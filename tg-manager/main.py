@@ -795,6 +795,19 @@ async def main() -> None:
         "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS stock_qty INT",
         "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS related_skus TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE bot_sales_products ADD COLUMN IF NOT EXISTS variants JSONB NOT NULL DEFAULT '[]'",
+        # База знаний (FAQ) и эталонные примеры менеджера (schema_v207). Читаются
+        # на пользовательском маршруте persona detail и в handle_incoming — при
+        # лаге миграции путь падал бы. CREATE TABLE идемпотентен.
+        "CREATE TABLE IF NOT EXISTS bot_sales_faq ("
+        "id BIGSERIAL PRIMARY KEY, persona_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
+        "question TEXT NOT NULL DEFAULT '', answer TEXT NOT NULL DEFAULT '', "
+        "keywords TEXT NOT NULL DEFAULT '', priority INT NOT NULL DEFAULT 0, "
+        "is_active BOOLEAN NOT NULL DEFAULT TRUE, "
+        "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "CREATE TABLE IF NOT EXISTS bot_sales_examples ("
+        "id BIGSERIAL PRIMARY KEY, persona_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
+        "user_msg TEXT NOT NULL DEFAULT '', assistant_msg TEXT NOT NULL DEFAULT '', "
+        "ord INT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
     ):
         try:
             await pool.execute(_ddl)

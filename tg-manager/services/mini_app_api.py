@@ -16092,7 +16092,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not p:
             return _err("Not found", 404)
         return _json_resp({"persona": p,
-                           "products": await _bsp.list_products(pool, pid)})
+                           "products": await _bsp.list_products(pool, pid),
+                           "faqs": await _bsp.list_faq(pool, pid),
+                           "examples": await _bsp.list_examples(pool, pid)})
 
     async def sp_update(request):
         uid = _get_uid(request)
@@ -16229,6 +16231,87 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         products = await _bsp.list_products(pool, pid, active_only=True)
         return _json_resp(await _bsp.diagnose_generation(p, products))
 
+    # ── База знаний (FAQ) ──────────────────────────────────────────────────
+    async def sp_faq_add(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            faq = await _bsp.add_faq(
+                pool, pid, uid, d.get("question", ""), d.get("answer", ""),
+                keywords=d.get("keywords", "") or "",
+                priority=int(d.get("priority", 0) or 0))
+            return _json_resp({"ok": True, "faq": faq})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_faq_add uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_faq_update(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["fid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        r = await _bsp.update_faq(pool, fid, uid, **d)
+        if not r:
+            return _err("Not found", 404)
+        return _json_resp({"ok": True, "faq": r})
+
+    async def sp_faq_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["fid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_faq(pool, fid, uid)})
+
+    # ── Эталонные примеры (few-shot) ───────────────────────────────────────
+    async def sp_example_add(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            ex = await _bsp.add_example(
+                pool, pid, uid, d.get("user_msg", ""), d.get("assistant_msg", ""),
+                ord=int(d.get("ord", 0) or 0))
+            return _json_resp({"ok": True, "example": ex})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_example_add uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_example_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eid = int(request.match_info["eid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_example(pool, eid, uid)})
+
     async def sp_orders(request):
         uid = _get_uid(request)
         if not uid:
@@ -16266,6 +16349,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_patch("/api/miniapp/sales/product/{prid}", sp_product_update)
     app.router.add_delete("/api/miniapp/sales/product/{prid}", sp_product_delete)
     app.router.add_post("/api/miniapp/sales/persona/{pid}/test", sp_test)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/faq", sp_faq_add)
+    app.router.add_patch("/api/miniapp/sales/faq/{fid}", sp_faq_update)
+    app.router.add_delete("/api/miniapp/sales/faq/{fid}", sp_faq_delete)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/example", sp_example_add)
+    app.router.add_delete("/api/miniapp/sales/example/{eid}", sp_example_delete)
     app.router.add_get("/api/miniapp/sales/orders", sp_orders)
     app.router.add_patch("/api/miniapp/sales/order/{oid}", sp_order_update)
     # Infra Analytics

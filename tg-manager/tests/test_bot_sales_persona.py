@@ -309,6 +309,42 @@ def test_build_prompt_product_stock_variants_related():
     assert "нет в наличии" in bsp.build_system_prompt(p, products)
 
 
+def test_match_faq():
+    faqs = [
+        {"question": "Какая доставка и сроки?", "answer": "Доставка 1-3 дня.",
+         "keywords": "доставка, сроки", "priority": 0, "is_active": True},
+        {"question": "Есть ли гарантия?", "answer": "Гарантия 12 месяцев.",
+         "keywords": "гарантия", "priority": 5, "is_active": True},
+        {"question": "Как оплатить?", "answer": "Картой или наличными.",
+         "keywords": "оплата, оплатить", "priority": 0, "is_active": False},
+    ]
+    m = bsp.match_faq("а какая у вас доставка?", faqs)
+    assert m and "Доставка" in m["answer"]
+    m2 = bsp.match_faq("дайте гарантию на товар", faqs)
+    assert m2 and "Гарантия" in m2["answer"]
+    # неактивный FAQ не матчится
+    assert bsp.match_faq("как оплатить заказ?", faqs) is None
+    # нет совпадения — None
+    assert bsp.match_faq("расскажи анекдот", faqs) is None
+
+
+def test_example_messages_and_prompt_faq():
+    exs = [{"user_msg": "дорого", "assistant_msg": "Понимаю! Зато качество.", "ord": 1},
+           {"user_msg": "спасибо", "assistant_msg": "Всегда рады 🙂", "ord": 0}]
+    msgs = bsp._example_messages(exs)
+    # порядок по ord: сначала "спасибо" (ord 0), потом "дорого" (ord 1)
+    assert msgs[0] == {"role": "user", "content": "спасибо"}
+    assert msgs[1]["role"] == "assistant"
+    assert len(msgs) == 4
+    # FAQ попадает в системный промпт
+    faqs = [{"question": "Сроки доставки?", "answer": "1-3 дня", "is_active": True}]
+    sp = bsp.build_system_prompt({"name": "A"}, [], None, faqs)
+    assert "База знаний" in sp and "1-3 дня" in sp
+    # подсказка по точному совпадению
+    sp2 = bsp.build_system_prompt({"name": "A"}, [], {"faq_hint": "ответ из базы"}, faqs)
+    assert "ответ из базы" in sp2
+
+
 def test_merge_items():
     m, t = bsp._merge_items([{"name": "A", "qty": 1, "price_cents": 100}],
                             [{"name": "A", "qty": 3, "price_cents": 100},
@@ -403,7 +439,7 @@ def test_wave_a_settings_and_followup_postgres():
                 "VALUES($1,$2,$3,TRUE) ON CONFLICT (bot_id) DO NOTHING",
                 BOT, "tkn:" + str(BOT), OWN)
 
-            async def _fake_gen(persona, products, dialog, text):
+            async def _fake_gen(persona, products, dialog, text, faqs=None, examples=None):
                 return "ок"
             with patch.object(bsp, "generate_reply", _fake_gen):
                 await bsp.handle_incoming(pool, BOT, OWN, CHAT, "привет", name="П")
@@ -419,6 +455,60 @@ def test_wave_a_settings_and_followup_postgres():
             assert due[0]["followup_message"] == "ещё актуально?"
             await bsp.mark_followup_sent(pool, due[0]["dialog_id"])
             assert await bsp.list_followup_due(pool) == []   # антидубль
+            await _cl()
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_faq_examples_postgres():
+    import asyncio
+    import asyncpg
+    from unittest.mock import patch
+
+    OWN, BOT, CHAT = 801100, 557100, 73
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+
+        async def _cl():
+            for t in ("bot_sales_faq", "bot_sales_examples", "bot_sales_dialogs",
+                      "bot_sales_products", "bot_sales_personas"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWN)
+            await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", BOT)
+        try:
+            await _cl()
+            p = await bsp.create_persona(pool, OWN, "Ника")
+            pid = p["id"]
+            f = await bsp.add_faq(pool, pid, OWN, "Какая доставка?",
+                                  "Доставка курьером 1-3 дня.", keywords="доставка", priority=3)
+            assert f["priority"] == 3
+            assert (await bsp.list_faq(pool, pid))[0]["answer"].startswith("Доставка")
+            ex = await bsp.add_example(pool, pid, OWN, "дорого", "Зато качество!")
+            assert ex["user_msg"] == "дорого"
+            assert len(await bsp.list_examples(pool, pid)) == 1
+            await bsp.assign_to_bot(pool, pid, OWN, BOT)
+            await pool.execute(
+                "INSERT INTO managed_bots(bot_id,token,added_by,is_active) "
+                "VALUES($1,$2,$3,TRUE) ON CONFLICT (bot_id) DO NOTHING",
+                BOT, "tkn:" + str(BOT), OWN)
+
+            # FAQ-хинт прокидывается в generate_reply при совпадении вопроса
+            seen = {}
+            async def _spy(persona, products, dialog, text, faqs=None, examples=None):
+                seen["faq_hint"] = (dialog or {}).get("faq_hint")
+                seen["faqs_n"] = len(faqs or [])
+                seen["ex_n"] = len(examples or [])
+                return "ок"
+            with patch.object(bsp, "generate_reply", _spy):
+                await bsp.handle_incoming(pool, BOT, OWN, CHAT,
+                                          "подскажите про доставку", name="П")
+            assert "1-3 дня" in (seen.get("faq_hint") or "")
+            assert seen["faqs_n"] == 1 and seen["ex_n"] == 1
+            # удаление
+            assert await bsp.delete_faq(pool, f["id"], OWN) is True
+            assert await bsp.delete_example(pool, ex["id"], OWN) is True
             await _cl()
         finally:
             await pool.close()

@@ -138,6 +138,50 @@ def match_order_items(text: str, products: list[dict]) -> tuple[list[dict], int]
     return items, total
 
 
+def match_faq(text: str, faqs: list[dict]) -> dict | None:
+    """Находит наиболее подходящий FAQ по тексту клиента. ЧИСТАЯ.
+
+    Скоринг: пересечение значимых слов вопроса+ключевых слов с текстом клиента.
+    При равенстве выигрывает более высокий priority. Возвращает FAQ или None,
+    если уверенного совпадения нет (порог ≥1 значимое совпадение)."""
+    t = (text or "").lower()
+    if not t:
+        return None
+
+    def _hit(word: str) -> bool:
+        # Стем-матч для русских склонений («доставка» ловит «доставку/доставки»).
+        if word in t:
+            return True
+        if len(word) > 5 and word[:-1] in t:
+            return True
+        if len(word) > 6 and word[:-2] in t:
+            return True
+        return False
+
+    best = None
+    best_score = 0
+    for f in faqs or []:
+        if not f.get("is_active", True):
+            continue
+        terms: set[str] = set()
+        for w in re.split(r"[^\wа-яё]+", (f.get("question") or "").lower()):
+            if len(w) >= 4:
+                terms.add(w)
+        score = 0
+        for w in terms:
+            if _hit(w):
+                score += 1
+        # ключевые слова весомее (точные триггеры)
+        for w in re.split(r"[,\n]+", (f.get("keywords") or "").lower()):
+            w = w.strip()
+            if len(w) >= 3 and _hit(w):
+                score += 2
+        if score > best_score or (score == best_score and score > 0 and best
+                                  and int(f.get("priority") or 0) > int(best.get("priority") or 0)):
+            best, best_score = f, score
+    return best if best_score >= 1 else None
+
+
 def _merge_items(existing: list[dict], new: list[dict]) -> tuple[list[dict], int]:
     """Слияние позиций заказа по имени (берём последнее упомянутое количество). ЧИСТАЯ."""
     by_name: dict[str, dict] = {}
@@ -292,7 +336,8 @@ def greeting_prefix(persona: dict, now_utc=None) -> str:
 
 
 def build_system_prompt(persona: dict, products: list[dict],
-                        dialog: dict | None = None) -> str:
+                        dialog: dict | None = None,
+                        faqs: list[dict] | None = None) -> str:
     """Собирает системный промпт из ВСЕХ настроек персоны. ЧИСТАЯ функция —
     ядро поведения; тестируется без сети."""
     p = persona
@@ -428,6 +473,23 @@ def build_system_prompt(persona: dict, products: list[dict],
                  "что уточнишь, и предложи перевести на оператора. НЕ выдумывай цены.")
     if p.get("pricing_policy"):
         L.append(f"Политика цен/скидок: {p['pricing_policy'].strip()}")
+
+    # База знаний (FAQ) — точные ответы, приоритет над догадками.
+    active_faqs = [f for f in (faqs or []) if f.get("is_active", True)
+                   and (f.get("question") or f.get("answer"))]
+    if active_faqs:
+        L.append("База знаний — точные ответы на частые вопросы. Если вопрос клиента "
+                 "совпадает по смыслу с одним из них, отвечай ИМЕННО так (можно "
+                 "перефразировать живо, но не искажай факты и не выдумывай):")
+        for f in active_faqs[:40]:
+            q = (f.get("question") or "").strip()
+            a = (f.get("answer") or "").strip()
+            if q or a:
+                L.append(f"— В: {q}\n  О: {a}")
+    # Точное совпадение по текущему сообщению — сильная подсказка.
+    if dialog and (dialog.get("faq_hint") or "").strip():
+        L.append("На текущий вопрос клиента есть готовый точный ответ из базы знаний "
+                 "— используй его: " + dialog["faq_hint"].strip())
 
     # Поведение
     caps = []
@@ -626,11 +688,27 @@ async def _run_completion(persona: dict, messages: list[dict]) -> tuple[str | No
     return None, info
 
 
+def _example_messages(examples: list[dict] | None) -> list[dict]:
+    """Few-shot: эталонные пары «клиент→менеджер» как предыдущие реплики. ЧИСТАЯ."""
+    out: list[dict] = []
+    for ex in sorted(examples or [], key=lambda e: int(e.get("ord") or 0))[:8]:
+        u = (ex.get("user_msg") or "").strip()
+        a = (ex.get("assistant_msg") or "").strip()
+        if u and a:
+            out.append({"role": "user", "content": u})
+            out.append({"role": "assistant", "content": a})
+    return out
+
+
 async def generate_reply(persona: dict, products: list[dict], dialog: dict | None,
-                         user_text: str) -> str:
+                         user_text: str, faqs: list[dict] | None = None,
+                         examples: list[dict] | None = None) -> str:
     """Ответ персоны через настроенный AI-провайдер (failover, OpenAI-совместимо)."""
     _fallback = persona.get("fallback") or "Дайте секунду, уточню и вернусь с ответом 🙌"
-    messages = [{"role": "system", "content": build_system_prompt(persona, products, dialog)}]
+    messages = [{"role": "system",
+                 "content": build_system_prompt(persona, products, dialog, faqs)}]
+    # Эталонные примеры идут ПЕРЕД реальной историей — как образец стиля.
+    messages.extend(_example_messages(examples))
     messages.extend(_history_messages(dialog))
     messages.append({"role": "user", "content": user_text or ""})
     txt, info = await _run_completion(persona, messages)
@@ -930,6 +1008,93 @@ async def delete_product(pool, product_id: int, owner_id: int) -> bool:
     return res.endswith("1")
 
 
+# ── CRUD: база знаний (FAQ) ───────────────────────────────────────────────────
+async def add_faq(pool, persona_id: int, owner_id: int, question: str,
+                  answer: str, *, keywords: str = "", priority: int = 0) -> dict:
+    if not (question or "").strip() and not (answer or "").strip():
+        raise ValueError("нужен вопрос или ответ")
+    try:
+        pr = int(priority)
+    except (TypeError, ValueError):
+        pr = 0
+    r = await pool.fetchrow(
+        """INSERT INTO bot_sales_faq(persona_id, owner_id, question, answer,
+               keywords, priority)
+           VALUES($1,$2,$3,$4,$5,$6) RETURNING *""",
+        persona_id, owner_id, (question or "").strip(), (answer or "").strip(),
+        (keywords or "").strip(), pr)
+    return dict(r)
+
+
+async def list_faq(pool, persona_id: int, *, active_only: bool = False) -> list[dict]:
+    cond = "AND is_active=TRUE" if active_only else ""
+    rows = await pool.fetch(
+        f"SELECT * FROM bot_sales_faq WHERE persona_id=$1 {cond} "
+        f"ORDER BY priority DESC, id", persona_id)
+    return [dict(r) for r in rows]
+
+
+async def update_faq(pool, faq_id: int, owner_id: int, **fields) -> dict | None:
+    sets, args = [], []
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if k in ("question", "answer", "keywords"):
+            args.append(str(v).strip()); sets.append(f"{k}=${len(args)}")
+        elif k == "priority":
+            try:
+                args.append(int(v))
+            except (TypeError, ValueError):
+                args.append(0)
+            sets.append(f"priority=${len(args)}")
+        elif k == "is_active":
+            args.append(bool(v)); sets.append(f"is_active=${len(args)}")
+    if not sets:
+        return None
+    args.extend([faq_id, owner_id])
+    r = await pool.fetchrow(
+        f"UPDATE bot_sales_faq SET {', '.join(sets)}, updated_at=now() "
+        f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
+    return dict(r) if r else None
+
+
+async def delete_faq(pool, faq_id: int, owner_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM bot_sales_faq WHERE id=$1 AND owner_id=$2", faq_id, owner_id)
+    return res.endswith("1")
+
+
+# ── CRUD: эталонные примеры (few-shot) ────────────────────────────────────────
+async def add_example(pool, persona_id: int, owner_id: int, user_msg: str,
+                      assistant_msg: str, *, ord: int = 0) -> dict:
+    if not (user_msg or "").strip() or not (assistant_msg or "").strip():
+        raise ValueError("нужны и сообщение клиента, и ответ менеджера")
+    try:
+        o = int(ord)
+    except (TypeError, ValueError):
+        o = 0
+    r = await pool.fetchrow(
+        """INSERT INTO bot_sales_examples(persona_id, owner_id, user_msg,
+               assistant_msg, ord)
+           VALUES($1,$2,$3,$4,$5) RETURNING *""",
+        persona_id, owner_id, user_msg.strip(), assistant_msg.strip(), o)
+    return dict(r)
+
+
+async def list_examples(pool, persona_id: int) -> list[dict]:
+    rows = await pool.fetch(
+        "SELECT * FROM bot_sales_examples WHERE persona_id=$1 ORDER BY ord, id",
+        persona_id)
+    return [dict(r) for r in rows]
+
+
+async def delete_example(pool, example_id: int, owner_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM bot_sales_examples WHERE id=$1 AND owner_id=$2",
+        example_id, owner_id)
+    return res.endswith("1")
+
+
 # ── Диалоги (память по клиенту) ───────────────────────────────────────────────
 async def get_or_create_dialog(pool, bot_id: int, customer_chat_id: int,
                                owner_id: int, persona_id: int | None) -> dict:
@@ -1199,8 +1364,17 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
         except Exception:
             log.warning("bsp handle_incoming: order flow failed", exc_info=False)
 
-    # 3) Живой ответ модели.
-    reply = await generate_reply(persona, products, dialog, text)
+    # 3) Живой ответ модели — с базой знаний (FAQ) и эталонными примерами.
+    faqs = examples = None
+    try:
+        faqs = await list_faq(pool, pid, active_only=True)
+        matched = match_faq(text, faqs)
+        if matched:
+            dialog["faq_hint"] = (matched.get("answer") or "").strip()
+        examples = await list_examples(pool, pid)
+    except Exception:
+        log.debug("bsp handle_incoming: faq/examples load skipped")
+    reply = await generate_reply(persona, products, dialog, text, faqs, examples)
     if order_note and order_note not in reply:
         reply = f"{reply}\n\n{order_note}"
 

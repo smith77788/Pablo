@@ -195,13 +195,16 @@ async function openPersonaEditor(id) {
   const body = document.getElementById('s-salesedit-body');
   body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>';
   try {
-    let persona = {}, products = [];
+    let persona = {}, products = [], faqs = [], examples = [];
     if (id) {
       const d = await api('/api/miniapp/sales/persona/' + id);
       persona = d.persona || {}; products = d.products || [];
+      faqs = d.faqs || []; examples = d.examples || [];
     }
     _spCurrent = persona;
     _spCurrent._products = products;
+    _spCurrent._faqs = faqs;
+    _spCurrent._examples = examples;
     body.innerHTML = _spRenderForm(persona, products);
     _spFillForm(persona);
     // предвыбор бота при создании из карточки бота
@@ -273,6 +276,27 @@ function _spRenderForm(persona, products) {
     h += '<div style="font-size:12px;color:var(--hint);padding:0 2px 10px">' +
       'Сохраните менеджера — затем можно добавить товары.</div>';
   }
+  // База знаний (FAQ)
+  if (persona.id) {
+    h += '<div class="sec">📚 База знаний (точные ответы на частые вопросы)</div>';
+    h += '<div id="spFaqs">' + _spRenderFaqs(_spCurrent._faqs || []) + '</div>';
+    h += '<input type="text" id="nf_q" placeholder="Вопрос (напр. Есть ли доставка?)" class="inp" style="width:100%;margin:6px 0 4px">' +
+      '<textarea id="nf_a" placeholder="Точный ответ" class="inp" rows="2" style="width:100%;margin:0 0 4px"></textarea>' +
+      '<div style="display:flex;gap:8px;margin:0 0 4px">' +
+      '<input type="text" id="nf_kw" placeholder="Ключевые слова (через запятую)" class="inp" style="flex:2">' +
+      '<input type="number" id="nf_prio" placeholder="Приоритет" class="inp" style="flex:1">' +
+      '<button class="btn btn-s" onclick="spAddFaq()">➕</button></div>' +
+      '<div style="font-size:12px;color:var(--hint);padding:0 2px 12px">' +
+      'Менеджер отвечает по базе знаний с приоритетом над догадками — меньше выдумывает.</div>';
+
+    // Эталонные примеры (few-shot)
+    h += '<div class="sec">🎯 Примеры «как отвечать» (обучение стилю)</div>';
+    h += '<div id="spExamples">' + _spRenderExamples(_spCurrent._examples || []) + '</div>';
+    h += '<input type="text" id="ne_u" placeholder="Сообщение клиента" class="inp" style="width:100%;margin:6px 0 4px">' +
+      '<textarea id="ne_a" placeholder="Идеальный ответ менеджера" class="inp" rows="2" style="width:100%;margin:0 0 4px"></textarea>' +
+      '<div style="display:flex;gap:8px;margin:0 0 12px">' +
+      '<button class="btn btn-s" onclick="spAddExample()">➕ Добавить пример</button></div>';
+  }
   // Привязка к боту
   h += '<div class="sec">🤖 Бот</div>';
   const botOpts = ['<option value="">— не назначен —</option>'].concat(
@@ -323,6 +347,91 @@ function _spRenderProducts(products) {
       minNote + stockNote + vNote + '</div></div><button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
       'onclick="spDelProduct(' + pr.id + ')">✕</button></div>';
   }).join('');
+}
+
+function _spRenderFaqs(faqs) {
+  if (!faqs || !faqs.length) {
+    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+  }
+  return faqs.map(f => {
+    const q = esc((f.question || '').slice(0, 80));
+    const a = esc((f.answer || '').slice(0, 120));
+    return '<div class="row"><div class="row-body"><div class="row-name">' + (q || '—') +
+      '</div><div class="row-val" style="white-space:normal">' + a + '</div></div>' +
+      '<button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
+      'onclick="spDelFaq(' + f.id + ')">✕</button></div>';
+  }).join('');
+}
+
+function _spRenderExamples(examples) {
+  if (!examples || !examples.length) {
+    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+  }
+  return examples.map(e => {
+    const u = esc((e.user_msg || '').slice(0, 70));
+    const a = esc((e.assistant_msg || '').slice(0, 120));
+    return '<div class="row"><div class="row-body"><div class="row-name">👤 ' + u +
+      '</div><div class="row-val" style="white-space:normal">🧑‍💼 ' + a + '</div></div>' +
+      '<button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
+      'onclick="spDelExample(' + e.id + ')">✕</button></div>';
+  }).join('');
+}
+
+async function spAddFaq() {
+  const pid = _spCurrent && _spCurrent.id;
+  if (!pid) return;
+  const q = (document.getElementById('nf_q').value || '').trim();
+  const a = (document.getElementById('nf_a').value || '').trim();
+  const kw = (document.getElementById('nf_kw').value || '').trim();
+  const prio = parseInt((document.getElementById('nf_prio') || {}).value || '0', 10) || 0;
+  if (!q && !a) { toast('Заполните вопрос или ответ'); return; }
+  try {
+    await api('/api/miniapp/sales/persona/' + pid + '/faq',
+      { method: 'POST', body: JSON.stringify({ question: q, answer: a, keywords: kw, priority: prio }) });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._faqs = d.faqs || [];
+    document.getElementById('spFaqs').innerHTML = _spRenderFaqs(_spCurrent._faqs);
+    ['nf_q', 'nf_a', 'nf_kw', 'nf_prio'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function spDelFaq(fid) {
+  const pid = _spCurrent && _spCurrent.id;
+  try {
+    await api('/api/miniapp/sales/faq/' + fid, { method: 'DELETE' });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._faqs = d.faqs || [];
+    document.getElementById('spFaqs').innerHTML = _spRenderFaqs(_spCurrent._faqs);
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function spAddExample() {
+  const pid = _spCurrent && _spCurrent.id;
+  if (!pid) return;
+  const u = (document.getElementById('ne_u').value || '').trim();
+  const a = (document.getElementById('ne_a').value || '').trim();
+  if (!u || !a) { toast('Нужны и сообщение клиента, и ответ'); return; }
+  try {
+    await api('/api/miniapp/sales/persona/' + pid + '/example',
+      { method: 'POST', body: JSON.stringify({ user_msg: u, assistant_msg: a }) });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._examples = d.examples || [];
+    document.getElementById('spExamples').innerHTML = _spRenderExamples(_spCurrent._examples);
+    document.getElementById('ne_u').value = '';
+    document.getElementById('ne_a').value = '';
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function spDelExample(eid) {
+  const pid = _spCurrent && _spCurrent.id;
+  try {
+    await api('/api/miniapp/sales/example/' + eid, { method: 'DELETE' });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._examples = d.examples || [];
+    document.getElementById('spExamples').innerHTML = _spRenderExamples(_spCurrent._examples);
+  } catch (e) { toast(e.message || 'Ошибка'); }
 }
 
 function _spFillForm(p) {
