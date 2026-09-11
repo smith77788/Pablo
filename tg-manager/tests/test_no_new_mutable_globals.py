@@ -117,6 +117,8 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/auto_responder.py:_inactivity_sweep_task": "asyncio.Task",
     "services/auto_responder.py:_sales_followup_task": "asyncio.Task",
     "services/auto_responder.py:_new_user_notify": "троттлинг уведомлений о новых подписчиках по боту (анти-накрутка); best-effort, потеря при рестарте безвредна",
+    "services/flood_guard.py:_windows": "скользящее окно скорости новых подписчиков по боту (детектор всплеска); process-local, потеря при рестарте безвредна",
+    "services/flood_guard.py:_config_cache": "TTL-кэш конфига защиты по боту; расхождение реплик безвредно (кэш истекает за 30с, источник правды — БД)",
     "services/bg_tasks.py:_bg_tasks": "ссылки на задачи, чтобы их не собрал GC",
     "services/bot_api.py:_semaphore": "asyncio.Semaphore",
     "services/broadcaster.py:_running": "asyncio.Task запущенных рассылок",

@@ -576,6 +576,24 @@ async def _process_bot(
                 ],
             )
 
+            # Защита от накрутки/ботов (per-bot, off по умолчанию). Решение по
+            # новому подписчику: detect — только наблюдение/алерт; protect —
+            # пометить suspect (вон из аудитории рассылок); block — вдобавок не
+            # давать никакой «выгоды» (диплинк/реферал/воронка/автоответ/ИИ).
+            if is_new_user and bot_row and bot_row.get("added_by"):
+                try:
+                    from services import flood_guard as _fg
+                    _flood = await _fg.handle_new_user(
+                        pool, bot_id, int(bot_row["added_by"]), chat_id)
+                except Exception:
+                    log_exc_swallow(log, f"flood_guard bot={bot_id}")
+                    _flood = None
+                if _flood and _flood.get("block"):
+                    log.info(
+                        "flood_guard: заблокирован подозрительный подписчик "
+                        "bot=%s user=%s rate=%s", bot_id, chat_id, _flood.get("rate"))
+                    continue  # атакующий не получает ничего
+
             # Deep link tracking: /start <param>
             if text.strip().lower().startswith("/start "):
                 parts = text.strip().split(None, 1)

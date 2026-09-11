@@ -560,7 +560,8 @@ async def mass_broadcast_with_scheduling(
     # db.safe_count глотает сбой БД → 0, рассылка не падает целиком.
     total = await db.safe_count(
         pool,
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql,
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
+        "AND suspect=false" + _seg_sql,
         bot_id,
     )
 
@@ -668,7 +669,7 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
     try:
         rows = await pool.fetch(
             """SELECT bu.user_id FROM bot_users bu
-               WHERE bu.bot_id=$1 AND bu.is_active=true
+               WHERE bu.bot_id=$1 AND bu.is_active=true AND bu.suspect=false
                  AND NOT EXISTS (
                      SELECT 1 FROM broadcast_delivery_log dl
                      WHERE dl.broadcast_id=$2 AND dl.user_id=bu.user_id)""",

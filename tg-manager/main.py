@@ -821,6 +821,21 @@ async def main() -> None:
         "expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
         "ALTER TABLE bot_sales_orders ADD COLUMN IF NOT EXISTS discount_cents INT NOT NULL DEFAULT 0",
         "ALTER TABLE bot_sales_orders ADD COLUMN IF NOT EXISTS promo_code TEXT NOT NULL DEFAULT ''",
+        # Защита от накрутки/ботов (schema_v209). Конфиг/эпизоды читаются в горячем
+        # пути поллера и на маршрутах карточки бота; suspect исключается из
+        # аудитории рассылок — при лаге миграции путь падал бы.
+        "CREATE TABLE IF NOT EXISTS bot_flood_config ("
+        "bot_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL, "
+        "mode TEXT NOT NULL DEFAULT 'off', threshold_per_min INT NOT NULL DEFAULT 30, "
+        "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "CREATE TABLE IF NOT EXISTS bot_flood_events ("
+        "id BIGSERIAL PRIMARY KEY, bot_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
+        "started_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "peak_per_min INT NOT NULL DEFAULT 0, suspected_count INT NOT NULL DEFAULT 0, "
+        "mode TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active')",
+        "ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS suspect BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS flagged_at TIMESTAMPTZ",
+        "CREATE INDEX IF NOT EXISTS idx_bot_users_suspect ON bot_users(bot_id) WHERE suspect",
     ):
         try:
             await pool.execute(_ddl)

@@ -950,14 +950,20 @@ async def safe_count(pool: asyncpg.Pool, query: str, *args: object) -> int:
 
 
 async def get_audience_count(pool: asyncpg.Pool, bot_id: int) -> int:
-    return await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
+    # suspect=FALSE — накрученных (флаг ставит flood_guard, только если защита
+    # включена) не считаем аудиторией; для ботов без защиты флаг всегда FALSE.
+    return await safe_count(
+        pool,
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
+        "AND suspect=FALSE",
+        bot_id,
     )
 
 
 async def get_audience_user_ids(pool: asyncpg.Pool, bot_id: int) -> list[int]:
     rows = await pool.fetch(
-        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
+        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
+        "AND is_blocked=FALSE AND suspect=FALSE",
         bot_id,
     )
     return [r["user_id"] for r in rows]
