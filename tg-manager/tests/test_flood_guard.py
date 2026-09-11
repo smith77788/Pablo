@@ -128,6 +128,38 @@ def test_flood_guard_full_postgres():
 
 
 @pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_end_stale_episodes_postgres():
+    """Фоновый свип закрывает протухшие активные эпизоды (последний всплеск давно)."""
+    import asyncio
+    import asyncpg
+
+    OWN, BOT = 802003, 558003
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+        try:
+            await pool.execute("DELETE FROM bot_flood_events WHERE bot_id=$1", BOT)
+            # свежий активный эпизод — не трогаем
+            await pool.execute(
+                "INSERT INTO bot_flood_events(bot_id,owner_id,last_at,status) "
+                "VALUES($1,$2,now(),'active')", BOT, OWN)
+            # протухший активный (последний всплеск час назад) — должен закрыться
+            await pool.execute(
+                "INSERT INTO bot_flood_events(bot_id,owner_id,last_at,status) "
+                "VALUES($1,$2,now()-interval '1 hour','active')", BOT, OWN)
+            ended = await fg.end_stale_episodes(pool)
+            assert ended >= 1
+            active = await pool.fetchval(
+                "SELECT count(*) FROM bot_flood_events WHERE bot_id=$1 AND status='active'",
+                BOT)
+            assert active == 1  # остался только свежий
+            await pool.execute("DELETE FROM bot_flood_events WHERE bot_id=$1", BOT)
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
 def test_suspects_excluded_from_audience_postgres():
     """Архитектурный гейт: помеченные suspect не попадают в аудиторию рассылок."""
     import asyncio

@@ -1303,6 +1303,16 @@ async def run_sales_followup_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSessi
                     await _bsp.mark_followup_sent(pool, d["dialog_id"])
                 except Exception:
                     log_exc_swallow(log, "auto_responder: followup send failed")
+            # Защита от накрутки: закрываем протухшие эпизоды атак (последний
+            # всплеск был давно) — чтобы статус на карточке бота был точным и
+            # следующая атака открывала новый эпизод. Дёшево, весь флот разом.
+            try:
+                from services import flood_guard as _fg
+                ended = await _fg.end_stale_episodes(pool)
+                if ended:
+                    log.info("flood_guard: закрыто протухших эпизодов: %d", ended)
+            except Exception:
+                log_exc_swallow(log, "auto_responder: flood episode sweep")
         except asyncio.CancelledError:
             raise
         except Exception:
