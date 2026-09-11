@@ -836,26 +836,6 @@ async def main() -> None:
         "ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS suspect BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS flagged_at TIMESTAMPTZ",
         "CREATE INDEX IF NOT EXISTS idx_bot_users_suspect ON bot_users(bot_id) WHERE suspect",
-        # Ткань присутствия (schema_v210). Читается фоновым реконсайлером и на
-        # маршрутах экрана — при лаге миграции путь падал бы.
-        "CREATE TABLE IF NOT EXISTS presence_identities ("
-        "id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, name TEXT NOT NULL DEFAULT '', "
-        "avatar_emoji TEXT NOT NULL DEFAULT '🧑', persona_id BIGINT, acc_id BIGINT, "
-        "status TEXT NOT NULL DEFAULT 'active', memory JSONB NOT NULL DEFAULT '{}', "
-        "materialized_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
-        "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
-        "CREATE TABLE IF NOT EXISTS presence_targets ("
-        "id BIGSERIAL PRIMARY KEY, identity_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
-        "chat_ref TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'desired', last_op_id BIGINT, "
-        "last_reconciled_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
-        "UNIQUE(identity_id, chat_ref))",
-        "CREATE TABLE IF NOT EXISTS presence_events ("
-        "id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, identity_id BIGINT, "
-        "kind TEXT NOT NULL, detail JSONB NOT NULL DEFAULT '{}', "
-        "created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
-        "CREATE INDEX IF NOT EXISTS idx_presence_identities_owner ON presence_identities(owner_id)",
-        "CREATE INDEX IF NOT EXISTS idx_presence_targets_identity ON presence_targets(identity_id)",
-        "CREATE INDEX IF NOT EXISTS idx_presence_events_owner ON presence_events(owner_id, id DESC)",
     ):
         try:
             await pool.execute(_ddl)
