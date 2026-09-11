@@ -116,6 +116,7 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/account_warmer.py:_session_locks": "asyncio.Lock",
     "services/auto_responder.py:_inactivity_sweep_task": "asyncio.Task",
     "services/auto_responder.py:_sales_followup_task": "asyncio.Task",
+    "services/auto_responder.py:_presence_reconciler_task": "asyncio.Task",
     "services/auto_responder.py:_new_user_notify": "троттлинг уведомлений о новых подписчиках по боту (анти-накрутка); best-effort, потеря при рестарте безвредна",
     "services/flood_guard.py:_windows": "скользящее окно скорости новых подписчиков по боту (детектор всплеска); process-local, потеря при рестарте безвредна",
     "services/flood_guard.py:_config_cache": "TTL-кэш конфига защиты по боту; расхождение реплик безвредно (кэш истекает за 30с, источник правды — БД)",

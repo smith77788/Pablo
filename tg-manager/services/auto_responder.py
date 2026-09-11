@@ -31,6 +31,8 @@ _cycle_rule_counts: dict[tuple[int, int], int] = {}
 _inactivity_sweep_task: asyncio.Task | None = None
 # Тот же приём для фонового дожима (followup) менеджера по продажам.
 _sales_followup_task: asyncio.Task | None = None
+# И для реконсайлера ткани присутствия (presence-fabric).
+_presence_reconciler_task: asyncio.Task | None = None
 
 # Cooldown for bots whose token getUpdates rejects as Unauthorized (revoked/invalid
 # token). Without this, a single dead-token bot gets re-polled every 10s forever,
@@ -1230,9 +1232,10 @@ async def _process_bot(
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
-    global _inactivity_sweep_task, _sales_followup_task
+    global _inactivity_sweep_task, _sales_followup_task, _presence_reconciler_task
     _inactivity_sweep_task = asyncio.create_task(run_inactivity_sweep(pool, http))
     _sales_followup_task = asyncio.create_task(run_sales_followup_sweep(pool, http))
+    _presence_reconciler_task = asyncio.create_task(run_presence_reconciler(pool))
     # Stagger startup — don't hammer DB immediately alongside other services
     await asyncio.sleep(10)
     _cycle = 0
@@ -1318,6 +1321,26 @@ async def run_sales_followup_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSessi
         except Exception:
             log.exception("sales followup sweep error")
         await asyncio.sleep(300)  # каждые 5 минут
+
+
+async def run_presence_reconciler(pool: asyncpg.Pool) -> None:
+    """Фоновый реконсайлер ткани присутствия: приводит РЕАЛЬНОСТЬ к желаемому
+    состоянию (personas в чатах), лечит дрейф (умершее тело → перенос личности).
+
+    Идёт раз в ~3 минуты по всем активным личностям. Актуация — через шину
+    операций (тариф-гейт/Ban-Weather/дедуп наследуются). Идемпотентно, fail-open."""
+    await asyncio.sleep(180)  # старт со сдвигом
+    while True:
+        try:
+            from services import presence_fabric as _pf
+            summary = await _pf.reconcile_once(pool)
+            if summary.get("submitted") or summary.get("no_body"):
+                log.info("presence reconciler: %s", summary)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("presence reconciler error")
+        await asyncio.sleep(180)  # каждые 3 минуты
 
 
 async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
