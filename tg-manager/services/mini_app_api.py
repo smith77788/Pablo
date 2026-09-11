@@ -16469,6 +16469,100 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/sales/promo/{prid}", sp_promo_delete)
     app.router.add_get("/api/miniapp/sales/orders", sp_orders)
     app.router.add_patch("/api/miniapp/sales/order/{oid}", sp_order_update)
+
+    # ── Защита от накрутки/ботов (per-bot) ───────────────────────────────────
+    from services import flood_guard as _fg
+
+    async def _fg_owns(uid, bot_id):
+        return bool(await _safe_count(
+            pool, "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid))
+
+    async def fg_get(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        if not await _fg_owns(uid, bot_id):
+            return _err("Not found", 404)
+        cfg = await _fg.get_config(pool, bot_id)
+        ep = await _fg.active_episode(pool, bot_id)
+        if ep:
+            ep = {"started_at": str(ep.get("started_at")), "last_at": str(ep.get("last_at")),
+                  "peak_per_min": ep.get("peak_per_min"),
+                  "suspected_count": ep.get("suspected_count"), "mode": ep.get("mode")}
+        return _json_resp({"config": cfg, "episode": ep,
+                           "suspect_count": await _fg.suspect_count(pool, bot_id)})
+
+    async def fg_set(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _fg_owns(uid, bot_id):
+            return _err("Not found", 404)
+        try:
+            cfg = await _fg.set_config(
+                pool, bot_id, uid, mode=d.get("mode"),
+                threshold_per_min=d.get("threshold_per_min"))
+            return _json_resp({"ok": True, "config": cfg})
+        except Exception as e:
+            log.exception("fg_set uid=%s bot=%s", uid, bot_id)
+            return _err(str(e), 500)
+
+    async def fg_flag_recent(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _fg_owns(uid, bot_id):
+            return _err("Not found", 404)
+        n = await _fg.flag_recent(pool, bot_id, int(d.get("minutes", 10) or 10))
+        return _json_resp({"ok": True, "flagged": n})
+
+    async def fg_purge(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _fg_owns(uid, bot_id):
+            return _err("Not found", 404)
+        n = await _fg.purge_suspects(pool, bot_id, hard=bool(d.get("hard", False)))
+        return _json_resp({"ok": True, "purged": n})
+
+    async def fg_unflag(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        if not await _fg_owns(uid, bot_id):
+            return _err("Not found", 404)
+        n = await _fg.unflag_all(pool, bot_id)
+        return _json_resp({"ok": True, "unflagged": n})
+
+    app.router.add_get("/api/miniapp/flood/{bot_id}", fg_get)
+    app.router.add_patch("/api/miniapp/flood/{bot_id}", fg_set)
+    app.router.add_post("/api/miniapp/flood/{bot_id}/flag-recent", fg_flag_recent)
+    app.router.add_post("/api/miniapp/flood/{bot_id}/purge", fg_purge)
+    app.router.add_post("/api/miniapp/flood/{bot_id}/unflag", fg_unflag)
     # Infra Analytics
     app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
     # Reporter

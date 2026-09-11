@@ -8197,6 +8197,7 @@ function buildBotDetail(d) {
       {ico:'⏰',lbl:'Расписание',     fn:`openSchedule(${bid},'${bn}')`},
       {ico:'🔀',lbl:'Авто-воронки',  fn:`openAutoFunnels()`},
       {ico:'🎯',lbl:'Аудитория',      fn:`openAudience(${bid},'${bn}')`},
+      {ico:'🛡',lbl:'Защита от накрутки', fn:`openFloodGuard(${bid})`},
     ]},
     { title:'Аналитика', tiles:[
       {ico:'📊',lbl:'Статистика',     fn:`openBotStats(${bid},'${bn}')`},
@@ -21940,5 +21941,6 @@ function downloadBlob(content, filename, type) {
 <script src="screens/invite.js"></script>
 <script src="screens/contact_invite_link.js"></script>
 <script src="screens/sales_manager.js"></script>
+<script src="screens/flood_guard.js"></script>
 </body>
 </html>
