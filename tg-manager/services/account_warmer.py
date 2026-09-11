@@ -2406,6 +2406,30 @@ async def notify_paused_plans(pool: asyncpg.Pool, bot) -> int:
     return sent
 
 
+async def _select_due_plans(pool: asyncpg.Pool) -> list:
+    """Активные планы прогрева, которым пора запуститься.
+
+    Занятость аккаунта считаем ПО АРЕНДЕ, а не по голому in_operation: флаг мог
+    ПРОТЕЧЬ (операция упала, аренда истекла) — тогда аккаунт числился занятым
+    ВЕЧНО, и прогрев молча стоял (день 0/14, «занят операцией», N часов без
+    действий). Атомарный захват try_claim_account/_db_claim и так считает
+    истёкшую/пустую аренду свободной — выравниваем предфильтр с этим гейтом.
+    Аккаунт с ЖИВОЙ арендой (op_lease_until в будущем) по-прежнему пропускаем:
+    две сессии одного аккаунта = AUTH_KEY_DUPLICATED (бан)."""
+    return await pool.fetch(
+        """SELECT wp.*, a.owner_id, a.proxy_id, up.geo_country
+           FROM account_warmup_plans wp
+           JOIN tg_accounts a ON a.id = wp.account_id
+           LEFT JOIN user_proxies up ON up.id = a.proxy_id
+           WHERE wp.status = 'active'
+             AND (COALESCE(a.in_operation, FALSE) = FALSE
+                  OR a.op_lease_until IS NULL
+                  OR a.op_lease_until < NOW())
+             AND (wp.last_action_at IS NULL
+                  OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
+    )
+
+
 async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1, bot=None) -> None:
     """
     Фоновый цикл: каждый час проверяет активные планы И сессии разогрева.
@@ -2435,18 +2459,7 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1, bot=None)
 
             # Одиночные планы разогрева — включаем proxy_id для proxy-correlation
             # и geo_country прокси для локального времени аккаунта.
-            rows = await pool.fetch(
-                """SELECT wp.*, a.owner_id, a.proxy_id, up.geo_country
-                   FROM account_warmup_plans wp
-                   JOIN tg_accounts a ON a.id = wp.account_id
-                   LEFT JOIN user_proxies up ON up.id = a.proxy_id
-                   WHERE wp.status = 'active'
-                     -- НЕ берём аккаунты, занятые активной операцией: параллельный
-                     -- коннект одной сессии прогревом и операцией = AUTH_KEY_DUPLICATED.
-                     AND COALESCE(a.in_operation, FALSE) = FALSE
-                     AND (wp.last_action_at IS NULL
-                          OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
-            )
+            rows = await _select_due_plans(pool)
             if rows:
                 _total = len(rows)
                 rows = [r for r in rows if not geo_tempo.is_local_night(r["geo_country"])]
