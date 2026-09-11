@@ -1410,6 +1410,64 @@ async def mark_followup_sent(pool, dialog_id: int) -> None:
         "UPDATE bot_sales_dialogs SET followup_sent_at=now() WHERE id=$1", dialog_id)
 
 
+# ── Аналитика ─────────────────────────────────────────────────────────────────
+async def persona_stats(pool, persona_id: int, owner_id: int) -> dict:
+    """Сводка по менеджеру: диалоги, хендофы, заказы, выручка, конверсия.
+    Скоуп по owner_id (не показываем чужое). Fail-open."""
+    d = await pool.fetchrow(
+        """SELECT count(*) AS total,
+                  count(*) FILTER (WHERE handed_off) AS handoffs
+           FROM bot_sales_dialogs WHERE persona_id=$1 AND owner_id=$2""",
+        persona_id, owner_id)
+    o = await pool.fetchrow(
+        """SELECT count(*) AS total,
+                  count(*) FILTER (WHERE status='confirmed') AS confirmed,
+                  COALESCE(SUM(total_cents) FILTER (WHERE status='confirmed'),0) AS revenue
+           FROM bot_sales_orders WHERE persona_id=$1 AND owner_id=$2""",
+        persona_id, owner_id)
+    dialogs_total = int(d["total"] or 0)
+    confirmed = int(o["confirmed"] or 0)
+    conv = round(100.0 * confirmed / dialogs_total, 1) if dialogs_total else 0.0
+    avg = int(int(o["revenue"] or 0) / confirmed) if confirmed else 0
+    return {
+        "dialogs_total": dialogs_total,
+        "handoffs": int(d["handoffs"] or 0),
+        "orders_total": int(o["total"] or 0),
+        "orders_confirmed": confirmed,
+        "revenue_cents": int(o["revenue"] or 0),
+        "conversion_pct": conv,
+        "avg_order_cents": avg,
+    }
+
+
+# ── Песочница: владелец тестирует бота в мини-аппе ────────────────────────────
+async def sandbox_reply(pool, persona: dict, text: str,
+                        history: list[dict] | None = None) -> str:
+    """Ответ менеджера в тестовом режиме (без записи в реальные диалоги/заказы).
+
+    Прогоняет ТОТ ЖЕ путь промпта/модели, что и боевой ответ, чтобы владелец видел
+    настоящее поведение. История держится на стороне клиента и передаётся сюда."""
+    pid = persona["id"]
+    products = await list_products(pool, pid, active_only=True)
+    faqs = await list_faq(pool, pid, active_only=True)
+    examples = await list_examples(pool, pid)
+    delivery = await list_delivery(pool, pid, active_only=True)
+    promos = await list_promos(pool, pid, active_only=True)
+    # безопасная нормализация клиентской истории
+    hist = []
+    for turn in (history or [])[-2 * _MAX_HISTORY:]:
+        role = turn.get("role") if isinstance(turn, dict) else None
+        content = turn.get("content") if isinstance(turn, dict) else None
+        if role in ("user", "assistant") and content:
+            hist.append({"role": role, "content": str(content)[:2000]})
+    dialog = {"history": hist, "customer_name": "", "greet_hint": greeting_prefix(persona)}
+    matched = match_faq(text, faqs)
+    if matched:
+        dialog["faq_hint"] = (matched.get("answer") or "").strip()
+    return await generate_reply(persona, products, dialog, text, faqs, examples,
+                                delivery, promos)
+
+
 # ── Высокоуровневый вход: обработка сообщения клиента ─────────────────────────
 async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
                           text: str, *, username: str = "", name: str = "") -> dict | None:

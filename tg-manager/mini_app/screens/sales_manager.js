@@ -16,6 +16,50 @@ const SP_SELECTS = {
                     ['aggressive', 'Активный (дожимает)']],
 };
 
+// Пресеты персон — типовые заготовки под бизнес (заполняют поля формы).
+const SP_PRESETS = {
+  coffee: {
+    label: '☕ Кофейня',
+    fields: {
+      name: 'Аня', role_title: 'бариста-консультант', tone: 'warm', emoji_level: 'high',
+      msg_length: 'short', sales_intensity: 'balanced', greeting_by_time: true,
+      company_about: 'Свежеобжаренный кофе и напитки навынос.',
+      product_knowledge: 'Кофе, авторские напитки, десерты, зёрна домой.',
+      smalltalk_topics: 'кофе, утро, книги', can_smalltalk: true,
+    },
+  },
+  clothing: {
+    label: '👗 Магазин одежды',
+    fields: {
+      name: 'Мария', role_title: 'персональный стилист-консультант', tone: 'friendly',
+      emoji_level: 'medium', msg_length: 'medium', sales_intensity: 'balanced',
+      can_discuss_prefs: true, proactive_offers: true,
+      company_about: 'Стильная одежда для повседневности и особых случаев.',
+      product_knowledge: 'Одежда, размеры S–XL, помощь с подбором образа.',
+    },
+  },
+  services: {
+    label: '🛠 Услуги',
+    fields: {
+      name: 'Дмитрий', role_title: 'менеджер по работе с клиентами', tone: 'professional',
+      formality: 'vy', emoji_level: 'low', msg_length: 'medium', sales_intensity: 'soft',
+      company_about: 'Профессиональные услуги под ключ.',
+      product_knowledge: 'Консультация, расчёт стоимости, запись на услугу.',
+      can_take_orders: true,
+    },
+  },
+  electronics: {
+    label: '📱 Электроника',
+    fields: {
+      name: 'Игорь', role_title: 'консультант по технике', tone: 'friendly',
+      emoji_level: 'low', msg_length: 'medium', sales_intensity: 'balanced',
+      can_consult: true, proactive_offers: true,
+      company_about: 'Гаджеты и техника с гарантией.',
+      product_knowledge: 'Смартфоны, ноутбуки, аксессуары; помощь с выбором и гарантией.',
+    },
+  },
+};
+
 // Схема формы: секции + поля. type: text|textarea|number|select|bool|list|channels
 const SP_FORM = [
   { sec: '🧑‍💼 Личность' },
@@ -251,6 +295,14 @@ function _spField(f) {
 
 function _spRenderForm(persona, products) {
   let h = '';
+  // Пресеты — быстрый старт: заполняют поля под типовой бизнес.
+  h += '<div class="sec">🎨 Быстрый старт (пресет)</div>';
+  const presetBtns = Object.keys(SP_PRESETS).map(k =>
+    '<button class="btn btn-s" style="flex:1" onclick="spApplyPreset(\'' + k + '\')">' +
+    esc(SP_PRESETS[k].label) + '</button>').join('');
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">' + presetBtns + '</div>' +
+    '<div style="font-size:12px;color:var(--hint);padding:0 2px 10px">' +
+    'Заполнит настройки под типовой бизнес — потом отредактируйте под себя.</div>';
   let curSec = '';
   for (const f of SP_FORM) {
     if (f.sec) { h += '<div class="sec">' + esc(f.sec) + '</div>'; continue; }
@@ -346,6 +398,10 @@ function _spRenderForm(persona, products) {
   }
   h += '</div>';
   if (persona.id) {
+    h += '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+      '<button class="btn btn-s" style="flex:1" onclick="spChat(' + persona.id + ')">💬 Тест-чат</button>' +
+      '<button class="btn btn-s" style="flex:1" onclick="spStats(' + persona.id + ')">📊 Статистика</button></div>';
+    h += '<div id="spStatsOut" style="font-size:13px;margin-bottom:10px"></div>';
     h += '<button class="btn btn-s" style="width:100%;margin-bottom:8px" ' +
       'onclick="spTest(' + persona.id + ')">🧪 Проверить ИИ (почему молчит?)</button>' +
       '<div id="spTestOut" style="font-size:13px;margin-bottom:10px"></div>';
@@ -722,6 +778,130 @@ async function spTest(pid) {
   }
 }
 
+let _spOrdersCache = [];
+
+function spExportOrdersCsv() {
+  const out = document.getElementById('spCsvOut');
+  const rows = [['id', 'status', 'customer', 'phone', 'items', 'total', 'currency', 'promo']];
+  (_spOrdersCache || []).forEach(o => {
+    let contact = o.contact;
+    if (typeof contact === 'string') { try { contact = JSON.parse(contact); } catch (_) { contact = {}; } }
+    let items = o.items;
+    if (typeof items === 'string') { try { items = JSON.parse(items); } catch (_) { items = []; } }
+    const itemsStr = (Array.isArray(items) ? items : []).map(it =>
+      (it.name || '') + (it.qty > 1 ? ' x' + it.qty : '')).join('; ');
+    rows.push([o.id, o.status || '',
+      o.customer_username ? '@' + o.customer_username : (o.customer_name || o.customer_chat_id),
+      (contact && contact.phone) || '', itemsStr,
+      ((o.total_cents || 0) / 100).toFixed(2), o.currency || 'USD', o.promo_code || '']);
+  });
+  const csv = rows.map(r => r.map(c => {
+    const s = String(c == null ? '' : c);
+    return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\n');
+  if (out) {
+    out.innerHTML = '<div style="font-size:12px;color:var(--hint);margin-bottom:4px">' +
+      'Скопируйте CSV:</div><textarea class="inp" rows="6" style="width:100%;font-family:monospace;font-size:11px" ' +
+      'onclick="this.select()">' + esc(csv) + '</textarea>';
+  }
+}
+
+function spApplyPreset(key) {
+  const preset = SP_PRESETS[key];
+  if (!preset) return;
+  for (const k in preset.fields) {
+    const el = document.getElementById('f_' + k);
+    if (!el) continue;
+    const v = preset.fields[k];
+    if (el.type === 'checkbox') el.checked = !!v;
+    else el.value = v;
+  }
+  toast('Пресет применён — проверьте поля и сохраните');
+}
+
+async function spStats(pid) {
+  const out = document.getElementById('spStatsOut');
+  if (out) out.innerHTML = '<span style="color:var(--hint)">Считаю…</span>';
+  try {
+    const r = await api('/api/miniapp/sales/persona/' + pid + '/stats');
+    const s = r.stats || {};
+    const rev = ((s.revenue_cents || 0) / 100).toFixed(2);
+    const avg = ((s.avg_order_cents || 0) / 100).toFixed(2);
+    if (!out) return;
+    const cell = (label, val) =>
+      '<div style="flex:1;min-width:90px;padding:8px;background:var(--bg2);border-radius:8px">' +
+      '<div style="font-size:18px;font-weight:600">' + esc(String(val)) + '</div>' +
+      '<div style="font-size:11px;color:var(--hint)">' + esc(label) + '</div></div>';
+    out.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      cell('Диалогов', s.dialogs_total || 0) +
+      cell('Заказов', s.orders_confirmed || 0) +
+      cell('Конверсия', (s.conversion_pct || 0) + '%') +
+      cell('Выручка', rev) +
+      cell('Средний чек', avg) +
+      cell('К оператору', s.handoffs || 0) +
+      '</div>';
+  } catch (e) {
+    if (out) out.innerHTML = '<div style="color:var(--red)">' + esc(e.message) + '</div>';
+  }
+}
+
+let _spChatHistory = [];
+let _spChatPid = null;
+
+function spChat(pid) {
+  _spChatPid = pid;
+  _spChatHistory = [];
+  _spScreen('s-saleschat', '💬 Тест-чат с менеджером', '');
+  push('s-saleschat');
+  const body = document.getElementById('s-saleschat-body');
+  body.innerHTML =
+    '<div style="font-size:12px;color:var(--hint);padding:0 2px 8px">' +
+    'Тестовый диалог — как увидит клиент. Реальные заказы не создаются.</div>' +
+    '<div id="spChatLog" style="min-height:200px;max-height:50vh;overflow-y:auto;' +
+    'padding:8px;background:var(--bg2);border-radius:10px;margin-bottom:8px"></div>' +
+    '<div style="display:flex;gap:8px">' +
+    '<input type="text" id="spChatInput" placeholder="Написать сообщение…" class="inp" style="flex:1" ' +
+    'onkeydown="if(event.key===\'Enter\')spChatSend()">' +
+    '<button class="btn btn-p" onclick="spChatSend()">▶</button></div>';
+}
+
+function _spChatRender() {
+  const log = document.getElementById('spChatLog');
+  if (!log) return;
+  log.innerHTML = _spChatHistory.map(m => {
+    const mine = m.role === 'user';
+    return '<div style="display:flex;justify-content:' + (mine ? 'flex-end' : 'flex-start') + ';margin:4px 0">' +
+      '<div style="max-width:80%;padding:7px 10px;border-radius:12px;white-space:pre-wrap;' +
+      'background:' + (mine ? 'var(--accent)' : 'var(--bg)') + ';color:' + (mine ? '#fff' : 'var(--fg)') + '">' +
+      esc(m.content) + '</div></div>';
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+async function spChatSend() {
+  const inp = document.getElementById('spChatInput');
+  if (!inp) return;
+  const text = (inp.value || '').trim();
+  if (!text) return;
+  inp.value = '';
+  _spChatHistory.push({ role: 'user', content: text });
+  _spChatRender();
+  const log = document.getElementById('spChatLog');
+  const typing = document.createElement('div');
+  typing.style.cssText = 'color:var(--hint);font-size:12px;padding:4px';
+  typing.textContent = 'печатает…';
+  if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+  try {
+    const r = await api('/api/miniapp/sales/persona/' + _spChatPid + '/chat',
+      { method: 'POST', body: JSON.stringify({ text: text, history: _spChatHistory.slice(0, -1) }) });
+    _spChatHistory.push({ role: 'assistant', content: r.reply || '—' });
+    _spChatRender();
+  } catch (e) {
+    if (typing) typing.remove();
+    toast(e.message || 'Ошибка');
+  }
+}
+
 async function spOrders(pid) {
   _spScreen('s-salesorders', '📦 Заказы менеджера', '');
   push('s-salesorders');
@@ -736,7 +916,10 @@ async function spOrders(pid) {
     }
     const st = { new: '🆕 новый', confirmed: '✅ подтверждён', handoff: '🆘 оператору',
                  cancelled: '❌ отменён', done: '📦 выполнен' };
-    body.innerHTML = orders.map(o => {
+    _spOrdersCache = orders;
+    body.innerHTML = '<button class="btn btn-s" style="width:100%;margin-bottom:10px" ' +
+      'onclick="spExportOrdersCsv()">⬇️ Экспорт CSV</button>' +
+      '<div id="spCsvOut"></div>' + orders.map(o => {
       let contact = o.contact;
       if (typeof contact === 'string') { try { contact = JSON.parse(contact); } catch (_) { contact = {}; } }
       let items = o.items;

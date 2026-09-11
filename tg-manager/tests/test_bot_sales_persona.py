@@ -617,6 +617,72 @@ def test_delivery_promo_postgres():
     asyncio.new_event_loop().run_until_complete(go())
 
 
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_stats_and_sandbox_postgres():
+    import asyncio
+    import asyncpg
+    from unittest.mock import patch
+
+    OWN, BOT, CHAT = 801300, 557300, 75
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+
+        async def _cl():
+            for t in ("bot_sales_orders", "bot_sales_dialogs", "bot_sales_products",
+                      "bot_sales_faq", "bot_sales_personas"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWN)
+            await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", BOT)
+        try:
+            await _cl()
+            p = await bsp.create_persona(pool, OWN, "Ника")
+            pid = p["id"]
+            await bsp.add_product(pool, pid, OWN, "Кофе", price_cents=1000)
+            await bsp.assign_to_bot(pool, pid, OWN, BOT)
+
+            async def _fake_gen(persona, products, dialog, text, faqs=None,
+                                examples=None, delivery=None, promos=None):
+                return "ок"
+            with patch.object(bsp, "generate_reply", _fake_gen):
+                # один подтверждённый заказ (диалог+заказ)
+                await bsp.handle_incoming(pool, BOT, OWN, CHAT, "заказать 2 кофе", name="П")
+                await bsp.handle_incoming(pool, BOT, OWN, CHAT, "тел +79001112233", name="П")
+
+            stats = await bsp.persona_stats(pool, pid, OWN)
+            assert stats["dialogs_total"] == 1
+            assert stats["orders_confirmed"] == 1
+            assert stats["revenue_cents"] == 2000
+            assert stats["conversion_pct"] == 100.0
+            assert stats["avg_order_cents"] == 2000
+
+            # песочница: тот же путь генерации, история с клиента, без записи в БД
+            await bsp.add_faq(pool, pid, OWN, "Доставка?", "1-3 дня", keywords="доставка")
+            seen = {}
+            async def _spy(persona, products, dialog, text, faqs=None, examples=None,
+                           delivery=None, promos=None):
+                seen["faqs"] = len(faqs or [])
+                seen["hist"] = len((dialog or {}).get("history") or [])
+                seen["faq_hint"] = (dialog or {}).get("faq_hint")
+                return "тест-ответ"
+            fresh_p = await bsp.get_persona(pool, pid)
+            with patch.object(bsp, "generate_reply", _spy):
+                reply = await bsp.sandbox_reply(
+                    pool, fresh_p, "какая доставка?",
+                    [{"role": "user", "content": "привет"},
+                     {"role": "assistant", "content": "здравствуйте"}])
+            assert reply == "тест-ответ"
+            assert seen["faqs"] == 1 and seen["hist"] == 2
+            assert "1-3 дня" in (seen["faq_hint"] or "")
+            # песочница НЕ создала новых диалогов (по-прежнему 1)
+            n = await pool.fetchval(
+                "SELECT count(*) FROM bot_sales_dialogs WHERE persona_id=$1", pid)
+            assert n == 1
+            await _cl()
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())
+
+
 def test_auto_responder_human_delivery_and_silence():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = open(os.path.join(root, "services", "auto_responder.py"), encoding="utf-8").read()

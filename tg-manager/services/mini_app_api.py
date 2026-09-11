@@ -16233,6 +16233,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         products = await _bsp.list_products(pool, pid, active_only=True)
         return _json_resp(await _bsp.diagnose_generation(p, products))
 
+    async def sp_stats(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        return _json_resp({"stats": await _bsp.persona_stats(pool, pid, uid)})
+
+    async def sp_chat(request):
+        """Песочница: владелец тестирует бота, история — на клиенте."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        p = await _sp_owned(uid, pid)
+        if not p:
+            return _err("Not found", 404)
+        text = (d.get("text") or "").strip()
+        if not text:
+            return _err("пустое сообщение", 400)
+        try:
+            reply = await _bsp.sandbox_reply(pool, p, text, d.get("history") or [])
+            return _json_resp({"ok": True, "reply": reply})
+        except Exception as e:
+            log.exception("sp_chat uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
     # ── База знаний (FAQ) ──────────────────────────────────────────────────
     async def sp_faq_add(request):
         uid = _get_uid(request)
@@ -16421,6 +16456,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_patch("/api/miniapp/sales/product/{prid}", sp_product_update)
     app.router.add_delete("/api/miniapp/sales/product/{prid}", sp_product_delete)
     app.router.add_post("/api/miniapp/sales/persona/{pid}/test", sp_test)
+    app.router.add_get("/api/miniapp/sales/persona/{pid}/stats", sp_stats)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/chat", sp_chat)
     app.router.add_post("/api/miniapp/sales/persona/{pid}/faq", sp_faq_add)
     app.router.add_patch("/api/miniapp/sales/faq/{fid}", sp_faq_update)
     app.router.add_delete("/api/miniapp/sales/faq/{fid}", sp_faq_delete)
