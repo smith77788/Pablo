@@ -40,6 +40,35 @@ _dead_token_cooldown: dict[int, tuple[int, float]] = {}
 _DEAD_TOKEN_BASE_COOLDOWN = 60.0  # seconds
 _DEAD_TOKEN_MAX_COOLDOWN = 3600.0  # cap at 1h between retries
 
+# Троттлинг уведомлений «новый подписчик» ПО БОТУ (анти-накрутка). Раньше каждый
+# новый юзер слал владельцу отдельный DM через main-bot; при накрутке ботами
+# поток из тысяч фейков насыщал main-bot (FloodWait) — и Infragram переставал
+# отвечать всем. Теперь копим счётчик за окно и шлём одно агрегированное
+# уведомление на бота, предупреждая о возможной накрутке.
+# Структура: {bot_id: {"count": int, "last": monotonic}}
+_new_user_notify: dict[int, dict] = {}
+_NEW_USER_NOTIFY_COOLDOWN = 60.0  # не чаще одного уведомления на бота в минуту
+
+
+def _new_user_notify_decide(bot_id: int) -> int | None:
+    """Сколько новых подписчиков отправить в уведомлении сейчас, либо None если
+    рано (throttle). ЧИСТАЯ по эффекту (только in-memory счётчик процесса).
+
+    Первый подписчик после паузы уведомляется сразу (count=1); последующие в
+    пределах окна копятся и уходят одним агрегированным уведомлением после окна."""
+    now = time.monotonic()
+    st = _new_user_notify.get(bot_id)
+    if st is None:
+        st = {"count": 0, "last": 0.0}
+        _new_user_notify[bot_id] = st
+    st["count"] += 1
+    if now - st["last"] >= _NEW_USER_NOTIFY_COOLDOWN:
+        n = st["count"]
+        st["count"] = 0
+        st["last"] = now
+        return n
+    return None
+
 
 def _is_dm_update(upd: dict) -> bool:
     """True только если сообщение пришло из ЛИЧНОГО чата с ботом.
@@ -499,28 +528,38 @@ async def _process_bot(
                     bot_id, chat_id, bool(main_bot), bot_row.get("added_by") if bot_row else None,
                 )
             if is_new_user and main_bot and bot_row and bot_row.get("added_by"):
-                owner_id = bot_row["added_by"]
-                bot_name = (
-                    bot_row.get("username")
-                    or bot_row.get("first_name")
-                    or f"id{bot_id}"
-                )
-                user_name = (
-                    from_user.get("username")
-                    or from_user.get("first_name")
-                    or f"id{chat_id}"
-                )
-                note = f"👤 <b>Новый пользователь</b> @{user_name} подписался на @{bot_name}"
-                # dedup_key = (bot, новый юзер): каждый отдельный новый подписчик
-                # уведомляется, иначе кулдаун по (owner, "new_user") глушил всех
-                # новых юзеров со всех ботов владельца в одном слоте.
-                from services.bg_tasks import spawn
-                spawn(
-                    db.notify_if_enabled(
-                        pool, main_bot, owner_id, "new_user", note,
-                        dedup_key=f"{bot_id}:{chat_id}",
+                # Анти-накрутка: троттлим уведомления ПО БОТУ, а не по каждому юзеру.
+                # Иначе поток фейков (накрутка) слал бы тысячи DM через main-bot,
+                # клал его в FloodWait и «ронял» Infragram для всех.
+                _n = _new_user_notify_decide(bot_id)
+                if _n is not None:
+                    owner_id = bot_row["added_by"]
+                    bot_name = (
+                        bot_row.get("username")
+                        or bot_row.get("first_name")
+                        or f"id{bot_id}"
                     )
-                )
+                    if _n <= 1:
+                        user_name = (
+                            from_user.get("username")
+                            or from_user.get("first_name")
+                            or f"id{chat_id}"
+                        )
+                        note = (f"👤 <b>Новый пользователь</b> @{user_name} "
+                                f"подписался на @{bot_name}")
+                    else:
+                        note = (f"👤 <b>+{_n} новых подписчиков</b> на @{bot_name} "
+                                f"за последнюю минуту.\n⚠️ Если вы не запускали "
+                                f"продвижение — возможно, идёт накрутка ботами.")
+                    # dedup_key per-bot: уведомления по этому боту делят один слот
+                    # кулдауна (не по каждому юзеру) — второй барьер против флуда.
+                    from services.bg_tasks import spawn
+                    spawn(
+                        db.notify_if_enabled(
+                            pool, main_bot, owner_id, "new_user", note,
+                            dedup_key=f"{bot_id}:new",
+                        )
+                    )
 
             # Register in bot_users so the user appears in broadcast audience
             await db.upsert_users(
