@@ -182,6 +182,30 @@ INLINE_MIGRATIONS: list[str] = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
     "CREATE INDEX IF NOT EXISTS idx_chatlist_folders_owner ON chatlist_folders(owner_id, created_at DESC)",
+    # v210: «Нотариус» — независимое заверение рекламных размещений. Панель
+    # наблюдателей фиксирует хронологию поста и подписывает протокол.
+    """CREATE TABLE IF NOT EXISTS notary_watches (
+        id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL,
+        channel_ref TEXT NOT NULL, channel_title TEXT, msg_id BIGINT,
+        advertiser TEXT, price_paid NUMERIC(12,2), currency TEXT DEFAULT 'USD',
+        promised_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+        promised_until TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active', verdict TEXT,
+        first_seen_at TIMESTAMPTZ, last_seen_at TIMESTAMPTZ,
+        absent_since TIMESTAMPTZ, views_first INTEGER, views_last INTEGER,
+        checks_done INTEGER NOT NULL DEFAULT 0,
+        next_check_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        cert_sig TEXT, cert_issued_at TIMESTAMPTZ, note TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    "CREATE INDEX IF NOT EXISTS idx_notary_watches_owner ON notary_watches(owner_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_notary_watches_due ON notary_watches(next_check_at) WHERE status = 'active'",
+    """CREATE TABLE IF NOT EXISTS notary_observations (
+        id BIGSERIAL PRIMARY KEY,
+        watch_id BIGINT NOT NULL REFERENCES notary_watches(id) ON DELETE CASCADE,
+        observed_at TIMESTAMPTZ NOT NULL DEFAULT now(), state TEXT NOT NULL,
+        views INTEGER, acc_id BIGINT, geo TEXT, detail TEXT, sig TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_notary_obs_watch ON notary_observations(watch_id, observed_at)",
     # v198: здоровье управляемых ботов. Без этих колонок бот с отозванным
     # токеном выглядел «активным», молча не отвечал подписчикам, и знал об
     # этом только серверный лог.
@@ -9725,6 +9749,183 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                            "total": len(out),
                            "connected": sum(1 for x in out if x["connected"])})
 
+    # ── «Нотариус»: заверение рекламных размещений ────────────────────────
+
+    async def notary_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT id, channel_ref, channel_title, msg_id, advertiser,
+                      promised_from, promised_until, status, verdict,
+                      first_seen_at, last_seen_at, absent_since,
+                      views_first, views_last, checks_done, cert_sig, created_at
+                 FROM notary_watches WHERE owner_id=$1
+                ORDER BY created_at DESC LIMIT 100""", uid)
+        from services import notary as _nt
+        out = []
+        for r in (rows or []):
+            d = dict(r)
+            for k in ("promised_from", "promised_until", "first_seen_at",
+                      "last_seen_at", "absent_since", "created_at"):
+                d[k] = d[k].isoformat() if d.get(k) else None
+            v = d.get("verdict")
+            d["verdict_label"] = _nt.VERDICT_LABEL.get(v, "⏳ Ожидает наблюдений")
+            d["signed"] = bool(d.pop("cert_sig", None))
+            out.append(d)
+        return _json_resp({"ok": True, "watches": out})
+
+    async def notary_create(request: web.Request) -> web.Response:
+        """Поставить размещение под наблюдение.
+
+        msg_id не обязателен: без него наблюдаем ПОЯВЛЕНИЕ поста, что и даёт
+        возможность доказать обратное — «оплачено, но не опубликовано».
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        channel = validate_string(body.get("channel"), max_len=120)
+        if not channel:
+            return _err("Укажите канал (@username или id)", 400)
+        try:
+            hours = float(body.get("hours") or 24)
+        except (TypeError, ValueError):
+            return _err("Некорректный срок", 400)
+        if not 0.5 <= hours <= 24 * 30:
+            return _err("Срок должен быть от 30 минут до 30 суток", 400)
+        msg_id = body.get("msg_id")
+        try:
+            msg_id = int(msg_id) if msg_id else None
+        except (TypeError, ValueError):
+            return _err("Некорректный id поста", 400)
+        advertiser = validate_string(body.get("advertiser"), max_len=120) or None
+        try:
+            wid = await pool.fetchval(
+                """INSERT INTO notary_watches
+                     (owner_id, channel_ref, msg_id, advertiser, promised_from,
+                      promised_until, next_check_at)
+                   VALUES ($1,$2,$3,$4, now(), now() + ($5 || ' hours')::interval, now())
+                   RETURNING id""",
+                uid, channel.lstrip("@"), msg_id, advertiser, str(hours))
+        except Exception as exc:
+            log.exception("notary_create uid=%s", uid)
+            return _err(str(exc)[:150], 500)
+        return _json_resp({"ok": True, "id": wid})
+
+    async def notary_detail(request: web.Request) -> web.Response:
+        """Протокол наблюдения: факты, журнал и подпись."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["watch_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT * FROM notary_watches WHERE id=$1 AND owner_id=$2", wid, uid)
+        if not row:
+            return _err("Наблюдение не найдено", 404)
+        watch = dict(row)
+        obs = await _safe_fetch(pool,
+            "SELECT observed_at, state, views, geo, detail FROM notary_observations "
+            "WHERE watch_id=$1 ORDER BY observed_at DESC LIMIT 500", wid)
+        from services import notary as _nt, notary_observer as _no
+        from datetime import datetime as _dtn, timezone as _tzn
+        ordered = list(reversed([dict(o) for o in (obs or [])]))
+        folded = _nt.fold(ordered, promised_from=watch["promised_from"],
+                          promised_until=watch["promised_until"],
+                          now=_dtn.now(_tzn.utc))
+        burst = _nt.views_burst(ordered)
+        sig = watch.get("cert_sig")
+        # Подпись показываем только там, где она проверяема: пересчитываем её
+        # заново и сверяем. Протокол с неподтверждённой подписью хуже, чем без.
+        payload = _nt.certificate_payload(watch, folded)
+        verified = bool(sig) and _no.verify(payload, sig)
+        journal = []
+        for o in (obs or []):
+            d = dict(o)
+            d["observed_at"] = d["observed_at"].isoformat() if d.get("observed_at") else None
+            journal.append(d)
+        return _json_resp({
+            "ok": True,
+            "watch": {
+                "id": watch["id"],
+                "channel_ref": watch["channel_ref"],
+                "channel_title": watch.get("channel_title"),
+                "msg_id": watch.get("msg_id"),
+                "advertiser": watch.get("advertiser"),
+                "status": watch.get("status"),
+                "promised_from": watch["promised_from"].isoformat(),
+                "promised_until": watch["promised_until"].isoformat(),
+            },
+            "verdict": folded["verdict"],
+            "verdict_label": _nt.VERDICT_LABEL.get(folded["verdict"], ""),
+            "verdict_hint": _nt.VERDICT_HINT.get(folded["verdict"], ""),
+            "facts": {
+                "first_seen_at": folded["first_seen_at"].isoformat() if folded["first_seen_at"] else None,
+                "last_seen_at": folded["last_seen_at"].isoformat() if folded["last_seen_at"] else None,
+                "absent_since": folded["absent_since"].isoformat() if folded["absent_since"] else None,
+                "held_min_h": folded["held_min_h"],
+                "views_first": folded["views_first"],
+                "views_last": folded["views_last"],
+                "coverage": folded["coverage"],
+                "n_present": folded["n_present"],
+                "n_absent": folded["n_absent"],
+                "n_unknown": folded["n_unknown"],
+                "n_total": folded["n_total"],
+            },
+            "burst": burst,
+            "signed": bool(sig),
+            "signature_valid": verified,
+            "certificate": _nt.render_certificate(
+                watch, folded, sig if verified else None, burst),
+            "journal": journal,
+        })
+
+    async def notary_check_now(request: web.Request) -> web.Response:
+        """Проверить размещение немедленно, не дожидаясь такта наблюдателя."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["watch_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        row = await _safe_fetchrow(pool,
+            "SELECT * FROM notary_watches WHERE id=$1 AND owner_id=$2", wid, uid)
+        if not row:
+            return _err("Наблюдение не найдено", 404)
+        from services import notary_observer as _no
+        try:
+            state = await _no.observe(pool, dict(row))
+        except PermissionError as exc:
+            return _err(str(exc) or "Недоступно на вашем тарифе", 403)
+        except Exception as exc:
+            log.exception("notary_check_now uid=%s watch=%s", uid, wid)
+            return _err(str(exc)[:150], 500)
+        return _json_resp({"ok": True, "state": state})
+
+    async def notary_cancel(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            wid = int(request.match_info["watch_id"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        # Журнал наблюдений не трогаем: протокол, который можно стереть, ничего
+        # не стоит. Снимаем только с наблюдения.
+        row = await _safe_fetchrow(pool,
+            "UPDATE notary_watches SET status='cancelled', updated_at=now() "
+            "WHERE id=$1 AND owner_id=$2 AND status='active' RETURNING id", wid, uid)
+        if not row:
+            return _err("Наблюдение не найдено или уже закрыто", 404)
+        return _json_resp({"ok": True})
+
     async def chatlist_folders_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -15795,6 +15996,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
     app.router.add_post("/api/miniapp/bots/connect_discovered", bots_connect_discovered)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
+    app.router.add_get("/api/miniapp/notary", notary_list)
+    app.router.add_post("/api/miniapp/notary", notary_create)
+    app.router.add_get("/api/miniapp/notary/{watch_id}", notary_detail)
+    app.router.add_post("/api/miniapp/notary/{watch_id}/check", notary_check_now)
+    app.router.add_delete("/api/miniapp/notary/{watch_id}", notary_cancel)
     app.router.add_post("/api/miniapp/chatlist_folders", chatlist_folder_create)
     app.router.add_delete("/api/miniapp/chatlist_folders/{folder_id}", chatlist_folder_delete)
     app.router.add_get("/api/miniapp/rehab", rehab_overview_ep)

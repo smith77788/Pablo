@@ -1048,6 +1048,11 @@ async def main() -> None:
         # сетевые ошибки. Снаружи это выглядит как «сломались аккаунты».
         from services import proxy_watchdog
         asyncio.create_task(_resilient("proxy_watchdog", proxy_watchdog.run, pool, bot))
+        # «Нотариус»: панель наблюдателей ведёт хронологию купленных размещений.
+        # Наблюдение пассивное (чтение одного поста), поэтому флот от него не
+        # изнашивается — цикл может работать постоянно.
+        from services import notary_observer
+        asyncio.create_task(_resilient("notary_observer", notary_observer.run, pool, bot))
         # Пульс организма: сердцебиение — смотрит на мир владельца и проактивно
         # подсказывает срочное в ЛС (с кулдауном). Система «живёт» между сессиями.
         from services.organism import runner as organism_runner

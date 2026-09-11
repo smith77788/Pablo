@@ -1823,6 +1823,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <!-- Инвайт «от обратного»: одна ссылка добавляет человеку сразу всю
            связку каналов+чат общей папкой Telegram. -->
+      <div class="mgmt-tile" onclick="openNotary()">
+        <div class="mgmt-tile-ico">⚖️</div>
+        <div class="mgmt-tile-lbl">Нотариус</div>
+        <div class="mgmt-tile-val" id="m-notary-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openFolders()">
         <div class="mgmt-tile-ico">📁</div>
         <div class="mgmt-tile-lbl">Общие папки</div>
@@ -4795,6 +4800,53 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="rehabStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
     <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
+</div>
+
+<div class="screen" id="s-notary">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⚖️ Нотариус</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openNotaryNew()">+ Заверить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
+      Панель наблюдателей смотрит, висит ли купленный пост, и составляет
+      подписанный протокол с хронологией. Наблюдение пассивное — аккаунты от
+      него не изнашиваются.
+    </div>
+    <div class="lst" id="notaryList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-notarynew">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⚖️ Новое заверение</div>
+  </div>
+  <div class="sub-sb">
+    <div class="field"><label>Канал</label>
+      <input id="ntChannel" placeholder="@channel или -100…"></div>
+    <div class="field"><label>ID поста (необязательно)</label>
+      <input id="ntMsg" inputmode="numeric" placeholder="оставьте пустым — проследим появление"></div>
+    <div class="field"><label>Обещанный срок, часов</label>
+      <input id="ntHours" inputmode="decimal" value="24"></div>
+    <div class="field"><label>Рекламодатель (необязательно)</label>
+      <input id="ntAdv" placeholder="@advertiser"></div>
+    <div style="font-size:11px;opacity:.6;padding:4px 2px 10px;line-height:1.4">
+      Без ID поста нотариус следит за появлением — так доказывается и обратное:
+      оплачено, но не опубликовано. Проверки плотные в первые часы и редкие
+      дальше: подмену почти всегда делают в начале.
+    </div>
+    <button class="btn btn-p" style="width:100%" onclick="submitNotary()">⚖️ Поставить под наблюдение</button>
+  </div>
+</div>
+
+<div class="screen" id="s-notarycert">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⚖️ Протокол</div>
+  </div>
+  <div class="sub-sb"><div id="notaryCert"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <div class="screen" id="s-folders">
@@ -16923,6 +16975,132 @@ async function openWarmup() {
 // Одна ссылка добавляет человеку сразу всю связку каналов+чат. Раздача
 // честная (наши рассылки/боты/посты), вступление — выбор пользователя.
 let FC_SEL = new Set();
+// ── «Нотариус»: заверение рекламных размещений ───────────────────────────
+let NOTARY_WATCHES = [];
+async function openNotary() {
+  push('s-notary');
+  txt('notaryList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/notary');
+    NOTARY_WATCHES = d.watches || [];
+    const el = document.getElementById('m-notary-val');
+    if (el) el.textContent = NOTARY_WATCHES.length ? NOTARY_WATCHES.length + ' под наблюдением' : '';
+    if (!NOTARY_WATCHES.length) {
+      txt('notaryList', empty('⚖️','Нет заверений',
+        'Поставьте купленное размещение под наблюдение — получите протокол с хронологией',
+        {label:'⚖️ Заверить размещение', fn:'openNotaryNew()'}));
+      return;
+    }
+    txt('notaryList', NOTARY_WATCHES.map(w=>`
+      <div class="li tap" onclick="openNotaryCert(${w.id})">
+        <div class="ava ava-purple">⚖️</div>
+        <div class="li-body">
+          <div class="li-name">${esc(w.channel_title || ('@'+w.channel_ref))}</div>
+          <div class="li-sub">${esc(w.verdict_label||'')} · проверок ${num(w.checks_done||0)}${w.signed?' · 🔏 подписан':''}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>`).join(''));
+  } catch(e) { txt('notaryList', errHtml(e.message,'openNotary()')); }
+}
+
+function openNotaryNew() {
+  push('s-notarynew');
+  ['ntChannel','ntMsg','ntAdv'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const h = document.getElementById('ntHours'); if (h) h.value = '24';
+}
+
+async function submitNotary() {
+  const channel = (document.getElementById('ntChannel').value||'').trim();
+  if (!channel) { toast('Укажите канал'); return; }
+  const body = {
+    channel,
+    msg_id: (document.getElementById('ntMsg').value||'').trim() || null,
+    hours: Number((document.getElementById('ntHours').value||'24').replace(',','.')) || 24,
+    advertiser: (document.getElementById('ntAdv').value||'').trim() || null,
+  };
+  try {
+    await api('/api/miniapp/notary', {method:'POST', body: JSON.stringify(body)});
+    toast('⚖️ Под наблюдением');
+    back(); openNotary();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+
+async function openNotaryCert(id) {
+  push('s-notarycert');
+  txt('notaryCert', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/notary/'+id);
+    const f = d.facts || {};
+    // Подпись показываем только подтверждённую: «подписано, но не сходится» —
+    // хуже, чем без подписи вовсе.
+    const sigRow = d.signed
+      ? (d.signature_valid
+          ? '<div class="row"><div class="row-body"><div class="row-name">Подпись</div><div class="row-val" style="color:var(--green)">🔏 подтверждена</div></div></div>'
+          : '<div class="row"><div class="row-body"><div class="row-name">Подпись</div><div class="row-val" style="color:var(--red)">⚠️ не сходится — протокол изменён</div></div></div>')
+      : '';
+    const burst = d.burst
+      ? `<div class="card" style="border-left:3px solid var(--orange);margin:8px 0">
+           <div style="font-weight:600;font-size:13px">⚠️ Подозрение на накрутку просмотров</div>
+           <div style="font-size:12px;color:var(--hint);margin-top:3px;line-height:1.4">
+             +${num(d.burst.gained)} просмотров за один интервал — ${d.burst.factor}× обычного темпа.
+             Это сигнал, а не доказательство.</div>
+         </div>` : '';
+    txt('notaryCert', `
+      <div style="padding:10px 2px 4px">
+        <div style="font-size:16px;font-weight:700">${esc(d.verdict_label||'')}</div>
+        <div style="font-size:12px;color:var(--hint);margin-top:4px;line-height:1.45">${esc(d.verdict_hint||'')}</div>
+      </div>
+      ${burst}
+      <div class="lst">
+        <div class="row"><div class="row-body"><div class="row-name">Впервые зафиксирован</div><div class="row-val">${f.first_seen_at?new Date(f.first_seen_at).toLocaleString('ru'):'—'}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Последний раз на месте</div><div class="row-val">${f.last_seen_at?new Date(f.last_seen_at).toLocaleString('ru'):'—'}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Подтверждённое удержание</div><div class="row-val">${f.held_min_h!=null?('не менее '+Number(f.held_min_h).toFixed(1)+' ч'):'—'}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Просмотры</div><div class="row-val">${f.views_first!=null?(num(f.views_first)+' → '+num(f.views_last)):'—'}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Наблюдений</div><div class="row-val">${num(f.n_total||0)} · покрытие ${Math.round((f.coverage||0)*100)}%</div></div></div>
+        ${sigRow}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-s" style="flex:1;min-width:120px" onclick="notaryCheckNow(${id})">🔄 Проверить сейчас</button>
+        <button class="btn btn-s" style="flex:1;min-width:120px" onclick="copyNotaryCert()">📄 Скопировать протокол</button>
+        <button class="btn btn-d" style="flex:1;min-width:120px" onclick="notaryCancel(${id})">⏹ Снять с наблюдения</button>
+      </div>
+      <div class="sec">Журнал наблюдений</div>
+      <div class="lst">${(d.journal||[]).slice(0,50).map(o=>{
+        const ico = o.state==='present'?'🟢':o.state==='absent'?'🔴':'⚪';
+        const lbl = o.state==='present'?'на месте':o.state==='absent'?'отсутствует':'не удалось';
+        return `<div class="row"><div class="row-body">
+          <div class="row-name">${ico} ${lbl}${o.views!=null?(' · '+num(o.views)):''}</div>
+          <div class="row-val">${o.observed_at?new Date(o.observed_at).toLocaleString('ru'):''}${o.detail?(' · '+esc(String(o.detail).substring(0,60))):''}</div>
+        </div></div>`;
+      }).join('') || '<div style="padding:10px;color:var(--hint);font-size:13px">Наблюдений пока нет</div>'}</div>
+      <div style="height:16px"></div>`);
+    NOTARY_CERT_TEXT = d.certificate || '';
+  } catch(e) { txt('notaryCert', errHtml(e.message)); }
+}
+
+// Текст протокола держим в кэше: данные в атрибуте onclick рвут разметку.
+let NOTARY_CERT_TEXT = '';
+function copyNotaryCert() { copyText(NOTARY_CERT_TEXT || ''); }
+
+async function notaryCheckNow(id) {
+  toast('🔄 Смотрю…');
+  try {
+    const r = await api('/api/miniapp/notary/'+id+'/check', {method:'POST'});
+    const lbl = {present:'🟢 пост на месте', absent:'🔴 поста нет', unknown:'⚪ посмотреть не удалось'}[r.state] || r.state;
+    toast(lbl);
+    openNotaryCert(id);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+
+async function notaryCancel(id) {
+  if (!await askConfirm('Снять размещение с наблюдения? Журнал и протокол останутся.')) return;
+  try {
+    await api('/api/miniapp/notary/'+id, {method:'DELETE'});
+    toast('⏹ Снято с наблюдения');
+    back(); openNotary();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
+}
+
 async function openFolders() {
   push('s-folders');
   txt('foldersList','<div class="spin-wrap"><div class="spin"></div></div>');
