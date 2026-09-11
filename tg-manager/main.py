@@ -808,6 +808,19 @@ async def main() -> None:
         "id BIGSERIAL PRIMARY KEY, persona_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
         "user_msg TEXT NOT NULL DEFAULT '', assistant_msg TEXT NOT NULL DEFAULT '', "
         "ord INT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        # Способы доставки, промокоды и поля скидки в заказе (schema_v208).
+        "CREATE TABLE IF NOT EXISTS bot_sales_delivery ("
+        "id BIGSERIAL PRIMARY KEY, persona_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
+        "name TEXT NOT NULL DEFAULT '', price_cents INT NOT NULL DEFAULT 0, "
+        "eta TEXT NOT NULL DEFAULT '', zones TEXT NOT NULL DEFAULT '', "
+        "is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "CREATE TABLE IF NOT EXISTS bot_sales_promos ("
+        "id BIGSERIAL PRIMARY KEY, persona_id BIGINT NOT NULL, owner_id BIGINT NOT NULL, "
+        "code TEXT NOT NULL DEFAULT '', percent INT NOT NULL DEFAULT 0, "
+        "min_total_cents INT NOT NULL DEFAULT 0, is_active BOOLEAN NOT NULL DEFAULT TRUE, "
+        "expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "ALTER TABLE bot_sales_orders ADD COLUMN IF NOT EXISTS discount_cents INT NOT NULL DEFAULT 0",
+        "ALTER TABLE bot_sales_orders ADD COLUMN IF NOT EXISTS promo_code TEXT NOT NULL DEFAULT ''",
     ):
         try:
             await pool.execute(_ddl)

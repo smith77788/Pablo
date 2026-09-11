@@ -345,6 +345,53 @@ def test_example_messages_and_prompt_faq():
     assert "ответ из базы" in sp2
 
 
+def test_promo_apply_and_find():
+    promos = [
+        {"code": "SALE10", "percent": 10, "min_total_cents": 0, "is_active": True,
+         "expires_at": None},
+        {"code": "BIG20", "percent": 20, "min_total_cents": 5000, "is_active": True,
+         "expires_at": None},
+        {"code": "OLD", "percent": 50, "min_total_cents": 0, "is_active": False,
+         "expires_at": None},
+    ]
+    # применение
+    disc, new_total = bsp.apply_promo(1000, promos[0])
+    assert disc == 100 and new_total == 900
+    assert bsp.apply_promo(1000, None) == (0, 1000)
+    # поиск: код как слово
+    assert bsp.find_promo_in_text("мой код SALE10", promos, 1000)["code"] == "SALE10"
+    assert bsp.find_promo_in_text("промокод sale10 есть?", promos, 1000)["code"] == "SALE10"
+    # порог суммы не достигнут
+    assert bsp.find_promo_in_text("BIG20", promos, 1000) is None
+    assert bsp.find_promo_in_text("BIG20", promos, 6000)["code"] == "BIG20"
+    # неактивный код
+    assert bsp.find_promo_in_text("OLD", promos, 1000) is None
+    # ложная подстрока не ловится
+    assert bsp.find_promo_in_text("BIGSALE20xx", promos, 9000) is None
+    # нет кода
+    assert bsp.find_promo_in_text("привет", promos, 1000) is None
+
+
+def test_promo_expired():
+    import datetime as dt
+    past = dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc)
+    promos = [{"code": "EXP", "percent": 10, "min_total_cents": 0, "is_active": True,
+               "expires_at": past}]
+    assert bsp.find_promo_in_text("EXP", promos, 1000) is None
+
+
+def test_build_prompt_delivery_and_promos():
+    p = {"name": "A", "can_take_orders": True, "currency": "USD"}
+    delivery = [{"name": "Курьер", "price_cents": 500, "eta": "1-2 дня",
+                 "zones": "Москва", "is_active": True},
+                {"name": "Самовывоз", "price_cents": 0, "is_active": True}]
+    promos = [{"code": "SALE10", "percent": 10, "is_active": True}]
+    sp = bsp.build_system_prompt(p, [], None, None, delivery, promos)
+    assert "Курьер — 5.00 USD" in sp
+    assert "Самовывоз — бесплатно" in sp
+    assert "промокод" in sp.lower()
+
+
 def test_merge_items():
     m, t = bsp._merge_items([{"name": "A", "qty": 1, "price_cents": 100}],
                             [{"name": "A", "qty": 3, "price_cents": 100},
@@ -439,7 +486,8 @@ def test_wave_a_settings_and_followup_postgres():
                 "VALUES($1,$2,$3,TRUE) ON CONFLICT (bot_id) DO NOTHING",
                 BOT, "tkn:" + str(BOT), OWN)
 
-            async def _fake_gen(persona, products, dialog, text, faqs=None, examples=None):
+            async def _fake_gen(persona, products, dialog, text, faqs=None,
+                                examples=None, delivery=None, promos=None):
                 return "ок"
             with patch.object(bsp, "generate_reply", _fake_gen):
                 await bsp.handle_incoming(pool, BOT, OWN, CHAT, "привет", name="П")
@@ -496,7 +544,8 @@ def test_faq_examples_postgres():
 
             # FAQ-хинт прокидывается в generate_reply при совпадении вопроса
             seen = {}
-            async def _spy(persona, products, dialog, text, faqs=None, examples=None):
+            async def _spy(persona, products, dialog, text, faqs=None, examples=None,
+                           delivery=None, promos=None):
                 seen["faq_hint"] = (dialog or {}).get("faq_hint")
                 seen["faqs_n"] = len(faqs or [])
                 seen["ex_n"] = len(examples or [])
@@ -509,6 +558,58 @@ def test_faq_examples_postgres():
             # удаление
             assert await bsp.delete_faq(pool, f["id"], OWN) is True
             assert await bsp.delete_example(pool, ex["id"], OWN) is True
+            await _cl()
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_delivery_promo_postgres():
+    import asyncio
+    import asyncpg
+    from unittest.mock import patch
+
+    OWN, BOT, CHAT = 801200, 557200, 74
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+
+        async def _cl():
+            for t in ("bot_sales_delivery", "bot_sales_promos", "bot_sales_orders",
+                      "bot_sales_dialogs", "bot_sales_products", "bot_sales_personas"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWN)
+            await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", BOT)
+        try:
+            await _cl()
+            p = await bsp.create_persona(pool, OWN, "Ника")
+            pid = p["id"]
+            dlv = await bsp.add_delivery(pool, pid, OWN, "Курьер",
+                                         price_cents=500, eta="1-2 дня", zones="Москва")
+            assert dlv["price_cents"] == 500
+            assert len(await bsp.list_delivery(pool, pid)) == 1
+            promo = await bsp.add_promo(pool, pid, OWN, "SALE10", 10)
+            assert promo["percent"] == 10 and promo["code"] == "SALE10"
+            await bsp.add_product(pool, pid, OWN, "Кофе", price_cents=1000)
+            await bsp.assign_to_bot(pool, pid, OWN, BOT)
+
+            async def _fake_gen(persona, products, dialog, text, faqs=None,
+                                examples=None, delivery=None, promos=None):
+                return "ок"
+            with patch.object(bsp, "generate_reply", _fake_gen):
+                # заказ 2 кофе + промокод → скидка применена
+                await bsp.handle_incoming(
+                    pool, BOT, OWN, CHAT,
+                    "хочу заказать 2 кофе, промокод SALE10", name="П")
+                await bsp.handle_incoming(
+                    pool, BOT, OWN, CHAT, "тел +79001112233", name="П")
+            o = (await bsp.list_orders(pool, OWN, bot_id=BOT))[0]
+            # 2×1000 = 2000, скидка 10% = 200, итог 1800
+            assert o["discount_cents"] == 200, o["discount_cents"]
+            assert o["total_cents"] == 1800 and o["promo_code"] == "SALE10"
+            assert o["status"] == "confirmed"
+            assert await bsp.delete_delivery(pool, dlv["id"], OWN) is True
+            assert await bsp.delete_promo(pool, promo["id"], OWN) is True
             await _cl()
         finally:
             await pool.close()

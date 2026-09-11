@@ -16094,7 +16094,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"persona": p,
                            "products": await _bsp.list_products(pool, pid),
                            "faqs": await _bsp.list_faq(pool, pid),
-                           "examples": await _bsp.list_examples(pool, pid)})
+                           "examples": await _bsp.list_examples(pool, pid),
+                           "delivery": await _bsp.list_delivery(pool, pid),
+                           "promos": await _bsp.list_promos(pool, pid)})
 
     async def sp_update(request):
         uid = _get_uid(request)
@@ -16312,6 +16314,76 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad id", 400)
         return _json_resp({"ok": await _bsp.delete_example(pool, eid, uid)})
 
+    # ── Способы доставки ───────────────────────────────────────────────────
+    async def sp_delivery_add(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
+                           else _mp.to_cents(d.get("price", "0")))
+            r = await _bsp.add_delivery(
+                pool, pid, uid, d.get("name", ""), price_cents=price_cents,
+                eta=d.get("eta", "") or "", zones=d.get("zones", "") or "")
+            return _json_resp({"ok": True, "delivery": r})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_delivery_add uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_delivery_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            did = int(request.match_info["did"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_delivery(pool, did, uid)})
+
+    # ── Промокоды ──────────────────────────────────────────────────────────
+    async def sp_promo_add(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            pid = int(request.match_info["pid"])
+            d = await request.json()
+        except Exception:
+            return _err("bad request", 400)
+        if not await _sp_owned(uid, pid):
+            return _err("Not found", 404)
+        try:
+            min_total = (int(d["min_total_cents"]) if d.get("min_total_cents") is not None
+                         else _mp.to_cents(d.get("min_total", "0")))
+            r = await _bsp.add_promo(
+                pool, pid, uid, d.get("code", ""), int(d.get("percent", 0) or 0),
+                min_total_cents=min_total)
+            return _json_resp({"ok": True, "promo": r})
+        except ValueError as e:
+            return _err(str(e), 400)
+        except Exception as e:
+            log.exception("sp_promo_add uid=%s pid=%s", uid, pid)
+            return _err(str(e), 500)
+
+    async def sp_promo_delete(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            prid = int(request.match_info["prid"])
+        except (KeyError, ValueError):
+            return _err("bad id", 400)
+        return _json_resp({"ok": await _bsp.delete_promo(pool, prid, uid)})
+
     async def sp_orders(request):
         uid = _get_uid(request)
         if not uid:
@@ -16354,6 +16426,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/sales/faq/{fid}", sp_faq_delete)
     app.router.add_post("/api/miniapp/sales/persona/{pid}/example", sp_example_add)
     app.router.add_delete("/api/miniapp/sales/example/{eid}", sp_example_delete)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/delivery", sp_delivery_add)
+    app.router.add_delete("/api/miniapp/sales/delivery/{did}", sp_delivery_delete)
+    app.router.add_post("/api/miniapp/sales/persona/{pid}/promo", sp_promo_add)
+    app.router.add_delete("/api/miniapp/sales/promo/{prid}", sp_promo_delete)
     app.router.add_get("/api/miniapp/sales/orders", sp_orders)
     app.router.add_patch("/api/miniapp/sales/order/{oid}", sp_order_update)
     # Infra Analytics

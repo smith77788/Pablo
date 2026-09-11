@@ -200,8 +200,14 @@ async function openPersonaEditor(id) {
       const d = await api('/api/miniapp/sales/persona/' + id);
       persona = d.persona || {}; products = d.products || [];
       faqs = d.faqs || []; examples = d.examples || [];
+      _spCurrent = persona;
+      _spCurrent._delivery = d.delivery || [];
+      _spCurrent._promos = d.promos || [];
+    } else {
+      _spCurrent = persona;
+      _spCurrent._delivery = [];
+      _spCurrent._promos = [];
     }
-    _spCurrent = persona;
     _spCurrent._products = products;
     _spCurrent._faqs = faqs;
     _spCurrent._examples = examples;
@@ -296,6 +302,31 @@ function _spRenderForm(persona, products) {
       '<textarea id="ne_a" placeholder="Идеальный ответ менеджера" class="inp" rows="2" style="width:100%;margin:0 0 4px"></textarea>' +
       '<div style="display:flex;gap:8px;margin:0 0 12px">' +
       '<button class="btn btn-s" onclick="spAddExample()">➕ Добавить пример</button></div>';
+
+    // Способы доставки
+    h += '<div class="sec">🚚 Способы доставки</div>';
+    h += '<div id="spDelivery">' + _spRenderDelivery(_spCurrent._delivery || []) + '</div>';
+    h += '<div style="display:flex;gap:8px;margin:6px 0 4px">' +
+      '<input type="text" id="nd_name" placeholder="Способ (Курьер)" class="inp" style="flex:2">' +
+      '<input type="number" step="0.01" min="0" id="nd_price" placeholder="Цена (0=беспл.)" class="inp" style="flex:1">' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin:0 0 4px">' +
+      '<input type="text" id="nd_eta" placeholder="Срок (1-2 дня)" class="inp" style="flex:1">' +
+      '<input type="text" id="nd_zones" placeholder="Зоны (Москва, МО)" class="inp" style="flex:1">' +
+      '<button class="btn btn-s" onclick="spAddDelivery()">➕</button></div>' +
+      '<div style="font-size:12px;color:var(--hint);padding:0 2px 12px">' +
+      'Менеджер называет только эти способы и цены — не выдумывает.</div>';
+
+    // Промокоды
+    h += '<div class="sec">🎟 Промокоды</div>';
+    h += '<div id="spPromos">' + _spRenderPromos(_spCurrent._promos || []) + '</div>';
+    h += '<div style="display:flex;gap:8px;margin:6px 0 4px">' +
+      '<input type="text" id="np_code" placeholder="Код (SALE10)" class="inp" style="flex:2">' +
+      '<input type="number" min="1" max="100" id="np_percent" placeholder="%" class="inp" style="flex:1">' +
+      '<input type="number" step="0.01" min="0" id="np_mintotal" placeholder="От суммы" class="inp" style="flex:1">' +
+      '<button class="btn btn-s" onclick="spAddPromo()">➕</button></div>' +
+      '<div style="font-size:12px;color:var(--hint);padding:0 2px 12px">' +
+      'Скидку по коду система применяет к заказу автоматически при совпадении.</div>';
   }
   // Привязка к боту
   h += '<div class="sec">🤖 Бот</div>';
@@ -431,6 +462,94 @@ async function spDelExample(eid) {
     const d = await api('/api/miniapp/sales/persona/' + pid);
     _spCurrent._examples = d.examples || [];
     document.getElementById('spExamples').innerHTML = _spRenderExamples(_spCurrent._examples);
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+function _spRenderDelivery(items) {
+  if (!items || !items.length) {
+    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+  }
+  return items.map(d => {
+    const price = (d.price_cents ? ((d.price_cents / 100).toFixed(2) + ' ' +
+      (_spCurrent.currency || 'USD')) : 'бесплатно');
+    const extra = [d.eta, d.zones].filter(Boolean).map(esc).join(' · ');
+    return '<div class="row"><div class="row-body"><div class="row-name">' + esc(d.name) +
+      '</div><div class="row-val">' + price + (extra ? ' · ' + extra : '') + '</div></div>' +
+      '<button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
+      'onclick="spDelDelivery(' + d.id + ')">✕</button></div>';
+  }).join('');
+}
+
+function _spRenderPromos(items) {
+  if (!items || !items.length) {
+    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+  }
+  return items.map(p => {
+    const mt = p.min_total_cents ? (' · от ' + (p.min_total_cents / 100).toFixed(2)) : '';
+    return '<div class="row"><div class="row-body"><div class="row-name">' + esc(p.code) +
+      '</div><div class="row-val">−' + parseInt(p.percent, 10) + '%' + mt + '</div></div>' +
+      '<button class="btn btn-s" style="color:var(--red);padding:5px 10px" ' +
+      'onclick="spDelPromo(' + p.id + ')">✕</button></div>';
+  }).join('');
+}
+
+async function spAddDelivery() {
+  const pid = _spCurrent && _spCurrent.id;
+  if (!pid) return;
+  const name = (document.getElementById('nd_name').value || '').trim();
+  const price = (document.getElementById('nd_price').value || '').trim();
+  const eta = (document.getElementById('nd_eta').value || '').trim();
+  const zones = (document.getElementById('nd_zones').value || '').trim();
+  if (!name) { toast('Название способа'); return; }
+  try {
+    await api('/api/miniapp/sales/persona/' + pid + '/delivery',
+      { method: 'POST', body: JSON.stringify({ name: name, price: price || '0', eta: eta, zones: zones }) });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._delivery = d.delivery || [];
+    document.getElementById('spDelivery').innerHTML = _spRenderDelivery(_spCurrent._delivery);
+    ['nd_name', 'nd_price', 'nd_eta', 'nd_zones'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function spDelDelivery(did) {
+  const pid = _spCurrent && _spCurrent.id;
+  try {
+    await api('/api/miniapp/sales/delivery/' + did, { method: 'DELETE' });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._delivery = d.delivery || [];
+    document.getElementById('spDelivery').innerHTML = _spRenderDelivery(_spCurrent._delivery);
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function spAddPromo() {
+  const pid = _spCurrent && _spCurrent.id;
+  if (!pid) return;
+  const code = (document.getElementById('np_code').value || '').trim();
+  const percent = parseInt((document.getElementById('np_percent') || {}).value || '0', 10) || 0;
+  const minTotal = (document.getElementById('np_mintotal').value || '').trim();
+  if (!code) { toast('Код промокода'); return; }
+  if (percent < 1 || percent > 100) { toast('Процент 1–100'); return; }
+  try {
+    await api('/api/miniapp/sales/persona/' + pid + '/promo',
+      { method: 'POST', body: JSON.stringify({ code: code, percent: percent, min_total: minTotal || '0' }) });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._promos = d.promos || [];
+    document.getElementById('spPromos').innerHTML = _spRenderPromos(_spCurrent._promos);
+    ['np_code', 'np_percent', 'np_mintotal'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function spDelPromo(prid) {
+  const pid = _spCurrent && _spCurrent.id;
+  try {
+    await api('/api/miniapp/sales/promo/' + prid, { method: 'DELETE' });
+    const d = await api('/api/miniapp/sales/persona/' + pid);
+    _spCurrent._promos = d.promos || [];
+    document.getElementById('spPromos').innerHTML = _spRenderPromos(_spCurrent._promos);
   } catch (e) { toast(e.message || 'Ошибка'); }
 }
 

@@ -182,6 +182,52 @@ def match_faq(text: str, faqs: list[dict]) -> dict | None:
     return best if best_score >= 1 else None
 
 
+def find_promo_in_text(text: str, promos: list[dict], total_cents: int = 0,
+                       now_utc=None) -> dict | None:
+    """Ищет в сообщении клиента валидный промокод. ЧИСТАЯ.
+
+    Код валиден, если активен, не истёк и сумма заказа ≥ min_total_cents.
+    Возвращает промо-запись или None."""
+    import datetime as _dt
+    tl = (text or "").lower()
+    if not tl:
+        return None
+    now = now_utc or _dt.datetime.now(_dt.timezone.utc)
+    for pr in promos or []:
+        if not pr.get("is_active", True):
+            continue
+        code = (pr.get("code") or "").strip().lower()
+        if not code:
+            continue
+        # код как отдельное слово в тексте (без ложных подстрок)
+        if not re.search(r"(?<![\w])" + re.escape(code) + r"(?![\w])", tl):
+            continue
+        exp = pr.get("expires_at")
+        if exp is not None:
+            try:
+                if exp < now:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        if total_cents and int(pr.get("min_total_cents") or 0) > total_cents:
+            continue
+        return pr
+    return None
+
+
+def apply_promo(total_cents: int, promo: dict | None) -> tuple[int, int]:
+    """Применяет промо к сумме. ЧИСТАЯ. Возвращает (discount_cents, new_total)."""
+    total = int(total_cents or 0)
+    if not promo:
+        return 0, total
+    try:
+        pct = max(0, min(100, int(promo.get("percent") or 0)))
+    except (TypeError, ValueError):
+        pct = 0
+    discount = total * pct // 100
+    return discount, total - discount
+
+
 def _merge_items(existing: list[dict], new: list[dict]) -> tuple[list[dict], int]:
     """Слияние позиций заказа по имени (берём последнее упомянутое количество). ЧИСТАЯ."""
     by_name: dict[str, dict] = {}
@@ -337,7 +383,9 @@ def greeting_prefix(persona: dict, now_utc=None) -> str:
 
 def build_system_prompt(persona: dict, products: list[dict],
                         dialog: dict | None = None,
-                        faqs: list[dict] | None = None) -> str:
+                        faqs: list[dict] | None = None,
+                        delivery: list[dict] | None = None,
+                        promos: list[dict] | None = None) -> str:
     """Собирает системный промпт из ВСЕХ настроек персоны. ЧИСТАЯ функция —
     ядро поведения; тестируется без сети."""
     p = persona
@@ -571,6 +619,31 @@ def build_system_prompt(persona: dict, products: list[dict],
         else:
             L.append("Не предлагай и не обещай скидок по своей инициативе — по "
                      "скидкам направляй к оператору, если он есть.")
+        # Способы доставки (структурно — реальные варианты/цены/сроки).
+        active_dlv = [d for d in (delivery or []) if d.get("is_active", True)
+                      and (d.get("name"))]
+        if active_dlv:
+            cur = p.get("currency") or "USD"
+            parts = []
+            for d in active_dlv[:10]:
+                price = ("бесплатно" if not int(d.get("price_cents") or 0)
+                         else format_price(d["price_cents"], cur))
+                extra = []
+                if (d.get("eta") or "").strip():
+                    extra.append(d["eta"].strip())
+                if (d.get("zones") or "").strip():
+                    extra.append(d["zones"].strip())
+                parts.append(f"{d['name']} — {price}"
+                             + (f" ({', '.join(extra)})" if extra else ""))
+            L.append("Способы доставки (называй только эти, ничего не выдумывай): "
+                     + "; ".join(parts) + ".")
+        # Промокоды — применяет система; менеджер не выдаёт коды сам.
+        active_promos = [pr for pr in (promos or []) if pr.get("is_active", True)
+                         and (pr.get("code"))]
+        if active_promos:
+            L.append("Если клиент называет промокод — его валидность и скидку "
+                     "проверит система; ты подтверди применение, если код принят. "
+                     "НЕ придумывай промокоды и не называй их сам без необходимости.")
         if (p.get("order_rules") or "").strip():
             L.append("Правила заказа и доставки (соблюдай неукоснительно, не нарушай "
                      "и не предлагай в обход них): " + p["order_rules"].strip())
@@ -702,11 +775,14 @@ def _example_messages(examples: list[dict] | None) -> list[dict]:
 
 async def generate_reply(persona: dict, products: list[dict], dialog: dict | None,
                          user_text: str, faqs: list[dict] | None = None,
-                         examples: list[dict] | None = None) -> str:
+                         examples: list[dict] | None = None,
+                         delivery: list[dict] | None = None,
+                         promos: list[dict] | None = None) -> str:
     """Ответ персоны через настроенный AI-провайдер (failover, OpenAI-совместимо)."""
     _fallback = persona.get("fallback") or "Дайте секунду, уточню и вернусь с ответом 🙌"
     messages = [{"role": "system",
-                 "content": build_system_prompt(persona, products, dialog, faqs)}]
+                 "content": build_system_prompt(persona, products, dialog, faqs,
+                                                 delivery, promos)}]
     # Эталонные примеры идут ПЕРЕД реальной историей — как образец стиля.
     messages.extend(_example_messages(examples))
     messages.extend(_history_messages(dialog))
@@ -1095,6 +1171,109 @@ async def delete_example(pool, example_id: int, owner_id: int) -> bool:
     return res.endswith("1")
 
 
+# ── CRUD: способы доставки ────────────────────────────────────────────────────
+async def add_delivery(pool, persona_id: int, owner_id: int, name: str, *,
+                       price_cents: int = 0, eta: str = "", zones: str = "") -> dict:
+    if not (name or "").strip():
+        raise ValueError("название способа доставки обязательно")
+    r = await pool.fetchrow(
+        """INSERT INTO bot_sales_delivery(persona_id, owner_id, name, price_cents,
+               eta, zones)
+           VALUES($1,$2,$3,$4,$5,$6) RETURNING *""",
+        persona_id, owner_id, name.strip(), max(0, int(price_cents or 0)),
+        (eta or "").strip(), (zones or "").strip())
+    return dict(r)
+
+
+async def list_delivery(pool, persona_id: int, *, active_only: bool = False) -> list[dict]:
+    cond = "AND is_active=TRUE" if active_only else ""
+    rows = await pool.fetch(
+        f"SELECT * FROM bot_sales_delivery WHERE persona_id=$1 {cond} "
+        f"ORDER BY price_cents, id", persona_id)
+    return [dict(r) for r in rows]
+
+
+async def update_delivery(pool, delivery_id: int, owner_id: int, **fields) -> dict | None:
+    sets, args = [], []
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if k in ("name", "eta", "zones"):
+            args.append(str(v).strip()); sets.append(f"{k}=${len(args)}")
+        elif k == "price_cents":
+            args.append(max(0, int(v))); sets.append(f"price_cents=${len(args)}")
+        elif k == "is_active":
+            args.append(bool(v)); sets.append(f"is_active=${len(args)}")
+    if not sets:
+        return None
+    args.extend([delivery_id, owner_id])
+    r = await pool.fetchrow(
+        f"UPDATE bot_sales_delivery SET {', '.join(sets)} "
+        f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
+    return dict(r) if r else None
+
+
+async def delete_delivery(pool, delivery_id: int, owner_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM bot_sales_delivery WHERE id=$1 AND owner_id=$2",
+        delivery_id, owner_id)
+    return res.endswith("1")
+
+
+# ── CRUD: промокоды ───────────────────────────────────────────────────────────
+async def add_promo(pool, persona_id: int, owner_id: int, code: str, percent: int,
+                    *, min_total_cents: int = 0, expires_at=None) -> dict:
+    code = (code or "").strip()
+    if not code:
+        raise ValueError("код промокода обязателен")
+    try:
+        pct = max(1, min(100, int(percent)))
+    except (TypeError, ValueError):
+        raise ValueError("процент скидки должен быть числом 1–100")
+    r = await pool.fetchrow(
+        """INSERT INTO bot_sales_promos(persona_id, owner_id, code, percent,
+               min_total_cents, expires_at)
+           VALUES($1,$2,$3,$4,$5,$6) RETURNING *""",
+        persona_id, owner_id, code, pct, max(0, int(min_total_cents or 0)), expires_at)
+    return dict(r)
+
+
+async def list_promos(pool, persona_id: int, *, active_only: bool = False) -> list[dict]:
+    cond = "AND is_active=TRUE" if active_only else ""
+    rows = await pool.fetch(
+        f"SELECT * FROM bot_sales_promos WHERE persona_id=$1 {cond} ORDER BY id",
+        persona_id)
+    return [dict(r) for r in rows]
+
+
+async def update_promo(pool, promo_id: int, owner_id: int, **fields) -> dict | None:
+    sets, args = [], []
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if k == "code":
+            args.append(str(v).strip()); sets.append(f"code=${len(args)}")
+        elif k == "percent":
+            args.append(max(1, min(100, int(v)))); sets.append(f"percent=${len(args)}")
+        elif k == "min_total_cents":
+            args.append(max(0, int(v))); sets.append(f"min_total_cents=${len(args)}")
+        elif k == "is_active":
+            args.append(bool(v)); sets.append(f"is_active=${len(args)}")
+    if not sets:
+        return None
+    args.extend([promo_id, owner_id])
+    r = await pool.fetchrow(
+        f"UPDATE bot_sales_promos SET {', '.join(sets)} "
+        f"WHERE id=${len(args)-1} AND owner_id=${len(args)} RETURNING *", *args)
+    return dict(r) if r else None
+
+
+async def delete_promo(pool, promo_id: int, owner_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM bot_sales_promos WHERE id=$1 AND owner_id=$2", promo_id, owner_id)
+    return res.endswith("1")
+
+
 # ── Диалоги (память по клиенту) ───────────────────────────────────────────────
 async def get_or_create_dialog(pool, bot_id: int, customer_chat_id: int,
                                owner_id: int, persona_id: int | None) -> dict:
@@ -1174,10 +1353,11 @@ async def update_order(pool, order_id: int, owner_id: int, **fields) -> dict | N
     for k, v in fields.items():
         if v is None:
             continue
-        if k in ("status", "note", "customer_name", "customer_username", "currency"):
+        if k in ("status", "note", "customer_name", "customer_username", "currency",
+                 "promo_code"):
             args.append(str(v)); sets.append(f"{k}=${len(args)}")
-        elif k == "total_cents":
-            args.append(int(v)); sets.append(f"total_cents=${len(args)}")
+        elif k in ("total_cents", "discount_cents"):
+            args.append(int(v)); sets.append(f"{k}=${len(args)}")
         elif k in ("items", "contact"):
             args.append(json.dumps(v)); sets.append(f"{k}=${len(args)}::jsonb")
     if not sets:
@@ -1317,6 +1497,12 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
                 "order_id": None, "channels": [], "persona_id": pid, "offhours": True}
 
     products = await list_products(pool, pid, active_only=True)
+    try:
+        delivery = await list_delivery(pool, pid, active_only=True)
+        promos = await list_promos(pool, pid, active_only=True)
+    except Exception:
+        delivery, promos = [], []
+        log.debug("bsp handle_incoming: delivery/promos load skipped")
 
     # 2) Приём заказа: намерение/телефон → черновик; позиции из прайса → items/total;
     #    телефон → подтверждение. Состав заказа виден владельцу.
@@ -1342,6 +1528,16 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
                 await update_order(pool, order_id, owner_id,
                                    items=merged, total_cents=total)
                 cur_items = merged
+            # Промокод: детерминированно применяем валидный код к сумме заказа.
+            base_total = sum(int(it.get("qty") or 0) * int(it.get("price_cents") or 0)
+                             for it in (cur_items or []))
+            promo = find_promo_in_text(text, promos, base_total)
+            if promo and not (order.get("promo_code") or ""):
+                disc, new_total = apply_promo(base_total, promo)
+                if disc > 0:
+                    await update_order(pool, order_id, owner_id,
+                                       total_cents=new_total, discount_cents=disc,
+                                       promo_code=promo["code"])
             if actions["phone"]:
                 contact = order.get("contact") or {}
                 if isinstance(contact, str):
@@ -1374,7 +1570,8 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
         examples = await list_examples(pool, pid)
     except Exception:
         log.debug("bsp handle_incoming: faq/examples load skipped")
-    reply = await generate_reply(persona, products, dialog, text, faqs, examples)
+    reply = await generate_reply(persona, products, dialog, text, faqs, examples,
+                                 delivery, promos)
     if order_note and order_note not in reply:
         reply = f"{reply}\n\n{order_note}"
 
