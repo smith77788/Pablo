@@ -15569,15 +15569,27 @@ async function cloudRefreshList() {
     const d = await api('/api/miniapp/cloud/files');
     const files = d.files || [];
     if (!files.length) { box.innerHTML = '<div style="font-size:13px;color:var(--hint);padding:8px 0">Пока пусто — загрузите первый файл.</div>'; return; }
-    box.innerHTML = files.map(f => `
+    const tgt = Number(d.target_replicas) || 2;
+    box.innerHTML = files.map(f => {
+      const mr = f.min_replicas;            // минимум живых копий среди кусков
+      let shield, degraded = false;
+      if (mr === null || mr === undefined) { shield = ''; }
+      else if (mr <= 0) { shield = '<span style="color:var(--red)">⚠️ кусок недоступен</span>'; degraded = true; }
+      else if (mr < tgt) { shield = `<span style="color:#c90">🛡 ${mr}/${tgt} копии</span>`; degraded = true; }
+      else { shield = `<span style="color:var(--accent)">🛡 ${mr} копии</span>`; }
+      const healBtn = degraded
+        ? `<button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudHeal(${f.id})" title="Восстановить копии">♻️</button>` : '';
+      return `
       <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--sep)">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name || 'файл')}</div>
-          <div style="font-size:11px;color:var(--hint)">${_cloudBytes(f.size_bytes)} · ${f.chunk_count || 0} кус. · ${esc(f.status || '')}</div>
+          <div style="font-size:11px;color:var(--hint)">${_cloudBytes(f.size_bytes)} · ${f.chunk_count || 0} кус. ${shield ? '· ' + shield : ''}</div>
         </div>
+        ${healBtn}
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudDownload(${f.id}, '${esc((f.name||'file').replace(/'/g,''))}')">⬇️</button>
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})">🗑</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(e.message || 'Ошибка')}</div>`; }
 }
 
@@ -15629,6 +15641,16 @@ async function cloudDelete(fileId) {
     await api('/api/miniapp/cloud/file/' + fileId + '/delete', { method: 'POST', body: '{}' });
     toast('Удалено');
     await openCloud();
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function cloudHeal(fileId) {
+  toast('♻️ Восстанавливаю копии…');
+  try {
+    const r = await api('/api/miniapp/cloud/file/' + fileId + '/heal', { method: 'POST', body: '{}' });
+    if (r.unhealable) toast('⚠️ Восстановлено копий: ' + (r.restored || 0) + ', но ' + r.unhealable + ' кусков потеряны безвозвратно');
+    else toast('✅ Избыточность восстановлена (+' + (r.restored || 0) + ' копий)');
+    await cloudRefreshList();
   } catch (e) { toast(e.message || 'Ошибка'); }
 }
 

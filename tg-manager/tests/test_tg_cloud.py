@@ -99,3 +99,73 @@ def test_cloud_store_retrieve_quota_access_postgres():
             await pool.close()
 
     asyncio.new_event_loop().run_until_complete(go())
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_cloud_survives_fleet_bans_and_heals_postgres():
+    """Доступ к файлам переживает баны флота: пока жива хоть одна реплика куска —
+    файл скачивается; реконсайлер дотягивает избыточность обратно."""
+    import asyncio
+    import asyncpg
+
+    ADMIN = 809010
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+
+        async def _cl():
+            await pool.execute("DELETE FROM tg_cloud_files WHERE owner_id=$1", ADMIN)
+            await pool.execute("DELETE FROM tg_cloud_blobs WHERE owner_id=$1", ADMIN)
+            await pool.execute("DELETE FROM tg_cloud_quota WHERE owner_id=$1", ADMIN)
+
+        import bot.handlers.admin as admin_mod
+        admin_mod._session_admins.add(ADMIN)
+        try:
+            await _cl()
+            payload = os.urandom(4500)
+            # 3 куска × 3 реплики = 9 локаций.
+            f = await tg_cloud.store_file(pool, ADMIN, "vault.bin", payload,
+                                          chunk_size=2000, replicas=3)
+            fid = f["id"]
+            dur = await tg_cloud.file_durability(pool, fid)
+            assert dur["min_live"] == 3 and dur["chunks"] == 3
+
+            # ── «бан» 2 из 3 хранителей: гасим реплики 0 и 1 у КАЖДОГО куска ──
+            for rep in (0, 1):
+                locs = await pool.fetch(
+                    "SELECT l.id, l.locator FROM tg_cloud_chunk_locs l "
+                    "JOIN tg_cloud_chunks c ON c.id=l.chunk_id "
+                    "WHERE c.file_id=$1 AND l.replica=$2", fid, rep)
+                for lo in locs:
+                    await pool.execute("DELETE FROM tg_cloud_blobs WHERE locator=$1", lo["locator"])
+                    await pool.execute("UPDATE tg_cloud_chunk_locs SET status='dead' WHERE id=$1", lo["id"])
+            dur = await tg_cloud.file_durability(pool, fid)
+            assert dur["min_live"] == 1, dur
+            # Доступ к облаку от банов НЕ зависит — только от владельца.
+            assert await tg_cloud.has_access(pool, ADMIN) is True
+            # Файл всё ещё собирается из уцелевшей реплики.
+            assert await tg_cloud.retrieve_file(pool, ADMIN, fid) == payload
+
+            # ── heal восстанавливает избыточность до нормы ──
+            res = await tg_cloud.heal_file(pool, ADMIN, fid, replicas=3)
+            assert res["restored"] == 6 and res["unhealable"] == 0, res
+            assert (await tg_cloud.file_durability(pool, fid))["min_live"] == 3
+            assert await tg_cloud.retrieve_file(pool, ADMIN, fid) == payload
+
+            # ── крайний случай: убить ВСЕ реплики одного куска → сборка честно падает
+            locs = await pool.fetch(
+                "SELECT l.locator FROM tg_cloud_chunk_locs l "
+                "JOIN tg_cloud_chunks c ON c.id=l.chunk_id WHERE c.file_id=$1 AND c.ord=0", fid)
+            for lo in locs:
+                await pool.execute("DELETE FROM tg_cloud_blobs WHERE locator=$1", lo["locator"])
+                await pool.execute("UPDATE tg_cloud_chunk_locs SET status='dead' WHERE locator=$1", lo["locator"])
+            with pytest.raises(ValueError):
+                await tg_cloud.retrieve_file(pool, ADMIN, fid)
+            heal2 = await tg_cloud.heal_file(pool, ADMIN, fid, replicas=3)
+            assert heal2["unhealable"] == 1, heal2
+            await _cl()
+        finally:
+            admin_mod._session_admins.discard(ADMIN)
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())

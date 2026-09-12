@@ -19914,12 +19914,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 500)
 
     async def cloud_list(request: web.Request) -> web.Response:
-        """Список файлов владельца (манифест, без содержимого)."""
+        """Список файлов владельца (манифест + здоровье избыточности, без содержимого)."""
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
             from services import tg_cloud
-            return _json_resp({'files': await tg_cloud.list_files(pool, uid)})
+            files = await tg_cloud.list_files(pool, uid)
+            for f in files:
+                try:
+                    dur = await tg_cloud.file_durability(pool, int(f['id']))
+                    f['min_replicas'] = dur['min_live']   # 0 = есть недоступный кусок
+                    f['target_replicas'] = dur['target']
+                except Exception:
+                    f['min_replicas'] = None
+            return _json_resp({'files': files, 'target_replicas': tg_cloud.REPLICAS})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def cloud_heal(request: web.Request) -> web.Response:
+        """Восстановить избыточность файла (долить реплики на уцелевших хранителях)
+        после бана части флота. Доступно владельцу файла."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services import tg_cloud
+            fid = int(request.match_info['file_id'])
+            if not await tg_cloud.get_file(pool, uid, fid):
+                return _err("файл не найден", 404)
+            res = await tg_cloud.heal_file(pool, uid, fid)
+            return _json_resp(res)
         except Exception as e:
             return _err(str(e), 500)
 
@@ -20249,6 +20272,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/cloud/upload", cloud_upload)
     app.router.add_get("/api/miniapp/cloud/file/{file_id}/download", cloud_download)
     app.router.add_post("/api/miniapp/cloud/file/{file_id}/delete", cloud_delete)
+    app.router.add_post("/api/miniapp/cloud/file/{file_id}/heal", cloud_heal)
     app.router.add_post("/api/miniapp/cloud/set-paid", cloud_set_paid)
     app.router.add_post("/api/miniapp/uch/bulk/group", uch_bulk_group)
     app.router.add_post("/api/miniapp/uch/bulk/merge", uch_bulk_merge)

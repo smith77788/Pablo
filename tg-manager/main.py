@@ -862,6 +862,17 @@ async def main() -> None:
         "CREATE TABLE IF NOT EXISTS tg_cloud_blobs ("
         "locator TEXT PRIMARY KEY, owner_id BIGINT NOT NULL, data BYTEA NOT NULL, "
         "created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        # Избыточность кусков (schema_v213): несколько реплик на разных хранителях —
+        # доступ к файлу переживает баны части флота. Читается на скачивании/heal.
+        "CREATE TABLE IF NOT EXISTS tg_cloud_chunk_locs ("
+        "id BIGSERIAL PRIMARY KEY, "
+        "chunk_id BIGINT NOT NULL REFERENCES tg_cloud_chunks(id) ON DELETE CASCADE, "
+        "owner_id BIGINT NOT NULL, replica INT NOT NULL DEFAULT 0, acc_id BIGINT, "
+        "channel_id BIGINT, message_id BIGINT, locator TEXT NOT NULL, "
+        "status TEXT NOT NULL DEFAULT 'stored', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "UNIQUE(chunk_id, locator))",
+        "CREATE INDEX IF NOT EXISTS idx_tg_cloud_locs_chunk ON tg_cloud_chunk_locs(chunk_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_tg_cloud_locs_acc ON tg_cloud_chunk_locs(acc_id) WHERE acc_id IS NOT NULL",
     ):
         try:
             await pool.execute(_ddl)

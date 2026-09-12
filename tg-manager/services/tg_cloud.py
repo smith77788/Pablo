@@ -24,6 +24,11 @@ log = logging.getLogger(__name__)
 CHUNK_SIZE = 2 * 1024 * 1024 * 1024
 # Дефолтный лимит платного доступа, если не задан явно (100 ГБ).
 DEFAULT_PAID_LIMIT = 100 * 1024 * 1024 * 1024
+# Избыточность: сколько КОПИЙ каждого куска держим на РАЗНЫХ хранителях. Бан
+# одного аккаунта не должен лишать доступа к файлу — пока жива хотя бы одна
+# реплика, файл собирается; реконсайлер (heal) дотягивает избыточность обратно.
+# 2 — разумный дефолт; для флот-транспорта реплики кладутся на разные аккаунты.
+REPLICAS = 2
 
 
 # ── Чистые помощники: нарезка + шифрование ────────────────────────────────────
@@ -53,9 +58,12 @@ def unpack_chunk(blob: bytes) -> bytes:
 # ── Транспорт кусков (абстракция) ─────────────────────────────────────────────
 class ChunkTransport:
     """put кладёт зашифрованный blob и возвращает dict-локатор (что записать в
-    манифест: locator и, для флота, acc_id/channel_id/message_id). get достаёт
-    blob по строке `locator`. delete удаляет."""
-    async def put(self, pool, owner_id: int, file_id: int, ord: int, blob: bytes) -> dict:
+    манифест: locator и, для флота, acc_id/channel_id/message_id). `replica` —
+    номер копии: транспорт обязан класть разные реплики в РАЗНЫЕ места (флот —
+    на разные аккаунты), иначе избыточность мнимая. get достаёт blob по строке
+    `locator`. delete удаляет."""
+    async def put(self, pool, owner_id: int, file_id: int, ord: int, blob: bytes,
+                  replica: int = 0) -> dict:
         raise NotImplementedError
 
     async def get(self, pool, locator: str) -> bytes:
@@ -67,9 +75,12 @@ class ChunkTransport:
 
 class DbTransport(ChunkTransport):
     """v1-бэкенд: куски в таблице tg_cloud_blobs. Работает без флота; годится для
-    небольших файлов и как эталон контракта для флот-транспорта."""
-    async def put(self, pool, owner_id: int, file_id: int, ord: int, blob: bytes) -> dict:
-        loc = f"db:{owner_id}:{file_id}:{ord}"
+    небольших файлов и как эталон контракта для флот-транспорта. Реплики — разные
+    строки blobs под разными локаторами (в проде БД сама избыточна на уровне
+    хранилища, но контракт избыточности соблюдаем единообразно)."""
+    async def put(self, pool, owner_id: int, file_id: int, ord: int, blob: bytes,
+                  replica: int = 0) -> dict:
+        loc = f"db:{owner_id}:{file_id}:{ord}:r{replica}"
         await pool.execute(
             "INSERT INTO tg_cloud_blobs(locator, owner_id, data) VALUES($1,$2,$3) "
             "ON CONFLICT (locator) DO UPDATE SET data=EXCLUDED.data",
@@ -175,13 +186,16 @@ async def get_file(pool, owner_id: int, file_id: int) -> dict | None:
 # ── Оркестрация: сохранить / достать / удалить ────────────────────────────────
 async def store_file(pool, owner_id: int, name: str, data: bytes,
                      transport: ChunkTransport | None = None,
-                     *, chunk_size: int = CHUNK_SIZE) -> dict:
-    """Зашифровать, нарезать, разложить транспортом, записать манифест. Проверяет
-    доступ и квоту. Возвращает запись файла."""
+                     *, chunk_size: int = CHUNK_SIZE, replicas: int = REPLICAS) -> dict:
+    """Зашифровать, нарезать, разложить транспортом В НЕСКОЛЬКИХ репликах, записать
+    манифест. Проверяет доступ и квоту. Квота считает ЛОГИЧЕСКИЙ размер файла, а не
+    физические копии: избыточность — расход платформы/флота ради отказоустойчивости,
+    а не то, за что платит пользователь. Возвращает запись файла."""
     if not await has_access(pool, owner_id):
         raise AccessDenied("нет доступа к облаку (нужна оплата)")
     data = data or b""
     size = len(data)
+    replicas = max(1, int(replicas))
     limit = await _effective_limit(pool, owner_id)
     if limit > 0:
         used = (await get_quota(pool, owner_id))["used_bytes"]
@@ -195,14 +209,13 @@ async def store_file(pool, owner_id: int, name: str, data: bytes,
     n = 0
     for ordi, chunk in iter_chunks(data, chunk_size):
         blob = pack_chunk(chunk)
-        loc = await transport.put(pool, owner_id, file_id, ordi, blob)
-        await pool.execute(
-            """INSERT INTO tg_cloud_chunks(file_id, owner_id, ord, size_bytes, sha256,
-                   acc_id, channel_id, message_id, locator, status)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'stored')""",
-            file_id, owner_id, ordi, len(chunk), sha256_hex(chunk),
-            loc.get("acc_id"), loc.get("channel_id"), loc.get("message_id"),
-            loc.get("locator") or "")
+        chunk_id = int(await pool.fetchval(
+            "INSERT INTO tg_cloud_chunks(file_id, owner_id, ord, size_bytes, sha256, "
+            "status) VALUES($1,$2,$3,$4,$5,'stored') RETURNING id",
+            file_id, owner_id, ordi, len(chunk), sha256_hex(chunk)))
+        for rep in range(replicas):
+            loc = await transport.put(pool, owner_id, file_id, ordi, blob, replica=rep)
+            await _record_loc(pool, chunk_id, owner_id, rep, loc)
         n = ordi + 1
     await pool.execute(
         "UPDATE tg_cloud_files SET status='stored', chunk_count=$2, updated_at=now() "
@@ -211,28 +224,144 @@ async def store_file(pool, owner_id: int, name: str, data: bytes,
     return await get_file(pool, owner_id, file_id)
 
 
+async def _record_loc(pool, chunk_id: int, owner_id: int, replica: int, loc: dict) -> None:
+    """Записать одну локацию (реплику) куска в манифест. ON CONFLICT — для heal,
+    который может переиспользовать тот же locator при повторной укладке."""
+    await pool.execute(
+        """INSERT INTO tg_cloud_chunk_locs(chunk_id, owner_id, replica, acc_id,
+               channel_id, message_id, locator, status)
+           VALUES($1,$2,$3,$4,$5,$6,$7,'stored')
+           ON CONFLICT (chunk_id, locator) DO UPDATE SET status='stored',
+               replica=EXCLUDED.replica, acc_id=EXCLUDED.acc_id,
+               channel_id=EXCLUDED.channel_id, message_id=EXCLUDED.message_id""",
+        chunk_id, owner_id, replica, loc.get("acc_id"), loc.get("channel_id"),
+        loc.get("message_id"), loc.get("locator") or f"loc:{chunk_id}:{replica}")
+
+
+async def _read_chunk(pool, transport: ChunkTransport, chunk_id: int, sha: str):
+    """Достать кусок из ЛЮБОЙ живой реплики с проверкой целостности. Возвращает
+    (расшифрованный_кусок, зашифрованный_blob, список_живых_локаторов) или
+    (None, None, []), если ни одна реплика не поднялась (все хранители мертвы)."""
+    locs = await pool.fetch(
+        "SELECT locator FROM tg_cloud_chunk_locs WHERE chunk_id=$1 AND status='stored' "
+        "ORDER BY replica", chunk_id)
+    alive = [r["locator"] for r in locs]
+    for locator in alive:
+        try:
+            blob = await transport.get(pool, locator)
+            if not blob:
+                continue
+            chunk = unpack_chunk(blob)
+        except Exception:
+            continue
+        if sha and sha256_hex(chunk) != sha:
+            continue
+        return chunk, blob, alive
+    return None, None, alive
+
+
 async def retrieve_file(pool, owner_id: int, file_id: int,
                         transport: ChunkTransport | None = None) -> bytes:
-    """Собрать файл обратно: куски по порядку → расшифровать → склеить → сверить
-    SHA-256. Бросает при рассинхроне/порче."""
+    """Собрать файл обратно: для каждого куска берём ЛЮБУЮ живую реплику →
+    расшифровать → склеить → сверить SHA-256. Пока жива хотя бы одна копия куска,
+    сборка проходит — баны части флота не мешают. Бросает, только если у куска не
+    осталось ни одной живой реплики или не сошёлся хэш целого."""
     f = await get_file(pool, owner_id, file_id)
     if not f:
         raise FileNotFoundError("файл не найден")
     transport = transport or DbTransport()
     rows = await pool.fetch(
-        "SELECT ord, locator, sha256 FROM tg_cloud_chunks WHERE file_id=$1 ORDER BY ord",
+        "SELECT id, ord, sha256 FROM tg_cloud_chunks WHERE file_id=$1 ORDER BY ord",
         file_id)
     out = bytearray()
     for r in rows:
-        blob = await transport.get(pool, r["locator"])
-        chunk = unpack_chunk(blob)
-        if r["sha256"] and sha256_hex(chunk) != r["sha256"]:
-            raise ValueError(f"кусок {r['ord']} повреждён (хэш не сошёлся)")
+        chunk, _blob, _alive = await _read_chunk(pool, transport, r["id"], r["sha256"])
+        if chunk is None:
+            raise ValueError(
+                f"кусок {r['ord']}: не осталось ни одной живой реплики "
+                "(все хранители недоступны/забанены) — запустите восстановление")
         out.extend(chunk)
     res = bytes(out)
     if f["sha256"] and sha256_hex(res) != f["sha256"]:
         raise ValueError("файл собран, но хэш целого не сошёлся")
     return res
+
+
+async def heal_file(pool, owner_id: int, file_id: int,
+                    transport: ChunkTransport | None = None,
+                    *, replicas: int = REPLICAS) -> dict:
+    """Реконсайлер избыточности: для каждого куска, где живых реплик меньше
+    нормы, берём уцелевшую копию и доливаем недостающие на новые слоты. Так файл
+    возвращает отказоустойчивость после бана части хранителей. Возвращает отчёт:
+    сколько реплик восстановлено и сколько кусков восстановить НЕ удалось (все
+    реплики мертвы — файл в опасности, нужен сигнал владельцу)."""
+    transport = transport or DbTransport()
+    replicas = max(1, int(replicas))
+    rows = await pool.fetch(
+        "SELECT id, ord, sha256 FROM tg_cloud_chunks WHERE file_id=$1 ORDER BY ord",
+        file_id)
+    restored = 0
+    unhealable = 0
+    for r in rows:
+        chunk_id = r["id"]
+        live = await pool.fetchval(
+            "SELECT count(*) FROM tg_cloud_chunk_locs WHERE chunk_id=$1 AND status='stored'",
+            chunk_id)
+        if int(live) >= replicas:
+            continue
+        chunk, blob, alive = await _read_chunk(pool, transport, chunk_id, r["sha256"])
+        if chunk is None:
+            unhealable += 1
+            continue
+        # Занятые номера реплик — чтобы новые не конфликтовали по UNIQUE.
+        used_reps = {int(x["replica"]) for x in await pool.fetch(
+            "SELECT replica FROM tg_cloud_chunk_locs WHERE chunk_id=$1", chunk_id)}
+        rep = 0
+        need = replicas - int(live)
+        made = 0
+        while made < need:
+            while rep in used_reps:
+                rep += 1
+            loc = await transport.put(pool, owner_id, file_id, r["ord"], blob, replica=rep)
+            await _record_loc(pool, chunk_id, owner_id, rep, loc)
+            used_reps.add(rep)
+            made += 1
+            restored += 1
+    # Статус файла отражает здоровье: degraded, если есть невосстановимые куски.
+    if rows:
+        await pool.execute(
+            "UPDATE tg_cloud_files SET status=$2, updated_at=now() WHERE id=$1",
+            file_id, ("degraded" if unhealable else "stored"))
+    return {"restored": restored, "unhealable": unhealable}
+
+
+async def mark_account_dead(pool, acc_id: int) -> int:
+    """Аккаунт-хранитель забанен/потерян — пометить все его локации dead, чтобы
+    сборка их не трогала, а heal восстановил избыточность с уцелевших реплик.
+    Вызывается пайплайном обработки банов. Возвращает число помеченных локаций."""
+    status = await pool.execute(
+        "UPDATE tg_cloud_chunk_locs SET status='dead' WHERE acc_id=$1 AND status<>'dead'",
+        acc_id)
+    # asyncpg возвращает команд-тег вида "UPDATE <n>".
+    try:
+        return int(str(status).rsplit(" ", 1)[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
+async def file_durability(pool, file_id: int) -> dict:
+    """Здоровье избыточности файла для UI/мониторинга: минимум живых реплик среди
+    кусков (0 = есть недоступный кусок), всего живых локаций, норма."""
+    row = await pool.fetchrow(
+        """SELECT COALESCE(MIN(live),0) AS min_live, COALESCE(SUM(live),0) AS total_live,
+                  count(*) AS chunks
+             FROM (SELECT c.id,
+                          (SELECT count(*) FROM tg_cloud_chunk_locs l
+                            WHERE l.chunk_id=c.id AND l.status='stored') AS live
+                     FROM tg_cloud_chunks c WHERE c.file_id=$1) q""",
+        file_id)
+    return {"min_live": int(row["min_live"]), "total_live": int(row["total_live"]),
+            "chunks": int(row["chunks"]), "target": REPLICAS}
 
 
 async def delete_file(pool, owner_id: int, file_id: int,
@@ -242,12 +371,14 @@ async def delete_file(pool, owner_id: int, file_id: int,
         return False
     transport = transport or DbTransport()
     rows = await pool.fetch(
-        "SELECT locator FROM tg_cloud_chunks WHERE file_id=$1", file_id)
+        "SELECT l.locator FROM tg_cloud_chunk_locs l "
+        "JOIN tg_cloud_chunks c ON c.id=l.chunk_id WHERE c.file_id=$1", file_id)
     for r in rows:
         try:
             await transport.delete(pool, r["locator"])
         except Exception:
             log.debug("tg_cloud: не удалён blob %s", r["locator"])
+    # CASCADE по file_id снесёт tg_cloud_chunks → tg_cloud_chunk_locs.
     await pool.execute("DELETE FROM tg_cloud_files WHERE id=$1 AND owner_id=$2",
                        file_id, owner_id)
     await _add_used(pool, owner_id, -int(f["size_bytes"]))
