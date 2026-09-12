@@ -425,6 +425,23 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
     except Exception:
         pass
 
+    # Virtual Layer: намерение — это сигнал воронки. Раскладываем CRM-стадию в
+    # сигнал состояния; переход родит виртуальное событие (purchase_intent_
+    # detected / user_lost_interest), на которое реагируют автоматизации. Это
+    # НАДСТРОЙКА над стадией: у состояния есть уверенность и распад, которых у
+    # тега нет. Fail-open — сбой слоя не ломает обработку сообщения.
+    if stage_changed:
+        _sig = {"proposal": "asked_price", "negotiation": "asked_how_to_pay",
+                "lead": "replied", "lost": "refused"}.get(target_stage)
+        if _sig:
+            try:
+                from services import virtual_layer
+                await virtual_layer.signal(
+                    pool, owner_id, virtual_layer.USER, contact_id, _sig,
+                    confidence=0.7, source="intent_sensor")
+            except Exception:
+                log.debug("intent_sensor: virtual_layer signal failed owner=%s", owner_id)
+
     return {"matched": len(matched), "stage": target_stage if stage_changed else None,
             "tags": added_tags, "notified": notified, "contact_id": contact_id}
 

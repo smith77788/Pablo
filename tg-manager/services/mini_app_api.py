@@ -206,6 +206,24 @@ INLINE_MIGRATIONS: list[str] = [
         observed_at TIMESTAMPTZ NOT NULL DEFAULT now(), state TEXT NOT NULL,
         views INTEGER, acc_id BIGINT, geo TEXT, detail TEXT, sig TEXT)""",
     "CREATE INDEX IF NOT EXISTS idx_notary_obs_watch ON notary_observations(watch_id, observed_at)",
+    # v211: Virtual Layer — динамические состояния и виртуальные события.
+    # Надстройка над unified_contacts.stage: состояние с уверенностью, распадом
+    # и историей, адресуемое на любом уровне (user|bot|campaign|network).
+    """CREATE TABLE IF NOT EXISTS virtual_states (
+        owner_id BIGINT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+        state_key TEXT NOT NULL, value TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 0.5,
+        source TEXT, expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (owner_id, entity_type, entity_id, state_key))""",
+    "CREATE INDEX IF NOT EXISTS idx_vstates_owner_key ON virtual_states(owner_id, entity_type, state_key, value)",
+    "CREATE INDEX IF NOT EXISTS idx_vstates_expiry ON virtual_states(expires_at) WHERE expires_at IS NOT NULL",
+    """CREATE TABLE IF NOT EXISTS virtual_state_history (
+        id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL, state_key TEXT NOT NULL, from_value TEXT,
+        to_value TEXT NOT NULL, reason TEXT, confidence REAL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    "CREATE INDEX IF NOT EXISTS idx_vstate_hist_entity ON virtual_state_history(owner_id, entity_type, entity_id, state_key, created_at)",
     # v198: здоровье управляемых ботов. Без этих колонок бот с отозванным
     # токеном выглядел «активным», молча не отвечал подписчикам, и знал об
     # этом только серверный лог.
