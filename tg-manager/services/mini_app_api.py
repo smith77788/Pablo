@@ -9785,6 +9785,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                            "total": len(out),
                            "connected": sum(1 for x in out if x["connected"])})
 
+    # ── Virtual Layer: обзор состояний и виртуальных событий ──────────────
+
+    async def vlayer_overview(request: web.Request) -> web.Response:
+        """Сводка вычислительного слоя: распределение воронки, «горячие»
+        сущности и лента виртуальных событий (что слой понял о поведении)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        from services.organism import spine as _spine
+        try:
+            ov = await _vl.overview(pool, uid)
+        except Exception as exc:
+            log.exception("vlayer_overview uid=%s", uid)
+            return _err(str(exc)[:150], 500)
+        events = []
+        try:
+            raw = await _spine.recent_events(
+                pool, uid, kinds=_vl.VIRTUAL_EVENT_KINDS, hours=168, limit=40)
+            for e in raw:
+                p = e.get("payload") or {}
+                events.append({
+                    "kind": e["kind"],
+                    "label": _vl.EVENT_LABEL.get(e["kind"], e["kind"]),
+                    "entity_type": p.get("entity_type"),
+                    "entity_id": p.get("entity_id"),
+                    "at": e["at"].isoformat() if e.get("at") else None,
+                })
+        except Exception:
+            log.debug("vlayer_overview events failed uid=%s", uid)
+        return _json_resp({"ok": True, "funnel": ov["funnel"], "hot": ov["hot"],
+                           "total": ov["total"], "events": events})
+
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 
     async def notary_list(request: web.Request) -> web.Response:
@@ -16032,6 +16065,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
     app.router.add_post("/api/miniapp/bots/connect_discovered", bots_connect_discovered)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
+    app.router.add_get("/api/miniapp/vlayer/overview", vlayer_overview)
     app.router.add_get("/api/miniapp/notary", notary_list)
     app.router.add_post("/api/miniapp/notary", notary_create)
     app.router.add_get("/api/miniapp/notary/{watch_id}", notary_detail)

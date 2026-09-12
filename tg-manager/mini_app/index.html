@@ -1828,6 +1828,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Нотариус</div>
         <div class="mgmt-tile-val" id="m-notary-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openVLayer()">
+        <div class="mgmt-tile-ico">🧠</div>
+        <div class="mgmt-tile-lbl">Модель поведения</div>
+        <div class="mgmt-tile-val" id="m-vlayer-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openFolders()">
         <div class="mgmt-tile-ico">📁</div>
         <div class="mgmt-tile-lbl">Общие папки</div>
@@ -4810,6 +4815,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="rehabStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
     <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-vlayer">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🧠 Модель поведения</div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
+      Telegram показывает, что произошло; здесь — что это значит. Состояние
+      аудитории с уверенностью и остыванием: кто готов купить, кто присматривается,
+      кто остыл. События, которых Telegram не шлёт, слой вычисляет сам.
+    </div>
+    <div id="vlayerBody"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -17183,6 +17203,61 @@ async function openWarmup() {
 // Одна ссылка добавляет человеку сразу всю связку каналов+чат. Раздача
 // честная (наши рассылки/боты/посты), вступление — выбор пользователя.
 let FC_SEL = new Set();
+// ── Virtual Layer: модель поведения аудитории ────────────────────────────
+async function openVLayer() {
+  push('s-vlayer');
+  txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/vlayer/overview');
+    const funnel = d.funnel || [];
+    const events = d.events || [];
+    const hot = d.hot || [];
+    const mv = document.getElementById('m-vlayer-val');
+    if (mv) mv.textContent = d.total ? d.total + ' в модели' : '';
+    let html = '';
+    if (!d.total) {
+      html = empty('🧠', 'Модель ещё пуста',
+        'Слой наполняется по мере переписки: сенсор намерений и действия ботов '
+        + 'двигают аудиторию по воронке. Загляните позже.');
+      txt('vlayerBody', html); return;
+    }
+    // Воронка: полоски по рунгам.
+    const max = Math.max(...funnel.map(f => f.count), 1);
+    html += '<div class="sec">Воронка аудитории</div>';
+    html += funnel.map(f => {
+      const w = Math.max(4, Math.round(f.count / max * 100));
+      return `<div style="padding:6px 2px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
+          <span>${esc(f.label)}</span><span style="font-weight:600">${num(f.count)}</span></div>
+        <div style="height:6px;background:var(--sep);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${w}%;background:var(--accent,#7c3aed);border-radius:3px"></div></div>
+      </div>`;
+    }).join('');
+    // «Горячие» — кого дожимать первыми.
+    if (hot.length) {
+      html += '<div class="sec">🔥 Дожать в первую очередь</div><div class="lst">';
+      html += hot.slice(0, 20).map(h => `<div class="row">
+        <div class="row-ico" style="background:var(--bg-orange-16,rgba(245,158,11,.16))">🔥</div>
+        <div class="row-body"><div class="row-name">${esc(h.label)} · #${esc(String(h.entity_id))}</div>
+          <div class="row-val">уверенность ${Math.round((h.confidence||0)*100)}%</div></div>
+      </div>`).join('');
+      html += '</div>';
+    }
+    // Лента виртуальных событий — «что слой понял».
+    html += '<div class="sec">События поведения</div>';
+    if (!events.length) {
+      html += '<div style="padding:10px;color:var(--hint);font-size:13px">Пока тихо</div>';
+    } else {
+      html += '<div class="lst">' + events.map(e => `<div class="row">
+        <div class="row-body"><div class="row-name">${esc(e.label)}</div>
+          <div class="row-val">${e.entity_id?('#'+esc(String(e.entity_id))+' · '):''}${e.at?new Date(e.at).toLocaleString('ru'):''}</div></div>
+      </div>`).join('') + '</div>';
+    }
+    html += '<div style="height:16px"></div>';
+    txt('vlayerBody', html);
+  } catch(e) { txt('vlayerBody', errHtml(e.message, 'openVLayer()')); }
+}
+
 // ── «Нотариус»: заверение рекламных размещений ───────────────────────────
 let NOTARY_WATCHES = [];
 async function openNotary() {

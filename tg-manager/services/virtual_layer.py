@@ -65,6 +65,22 @@ ENTER_EVENT = {
     "purchased": "purchase_confirmed",
     LOST: "user_lost_interest",
 }
+# Виды виртуальных событий этого слоя (для фильтрации ленты в read-поверхности).
+VIRTUAL_EVENT_KINDS = list(dict.fromkeys(ENTER_EVENT.values()))
+
+# Русские подписи значений и событий — владелец не читает по-английски.
+VALUE_LABEL = {
+    "new": "Новый", "curious": "Присматривается", "interested": "Интерес",
+    "qualified": "Квалифицирован", "ready": "Готов купить",
+    "purchased": "Купил", LOST: "Потерян",
+}
+EVENT_LABEL = {
+    "user_became_active": "🌱 Ожил",
+    "user_showed_interest": "👀 Проявил интерес",
+    "purchase_intent_detected": "🔥 Намерение купить",
+    "purchase_confirmed": "✅ Покупка",
+    "user_lost_interest": "❄️ Остыл",
+}
 
 # Сигнал → минимальный ранг, до которого он подтягивает. Сигнал НЕ опускает
 # (кроме явных негативов ниже): опускает только распад.
@@ -371,3 +387,45 @@ async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
     except Exception:
         log.debug("virtual_layer: cascade emit failed", exc_info=True)
     return verdict
+
+
+# ── Read-поверхность (обзор для владельца) ─────────────────────────────────
+
+async def overview(pool, owner_id: int, *, entity_type: str = USER,
+                   state_key: str = "funnel") -> dict:
+    """Сводка слоя для экрана: распределение воронки + «горячие» сущности.
+
+    Лента виртуальных событий берётся отдельно из spine (это его память),
+    поэтому здесь только состояния. Fail-open: пустая сводка вместо падения.
+    """
+    out = {"funnel": [], "hot": [], "total": 0}
+    try:
+        rows = await pool.fetch(
+            "SELECT value, COUNT(*) AS c FROM virtual_states "
+            "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+            "GROUP BY value", owner_id, entity_type, state_key)
+    except Exception:
+        log.debug("virtual_layer.overview funnel failed owner=%s", owner_id)
+        return out
+    dist = {r["value"]: int(r["c"]) for r in rows}
+    order = LADDER + [LOST]
+    out["funnel"] = [
+        {"value": v, "label": VALUE_LABEL.get(v, v), "count": dist.get(v, 0)}
+        for v in order if dist.get(v, 0) > 0
+    ]
+    out["total"] = sum(dist.values())
+    # «Горячие» сущности верхних рунгов — кого дожимать в первую очередь.
+    try:
+        hot_rows = await pool.fetch(
+            "SELECT entity_type, entity_id, value, confidence, updated_at "
+            "FROM virtual_states WHERE owner_id=$1 AND state_key=$2 "
+            "AND value = ANY($3::text[]) ORDER BY confidence DESC, updated_at DESC "
+            "LIMIT 50", owner_id, state_key, ["ready", "qualified"])
+        out["hot"] = [
+            {"entity_type": r["entity_type"], "entity_id": r["entity_id"],
+             "value": r["value"], "label": VALUE_LABEL.get(r["value"], r["value"]),
+             "confidence": round(float(r["confidence"] or 0), 2)}
+            for r in hot_rows]
+    except Exception:
+        log.debug("virtual_layer.overview hot failed owner=%s", owner_id)
+    return out
