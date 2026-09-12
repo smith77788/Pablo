@@ -147,3 +147,56 @@ def test_make_envelope_gives_unique_task_ids():
     a = M.make_envelope(7, 100, _route(200))
     b = M.make_envelope(7, 100, _route(200))
     assert a["task_id"] != b["task_id"]
+
+
+# ── Проволочный кодек ───────────────────────────────────────────────────────
+
+def test_encode_decode_roundtrip():
+    e = _env()
+    wire = M.encode_message(e)
+    assert wire.startswith(M.MESH_PREFIX)
+    back = M.decode_message(wire)
+    assert back["task_id"] == e["task_id"] and back["step"] == e["step"]
+    assert back["route"] == e["route"]
+
+
+def test_decode_ignores_non_mesh_text():
+    assert M.decode_message("привет, как дела?") is None
+    assert M.decode_message("") is None
+    assert M.decode_message(None) is None
+
+
+def test_decode_survives_broken_json():
+    """Чужой текст, начатый на /mesh, но с мусором — не наша задача, не падаем."""
+    assert M.decode_message(M.MESH_PREFIX + " {не json") is None
+    assert M.decode_message(M.MESH_PREFIX + " 12345") is None
+
+
+def test_decode_requires_task_id():
+    assert M.decode_message(M.MESH_PREFIX + ' {"step": 0}') is None
+
+
+# ── Решение приёма ──────────────────────────────────────────────────────────
+
+def test_incoming_forwards_to_next_bot():
+    d = M.process_incoming(_env(), now=T0)
+    assert d["action"] == "forward" and d["to_bot"] == 300
+    assert d["next_env"]["step"] == 1
+
+
+def test_incoming_terminal_at_route_end():
+    e = _env(step=2)                      # последний шаг маршрута (bots 200,300,400)
+    d = M.process_incoming(e, now=T0)
+    assert d["action"] == "terminal" and M.is_terminal(d["next_env"])
+
+
+def test_incoming_drops_on_any_safeguard():
+    d = M.process_incoming(_env(depth=M.MAX_DEPTH + 1), now=T0)
+    assert d["action"] == "drop" and d["reason"] == M.DROP_MAX_DEPTH
+
+
+def test_incoming_drops_duplicate_step():
+    e = _env()
+    seen = {(e["task_id"], 0, 200)}
+    d = M.process_incoming(e, seen_steps=seen, now=T0)
+    assert d["action"] == "drop" and d["reason"] == M.DROP_DUPLICATE

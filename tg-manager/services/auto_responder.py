@@ -363,6 +363,67 @@ async def _deliver_sales_reply(http, token, chat_id, text, reply_markup=None) ->
     return ok_any
 
 
+async def _maybe_handle_mesh(pool, http, token, bot_id: int, msg: dict) -> bool:
+    """Приём сообщения Bot Mesh от другого бота. Возвращает True, если это была
+    задача сети (обработана), иначе False (пусть идёт обычным путём).
+
+    Всё, что связано с решением обрабатывать/отбросить, — loop-safe ядро
+    bot_mesh. Дедуп петли — через UNIQUE-индекс hops (record_hop=False на
+    повторе). Fail-open: ошибка не рушит хот-луп опроса.
+
+    ФИЗИЧЕСКАЯ пересылка следующему боту (bot→bot send) на живых ботах не
+    выверена и требует включённого режима у обоих — она изолирована и помечена;
+    состояние задачи и защита от петель работают независимо от неё.
+    """
+    from services import bot_mesh
+    text = msg.get("text") or ""
+    env = bot_mesh.decode_message(text)
+    if env is None:
+        return False
+    task_id = env.get("task_id")
+    step = int(env.get("step", 0))
+    from_bot = (msg.get("from") or {}).get("id")
+    # Дедуп шага межпроцессно: повтор (task_id, step, этот бот) не вставится.
+    fresh = await bot_mesh.record_hop(
+        pool, task_id, step, from_bot=from_bot, to_bot=bot_id,
+        capability=None, outcome="received")
+    if not fresh:
+        log.debug("bot_mesh: дубль шага task=%s step=%s — петля погашена", task_id, step)
+        return True
+    decision = bot_mesh.process_incoming(env)
+    action = decision.get("action")
+    if action == "drop":
+        try:
+            await bot_mesh.drop_task(pool, task_id, decision.get("reason") or "dropped")
+        except Exception:
+            log.debug("bot_mesh: drop persist failed task=%s", task_id)
+        return True
+    # forward | terminal — сохраняем прогресс и эмитим событие в шину.
+    nxt = decision.get("next_env") or env
+    try:
+        await bot_mesh.save_progress(pool, nxt)
+    except Exception:
+        log.debug("bot_mesh: progress persist failed task=%s", task_id)
+    try:
+        from services.organism import spine
+        await spine.emit(pool, env.get("owner_id") or 0,
+                         "bot_mesh_" + ("done" if action == "terminal" else "hop"),
+                         {"task_id": task_id, "to_bot": decision.get("to_bot"),
+                          "step": nxt.get("step")})
+    except Exception:
+        pass
+    if action == "forward" and decision.get("to_bot"):
+        # СИВ физической пересылки (bot→bot). На живых ботах не выверен: требует
+        # включённого bot-to-bot у обоих. Пытаемся, но не полагаемся — состояние
+        # уже сохранено, дедуп/петли отработали.
+        try:
+            await bot_api.send_message(http, token, int(decision["to_bot"]),
+                                       bot_mesh.encode_message(nxt))
+        except Exception:
+            log.debug("bot_mesh: forward send unverified/failed task=%s", task_id)
+    return True
+
+
 async def _process_bot(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
@@ -475,6 +536,18 @@ async def _process_bot(
 
             msg = upd.get("message")
             if not msg:
+                continue
+            # Bot Mesh: сообщение от ДРУГОГО бота — это не человек. Раньше такой
+            # апдейт шёл в человеческую логику (бот регистрировался как «юзер»,
+            # получал авто-ответ). Теперь: если это конверт задачи сети —
+            # обрабатываем как mesh; в любом случае сообщения от ботов НЕ идут
+            # дальше в воронки/авто-ответы.
+            if (msg.get("from") or {}).get("is_bot"):
+                try:
+                    await _maybe_handle_mesh(pool, http, token, bot_id, msg)
+                except Exception:
+                    log.debug("auto_responder: mesh handling failed bot=%s",
+                              bot_id, exc_info=True)
                 continue
             # Только личка: в группе chat_id — это id группы, и весь путь ниже
             # (авто-ответы, /start, воронки, релей) отвечал бы В ГРУППУ и портил

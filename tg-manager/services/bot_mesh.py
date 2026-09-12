@@ -24,13 +24,11 @@ Telegram РЕАЛЬНО поддерживает bot-to-bot: бот включа
   дважды — прямой признак петли;
 * **цикл в трассе**: один бот не появляется в пути чаще MAX_VISITS раз.
 
-СТАТУС: НЕ ПОДКЛЮЧЁН. Построено ядро координации и защиты от петель; транспорта
-(приём/отправка bot-message) ещё нет. Причина: транспорт требует включённого
-режима bot-to-bot в @BotFather у каждого бота-участника — это ручной шаг на
-живых ботах, из кода его не сделать. Ядро строится первым осознанно: ошибка в
-гашении петель роняет флот, поэтому его безопаснее иметь и покрыть тестами до
-транспорта. Подключается вместе с хендлерами приёма bot-message (см. TASK_QUEUE,
-блок Virtual Layer → Bot Mesh) — тогда убрать из KNOWN_ORPHANS.
+СТАТУС: приём подключён (services/auto_responder._maybe_handle_mesh ловит
+bot-message от другого бота, гасит петли, ведёт состояние задачи, эмитит
+событие в шину). Физическая пересылка bot→bot (send следующему боту) на живых
+ботах ещё не выверена — требует включённого режима у обоих и канарейки;
+изолирована в сиве и не влияет на защиту от петель и состояние.
 """
 from __future__ import annotations
 
@@ -203,3 +201,79 @@ async def save_progress(pool, env: dict) -> None:
         "status=$5, updated_at=now() WHERE task_id=$1",
         env["task_id"], int(env.get("step", 0)), int(env.get("depth", 0)),
         json.dumps(env.get("trace") or []), env.get("status", "running"))
+
+
+# ── Проволочный формат (кодек) ─────────────────────────────────────────────
+# Задача летит между ботами текстом сообщения. Маркер-команда /mesh: и в группах
+# (доставка по команде-упоминанию), и в ЛС узнаётся однозначно и не путается с
+# человеческим сообщением. Payload — компактный JSON.
+
+MESH_PREFIX = "/mesh"
+_MAX_WIRE = 3500                    # запас под лимит сообщения Telegram (4096)
+
+
+def encode_message(env: dict) -> str:
+    """Конверт → строка сообщения для передачи другому боту."""
+    import json
+    core = {"task_id": env.get("task_id"), "owner_id": env.get("owner_id"),
+            "origin_bot": env.get("origin_bot"), "route": env.get("route") or [],
+            "step": int(env.get("step", 0)), "depth": int(env.get("depth", 0)),
+            "trace": env.get("trace") or [], "payload": env.get("payload") or {},
+            "deadline": (env.get("deadline_at").isoformat()
+                         if env.get("deadline_at") else None)}
+    return f"{MESH_PREFIX} " + json.dumps(core, ensure_ascii=False, default=str)
+
+
+def decode_message(text: str) -> dict | None:
+    """Строка сообщения → конверт, либо None если это не mesh-сообщение.
+
+    Никогда не поднимает исключение: чужой текст, начинающийся на /mesh, но с
+    битым JSON — это не наша задача, а не повод падать в чужом хот-лупе.
+    """
+    import json
+    from datetime import datetime, timezone
+    if not isinstance(text, str):
+        return None
+    t = text.strip()
+    if not t.startswith(MESH_PREFIX):
+        return None
+    body = t[len(MESH_PREFIX):].strip()
+    if not body or len(t) > _MAX_WIRE * 2:
+        return None
+    try:
+        d = json.loads(body)
+    except Exception:
+        return None
+    if not isinstance(d, dict) or not d.get("task_id"):
+        return None
+    dl = d.get("deadline")
+    if dl:
+        try:
+            d["deadline_at"] = datetime.fromisoformat(dl)
+        except Exception:
+            d["deadline_at"] = datetime.now(timezone.utc)
+    else:
+        d["deadline_at"] = datetime.now(timezone.utc)
+    return d
+
+
+def process_incoming(env: dict, *, seen_steps: set | None = None,
+                     now=None) -> dict:
+    """Что делать с принятым конвертом. Возвращает решение:
+
+    {"action": "drop"|"terminal"|"forward", "reason": …, "next_env": …,
+     "to_bot": …}
+
+    Всё решается предохранителями should_process. Физической отправки здесь нет —
+    это чистое ядро; отправку делает вызывающий по next_env/to_bot.
+    """
+    ok, reason = should_process(env, seen_steps=seen_steps, now=now)
+    if not ok:
+        return {"action": "drop", "reason": reason}
+    nxt = advance(env, now=now)
+    if is_terminal(nxt):
+        return {"action": "terminal", "reason": "route_complete", "next_env": nxt}
+    tgt = target_of(nxt)
+    return {"action": "forward", "next_env": nxt,
+            "to_bot": tgt.get("bot") if tgt else None,
+            "capability": tgt.get("capability") if tgt else None}
