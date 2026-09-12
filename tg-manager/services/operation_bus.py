@@ -334,6 +334,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🔌",
     },
+    "enable_bot_to_bot": {
+        "description": "Включение режима bot-to-bot у сети ботов (@BotFather)",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🕸",
+    },
     "reclassify_channels": {
         "description": "Переопределение моей инфраструктуры (убрать чужие каналы)",
         "min_plan": "starter",

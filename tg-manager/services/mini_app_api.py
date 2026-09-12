@@ -242,6 +242,10 @@ INLINE_MIGRATIONS: list[str] = [
         outcome TEXT, reason TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
     "CREATE INDEX IF NOT EXISTS idx_bot_mesh_hops_task ON bot_mesh_hops(task_id, created_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_bot_mesh_hop_step ON bot_mesh_hops(task_id, step, to_bot)",
+    # v213: массовое включение bot-to-bot. Отметка состояния, чтобы не гонять
+    # BotFather повторно и видеть, кто готов к сети.
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS b2b_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS b2b_checked_at TIMESTAMPTZ",
     # v198: здоровье управляемых ботов. Без этих колонок бот с отозванным
     # токеном выглядел «активным», молча не отвечал подписчикам, и знал об
     # этом только серверный лог.
@@ -9760,6 +9764,42 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "op_id": op_id,
                            "pending": int(pending)})
 
+    async def bots_enable_b2b(request: web.Request) -> web.Response:
+        """Массово включить режим bot-to-bot у управляемых ботов (@BotFather).
+
+        Нужно для сети ботов (Bot Mesh): без включённого режима боты не получают
+        апдейты друг от друга. Включает только аккаунт-владелец бота — операция
+        группирует ботов по владельцу сама. Первый прогон — канарейкой (limit).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            limit = max(1, min(200, int(body.get("limit") or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        only_disabled = bool(body.get("only_disabled", True))
+        cond = "AND COALESCE(b2b_enabled, FALSE)=FALSE" if only_disabled else ""
+        pending = await _safe_count(pool,
+            f"SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE "
+            f"AND username IS NOT NULL AND acc_id IS NOT NULL {cond}", uid)
+        if not pending:
+            return _err("Нечего включать: у ботов либо уже включён режим, либо нет "
+                        "аккаунта-владельца (тогда только вручную в @BotFather)", 409)
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "enable_bot_to_bot",
+                {"limit": limit, "only_disabled": only_disabled},
+                total_items=min(int(pending), limit),
+                label="Включение bot-to-bot")
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        return _json_resp({"ok": True, "op_id": op_id, "pending": int(pending)})
+
     async def bots_discovered_list(request: web.Request) -> web.Response:
         """Найденные на флоте боты: что есть, на каком аккаунте, подключён ли."""
         uid = _get_uid(request)
@@ -16065,6 +16105,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/bots/scan_fleet", bots_scan_fleet)
     app.router.add_get("/api/miniapp/bots/discovered", bots_discovered_list)
     app.router.add_post("/api/miniapp/bots/connect_discovered", bots_connect_discovered)
+    app.router.add_post("/api/miniapp/bots/enable_b2b", bots_enable_b2b)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
     app.router.add_get("/api/miniapp/vlayer/overview", vlayer_overview)
     app.router.add_get("/api/miniapp/notary", notary_list)

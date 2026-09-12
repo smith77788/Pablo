@@ -815,6 +815,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" onclick="scanFleetBots()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Найти на флоте</button>
       <button class="btn btn-s" onclick="showDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">📋 Найденные</button>
       <button class="btn btn-p" onclick="connectDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">🔌 Подключить найденных</button>
+      <!-- Bot Mesh: без включённого режима bot-to-bot боты не получают апдейты
+           друг от друга; включает только аккаунт-владелец через @BotFather. -->
+      <button class="btn btn-s" onclick="enableBotMesh()" style="flex:1;font-size:13px;padding:10px 6px" title="Включить режим bot-to-bot у сети ботов">🕸 Включить сеть</button>
     </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -8022,6 +8025,24 @@ async function connectDiscoveredBots() {
     const r = await api('/api/miniapp/bots/connect_discovered', {method:'POST', body:'{}'});
     toast('🔌 Подключение запущено' + (r.op_id ? ' · операция #'+r.op_id : ''));
     if (r.op_id) pollOpResult(r.op_id, 'Подключение найденных ботов', loadBots);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
+}
+// Включить режим bot-to-bot у сети — нужно для координации ботов (Bot Mesh).
+// Первый прогон делаем канарейкой на 2 ботах: разбор меню BotFather зависит от
+// локали и на живой сессии не выверен, лучше проверить на паре.
+async function enableBotMesh() {
+  const canary = await askConfirm(
+    'Включить режим bot-to-bot у сети ботов?\n\n'
+    + 'Это нужно, чтобы боты координировали задачи между собой. Включает '
+    + 'аккаунт-владелец через @BotFather.\n\n'
+    + 'РЕКОМЕНДУЕМ начать с проверки на 2 ботах: разбор меню BotFather зависит '
+    + 'от языка интерфейса. Нажмите ОК для канарейки (2 бота) или Отмена.');
+  if (!canary) return;
+  try {
+    const r = await api('/api/miniapp/bots/enable_b2b',
+      {method:'POST', body: JSON.stringify({limit: 2})});
+    toast('🕸 Включение запущено на 2 ботах' + (r.op_id ? ' · #'+r.op_id : ''));
+    if (r.op_id) pollOpResult(r.op_id, 'Включение bot-to-bot (канарейка)', loadBots);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,140)); }
 }
 // Полноценный экран, а не всплывающее окно: из списка найденных надо уметь

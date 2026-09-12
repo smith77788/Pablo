@@ -1702,6 +1702,7 @@ def _build_dispatch() -> dict:
         "scan_owned_resources": _exec_scan_owned_resources,
         "scan_owned_bots": _exec_scan_owned_bots,
         "connect_discovered_bots": _exec_connect_discovered_bots,
+        "enable_bot_to_bot": _exec_enable_bot_to_bot,
         "account_warmup": _exec_account_warmup,
         "auto_register": _exec_auto_register,
         "leave_all_chats": _exec_leave_all_chats,
@@ -8646,6 +8647,99 @@ async def _exec_connect_discovered_bots(
     if failed:
         summary += "\nНе удалось:\n" + "\n".join(f"• {x}" for x in failed[:15])
     return {"status": "done", "connected": connected, "summary": summary}
+
+
+async def _exec_enable_bot_to_bot(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массово включить режим bot-to-bot у управляемых ботов через @BotFather.
+
+    Включить режим может ТОЛЬКО аккаунт-владелец бота (managed_bots.acc_id) —
+    API для этого нет. Поэтому группируем ботов по владельцу и прогоняем диалог
+    BotFather от каждой сессии. Боты без acc_id включить нечем (нет сессии) —
+    честно выводим их в остаток.
+
+    Разбор меню BotFather локале-зависим и на живой сессии не проверен: первый
+    прогон — канарейкой на 1–2 ботах (params limit). Пункт не найден → не врём,
+    а помечаем «проверьте вручную».
+    """
+    from services import bot_b2b, resource_selector  # noqa: F401
+
+    only_disabled = params.get("only_disabled", True)
+    limit = int(params.get("limit") or 50)
+    rows = await _safe_fetch(pool,
+        "SELECT bot_id, username, acc_id, COALESCE(b2b_enabled, FALSE) AS b2b_enabled "
+        "FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", owner_id)
+    bots = [dict(r) for r in (rows or [])]
+    if not bots:
+        return {"status": "failed", "summary": "⚠️ Нет управляемых ботов"}
+
+    by_acc = bot_b2b.plan_targets(bots, only_disabled=only_disabled, limit=limit)
+    no_owner = by_acc.pop(None, [])          # боты без аккаунта-владельца
+    if not by_acc:
+        if no_owner:
+            return {"status": "failed",
+                    "summary": f"⚠️ {len(no_owner)} ботов без аккаунта-владельца — "
+                    "их режим включается только вручную в @BotFather"}
+        return {"status": "done", "summary": "✅ Все боты уже в режиме bot-to-bot"}
+
+    uname_to_bot = {(b.get("username") or "").lstrip("@"): b["bot_id"] for b in bots}
+    enabled_n = already_n = 0
+    err_lines: list[str] = []
+    await _safe_execute(pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+                        sum(len(v) for v in by_acc.values()), op_id)
+
+    for acc_id, unames in by_acc.items():
+        if await _is_cancelled(pool, op_id):
+            break
+        acc = await _db_get_account_for_telethon(pool, int(acc_id), owner_id)
+        if not acc or not acc.get("session_str"):
+            err_lines.append(f"⚠️ Аккаунт {acc_id}: нет сессии ({len(unames)} ботов)")
+            continue
+        if not await try_claim_account(int(acc_id)):
+            err_lines.append(f"⏳ Аккаунт {acc_id} занят — {len(unames)} ботов пропущены")
+            continue
+        try:
+            res = await asyncio.wait_for(
+                bot_b2b.enable_b2b_via_botfather(acc["session_str"], unames,
+                                                 _acc=dict(acc), limit=len(unames)),
+                timeout=60 + 20 * len(unames))
+        except Exception as e:
+            err_lines.append(f"⚠️ Аккаунт {acc_id}: {str(e)[:100]}")
+            continue
+        finally:
+            await release_accounts([int(acc_id)])
+
+        done = list(res.get("enabled") or []) + list(res.get("already") or [])
+        enabled_n += len(res.get("enabled") or [])
+        already_n += len(res.get("already") or [])
+        for u in done:
+            bid = uname_to_bot.get(u)
+            if bid is not None:
+                await _safe_execute(pool,
+                    "UPDATE managed_bots SET b2b_enabled=TRUE, b2b_checked_at=now() "
+                    "WHERE bot_id=$1 AND added_by=$2", bid, owner_id)
+        for u, why in (res.get("errors") or {}).items():
+            err_lines.append(f"• @{u}: {why}" if u != "_" else f"• {why}")
+        await _safe_execute(pool,
+            "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
+            len(unames), op_id)
+
+    parts = [f"🕸 Включено bot-to-bot: {enabled_n}"]
+    if already_n:
+        parts.append(f"уже были: {already_n}")
+    if no_owner:
+        parts.append(f"без аккаунта-владельца (вручную): {len(no_owner)}")
+    summary = " · ".join(parts)
+    if err_lines:
+        summary += "\n" + "\n".join(err_lines[:15])
+    return {"status": "done", "enabled": enabled_n, "already": already_n,
+            "summary": summary}
+
+
+async def _db_get_account_for_telethon(pool, acc_id: int, owner_id: int):
+    from database import db as _db
+    return await _db.get_account_for_telethon(pool, acc_id, owner_id)
 
 
 async def _exec_scan_owned_bots(
