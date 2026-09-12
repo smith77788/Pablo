@@ -56,6 +56,7 @@ def env():
         "invite_batch": inv.invite_batch,
         "channel_admin_status": inv.channel_admin_status,
         "promote_to_admin": am.promote_to_admin,
+        "promote_to_admin_ex": am.promote_to_admin_ex,
         "resolve_self_user_id": am.resolve_self_user_id,
         "join_channel": am.join_channel,
         "humanize": invite_behavior.humanize,
@@ -114,6 +115,18 @@ def env():
             ro.add(aid)
         return True
 
+    # On-demand-путь инвайта зовёт promote_to_admin_ex НАПРЯМУЮ (ему нужна причина
+    # отказа, чтобы отличить «подожди» от «никогда») — прежний promote_to_admin
+    # там больше не вызывается. Без этой заглушки on-demand-выдача шла в реальную
+    # функцию (без telethon), права никому не выдавались, и тест «весь флот
+    # работает» падал. Возвращаем (успех, причина="") и переиспользуем fake_promote.
+    async def fake_promote_ex(psession, group, uid, _acc=None, invite_users=False,
+                              post_messages=False, add_admins=False, **kw):
+        ok = await fake_promote(psession, group, uid, _acc=_acc,
+                                invite_users=invite_users, post_messages=post_messages,
+                                add_admins=add_admins)
+        return (bool(ok), "")
+
     async def fake_resolve(session, _acc=None):
         return 900000 + int(_acc["id"])
 
@@ -128,6 +141,7 @@ def env():
     inv.invite_batch = fake_batch
     inv.channel_admin_status = fake_admin_status
     am.promote_to_admin = fake_promote
+    am.promote_to_admin_ex = fake_promote_ex
     am.resolve_self_user_id = fake_resolve
     am.join_channel = fake_join
     invite_behavior.humanize = fake_humanize
@@ -137,6 +151,7 @@ def env():
     inv.invite_batch = orig["invite_batch"]
     inv.channel_admin_status = orig["channel_admin_status"]
     am.promote_to_admin = orig["promote_to_admin"]
+    am.promote_to_admin_ex = orig["promote_to_admin_ex"]
     am.resolve_self_user_id = orig["resolve_self_user_id"]
     am.join_channel = orig["join_channel"]
     invite_behavior.humanize = orig["humanize"]

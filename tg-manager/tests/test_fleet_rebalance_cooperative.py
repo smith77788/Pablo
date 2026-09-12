@@ -146,8 +146,12 @@ def test_rebalance_gives_back_a_fair_share_to_a_rival_operation(pool):
 
     with _PoolCtx(w, pool):
         # "Моя" операция реально держит все 10 (настоящая аренда в БД).
+        # Сравниваем как МНОЖЕСТВА: _db_claim делает UPDATE ... RETURNING id без
+        # ORDER BY, поэтому порядок строк зависит от физического расположения в
+        # таблице и «плывёт», когда в tg_accounts есть строки других тестов.
+        # Смысл проверки — «захвачены все 10», а не их порядок.
         claimed = _run(w.try_claim_accounts(acc_ids))
-        assert claimed == acc_ids
+        assert set(claimed) == set(acc_ids)
         w._operation_account_locks[my_op_id] = set(acc_ids)
         w._active_op_ids.add(my_op_id)
 

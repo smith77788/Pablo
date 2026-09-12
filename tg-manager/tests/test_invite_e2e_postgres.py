@@ -358,7 +358,10 @@ def test_daughter_group_rotation_survives_closed_group(stand):
     _orig_create = dg.get_or_create_active
     _orig_burn = dg.mark_burned
 
-    async def _fake_create(pool, owner_id, mother_ref, creator_acc):
+    async def _fake_create(pool, owner_id, mother_ref, creator_acc, redirect_ref=""):
+        # Сигнатура обязана совпадать с реальной get_or_create_active: та обзавелась
+        # аргументом redirect_ref (куда ведёт закреп дочерней группы), а фейк — нет,
+        # и весь путь падал TypeError на живой БД (на CI тест скипается без PG).
         calls["create"] += 1
         return {"ok": True, "group_ref": f"https://t.me/+FAKE{calls['create']}", "id": calls["create"]}
 

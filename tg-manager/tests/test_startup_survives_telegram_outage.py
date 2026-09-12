@@ -39,11 +39,31 @@ import urllib.request
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
-    not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
-pytest.importorskip("telethon", reason="старт тянет telethon")
-pytest.importorskip("aiogram", reason="старт тянет aiogram")
+
+def _subprocess_can_import(mod: str) -> bool:
+    """Импортируется ли модуль в ОТДЕЛЬНОМ процессе (как настоящий `python main.py`).
+
+    Здесь стартует реальный подпроцесс main.py, а он тянет telethon НАПРЯМУЮ.
+    In-process заглушка telethon из conftest в подпроцесс НЕ попадает, поэтому
+    `pytest.importorskip('telethon')` (видит заглушку) давал ложное «есть» и тест
+    падал ошибкой импорта в подпроцессе вместо честного skip. Проверяем реальную
+    доступность там, где она и нужна — в подпроцессе."""
+    try:
+        return subprocess.run([sys.executable, "-c", f"import {mod}"],
+                              capture_output=True, timeout=60).returncode == 0
+    except Exception:
+        return False
+
+
+pytestmark = [
+    pytest.mark.skipif(not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN"),
+    pytest.mark.skipif(not _subprocess_can_import("telethon"),
+                       reason="стартовому подпроцессу нужен НАСТОЯЩИЙ telethon "
+                              "(in-process заглушка conftest в подпроцесс не попадает)"),
+    pytest.mark.skipif(not _subprocess_can_import("aiogram"),
+                       reason="стартовому подпроцессу нужен aiogram"),
+]
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
