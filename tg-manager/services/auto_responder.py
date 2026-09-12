@@ -31,6 +31,8 @@ _cycle_rule_counts: dict[tuple[int, int], int] = {}
 _inactivity_sweep_task: asyncio.Task | None = None
 # Тот же приём для фонового дожима (followup) менеджера по продажам.
 _sales_followup_task: asyncio.Task | None = None
+# И для самовосстановления облака (избыточность кусков после банов хранителей).
+_cloud_reconcile_task: asyncio.Task | None = None
 
 # Cooldown for bots whose token getUpdates rejects as Unauthorized (revoked/invalid
 # token). Without this, a single dead-token bot gets re-polled every 10s forever,
@@ -1303,9 +1305,10 @@ async def _process_bot(
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
-    global _inactivity_sweep_task, _sales_followup_task
+    global _inactivity_sweep_task, _sales_followup_task, _cloud_reconcile_task
     _inactivity_sweep_task = asyncio.create_task(run_inactivity_sweep(pool, http))
     _sales_followup_task = asyncio.create_task(run_sales_followup_sweep(pool, http))
+    _cloud_reconcile_task = asyncio.create_task(run_cloud_reconcile_sweep(pool))
     # Stagger startup — don't hammer DB immediately alongside other services
     await asyncio.sleep(10)
     _cycle = 0
@@ -1339,6 +1342,27 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
         except Exception:
             log.exception("Auto-responder loop error")
         await asyncio.sleep(10)
+
+
+async def run_cloud_reconcile_sweep(pool: asyncpg.Pool) -> None:
+    """Фоновое самовосстановление облака (флот-бэкенд): гасим локации забаненных
+    хранителей и доливаем избыточность на живые аккаунты — доступ к файлам держится
+    сам, без ручных действий после банов. На БД-бэкенде делать нечего (куски не на
+    аккаунтах) — цикл просто спит. Сбой одного прохода не роняет цикл."""
+    await asyncio.sleep(900)  # старт через 15 мин после подъёма
+    while True:
+        try:
+            from services import tg_cloud
+            if tg_cloud._backend() == "fleet":
+                from services import tg_cloud_fleet
+                rep = await tg_cloud_fleet.reconcile(pool)
+                if rep.get("marked_dead") or rep.get("restored") or rep.get("unhealable"):
+                    log.info("cloud reconcile: %s", rep)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("cloud_reconcile_sweep error")
+        await asyncio.sleep(1800)  # каждые 30 минут
 
 
 async def run_inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:

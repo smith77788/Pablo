@@ -98,6 +98,30 @@ async def _delete_blob(acc: dict, channel_id: int, access_hash: int, message_id:
         acc.get("session_str") or "", channel_id, access_hash, message_id, _acc=acc)
 
 
+async def reconcile(pool, *, heal: bool = True, max_files: int = 50) -> dict:
+    """Самовосстановление облака на флот-бэкенде:
+      1) локации забаненных/мёртвых хранителей помечаются dead;
+      2) у деградировавших файлов избыточность доливается heal'ом на живые аккаунты.
+    Так доступ к файлам держится сам, без ручных действий после бана флота.
+    Возвращает сводку. max_files ограничивает один проход (heal ходит в Telegram)."""
+    from services import tg_cloud
+    marked = await tg_cloud.mark_dead_for_banned_storekeepers(pool)
+    files = restored = unhealable = 0
+    if heal:
+        for row in await tg_cloud.list_degraded_files(pool, limit=max_files):
+            files += 1
+            try:
+                res = await tg_cloud.heal_file(
+                    pool, row["owner_id"], row["file_id"], FleetTransport(row["owner_id"]))
+                restored += res.get("restored", 0)
+                unhealable += res.get("unhealable", 0)
+            except Exception:
+                log.warning("cloud reconcile: heal файла %s не прошёл",
+                            row["file_id"], exc_info=True)
+    return {"marked_dead": marked, "files_touched": files,
+            "restored": restored, "unhealable": unhealable}
+
+
 # ── Транспорт ─────────────────────────────────────────────────────────────────
 class FleetTransport:
     """Реплики кусков — в приватных каналах РАЗНЫХ аккаунтов флота.

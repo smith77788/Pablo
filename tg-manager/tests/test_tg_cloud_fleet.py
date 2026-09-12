@@ -105,3 +105,91 @@ def test_fleet_replicas_distinct_survive_ban_and_heal_postgres(monkeypatch):
             await pool.close()
 
     asyncio.new_event_loop().run_until_complete(go())
+
+
+def _fake_fleet(monkeypatch):
+    """Общий фейк «облака Telegram» для флот-сеамов. Возвращает dict-хранилище."""
+    store: dict = {}
+    seq = {"n": 2000}
+
+    async def fake_ensure(pool_, acc):
+        return int(acc["id"]) * 10, 0
+
+    async def fake_upload(acc, channel_id, access_hash, blob):
+        seq["n"] += 1
+        store[(int(acc["id"]), int(channel_id), seq["n"])] = bytes(blob)
+        return seq["n"]
+
+    async def fake_download(acc, channel_id, access_hash, message_id):
+        return store.get((int(acc["id"]), int(channel_id), int(message_id)), b"")
+
+    async def fake_delete(acc, channel_id, access_hash, message_id):
+        store.pop((int(acc["id"]), int(channel_id), int(message_id)), None)
+
+    monkeypatch.setattr(fleet, "_ensure_storage_channel", fake_ensure)
+    monkeypatch.setattr(fleet, "_upload_blob", fake_upload)
+    monkeypatch.setattr(fleet, "_download_blob", fake_download)
+    monkeypatch.setattr(fleet, "_delete_blob", fake_delete)
+    return store
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_cloud_reconcile_auto_detects_banned_and_heals_postgres(monkeypatch):
+    """reconcile сам находит забаненного хранителя (по acc_status), гасит его
+    локации и доливает избыточность — без ручного mark_account_dead."""
+    import asyncio
+    import asyncpg
+
+    OWNER = 809200
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+        _fake_fleet(monkeypatch)
+
+        async def _cl():
+            await pool.execute("DELETE FROM tg_cloud_files WHERE owner_id=$1", OWNER)
+            await pool.execute("DELETE FROM tg_cloud_storekeepers WHERE owner_id=$1", OWNER)
+            await pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER)
+
+        import bot.handlers.admin as admin_mod
+        admin_mod._session_admins.add(OWNER)
+        try:
+            await _cl()
+            acc_ids = []
+            for i in range(4):
+                acc_ids.append(int(await pool.fetchval(
+                    "INSERT INTO tg_accounts(owner_id,phone,session_str,is_active,acc_status) "
+                    "VALUES($1,$2,$3,TRUE,'active') RETURNING id",
+                    OWNER, f"+7988{OWNER%100}{i:04d}", f"SK{i}")))
+
+            payload = os.urandom(4200)
+            f = await tg_cloud.store_file(pool, OWNER, "r.bin", payload,
+                                          transport=fleet.FleetTransport(OWNER),
+                                          chunk_size=2000, replicas=2)
+            fid = f["id"]
+
+            # Банится аккаунт, реально хранящий реплики, — через acc_status (как в проде).
+            victim = int(await pool.fetchval(
+                "SELECT l.acc_id FROM tg_cloud_chunk_locs l JOIN tg_cloud_chunks c ON c.id=l.chunk_id "
+                "WHERE c.file_id=$1 AND l.acc_id IS NOT NULL LIMIT 1", fid))
+            await pool.execute(
+                "UPDATE tg_accounts SET is_active=FALSE, acc_status='banned' WHERE id=$1", victim)
+
+            rep = await fleet.reconcile(pool)
+            assert rep["marked_dead"] >= 1 and rep["unhealable"] == 0, rep
+            assert (await tg_cloud.file_durability(pool, fid))["min_live"] == 2
+            live_on_victim = await pool.fetchval(
+                "SELECT count(*) FROM tg_cloud_chunk_locs l JOIN tg_cloud_chunks c ON c.id=l.chunk_id "
+                "WHERE c.file_id=$1 AND l.acc_id=$2 AND l.status='stored'", fid, victim)
+            assert int(live_on_victim) == 0
+            assert await tg_cloud.retrieve_file(pool, OWNER, fid, fleet.FleetTransport(OWNER)) == payload
+
+            # Повторный проход — уже здорово, ничего не доливаем.
+            rep2 = await fleet.reconcile(pool)
+            assert rep2["restored"] == 0, rep2
+            await _cl()
+        finally:
+            admin_mod._session_admins.discard(OWNER)
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())

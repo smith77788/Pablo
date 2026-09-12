@@ -369,6 +369,39 @@ async def mark_account_dead(pool, acc_id: int) -> int:
         return 0
 
 
+async def mark_dead_for_banned_storekeepers(pool) -> int:
+    """Пометить dead локации, чей аккаунт-хранитель забанен/неактивен. Основа
+    АВТО-восстановления: пока локация числится stored, heal считает её живой;
+    связав статус локации с реальным статусом аккаунта, узнаём о потере копии без
+    ручного mark_account_dead на каждом бане. Возвращает число помеченных."""
+    status = await pool.execute(
+        """UPDATE tg_cloud_chunk_locs l SET status='dead'
+             FROM tg_accounts a
+            WHERE l.acc_id = a.id AND l.status='stored'
+              AND (a.is_active = FALSE
+                   OR COALESCE(a.acc_status,'active') IN ('banned','deleted'))""")
+    try:
+        return int(str(status).rsplit(" ", 1)[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
+async def list_degraded_files(pool, *, target: int = REPLICAS, limit: int = 500) -> list[dict]:
+    """Файлы, где у какого-то куска живых реплик меньше нормы (или ноль). Отдаёт
+    {file_id, owner_id} для точечного heal. Только файлы на флот-бэкенде (у кусков
+    есть acc_id) — БД-бэкенд избыточности на уровне аккаунтов не имеет."""
+    rows = await pool.fetch(
+        """SELECT DISTINCT f.id AS file_id, f.owner_id
+             FROM tg_cloud_files f
+             JOIN tg_cloud_chunks c ON c.file_id = f.id
+            WHERE EXISTS (SELECT 1 FROM tg_cloud_chunk_locs l0
+                           WHERE l0.chunk_id = c.id AND l0.acc_id IS NOT NULL)
+              AND (SELECT count(*) FROM tg_cloud_chunk_locs l
+                    WHERE l.chunk_id = c.id AND l.status='stored') < $1
+            LIMIT $2""", max(1, int(target)), max(1, int(limit)))
+    return [{"file_id": int(r["file_id"]), "owner_id": int(r["owner_id"])} for r in rows]
+
+
 async def file_durability(pool, file_id: int) -> dict:
     """Здоровье избыточности файла для UI/мониторинга: минимум живых реплик среди
     кусков (0 = есть недоступный кусок), всего живых локаций, норма."""
