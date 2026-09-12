@@ -4073,6 +4073,68 @@ async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int
     raise ValueError(f"Channel {channel_ref} not found in account dialogs")
 
 
+# ── Облако: хранение зашифрованных кусков в приватном канале-складе ───────────
+# Куски — это УЖЕ зашифрованные байты (AES-256-GCM, services/token_vault), сюда
+# приходят непрозрачным blob'ом: аккаунт-хранитель их не читает, только держит.
+async def upload_cloud_blob(session_string: str, channel_id: int, access_hash: int,
+                            blob: bytes, name: str = "ic.bin", _acc: dict | None = None) -> int:
+    """Положить кусок документом в канал-склад. Возвращает message_id."""
+    import io as _io
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        peer = await _resolve_channel_peer(client, channel_id, access_hash)
+        fobj = _io.BytesIO(blob)
+        fobj.name = name
+        msg = await asyncio.wait_for(
+            client.send_file(peer, file=fobj, force_document=True),
+            timeout=max(_OP_TIMEOUT, 120))
+        return int(msg.id)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def download_cloud_blob(session_string: str, channel_id: int, access_hash: int,
+                              message_id: int, _acc: dict | None = None) -> bytes:
+    """Скачать кусок (документ message_id) из канала-склада. b'' если не найден."""
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        peer = await _resolve_channel_peer(client, channel_id, access_hash)
+        msg = await asyncio.wait_for(
+            client.get_messages(peer, ids=int(message_id)), timeout=_OP_TIMEOUT)
+        if not msg or not getattr(msg, "media", None):
+            return b""
+        data = await asyncio.wait_for(
+            client.download_media(msg, file=bytes), timeout=max(_OP_TIMEOUT, 180))
+        return bytes(data or b"")
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def delete_cloud_blob(session_string: str, channel_id: int, access_hash: int,
+                            message_id: int, _acc: dict | None = None) -> None:
+    """Удалить кусок (сообщение) из канала-склада."""
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        peer = await _resolve_channel_peer(client, channel_id, access_hash)
+        await asyncio.wait_for(
+            client.delete_messages(peer, [int(message_id)]), timeout=_OP_TIMEOUT)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def get_channel_invite_link(
     session_string: str,
     channel_id: int | str,

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 
 from services import token_vault
 
@@ -160,6 +161,25 @@ async def _add_used(pool, owner_id: int, delta: int) -> None:
         owner_id, int(delta))
 
 
+def _backend() -> str:
+    """Какой бэкенд хранения кусков активен. По умолчанию 'db' (канарейка: флот
+    включается ЯВНО через INFRAGRAM_CLOUD_BACKEND=fleet, когда флот-путь обкатан)."""
+    return (os.getenv("INFRAGRAM_CLOUD_BACKEND", "db") or "db").strip().lower()
+
+
+def make_transport(owner_id: int) -> ChunkTransport:
+    """Транспорт по умолчанию для владельца. Фабрика (а не общий синглтон), потому
+    что FleetTransport ДЕРЖИТ состояние в пределах одной операции (распределение
+    реплик по аккаунтам) — каждой store/retrieve/heal нужен свой экземпляр."""
+    if _backend() == "fleet":
+        try:
+            from services.tg_cloud_fleet import FleetTransport
+            return FleetTransport(int(owner_id))
+        except Exception:
+            log.warning("tg_cloud: FleetTransport недоступен, откат на БД-бэкенд", exc_info=True)
+    return DbTransport()
+
+
 class QuotaExceeded(Exception):
     pass
 
@@ -201,7 +221,7 @@ async def store_file(pool, owner_id: int, name: str, data: bytes,
         used = (await get_quota(pool, owner_id))["used_bytes"]
         if used + size > limit:
             raise QuotaExceeded(f"превышен лимит хранилища ({used + size} > {limit})")
-    transport = transport or DbTransport()
+    transport = transport or make_transport(owner_id)
     file_id = int(await pool.fetchval(
         "INSERT INTO tg_cloud_files(owner_id, name, size_bytes, sha256, status) "
         "VALUES($1,$2,$3,$4,'pending') RETURNING id",
@@ -269,7 +289,7 @@ async def retrieve_file(pool, owner_id: int, file_id: int,
     f = await get_file(pool, owner_id, file_id)
     if not f:
         raise FileNotFoundError("файл не найден")
-    transport = transport or DbTransport()
+    transport = transport or make_transport(owner_id)
     rows = await pool.fetch(
         "SELECT id, ord, sha256 FROM tg_cloud_chunks WHERE file_id=$1 ORDER BY ord",
         file_id)
@@ -295,7 +315,7 @@ async def heal_file(pool, owner_id: int, file_id: int,
     возвращает отказоустойчивость после бана части хранителей. Возвращает отчёт:
     сколько реплик восстановлено и сколько кусков восстановить НЕ удалось (все
     реплики мертвы — файл в опасности, нужен сигнал владельцу)."""
-    transport = transport or DbTransport()
+    transport = transport or make_transport(owner_id)
     replicas = max(1, int(replicas))
     rows = await pool.fetch(
         "SELECT id, ord, sha256 FROM tg_cloud_chunks WHERE file_id=$1 ORDER BY ord",
@@ -369,7 +389,7 @@ async def delete_file(pool, owner_id: int, file_id: int,
     f = await get_file(pool, owner_id, file_id)
     if not f:
         return False
-    transport = transport or DbTransport()
+    transport = transport or make_transport(owner_id)
     rows = await pool.fetch(
         "SELECT l.locator FROM tg_cloud_chunk_locs l "
         "JOIN tg_cloud_chunks c ON c.id=l.chunk_id WHERE c.file_id=$1", file_id)

@@ -873,6 +873,11 @@ async def main() -> None:
         "UNIQUE(chunk_id, locator))",
         "CREATE INDEX IF NOT EXISTS idx_tg_cloud_locs_chunk ON tg_cloud_chunk_locs(chunk_id, status)",
         "CREATE INDEX IF NOT EXISTS idx_tg_cloud_locs_acc ON tg_cloud_chunk_locs(acc_id) WHERE acc_id IS NOT NULL",
+        # Флот-транспорт (schema_v214): привязка аккаунт-хранитель → канал-склад.
+        "CREATE TABLE IF NOT EXISTS tg_cloud_storekeepers ("
+        "acc_id BIGINT PRIMARY KEY, owner_id BIGINT NOT NULL, channel_id BIGINT NOT NULL, "
+        "access_hash BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "CREATE INDEX IF NOT EXISTS idx_tg_cloud_storekeepers_owner ON tg_cloud_storekeepers(owner_id)",
     ):
         try:
             await pool.execute(_ddl)
