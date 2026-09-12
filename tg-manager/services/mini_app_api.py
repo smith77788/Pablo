@@ -19859,6 +19859,114 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    # ── Telegram-облако (шифрованное распределённое хранилище файлов) ──────────
+    async def cloud_status(request: web.Request) -> web.Response:
+        """Доступ + квота: сколько занято/лимит, платный ли доступ, безлимит ли."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services import tg_cloud
+            q = await tg_cloud.get_quota(pool, uid)
+            limit = await tg_cloud._effective_limit(pool, uid)
+            return _json_resp({
+                'access': await tg_cloud.has_access(pool, uid),
+                'admin': tg_cloud._is_admin(uid),
+                'used_bytes': q['used_bytes'],
+                'limit_bytes': limit,          # 0 = безлимит
+                'paid': q['paid'],
+            })
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def cloud_list(request: web.Request) -> web.Response:
+        """Список файлов владельца (манифест, без содержимого)."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services import tg_cloud
+            return _json_resp({'files': await tg_cloud.list_files(pool, uid)})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def cloud_upload(request: web.Request) -> web.Response:
+        """Загрузить файл в облако. Принимает JSON {name, data_b64}. v1 — байты
+        приходят base64 (мини-апп читает файл через FileReader)."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            import base64 as _b64
+            from services import tg_cloud
+            d = await request.json()
+            name = (d.get('name') or 'file').strip()
+            raw = d.get('data_b64') or ''
+            try:
+                blob = _b64.b64decode(raw)
+            except Exception:
+                return _err("не удалось прочитать данные файла", 400)
+            f = await tg_cloud.store_file(pool, uid, name, blob)
+            return _json_resp({'file': f})
+        except tg_cloud.AccessDenied as e:
+            return _err(str(e) or "нет доступа к облаку — требуется подписка", 403)
+        except tg_cloud.QuotaExceeded as e:
+            return _err(str(e), 413)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def cloud_download(request: web.Request) -> web.Response:
+        """Скачать файл: собираем куски, расшифровываем, отдаём как поток байт."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services import tg_cloud
+            fid = int(request.match_info['file_id'])
+            meta = await tg_cloud.get_file(pool, uid, fid)
+            if not meta:
+                return _err("файл не найден", 404)
+            data = await tg_cloud.retrieve_file(pool, uid, fid)
+            fname = (meta.get('name') or 'file').replace('"', '')
+            return web.Response(
+                body=data,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/octet-stream",
+                    "Content-Disposition": f'attachment; filename="{fname}"',
+                })
+        except FileNotFoundError:
+            return _err("файл не найден", 404)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def cloud_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services import tg_cloud
+            fid = int(request.match_info['file_id'])
+            ok = await tg_cloud.delete_file(pool, uid, fid)
+            return _json_resp({'deleted': bool(ok)})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def cloud_set_paid(request: web.Request) -> web.Response:
+        """Выдать/снять платный доступ к облаку другому пользователю. Только
+        владелец платформы (админ)."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services import tg_cloud
+            if not tg_cloud._is_admin(uid):
+                return _err("только владелец платформы может выдавать доступ", 403)
+            d = await request.json()
+            target = int(d.get('owner_id') or 0)
+            if not target:
+                return _err("нужен owner_id", 400)
+            lim = d.get('limit_bytes')
+            q = await tg_cloud.set_paid(pool, target, bool(d.get('paid', True)),
+                                        limit_bytes=(int(lim) if lim else None))
+            return _json_resp({'quota': q})
+        except Exception as e:
+            return _err(str(e), 500)
+
     async def uch_bulk_group(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -20101,6 +20209,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/filter/preview", uch_filter_preview)
     app.router.add_post("/api/miniapp/uch/filter/exclude", uch_filter_exclude)
     app.router.add_post("/api/miniapp/uch/filter/delete", uch_filter_delete)
+    app.router.add_get("/api/miniapp/cloud/status", cloud_status)
+    app.router.add_get("/api/miniapp/cloud/files", cloud_list)
+    app.router.add_post("/api/miniapp/cloud/upload", cloud_upload)
+    app.router.add_get("/api/miniapp/cloud/file/{file_id}/download", cloud_download)
+    app.router.add_post("/api/miniapp/cloud/file/{file_id}/delete", cloud_delete)
+    app.router.add_post("/api/miniapp/cloud/set-paid", cloud_set_paid)
     app.router.add_post("/api/miniapp/uch/bulk/group", uch_bulk_group)
     app.router.add_post("/api/miniapp/uch/bulk/merge", uch_bulk_merge)
     app.router.add_post("/api/miniapp/uch/bulk/export", uch_bulk_export)

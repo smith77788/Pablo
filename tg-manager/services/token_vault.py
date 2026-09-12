@@ -84,6 +84,27 @@ def decrypt_token(enc: str) -> str:
         return enc
 
 
+def encrypt_bytes(data: bytes) -> bytes:
+    """AES-256-GCM шифрование произвольных БАЙТ (для кусков файлов облака).
+    Возвращает nonce(12) + tag(16) + ciphertext. Ключ — тот же _key()."""
+    from Crypto.Cipher import AES as _AES
+    nonce = os.urandom(12)
+    cipher = _AES.new(_key(), _AES.MODE_GCM, nonce=nonce)
+    ct, tag = cipher.encrypt_and_digest(data or b"")
+    return nonce + tag + ct
+
+
+def decrypt_bytes(blob: bytes) -> bytes:
+    """Обратное к encrypt_bytes. Бросает при неверном ключе/порче (целостность
+    важнее «тихого» возврата — для файлов молчаливая порча недопустима)."""
+    from Crypto.Cipher import AES as _AES
+    if not blob or len(blob) < 28:
+        return b""
+    nonce, tag, ct = blob[:12], blob[12:28], blob[28:]
+    cipher = _AES.new(_key(), _AES.MODE_GCM, nonce=nonce)
+    return cipher.decrypt_and_verify(ct, tag)
+
+
 def session_fingerprint(session_str: str) -> str:
     """Детерминированный fingerprint сессии для ДЕДУПА (не для безопасности).
 

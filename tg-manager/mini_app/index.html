@@ -1662,6 +1662,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Контакты</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openCloud()">
+        <div class="mgmt-tile-ico">☁️</div>
+        <div class="mgmt-tile-lbl">Облако</div>
+        <div class="mgmt-tile-val" id="m-cloud-val"></div>
+      </div>
     </div>
 
     <!-- Аналитика и CRM -->
@@ -3355,6 +3360,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-uchcleanup">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧹 Чистка / личные</div></div>
   <div class="sub-sb" id="uchCleanBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-cloud">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">☁️ Облако</div></div>
+  <div class="sub-sb" id="cloudBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchgraph">
@@ -15470,6 +15480,134 @@ async function uchClDelete() {
     const d = await api('/api/miniapp/uch/filter/delete', { method: 'POST', body: JSON.stringify({ ...f, confirm: true }) });
     toast('Удалено: ' + (d.deleted || 0));
     document.getElementById('uchClCount').textContent = '';
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+// ── Облако: шифрованное распределённое хранилище файлов ──────────────────────
+function _cloudBytes(n) {
+  n = Number(n) || 0;
+  if (n <= 0) return '0 Б';
+  if (n < 1024) return n + ' Б';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' КБ';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' МБ';
+  return (n / 1024 / 1024 / 1024).toFixed(2) + ' ГБ';
+}
+
+async function openCloud() {
+  push('s-cloud');
+  txt('cloudBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const st = await api('/api/miniapp/cloud/status');
+    if (!st.access) {
+      txt('cloudBody', `<div style="padding:16px">
+        <div style="font-size:14px;line-height:1.6;color:var(--hint)">
+          ☁️ <b>Облако</b> — ваши файлы шифруются (AES-256-GCM), режутся на куски и
+          распределяются по хранилищу. Скачивание — обратная сборка с проверкой
+          целостности. Никто, кроме вас, не соберёт файл обратно.
+        </div>
+        <div style="margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);font-size:13px">
+          Доступ к облаку — по подписке. Обратитесь к владельцу для подключения.
+        </div>
+      </div>`);
+      return;
+    }
+    const limit = Number(st.limit_bytes) || 0;
+    const used = Number(st.used_bytes) || 0;
+    const quotaLine = limit > 0
+      ? `${_cloudBytes(used)} из ${_cloudBytes(limit)}`
+      : `${_cloudBytes(used)} · безлимит`;
+    const pct = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
+    const bar = limit > 0
+      ? `<div style="height:6px;background:var(--bg3);border-radius:4px;overflow:hidden;margin-top:6px">
+           <div style="height:100%;width:${pct}%;background:var(--accent)"></div></div>`
+      : '';
+    let head = `<div style="padding:14px 16px">
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:10px">
+        Файлы шифруются и хранятся распределённо. ${st.admin ? 'Вы владелец — безлимит.' : ''}
+      </div>
+      <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600">💾 ${quotaLine}</div>${bar}
+      </div>
+      <label class="btn btn-p" style="width:100%;margin-bottom:6px;display:block;text-align:center;cursor:pointer">
+        ⬆️ Загрузить файл
+        <input type="file" id="cloudFileInput" style="display:none" onchange="cloudUpload(this)">
+      </label>
+      <div id="cloudUpMsg" style="font-size:12px;text-align:center;color:var(--hint);min-height:14px;margin-bottom:8px"></div>
+      <div class="sec">Мои файлы</div>
+      <div id="cloudFiles"></div>
+    </div>`;
+    txt('cloudBody', head);
+    await cloudRefreshList();
+  } catch (e) { txt('cloudBody', `<div style="padding:16px;color:var(--red)">${esc(e.message || 'Ошибка')}</div>`); }
+}
+
+async function cloudRefreshList() {
+  const box = document.getElementById('cloudFiles');
+  if (!box) return;
+  try {
+    const d = await api('/api/miniapp/cloud/files');
+    const files = d.files || [];
+    if (!files.length) { box.innerHTML = '<div style="font-size:13px;color:var(--hint);padding:8px 0">Пока пусто — загрузите первый файл.</div>'; return; }
+    box.innerHTML = files.map(f => `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--sep)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name || 'файл')}</div>
+          <div style="font-size:11px;color:var(--hint)">${_cloudBytes(f.size_bytes)} · ${f.chunk_count || 0} кус. · ${esc(f.status || '')}</div>
+        </div>
+        <button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudDownload(${f.id}, '${esc((f.name||'file').replace(/'/g,''))}')">⬇️</button>
+        <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})">🗑</button>
+      </div>`).join('');
+  } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(e.message || 'Ошибка')}</div>`; }
+}
+
+async function cloudUpload(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const msg = document.getElementById('cloudUpMsg');
+  if (msg) msg.textContent = '⏳ Читаю и шифрую…';
+  try {
+    const b64 = await new Promise((resolve, reject) => {
+      const rd = new FileReader();
+      rd.onerror = () => reject(new Error('Не удалось прочитать файл'));
+      rd.onload = () => { const s = String(rd.result || ''); resolve(s.slice(s.indexOf(',') + 1)); };
+      rd.readAsDataURL(file);
+    });
+    if (msg) msg.textContent = '⏳ Загружаю в облако…';
+    await api('/api/miniapp/cloud/upload', { method: 'POST', body: JSON.stringify({ name: file.name, data_b64: b64 }) });
+    if (msg) msg.textContent = '✅ Загружено';
+    input.value = '';
+    await openCloud();
+  } catch (e) {
+    if (msg) msg.textContent = '';
+    toast(e.message || 'Ошибка загрузки');
+  }
+}
+
+async function cloudDownload(fileId, name) {
+  toast('⏳ Собираю файл…');
+  try {
+    const r = await fetchT('/api/miniapp/cloud/file/' + fileId + '/download',
+                           { headers: { 'Authorization': 'Bearer ' + TK } });
+    if (!r.ok) {
+      let m = 'Не удалось скачать';
+      try { const j = await r.json(); m = j.message || j.error || m; } catch (_) {}
+      toast(m); return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name || 'file';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function cloudDelete(fileId) {
+  if (!await askConfirm('Удалить файл из облака безвозвратно?')) return;
+  try {
+    await api('/api/miniapp/cloud/file/' + fileId + '/delete', { method: 'POST', body: '{}' });
+    toast('Удалено');
+    await openCloud();
   } catch (e) { toast(e.message || 'Ошибка'); }
 }
 

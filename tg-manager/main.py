@@ -840,6 +840,28 @@ async def main() -> None:
         "ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS suspect BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS flagged_at TIMESTAMPTZ",
         "CREATE INDEX IF NOT EXISTS idx_bot_users_suspect ON bot_users(bot_id) WHERE suspect",
+        # Telegram-облако (schema_v212). Манифест файлов/кусков + квоты + v1-бэкенд
+        # хранения в БД. Читается на маршрутах /api/miniapp/cloud/* — при лаге
+        # миграции путь падал бы. Все CREATE идемпотентны.
+        "CREATE TABLE IF NOT EXISTS tg_cloud_files ("
+        "id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, name TEXT NOT NULL DEFAULT '', "
+        "size_bytes BIGINT NOT NULL DEFAULT 0, chunk_count INT NOT NULL DEFAULT 0, "
+        "sha256 TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', "
+        "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "CREATE INDEX IF NOT EXISTS idx_tg_cloud_files_owner ON tg_cloud_files(owner_id, id DESC)",
+        "CREATE TABLE IF NOT EXISTS tg_cloud_chunks ("
+        "id BIGSERIAL PRIMARY KEY, file_id BIGINT NOT NULL REFERENCES tg_cloud_files(id) ON DELETE CASCADE, "
+        "owner_id BIGINT NOT NULL, ord INT NOT NULL, size_bytes BIGINT NOT NULL DEFAULT 0, "
+        "sha256 TEXT NOT NULL DEFAULT '', acc_id BIGINT, channel_id BIGINT, message_id BIGINT, "
+        "locator TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', UNIQUE(file_id, ord))",
+        "CREATE INDEX IF NOT EXISTS idx_tg_cloud_chunks_file ON tg_cloud_chunks(file_id, ord)",
+        "CREATE TABLE IF NOT EXISTS tg_cloud_quota ("
+        "owner_id BIGINT PRIMARY KEY, limit_bytes BIGINT NOT NULL DEFAULT 0, "
+        "used_bytes BIGINT NOT NULL DEFAULT 0, paid BOOLEAN NOT NULL DEFAULT FALSE, "
+        "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        "CREATE TABLE IF NOT EXISTS tg_cloud_blobs ("
+        "locator TEXT PRIMARY KEY, owner_id BIGINT NOT NULL, data BYTEA NOT NULL, "
+        "created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
     ):
         try:
             await pool.execute(_ddl)
