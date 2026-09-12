@@ -224,6 +224,24 @@ INLINE_MIGRATIONS: list[str] = [
         to_value TEXT NOT NULL, reason TEXT, confidence REAL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
     "CREATE INDEX IF NOT EXISTS idx_vstate_hist_entity ON virtual_state_history(owner_id, entity_type, entity_id, state_key, created_at)",
+    # v212: Bot Mesh — координация задач между ботами (bot-to-bot). Гашение петель
+    # на нашей стороне: глубина, дедлайн, дедуп шага (UNIQUE), цикл в трассе.
+    """CREATE TABLE IF NOT EXISTS bot_mesh_tasks (
+        task_id TEXT PRIMARY KEY, owner_id BIGINT NOT NULL, origin_bot BIGINT,
+        route JSONB NOT NULL DEFAULT '[]', step INTEGER NOT NULL DEFAULT 0,
+        depth INTEGER NOT NULL DEFAULT 0, trace JSONB NOT NULL DEFAULT '[]',
+        payload JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'running',
+        drop_reason TEXT, deadline_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    "CREATE INDEX IF NOT EXISTS idx_bot_mesh_owner ON bot_mesh_tasks(owner_id, created_at DESC)",
+    """CREATE TABLE IF NOT EXISTS bot_mesh_hops (
+        id BIGSERIAL PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES bot_mesh_tasks(task_id) ON DELETE CASCADE,
+        step INTEGER NOT NULL, from_bot BIGINT, to_bot BIGINT, capability TEXT,
+        outcome TEXT, reason TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+    "CREATE INDEX IF NOT EXISTS idx_bot_mesh_hops_task ON bot_mesh_hops(task_id, created_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_bot_mesh_hop_step ON bot_mesh_hops(task_id, step, to_bot)",
     # v198: здоровье управляемых ботов. Без этих колонок бот с отозванным
     # токеном выглядел «активным», молча не отвечал подписчикам, и знал об
     # этом только серверный лог.
