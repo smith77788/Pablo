@@ -31,7 +31,31 @@ async def snapshot(pool, owner_id: int) -> dict:
         "bots": await _bots(pool, owner_id),
         "chat_warmup": await _chat_warmup(pool, owner_id),
         "events_24h": await _events(pool, owner_id),
+        "vlayer": await _vlayer(pool, owner_id),
     }
+
+
+async def _vlayer(pool, owner_id: int) -> dict:
+    """Модель поведения: сколько контактов «готовы купить» и температура
+    аудитории — чтобы мозг мог толкнуть «дожмите горячих», пока они горячие."""
+    out = {"ready": 0, "hot": 0, "audience": None}
+    try:
+        r = await pool.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE value='ready') AS ready, "
+            "COUNT(*) FILTER (WHERE value IN ('ready','qualified')) AS hot "
+            "FROM virtual_states WHERE owner_id=$1 AND entity_type='user' "
+            "AND state_key='funnel'", owner_id)
+        if r:
+            out["ready"] = int(r["ready"] or 0)
+            out["hot"] = int(r["hot"] or 0)
+        aud = await pool.fetchval(
+            "SELECT value FROM virtual_states WHERE owner_id=$1 "
+            "AND entity_type='network' AND entity_id='audience' "
+            "AND state_key='funnel'", owner_id)
+        out["audience"] = aud
+    except Exception:
+        log.debug("world._vlayer failed owner=%s", owner_id)
+    return out
 
 
 async def _bots(pool, owner_id: int) -> dict:

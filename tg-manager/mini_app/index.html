@@ -7566,7 +7566,7 @@ async function fleetDoctorLoad(){
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',
     segment_hot:'Написать оффер', intents:'Сигналы намерения', purge_dead:'Удалить мёртвые',
-    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити', chatwarmup:'Разогрев чата', seo:'Оптимизировать SEO', retention:'Настроить welcome', health:'Открыть здоровье'})[a&&a.kind] || 'Открыть';
+    campaign:'Планировщик', invite:'Запустить инвайт', geo:'Гео-сеть', growth:'Мотор роста', bots:'Сеть ботов', community:'Комьюнити', chatwarmup:'Разогрев чата', seo:'Оптимизировать SEO', retention:'Настроить welcome', health:'Открыть здоровье', vlayer:'Дожать горячих'})[a&&a.kind] || 'Открыть';
 }
 // Действие подсказки Пульса — ОБЪЕКТ {kind, param}, и param бывает строкой.
 // Класть его в атрибут через JSON.stringify нельзя: свои кавычки JSON и
@@ -7605,6 +7605,7 @@ function runPulseAction(a) {
   if (k==='seo') return openSeo();
   if (k==='retention') return openMassInvite();
   if (k==='health') return openHealth();
+  if (k==='vlayer') return openVLayer();
   toast('Открываю…');
 }
 // Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).

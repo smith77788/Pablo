@@ -88,6 +88,20 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             f"{d} дн. без новых сообщений — вероятно бизнес-бот отвалился.",
             {"kind": "vault"})
 
+    # Виртуальный слой: горячие контакты — дожать, пока не остыли (распад
+    # опустит их сам). Порог 5, чтобы не дёргать по одному лиду.
+    vl = snap.get("vlayer") or {}
+    if vl.get("ready", 0) >= 5:
+        add("vlayer_hot", "warn", f"{vl['ready']} готовы купить",
+            "Модель поведения свела переписку в состояние «готов купить». Эти "
+            "контакты остынут сами, если не дожать сейчас — отправьте оффер.",
+            {"kind": "vlayer"})
+    elif vl.get("audience") == "hot":
+        add("vlayer_audience", "warn", "Аудитория разогрелась",
+            "Готовых и квалифицированных набралось достаточно, чтобы вся "
+            "аудитория считалась горячей — момент для рассылки.",
+            {"kind": "vlayer"})
+
     anom = snap.get("anomalies") or {}
     if anom.get("critical", 0) > 0:
         add("anomaly_crit", "urgent",

@@ -83,3 +83,32 @@ def test_severity_order():
     sevs = [x["severity"] for x in s]
     order = {"urgent": 0, "warn": 1, "opportunity": 2, "info": 3}
     assert sevs == sorted(sevs, key=lambda x: order[x])   # отсортировано по важности
+
+
+# ── Virtual Layer → действие ────────────────────────────────────────────────
+
+def test_hot_ready_contacts_prompt_to_close():
+    s = build_suggestions(_snap(vlayer={"ready": 7, "hot": 10, "audience": None}))
+    v = next(x for x in s if x["id"] == "vlayer_hot")
+    assert "7" in v["title"] and v["action"]["kind"] == "vlayer"
+
+
+def test_few_ready_do_not_nag():
+    """Порог 5 — не дёргать по одному лиду."""
+    assert "vlayer_hot" not in _ids(build_suggestions(
+        _snap(vlayer={"ready": 2, "hot": 3, "audience": None})))
+
+
+def test_hot_audience_prompts_broadcast_when_no_ready_bucket():
+    s = build_suggestions(_snap(vlayer={"ready": 0, "hot": 0, "audience": "hot"}))
+    assert "vlayer_audience" in _ids(s)
+
+
+def test_ready_bucket_takes_precedence_over_audience():
+    """Конкретные готовые важнее общей температуры — одна подсказка, не две."""
+    ids = _ids(build_suggestions(_snap(vlayer={"ready": 8, "hot": 8, "audience": "hot"})))
+    assert "vlayer_hot" in ids and "vlayer_audience" not in ids
+
+
+def test_quiet_layer_says_nothing():
+    assert "vlayer_hot" not in _ids(build_suggestions(_snap()))
