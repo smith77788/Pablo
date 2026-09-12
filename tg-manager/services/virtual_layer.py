@@ -398,7 +398,7 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     Лента виртуальных событий берётся отдельно из spine (это его память),
     поэтому здесь только состояния. Fail-open: пустая сводка вместо падения.
     """
-    out = {"funnel": [], "hot": [], "total": 0}
+    out = {"funnel": [], "hot": [], "total": 0, "audience": None}
     try:
         rows = await pool.fetch(
             "SELECT value, COUNT(*) AS c FROM virtual_states "
@@ -428,4 +428,11 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
             for r in hot_rows]
     except Exception:
         log.debug("virtual_layer.overview hot failed owner=%s", owner_id)
+    # Температура аудитории (каскад): hot|warm|None.
+    try:
+        aud = await get_state(pool, owner_id, NETWORK, "audience", state_key)
+        if aud:
+            out["audience"] = aud.get("value")
+    except Exception:
+        log.debug("virtual_layer.overview audience failed owner=%s", owner_id)
     return out

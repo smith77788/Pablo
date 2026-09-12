@@ -61,12 +61,26 @@ async def _tick(pool, bot) -> int:
         except Exception:
             log.debug("organism.runner: virtual_layer decay failed", exc_info=True)
     sent = 0
+    _do_cascade = now - _last_prune < 1      # тот же редкий проход, что прунинг
     for oid in await _active_owners(pool):
         try:
             if await _tick_owner(pool, bot, oid):
                 sent += 1
         except Exception:
             log.debug("organism.runner: owner %s failed", oid, exc_info=True)
+        # Каскад аудитории: свернуть состояния всех контактов владельца в единую
+        # «температуру» (много «горячих» → аудитория горячая). Чистого маппинга
+        # контакт→бот нет, поэтому катим на уровень аудитории — это и есть
+        # пример «147 горячих → кампания горячая». Тихо: пишет только на смену
+        # вердикта. Реже нуджей (по флагу редкого прохода) — это не горячий путь.
+        if _do_cascade:
+            try:
+                from services import virtual_layer as _vl
+                await _vl.recompute_cascade(
+                    pool, oid, _vl.NETWORK, "audience", _vl.USER,
+                    min_count=20, min_share=0.15)
+            except Exception:
+                log.debug("organism.runner: cascade failed owner=%s", oid, exc_info=True)
     if sent:
         log.info("organism.runner: нуджей отправлено %d", sent)
     return sent

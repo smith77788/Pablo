@@ -9816,7 +9816,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.debug("vlayer_overview events failed uid=%s", uid)
         return _json_resp({"ok": True, "funnel": ov["funnel"], "hot": ov["hot"],
-                           "total": ov["total"], "events": events})
+                           "total": ov["total"], "audience": ov.get("audience"),
+                           "events": events})
 
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 

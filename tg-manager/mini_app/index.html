@@ -17223,6 +17223,15 @@ async function openVLayer() {
     }
     // Воронка: полоски по рунгам.
     const max = Math.max(...funnel.map(f => f.count), 1);
+    if (d.audience) {
+      const t = d.audience === 'hot'
+        ? {e:'🔥', l:'Аудитория горячая', c:'var(--red)'}
+        : {e:'🌡', l:'Аудитория тёплая', c:'var(--orange)'};
+      html += `<div class="card" style="border-left:3px solid ${t.c};margin-bottom:8px">
+        <div style="font-weight:600;font-size:14px">${t.e} ${t.l}</div>
+        <div style="font-size:12px;color:var(--hint);margin-top:2px">Готовых и квалифицированных набралось достаточно — момент для рассылки/оффера.</div>
+      </div>`;
+    }
     html += '<div class="sec">Воронка аудитории</div>';
     html += funnel.map(f => {
       const w = Math.max(4, Math.round(f.count / max * 100));
