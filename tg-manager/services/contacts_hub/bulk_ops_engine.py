@@ -43,11 +43,96 @@ async def bulk_set_favorite(pool, owner_id: int, contact_ids: list, is_favorite:
 
 
 async def bulk_delete(pool, owner_id: int, contact_ids: list) -> dict:
+    if not contact_ids:
+        return {'deleted': 0}
     placeholders = ','.join([f'${i+2}' for i in range(len(contact_ids))])
     params = [owner_id] + contact_ids
     result = await pool.execute(
         f'DELETE FROM unified_contacts WHERE owner_id=$1 AND id IN ({placeholders})', *params)
     return {'deleted': int(result.split()[-1]) if result.startswith('DELETE') else 0}
+
+
+# ── Личные/исключённые контакты (не идут в рабочие сегменты) ──────────────────
+async def set_excluded(pool, owner_id: int, contact_ids: list, excluded: bool) -> dict:
+    """Пометить/снять пометку «личный» (excluded). Помеченные не попадают в
+    рабочие срезы (рассылки/инвайты по сегменту), но видны в общем списке."""
+    if not contact_ids:
+        return {'updated': 0}
+    total = 0
+    for i in range(0, len(contact_ids), 500):
+        chunk = contact_ids[i:i + 500]
+        placeholders = ','.join(f'${j + 3}' for j in range(len(chunk)))
+        ts = 'NOW()' if excluded else 'NULL'
+        result = await pool.execute(
+            f'UPDATE unified_contacts SET excluded=$1, excluded_at={ts}, updated_at=NOW() '
+            f'WHERE owner_id=$2 AND id IN ({placeholders})',
+            bool(excluded), owner_id, *chunk)
+        total += int(result.split()[-1]) if result.startswith('UPDATE') else 0
+    return {'updated': total}
+
+
+# ── Резолвер по фильтру (страна из номера / тег / аккаунт-источник) ────────────
+async def resolve_filter_ids(pool, owner_id: int, *, country: str | None = None,
+                             tag: str | None = None,
+                             account_id: int | None = None) -> list:
+    """id контактов владельца под фильтр. country — ISO-код (из префикса номера,
+    через account_manager.country_code_from_phone); tag — тег; account_id —
+    аккаунт-источник. Пустой фильтр → пустой список (не даём удалить всё случайно)."""
+    if not any([country, tag, account_id]):
+        return []
+    conds = ['owner_id = $1']
+    params = [owner_id]
+    idx = 2
+    if tag:
+        conds.append(f'${idx} = ANY(tags)'); params.append(tag); idx += 1
+    if account_id:
+        conds.append(f'EXISTS (SELECT 1 FROM contact_sources cs '
+                     f'WHERE cs.contact_id = unified_contacts.id AND cs.account_id = ${idx})')
+        params.append(int(account_id)); idx += 1
+    rows = await pool.fetch(
+        f'SELECT id, phones FROM unified_contacts WHERE {" AND ".join(conds)}', *params)
+    if not country:
+        return [str(r['id']) for r in rows]
+    from services.account_manager import country_code_from_phone
+    want = country.strip().upper()
+    out = []
+    for r in rows:
+        phones = r['phones']
+        if isinstance(phones, str):
+            try:
+                phones = json.loads(phones or '[]')
+            except (json.JSONDecodeError, TypeError):
+                phones = []
+        isos = {country_code_from_phone(p) for p in (phones or [])}
+        if want in {c for c in isos if c}:
+            out.append(str(r['id']))
+    return out
+
+
+async def count_by_filter(pool, owner_id: int, *, country: str | None = None,
+                          tag: str | None = None, account_id: int | None = None) -> int:
+    return len(await resolve_filter_ids(pool, owner_id, country=country, tag=tag,
+                                        account_id=account_id))
+
+
+async def exclude_by_filter(pool, owner_id: int, *, excluded: bool = True,
+                            country: str | None = None, tag: str | None = None,
+                            account_id: int | None = None) -> dict:
+    ids = await resolve_filter_ids(pool, owner_id, country=country, tag=tag,
+                                   account_id=account_id)
+    return await set_excluded(pool, owner_id, ids, excluded)
+
+
+async def delete_by_filter(pool, owner_id: int, *, country: str | None = None,
+                           tag: str | None = None, account_id: int | None = None) -> dict:
+    """Массовое удаление контактов под фильтр (страна/тег/источник). Пустой
+    фильтр ничего не удаляет — защита от «снёс всё»."""
+    ids = await resolve_filter_ids(pool, owner_id, country=country, tag=tag,
+                                   account_id=account_id)
+    total = 0
+    for i in range(0, len(ids), 500):
+        total += (await bulk_delete(pool, owner_id, ids[i:i + 500]))['deleted']
+    return {'deleted': total}
 
 
 async def bulk_add_to_group(pool, owner_id: int, contact_ids: list, group_id: int) -> dict:

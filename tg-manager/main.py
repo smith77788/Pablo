@@ -759,6 +759,10 @@ async def main() -> None:
         # /account/{id}/bots падал бы с «column acc_id does not exist».
         "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS acc_id INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_managed_bots_acc_id ON managed_bots(acc_id)",
+        # Контакты: пометка «личный/исключён из работы» (schema_v211). Читается
+        # _segment_where на рабочем пути — при лаге миграции путь падал бы.
+        "ALTER TABLE unified_contacts ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE unified_contacts ADD COLUMN IF NOT EXISTS excluded_at TIMESTAMPTZ",
         # Менеджер по продажам: минимальный заказ/порог доставки по товару и правила
         # заказа на уровне персоны (schema_v205). Их читает build_system_prompt и
         # пишут add_product/update_persona — при лаге миграции путь падал бы с

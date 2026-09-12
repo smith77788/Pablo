@@ -3214,6 +3214,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span class="chip" style="flex:0 0 auto" onclick="openIntentSensor()">🎯 Намерения</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchReminders()">⏰ Напоминания</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchExport()">📤 Экспорт</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openUchCleanup()">🧹 Чистка / личные</span>
     </div>
     <div style="padding:6px 0">
       <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов..." oninput="searchContacts()" class="inp">
@@ -3349,6 +3350,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-uchexport">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📤 Экспорт контактов</div></div>
   <div class="sub-sb" id="expBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<div class="screen" id="s-uchcleanup">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧹 Чистка / личные</div></div>
+  <div class="sub-sb" id="uchCleanBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchgraph">
@@ -14603,6 +14609,16 @@ async function loadContactStats() {
 
 let CURRENT_CONTACT_ID = null;
 
+async function cdToggleExclude(excluded) {
+  if (!CURRENT_CONTACT_ID) return;
+  try {
+    await api('/api/miniapp/uch/bulk/exclude', { method: 'POST',
+      body: JSON.stringify({ contact_ids: [CURRENT_CONTACT_ID], excluded: excluded }) });
+    toast(excluded ? 'Помечен личным — вне рассылок/инвайтов' : 'Возвращён в работу');
+    openContactDetail(CURRENT_CONTACT_ID);
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
 async function openContactDetail(id) {
   CURRENT_CONTACT_ID = id;
   push('s-contactdetail');
@@ -14643,6 +14659,7 @@ async function openContactDetail(id) {
       <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:0">📋 ID</button>
       ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:0">📋 Тел.</button>`:''}
       ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0">📋 Email</button>`:''}
+      <button class="btn btn-s" id="cdExclBtn" onclick="cdToggleExclude(${c.excluded?'false':'true'})" style="flex:0">${c.excluded?'↩️ Вернуть в работу':'🙈 Личный (вне работы)'}</button>
     </div>`;
     html += `<div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="openContactWrite()" style="flex:0">✍️ Написать</button>
@@ -15396,6 +15413,64 @@ async function openUchExport() {
     </div>
   </div>`;
   txt('expBody', html);
+}
+
+function openUchCleanup() {
+  push('s-uchcleanup');
+  const html = `<div style="padding:14px 16px">
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:12px">
+      Личные контакты можно пометить — они <b>останутся в списке</b>, но <b>не будут
+      попадать в рассылки и инвайты по сегментам</b>. А по фильтру (страна из номера
+      или тег) можно массово пометить личными или удалить.
+    </div>
+    <div class="sec">Фильтр</div>
+    <div style="display:flex;gap:8px;margin:8px 0">
+      <input id="uchClCountry" class="inp" placeholder="Страна ISO (RU, US, UA…)" style="flex:1;text-transform:uppercase">
+      <input id="uchClTag" class="inp" placeholder="Тег" style="flex:1">
+    </div>
+    <button class="btn btn-s" style="width:100%;margin-bottom:6px" onclick="uchClPreview()">🔎 Предпросмотр — сколько попадёт</button>
+    <div id="uchClCount" style="font-size:13px;text-align:center;color:var(--hint);margin-bottom:10px"></div>
+    <button class="btn btn-s" style="width:100%;margin-bottom:6px" onclick="uchClExclude(true)">🙈 Пометить личными (убрать из работы)</button>
+    <button class="btn btn-s" style="width:100%;margin-bottom:6px" onclick="uchClExclude(false)">↩️ Снять пометку «личный»</button>
+    <button class="btn btn-s" style="width:100%;color:var(--red);margin-bottom:16px" onclick="uchClDelete()">🗑 Удалить всё под фильтр (безвозвратно)</button>
+    <div style="font-size:12px;color:var(--hint)">Совет: сначала «Предпросмотр», затем действие. Пустой фильтр ничего не тронет.</div>
+  </div>`;
+  txt('uchCleanBody', html);
+}
+
+function _uchClFilter() {
+  const country = (document.getElementById('uchClCountry').value || '').trim().toUpperCase();
+  const tag = (document.getElementById('uchClTag').value || '').trim();
+  return { country: country || undefined, tag: tag || undefined };
+}
+
+async function uchClPreview() {
+  const f = _uchClFilter();
+  if (!f.country && !f.tag) { toast('Задайте страну или тег'); return; }
+  try {
+    const d = await api('/api/miniapp/uch/filter/preview', { method: 'POST', body: JSON.stringify(f) });
+    document.getElementById('uchClCount').textContent = 'Под фильтр попадает: ' + (d.count || 0) + ' контактов';
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function uchClExclude(excluded) {
+  const f = _uchClFilter();
+  if (!f.country && !f.tag) { toast('Задайте страну или тег'); return; }
+  try {
+    const d = await api('/api/miniapp/uch/filter/exclude', { method: 'POST', body: JSON.stringify({ ...f, excluded: excluded }) });
+    toast((excluded ? 'Помечено личными: ' : 'Снято пометок: ') + (d.updated || 0));
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+async function uchClDelete() {
+  const f = _uchClFilter();
+  if (!f.country && !f.tag) { toast('Задайте страну или тег'); return; }
+  if (!await askConfirm('Удалить БЕЗВОЗВРАТНО все контакты под фильтр? Сначала лучше сделать предпросмотр.')) return;
+  try {
+    const d = await api('/api/miniapp/uch/filter/delete', { method: 'POST', body: JSON.stringify({ ...f, confirm: true }) });
+    toast('Удалено: ' + (d.deleted || 0));
+    document.getElementById('uchClCount').textContent = '';
+  } catch (e) { toast(e.message || 'Ошибка'); }
 }
 
 async function openUchGraph() {

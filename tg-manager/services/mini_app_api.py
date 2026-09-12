@@ -18379,6 +18379,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if gender not in ('m', 'f', 'unknown'):
             gender = None
         crm_stage = (request.query.get('crm_stage') or '').strip()[:40] or None
+        excluded_only = request.query.get('excluded_only') == '1'  # только личные (управление)
         # Пагинация: без неё список молча обрезался дефолтным limit=100 — при 2.9к+
         # контактов пользователь видел «лишь десятки» и не мог долистать до
         # остальных. limit зажат, offset — для «Показать ещё».
@@ -18395,6 +18396,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
                                         tag=tag, premium_only=premium, multi_only=multi,
                                         mutual_only=mutual, gender=gender, crm_stage=crm_stage,
+                                        excluded_only=excluded_only,
                                         limit=limit, offset=offset)
             result['offset'] = offset
             result['limit'] = limit
@@ -19794,6 +19796,69 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             return _err(str(e), 500)
 
+    async def uch_bulk_exclude(request: web.Request) -> web.Response:
+        """Пометить/снять «личный» (исключить из рабочих сегментов) по списку id."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            from services.contacts_hub.bulk_ops_engine import set_excluded
+            result = await set_excluded(pool, uid, data.get('contact_ids', []),
+                                        bool(data.get('excluded', True)))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_filter_preview(request: web.Request) -> web.Response:
+        """Сколько контактов попадёт под фильтр (страна/тег/источник) — до действия."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            d = await request.json()
+            from services.contacts_hub.bulk_ops_engine import count_by_filter
+            n = await count_by_filter(
+                pool, uid, country=(d.get('country') or None),
+                tag=(d.get('tag') or None),
+                account_id=(int(d['account_id']) if d.get('account_id') else None))
+            return _json_resp({'count': n})
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_filter_exclude(request: web.Request) -> web.Response:
+        """Пометить «личными»/снять пометку у всех под фильтр (страна/тег/источник)."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            d = await request.json()
+            from services.contacts_hub.bulk_ops_engine import exclude_by_filter
+            result = await exclude_by_filter(
+                pool, uid, excluded=bool(d.get('excluded', True)),
+                country=(d.get('country') or None), tag=(d.get('tag') or None),
+                account_id=(int(d['account_id']) if d.get('account_id') else None))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
+    async def uch_filter_delete(request: web.Request) -> web.Response:
+        """Массовое удаление контактов под фильтр (страна/тег/источник). Требует
+        confirm=true — защита от случайного сноса."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            d = await request.json()
+            if not d.get('confirm'):
+                return _err("нужно подтверждение (confirm)", 400)
+            if not any([d.get('country'), d.get('tag'), d.get('account_id')]):
+                return _err("пустой фильтр — нечего удалять", 400)
+            from services.contacts_hub.bulk_ops_engine import delete_by_filter
+            result = await delete_by_filter(
+                pool, uid, country=(d.get('country') or None),
+                tag=(d.get('tag') or None),
+                account_id=(int(d['account_id']) if d.get('account_id') else None))
+            return _json_resp(result)
+        except Exception as e:
+            return _err(str(e), 500)
+
     async def uch_bulk_group(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -20032,6 +20097,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/uch/bulk/untag", uch_bulk_untag)
     app.router.add_post("/api/miniapp/uch/bulk/favorite", uch_bulk_favorite)
     app.router.add_post("/api/miniapp/uch/bulk/delete", uch_bulk_delete)
+    app.router.add_post("/api/miniapp/uch/bulk/exclude", uch_bulk_exclude)
+    app.router.add_post("/api/miniapp/uch/filter/preview", uch_filter_preview)
+    app.router.add_post("/api/miniapp/uch/filter/exclude", uch_filter_exclude)
+    app.router.add_post("/api/miniapp/uch/filter/delete", uch_filter_delete)
     app.router.add_post("/api/miniapp/uch/bulk/group", uch_bulk_group)
     app.router.add_post("/api/miniapp/uch/bulk/merge", uch_bulk_merge)
     app.router.add_post("/api/miniapp/uch/bulk/export", uch_bulk_export)

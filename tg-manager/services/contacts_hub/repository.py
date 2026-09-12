@@ -45,6 +45,13 @@ def _segment_where(owner_id, f: dict):
     conds = ['owner_id = $1']
     params = [owner_id]
     idx = 2
+    # Личные/исключённые контакты не попадают в РАБОЧИЙ срез (рассылки/инвайты по
+    # сегменту). По умолчанию исключаем; просмотр списка передаёт include_excluded,
+    # а управление личными — excluded_only.
+    if f.get('excluded_only'):
+        conds.append('excluded = TRUE')
+    elif not f.get('include_excluded'):
+        conds.append('excluded = FALSE')
     if f.get('search'):
         conds.append(
             f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
@@ -85,12 +92,16 @@ def _segment_where(owner_id, f: dict):
 async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
                        favorite_only=False, premium_only=False, multi_only=False,
                        mutual_only=False, gender=None, crm_stage=None,
-                       account_id=None,
+                       account_id=None, excluded_only=False,
                        sort_by='first_name', limit=100, offset=0) -> dict:
+    # Просмотр списка показывает ВСЕ контакты (в т.ч. личные — их надо видеть и
+    # уметь снять пометку); excluded_only — режим управления только личными.
     filters = {'search': search, 'tag': tag, 'group_id': group_id,
                'favorite_only': favorite_only, 'premium_only': premium_only,
                'multi_only': multi_only, 'mutual_only': mutual_only,
-               'gender': gender, 'crm_stage': crm_stage, 'account_id': account_id}
+               'gender': gender, 'crm_stage': crm_stage, 'account_id': account_id,
+               'excluded_only': excluded_only,
+               'include_excluded': not excluded_only}
     where, params, idx = _segment_where(owner_id, filters)
     sort_map = {
         'name': 'first_name, last_name',
