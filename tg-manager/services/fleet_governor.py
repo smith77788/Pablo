@@ -56,6 +56,15 @@ async def tempo_multiplier(pool: asyncpg.Pool, owner_id: int) -> float:
         mult = multiplier_for_score(int(p.get("score", 0) or 0))
     except Exception as e:
         log.debug("fleet_governor: pressure failed owner=%s: %s", owner_id, e)
+    # Anti-Storm — событийный клэмп поверх инерционного давления. Волна банов
+    # ловится хуком мгновенно и держит резкий множитель фиксированное окно;
+    # берём более сильный из двух, чтобы шторм не «размылся» медленным прессом.
+    try:
+        from services import anti_storm
+        storm_mult = (await anti_storm.current(pool, owner_id)).get("mult", 1.0)
+        mult = max(mult, float(storm_mult or 1.0))
+    except Exception as e:
+        log.debug("fleet_governor: anti_storm failed owner=%s: %s", owner_id, e)
     _CACHE[owner_id] = (now + _TTL, mult)
     return mult
 
@@ -74,8 +83,16 @@ async def status(pool: asyncpg.Pool, owner_id: int) -> dict:
         p = {}
     score = int(p.get("score", 0) or 0)
     mult = multiplier_for_score(score)
+    storm = {"level": "calm", "mult": 1.0, "until": None}
+    try:
+        from services import anti_storm
+        storm = await anti_storm.current(pool, owner_id)
+    except Exception:
+        pass
+    storm_mult = float(storm.get("mult", 1.0) or 1.0)
+    mult = max(mult, storm_mult)
     level = level_for_multiplier(mult)
-    return {
+    out = {
         "score": score,
         "multiplier": mult,
         "level": level,
@@ -84,6 +101,13 @@ async def status(pool: asyncpg.Pool, owner_id: int) -> dict:
         "breakdown": p.get("breakdown", {}),
         "explain": _explain(level, mult),
     }
+    if storm_mult > 1.0:
+        out["storm"] = storm
+        out["explain"] = (
+            f"🌩 Anti-Storm: обнаружена волна банов — флот в защитном режиме "
+            f"(темп ×{storm_mult:g}). Переждём чистку, чтобы не жечь остальные "
+            "аккаунты; режим снимется сам.")
+    return out
 
 
 def _explain(level: str, mult: float) -> str:

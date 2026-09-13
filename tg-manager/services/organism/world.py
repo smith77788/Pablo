@@ -246,6 +246,8 @@ async def _fleet(pool, owner_id: int) -> dict:
         out["pressure"] = g.get("score", 0)
         out["governor_mult"] = g.get("multiplier", 1.0)
         out["governor_level"] = g.get("level", "green")
+        if g.get("storm"):
+            out["storm"] = g["storm"]
     except Exception:
         log.debug("world._fleet governor failed owner=%s", owner_id)
     try:

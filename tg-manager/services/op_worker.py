@@ -637,9 +637,11 @@ async def _governed_sleep(pool, owner_id: int, base: float) -> None:
     await asyncio.sleep(await _governed_delay(pool, owner_id, base))
 
 
-async def _on_account_banned(pool, owner_id: int, acc_id: int, where: str) -> None:
+async def _on_account_banned(pool, owner_id: int, acc_id: int, where: str,
+                             *, bot=None) -> None:
     """Реакция на бан: мгновенно сбросить кэш губернатора (чтобы темп упал СЕЙЧАС,
-    а не через 45с) и записать событие в память организма. Fail-open."""
+    а не через 45с), записать событие в память организма и проверить, не идёт ли
+    ВОЛНА банов (Anti-Storm). Fail-open."""
     try:
         from services import fleet_governor
         fleet_governor.invalidate(owner_id)
@@ -648,6 +650,13 @@ async def _on_account_banned(pool, owner_id: int, acc_id: int, where: str) -> No
     try:
         from services.organism import spine
         await spine.emit(pool, owner_id, "ban", {"account_id": acc_id, "where": where})
+    except Exception:
+        pass
+    # Anti-Storm: событийный предохранитель. Считает РАЗНЫЕ пострадавшие аккаунты
+    # за окно и при всплеске переводит флот в глубокий сон, переждать чистку.
+    try:
+        from services import anti_storm
+        await anti_storm.check_and_arm(pool, owner_id, bot=bot)
     except Exception:
         pass
 
@@ -7396,7 +7405,7 @@ async def _exec_bulk_dm_adhoc(
                     # Мёртвая сессия. Прежний код искал ключ 'banned', которого
                     # send_dm никогда не возвращает, — то есть не ловил это вообще.
                     await _db.deactivate_account(pool, acc["id"], "dead session in bulk_dm_adhoc")
-                    await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc")
+                    await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc", bot=bot)
                     active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
                     err_count += 1
                     await _log_step(i + 1, username, "error", f"сессия мертва · акк {acc['id']}")
@@ -7615,7 +7624,7 @@ async def _exec_bulk_post_to_channel(
                 continue
             if result.get("banned"):
                 await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
-                await _on_account_banned(pool, owner_id, acc["id"], "bulk_op")
+                await _on_account_banned(pool, owner_id, acc["id"], "bulk_op", bot=bot)
                 err_list.append(f"❌ {label}: забанен")
             elif result.get("flood_wait"):
                 err_list.append(f"⏳ {label}: flood_wait, пропущен")
