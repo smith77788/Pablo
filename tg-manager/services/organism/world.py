@@ -123,6 +123,14 @@ async def _growth(pool, owner_id: int) -> dict:
             owner_id, list(growth_center.GROWTH_OP_TYPES)) or 0)
     except Exception:
         log.debug("world._growth failed owner=%s", owner_id)
+    # Дозор роста: подозрение на накрутку подписчиков по ряду снимков.
+    try:
+        from services import growth_sentry
+        s = await growth_sentry.summary(pool, owner_id)
+        out["suspicious"] = s.get("suspicious", 0)
+        out["fake_top"] = s.get("fake_top")
+    except Exception:
+        log.debug("world._growth sentry failed owner=%s", owner_id)
     return out
 
 

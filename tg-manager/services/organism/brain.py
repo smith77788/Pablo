@@ -168,6 +168,15 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
             {"kind": "community"})
 
     growth = snap.get("growth") or {}
+    if growth.get("suspicious", 0) > 0:
+        top = growth.get("fake_top")
+        add("growth_fake", "warn",
+            f"Подозрение на накрутку: {growth['suspicious']} канал(ов)",
+            (f"«{top}» и др. — " if top else "")
+            + "резкий неорганический скачок подписчиков (боты влетают разом и "
+            "осыпаются, мёртвая аудитория режет охваты). Проверьте источник "
+            "прироста, пока не занизило охваты.",
+            {"kind": "growth"})
     if growth.get("channels", 0) > 0 and growth.get("growth_ops_7d", 0) == 0:
         add("growth_stall", "opportunity",
             f"{growth['channels']} каналов без роста 7 дн.",

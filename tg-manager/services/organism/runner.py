@@ -81,6 +81,14 @@ async def _tick(pool, bot) -> int:
                     min_count=20, min_share=0.15)
             except Exception:
                 log.debug("organism.runner: cascade failed owner=%s", oid, exc_info=True)
+            # Дозор роста: запомнить новые всплески/обвалы подписчиков (дедуп внутри).
+            try:
+                from services import growth_sentry
+                found = await growth_sentry.scan_and_remember(pool, oid)
+                if found:
+                    log.info("organism.runner: аномалий роста owner=%s: %d", oid, len(found))
+            except Exception:
+                log.debug("organism.runner: growth_sentry failed owner=%s", oid, exc_info=True)
     if sent:
         log.info("organism.runner: нуджей отправлено %d", sent)
     return sent
