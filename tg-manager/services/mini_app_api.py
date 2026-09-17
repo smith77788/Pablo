@@ -21473,6 +21473,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mini_app")
     _index_path = os.path.join(_static_dir, "index.html")
+    # PWA: .webmanifest иначе отдаётся octet-stream и часть браузеров ворчит.
+    import mimetypes as _mt
+    _mt.add_type("application/manifest+json", ".webmanifest")
     # Сжатый мини-апп в памяти: {"key": (mtime, size), "body": bytes}.
     # Пересобирается сам, когда файл меняется (деплой) — ключ перестаёт совпадать.
     _MINIAPP_GZ: dict = {}

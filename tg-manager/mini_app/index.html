@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Infragram</title>
+<!-- PWA: установка на Android как приложение (вне Telegram). Пути относительные —
+     как у telegram-web-app.js и screens/*.js: приложение отдаётся из /miniapp/. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Infragram">
 <!-- Telegram SDK грузим СВОЕЙ копией (тот же origin, что и приложение): у многих
      операторов telegram.org/js/* заблокирован провайдером, хотя сам Telegram
      работает — внешний скрипт не открывался и приложение висело пустым («не
@@ -649,6 +657,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .field textarea:focus,.field input:focus,.field select:focus,.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.12)}
 .nav-item.on{background:rgba(45,212,191,.10);color:var(--accent)}
 </style>
+<script>
+  /* PWA: регистрируем service worker после загрузки — не мешаем запуску
+     приложения и раннему скрипту безопасности выше. Scope = каталог sw.js
+     (/miniapp/); запросы к /api/* он не перехватывает. */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      try { navigator.serviceWorker.register('sw.js'); } catch (e) {}
+    });
+  }
+</script>
 </head>
 <body>
 <!-- Экран фатальной ошибки старта. Лежит в разметке СТАТИЧЕСКИ: если скрипт
@@ -6598,6 +6616,105 @@ function forceRefresh() {
 // умирает, авторизации нет, данные не грузятся (видны только статичные плитки).
 const FETCH_TIMEOUT_MS = 30000;
 
+// ── Автономный вход (PWA/приложение вне Telegram) ───────
+// Внутри Telegram авторизуемся через initData. Вне Telegram initData нет,
+// поэтому используем связывание устройства: код из бота (/pair) → токен
+// устройства (хранится локально) → обычный сессионный токен. Точка доверия та
+// же — Telegram-бот; второго логина с паролем нет.
+const DEVICE_TOKEN_KEY = 'ig_device_token';
+
+async function acquireSessionToken() {
+  if (tg.initData) {                       // обычный путь внутри Telegram
+    const r = await fetchT('/api/miniapp/auth', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({initData: tg.initData}),
+    });
+    if (!r.ok) throw new Error('Auth '+r.status);
+    return (await r.json()).token;
+  }
+  // Вне Telegram: связывание устройства.
+  let dt = null;
+  try { dt = localStorage.getItem(DEVICE_TOKEN_KEY); } catch(_) {}
+  if (dt) {
+    const tok = await exchangeDeviceToken(dt);
+    if (tok) return tok;
+    try { localStorage.removeItem(DEVICE_TOKEN_KEY); } catch(_) {}
+  }
+  for (;;) {                               // просим код из бота, пока не войдём
+    const code = await askPairingCode();
+    const pr = await fetchT('/api/miniapp/pair', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({code, label: (navigator.userAgent||'').slice(0,80)}),
+    });
+    if (!pr.ok) { showPairingError('Код неверный или истёк. Возьмите новый в боте: /pair'); continue; }
+    const newDt = (await pr.json()).device_token;
+    try { localStorage.setItem(DEVICE_TOKEN_KEY, newDt); } catch(_) {}
+    const tok = await exchangeDeviceToken(newDt);
+    if (tok) { hidePairingOverlay(); return tok; }
+    showPairingError('Не удалось войти. Попробуйте ещё раз.');
+  }
+}
+
+async function exchangeDeviceToken(dt) {
+  try {
+    const r = await fetchT('/api/miniapp/pair/exchange', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({device_token: dt}),
+    });
+    if (!r.ok) return null;
+    return (await r.json()).token;
+  } catch(_) { return null; }
+}
+
+// Оверлей ввода кода связывания. Возвращает Promise<код>.
+function askPairingCode() {
+  return new Promise((resolve) => {
+    let ov = document.getElementById('pairOverlay');
+    if (!ov) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML =
+        '<div id="pairOverlay" style="position:fixed;inset:0;z-index:99999;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,-apple-system,sans-serif">'
+        + '<div style="max-width:360px;width:100%;text-align:center">'
+        + '<div style="font-size:44px;margin-bottom:8px">🔗</div>'
+        + '<h2 style="margin:0 0 8px;font-size:20px">Вход в Infragram</h2>'
+        + '<p style="margin:0 0 16px;font-size:14px;color:#94a3b8;line-height:1.5">'
+        + 'Откройте бота Infragram в Telegram, отправьте команду <b>/pair</b> '
+        + 'и введите здесь полученный код.</p>'
+        + '<input id="pairInput" autocapitalize="characters" autocomplete="off" '
+        + 'placeholder="XXXX-XXXX" maxlength="9" '
+        + 'style="width:100%;box-sizing:border-box;padding:14px;font-size:20px;'
+        + 'text-align:center;letter-spacing:2px;border-radius:12px;border:1px solid #334155;'
+        + 'background:#1e293b;color:#e2e8f0;text-transform:uppercase;margin-bottom:12px">'
+        + '<button id="pairBtn" style="width:100%;padding:14px;font-size:16px;cursor:pointer;'
+        + 'border:none;border-radius:12px;background:#3b82f6;color:#fff;font-weight:600">'
+        + 'Войти</button>'
+        + '<div id="pairErr" style="color:#f87171;font-size:13px;margin-top:10px;min-height:18px"></div>'
+        + '</div>'
+        + '</div>';
+      ov = wrap.firstElementChild;
+      document.body.appendChild(ov);
+    }
+    ov.style.display = 'flex';
+    const input = ov.querySelector('#pairInput');
+    const btn = ov.querySelector('#pairBtn');
+    ov.querySelector('#pairErr').textContent = '';
+    input.value = '';
+    setTimeout(function(){ try{input.focus();}catch(_){} }, 50);
+    const submit = function () {
+      const v = (input.value||'').trim();
+      if (v.replace(/[^0-9A-Za-z]/g,'').length < 8) { showPairingError('Введите код полностью.'); return; }
+      btn.removeEventListener('click', submit);
+      input.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    const onKey = function (e) { if (e.key === 'Enter') submit(); };
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', onKey);
+  });
+}
+function showPairingError(msg){ const e=document.getElementById('pairErr'); if(e) e.textContent=msg; }
+function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); if(ov) ov.style.display='none'; }
+
 // ── Boot ───────────────────────────────────────────────
 (async function boot() {
   const u = tg.initDataUnsafe?.user;
@@ -6607,12 +6724,9 @@ const FETCH_TIMEOUT_MS = 30000;
     // ВАЖНО: с таймаутом. Если этот запрос повиснет, boot() не дойдёт ни до
     // loadHome(), ни до catch — экран останется в стартовых скелетонах, и
     // пользователь увидит «вечную загрузку» без единого слова о причине.
-    const r = await fetchT('/api/miniapp/auth', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({initData: tg.initData || ''}),
-    });
-    if (!r.ok) throw new Error('Auth '+r.status);
-    TK = (await r.json()).token;
+    // Внутри Telegram — вход по initData; вне (PWA/приложение) — по связыванию
+    // устройства. Обе ветки возвращают обычный сессионный токен.
+    TK = await acquireSessionToken();
     fetch('/api/miniapp/config').then(r=>r.json()).then(cfg=>{
       if(cfg.bot_username) window._botUsername = cfg.bot_username;
       if(cfg.paid_price) window._paidPrice = cfg.paid_price;

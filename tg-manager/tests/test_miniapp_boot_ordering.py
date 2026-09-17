@@ -46,11 +46,27 @@ def test_fetch_timeout_declared_exactly_once():
     assert len(re.findall(r"\bconst\s+FETCH_TIMEOUT_MS\b", _html())) == 1
 
 
-def test_boot_calls_fetcht_for_auth():
-    # фиксируем инвариант, из-за которого важен порядок: boot СИНХРОННО дергает
-    # fetchT на /auth (дефолтный ms=FETCH_TIMEOUT_MS)
+def test_boot_acquires_session_token():
+    # boot() получает сессионный токен через acquireSessionToken() — в Telegram
+    # по initData, вне Telegram (PWA/приложение) по связыванию устройства. Обе
+    # ветки СИНХРОННО дергают fetchT (дефолт ms=FETCH_TIMEOUT_MS), поэтому важен
+    # порядок объявлений (см. test_fetch_timeout_declared_before_boot).
     html = _html()
     i_boot = html.find("function boot()")
     seg = html[i_boot:i_boot + 900]
+    assert "acquireSessionToken(" in seg, \
+        "boot() больше не зовёт acquireSessionToken() — обнови инвариант, если намеренно"
+
+
+def test_auth_fetch_uses_fetcht_with_timeout():
+    # Инвариант TDZ: запрос на /auth идёт через fetchT (с таймаутом), а сам
+    # fetchT берёт дефолт ms=FETCH_TIMEOUT_MS. Объявление токен-функции —
+    # ПОСЛЕ const FETCH_TIMEOUT_MS (проверяется отдельным тестом).
+    html = _html()
+    i_fn = html.find("function acquireSessionToken(")
+    assert i_fn != -1, "не найдена acquireSessionToken()"
+    seg = html[i_fn:i_fn + 1200]
     assert "fetchT('/api/miniapp/auth'" in seg or 'fetchT("/api/miniapp/auth"' in seg, \
-        "boot() больше не зовёт fetchT('/auth') — обнови инвариант теста, если это намеренно"
+        "вход по initData больше не идёт через fetchT('/auth') — проверь намеренность"
+    assert html.find("const FETCH_TIMEOUT_MS") < i_fn, \
+        "FETCH_TIMEOUT_MS должен быть объявлен до acquireSessionToken() (TDZ)"
