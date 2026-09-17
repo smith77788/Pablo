@@ -1356,85 +1356,94 @@ async def _run_daily_warmup_impl(
         await _note_skip(pool, plan_id, "busy")
         return _skip_result
 
-    # Профиль аккаунта из таблицы niche_profiles (если есть)
-    niche_row = await pool.fetchrow(
-        "SELECT niche, profile_type FROM account_niche_profiles WHERE account_id=$1",
-        account_id,
-    )
-    acc_profile = (niche_row["profile_type"] if niche_row else None) or "mixed"
-
-    device = dict(acc_row) if acc_row["device_model"] else None
-    client = account_manager._make_client(acc_row["session_str"], device)
-
+    # Счётчики — ДО try: пост-try код (warmup_level/обновление плана) читает их,
+    # а исключение в окне подготовки могло случиться раньше их инициализации
+    # внутри try → UnboundLocalError вместо честного обновления плана.
     actions_ok = 0
     actions_fail = 0
-    consecutive_fails = 0
-    fail_streak = 0  # подряд провалов (сброс только на успехе) — потолок безопасности
-    available_actions = _get_actions_for_day(current_day)
-    # Прогрессивный гейт: в этом пути (одиночные планы) его не было вовсе —
-    # свежий аккаунт мог с первого дня писать комментарии и ставить реакции.
-    _p_age_days = None
-    _p_trust = None
-    if acc_health is not None:
-        try:
-            from datetime import datetime as _dtm2, timezone as _tzz2
-
-            _p_trust = acc_health["trust_score"]
-            if acc_health["added_at"] is not None:
-                _p_age_days = (
-                    _dtm2.now(_tzz2.utc) - acc_health["added_at"].replace(tzinfo=_tzz2.utc)
-                ).total_seconds() / 86400.0
-        except (TypeError, ValueError, AttributeError, KeyError):
-            pass
-    available_actions = _progressive_actions(
-        available_actions,
-        trust_score=_p_trust,
-        age_days=_p_age_days,
-        warmup_day=current_day,
-    )
-    resources = await _get_warmup_resources(pool, owner_id)
-    own_bots = resources["bots"]
-    own_channels = resources["channels"]
-    # Нишево-осведомлённый список каналов: через account_niche_profiles
-    channels = await get_account_niche_channels(pool, account_id)
-    if not channels:
-        channels = list(_WARMUP_PUBLIC_CHANNELS)
-    # Стабильный пер-аккаунтный порядок/набор вместо глобального shuffle:
-    # одинаковый граф вступлений у всего флота — сигнатура ботнета.
-    channels = _account_channels(account_id, channels, k=len(channels))
-
-    # Описания действий для прогресс-коллбэка
-    _action_descriptions = {
-        "read_channel": "📖 читаю канал",
-        "join_channel": "🔔 вступаю в канал",
-        "send_reaction": "❤️ реакция на пост",
-        "search": "🔍 поиск",
-        "view_profile": "👁 смотрю профиль",
-        "open_chat": "💬 открываю чат",
-        "dm_bot": "🤖 пишу боту",
-        "mark_read": "✅ отмечаю прочитанным",
-        "update_presence": "🟢 онлайн-присутствие",
-        "browse_dialogs": "📱 проверяю диалоги",
-        "forward_to_saved": "📌 сохраняю пост",
-        "vote_poll": "📊 голосую в опросе",
-        "send_comment": "💬 оставляю комментарий",
-        "own_channel_read": "📡 читаю свой канал",
-        "smart_bot_start": "🤖 /start своему боту",
-        "smart_bot_help": "🤖 /help своему боту",
-        "own_bot_start": "🤖 запуск своего бота",
-        "story_view": "📸 просматриваю истории",
-        "check_notifications": "🔔 проверяю уведомления",
-    }
-
-    # Рампа объёма действий: свежий аккаунт (день 0-1) делает мало действий,
-    # объём растёт с возрастом. Это ключевая защита от бана.
-    day_actions_n = _actions_for_day_count(current_day, daily_actions)
-    # Темп — по локальному времени гео аккаунта + личный хронотип (не по Киеву).
-    _tod_mult = _time_of_day_multiplier(plan.get("geo_country"), account_id=account_id)
-    if _tod_mult != 1.0:
-        day_actions_n = max(1, int(day_actions_n * _tod_mult))
-
+    # ВЕСЬ пост-захватный путь под общим try/finally (release в finally ниже):
+    # раньше окно от захвата до client.connect() (niche/health/_make_client) НЕ
+    # освобождало аккаунт при исключении — он «зомби» в памяти до рестарта, и
+    # ни renew_leases, ни reconcile его не чистят (память считает занятым).
     try:
+        # Профиль аккаунта из таблицы niche_profiles (если есть)
+        niche_row = await pool.fetchrow(
+            "SELECT niche, profile_type FROM account_niche_profiles WHERE account_id=$1",
+            account_id,
+        )
+        acc_profile = (niche_row["profile_type"] if niche_row else None) or "mixed"
+
+        device = dict(acc_row) if acc_row["device_model"] else None
+        client = account_manager._make_client(acc_row["session_str"], device)
+
+        actions_ok = 0
+        actions_fail = 0
+        consecutive_fails = 0
+        fail_streak = 0  # подряд провалов (сброс только на успехе) — потолок безопасности
+        available_actions = _get_actions_for_day(current_day)
+        # Прогрессивный гейт: в этом пути (одиночные планы) его не было вовсе —
+        # свежий аккаунт мог с первого дня писать комментарии и ставить реакции.
+        _p_age_days = None
+        _p_trust = None
+        if acc_health is not None:
+            try:
+                from datetime import datetime as _dtm2, timezone as _tzz2
+
+                _p_trust = acc_health["trust_score"]
+                if acc_health["added_at"] is not None:
+                    _p_age_days = (
+                        _dtm2.now(_tzz2.utc) - acc_health["added_at"].replace(tzinfo=_tzz2.utc)
+                    ).total_seconds() / 86400.0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+        available_actions = _progressive_actions(
+            available_actions,
+            trust_score=_p_trust,
+            age_days=_p_age_days,
+            warmup_day=current_day,
+        )
+        resources = await _get_warmup_resources(pool, owner_id)
+        own_bots = resources["bots"]
+        own_channels = resources["channels"]
+        # Нишево-осведомлённый список каналов: через account_niche_profiles
+        channels = await get_account_niche_channels(pool, account_id)
+        if not channels:
+            channels = list(_WARMUP_PUBLIC_CHANNELS)
+        # Стабильный пер-аккаунтный порядок/набор вместо глобального shuffle:
+        # одинаковый граф вступлений у всего флота — сигнатура ботнета.
+        channels = _account_channels(account_id, channels, k=len(channels))
+
+        # Описания действий для прогресс-коллбэка
+        _action_descriptions = {
+            "read_channel": "📖 читаю канал",
+            "join_channel": "🔔 вступаю в канал",
+            "send_reaction": "❤️ реакция на пост",
+            "search": "🔍 поиск",
+            "view_profile": "👁 смотрю профиль",
+            "open_chat": "💬 открываю чат",
+            "dm_bot": "🤖 пишу боту",
+            "mark_read": "✅ отмечаю прочитанным",
+            "update_presence": "🟢 онлайн-присутствие",
+            "browse_dialogs": "📱 проверяю диалоги",
+            "forward_to_saved": "📌 сохраняю пост",
+            "vote_poll": "📊 голосую в опросе",
+            "send_comment": "💬 оставляю комментарий",
+            "own_channel_read": "📡 читаю свой канал",
+            "smart_bot_start": "🤖 /start своему боту",
+            "smart_bot_help": "🤖 /help своему боту",
+            "own_bot_start": "🤖 запуск своего бота",
+            "story_view": "📸 просматриваю истории",
+            "check_notifications": "🔔 проверяю уведомления",
+        }
+
+        # Рампа объёма действий: свежий аккаунт (день 0-1) делает мало действий,
+        # объём растёт с возрастом. Это ключевая защита от бана.
+        day_actions_n = _actions_for_day_count(current_day, daily_actions)
+        # Темп — по локальному времени гео аккаунта + личный хронотип (не по Киеву).
+        _tod_mult = _time_of_day_multiplier(plan.get("geo_country"), account_id=account_id)
+        if _tod_mult != 1.0:
+            day_actions_n = max(1, int(day_actions_n * _tod_mult))
+
         await asyncio.wait_for(client.connect(), timeout=15)
 
         for i in range(day_actions_n):
@@ -1776,10 +1785,16 @@ async def _run_daily_warmup_impl(
     # проваленный — записывает. Иначе экран показывал бы старую жалобу на плане,
     # который давно ожил, либо молчал бы о плане, который каждый день пустой.
     await pool.execute(
+        # $4::text ОБЯЗАТЕЛЕН: без явного типа Postgres не может вывести тип $4
+        # (он используется только в присваивании и в `IS NULL`) и падает на PREPARE
+        # c AmbiguousParameterError — КАЖДЫЙ раз, при любом значении. Из-за этого
+        # план прогрева НИКОГДА не обновлялся: current_day и last_action_at стояли,
+        # исключение глушил gather(return_exceptions=True) в цикле — снаружи это
+        # «день 0/14, хотя действия успешные». Каст чинит обновление плана.
         """UPDATE account_warmup_plans
            SET current_day=$1, status=$2, last_action_at=NOW(),
-               last_skip_reason=$4,
-               last_skip_at=CASE WHEN $4 IS NULL THEN NULL ELSE NOW() END,
+               last_skip_reason=$4::text,
+               last_skip_at=CASE WHEN $4::text IS NULL THEN NULL ELSE NOW() END,
                completed_at=CASE WHEN $2='completed' THEN NOW() ELSE NULL END
            WHERE id=$3""",
         new_day,
