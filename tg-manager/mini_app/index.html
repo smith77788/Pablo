@@ -15697,12 +15697,33 @@ async function openCloud() {
   } catch (e) { txt('cloudBody', `<div style="padding:16px;color:var(--red)">${esc(e.message || 'Ошибка')}</div>`); }
 }
 
+// Тип файла по расширению имени → вид/иконка (для различения файлов в списке
+// и выбора предпросмотра). Содержимое зашифровано, поэтому судим по имени.
+function _cloudExt(name) { const m = /\.([a-z0-9]+)$/i.exec(name || ''); return m ? m[1].toLowerCase() : ''; }
+function _cloudKind(name) {
+  const e = _cloudExt(name);
+  if (['jpg','jpeg','png','gif','webp','heic','bmp','svg'].includes(e)) return 'img';
+  if (['mp4','mov','avi','mkv','webm','m4v'].includes(e)) return 'video';
+  if (['mp3','ogg','wav','m4a','aac','flac'].includes(e)) return 'audio';
+  if (e === 'pdf') return 'pdf';
+  if (['doc','docx','txt','rtf'].includes(e)) return 'doc';
+  if (['xls','xlsx','csv'].includes(e)) return 'sheet';
+  if (['zip','rar','7z','tar','gz'].includes(e)) return 'arch';
+  return 'file';
+}
+function _cloudIcon(name) {
+  return { img:'🖼', video:'🎬', audio:'🎵', pdf:'📕', doc:'📄', sheet:'📊', arch:'📦', file:'📎' }[_cloudKind(name)] || '📎';
+}
+let _CLOUD_FILES = {};   // id → запись файла (имя берём отсюда, без экранирования в onclick)
+
 async function cloudRefreshList() {
   const box = document.getElementById('cloudFiles');
   if (!box) return;
   try {
     const d = await api('/api/miniapp/cloud/files');
     const files = d.files || [];
+    _CLOUD_FILES = {};
+    files.forEach(f => { _CLOUD_FILES[f.id] = f; });
     if (!files.length) { box.innerHTML = '<div style="font-size:13px;color:var(--hint);padding:8px 0">Пока пусто — загрузите первый файл.</div>'; return; }
     const tgt = Number(d.target_replicas) || 2;
     box.innerHTML = files.map(f => {
@@ -15714,15 +15735,19 @@ async function cloudRefreshList() {
       else { shield = `<span style="color:var(--accent)">🛡 ${mr} копии</span>`; }
       const healBtn = degraded
         ? `<button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudHeal(${f.id})" title="Восстановить копии">♻️</button>` : '';
+      const date = f.created_at ? new Date(f.created_at).toLocaleDateString('ru-RU') : '';
+      const kind = _cloudKind(f.name);
+      const canPreview = (kind === 'img' || kind === 'video' || kind === 'audio');
       return `
       <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--sep)">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name || 'файл')}</div>
-          <div style="font-size:11px;color:var(--hint)">${_cloudBytes(f.size_bytes)} · ${f.chunk_count || 0} кус. ${shield ? '· ' + shield : ''}</div>
+        <div style="font-size:22px;flex:0 0 auto;width:26px;text-align:center">${_cloudIcon(f.name)}</div>
+        <div style="flex:1;min-width:0" class="tap" onclick="cloudOpenFile(${f.id})">
+          <div style="font-size:13px;font-weight:600;word-break:break-word;line-height:1.25">${esc(f.name || 'файл')}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${_cloudBytes(f.size_bytes)}${date ? ' · ' + date : ''}${shield ? ' · ' + shield : ''}${canPreview ? ' · 👁 просмотр' : ''}</div>
         </div>
         ${healBtn}
-        <button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudDownload(${f.id}, '${esc((f.name||'file').replace(/'/g,''))}')">⬇️</button>
-        <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})">🗑</button>
+        <button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="cloudSave(${f.id})" title="Сохранить">⬇️</button>
+        <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})" title="Удалить">🗑</button>
       </div>`;
     }).join('');
   } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(e.message || 'Ошибка')}</div>`; }
@@ -15751,23 +15776,77 @@ async function cloudUpload(input) {
   }
 }
 
-async function cloudDownload(fileId, name) {
-  toast('⏳ Собираю файл…');
+// Сохранить файл на устройство. В Telegram WebView программный клик по ссылке-
+// загрузке НЕ качает — поэтому сначала пробуем нативный загрузчик Telegram
+// (Bot API 8.0+): он сам скачивает файл системно. Токен кладём в query (эндпойнт
+// это допускает) — запрос идёт к НАШЕМУ серверу, не третьей стороне. Фолбэк для
+// старых клиентов — blob-ссылка (срабатывает не везде, поэтому и есть предпросмотр).
+async function cloudSave(fileId) {
+  const f = _CLOUD_FILES[fileId] || {};
+  const name = f.name || 'file';
+  const path = '/api/miniapp/cloud/file/' + fileId + '/download';
+  if (tg && typeof tg.downloadFile === 'function') {
+    try {
+      tg.downloadFile({ url: location.origin + path + '?token=' + encodeURIComponent(TK), file_name: name });
+      return;
+    } catch (_) {}
+  }
+  toast('⏳ Готовлю файл…');
+  try {
+    const r = await fetchT(path, { headers: { 'Authorization': 'Bearer ' + TK } });
+    if (!r.ok) { let m = 'Не удалось скачать'; try { const j = await r.json(); m = j.message || j.error || m; } catch (_) {} toast(m); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+  } catch (e) { toast(e.message || 'Ошибка'); }
+}
+
+// Открыть файл в приложении: картинку/видео/аудио показываем прямо здесь (сразу
+// видно, какой это файл), для остального — карточка с именем и кнопкой сохранить.
+// Переиспользуем оверлей и закрытие от хранилища (closeVaultMedia освобождает blob).
+async function cloudOpenFile(fileId) {
+  const f = _CLOUD_FILES[fileId] || {};
+  const name = f.name || 'файл';
+  const ov = document.getElementById('vmediaOverlay');
+  if (!ov) return;
+  ov.style.display = 'flex';
+  ov.onclick = e => { if (e.target === ov) closeVaultMedia(); };
+  ov.innerHTML = '<div style="color:#fff;font-size:14px">⏳ Открываю файл…</div>';
   try {
     const r = await fetchT('/api/miniapp/cloud/file/' + fileId + '/download',
                            { headers: { 'Authorization': 'Bearer ' + TK } });
     if (!r.ok) {
-      let m = 'Не удалось скачать';
+      let m = 'Не удалось открыть файл';
       try { const j = await r.json(); m = j.message || j.error || m; } catch (_) {}
-      toast(m); return;
+      ov.innerHTML = `<div style="color:#fff;font-size:14px;text-align:center;max-width:80%">${esc(m)}
+          <div style="margin-top:14px"><button class="btn btn-s" onclick="closeVaultMedia()">Закрыть</button></div></div>`;
+      return;
     }
     const blob = await r.blob();
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = name || 'file';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+    VAULT_MEDIA_URL = url;
+    const kind = _cloudKind(name);
+    let view;
+    if (kind === 'img') view = `<img src="${url}" style="max-width:100%;max-height:74vh;border-radius:10px">`;
+    else if (kind === 'video') view = `<video src="${url}" controls autoplay style="max-width:100%;max-height:74vh;border-radius:10px"></video>`;
+    else if (kind === 'audio') view = `<audio src="${url}" controls autoplay style="width:100%"></audio>`;
+    else view = `<div style="color:#fff;text-align:center">
+        <div style="font-size:52px">${_cloudIcon(name)}</div>
+        <div style="font-size:14px;margin-top:8px;word-break:break-word;max-width:80vw">${esc(name)}</div>
+        <div style="font-size:12px;opacity:.7;margin-top:4px">${_cloudBytes(f.size_bytes)}</div></div>`;
+    ov.innerHTML = `<div style="max-width:100%;text-align:center">
+        ${view}
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
+          <button class="btn btn-p" style="padding:8px 16px;font-size:13px" onclick="cloudSave(${fileId})">⬇️ Сохранить</button>
+          <button class="btn btn-s" style="padding:8px 16px;font-size:13px" onclick="closeVaultMedia()">Закрыть</button>
+        </div></div>`;
+  } catch (e) {
+    ov.innerHTML = `<div style="color:#fff;font-size:14px;text-align:center">${esc(e.message || 'Ошибка')}
+        <div style="margin-top:14px"><button class="btn btn-s" onclick="closeVaultMedia()">Закрыть</button></div></div>`;
+  }
 }
 
 async function cloudDelete(fileId) {

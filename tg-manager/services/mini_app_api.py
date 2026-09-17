@@ -20121,11 +20121,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("файл не найден", 404)
             data = await tg_cloud.retrieve_file(pool, uid, fid)
             fname = (meta.get('name') or 'file').replace('"', '')
+            # Реальный MIME по расширению: помогает нативному загрузчику Telegram
+            # назвать файл и корректно проиграть видео/аудио в предпросмотре.
+            import mimetypes
+            ctype = mimetypes.guess_type(fname)[0] or "application/octet-stream"
             return web.Response(
                 body=data,
                 headers={
                     "Access-Control-Allow-Origin": "*",
-                    "Content-Type": "application/octet-stream",
+                    "Content-Type": ctype,
                     "Content-Disposition": f'attachment; filename="{fname}"',
                 })
         except FileNotFoundError:
