@@ -6380,8 +6380,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             about = validate_string(data.get("about"), max_len=255) or ""
             channel_count = min(max(validate_integer(data.get("channel_count", 1), min_val=1, max_val=20) or 1, 1), 20)
             name_mode = (data.get("name_mode") or "num")
-            if name_mode not in ("num", "acc", "none"):
+            if name_mode not in ("num", "acc", "none", "keywords"):
                 name_mode = "num"
+            # SEO-массив: имя как набор ключей (перестановки) + шаблон @юзернейма,
+            # который тоже вращается по ключам (@Dostavka_Moskva → @Moskva_Dostavka,
+            # @Dostavkaj_Moskva …). Публичные @ занимают много мест в поиске.
+            username_template = validate_string(data.get("username_template"), max_len=64) or ""
             is_group = bool(data.get("is_group"))
             # Оставляем только СВОИ активные аккаунты с сессией.
             rows = await _safe_fetch(
@@ -6403,6 +6407,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         "about": about,
                         "channel_count": channel_count,
                         "name_mode": name_mode,
+                        "username_template": username_template,
                         "is_group": is_group,
                     },
                     total_items=total,

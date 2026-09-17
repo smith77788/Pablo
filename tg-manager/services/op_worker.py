@@ -5315,6 +5315,16 @@ async def _exec_bulk_create_channels_multi(
     failed_count = 0
     global_idx = 1
 
+    # SEO-массив: имена и @юзернеймы перестановкой ключей (не «Канал #1»).
+    # name_mode == "keywords" → title_base трактуется как набор ключевых слов;
+    # username_template (если задан) → публичные @юзернеймы вращением ключей.
+    from services import name_variator
+    _seo = name_mode == "keywords"
+    _titles = name_variator.generate_titles(title_base, total_ops, seed=op_id) if _seo else None
+    _uname_tpl = (params.get("username_template") or "").strip()
+    _uname_gen = (name_variator.username_candidates(_uname_tpl, seed=op_id)
+                  if _uname_tpl else None)
+
     try:
         for task_i in range(total_ops):
             if await _is_cancelled(pool, op_id):
@@ -5332,7 +5342,9 @@ async def _exec_bulk_create_channels_multi(
             acc = active_accounts[task_i % len(active_accounts)]
             acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
 
-            if name_mode == "num":
+            if _seo and _titles:
+                title = _titles[task_i]
+            elif name_mode == "num":
                 title = f"{title_base} {global_idx}"
             elif name_mode == "acc":
                 title = f"{title_base} ({acc_label[:20]})"
@@ -5354,14 +5366,34 @@ async def _exec_bulk_create_channels_multi(
                 failed_count += 1
             elif isinstance(result, dict) and result.get("channel_id") and not result.get("error"):
                 ch_id = result["channel_id"]
+                # Публичный @юзернейм из вращения ключей. Занятые/невалидные
+                # Telegram отвергает — берём следующий кандидат (несколько попыток).
+                _assigned_username = None
+                if _uname_gen is not None:
+                    _tries = 0
+                    for _cand in _uname_gen:
+                        _tries += 1
+                        if _tries > 5:        # не жжём аккаунт перебором @
+                            break
+                        _uerr = await account_manager.set_channel_username(
+                            acc["session_str"], ch_id, _cand, _acc=acc)
+                        if not _uerr:
+                            _assigned_username = _cand
+                            break
+                        _uup = _uerr.upper()
+                        if "FLOOD" in _uup or "TOO MANY" in _uup or "WAIT" in _uup:
+                            break            # флуд — не жжём кандидаты, оставим без @
+                        if "OCCUPIED" in _uup or "INVALID" in _uup or "TAKEN" in _uup:
+                            continue          # занят/невалиден — следующий вариант
+                        break                 # прочее — не зацикливаемся
                 try:
                     await pool.execute(
                         """INSERT INTO managed_channels
                                (owner_id, acc_id, channel_id, title, username, access_hash, type)
                            VALUES ($1,$2,$3,$4,$5,$6,$7)
-                           ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                           ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4, username=$5""",
                         owner_id, acc["id"], ch_id, title,
-                        result.get("username") or None,
+                        _assigned_username or result.get("username") or None,
                         result.get("access_hash", 0) or 0,
                         result.get("type", "channel"),
                     )

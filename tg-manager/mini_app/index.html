@@ -2416,10 +2416,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="number" id="cfCount" value="1" min="1" max="20" title="Сколько на каждый аккаунт" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <select id="cfNameMode" title="Как называть" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box">
+          <option value="keywords">🔎 SEO: перестановка ключей</option>
           <option value="num">Название + номер (1, 2, 3…)</option>
           <option value="acc">Название + имя аккаунта</option>
           <option value="none">Одинаковое название</option>
         </select>
+      </div>
+      <input type="text" id="cfUname" placeholder="Шаблон @юзернейма, напр. Dostavka_Moskva" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
+      <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
+        🔎 <b>SEO-режим</b>: название — это ключевые слова через пробел, @юзернейм — ключи через «_». Система расставит их для каждого ресурса по-разному (перестановка + добавление букв): <code>Dostavka_Moskva → Moskva_Dostavka, Dostavkaj_Moskva, Moskva_Dostavkagy…</code> — так вы занимаете много мест в поиске по многим сочетаниям ключей. @юзернейм — необязателен; занятые Telegram отвергнет, возьмётся следующий вариант.
       </div>
       <div style="font-size:12px;color:var(--hint);margin:2px 0 6px">Аккаунты — создаём у каждого выбранного (по «на аккаунт» штук):</div>
       <div style="display:flex;gap:8px;margin-bottom:6px">
@@ -20017,6 +20022,7 @@ async function submitChannelFactory() {
   const isGroup = !!document.getElementById('cfIsGroup')?.checked;
   const count = Math.max(1, parseInt(document.getElementById('cfCount')?.value) || 1);
   const nameMode = document.getElementById('cfNameMode')?.value || 'num';
+  const usernameTpl = (document.getElementById('cfUname')?.value || '').trim();
   if (!title) { errEl.textContent='Укажите название'; return; }
   if (!accts.length) { errEl.textContent='Выберите хотя бы один аккаунт'; return; }
   const total = accts.length * count;
@@ -20026,11 +20032,13 @@ async function submitChannelFactory() {
   try {
     const r = await api('/api/miniapp/channels/bulk_create',{method:'POST',body:JSON.stringify({
       account_ids: accts, channel_count: count, title, about, is_group: isGroup, name_mode: nameMode,
+      username_template: usernameTpl,
     })});
     toast(`🏭 Создание ${r.count || total} ${what} запущено · операция #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Создание ' + what);
     document.getElementById('cfTitle').value='';
     document.getElementById('cfAbout').value='';
+    const _u=document.getElementById('cfUname'); if(_u) _u.value='';
     loadCfRecent();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
