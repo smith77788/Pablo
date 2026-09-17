@@ -1,0 +1,123 @@
+name: build-android-apk
+
+# Собирает Android-приложение (.apk) как обёртку TWA вокруг установленной PWA
+# Infragram. Запускается ВРУЧНУЮ (workflow_dispatch) — не на каждый push, чтобы
+# не собирать APK впустую. Готовый .apk кладётся в артефакты запуска: качаете со
+# страницы Actions → этот запуск → Artifacts.
+#
+# Что нужно указать при запуске:
+#   pwa_url — публичный адрес приложения, например
+#             https://ВАШ-СЕРВИС.up.railway.app/miniapp/
+#             (тот же MINI_APP_URL, что открывает бот, со слешом на конце).
+#
+# ПОДПИСЬ. Для установки на свой телефон достаточно подписи ключом, который
+# создаётся прямо в этом запуске (пароль — временный секрет запуска). Такой APK
+# ставится через «Установка из этого источника». Если хотите стабильный ключ
+# (обновления поверх без переустановки) — положите keystore в секреты репозитория
+# и подставьте его вместо генерации (см. docs/ANDROID_APK.md).
+#
+# АДРЕСНАЯ СТРОКА. Чтобы приложение открывалось БЕЗ адресной строки Chrome,
+# нужен файл цифровой привязки assetlinks.json на домене — с отпечатком ключа
+# подписи. Отпечаток печатается в конце сборки (шаг "SHA256 отпечаток ключа").
+# Как добавить его на домен — в docs/ANDROID_APK.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pwa_url:
+        description: "Публичный URL PWA (со слешом на конце), напр. https://host/miniapp/"
+        required: true
+        type: string
+      app_name:
+        description: "Название приложения"
+        required: false
+        default: "Infragram"
+        type: string
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Установить Bubblewrap
+        run: npm install -g @bubblewrap/cli
+
+      - name: Собрать TWA и подписать APK
+        env:
+          # Пароли ключа — временный секрет этого запуска (не сохраняются нигде).
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-ig
+          BUBBLEWRAP_KEY_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-ig
+        run: |
+          set -euo pipefail
+          PWA_URL="${{ inputs.pwa_url }}"
+          APP_NAME="${{ inputs.app_name }}"
+          # host и packageId (обратный домен) из URL.
+          HOST="$(echo "$PWA_URL" | sed -E 's#^https?://##; s#/.*$##')"
+          PKG="$(echo "$HOST" | awk -F. '{for(i=NF;i>0;i--) printf "%s%s", $i, (i>1?".":"")}' | tr -cd 'a-zA-Z0-9._')"
+          PKG="app.${PKG}.twa"
+          START_PATH="/$(echo "$PWA_URL" | sed -E 's#^https?://[^/]+/?##')"
+          MANIFEST_URL="${PWA_URL%/}/manifest.webmanifest"
+          echo "host=$HOST pkg=$PKG start=$START_PATH manifest=$MANIFEST_URL"
+
+          mkdir -p twa && cd twa
+          # Ключ подписи создаём здесь (одноразовый пароль запуска).
+          keytool -genkeypair -v -keystore android.keystore -alias android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$BUBBLEWRAP_KEYSTORE_PASSWORD" \
+            -keypass "$BUBBLEWRAP_KEY_PASSWORD" \
+            -dname "CN=$APP_NAME, O=$APP_NAME, C=US"
+
+          # twa-manifest.json — источник правды Bubblewrap. Пишем без init
+          # (init интерактивный), затем build читает этот файл.
+          cat > twa-manifest.json <<JSON
+          {
+            "packageId": "$PKG",
+            "host": "$HOST",
+            "name": "$APP_NAME",
+            "launcherName": "$APP_NAME",
+            "display": "standalone",
+            "themeColor": "#0f172a",
+            "navigationColor": "#0f172a",
+            "backgroundColor": "#0f172a",
+            "startUrl": "$START_PATH",
+            "iconUrl": "${PWA_URL%/}/icon.svg",
+            "maskableIconUrl": "${PWA_URL%/}/icon-maskable.svg",
+            "webManifestUrl": "$MANIFEST_URL",
+            "signingKey": { "path": "./android.keystore", "alias": "android" },
+            "appVersionName": "1.0.0",
+            "appVersionCode": 1,
+            "shortcuts": [],
+            "generatorApp": "bubblewrap-cli",
+            "fallbackType": "customtabs",
+            "enableNotifications": false
+          }
+          JSON
+
+          bubblewrap build --skipPwaValidation
+
+          echo "== SHA256 отпечаток ключа (для assetlinks.json) =="
+          keytool -list -v -keystore android.keystore -alias android \
+            -storepass "$BUBBLEWRAP_KEYSTORE_PASSWORD" | grep -A1 "SHA256:" || true
+
+          ls -la ./*.apk || true
+
+      - name: Выложить APK в артефакты
+        uses: actions/upload-artifact@v4
+        with:
+          name: infragram-apk
+          path: |
+            twa/*.apk
+          if-no-files-found: error

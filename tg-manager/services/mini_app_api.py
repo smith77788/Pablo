@@ -21523,6 +21523,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                     content_type="text/html", charset="utf-8")
             return web.FileResponse(_index_path, headers=headers)
 
+        async def assetlinks(request: web.Request) -> web.Response:
+            """Digital Asset Links для Android-приложения (TWA): связывает домен с
+            APK по отпечатку ключа подписи, чтобы приложение открывалось БЕЗ
+            адресной строки Chrome. Содержимое задаётся переменной окружения
+            ANDROID_ASSETLINKS (JSON из сборки APK). Не задано — 404, это норма."""
+            raw = os.getenv("ANDROID_ASSETLINKS", "").strip()
+            if not raw:
+                return web.Response(status=404, text="assetlinks not configured")
+            return web.Response(body=raw.encode(), content_type="application/json")
+
+        app.router.add_get("/.well-known/assetlinks.json", assetlinks)
         app.router.add_get("/miniapp", serve_index)
         app.router.add_get("/miniapp/", serve_index)
         app.router.add_static("/miniapp", _static_dir, show_index=False)
