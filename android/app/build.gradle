@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'app.infragram.mobile'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'app.infragram.mobile'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug   // подпись отладочным ключом — ставится sideload'ом
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    // Выравниваем kotlin-stdlib: appcompat 1.7 тянет 1.8.22, а транзитивно
+    // приходит старый kotlin-stdlib-jdk8:1.6.21 → дублирующиеся классы. Форсим
+    // jdk7/jdk8-шимы к 1.8.22 (в этой версии они пустые заглушки) — дублей нет.
+    constraints {
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22')
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22')
+    }
+}

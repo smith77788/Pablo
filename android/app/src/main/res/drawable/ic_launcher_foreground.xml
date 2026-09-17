@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Столбцы роста (в центральной безопасной зоне 66x66 из 108) -->
+    <path android:fillColor="#3B82F6" android:pathData="M36,64 h9 v14 h-9 z" />
+    <path android:fillColor="#3B82F6" android:pathData="M50,56 h9 v22 h-9 z" />
+    <path android:fillColor="#60A5FA" android:pathData="M64,46 h9 v32 h-9 z" />
+    <!-- Связующая линия -->
+    <path android:strokeColor="#E2E8F0" android:strokeWidth="3"
+          android:strokeLineCap="round" android:strokeLineJoin="round"
+          android:fillColor="#00000000"
+          android:pathData="M40,64 L54,56 L68,47" />
+</vector>
