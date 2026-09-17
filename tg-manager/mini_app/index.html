@@ -4145,12 +4145,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <!-- РЕЖИМ «создать новых»: аккаунт реально переписывается с @BotFather -->
       <div id="bfNewFields">
         <div class="field">
-          <label>Аккаунт для @BotFather *</label>
-          <select id="bfAccount" class="sel"><option value="">Загрузка...</option></select>
-          <div class="field-note">Этот аккаунт напишет @BotFather и создаст ботов. Нужен активный аккаунт с сессией.</div>
+          <label>Аккаунты для @BotFather * (можно несколько)</label>
+          <div style="display:flex;gap:8px;margin-bottom:6px">
+            <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="bfAccAll(true)">Выбрать все</button>
+            <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="bfAccAll(false)">Очистить</button>
+          </div>
+          <div id="bfAccts" style="max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px"></div>
+          <div class="field-note">Каждый выбранный аккаунт напишет @BotFather и создаст ботов. Нужны активные аккаунты с сессией.</div>
         </div>
         <div class="field">
-          <label>Количество ботов</label>
+          <label>Ботов на каждый аккаунт</label>
           <input type="number" id="bfCount" value="1" min="1" max="10" class="inp">
           <div class="field-note">При &gt;1 к имени/username добавится номер. Операция идёт в фоне — следите в «Операции».</div>
         </div>
@@ -16063,6 +16067,10 @@ async function openContactStats() {
 //             (операция bot_factory, паритет с ботовым путём, идёт в фоне);
 //   'token' — регистрация УЖЕ созданного бота по токену + оформление.
 let _BF_MODE = 'new';
+// Отметить/снять все аккаунты в пикере фабрики ботов.
+function bfAccAll(on) {
+  document.querySelectorAll('#bfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on; });
+}
 function bfSetMode(mode) {
   _BF_MODE = (mode === 'token') ? 'token' : 'new';
   const isNew = _BF_MODE === 'new';
@@ -16083,15 +16091,8 @@ async function openBotFactory() {
   txt('botFactoryStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('botFactoryRecent','');
   bfSetMode(_BF_MODE);
-  // Аккаунты для режима «создать новых»: этот аккаунт реально пишет @BotFather.
-  try {
-    const accs = await api('/api/miniapp/accounts');
-    const sel = document.getElementById('bfAccount');
-    const live = (accs.accounts||[]).filter(a=>a.is_active);
-    sel.innerHTML = live.map(a=>
-      `<option value="${a.id}">${esc(a.phone||a.first_name||('#'+a.id))}</option>`
-    ).join('') || '<option value="">Нет активных аккаунтов</option>';
-  } catch(_) {}
+  // Аккаунты для режима «создать новых»: каждый выбранный пишет @BotFather.
+  _renderContactAccPicker('bfAccts', []);
   // Load ecosystems
   try {
     const ecos = await api('/api/miniapp/ecosystems');
@@ -16137,17 +16138,18 @@ async function submitBotFactory() {
 
   // РЕЖИМ «создать новых» — реальная операция через @BotFather (как в боте).
   if (_BF_MODE === 'new') {
-    const accId = document.getElementById('bfAccount').value;
-    const cnt = parseInt(document.getElementById('bfCount').value) || 1;
-    if (!accId) { errEl.textContent = 'Выберите аккаунт для @BotFather'; return; }
-    if (!await askConfirm(`Создать ${cnt} бот(ов) через @BotFather с аккаунта? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
+    const accts = [...document.querySelectorAll('#bfAccts .ca-acc-cb:checked')].map(cb => +cb.value);
+    const cnt = Math.max(1, parseInt(document.getElementById('bfCount').value) || 1);
+    if (!accts.length) { errEl.textContent = 'Выберите хотя бы один аккаунт для @BotFather'; return; }
+    const total = accts.length * cnt;
+    if (!await askConfirm(`Создать ${total} бот(ов) через @BotFather на ${accts.length} аккаунт(ах)? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
     btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь...';
     try {
       const r = await api('/api/miniapp/bot_factory/create_new', {method:'POST', body:JSON.stringify({
-        acc_id: +accId, count: cnt, name_template: name, uname_template: username,
+        account_ids: accts, count: cnt, name_template: name, uname_template: username,
       })});
       tg.HapticFeedback?.notificationOccurred('success');
-      toast(`🏭 Создание ${r.count} бот(ов) запущено · операция #${r.op_id}`);
+      toast(`🏭 Создание ${r.count || total} бот(ов) запущено · операция #${r.op_id}`);
       if (r.op_id) pollOpResult(r.op_id, 'Фабрика ботов');
       openBotFactory();
     } catch(e) {

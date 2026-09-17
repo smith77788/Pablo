@@ -85,14 +85,23 @@ def test_plan_refusal_is_403_not_500():
 def test_frontend_new_mode_sends_real_params():
     src = _code_only(_fn("submitBotFactory"))
     assert "bot_factory/create_new" in src, "режим «создать новых» должен звать реальный эндпойнт"
-    assert "acc_id" in src and "name_template" in src, "параметры реальной операции обязаны уходить"
+    assert "account_ids" in src and "name_template" in src, (
+        "мультивыбор аккаунтов и шаблон имени обязаны уходить в реальную операцию")
+    assert ".ca-acc-cb" in src, "аккаунты берутся из чекбоксов мультипикера"
     assert "askConfirm" in src, "создание ботов необратимо — нужно подтверждение"
     assert "pollOpResult" in src, "фоновая операция должна показывать пользователю итог"
 
 
+def test_endpoint_accepts_multi_account():
+    """Реальный эндпойнт умеет создавать ботов СРАЗУ на нескольких аккаунтах."""
+    h = _handler("bot_factory_create_new")
+    for key in ("account_ids", "bot_count", "bot_name", "base_username"):
+        assert key in h, f"multi-контракт исполнителя требует {key}"
+
+
 def test_ui_has_both_modes_and_real_fields():
     html = INDEX.read_text(encoding="utf-8")
-    assert 'id="bfAccount"' in html, "выбор аккаунта для @BotFather — часть реального пути"
+    assert 'id="bfAccts"' in html, "мультивыбор аккаунтов для @BotFather — часть реального пути"
     assert 'id="bfCount"' in html, "количество ботов реально поддерживается операцией"
     assert 'bfSetMode(' in html, "нужен явный переключатель режимов, а не одна лгущая форма"
 

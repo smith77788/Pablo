@@ -6305,6 +6305,52 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("bad json", 400)
 
+        # ── Мульти-аккаунт: создаём ботов через @BotFather у КАЖДОГО выбранного
+        # аккаунта. Тот же op bot_factory — при наличии account_ids исполнитель
+        # уходит в multi-путь (_exec_bot_factory_multi). ──
+        raw_ids = data.get("account_ids")
+        if raw_ids:
+            try:
+                acc_ids = [int(x) for x in raw_ids][:200]
+            except (TypeError, ValueError):
+                return _err("account_ids должен быть списком чисел", 400)
+            acc_ids = [a for a in acc_ids if a > 0]
+            if not acc_ids:
+                return _err("Выберите хотя бы один аккаунт", 400)
+            bot_name = validate_string(data.get("name_template") or data.get("bot_name"), max_len=128)
+            if not bot_name:
+                return _err("Укажите шаблон имени бота", 400)
+            base_username = validate_string(data.get("uname_template") or data.get("base_username"), max_len=32) or ""
+            bot_count = min(max(validate_integer(data.get("count", 1), min_val=1, max_val=10) or 1, 1), 10)
+            rows = await _safe_fetch(
+                pool,
+                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[]) "
+                "AND is_active=TRUE AND session_str IS NOT NULL",
+                uid, acc_ids)
+            owned = [int(r["id"]) for r in (rows or [])]
+            if not owned:
+                return _err("Нет доступных активных аккаунтов из выбранных", 400)
+            total = len(owned) * bot_count
+            try:
+                from services import operation_bus
+                op_id = await operation_bus.submit(
+                    pool, uid, "bot_factory",
+                    {
+                        "account_ids": owned,
+                        "bot_count": bot_count,
+                        "bot_name": bot_name,
+                        "base_username": base_username,
+                    },
+                    total_items=total,
+                    label=f"Фабрика ботов: {total} шт. на {len(owned)} акк.",
+                )
+                return _json_resp({"ok": True, "op_id": op_id, "count": total})
+            except PermissionError as exc:
+                return _err(str(exc) or "Требуется подписка", 403)
+            except Exception as exc:
+                log.exception("bot_factory_create_new(multi) uid=%d", uid)
+                return _err(str(exc), 500)
+
         acc_id = validate_integer(data.get("acc_id"), min_val=1)
         if not acc_id:
             return _err("Выберите аккаунт, который будет писать в @BotFather", 400)
