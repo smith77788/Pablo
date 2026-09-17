@@ -202,20 +202,33 @@ async def _db_release(acc_ids: list[int]) -> None:
 
 
 async def renew_leases() -> int:
-    """Heartbeat: продлить аренду всех аккаунтов, которые держит ЭТА реплика.
+    """Heartbeat: продлить аренду аккаунтов, которые процесс РЕАЛЬНО держит.
 
     Вызывается из цикла воркера. Пока процесс жив — его аккаунты не уводят;
     умер — аренды истекают, и флот возвращается в оборот сам.
+
+    КРИТИЧНО: продлеваем ТОЛЬКО те, что сейчас в памяти (`_accounts_in_use`), а НЕ
+    все `in_operation=TRUE` с нашим op_lease_owner. Иначе ЗАЛИПШИЙ флаг (операция
+    упала/не сняла in_operation, но в памяти держателя уже нет) продлевался бы
+    ВЕЧНО — аренда никогда не истекает, и аккаунт навсегда «занят операцией»:
+    прогрев стоит (день 0/14), фабрика/операции получают «все аккаунты заняты».
+    Флаг без живого держателя в памяти теперь НЕ продлеваем — аренда истекает за
+    TTL, и _db_claim/warmup/reconcile забирают аккаунт обратно.
     Возвращает число продлённых строк.
     """
     if not _db_pool:
+        return 0
+    async with _accounts_lock:
+        held = [int(a) for a in _accounts_in_use]
+    if not held:
         return 0
     try:
         res = await _db_pool.execute(
             """UPDATE tg_accounts
                   SET op_lease_until = now() + make_interval(secs => $2)
-                WHERE op_lease_owner = $1 AND in_operation = TRUE""",
-            _WORKER_ID, float(_LEASE_TTL_S),
+                WHERE op_lease_owner = $1 AND in_operation = TRUE
+                  AND id = ANY($3::int[])""",
+            _WORKER_ID, float(_LEASE_TTL_S), held,
         )
         try:
             return int(str(res).rsplit(" ", 1)[-1])
