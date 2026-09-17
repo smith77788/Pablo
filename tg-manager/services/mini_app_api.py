@@ -6432,6 +6432,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # который тоже вращается по ключам (@Dostavka_Moskva → @Moskva_Dostavka,
             # @Dostavkaj_Moskva …). Публичные @ занимают много мест в поиске.
             username_template = validate_string(data.get("username_template"), max_len=64) or ""
+            # Автопосев + первый контент — настраиваются ДО старта (автоматизация).
+            first_post = validate_string(data.get("first_post"), max_len=4000) or ""
+            pin_first_post = bool(data.get("pin_first_post"))
+            seed_count = min(max(validate_integer(data.get("seed_count", 0), min_val=0, max_val=200) or 0, 0), 200)
             is_group = bool(data.get("is_group"))
             # Оставляем только СВОИ активные аккаунты с сессией.
             rows = await _safe_fetch(
@@ -6454,6 +6458,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         "channel_count": channel_count,
                         "name_mode": name_mode,
                         "username_template": username_template,
+                        "first_post": first_post,
+                        "pin_first_post": pin_first_post,
+                        "seed_count": seed_count,
                         "is_group": is_group,
                     },
                     total_items=total,

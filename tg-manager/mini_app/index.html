@@ -2426,6 +2426,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
         🔎 <b>SEO-режим</b>: название — это ключевые слова через пробел, @юзернейм — ключи через «_». Система расставит их для каждого ресурса по-разному (перестановка + добавление букв): <code>Dostavka_Moskva → Moskva_Dostavka, Dostavkaj_Moskva, Moskva_Dostavkagy…</code> — так вы занимаете много мест в поиске по многим сочетаниям ключей. @юзернейм — необязателен; занятые Telegram отвергнет, возьмётся следующий вариант.
       </div>
+      <div class="sec" style="margin:6px 0 4px">Автоматизация после создания</div>
+      <textarea id="cfFirstPost" placeholder="Первый пост (необязательно). Поддержка вариантов: {Привет|Здравствуйте}, будет закреплён" rows="2" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:6px"></textarea>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
+        <input type="checkbox" id="cfPinFirst" style="width:16px;height:16px" checked> Закрепить первый пост
+      </label>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+        <input type="number" id="cfSeed" value="0" min="0" max="200" title="Сколько своих аккаунтов подписать" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="font-size:12px;color:var(--hint);line-height:1.4">👥 Автопосев: столько своих аккаунтов сразу подпишутся на каждый ресурс. Размер аудитории — главный фактор высоты позиции в поиске. 0 — выключено.</div>
+      </div>
+      <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
+        Первый пост и подписчики добавляются <b>сразу после создания, автоматически</b> — настраивается здесь до старта. Посев идёт отдельными операциями с защитой темпа (канарейка/пейсинг).
+      </div>
       <div style="font-size:12px;color:var(--hint);margin:2px 0 6px">Аккаунты — создаём у каждого выбранного (по «на аккаунт» штук):</div>
       <div style="display:flex;gap:8px;margin-bottom:6px">
         <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="cfAccAll(true)">Выбрать все</button>
@@ -20025,22 +20037,29 @@ async function submitChannelFactory() {
   const count = Math.max(1, parseInt(document.getElementById('cfCount')?.value) || 1);
   const nameMode = document.getElementById('cfNameMode')?.value || 'num';
   const usernameTpl = (document.getElementById('cfUname')?.value || '').trim();
+  const firstPost = (document.getElementById('cfFirstPost')?.value || '').trim();
+  const pinFirst = !!document.getElementById('cfPinFirst')?.checked;
+  const seedCount = Math.max(0, parseInt(document.getElementById('cfSeed')?.value) || 0);
   if (!title) { errEl.textContent='Укажите название'; return; }
   if (!accts.length) { errEl.textContent='Выберите хотя бы один аккаунт'; return; }
   const total = accts.length * count;
   const what = isGroup ? 'групп' : 'каналов';
   // Необратимо — каналы/группы реально появятся в Telegram.
-  if (!await askConfirm(`Создать ${total} ${what} на ${accts.length} аккаунт(ах)? Они реально появятся в Telegram — отменить создание нельзя.`)) return;
+  let _extra = '';
+  if (firstPost) _extra += `\n• первый пост${pinFirst?' + закреп':''}`;
+  if (seedCount>0) _extra += `\n• автопосев: +${seedCount} подписчиков на каждый`;
+  if (!await askConfirm(`Создать ${total} ${what} на ${accts.length} аккаунт(ах)?${_extra?('\nПосле создания:'+_extra):''}\nОни реально появятся в Telegram — отменить создание нельзя.`)) return;
   try {
     const r = await api('/api/miniapp/channels/bulk_create',{method:'POST',body:JSON.stringify({
       account_ids: accts, channel_count: count, title, about, is_group: isGroup, name_mode: nameMode,
-      username_template: usernameTpl,
+      username_template: usernameTpl, first_post: firstPost, pin_first_post: pinFirst, seed_count: seedCount,
     })});
     toast(`🏭 Создание ${r.count || total} ${what} запущено · операция #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Создание ' + what);
     document.getElementById('cfTitle').value='';
     document.getElementById('cfAbout').value='';
     const _u=document.getElementById('cfUname'); if(_u) _u.value='';
+    const _fp=document.getElementById('cfFirstPost'); if(_fp) _fp.value='';
     loadCfRecent();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }

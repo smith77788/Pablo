@@ -5325,6 +5325,21 @@ async def _exec_bulk_create_channels_multi(
     _uname_gen = (name_variator.username_candidates(_uname_tpl, seed=op_id)
                   if _uname_tpl else None)
 
+    # Автопосев + первый контент (настраивается ДО старта, чтобы не делать руками).
+    _first_post = (params.get("first_post") or "").strip()
+    _pin_first = bool(params.get("pin_first_post"))
+    _seed_count = max(0, min(int(params.get("seed_count") or 0), 200))
+    # Пул аккаунтов для посева — весь активный флот владельца (не только создатели),
+    # чтобы в новый ресурс заходили ДРУГИЕ аккаунты. Берём один раз.
+    _seed_pool: list[int] = []
+    if _seed_count > 0:
+        try:
+            _seed_rows = await resource_selector.select_all_active(
+                pool, owner_id, min_trust_score=0.0)
+            _seed_pool = [int(r["id"]) for r in (_seed_rows or [])]
+        except Exception:
+            _seed_pool = []
+
     try:
         for task_i in range(total_ops):
             if await _is_cancelled(pool, op_id):
@@ -5399,6 +5414,50 @@ async def _exec_bulk_create_channels_multi(
                     )
                 except Exception:
                     log_exc_swallow(log, "bulk_create_channels_multi: managed_channels insert failed")
+
+                _ch_hash = int(result.get("access_hash", 0) or 0)
+                # ── Первый контент: пост от создателя (он админ) + закреп ──────
+                if _first_post:
+                    try:
+                        from services.dm_engine import expand_spintax as _spin
+                        _text = _spin(_first_post) or _first_post   # разнообразим по каналам
+                        _pr = await account_manager.post_to_channel(
+                            acc["session_str"], ch_id, _text[:4000],
+                            access_hash=_ch_hash,
+                            username=(_assigned_username or ""), _acc=acc)
+                        if _pin_first and isinstance(_pr, dict) and _pr.get("msg_id"):
+                            await account_manager.pin_last_channel_post(
+                                acc["session_str"], ch_id, access_hash=_ch_hash,
+                                username=(_assigned_username or ""), _acc=acc)
+                    except Exception:
+                        log_exc_swallow(log, "bulk_create_channels_multi: first_post failed")
+
+                # ── Автопосев участников: отдельной операцией через шину ───────
+                # (проверенный путь boost_subscribers: свой захват, карантин,
+                # пейсинг). Заводим ДРУГИЕ аккаунты флота в новый ресурс.
+                if _seed_count > 0 and _seed_pool:
+                    _seed_target = (f"@{_assigned_username}" if _assigned_username else "")
+                    if not _seed_target:
+                        # приватный/без @ — берём инвайт-ссылку от создателя
+                        try:
+                            _lk = await account_manager.create_channel_invite_link(
+                                acc["session_str"], ch_id, access_hash=_ch_hash, _acc=acc)
+                            _seed_target = (_lk.get("invite_link")
+                                            if isinstance(_lk, dict) else "") or ""
+                        except Exception:
+                            _seed_target = ""
+                    _seed_ids = [i for i in _seed_pool if i != int(acc["id"])][:_seed_count]
+                    if _seed_target and _seed_ids:
+                        try:
+                            from services import operation_bus
+                            await operation_bus.submit(
+                                pool, owner_id, "boost_subscribers",
+                                {"target": _seed_target, "account_ids": _seed_ids},
+                                total_items=len(_seed_ids),
+                                label=f"Автопосев: +{len(_seed_ids)} в {title[:40]}")
+                        except Exception:
+                            log_exc_swallow(log, "bulk_create_channels_multi: seed submit failed")
+
                 try:
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
