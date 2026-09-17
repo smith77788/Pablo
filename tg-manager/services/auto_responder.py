@@ -1318,6 +1318,16 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
             # починятся. Чаще незачем: метка «уже сообщили» всё равно не даст
             # повторить, а лишний запрос каждые 10 секунд бессмысленен.
             _cycle += 1
+            if _cycle % 30 == 1:
+                # Сначала самолечение: снять зависший вебхук у ботов в CONFLICT и
+                # вернуть их на polling ДО того, как о поломке сообщат владельцу.
+                try:
+                    from services import bot_healer
+                    healed = await bot_healer.heal_broken_bots(pool, http)
+                    if healed:
+                        log.info("auto_responder: самолечением возвращено ботов: %d", healed)
+                except Exception:
+                    log.debug("auto_responder: самолечение ботов не выполнено")
             if main_bot is not None and _cycle % 30 == 1:
                 try:
                     await notify_broken_bots(pool, main_bot)
