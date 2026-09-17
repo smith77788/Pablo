@@ -595,3 +595,31 @@ async def cmd_app(message: Message) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.message(Command("pair", "svyaz", "svyazat"))
+async def cmd_pair(message: Message, pool) -> None:
+    """Выдать одноразовый код для входа в приложение на телефоне (вне Telegram).
+
+    Приложение (PWA/APK) не может войти через Telegram, поэтому связываем его
+    так: здесь берём код и вводим его в приложении один раз. Дальше приложение
+    входит само.
+    """
+    from services import device_pairing
+    from services.device_pairing import CODE_TTL_SEC, DEVICE_TTL_DAYS
+    try:
+        code = await device_pairing.create_pairing_code(pool, message.from_user.id)
+    except Exception:
+        await message.answer(
+            "⚠️ Не удалось создать код связывания. Попробуйте позже.")
+        return
+    await message.answer(
+        "🔗 <b>Код для входа в приложение</b>\n\n"
+        f"<code>{code}</code>\n\n"
+        f"Введите этот код в приложении на телефоне в течение "
+        f"{CODE_TTL_SEC // 60} минут. После связывания приложение будет входить "
+        f"само примерно {DEVICE_TTL_DAYS} дней — код больше не понадобится.\n\n"
+        "Код одноразовый. Никому его не передавайте: тот, кто введёт код, "
+        "получит доступ к вашей панели.",
+        parse_mode="HTML",
+    )

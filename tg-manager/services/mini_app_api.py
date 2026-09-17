@@ -47,6 +47,22 @@ _CACHE_TTL = 30  # секунд
 # (schema_v*.sql их НЕ содержат).
 INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
+    # v215: связывание устройства — автономный вход вне Telegram (PWA/Android).
+    """CREATE TABLE IF NOT EXISTS device_pairings (
+        id             BIGSERIAL PRIMARY KEY,
+        owner_id       BIGINT NOT NULL,
+        code           TEXT,
+        code_expires_at TIMESTAMPTZ,
+        token_fp       TEXT,
+        device_label   TEXT DEFAULT '',
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+        paired_at      TIMESTAMPTZ,
+        last_seen_at   TIMESTAMPTZ,
+        revoked_at     TIMESTAMPTZ
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_device_pairings_code ON device_pairings(code) WHERE code IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_device_pairings_owner ON device_pairings(owner_id)",
+    "CREATE INDEX IF NOT EXISTS idx_device_pairings_fp ON device_pairings(token_fp) WHERE token_fp IS NOT NULL",
     "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
     # Сигнал активности канала (для ecosystem auto_remove + аналитики):
     # проставляется при реальной публикации (op_worker._exec_mass_publish).
@@ -1083,6 +1099,84 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid Telegram initData", 401)
         token = make_token(user["user_id"], bot_token)
         return _json_resp({"token": token, "user": user})
+
+    # ── Связывание устройства (автономный вход вне Telegram: PWA/Android) ─────
+
+    async def pair_device(request: web.Request) -> web.Response:
+        """Обмен одноразового кода связывания (из бота) на токен устройства.
+        Публичный: кода достаточно, он одноразовый и короткоживущий."""
+        from services import device_pairing
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        code = validate_string(body.get("code"), max_len=32)
+        if not code:
+            return _err("Введите код связывания")
+        label = validate_string(body.get("label"), max_len=80) or ""
+        redeemed = await device_pairing.redeem_code(pool, code, label=label)
+        if not redeemed:
+            return _err("Код неверный или истёк — возьмите новый в боте", 401)
+        token = device_pairing.make_device_token(redeemed["owner_id"], _bot_token())
+        await device_pairing.attach_token_fp(
+            pool, redeemed["id"], device_pairing.token_fingerprint(token))
+        return _json_resp({"device_token": token})
+
+    async def pair_exchange(request: web.Request) -> web.Response:
+        """Обмен долгоживущего токена устройства на обычный сессионный токен —
+        дальше приложение работает как Telegram-мини-апп. Публичный: доступ даёт
+        сам токен устройства (подписан, с проверкой отзыва по отпечатку)."""
+        from services import device_pairing
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        dev = validate_string(body.get("device_token"), max_len=256)
+        if not dev:
+            return _err("Missing device_token")
+        bot_token = _bot_token()
+        uid = device_pairing.parse_device_token(dev, bot_token)
+        if not uid:
+            return _err("Устройство не привязано — свяжите заново", 401)
+        fp = device_pairing.token_fingerprint(dev)
+        if not await device_pairing.device_active(pool, fp):
+            return _err("Устройство отозвано — свяжите заново", 401)
+        await device_pairing.touch_device(pool, fp)
+        return _json_resp({"token": make_token(uid, bot_token),
+                           "user": {"user_id": uid}})
+
+    async def devices_list(request: web.Request) -> web.Response:
+        """Список связанных устройств владельца (для управления/отзыва).
+        Без кэша: список должен обновляться сразу после отзыва."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import device_pairing
+        rows = await device_pairing.list_devices(pool, uid)
+        return _json_resp({"devices": [
+            {"id": r["id"], "label": r.get("device_label") or "Устройство",
+             "paired_at": str(r["paired_at"]) if r.get("paired_at") else None,
+             "last_seen_at": str(r["last_seen_at"]) if r.get("last_seen_at") else None,
+             "revoked": bool(r.get("revoked_at"))}
+            for r in rows]})
+
+    async def devices_revoke(request: web.Request) -> web.Response:
+        """Отозвать связанное устройство владельца — его токен перестанет
+        обмениваться на сессию. Мутирующий POST — без кэша."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        try:
+            pairing_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return _err("Неверный идентификатор устройства")
+        from services import device_pairing
+        ok = await device_pairing.revoke_device(pool, uid, pairing_id)
+        return _json_resp({"ok": ok})
 
     # ── Dashboard ────────────────────────────────────────────────────────────
 
@@ -15858,6 +15952,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
     app.router.add_post("/api/miniapp/auth", auth)
+    app.router.add_post("/api/miniapp/pair", pair_device)
+    app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
+    app.router.add_get("/api/miniapp/devices", devices_list)
+    app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)
     # Bots
