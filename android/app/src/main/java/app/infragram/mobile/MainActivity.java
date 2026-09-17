@@ -34,6 +34,8 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String PREFS = "infragram";
     private static final String KEY_URL = "server_url";
+    // Адрес по умолчанию — сервер владельца. Можно сменить в меню.
+    private static final String DEFAULT_URL = "https://botmother.up.railway.app/miniapp/";
 
     private WebView web;
 
@@ -97,7 +99,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String currentUrl() {
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        return p.getString(KEY_URL, "");
+        return p.getString(KEY_URL, DEFAULT_URL);
     }
 
     /** Привести введённое к «https://host/miniapp/». */
