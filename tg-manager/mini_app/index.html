@@ -2406,19 +2406,28 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-chanfactory">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📢 Фабрика каналов</div></div>
   <div class="sub-sb">
-    <div class="sec">Создать канал</div>
+    <div class="sec">Создать каналы / группы массово</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <input type="text" id="cfTitle" placeholder="Название канала" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <input type="text" id="cfTitle" placeholder="Название (общее для всех)" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
       <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
-      <select id="cfAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-        <option value="">Выберите аккаунт...</option>
-      </select>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:10px">
+        <input type="checkbox" id="cfIsGroup" style="width:16px;height:16px"> Создавать группы (чаты), а не каналы
+      </label>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="cfCount" value="1" min="1" max="20" title="Сколько каналов создать" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
-        <input type="text" id="cfUsernamePattern" placeholder="username-шаблон (необяз.)" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <input type="number" id="cfCount" value="1" min="1" max="20" title="Сколько на каждый аккаунт" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <select id="cfNameMode" title="Как называть" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box">
+          <option value="num">Название + номер (1, 2, 3…)</option>
+          <option value="acc">Название + имя аккаунта</option>
+          <option value="none">Одинаковое название</option>
+        </select>
       </div>
-      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">При количестве &gt;1 запускается массовое создание: к названию/username добавится номер, операция идёт в фоне.</div>
-      <button class="btn btn-p" style="width:100%" onclick="submitChannelFactory()">📢 Создать канал</button>
+      <div style="font-size:12px;color:var(--hint);margin:2px 0 6px">Аккаунты — создаём у каждого выбранного (по «на аккаунт» штук):</div>
+      <div style="display:flex;gap:8px;margin-bottom:6px">
+        <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="cfAccAll(true)">Выбрать все</button>
+        <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="cfAccAll(false)">Очистить</button>
+      </div>
+      <div id="cfAccts" style="max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px;margin-bottom:10px"></div>
+      <button class="btn btn-p" style="width:100%" onclick="submitChannelFactory()">🏭 Создать</button>
       <div id="cfErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
     <div class="sec" style="margin-top:4px">Последние каналы</div>
@@ -19975,16 +19984,13 @@ async function openChannelFactory() {
   document.getElementById('cfTitle').value='';
   document.getElementById('cfAbout').value='';
   document.getElementById('cfErr').textContent='';
-  loadCfAccounts();
+  const g = document.getElementById('cfIsGroup'); if (g) g.checked = false;
+  _renderContactAccPicker('cfAccts', []);   // мультивыбор аккаунтов (создаём у каждого)
   loadCfRecent();
 }
-async function loadCfAccounts() {
-  const sel = document.getElementById('cfAccount');
-  try {
-    const d = await api('/api/miniapp/accounts');
-    const accs = d.accounts||d||[];
-    sel.innerHTML='<option value="">Выберите аккаунт...</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
-  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+// Отметить/снять все аккаунты в пикере фабрики каналов.
+function cfAccAll(on) {
+  document.querySelectorAll('#cfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on; });
 }
 async function loadCfRecent() {
   txt('cfRecent','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -20005,27 +20011,24 @@ async function loadCfRecent() {
 async function submitChannelFactory() {
   const title = document.getElementById('cfTitle').value.trim();
   const about = document.getElementById('cfAbout').value.trim();
-  const account_id = document.getElementById('cfAccount').value;
   const errEl = document.getElementById('cfErr');
   errEl.textContent='';
+  const accts = [...document.querySelectorAll('#cfAccts .ca-acc-cb:checked')].map(cb => +cb.value);
+  const isGroup = !!document.getElementById('cfIsGroup')?.checked;
+  const count = Math.max(1, parseInt(document.getElementById('cfCount')?.value) || 1);
+  const nameMode = document.getElementById('cfNameMode')?.value || 'num';
   if (!title) { errEl.textContent='Укажите название'; return; }
-  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
-  const count = parseInt(document.getElementById('cfCount')?.value) || 1;
-  const unamePattern = (document.getElementById('cfUsernamePattern')?.value || '').trim();
+  if (!accts.length) { errEl.textContent='Выберите хотя бы один аккаунт'; return; }
+  const total = accts.length * count;
+  const what = isGroup ? 'групп' : 'каналов';
+  // Необратимо — каналы/группы реально появятся в Telegram.
+  if (!await askConfirm(`Создать ${total} ${what} на ${accts.length} аккаунт(ах)? Они реально появятся в Telegram — отменить создание нельзя.`)) return;
   try {
-    if (count > 1) {
-      // Массовое создание — та же операция bulk_create_channels, что и в боте.
-      // Необратимо (каналы реально появятся в Telegram) → подтверждение.
-      if (!await askConfirm(`Создать ${count} каналов с аккаунта? Каналы реально появятся в Telegram — отменить создание нельзя.`)) return;
-      const r = await api('/api/miniapp/channels/bulk_create',{method:'POST',body:JSON.stringify({
-        acc_id:+account_id, count, prefix:title, about, username_pattern:unamePattern,
-      })});
-      toast(`📢 Создание ${r.count} каналов запущено · операция #${r.op_id}`);
-      if (r.op_id) pollOpResult(r.op_id, 'Создание каналов');
-    } else {
-      await api('/api/miniapp/channel_factory/submit',{method:'POST',body:JSON.stringify({title,about,account_id:+account_id})});
-      toast('✅ Канал будет создан в ближайшее время');
-    }
+    const r = await api('/api/miniapp/channels/bulk_create',{method:'POST',body:JSON.stringify({
+      account_ids: accts, channel_count: count, title, about, is_group: isGroup, name_mode: nameMode,
+    })});
+    toast(`🏭 Создание ${r.count || total} ${what} запущено · операция #${r.op_id}`);
+    if (r.op_id) pollOpResult(r.op_id, 'Создание ' + what);
     document.getElementById('cfTitle').value='';
     document.getElementById('cfAbout').value='';
     loadCfRecent();

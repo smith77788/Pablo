@@ -72,17 +72,24 @@ def test_count_is_bounded():
     assert "max_val=20" in h, "верхняя граница защищает от случайной пачки в сотни каналов"
 
 
-def test_frontend_switches_to_bulk_and_confirms():
+def test_frontend_submits_multi_account_bulk():
+    """UI фабрики создаёт каналы/группы СРАЗУ на нескольких аккаунтах: шлёт
+    account_ids в массовый эндпойнт, подтверждает необратимое действие и доводит
+    итог фоновой операции."""
     src = _fn("submitChannelFactory")
-    assert "channels/bulk_create" in src, "при count>1 должен вызываться массовый эндпойнт"
-    assert "count > 1" in src, "одиночный путь остаётся для одного канала"
-    assert "askConfirm" in src, "создание каналов необратимо — нужно подтверждение"
+    assert "channels/bulk_create" in src, "должен вызываться массовый эндпойнт"
+    assert "account_ids" in src, "мультивыбор аккаунтов — суть массового создания"
+    assert ".ca-acc-cb" in src, "аккаунты берутся из чекбоксов мультипикера"
+    assert "askConfirm" in src, "создание каналов/групп необратимо — нужно подтверждение"
     assert "pollOpResult" in src, "фоновая операция должна доводить итог до пользователя"
 
 
-def test_ui_exposes_count_and_username_pattern():
+def test_ui_exposes_multi_account_and_params():
+    """Экран даёт мультивыбор аккаунтов, количество на аккаунт, режим имени и
+    выбор канал/группа."""
     html = INDEX.read_text(encoding="utf-8")
-    assert 'id="cfCount"' in html and 'id="cfUsernamePattern"' in html
+    for el in ('id="cfAccts"', 'id="cfCount"', 'id="cfNameMode"', 'id="cfIsGroup"'):
+        assert el in html, f"нет элемента {el}"
 
 
 def test_no_unused_body_params():
