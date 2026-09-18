@@ -11354,6 +11354,21 @@ async def _exec_mass_invite(
     except (TypeError, ValueError):
         _flood_window_sec = 600
     _flood_times: list = []        # отметки времени флудов (монотонные часы)
+    # ДЛИННЫЙ FloodWait (≥ порога) — это НЕ «притормози», а «аккаунт достиг
+    # жёсткого потолка приглашений и забанен на приглашения на ~сутки». Считать
+    # его наравне с 60-секундным (обычный стоп-кран) — значит позволить флоту
+    # выжечь себя в суточные баны по одному (реальный лог: 7 аккаунтов по 86400с,
+    # а операция всё шла). Поэтому длинные флуды считаем ОТДЕЛЬНО и стопаем раньше:
+    # несколько суточных банов = весь флот у потолка по этому чату/паттерну.
+    try:
+        _long_flood_s = max(300, int(_os_env.getenv("INVITE_LONG_FLOOD_SEC", "3600")))
+    except (TypeError, ValueError):
+        _long_flood_s = 3600
+    try:
+        _long_flood_stop = max(0, int(_os_env.getenv("INVITE_LONG_FLOOD_STOP", "3")))
+    except (TypeError, ValueError):
+        _long_flood_stop = 3
+    _long_floods = 0               # сколько аккаунтов получили ДЛИННЫЙ (суточный) флуд
 
     def _take(q: deque, n: int) -> list:
         out: list = []
@@ -11798,20 +11813,29 @@ async def _exec_mass_invite(
                 _flood_times.append(_now_f)
                 # в окне держим только свежие отметки
                 _flood_times[:] = [t for t in _flood_times if _now_f - t <= _flood_window_sec]
-                if _flood_stop_streak:
+                # Суточный (длинный) флуд считаем отдельно и вне окна: это уже бан на
+                # приглашения, а не темп. Успех его НЕ обнуляет — потолок никуда не делся.
+                if int(res.get("flood_wait") or 0) >= _long_flood_s:
+                    _long_floods += 1
+                if _flood_stop_streak or _long_flood_stop:
                     # Шторм — это кучность флудов, а не их общее число за прогон.
-                    _storm_now = len(_flood_times) >= _flood_stop_streak
+                    _storm_now = _flood_stop_streak and len(_flood_times) >= _flood_stop_streak
                     # Отдельный случай: флот не дал НИ ОДНОГО успеха и уже столько
                     # раз получил флуд. Тогда дело не в хвосте очереди — работать
                     # нечем, и продолжать значит жечь аккаунты впустую.
-                    _dead_start = (total_ok == 0 and flood_streak >= _flood_stop_streak)
-                    if _storm_now or _dead_start:
+                    _dead_start = (total_ok == 0 and _flood_stop_streak
+                                   and flood_streak >= _flood_stop_streak)
+                    # Несколько суточных банов = флот у жёсткого потолка по этому чату:
+                    # каждый следующий аккаунт тоже уйдёт в суточный бан. Стоп раньше.
+                    _long_storm = _long_flood_stop and _long_floods >= _long_flood_stop
+                    if _storm_now or _dead_start or _long_storm:
                         flood_storm = True
                         log.warning(
                             "mass_invite op=%d: стоп операции (флот перегрет) — "
-                            "%d флудов за %dс%s",
-                            op_id, len(_flood_times), _flood_window_sec,
-                            ", успехов нет вовсе" if _dead_start else "",
+                            "%d флудов за %dс, %d суточных банов%s",
+                            op_id, len(_flood_times), _flood_window_sec, _long_floods,
+                            (", успехов нет вовсе" if _dead_start else
+                             ", флот у суточного потолка приглашений" if _long_storm else ""),
                         )
                         break
                 continue
