@@ -1689,6 +1689,7 @@ def _build_dispatch() -> dict:
         "bulk_leave": _exec_bulk_leave,
         "find_contact": _exec_find_contact,
         "bulk_create_channels": _exec_bulk_create_channels,
+        "check_channel_rankings": _exec_check_channel_rankings,
         "bot_factory": _exec_bot_factory,
         "bulk_edit_channels": _exec_bulk_edit_channels,
         "bulk_seo_apply": _exec_bulk_seo_apply,
@@ -5426,6 +5427,14 @@ async def _exec_bulk_create_channels_multi(
                 except Exception:
                     log_exc_swallow(log, "bulk_create_channels_multi: managed_channels insert failed")
 
+                # Автозаведение ключа для замера позиций: имя ресурса = его запрос.
+                if _seo:
+                    try:
+                        from services import channel_ranking
+                        await channel_ranking.register_for_channel(pool, owner_id, ch_id, title)
+                    except Exception:
+                        log_exc_swallow(log, "bulk_create_channels_multi: kw register failed")
+
                 _ch_hash = int(result.get("access_hash", 0) or 0)
                 # ── Первый контент: пост от создателя (он админ) + закреп ──────
                 _first_msg_id = 0
@@ -5540,6 +5549,20 @@ async def _exec_bulk_create_channels_multi(
         "summary": (f"Создано каналов: {created_count}, ошибок: {failed_count}"
                     + (f", пропущено занятых аккаунтов: {_busy}" if _busy else "")),
     }
+
+
+async def _exec_check_channel_rankings(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Замер позиций каналов/чатов владельца в поиске Telegram по ключам."""
+    from services import channel_ranking
+    res = await channel_ranking.check_owner(pool, owner_id, bot=bot)
+    if res.get("error"):
+        return {"status": "failed", "summary": f"⚠️ {res['error']}"}
+    return {"status": "done",
+            "checked": res.get("checked", 0), "found": res.get("found", 0),
+            "summary": (f"Проверено ключей: {res.get('checked', 0)}, "
+                        f"в выдаче найдено: {res.get('found', 0)}")}
 
 
 async def _exec_bulk_create_channels(

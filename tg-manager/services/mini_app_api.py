@@ -63,6 +63,26 @@ INLINE_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_device_pairings_code ON device_pairings(code) WHERE code IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_device_pairings_owner ON device_pairings(owner_id)",
     "CREATE INDEX IF NOT EXISTS idx_device_pairings_fp ON device_pairings(token_fp) WHERE token_fp IS NOT NULL",
+    # v216: замер позиций каналов/чатов в поиске Telegram по ключам.
+    """CREATE TABLE IF NOT EXISTS channel_tracked_keywords (
+        id          BIGSERIAL PRIMARY KEY,
+        owner_id    BIGINT  NOT NULL,
+        channel_id  BIGINT  NOT NULL,
+        keyword     TEXT    NOT NULL,
+        is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (channel_id, keyword)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_chkw_owner ON channel_tracked_keywords(owner_id)",
+    "CREATE INDEX IF NOT EXISTS idx_chkw_channel ON channel_tracked_keywords(channel_id)",
+    """CREATE TABLE IF NOT EXISTS channel_search_rankings (
+        id          BIGSERIAL PRIMARY KEY,
+        keyword_id  BIGINT  NOT NULL REFERENCES channel_tracked_keywords(id) ON DELETE CASCADE,
+        channel_id  BIGINT  NOT NULL,
+        position    INTEGER,
+        checked_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_chrank_keyword ON channel_search_rankings(keyword_id, checked_at DESC)",
     "ALTER TABLE self_promo_templates ADD COLUMN IF NOT EXISTS owner_id BIGINT",
     # Сигнал активности канала (для ecosystem auto_remove + аналитики):
     # проставляется при реальной публикации (op_worker._exec_mass_publish).
@@ -1206,6 +1226,77 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "username": ("@" + usernames[i]) if i < len(usernames) else "",
             })
         return _json_resp({"items": items})
+
+    # ── Замер позиций каналов/чатов в поиске ─────────────────────────────────
+
+    async def channel_rankings_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import channel_ranking
+        rows = await channel_ranking.list_positions(pool, uid)
+        out = [{
+            "id": r["id"], "channel_id": str(r["channel_id"]),
+            "keyword": r["keyword"], "title": r.get("title") or "",
+            "username": r.get("username") or "",
+            "position": r.get("pos"), "prev_position": r.get("prev_pos"),
+            "checked_at": str(r["checked_at"]) if r.get("checked_at") else None,
+        } for r in rows]
+        return _json_resp({"keywords": out})
+
+    async def channel_rankings_add(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        try:
+            channel_id = int(data.get("channel_id"))
+        except (TypeError, ValueError):
+            return _err("Неверный канал")
+        keyword = validate_string(data.get("keyword"), max_len=64) or ""
+        if not keyword:
+            return _err("Введите ключевое слово")
+        # Канал должен принадлежать владельцу.
+        owns = await _safe_fetchval(
+            pool, "SELECT 1 FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+            uid, channel_id)
+        if not owns:
+            return _err("Канал не найден среди ваших", 404)
+        from services import channel_ranking
+        ok = await channel_ranking.add_keyword(pool, uid, channel_id, keyword)
+        return _json_resp({"ok": bool(ok)})
+
+    async def channel_rankings_remove(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+            kid = int(data.get("id"))
+        except (TypeError, ValueError, Exception):
+            return _err("Неверный идентификатор")
+        from services import channel_ranking
+        ok = await channel_ranking.remove_keyword(pool, uid, kid)
+        return _json_resp({"ok": bool(ok)})
+
+    async def channel_rankings_check(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import operation_bus
+            op_id = await operation_bus.submit(
+                pool, uid, "check_channel_rankings", {},
+                label="Замер позиций каналов в поиске")
+            return _json_resp({"ok": True, "op_id": op_id})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception as exc:
+            log.exception("channel_rankings_check uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Dashboard ────────────────────────────────────────────────────────────
 
@@ -16104,6 +16195,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/devices", devices_list)
     app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
     app.router.add_post("/api/miniapp/factory/name_preview", factory_name_preview)
+    app.router.add_get("/api/miniapp/channel_rankings", channel_rankings_list)
+    app.router.add_post("/api/miniapp/channel_rankings/add", channel_rankings_add)
+    app.router.add_post("/api/miniapp/channel_rankings/remove", channel_rankings_remove)
+    app.router.add_post("/api/miniapp/channel_rankings/check", channel_rankings_check)
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)
     # Bots

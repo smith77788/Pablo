@@ -3611,6 +3611,50 @@ async def search_in_telegram(
             log_exc_swallow(log, "search_in_telegram disconnect")
 
 
+async def search_channels_in_telegram(
+    session_string: str, query: str, limit: int = 30, _acc: dict | None = None
+) -> list[dict]:
+    """Глобальный поиск Telegram по каналам/чатам (в отличие от search_in_telegram,
+    который смотрит только пользователей/ботов). Возвращает упорядоченные
+    результаты-чаты с позицией. Позиция — место среди найденных каналов/чатов
+    (важен тренд во времени, а не абсолют).
+    """
+    from telethon.tl.functions.contacts import SearchRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        result = await client(SearchRequest(q=query, limit=limit))
+        items = []
+        for i, chat in enumerate(getattr(result, "chats", []) or []):
+            items.append(
+                {
+                    "position": i + 1,
+                    "channel_id": chat.id,
+                    "username": getattr(chat, "username", "") or "",
+                    "title": getattr(chat, "title", "") or "",
+                    "is_megagroup": bool(getattr(chat, "megagroup", False)),
+                }
+            )
+        return items
+    except Exception as e:
+        from telethon.errors import FloodWaitError
+
+        if isinstance(e, FloodWaitError):
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "search_channels flood disconnect")
+            raise
+        log.exception("search_channels_in_telegram error: %s", e)
+        return []
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "search_channels_in_telegram disconnect")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CHANNEL / GROUP OPERATIONS
 # ══════════════════════════════════════════════════════════════════════════════

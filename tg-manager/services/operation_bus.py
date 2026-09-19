@@ -322,6 +322,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🔎",
     },
+    "check_channel_rankings": {
+        "description": "Замер позиций каналов/чатов в поиске по ключам",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📈",
+    },
     "scan_owned_bots": {
         "description": "Поиск ботов на аккаунтах флота (@BotFather)",
         "min_plan": "starter",
