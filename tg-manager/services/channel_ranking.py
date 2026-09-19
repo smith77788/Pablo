@@ -6,8 +6,8 @@
 каналов/чатов: какие ключи отслеживаем и какая позиция во времени.
 
 Ключи заводятся автоматически Фабрикой при создании (имя ресурса = его запрос) и
-вручную. Замер — поиск глазами живого аккаунта (search_channels_in_telegram) и
-поиск НАШЕГО канала в выдаче.
+вручную. Замер — поиск глазами живого аккаунта (search_global_ranked, РЕАЛЬНАЯ
+выдача единым списком) и поиск НАШЕГО канала в этой сквозной выдаче.
 
 Здесь чистое ядро (сопоставление результата с нашим каналом — его и проверяют
 тесты) и тонкие обёртки над БД/поиском. Важен ТРЕНД (поднялись/просели), а не
@@ -170,7 +170,8 @@ async def check_owner(pool, owner_id: int, *, bot=None) -> dict:
     for i, kw in enumerate(rows):
         acc = accounts[i % len(accounts)]
         try:
-            results = await account_manager.search_channels_in_telegram(
+            # РЕАЛЬНАЯ выдача единым списком (каналы+боты+чаты) — сквозная позиция.
+            results = await account_manager.search_global_ranked(
                 acc["session_str"], kw["keyword"], limit=SEARCH_LIMIT, _acc=acc)
         except Exception:
             log.debug("channel_ranking: search failed kw=%s", kw["keyword"])

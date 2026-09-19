@@ -3571,88 +3571,76 @@ async def fetch_chat_messages(
             log_exc_swallow(log, "fetch_chat_messages disconnect")
 
 
+async def search_global_ranked(
+    session_string: str, query: str, limit: int = 20, _acc: dict | None = None
+) -> list[dict]:
+    """РЕАЛЬНАЯ поисковая выдача Telegram единым списком (каналы+боты+чаты
+    вперемешку), с настоящей сквозной позицией по всем типам.
+
+    Порядок берём из глобальной выдачи `contacts.Search.results` (что видит
+    посторонний), а НЕ из фильтрованных .users/.chats по отдельности — иначе
+    позиция врёт (бот 3-й под двумя каналами выглядел 1-м). my_results
+    (личный раздел ищущего аккаунта: его контакты/подписки) НЕ учитываем, чтобы
+    членство самого аккаунта не завышало позицию — меряем видимость для чужих.
+    """
+    from telethon.tl.functions.contacts import SearchRequest
+    from telethon.tl.types import PeerUser, PeerChat, PeerChannel
+    from services.search_ranking import merge_ranked
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        result = await client(SearchRequest(q=query, limit=limit))
+        users = {
+            u.id: {"username": getattr(u, "username", "") or "",
+                   "first_name": getattr(u, "first_name", "") or "",
+                   "is_bot": bool(getattr(u, "bot", False))}
+            for u in (getattr(result, "users", []) or [])
+        }
+        chats = {
+            c.id: {"username": getattr(c, "username", "") or "",
+                   "title": getattr(c, "title", "") or "",
+                   "is_megagroup": bool(getattr(c, "megagroup", False))}
+            for c in (getattr(result, "chats", []) or [])
+        }
+        # Глобальная выдача — источник истины порядка. Пусто → личный раздел.
+        peers = list(getattr(result, "results", []) or [])
+        if not peers:
+            peers = list(getattr(result, "my_results", []) or [])
+        order: list[tuple] = []
+        for p in peers:
+            if isinstance(p, PeerUser):
+                order.append(("user", p.user_id))
+            elif isinstance(p, PeerChannel):
+                order.append(("channel", p.channel_id))
+            elif isinstance(p, PeerChat):
+                order.append(("chat", p.chat_id))
+        return merge_ranked(order, users, chats)
+    except Exception as e:
+        from telethon.errors import FloodWaitError
+
+        if isinstance(e, FloodWaitError):
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "search_global_ranked flood disconnect")
+            raise
+        log.exception("search_global_ranked error: %s", e)
+        return []
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "search_global_ranked disconnect")
+
+
 async def search_in_telegram(
     session_string: str, query: str, limit: int = 20, _acc: dict | None = None
 ) -> list[dict]:
-    """Search Telegram contacts/global and return ordered results."""
-    from telethon.tl.functions.contacts import SearchRequest
-
-    client = _make_client(session_string, _acc)
-    try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        result = await client(SearchRequest(q=query, limit=limit))
-        items = []
-        for i, user in enumerate(result.users):
-            items.append(
-                {
-                    "position": i + 1,
-                    "tg_user_id": user.id,
-                    "username": getattr(user, "username", "") or "",
-                    "first_name": getattr(user, "first_name", "") or "",
-                    "is_bot": getattr(user, "bot", False),
-                }
-            )
-        return items
-    except Exception as e:
-        from telethon.errors import FloodWaitError
-
-        if isinstance(e, FloodWaitError):
-            try:
-                await client.disconnect()
-            except Exception:
-                log_exc_swallow(log, "search_in_telegram flood disconnect")
-            raise
-        log.exception("search_in_telegram error: %s", e)
-        return []
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "search_in_telegram disconnect")
-
-
-async def search_channels_in_telegram(
-    session_string: str, query: str, limit: int = 30, _acc: dict | None = None
-) -> list[dict]:
-    """Глобальный поиск Telegram по каналам/чатам (в отличие от search_in_telegram,
-    который смотрит только пользователей/ботов). Возвращает упорядоченные
-    результаты-чаты с позицией. Позиция — место среди найденных каналов/чатов
-    (важен тренд во времени, а не абсолют).
-    """
-    from telethon.tl.functions.contacts import SearchRequest
-
-    client = _make_client(session_string, _acc)
-    try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        result = await client(SearchRequest(q=query, limit=limit))
-        items = []
-        for i, chat in enumerate(getattr(result, "chats", []) or []):
-            items.append(
-                {
-                    "position": i + 1,
-                    "channel_id": chat.id,
-                    "username": getattr(chat, "username", "") or "",
-                    "title": getattr(chat, "title", "") or "",
-                    "is_megagroup": bool(getattr(chat, "megagroup", False)),
-                }
-            )
-        return items
-    except Exception as e:
-        from telethon.errors import FloodWaitError
-
-        if isinstance(e, FloodWaitError):
-            try:
-                await client.disconnect()
-            except Exception:
-                log_exc_swallow(log, "search_channels flood disconnect")
-            raise
-        log.exception("search_channels_in_telegram error: %s", e)
-        return []
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "search_channels_in_telegram disconnect")
+    """Совместимость: та же РЕАЛЬНАЯ выдача, что и search_global_ranked (единый
+    порядок всех типов). Раньше возвращала только пользователей/ботов, из-за чего
+    позиция бота не учитывала стоящие выше каналы — теперь позиция сквозная."""
+    return await search_global_ranked(session_string, query, limit, _acc)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
