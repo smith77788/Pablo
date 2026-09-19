@@ -279,7 +279,14 @@ def test_broken_group_stops_the_whole_fleet(stand):
     """Нет прав на группу — это про цель, а не про аккаунт.
 
     С общей очередью цели возвращаются в неё, поэтому без остановки флот
-    разбивался бы об закрытую группу кругами, сжигая аккаунты один за другим.
+    разбивался бы об закрытую группу КРУГАМИ, сжигая аккаунты один за другим.
+
+    При параллельном круге закрытая группа замечается после ПЕРВОГО чанка
+    (до _parallel аккаунтов бьют по ней одновременно), а не после одного вызова —
+    но операция всё равно встаёт, и ни один аккаунт не идёт по второму кругу.
+    Защита (не молотить флот об закрытую группу) сохраняется, радиус ограничен
+    размером чанка. Строго-последовательное «ровно 1 попытка» проверяется в
+    режиме отката отдельным тестом ниже.
     """
     def responder(acc_id, refs, dry=False):
         return {"ok": 0, "failed": 1, "errors": ["group error: ChannelPrivateError"]}
@@ -287,11 +294,29 @@ def test_broken_group_stops_the_whole_fleet(stand):
     s = stand(responder)
     res = _run(_Pool(), TARGETS)
 
-    assert len(s.calls) == 1, f"после отказа группы попыток быть не должно: {s.calls}"
+    tried = [a for a, _ in s.calls]
+    assert len(tried) <= len(ACCOUNTS), f"флот не должен молотить круги: {s.calls}"
+    assert len(tried) == len(set(tried)), (
+        f"ни один аккаунт не должен идти по второму кругу об закрытую группу: {s.calls}")
     # Итог называет причину остановки: либо «Причина: <текст движка>»,
     # либо общий «Группа недоступна» — молчаливой остановки быть не должно.
     assert ("Причина" in res["summary"] or "недоступ" in res["summary"]), \
         "причина остановки должна быть названа"
+
+
+def test_broken_group_stops_after_one_call_when_sequential(stand, monkeypatch):
+    """Откат INVITE_PARALLEL=1: строго-последовательный режим встаёт РОВНО после
+    первого вызова — ни один второй аккаунт не трогается (как было до параллели)."""
+    monkeypatch.setenv("INVITE_PARALLEL", "1")
+
+    def responder(acc_id, refs, dry=False):
+        return {"ok": 0, "failed": 1, "errors": ["group error: ChannelPrivateError"]}
+
+    s = stand(responder)
+    res = _run(_Pool(), TARGETS)
+
+    assert len(s.calls) == 1, f"последовательный режим: после отказа группы попыток нет: {s.calls}"
+    assert ("Причина" in res["summary"] or "недоступ" in res["summary"])
 
 
 # ── отсутствие вечного круга ─────────────────────────────────────────────────

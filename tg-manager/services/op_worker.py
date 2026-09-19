@@ -11467,6 +11467,20 @@ async def _exec_mass_invite(
     except (TypeError, ValueError):
         _long_flood_stop = 3
     _long_floods = 0               # сколько аккаунтов получили ДЛИННЫЙ (суточный) флуд
+    # Сколько аккаунтов флота инвайтят ОДНОВРЕМЕННО. Раньше круг обрабатывал
+    # аккаунты строго по одному (`for acc in active` с await на каждый батч):
+    # флот из 20 слал батчи по очереди, пользователь видел «работает один
+    # аккаунт», а при короткой аудитории до дальних аккаунтов очередь не
+    # доходила вовсе. Теперь батчи круга уходят в сеть параллельно, чанками по
+    # _parallel; учёт (счётчики/флуд/дедуп/права/лог) остаётся ПОСЛЕДОВАТЕЛЬНЫМ.
+    # Разные аккаунты — разные сессии/прокси, для Telegram это независимые
+    # клиенты; параллельность НЕ ускоряет отдельный аккаунт, лишь убирает
+    # простой флота. INVITE_PARALLEL=1 возвращает прежнее строго последовательное
+    # поведение (аварийный откат без передеплоя).
+    try:
+        _parallel = max(1, int(_os_env.getenv("INVITE_PARALLEL", "4")))
+    except (TypeError, ValueError):
+        _parallel = 4
 
     def _take(q: deque, n: int) -> list:
         out: list = []
@@ -11548,6 +11562,135 @@ async def _exec_mass_invite(
     _given_back_n = 0
     _last_rebalance = time.monotonic()
     _REBALANCE_EVERY_S = 20.0  # не долбить БД COUNT(*) на каждый батч
+
+    # Ограничитель одновременных инвайтов флота. Разные аккаунты бьют по сети
+    # независимо; семафор держит не больше _parallel одновременно, чтобы не
+    # открыть разом сотню соединений и не залить чат всем флотом в одну секунду.
+    _invite_sem = asyncio.Semaphore(_parallel)
+
+    async def _fire(acc, batch, by_phone):
+        """Разослать ОДИН батч одним аккаунтом (сеть). Исключение не роняет круг:
+        возвращаем его как результат — решение «ретайрить ли аккаунт» на уровне
+        обработки (Фаза C), как было в прежнем try/except вокруг батча."""
+        async with _invite_sem:
+            try:
+                if by_phone:
+                    # Телефоны идут импортом контакта: промоут-трюк требует уже
+                    # резолвнутой сущности, поэтому номера всегда обычным путём.
+                    return await inv.invite_by_phones(acc["session_str"], dict(acc), group, batch)
+                if _invite_method == "admin":
+                    # «Через админку»: цель промоутится в админы (добавляется в
+                    # чат) → права тут же снимаются → остаётся участником.
+                    return await inv.add_via_promote(acc["session_str"], dict(acc), group, batch)
+                if _invite_method == "link":
+                    # «Ссылка в ЛС»: рассылаем цель ссылку-приглашение.
+                    return await inv.invite_via_link_batch(
+                        acc["session_str"], dict(acc), _invite_link, batch,
+                        _link_msg, _pace_mult)
+                # Множитель темпа уходит ВНУТРЬ батча (см. invite_batch).
+                return await inv.invite_batch(
+                    acc["session_str"], dict(acc), group, batch, _pace_mult,
+                    bulk=_bulk_api)
+            except Exception as exc:  # не BaseException: отмену операции пропускаем наверх
+                return exc
+
+    async def _iter_round(active):
+        """Один круг флота. Набираем батчи чанками по _parallel и рассылаем чанк
+        ПАРАЛЛЕЛЬНО, отдавая результаты вызывающему по одному. Набор целей,
+        суточные лимиты, governor чата (safe-режим) — ровно как раньше; ново лишь
+        то, что сеть нескольких аккаунтов идёт одновременно, а не по очереди.
+
+        Между чанками сверяем стоп-флаги (шторм флудов / закрытая группа /
+        отмена / лимит), чтобы флот останавливался так же рано, как в
+        последовательном режиме — не «уже разослали всем, потом заметили»."""
+        nonlocal group_broken, _group_broken_reason
+        _ai = 0
+        while _ai < len(active):
+            if group_broken or flood_storm:
+                return
+            if await _is_cancelled(pool, op_id):
+                return
+            if _max_invites and step >= _max_invites:
+                return
+
+            # ── Фаза A: набрать чанк до _parallel батчей (без тяжёлой сети) ──
+            _chunk: list = []
+            _chunk_planned = 0
+            while _ai < len(active) and len(_chunk) < _parallel:
+                acc = active[_ai]
+                _ai += 1
+                if not q_users and not q_phones:
+                    break
+                acc_id = int(acc["id"])
+                if acc_id not in budget:
+                    budget[acc_id] = await _acc_budget(acc)
+                cap = budget[acc_id]
+                if cap <= 0:
+                    retired.add(acc_id)
+                    # Выбыл по суточному лимиту, ни разу не сработав → «не
+                    # задействовали» именно из-за лимита (для честного итога).
+                    if acc_id not in _used_accounts:
+                        _daily_capped.add(acc_id)
+                    continue
+
+                take_n = min(batch_size, cap)
+                if _max_invites:
+                    take_n = min(take_n, _max_invites - step - _chunk_planned)
+                if take_n <= 0:
+                    break
+
+                # Сначала опустошаем очередь user_refs, потом телефоны: телефоны
+                # дороже (импорт контакта) и оставлять их на конец безопаснее.
+                by_phone = not q_users
+                queue = q_phones if by_phone else q_users
+                batch = _take(queue, take_n)
+                if not batch:
+                    continue
+
+                # Безопасный режим: governor уровня ЧАТА решает, можно ли слать.
+                # abort — чат «мёртвый»/убивает приглашённых, стоп всей операции.
+                # Иначе — ждём окно частоты/паузу чата и возвращаем batch (цели
+                # не тратим на отказ).
+                if _safe_mode:
+                    from services import smart_invite as _si
+                    _dec = await _si.can_invite(pool, owner_id, _group_key)
+                    if not _dec.allowed:
+                        _give_back(queue, batch)
+                        if _dec.abort:
+                            # Ключ governor'а — от МАТЕРИ (см. _group_key): после
+                            # ротации у новой дочерней истории нет, проверка увидит
+                            # «нет данных» и поведёт себя ОСТОРОЖНЕЕ, а не рискованнее.
+                            if await _rotate_daughter(_dec.reason):
+                                continue
+                            group_broken = True
+                            _group_broken_reason = _dec.reason
+                            log.warning("mass_invite op=%d: safe-режим СТОП по чату: %s",
+                                        op_id, _dec.reason)
+                            break  # уже набранный чанк дошлём, дальше круг остановится
+                        _wait = max(1.0, min(float(_dec.wait_sec), 120.0))
+                        log.info("mass_invite op=%d: safe-режим пауза чата %.0fс: %s",
+                                 op_id, _wait, _dec.reason)
+                        await asyncio.sleep(_wait)
+                        continue
+
+                _chunk.append((acc, acc_id, cap, batch, queue, by_phone))
+                _chunk_planned += len(batch)
+
+            if not _chunk:
+                # Ничего не набрали (все выбыли/на паузе/лимит) — не крутим пусто.
+                if _ai >= len(active) or not (q_users or q_phones):
+                    return
+                continue
+
+            # ── Фаза B: разослать чанк ПАРАЛЛЕЛЬНО ──
+            _results = await asyncio.gather(*[
+                _fire(acc, batch, by_phone)
+                for (acc, acc_id, cap, batch, queue, by_phone) in _chunk])
+
+            # ── Фаза C у вызывающего: отдаём результаты по одному ──
+            for (acc, acc_id, cap, batch, queue, by_phone), res in zip(_chunk, _results):
+                yield acc, acc_id, cap, batch, queue, by_phone, res
+
     while (q_users or q_phones) and not group_broken and not flood_storm:
         if await _is_cancelled(pool, op_id):
             break
@@ -11576,101 +11719,18 @@ async def _exec_mass_invite(
             break
 
         progressed = False
-        for acc in active:
-            if group_broken or flood_storm:
-                break
-            if not q_users and not q_phones:
-                break
-            if await _is_cancelled(pool, op_id):
-                break
-            if _max_invites and step >= _max_invites:
-                break
-
-            acc_id = int(acc["id"])
-            if acc_id not in budget:
-                budget[acc_id] = await _acc_budget(acc)
-            cap = budget[acc_id]
-            if cap <= 0:
-                retired.add(acc_id)
-                # Аккаунт выбыл по суточному лимиту, ни разу не сработав → его
-                # «не задействовали» именно из-за лимита (для честного итога).
-                if acc_id not in _used_accounts:
-                    _daily_capped.add(acc_id)
-                continue
-
-            take_n = min(batch_size, cap)
-            if _max_invites:
-                take_n = min(take_n, _max_invites - step)
-            if take_n <= 0:
-                break
-
-            # Сначала опустошаем очередь user_refs, потом телефоны: телефоны
-            # дороже (импорт контакта) и оставлять их на конец безопаснее.
-            by_phone = not q_users
-            queue = q_phones if by_phone else q_users
-            batch = _take(queue, take_n)
-            if not batch:
-                continue
-
-            # Безопасный режим: governor уровня ЧАТА решает, можно ли слать прямо
-            # сейчас. abort — чат «мёртвый»/убивает приглашённых, дальше лить
-            # нельзя (стоп всей операции). Иначе — ждём окно частоты/паузу чата и
-            # возвращаем batch в очередь (не тратим цели на отказ).
-            if _safe_mode:
-                from services import smart_invite as _si
-                _dec = await _si.can_invite(pool, owner_id, _group_key)
-                if not _dec.allowed:
-                    _give_back(queue, batch)
-                    if _dec.abort:
-                        # Ключ governor'а — от МАТЕРИ (см. _group_key), а не текущей
-                        # дочерней: после ротации история liveness/частоты новой
-                        # дочерней группы отсутствует, поэтому новая проверка увидит
-                        # «нет данных» и поведёт себя ОСТОРОЖНЕЕ, а не рискованнее.
-                        if await _rotate_daughter(_dec.reason):
-                            continue
-                        group_broken = True
-                        _group_broken_reason = _dec.reason
-                        log.warning("mass_invite op=%d: safe-режим СТОП по чату: %s",
-                                    op_id, _dec.reason)
-                        break
-                    _wait = max(1.0, min(float(_dec.wait_sec), 120.0))
-                    log.info("mass_invite op=%d: safe-режим пауза чата %.0fс: %s",
-                             op_id, _wait, _dec.reason)
-                    await asyncio.sleep(_wait)
-                    continue
-
+        # Круг флота: _iter_round набирает батчи чанками по _parallel и рассылает
+        # их ПАРАЛЛЕЛЬНО, отдавая результаты по одному. Вся обработка результата
+        # ниже — последовательная (без гонок по общему состоянию).
+        async for acc, acc_id, cap, batch, queue, by_phone, res in _iter_round(active):
             progressed = True
-
-            try:
-                if by_phone:
-                    # Телефоны идут импортом контакта: промоут-трюк требует уже
-                    # резолвнутой сущности, поэтому номера всегда обычным путём.
-                    res = await inv.invite_by_phones(acc["session_str"], dict(acc), group, batch)
-                elif _invite_method == "admin":
-                    # Метод «через админку»: цель промоутится в админы (добавляется
-                    # в чат) → права тут же снимаются → цель остаётся участником.
-                    # Обходит приватность и не требует права add_users у инвайтера.
-                    res = await inv.add_via_promote(acc["session_str"], dict(acc), group, batch)
-                elif _invite_method == "link":
-                    # Метод «ссылка в ЛС»: рассылаем цель ссылку-приглашение,
-                    # человек вступает сам. Обходит приватность добавления.
-                    res = await inv.invite_via_link_batch(
-                        acc["session_str"], dict(acc), _invite_link, batch,
-                        _link_msg, _pace_mult)
-                else:
-                    # Множитель темпа уходит ВНУТРЬ батча: раньше движок спал
-                    # 2–4с на цель независимо от выбранного режима, и «быстро»
-                    # не ускоряло ничего заметного.
-                    res = await inv.invite_batch(
-                        acc["session_str"], dict(acc), group, batch, _pace_mult,
-                        bulk=_bulk_api)
-            except Exception as exc:
+            if isinstance(res, Exception):
                 # Батч не отработан вовсе — цели возвращаем в очередь (их подберёт
                 # другой аккаунт), а этот выводим из круга, чтобы не зациклиться.
-                log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), exc)
+                log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), res)
                 _give_back(queue, batch)
                 retired.add(acc_id)
-                _noconnect_errs.append(str(exc)[:160])
+                _noconnect_errs.append(str(res)[:160])
                 continue
 
             # Нет прав админа у ЭТОГО аккаунта — проблема аккаунта, НЕ группы/целей.
@@ -11892,7 +11952,10 @@ async def _exec_mass_invite(
                     "mass_invite op=%d: группа %s недоступна (%s) — остановка, чтобы не жечь флот",
                     op_id, group, _group_reason[:120],
                 )
-                break
+                # НЕ break: батчи текущего чанка уже разосланы параллельно —
+                # их результаты нужно досчитать. Флаг group_broken не даст
+                # _iter_round набрать следующий чанк, и круг остановится.
+                continue
 
             if res.get("peer_flood") or res.get("flood_wait"):
                 log.warning(
@@ -11935,7 +11998,8 @@ async def _exec_mass_invite(
                             (", успехов нет вовсе" if _dead_start else
                              ", флот у суточного потолка приглашений" if _long_storm else ""),
                         )
-                        break
+                        # НЕ break: результаты уже разосланного чанка досчитываем;
+                        # флаг flood_storm остановит набор следующего чанка.
                 continue
 
             if attempted == 0:
