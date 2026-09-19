@@ -115,6 +115,26 @@ def _as_channel_id(ref) -> int | None:
     return int(digits)
 
 
+def _coerce_user_ref(ref):
+    """Числовой id пользователя, пришедший СТРОКОЙ, привести к int.
+
+    ЗАЧЕМ. parse_user_refs отдаёт числовой id как строку ('123456789'), а
+    client.get_entity ПО СТРОКЕ из одних цифр падает: username обязан начинаться
+    с буквы, поэтому строка-число не проходит разбор username и уходит в
+    «Cannot find any entity». По int Telethon хотя бы заглянет в кэш сессии и
+    построит PeerUser — часть целей, недоступных как строка, так резолвится.
+    @username, готовый int и прочее — возвращаем без изменений.
+    """
+    if isinstance(ref, str):
+        s = ref.strip()
+        if s.isdigit():
+            try:
+                return int(s)
+            except (TypeError, ValueError):
+                return ref
+    return ref
+
+
 def _group_channel_id(group):
     """id канала из разрешённой сущности.
 
@@ -365,7 +385,8 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
     failed = 0
     for ref in user_refs:
         try:
-            ent = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
+            ent = await asyncio.wait_for(
+                client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
         except Exception as e:
             # Нерезолвящаяся цель — это её собственная беда, а не повод ломать
             # пакет: просто не кладём её в запрос.
@@ -544,7 +565,8 @@ async def invite_batch(
 
         for ref in user_refs:
             try:
-                user = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
+                user = await asyncio.wait_for(
+                    client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
                 _res = await asyncio.wait_for(
                     client(InviteToChannelRequest(channel=group, users=[user])),
                     timeout=_ACTION_TIMEOUT,
@@ -627,6 +649,19 @@ async def invite_batch(
                     log.warning("invite failed: %s", e)
 
     except Exception as exc:
+        # Флуд во время резолва группы (приват-ссылка → CheckChatInviteRequest,
+        # числовой id → get_entity) раньше уходил сюда как «connect»-ошибка с
+        # flood_wait=0. Исполнитель не видел флуд-сигнала, ретайрил аккаунт как
+        # «не смог подключиться» и НЕ считал флуд в стоп-кран флота — весь флот
+        # выжигался на резолве по одному, а стоп так и не срабатывал. Пробрасываем
+        # флуд наружу, чтобы стоп-кран и cooldown отработали как на инвайте.
+        _en = type(exc).__name__
+        if _en == "PeerFloodError":
+            peer_flood = True
+            _note(FAIL_FLOOD)
+        elif _en == "FloodWaitError":
+            flood_wait = int(getattr(exc, "seconds", 0) or 0)
+            _note(FAIL_FLOOD)
         log.warning("invite_batch connect/group error: %s", exc)
         errors.append(f"connect: {str(exc)[:100]}")
     finally:
@@ -790,7 +825,8 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
         group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
         for ref in user_refs:
             try:
-                user = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
+                user = await asyncio.wait_for(
+                    client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
                 # Выдать минимальную админку → человек добавлен в чат…
                 await asyncio.wait_for(
                     client(EditAdminRequest(channel=group, user_id=user,
@@ -834,6 +870,13 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                 failed += 1
                 errors.append(f"{ref}: {str(e)[:80]}")
     except Exception as exc:
+        # Как в invite_batch: флуд во время резолва группы не должен маскироваться
+        # под «connect» с flood_wait=0 — иначе вызывающий не поставит cooldown.
+        _en = type(exc).__name__
+        if _en == "PeerFloodError":
+            peer_flood = True
+        elif _en == "FloodWaitError":
+            flood_wait = int(getattr(exc, "seconds", 0) or 0)
         log.warning("add_via_promote connect/group error: %s", exc)
         errors.append(f"connect: {str(exc)[:100]}")
     finally:
@@ -1109,6 +1152,13 @@ async def invite_by_phones(
             errors.append(f"{not_found} номеров не зарегистрированы в Telegram")
 
     except Exception as exc:
+        # Как в invite_batch: флуд на резолве группы не маскируем под обычную
+        # ошибку — иначе исполнитель не поставит cooldown и не сработает стоп-кран.
+        _en = type(exc).__name__
+        if _en == "PeerFloodError":
+            peer_flood = True
+        elif _en == "FloodWaitError":
+            flood_wait = int(getattr(exc, "seconds", 0) or 0)
         log.warning("invite_by_phones error: %s", exc)
         errors.append(str(exc)[:100])
         not_found_phones = []
