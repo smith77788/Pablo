@@ -2469,7 +2469,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <div style="font-size:12px;color:var(--hint);line-height:1.45;margin-bottom:8px">
-        Позиция ваших каналов/чатов в поиске Telegram по ключам. Ключ создаётся сам при создании ресурса в SEO-режиме (имя = запрос); можно добавить вручную. «Проверить» замеряет позиции живыми аккаунтами.
+        Место ваших каналов/чатов в <b>топ-10</b> поиска Telegram по ключам (пользователю видны только верхние позиции). Ключ создаётся сам при создании ресурса в SEO-режиме (имя = запрос); можно добавить вручную. «Проверить» замеряет позиции живыми аккаунтами.
       </div>
       <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="checkChannelRanks()">🔄 Проверить позиции сейчас</button>
       <div style="display:flex;gap:8px;margin-bottom:6px">
@@ -20166,14 +20166,22 @@ async function loadChannelRanks() {
     const kws = (r && r.keywords) || [];
     if (!kws.length) { txt('crList', empty('📈','Пока нет ключей','Создайте ресурсы в SEO-режиме или добавьте ключ вручную')); return; }
     txt('crList', kws.map(k=>{
-      const pos = (k.position==null) ? '—' : ('#'+k.position);
+      // В поиске Telegram видны только верхние позиции (топ-10). Всё за топ-10 —
+      // фактически вне выдачи: показываем как «вне топ-10», без цифры #30.
+      const inTop = (k.position!=null && k.position<=10);
+      let posLabel, posColor;
+      if (k.position==null) { posLabel='—'; posColor='var(--hint)'; }
+      else if (inTop) { posLabel='#'+k.position; posColor = (k.position<=3?'var(--green)':'var(--accent)'); }
+      else { posLabel='вне топ-10'; posColor='var(--hint)'; }
       let trend = '';
-      if (k.position!=null && k.prev_position!=null) {
+      // Тренд показываем только пока мы в топ-10 (движение по видимым местам).
+      if (inTop && k.prev_position!=null && k.prev_position<=10) {
         if (k.position < k.prev_position) trend = ' <span style="color:var(--green)">▲</span>';
         else if (k.position > k.prev_position) trend = ' <span style="color:var(--red)">▼</span>';
         else trend = ' <span style="color:var(--hint)">=</span>';
+      } else if (inTop && (k.prev_position==null || k.prev_position>10)) {
+        trend = ' <span style="color:var(--green)">▲</span>';   // вошли в топ-10
       }
-      const posColor = (k.position==null) ? 'var(--hint)' : (k.position<=10 ? 'var(--green)' : (k.position<=30 ? 'var(--accent)' : 'var(--text)'));
       return `<div class="row">
         <div class="row-body">
           <div class="row-name">${esc(k.title||'—')}</div>
@@ -20181,7 +20189,7 @@ async function loadChannelRanks() {
           <div class="row-val" style="color:var(--hint)">${k.checked_at?('замер: '+ago(k.checked_at)):'ещё не замеряли'}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <div style="font-size:16px;font-weight:700;color:${posColor}">${pos}${trend}</div>
+          <div style="font-size:15px;font-weight:700;color:${posColor};white-space:nowrap">${posLabel}${trend}</div>
           <div class="back" style="width:32px;height:32px;font-size:16px" onclick="removeChannelKeyword(${k.id})">🗑</div>
         </div>
       </div>`;
