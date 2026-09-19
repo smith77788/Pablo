@@ -11400,7 +11400,8 @@ async def _exec_mass_invite(
             _lv_client = await account_manager.connect_client(
                 _lv_acc["session_str"], _lv_acc, "resolve")
             try:
-                _lv_entity = await inv._resolve_group_entity(_lv_client, group)
+                _lv_entity = await inv._resolve_group_entity(
+                    _lv_client, group, acc_id=_lv_acc.get("id"))
                 _lv_score = await _si.assess_and_store_liveness(
                     pool, owner_id, _group_key, _lv_client, _lv_entity)
                 log.info("mass_invite op=%d: safe-режим liveness чата = %s", op_id, _lv_score)

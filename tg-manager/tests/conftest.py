@@ -279,3 +279,24 @@ def _reset_account_claims():
     _clear_op_worker_claims()
     yield
     _clear_op_worker_claims()
+
+
+@pytest.fixture(autouse=True)
+def _clear_invite_entity_cache():
+    """Кэш разрешённой сущности группы (mass_inviter_engine._ENTITY_CACHE) —
+    process-local и живёт между вызовами invite_batch НАМЕРЕННО (чтобы уже
+    вступивший аккаунт не дёргал CheckChatInviteRequest на каждый батч). В тестах
+    это межтестовое загрязнение: один и тот же (acc_id, group) во втором тесте
+    вернул бы сущность из первого. Чистим до и после каждого теста."""
+    import sys as _sys
+
+    def _clear():
+        m = _sys.modules.get("services.mass_inviter_engine")
+        if m is not None:
+            try:
+                m._ENTITY_CACHE.clear()
+            except Exception:
+                pass
+    _clear()
+    yield
+    _clear()

@@ -38,7 +38,95 @@ _MAX_FLOOD_INLINE = 60
 MAX_INVITE_LIST = 200_000
 
 
-async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
+# Кэш разрешённой сущности группы по (acc_id, group_ref) → (channel_id, access_hash).
+# ЗАЧЕМ. Для приватной группы (t.me/+HASH) уже вступивший аккаунт разрешает её
+# так: ImportChatInviteRequest → UserAlreadyParticipant → CheckChatInviteRequest.
+# CheckChatInviteRequest жёстко флуд-лимитирован, а разрешение шло НА КАЖДЫЙ батч
+# КАЖДЫМ аккаунтом — весь флот бил по нему десятки раз за прогон и ловил FloodWait
+# (реальный лог: «A wait of 112s (CheckChatInviteRequest)»), из-за чего аккаунты
+# не могли вступить/резолвить чат и инвайт валился. access_hash канала стабилен для
+# аккаунта, поэтому разрешаем ОДИН раз на аккаунт за прогон и дальше строим
+# InputPeerChannel из кэша — без сетевого резолва и без CheckChatInviteRequest.
+_ENTITY_CACHE: dict = {}
+_ENTITY_CACHE_MAX = 4000
+
+
+def _entity_cache_key(acc_id, group_ref):
+    if not acc_id:
+        return None
+    try:
+        return (int(acc_id), str(group_ref))
+    except (TypeError, ValueError):
+        return None
+
+
+def _cached_input_peer(acc_id, group_ref):
+    key = _entity_cache_key(acc_id, group_ref)
+    if not key:
+        return None
+    hit = _ENTITY_CACHE.get(key)
+    if not hit:
+        return None
+    try:
+        from telethon.tl.types import InputPeerChannel
+        return InputPeerChannel(channel_id=hit[0], access_hash=hit[1])
+    except Exception:
+        return None
+
+
+def _store_entity(acc_id, group_ref, entity) -> None:
+    key = _entity_cache_key(acc_id, group_ref)
+    if not key:
+        return
+    cid = getattr(entity, "id", None) or getattr(entity, "channel_id", None)
+    ah = getattr(entity, "access_hash", None)
+    if cid is None or ah is None:
+        return
+    try:
+        cid, ah = int(cid), int(ah)
+    except (TypeError, ValueError):
+        return
+    if len(_ENTITY_CACHE) >= _ENTITY_CACHE_MAX:
+        _ENTITY_CACHE.clear()   # простой сброс при переполнении — кэш best-effort
+    _ENTITY_CACHE[key] = (cid, ah)
+
+
+def _as_channel_id(ref) -> int | None:
+    """Числовой id канала из ссылки/строки: голый '2959208816' или маркированный
+    '-1002959208816' → 2959208816. Иначе None. Username'ы Telegram не бывают
+    из одних цифр, поэтому чисто числовая строка — всегда id канала, не @username.
+
+    ЗАЧЕМ. При выборе ПРИВАТНОГО канала из своего списка (без @username) UI кладёт
+    в поле голый channel_id. client.get_entity ПО СТРОКЕ трактует число как
+    username и падает → «Группа недоступна ни одному аккаунту», хотя флот в чате.
+    По этому id строим PeerChannel — аккаунт-участник знает его access_hash."""
+    s = str(ref or "").strip()
+    if not s:
+        return None
+    neg = s.startswith("-")
+    digits = s[1:] if neg else s
+    if not digits.isdigit():
+        return None
+    if neg:
+        # Маркированная форма супергруппы/канала: -100XXXXXXXXXX → XXXXXXXXXX.
+        if digits.startswith("100") and len(digits) > 3:
+            return int(digits[3:])
+        return None   # прочие отрицательные id (базовые группы) — не канал
+    return int(digits)
+
+
+def _group_channel_id(group):
+    """id канала из разрешённой сущности.
+
+    Обычная сущность канала несёт `.id`, а InputPeerChannel из кэша (кэш-хит
+    отдаёт именно его) — `.channel_id` и БЕЗ `.id`. Без этого фолбэка
+    channel_admin_status на кэш-хите возвращал бы channel_id=None, и «Выдать
+    права инвайтерам» ложно рапортовал бы «нет промоутера», хотя аккаунт — админ.
+    """
+    return getattr(group, "id", None) or getattr(group, "channel_id", None)
+
+
+async def _resolve_group_entity(client: Any, group_ref: str, acc_id=None) -> Any:
     """Resolve a group reference to an entity usable by InviteToChannelRequest.
 
     Handles both public (@username / t.me/username) and private invite-link
@@ -46,14 +134,35 @@ async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
     on a raw invite-link string either mismatches "joinchat" as a bogus username
     or fails outright for `+HASH` links — Telethon can't resolve an invite hash
     to a peer without ImportChatInviteRequest/CheckChatInviteRequest.
+
+    acc_id — если задан, сущность кэшируется по (acc_id, group_ref): повторные
+    батчи того же аккаунта берут её из кэша и НЕ дёргают флуд-лимитированный
+    CheckChatInviteRequest (см. _ENTITY_CACHE).
     """
+    cached = _cached_input_peer(acc_id, group_ref)
+    if cached is not None:
+        return cached
+
+    # Числовой id канала (приватный канал, выбранный из своего списка без
+    # @username) — резолвим через PeerChannel из кэша сессии аккаунта-участника.
+    _chan_id = _as_channel_id(group_ref)
+    if _chan_id is not None:
+        from telethon.tl.types import PeerChannel
+        ent = await asyncio.wait_for(
+            client.get_entity(PeerChannel(_chan_id)), timeout=_ACTION_TIMEOUT
+        )
+        _store_entity(acc_id, group_ref, ent)
+        return ent
+
     from services.account_manager import normalize_telegram_join_ref
 
     ref_kind, ref_value = normalize_telegram_join_ref(group_ref)
     if ref_kind != "invite":
-        return await asyncio.wait_for(
+        ent = await asyncio.wait_for(
             client.get_entity(ref_value or group_ref), timeout=_ACTION_TIMEOUT
         )
+        _store_entity(acc_id, group_ref, ent)
+        return ent
 
     from telethon.tl.functions.messages import (
         ImportChatInviteRequest,
@@ -67,16 +176,19 @@ async def _resolve_group_entity(client: Any, group_ref: str) -> Any:
         )
         chats = getattr(result, "chats", None) or []
         if chats:
+            _store_entity(acc_id, group_ref, chats[0])
             return chats[0]
         raise ValueError("ImportChatInviteRequest returned no chat")
     except UserAlreadyParticipantError:
         # Account is already a member — peek instead of re-joining to get the entity.
+        # Дорогой (флуд-лимитированный) путь: делаем его РЕДКИМ через кэш выше.
         info = await asyncio.wait_for(
             client(CheckChatInviteRequest(hash=ref_value)), timeout=_ACTION_TIMEOUT
         )
         chat = getattr(info, "chat", None)
         if chat is None:
             raise
+        _store_entity(acc_id, group_ref, chat)
         return chat
 
 
@@ -411,7 +523,7 @@ async def invite_batch(
 
     try:
         client = await connect_client(session_string, _acc, "invite")
-        group = await _resolve_group_entity(client, group_ref)
+        group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
 
         _use_bulk = _BULK_DEFAULT if bulk is None else bool(bulk)
         if _use_bulk and len(user_refs) > 1:
@@ -549,9 +661,9 @@ async def channel_admin_status(session_string: str, _acc: dict | None,
     client = None
     try:
         client = await connect_client(session_string, _acc, "invite")
-        group = await _resolve_group_entity(client, group_ref)
+        group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
         me = await asyncio.wait_for(client.get_me(), timeout=_ACTION_TIMEOUT)
-        _chan_id = getattr(group, "id", None)  # id чата — чтобы вызвать promote_all_admins
+        _chan_id = _group_channel_id(group)  # id чата — чтобы вызвать promote_all_admins
         part = await asyncio.wait_for(
             client(GetParticipantRequest(channel=group, participant="me")),
             timeout=_ACTION_TIMEOUT)
@@ -606,7 +718,7 @@ async def check_membership_and_admin(session_string: str, _acc: dict | None,
         return {"state": "no_connect", "error": str(exc)[:120]}
     try:
         try:
-            group = await _resolve_group_entity(client, group_ref)
+            group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
         except Exception as exc:
             return {"state": "group_bad", "error": str(exc)[:120]}
         try:
@@ -675,7 +787,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     no_rights = False  # у вызывающего нет add_admins — проблема аккаунта, не группы
     try:
         client = await connect_client(session_string, _acc, "invite")
-        group = await _resolve_group_entity(client, group_ref)
+        group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
         for ref in user_refs:
             try:
                 user = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
@@ -752,7 +864,7 @@ async def export_group_invite_link(session_string: str, _acc: dict | None,
     client = None
     try:
         client = await connect_client(session_string, _acc, "invite")
-        group = await _resolve_group_entity(client, group_ref)
+        group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
         result = await asyncio.wait_for(
             client(ExportChatInviteRequest(peer=group)), timeout=_ACTION_TIMEOUT)
         return getattr(result, "link", "") or ""
@@ -913,7 +1025,7 @@ async def invite_by_phones(
 
     try:
         client = await connect_client(session_string, _acc, "invite")
-        group = await _resolve_group_entity(client, group_ref)
+        group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
 
         # Импортируем контакты
         contacts = [

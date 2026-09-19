@@ -155,7 +155,7 @@ def test_single_target_never_uses_bulk():
 def _patch_engine(monkeypatch, client):
     async def _connect(session, acc, purpose):
         return client
-    async def _resolve(cl, ref):
+    async def _resolve(cl, ref, acc_id=None):
         return object()
     import services.account_manager as am
     monkeypatch.setattr(am, "connect_client", _connect)

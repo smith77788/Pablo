@@ -159,6 +159,11 @@ CACHE: dict[str, str] = {
     "services/broadcaster.py:_bot_tier_cache": "тариф бота с TTL",
     "services/contacts_hub/search_engine.py:_cache": "кэш результатов поиска",
     "services/fleet_governor.py:_CACHE": "множитель темпа с TTL",
+    "services/mass_inviter_engine.py:_ENTITY_CACHE": (
+        "разрешённая сущность группы по (acc_id, group_ref) — чтобы уже вступивший "
+        "аккаунт не дёргал флуд-лимитированный CheckChatInviteRequest на каждый батч; "
+        "best-effort, access_hash пер-аккаунтный и стабильный, потеря при рестарте "
+        "безвредна (перерезолвится)"),
     "services/wb_chat/drivers/mock.py:SENT_OUTBOX": (
         "исходящие mock-драйвера — существует только в тестах и локальной отладке, "
         "в проде драйвер real"),

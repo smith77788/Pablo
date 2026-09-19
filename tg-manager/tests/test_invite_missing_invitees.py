@@ -44,7 +44,7 @@ async def test_missing_invitee_is_failure_not_success(monkeypatch):
     async def _connect(*a, **k):
         return fake
 
-    async def _group(client, ref):
+    async def _group(client, ref, acc_id=None):
         return "GRP"
 
     async def _fast(*a, **k):
@@ -72,7 +72,7 @@ async def test_all_added_when_no_missing(monkeypatch):
     async def _connect(*a, **k):
         return fake
 
-    async def _group(client, ref):
+    async def _group(client, ref, acc_id=None):
         return "GRP"
 
     async def _fast(*a, **k):
