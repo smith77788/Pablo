@@ -228,7 +228,10 @@ async function openMassInvite() {
     txt('massInviteHistory', ops.map(o=>{
       const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
       const [bc,bl]=stb(o.status);
-      return `<div class="row">
+      // Кликабельно: открыть детали операции (per-target лог, причина отказов) —
+      // именно там видно, почему инвайт/операция сделала 0.
+      const _clk = (typeof openOpDetail==='function') ? ` onclick="openOpDetail(${o.id})" style="cursor:pointer"` : '';
+      return `<div class="row"${_clk}>
         <div class="row-ico" style="background:var(--bg-blue-16)">📨</div>
         <div class="row-body">
           <div class="row-name">${esc(o.label||'mass_invite')}</div>

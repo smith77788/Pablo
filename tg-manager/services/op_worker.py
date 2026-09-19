@@ -8119,6 +8119,10 @@ async def _exec_bulk_chan_exec(
             ch_id = pair["channel_id"]
             acc_id = int(pair["acc_id"])
             chan_title = _html.escape(str(pair.get("title") or ch_id))
+            # access_hash/username нужны, чтобы свежий клиент нашёл канал по id
+            # (иначе смена названия/описания давала 0 — get_entity(id) падал).
+            _pair_hash = int(pair.get("access_hash") or 0)
+            _pair_uname = str(pair.get("username") or "")
             acc = acc_map.get(acc_id)
             if not acc:
                 err_list.append(f"❌ {chan_title}: аккаунт не найден")
@@ -8172,7 +8176,8 @@ async def _exec_bulk_chan_exec(
 
                 elif op == "chan_about":
                     ok = await account_manager.edit_channel_about(
-                        acc["session_str"], ch_id, value, _acc=acc
+                        acc["session_str"], ch_id, value, _acc=acc,
+                        access_hash=_pair_hash, username=_pair_uname,
                     )
                     if ok:
                         ok_list.append(f"✅ {chan_title}")
@@ -8181,7 +8186,8 @@ async def _exec_bulk_chan_exec(
 
                 elif op == "chan_title":
                     ok = await account_manager.edit_channel_title(
-                        acc["session_str"], ch_id, value, _acc=acc
+                        acc["session_str"], ch_id, value, _acc=acc,
+                        access_hash=_pair_hash, username=_pair_uname,
                     )
                     if ok:
                         ok_list.append(f"✅ {chan_title} → {_html.escape(value[:40])}")

@@ -4510,7 +4510,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not ids_in:
             return _err("Выберите каналы", 400)
         chans = await _safe_fetch(pool,
-            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
+            "SELECT channel_id, title, acc_id, access_hash, username FROM managed_channels "
             "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
         chans = [c for c in (chans or []) if c.get("acc_id")]
         if not chans:
@@ -4525,7 +4525,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     return _err("Название канала — до 128 символов", 400)
                 worker_op = channel_edit_worker_op(op)
                 pairs = [{"channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
-                          "title": c.get("title") or ""} for c in chans]
+                          "title": c.get("title") or "",
+                          "access_hash": int(c.get("access_hash") or 0),
+                          "username": c.get("username") or ""} for c in chans]
                 params = {"op": worker_op, "value": value, "base_uname": value,
                           "channel_acc_pairs": pairs}
                 op_id = await _obus.submit(

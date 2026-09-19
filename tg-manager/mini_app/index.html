@@ -663,7 +663,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
      (/miniapp/); запросы к /api/* он не перехватывает. */
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
-      try { navigator.serviceWorker.register('sw.js'); } catch (e) {}
+      // .catch обязателен: register() отклоняется асинхронно (напр. не-https
+      // origin), иначе — необработанный rejection в консоли.
+      try { navigator.serviceWorker.register('sw.js').catch(function(){}); } catch (e) {}
     });
   }
 </script>
@@ -16758,12 +16760,26 @@ const ADV_STYLE = {
 // инвайт», только группа уже подставлена — не нужно искать канал заново.
 async function openMassInviteForChannel(chId) {
   const c = CUR_CHANNELS.find(x=>x.channel_id==chId);
-  const ref = c && c.username ? '@'+c.username : String(chId);
   await openMassInvite();  // сбрасывает поля — заполняем ПОСЛЕ
   const g = document.getElementById('massInviteGroup');
-  if (g) g.value = ref;
+  // Подставляем ПРИГОДНОЕ для инвайта: @username, иначе инвайт-ссылку. Голый
+  // числовой id инвайту бесполезен (его не разрезолвить) — именно из-за него
+  // в поле появлялись «цифры». Ссылку берём с бэка (у приватных/без @).
+  let ref = (c && c.username) ? '@'+c.username : '';
+  if (g) g.value = ref || 'Получаю ссылку…';
+  if (!ref) {
+    try {
+      const r = await api('/api/miniapp/channel/'+chId+'/invite_link');
+      if (r && r.invite_link) ref = r.invite_link;
+    } catch(_) {}
+    // Последний фолбэк — id в формате -100…, который аккаунт-админ разрешает.
+    if (!ref) ref = '-100' + String(chId).replace(/^-?100/, '');
+    if (g) g.value = ref;
+  }
   checkInviteRights();
-  toast('🎯 Канал подставлен — выберите источник аудитории и запустите');
+  toast(ref.startsWith('@')||ref.startsWith('http')
+    ? '🎯 Канал подставлен — выберите источник аудитории и запустите'
+    : '🎯 Канал подставлен по ID (у него нет @ и ссылки) — проверьте права аккаунта');
 }
 
 

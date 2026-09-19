@@ -3945,13 +3945,19 @@ async def edit_channel_title(
     channel_id: int,
     title: str,
     _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
 ) -> bool:
     from telethon.tl.functions.channels import EditTitleRequest
 
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(channel_id)
+        # Свежий клиент не знает канал по «голому» id → get_entity(id) падал и
+        # смена названия давала 0. Резолвим надёжно: @username / InputPeerChannel
+        # по access_hash / iter_dialogs (тот же путь, что у пина и постинга).
+        ref = f"@{username.lstrip('@')}" if username else channel_id
+        entity = await _resolve_channel_peer(client, ref, access_hash)
         await client(EditTitleRequest(channel=entity, title=title))
         return True
     except Exception as e:
@@ -3969,13 +3975,16 @@ async def edit_channel_about(
     channel_id: int,
     about: str,
     _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
 ) -> bool:
     from telethon.tl.functions.messages import EditChatAboutRequest
 
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(channel_id)
+        ref = f"@{username.lstrip('@')}" if username else channel_id
+        entity = await _resolve_channel_peer(client, ref, access_hash)
         await client(EditChatAboutRequest(peer=entity, about=about))
         return True
     except Exception as e:
