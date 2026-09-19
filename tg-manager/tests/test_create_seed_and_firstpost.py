@@ -78,7 +78,7 @@ def test_seed_and_firstpost_fire(monkeypatch):
         "account_ids": [1, 2], "title": "Dostavka Moskva", "channel_count": 1,
         "name_mode": "keywords", "username_template": "Dostavka_Moskva",
         "first_post": "Привет, это первый пост", "pin_first_post": True,
-        "seed_count": 1, "bulk_pacing": "fast",
+        "seed_count": 1, "engage_count": 1, "bulk_pacing": "fast",
     }
     res = asyncio.run(op_worker._exec_bulk_create_channels_multi(_Pool(), None, 1, 42, params))
     assert res["created"] == 2
@@ -90,6 +90,12 @@ def test_seed_and_firstpost_fire(monkeypatch):
     # автопосев ушёл операцией boost_subscribers по каждому каналу
     seeds = [s for s in submitted if s["op_type"] == "boost_subscribers"]
     assert len(seeds) == 2
+
+    # оживление первого поста: реакции + просмотры по каждому каналу
+    assert len([s for s in submitted if s["op_type"] == "boost_reactions"]) == 2
+    assert len([s for s in submitted if s["op_type"] == "boost_views"]) == 2
+    _react = next(s for s in submitted if s["op_type"] == "boost_reactions")
+    assert _react["params"].get("msg_id") == 1     # msg_id первого поста
     # создатель НЕ участвует в посеве своего же канала (заходят другие)
     # канал создателя #1 → посев аккаунтом [2]; создателя #2 → [1]
     seeded_sets = sorted(tuple(s["params"]["account_ids"]) for s in seeds)

@@ -5329,6 +5329,8 @@ async def _exec_bulk_create_channels_multi(
     _first_post = (params.get("first_post") or "").strip()
     _pin_first = bool(params.get("pin_first_post"))
     _seed_count = max(0, min(int(params.get("seed_count") or 0), 200))
+    # Оживление первого поста: сколько аккаунтов ставят реакцию + дают просмотр.
+    _engage_count = max(0, min(int(params.get("engage_count") or 0), 200))
     # Пул аккаунтов для посева — весь активный флот владельца (не только создатели),
     # чтобы в новый ресурс заходили ДРУГИЕ аккаунты. Берём один раз.
     _seed_pool: list[int] = []
@@ -5368,8 +5370,17 @@ async def _exec_bulk_create_channels_multi(
 
             await session_simulator.typing_delay(title)
 
+            # SEO-описание: разнообразим по ресурсам вариантами {а|б} (spintax).
+            _about_i = about
+            if about:
+                try:
+                    from services.dm_engine import expand_spintax as _spin_ab
+                    _about_i = _spin_ab(about) or about
+                except Exception:
+                    _about_i = about
+
             result = await account_manager.create_channel(
-                acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
+                acc["session_str"], title, about=_about_i, megagroup=is_group, _acc=acc
             )
 
             flood_wait = result.get("flood_wait", 0) if isinstance(result, dict) else 0
@@ -5417,6 +5428,7 @@ async def _exec_bulk_create_channels_multi(
 
                 _ch_hash = int(result.get("access_hash", 0) or 0)
                 # ── Первый контент: пост от создателя (он админ) + закреп ──────
+                _first_msg_id = 0
                 if _first_post:
                     try:
                         from services.dm_engine import expand_spintax as _spin
@@ -5425,12 +5437,38 @@ async def _exec_bulk_create_channels_multi(
                             acc["session_str"], ch_id, _text[:4000],
                             access_hash=_ch_hash,
                             username=(_assigned_username or ""), _acc=acc)
-                        if _pin_first and isinstance(_pr, dict) and _pr.get("msg_id"):
+                        if isinstance(_pr, dict) and _pr.get("msg_id"):
+                            _first_msg_id = int(_pr["msg_id"])
+                        if _pin_first and _first_msg_id:
                             await account_manager.pin_last_channel_post(
                                 acc["session_str"], ch_id, access_hash=_ch_hash,
                                 username=(_assigned_username or ""), _acc=acc)
                     except Exception:
                         log_exc_swallow(log, "bulk_create_channels_multi: first_post failed")
+
+                # ── Оживление первого поста: реакции + просмотры флотом ────────
+                # Свежий пост с реакциями/просмотрами выглядит живым (лучше для
+                # удержания и ранжирования). Только для публичного ресурса (@),
+                # чтобы аккаунты видели пост без вступления. Через шину (boost_*).
+                if _engage_count > 0 and _first_msg_id and _assigned_username and _seed_pool:
+                    _eng_ids = [i for i in _seed_pool if i != int(acc["id"])][:_engage_count]
+                    if _eng_ids:
+                        try:
+                            from services import operation_bus
+                            await operation_bus.submit(
+                                pool, owner_id, "boost_reactions",
+                                {"channel": f"@{_assigned_username}", "msg_id": _first_msg_id,
+                                 "account_ids": _eng_ids},
+                                total_items=len(_eng_ids),
+                                label=f"Оживление: реакции в {title[:40]}")
+                            await operation_bus.submit(
+                                pool, owner_id, "boost_views",
+                                {"channel": f"@{_assigned_username}", "msg_ids": [_first_msg_id],
+                                 "account_ids": _eng_ids},
+                                total_items=len(_eng_ids),
+                                label=f"Оживление: просмотры в {title[:40]}")
+                        except Exception:
+                            log_exc_swallow(log, "bulk_create_channels_multi: engage submit failed")
 
                 # ── Автопосев участников: отдельной операцией через шину ───────
                 # (проверенный путь boost_subscribers: свой захват, карантин,

@@ -2426,6 +2426,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
         🔎 <b>SEO-режим</b>: название — это ключевые слова через пробел, @юзернейм — ключи через «_». Система расставит их для каждого ресурса по-разному (перестановка + добавление букв): <code>Dostavka_Moskva → Moskva_Dostavka, Dostavkaj_Moskva, Moskva_Dostavkagy…</code> — так вы занимаете много мест в поиске по многим сочетаниям ключей. @юзернейм — необязателен; занятые Telegram отвергнет, возьмётся следующий вариант.
       </div>
+      <button class="btn btn-s" style="width:100%;margin-bottom:6px" onclick="previewFactoryNames('cf')">👁 Предпросмотр имён и @</button>
+      <div id="cfPreview" style="margin-bottom:8px"></div>
       <div class="sec" style="margin:6px 0 4px">Автоматизация после создания</div>
       <textarea id="cfFirstPost" placeholder="Первый пост (необязательно). Поддержка вариантов: {Привет|Здравствуйте}, будет закреплён" rows="2" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:6px"></textarea>
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
@@ -2434,6 +2436,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
         <input type="number" id="cfSeed" value="0" min="0" max="200" title="Сколько своих аккаунтов подписать" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <div style="font-size:12px;color:var(--hint);line-height:1.4">👥 Автопосев: столько своих аккаунтов сразу подпишутся на каждый ресурс. Размер аудитории — главный фактор высоты позиции в поиске. 0 — выключено.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+        <input type="number" id="cfEngage" value="0" min="0" max="200" title="Реакции + просмотры на первый пост" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="font-size:12px;color:var(--hint);line-height:1.4">🔥 Оживление: столько аккаунтов поставят реакцию и дадут просмотр первому посту (нужен первый пост и публичный @). Свежий пост выглядит живым. 0 — выключено.</div>
       </div>
       <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
         Первый пост и подписчики добавляются <b>сразу после создания, автоматически</b> — настраивается здесь до старта. Посев идёт отдельными операциями с защитой темпа (канарейка/пейсинг).
@@ -4194,6 +4200,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <label>Username (без @, без bot)</label>
         <input type="text" id="bfUsername" placeholder="{{myassistant|mypowerbot|myhelper}}" class="inp">
         <div class="field-note">Суффикс bot добавится автоматически. Спинтакс = уникальные имена.</div>
+      </div>
+      <div class="field">
+        <button class="btn btn-s" style="width:100%" onclick="previewFactoryNames('bf')">👁 Предпросмотр имён и @</button>
+        <div id="bfPreview" style="margin-top:6px"></div>
       </div>
       <div class="field">
         <label>Описание</label>
@@ -20038,6 +20048,31 @@ async function loadCfRecent() {
     `).join(''));
   } catch(e) { txt('cfRecent', empty('⚠️','Ошибка',e.message)); }
 }
+// Живой предпросмотр генерируемых имён/@ до создания. prefix: 'cf' (каналы) | 'bf' (боты).
+async function previewFactoryNames(prefix) {
+  const isBot = prefix === 'bf';
+  const title = (document.getElementById(isBot?'bfName':'cfTitle')?.value || '').trim();
+  const unameTpl = (document.getElementById(isBot?'bfUsername':'cfUname')?.value || '').trim();
+  const box = document.getElementById(isBot?'bfPreview':'cfPreview');
+  if (!box) return;
+  if (!title && !unameTpl) { box.innerHTML = '<div style="font-size:12px;color:var(--hint)">Введите название и/или шаблон @юзернейма для предпросмотра.</div>'; return; }
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const r = await api('/api/miniapp/factory/name_preview', {method:'POST', body:JSON.stringify({
+      title, username_template: unameTpl, count: 8, for_bot: isBot,
+    })});
+    const items = (r && r.items) || [];
+    if (!items.length) { box.innerHTML = '<div style="font-size:12px;color:var(--hint)">Нет вариантов.</div>'; return; }
+    box.innerHTML =
+      '<div style="font-size:12px;color:var(--hint);margin-bottom:4px">Так будут названы первые ресурсы:</div>'
+      + '<div style="background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px">'
+      + items.map((it,i)=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;padding:2px 0;${i?'border-top:1px solid var(--sep)':''}">`
+          + `<span style="color:var(--text)">${esc(it.title||'—')}</span>`
+          + `<span style="color:var(--accent)">${esc(it.username||'')}</span></div>`).join('')
+      + '</div>';
+  } catch(e) { box.innerHTML = `<div style="font-size:12px;color:var(--red)">${esc(e.message||'Ошибка')}</div>`; }
+}
+
 async function submitChannelFactory() {
   const title = document.getElementById('cfTitle').value.trim();
   const about = document.getElementById('cfAbout').value.trim();
@@ -20051,6 +20086,7 @@ async function submitChannelFactory() {
   const firstPost = (document.getElementById('cfFirstPost')?.value || '').trim();
   const pinFirst = !!document.getElementById('cfPinFirst')?.checked;
   const seedCount = Math.max(0, parseInt(document.getElementById('cfSeed')?.value) || 0);
+  const engageCount = Math.max(0, parseInt(document.getElementById('cfEngage')?.value) || 0);
   if (!title) { errEl.textContent='Укажите название'; return; }
   if (!accts.length) { errEl.textContent='Выберите хотя бы один аккаунт'; return; }
   const total = accts.length * count;
@@ -20059,11 +20095,13 @@ async function submitChannelFactory() {
   let _extra = '';
   if (firstPost) _extra += `\n• первый пост${pinFirst?' + закреп':''}`;
   if (seedCount>0) _extra += `\n• автопосев: +${seedCount} подписчиков на каждый`;
+  if (engageCount>0) _extra += `\n• оживление: реакции и просмотры от ${engageCount} аккаунтов`;
   if (!await askConfirm(`Создать ${total} ${what} на ${accts.length} аккаунт(ах)?${_extra?('\nПосле создания:'+_extra):''}\nОни реально появятся в Telegram — отменить создание нельзя.`)) return;
   try {
     const r = await api('/api/miniapp/channels/bulk_create',{method:'POST',body:JSON.stringify({
       account_ids: accts, channel_count: count, title, about, is_group: isGroup, name_mode: nameMode,
       username_template: usernameTpl, first_post: firstPost, pin_first_post: pinFirst, seed_count: seedCount,
+      engage_count: engageCount,
     })});
     toast(`🏭 Создание ${r.count || total} ${what} запущено · операция #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Создание ' + what);

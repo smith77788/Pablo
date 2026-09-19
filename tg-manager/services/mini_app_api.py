@@ -1178,6 +1178,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         ok = await device_pairing.revoke_device(pool, uid, pairing_id)
         return _json_resp({"ok": ok})
 
+    async def factory_name_preview(request: web.Request) -> web.Response:
+        """Предпросмотр генерируемых имён и @юзернеймов ДО создания ресурсов.
+        Чистый расчёт (name_variator), без БД и без Telegram — чтобы владелец
+        видел, что именно получится, и правил шаблон заранее."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        from services import name_variator
+        title = validate_string(data.get("title"), max_len=128) or ""
+        uname_tpl = validate_string(data.get("username_template"), max_len=64) or ""
+        for_bot = bool(data.get("for_bot"))
+        n = min(max(int(validate_integer(data.get("count", 6), min_val=1, max_val=12) or 6), 1), 12)
+        titles = name_variator.generate_titles(title, n) if title else []
+        usernames = []
+        if uname_tpl:
+            usernames = name_variator.generate_usernames(
+                uname_tpl, n, require_suffix=("bot" if for_bot else None))
+        items = []
+        for i in range(max(len(titles), len(usernames))):
+            items.append({
+                "title": titles[i] if i < len(titles) else "",
+                "username": ("@" + usernames[i]) if i < len(usernames) else "",
+            })
+        return _json_resp({"items": items})
+
     # ── Dashboard ────────────────────────────────────────────────────────────
 
     @_cached_user()
@@ -6440,6 +6469,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             first_post = validate_string(data.get("first_post"), max_len=4000) or ""
             pin_first_post = bool(data.get("pin_first_post"))
             seed_count = min(max(validate_integer(data.get("seed_count", 0), min_val=0, max_val=200) or 0, 0), 200)
+            engage_count = min(max(validate_integer(data.get("engage_count", 0), min_val=0, max_val=200) or 0, 0), 200)
             is_group = bool(data.get("is_group"))
             # Оставляем только СВОИ активные аккаунты с сессией.
             rows = await _safe_fetch(
@@ -6465,6 +6495,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         "first_post": first_post,
                         "pin_first_post": pin_first_post,
                         "seed_count": seed_count,
+                        "engage_count": engage_count,
                         "is_group": is_group,
                     },
                     total_items=total,
@@ -16072,6 +16103,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
     app.router.add_get("/api/miniapp/devices", devices_list)
     app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
+    app.router.add_post("/api/miniapp/factory/name_preview", factory_name_preview)
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)
     # Bots
