@@ -5824,6 +5824,14 @@ async def _exec_bot_factory_multi(
     failed_count = 0
     created_tokens: list[str] = []
 
+    # SEO-массив для ботов: имя из ключей (перестановка), @username вращением
+    # ключей с суффиксом bot. Иначе — прежняя нумерация unique_bot_username.
+    from services import name_variator as _nv
+    _bf_seo = params.get("name_mode") == "keywords"
+    _bf_titles = _nv.generate_titles(bot_name, total, seed=op_id) if _bf_seo else None
+    _bf_ugen = (_nv.username_candidates(base_username, seed=op_id, require_suffix="bot")
+                if (_bf_seo and base_username) else None)
+
     try:
         for global_i in range(total):
             if await _is_cancelled(pool, op_id):
@@ -5836,8 +5844,15 @@ async def _exec_bot_factory_multi(
             if not active_accounts:
                 break
 
-            username = unique_bot_username(base_username, global_i) if base_username else f"bot{random.randint(10000, 99999)}bot"
-            display_name = f"{bot_name} {global_i + 1}" if total > 1 else bot_name
+            if _bf_ugen is not None:
+                username = next(_bf_ugen, None) or (unique_bot_username(base_username, global_i)
+                                                    if base_username else f"bot{random.randint(10000,99999)}bot")
+            else:
+                username = unique_bot_username(base_username, global_i) if base_username else f"bot{random.randint(10000, 99999)}bot"
+            if _bf_seo and _bf_titles:
+                display_name = _bf_titles[global_i]
+            else:
+                display_name = f"{bot_name} {global_i + 1}" if total > 1 else bot_name
 
             await session_simulator.typing_delay(display_name)
             result = None
@@ -5981,6 +5996,14 @@ async def _exec_bot_factory(
         failed_count = 0
         created_tokens: list[str] = []
 
+        # SEO-массив для ботов: имя из ключей (перестановка), @username вращением
+        # ключей с обязательным суффиксом bot. Иначе — прежнее «Имя 1, Имя 2».
+        from services import name_variator as _nv
+        _bf_seo = params.get("name_mode") == "keywords"
+        _bf_titles = _nv.generate_titles(name_tpl, count, seed=op_id) if _bf_seo else None
+        _bf_ugen = (_nv.username_candidates(uname_tpl, seed=op_id, require_suffix="bot")
+                    if (_bf_seo and uname_tpl) else None)
+
         for i in range(count):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -5991,10 +6014,17 @@ async def _exec_bot_factory(
                 }
 
             num = i + 1
-            display_name = f"{name_tpl} {num}" if count > 1 else name_tpl
-            username_base = f"{uname_tpl}{num}" if uname_tpl else f"bot{random.randint(10000, 99999)}"
-            if not username_base.endswith("bot"):
-                username_base = username_base + "bot"
+            if _bf_seo and _bf_titles:
+                display_name = _bf_titles[i]
+            else:
+                display_name = f"{name_tpl} {num}" if count > 1 else name_tpl
+            if _bf_ugen is not None:
+                username_base = next(_bf_ugen, None) or (
+                    f"{uname_tpl}{num}bot" if uname_tpl else f"bot{random.randint(10000,99999)}bot")
+            else:
+                username_base = f"{uname_tpl}{num}" if uname_tpl else f"bot{random.randint(10000, 99999)}"
+                if not username_base.endswith("bot"):
+                    username_base = username_base + "bot"
 
             await session_simulator.typing_delay(display_name)
 

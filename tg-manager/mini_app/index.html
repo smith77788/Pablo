@@ -1880,7 +1880,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="mgmt-tile-lbl">Фабрика каналов</div>
         <div class="mgmt-tile-val"></div>
       </div>
-      <div class="mgmt-tile" onclick="openGroupFactory()">
+      <div class="mgmt-tile" onclick="openChannelFactory(true)">
         <div class="mgmt-tile-ico">👥</div>
         <div class="mgmt-tile-lbl">Фабрика групп</div>
         <div class="mgmt-tile-val"></div>
@@ -4168,7 +4168,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="field">
           <label>Ботов на каждый аккаунт</label>
           <input type="number" id="bfCount" value="1" min="1" max="10" class="inp">
-          <div class="field-note">При &gt;1 к имени/username добавится номер. Операция идёт в фоне — следите в «Операции».</div>
+          <div class="field-note">Операция идёт в фоне — следите в «Операции».</div>
+        </div>
+        <div class="field">
+          <label>Как называть</label>
+          <select id="bfNameMode" class="inp">
+            <option value="keywords">🔎 SEO: перестановка ключей</option>
+            <option value="num">Имя + номер (1, 2, 3…)</option>
+          </select>
+          <div class="field-note">🔎 SEO: имя — ключевые слова через пробел, username — ключи через «_». Система расставит их для каждого бота по-разному (перестановка + добавление букв), суффикс bot добавится сам. Так боты занимают больше мест в поиске по ключам.</div>
         </div>
       </div>
       <!-- РЕЖИМ «по токену»: регистрация уже созданного бота -->
@@ -16157,8 +16165,9 @@ async function submitBotFactory() {
     if (!await askConfirm(`Создать ${total} бот(ов) через @BotFather на ${accts.length} аккаунт(ах)? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
     btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь...';
     try {
+      const bfNameMode = document.getElementById('bfNameMode')?.value || 'keywords';
       const r = await api('/api/miniapp/bot_factory/create_new', {method:'POST', body:JSON.stringify({
-        account_ids: accts, count: cnt, name_template: name, uname_template: username,
+        account_ids: accts, count: cnt, name_template: name, uname_template: username, name_mode: bfNameMode,
       })});
       tg.HapticFeedback?.notificationOccurred('success');
       toast(`🏭 Создание ${r.count || total} бот(ов) запущено · операция #${r.op_id}`);
@@ -19998,12 +20007,14 @@ async function openEcoDetail(ecoId, ecoName) {
 }
 
 // ── Channel Factory ─────────────────────────────────────
-async function openChannelFactory() {
+async function openChannelFactory(asGroup) {
   push('s-chanfactory');
   document.getElementById('cfTitle').value='';
   document.getElementById('cfAbout').value='';
   document.getElementById('cfErr').textContent='';
-  const g = document.getElementById('cfIsGroup'); if (g) g.checked = false;
+  // Единая фабрика для каналов и чатов: групповой вход открывает её с включённой
+  // галочкой «группы» — чтобы у чатов были те же настройки (SEO/посев/первый пост).
+  const g = document.getElementById('cfIsGroup'); if (g) g.checked = !!asGroup;
   _renderContactAccPicker('cfAccts', []);   // мультивыбор аккаунтов (создаём у каждого)
   loadCfRecent();
 }

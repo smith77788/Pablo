@@ -6322,6 +6322,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Укажите шаблон имени бота", 400)
             base_username = validate_string(data.get("uname_template") or data.get("base_username"), max_len=32) or ""
             bot_count = min(max(validate_integer(data.get("count", 1), min_val=1, max_val=10) or 1, 1), 10)
+            bf_name_mode = (data.get("name_mode") or "keywords")
+            if bf_name_mode not in ("keywords", "num"):
+                bf_name_mode = "keywords"
             rows = await _safe_fetch(
                 pool,
                 "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[]) "
@@ -6340,6 +6343,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         "bot_count": bot_count,
                         "bot_name": bot_name,
                         "base_username": base_username,
+                        "name_mode": bf_name_mode,
                     },
                     total_items=total,
                     label=f"Фабрика ботов: {total} шт. на {len(owned)} акк.",
