@@ -263,7 +263,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .li-name{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .li-sub{font-size:13px;color:var(--hint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .li-right{flex-shrink:0;display:flex;align-items:center;gap:6px}
-.chev{color:var(--hint);font-size:14px;flex-shrink:0;opacity:.5;transition:transform .15s}
+.chev{color:var(--hint);font-size:14px;flex-shrink:0;opacity:.7;transition:transform .15s}
 .li.tap:active .chev{transform:translateX(2px)}
 
 /* ─── Rows (settings) ────────────────────────────────────────── */
@@ -323,7 +323,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .empty{text-align:center;padding:36px 20px;color:var(--hint)}
 .empty-ico{font-size:36px;margin-bottom:8px;opacity:.6}
 .empty-txt{font-size:14px;font-weight:500}
-.empty-sub{font-size:13px;margin-top:4px;opacity:.7}
+.empty-sub{font-size:13px;margin-top:4px}
 .err-msg{padding:18px 16px;color:var(--red);font-size:14px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
 .err-msg-ico{font-size:30px;opacity:.6}
 .err-msg-txt{font-weight:500;line-height:1.4}
@@ -722,7 +722,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .kpi-chip-val{font-size:24px;font-weight:700;letter-spacing:-.4px;line-height:1;margin-bottom:4px}
 /* Заглушка «нет данных»: тот же размер, чтобы лента не прыгала, но без
    акцентного цвета и веса — прочерк не должен спорить с настоящими числами. */
-.kpi-chip-val.is-empty{color:var(--hint);font-weight:500;opacity:.55}
+.kpi-chip-val.is-empty{color:var(--hint);font-weight:500;opacity:.75}
 .kpi-chip-lbl{font-size:10px;color:var(--hint);white-space:nowrap}
 
 /* ─── Mini bar chart ─────────────────────────────────────── */
@@ -751,7 +751,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .copilot-reason{font-size:12px;color:var(--hint);line-height:1.35;margin-bottom:5px}
 .copilot-cta{font-size:12px;font-weight:600;color:var(--accent)}
 .copilot-actions{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
-.copilot-apply{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
+.copilot-apply{background:var(--accent);color:var(--btn-text);border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
 .copilot-apply:active{transform:scale(.95)}
 .copilot-apply:disabled{opacity:.6}
 /* Пресеты в формах ввода (шаблоны в один тап) */
@@ -789,7 +789,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .mgmt-tile-val{color:var(--accent)}
 .ava-teal{background:rgba(45,212,191,.14);color:var(--teal)}
 .ava-green{background:rgba(52,211,153,.14);color:var(--green)}
-.sec{text-transform:uppercase;letter-spacing:.08em;font-size:11px;font-weight:700;color:var(--hint);opacity:.9}
+.sec{text-transform:uppercase;letter-spacing:.08em;font-size:11px;font-weight:700;color:var(--hint)}
 .hdr{background:var(--glass);backdrop-filter:saturate(150%) blur(16px);-webkit-backdrop-filter:saturate(150%) blur(16px);border-bottom:1px solid var(--glass-border)}
 .back{border-color:var(--border)}
 .back:active{background:var(--sep);transform:scale(.88)}
@@ -1275,7 +1275,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════ -->
 <style>
 .vfilter{flex:0 0 auto;font-size:12px;padding:8px 12px;border-radius:14px;background:var(--bg2);color:var(--hint);border:1px solid var(--sep);cursor:pointer;white-space:nowrap}
-.vfilter.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.vfilter.on{background:var(--accent);color:var(--btn-text);border-color:var(--accent)}
 </style>
 <div class="screen" id="s-vault">
   <div class="hdr">
@@ -3305,12 +3305,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
              onkeydown="if(event.key==='Enter')submitGlobalSearch()">
       <button class="btn btn-p" style="flex:0 0 auto;padding:9px 16px" onclick="submitGlobalSearch()">🔍</button>
     </div>
-    <div class="lst" id="gsResults"><div class="hint" style="opacity:.6;padding:12px">Введите запрос и нажмите 🔍</div></div>
+    <div class="lst" id="gsResults"><div class="hint" style="padding:12px">Введите запрос и нажмите 🔍</div></div>
 
     <details style="margin-top:14px">
       <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 2px">🔎 Найти потерянный контакт</summary>
       <div style="padding:6px 2px 2px">
-        <div class="hint" style="opacity:.7;padding:0 0 8px;font-size:12px;line-height:1.4">
+        <div class="hint" style="padding:0 0 8px;font-size:12px;line-height:1.4">
           Знаете имя профиля и начало @username с числовым хвостом? Сначала пробуем
           нативный поиск, затем перебираем @начало+цифры и ищем нужное имя.
           Перебор идёт в фоне — результат придёт <b>отчётом операции</b> (раздел «Отчёты»).
@@ -3845,7 +3845,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <details id="cfCredsBox" style="margin-bottom:8px">
         <summary style="font-size:13px;cursor:pointer;opacity:.85">🔑 Доступы Cloudflare</summary>
         <div style="padding-top:8px">
-          <div class="field"><label>API Token <span style="opacity:.6">(вставится 1 раз, хранится в БД зашифровано)</span></label><input type="password" id="cfToken" placeholder="cfut_… (оставьте пустым, чтобы не менять)" autocomplete="off"></div>
+          <div class="field"><label>API Token <span style="font-weight:400">(вставится 1 раз, хранится в БД зашифровано)</span></label><input type="password" id="cfToken" placeholder="cfut_… (оставьте пустым, чтобы не менять)" autocomplete="off"></div>
           <div class="field"><label>Account ID</label><input type="text" id="cfAccountId" placeholder="6d808bb24be683c5a0e556074977a78a"></div>
           <div class="field"><label>Workers-поддомен</label><input type="text" id="cfSubdomain" placeholder="infragram"></div>
           <button class="btn btn-s" id="cfSaveCredsBtn" style="width:100%;font-size:13px;padding:9px 6px" onclick="saveCfCreds()">💾 Сохранить доступы</button>
@@ -21335,12 +21335,12 @@ async function recomputeDna() {
 function openGlobalSearch(){
   push('s-gsearch');
   const el=document.getElementById('gsResults');
-  if(el) el.innerHTML='<div class="hint" style="opacity:.6;padding:12px">Введите запрос и нажмите 🔍</div>';
+  if(el) el.innerHTML='<div class="hint" style="padding:12px">Введите запрос и нажмите 🔍</div>';
 }
 async function submitGlobalSearch(){
   const q=(document.getElementById('gsQuery').value||'').trim();
   const el=document.getElementById('gsResults');
-  if(!q){ el.innerHTML='<div class="hint" style="opacity:.6;padding:12px">Введите запрос</div>'; return; }
+  if(!q){ el.innerHTML='<div class="hint" style="padding:12px">Введите запрос</div>'; return; }
   el.innerHTML='<div class="spin-wrap"><div class="spin"></div></div>';
   try{
     const d=await api('/api/miniapp/global_search',{method:'POST',body:JSON.stringify({query:q,limit:30})});
