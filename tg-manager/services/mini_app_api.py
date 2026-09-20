@@ -4780,41 +4780,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # is_account_quarantined считать только НОВЫЕ ограничения (история
             # событий цела; свежее ограничение снова уведёт в карантин).
             #
-            # acc_status='cooldown' снимаем ЗДЕСЬ же: его чистил только пассивный
-            # само-heal в account_monitor (цикл раз в час), а до тех пор
-            # account_health.load_from_db считал такой аккаунт спамблоком
-            # (−40 к health_score и suitability dm/invite = False), и
-            # behavioral_engine его пропускал. То есть кнопка «сбрасывала кулдаун»,
-            # а аккаунт ещё до часа не брался в работу — ровно та жалоба.
-            # Те же предохранители, что у само-heal: трогаем ТОЛЬКО транзиентный
-            # 'cooldown' (не 'banned'/'warming'/'session_expired') и не снимаем
-            # статус при устойчивом конфликте сессии — её надо перезалить.
+            # Полный сброс — пять шагов (кулдаун в БД и в памяти flood_engine,
+            # отметка риска, транзиентный acc_status, запрет suitability), и он
+            # ОДИН на все кнопки: services/account_reset.py. Раньше эта кнопка,
+            # кнопка бота и массовый сброс были написаны порознь и пропускали
+            # разные шаги — результат зависел от того, откуда владелец нажал.
             try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET cooldown_until=NULL, risk_cleared_at=NOW(), "
-                    "  acc_status = CASE WHEN COALESCE(acc_status,'active')='cooldown' "
-                    "                     AND session_conflict_at IS NULL "
-                    "                    THEN 'active' ELSE acc_status END, "
-                    "  status_reason = CASE WHEN COALESCE(acc_status,'active')='cooldown' "
-                    "                        AND session_conflict_at IS NULL "
-                    "                       THEN NULL ELSE status_reason END "
-                    "WHERE id=$1 AND owner_id=$2",
-                    acc_id, uid)
-                # Сбрасываем и process-local пульс: load_from_db перечитывает
-                # acc_status лишь раз в час (или по «Проверке аккаунтов»), а до
-                # того suitability остаётся False и get_sorted_accounts молча
-                # выкидывает аккаунт из подбора. main.py держит op_worker и это
-                # API в ОДНОМ процессе, поэтому правка видна сразу. Только
-                # снимаем запрет — health_score пересчитает штатный цикл.
-                try:
-                    from services import account_health as _ah
-                    _h = _ah.get_health(acc_id)
-                    for _k in ("dm", "invite"):
-                        if _k in _h.suitability:
-                            _h.suitability[_k] = True
-                except Exception:
-                    log.debug("reset_cooldown acc=%d: in-memory пульс не обновлён",
-                              acc_id, exc_info=True)
+                from services.account_reset import reset_account
+                await reset_account(pool, acc_id, uid)
                 return _json_resp({"ok": True, "message": "⚡ Кулдаун и риск-карантин сброшены"})
             except Exception as exc:
                 log.exception("reset_cooldown uid=%d acc=%d", uid, acc_id)

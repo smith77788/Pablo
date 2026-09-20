@@ -1929,28 +1929,17 @@ async def cb_reset_cooldown_one(
     user_id = callback.from_user.id
     acc_id = callback_data.page
 
+    # Полный сброс — одна реализация на все кнопки (services/account_reset.py):
+    # кулдаун в БД и в памяти flood_engine, отметка risk_cleared_at, транзиентный
+    # acc_status и запрет suitability. Раньше эта кнопка и кнопка Mini App были
+    # написаны порознь: здесь не ставилcя risk_cleared_at (гейт операций держал
+    # аккаунт по старым ограничениям), а статус снимался даже при устойчивом
+    # конфликте сессии, где само-heal его намеренно не трогает.
     try:
-        await pool.execute(
-            """UPDATE tg_accounts
-               SET cooldown_until=NULL,
-                   acc_status = CASE
-                       WHEN COALESCE(acc_status,'active') = 'cooldown' THEN 'active'
-                       ELSE COALESCE(acc_status,'active')
-                   END
-               WHERE id=$1 AND owner_id=$2""",
-            acc_id,
-            user_id,
-        )
+        from services.account_reset import reset_account
+        await reset_account(pool, acc_id, user_id)
     except Exception:
-        log_exc_swallow(log, f"reset_cooldown_one: execute failed acc_id={acc_id}")
-
-    # Сбросить in-memory cooldown (flood_engine) — иначе preflight_accounts
-    # продолжает фильтровать аккаунт даже после очистки DB.
-    try:
-        from services.flood_engine import clear_account_cooldown
-        clear_account_cooldown(acc_id)
-    except Exception as e:
-        log.warning("cb_reset_cooldown_one clear_account_cooldown: %s", e)
+        log_exc_swallow(log, f"reset_cooldown_one: сброс не удался acc_id={acc_id}")
 
     try:
         acc = await pool.fetchrow(
@@ -1985,44 +1974,16 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     await safe_answer(callback)
     user_id = callback.from_user.id
 
-    # Собрать ID аккаунтов с кулдауном ДО очистки — для сброса in-memory.
-    cooled_ids: list[int] = []
+    # Те же пять шагов, что и для одного аккаунта, одной реализацией
+    # (services/account_reset.py): DB-сброс без очистки памяти не помогает —
+    # подбор аккаунтов смотрит flood_engine.is_account_cooling() независимо.
+    # Набор прежний: только аккаунты с ЖИВЫМ окном кулдауна.
     try:
-        cooled_rows = await pool.fetch(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND cooldown_until > NOW()",
-            user_id,
-        )
-        cooled_ids = [r["id"] for r in cooled_rows]
-    except Exception as e:
-        log.warning("cb_reset_cooldown_all fetch cooled_ids: %s", e)
-
-    try:
-        result = await pool.execute(
-            """UPDATE tg_accounts
-               SET cooldown_until=NULL,
-                   acc_status = CASE
-                       WHEN COALESCE(acc_status,'active') = 'cooldown' THEN 'active'
-                       ELSE COALESCE(acc_status,'active')
-                   END
-               WHERE owner_id=$1 AND cooldown_until > NOW()""",
-            user_id,
-        )
+        from services.account_reset import reset_all_cooled
+        count = await reset_all_cooled(pool, user_id)
     except Exception:
-        log_exc_swallow(log, f"reset_cooldown_all: execute failed user_id={user_id}")
-        result = "UPDATE 0"
-    # result is like "UPDATE N"
-    try:
-        count = int(str(result).split()[-1])
-    except (ValueError, IndexError):
+        log_exc_swallow(log, f"reset_cooldown_all: сброс не удался user_id={user_id}")
         count = 0
-
-    # Сбросить in-memory cooldown — DB-reset без этого не помогает,
-    # preflight_accounts проверяет flood_engine.is_account_cooling() независимо.
-    try:
-        from services.flood_engine import clear_all_cooldowns
-        clear_all_cooldowns(cooled_ids)
-    except Exception as e:
-        log.warning("cb_reset_cooldown_all clear_all_cooldowns: %s", e)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К дашборду", callback_data=HealthCb(action="menu"))

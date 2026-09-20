@@ -35,8 +35,11 @@ def test_account_action_handles_three_inline_not_as_ops():
     assert "\"reauth_account\"" not in seg and "'reauth_account'" not in seg
     assert "op_type, params, label = \"export_session\"" not in seg
     assert "op_type, params, label = \"reset_cooldown\"" not in seg
-    # reset_cooldown — синхронный UPDATE (реальный эффект)
-    assert "cooldown_until=NULL" in seg
+    # reset_cooldown — синхронный реальный эффект: сброс дожидаются прямо в
+    # эндпоинте, а не ставят в очередь. Сам UPDATE переехал в
+    # services/account_reset.py — одна реализация на кнопки Mini App и бота,
+    # иначе они расходились по шагам (tests/test_risk_cleared_at.py).
+    assert "await reset_account(" in seg
     # export_session — синхронно расшифровывает и отдаёт сессию владельцу
     assert "decrypt_token" in seg and '"session": sess' in seg
     # reauth — честная инструкция в бота (интерактивный код), без фантомного op

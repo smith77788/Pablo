@@ -116,19 +116,11 @@ async def test_risk_cleared_at_lifts_pulse_quarantine():
         await conn.close()
 
 
-# SQL кнопки «Сбросить кулдаун» (services/mini_app_api.py, act == "reset_cooldown").
-# Здесь он повторён дословно, чтобы прогнать по живому Postgres; что хендлер не
-# разошёлся с этим текстом, стережёт tests/test_risk_cleared_at.py.
-_RESET_SQL = (
-    "UPDATE tg_accounts SET cooldown_until=NULL, risk_cleared_at=NOW(), "
-    "  acc_status = CASE WHEN COALESCE(acc_status,'active')='cooldown' "
-    "                     AND session_conflict_at IS NULL "
-    "                    THEN 'active' ELSE acc_status END, "
-    "  status_reason = CASE WHEN COALESCE(acc_status,'active')='cooldown' "
-    "                        AND session_conflict_at IS NULL "
-    "                       THEN NULL ELSE status_reason END "
-    "WHERE id=$1 AND owner_id=$2"
-)
+# Прогоняем по живому Postgres ТОТ ЖЕ SQL, что уходит из кнопок: берём его из
+# services/account_reset.py, чтобы тест не мог разойтись с кодом.
+def _reset_sql() -> str:
+    from services.account_reset import _CLEAR_STATUS_SQL
+    return f"UPDATE tg_accounts SET {_CLEAR_STATUS_SQL} WHERE id=$1 AND owner_id=$2"
 
 
 @pytest.mark.asyncio
@@ -158,7 +150,7 @@ async def test_reset_sql_clears_only_transient_cooldown():
                 cases[name] = acc_id
 
             for acc_id in cases.values():
-                await conn.execute(_RESET_SQL, acc_id, owner)
+                await conn.execute(_reset_sql(), acc_id, owner)
 
             rows = {r["id"]: r for r in await conn.fetch(
                 "SELECT id, acc_status, status_reason, cooldown_until, risk_cleared_at "
