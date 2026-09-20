@@ -1623,6 +1623,33 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         await asyncio.sleep(_POLL_INTERVAL)
 
 
+async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
+    """Цели операции, уже отработанные УСПЕШНО (operation_log, status='ok').
+
+    Нужно для идемпотентности повторов. Повтор операции — и автоматический
+    (_maybe_requeue после FloodWait/сети), и ручной — запускает исполнителя
+    заново с done_items=0, и тот проходит ВЕСЬ список целей сначала. Для
+    постинга это вторая публикация в канал, который уже получил пост: мусор в
+    канале, сожжённый лимит аккаунта и лишний повод для флуда — то есть прямой
+    удар по анти-детекту.
+
+    Пустое множество на первом прогоне (журнал ещё пуст), поэтому вызов
+    безопасен и там, где повтора не было.
+
+    Ключ — ровно та строка, которую исполнитель пишет в operation_log.target;
+    сравнивать имеет смысл только внутри одного исполнителя, где ключ
+    канонический (см. комментарий про retry_targets в services/operation_bus.py).
+    """
+    rows = await _safe_fetch(
+        pool,
+        "SELECT DISTINCT target FROM operation_log "
+        " WHERE op_id=$1 AND status='ok' AND target IS NOT NULL",
+        op_id,
+        log_ctx=f"[completed_targets op={op_id}]",
+    )
+    return {str(r["target"]) for r in (rows or []) if r["target"]}
+
+
 async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
     """Check if operation was cancelled by user.
 
@@ -2942,8 +2969,32 @@ async def _exec_mass_publish(
     # получает свой вариант; без spintax expand возвращает текст как есть (no-op).
     from services.dm_engine import expand_spintax as _expand_spintax
 
+    # Идемпотентность повтора. Повтор (автоматический после FloodWait/сети или
+    # ручной) запускает исполнителя заново с done_items=0, и он проходит ВЕСЬ
+    # список каналов сначала — включая те, куда пост уже ушёл. Это вторая
+    # публикация в канал: мусор у подписчиков, сожжённый лимит аккаунта и лишний
+    # повод для флуда. На первом прогоне журнал пуст, поэтому множество пустое и
+    # поведение не меняется.
+    _already_published = await completed_targets(pool, op_id)
+    if _already_published:
+        log.info(
+            "mass_publish op=%d: повтор — %d каналов уже опубликованы, пропускаем",
+            op_id, len(_already_published),
+        )
+
     for idx, target_entry in enumerate(targets, 1):
         dialog = target_entry["dialog"]
+        if str(dialog["id"]) in _already_published:
+            # Считаем успехом: цель операции достигнута на прошлом прогоне, и
+            # итоговые счётчики должны описывать ВСЮ операцию, а не только
+            # добор. Иначе повтор отчитывался бы «1 из 60» на выполненной работе.
+            ok_count += 1
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id,
+            )
+            continue
         candidate_accounts = [
             _acc
             for _acc in target_entry["accounts"]
@@ -3030,9 +3081,16 @@ async def _exec_mass_publish(
                     )
                 except Exception:
                     log_exc_swallow(log, "mass_publish: last_post_at update")
+                # target = channel_id, как и в error-ветке ниже. Раньше успех
+                # писал ЗАГОЛОВОК канала, а провал — id: сопоставить «уже
+                # опубликовано» с «упало» было нечем, поэтому и повтор, и
+                # проверка идемпотентности работали вслепую. Заголовок не
+                # теряется — он уходит в message (экран деталей печатает
+                # «target — message»).
                 await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, _ch_title,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)",
+                    op_id, idx, str(dialog["id"]), _ch_title,
                 )
                 await _audit(
                     pool,

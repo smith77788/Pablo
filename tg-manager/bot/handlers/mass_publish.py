@@ -624,18 +624,35 @@ async def cb_mpub_retry_failed(
     except (TypeError, ValueError):
         params = {}
 
-    # 2) Упавшие каналы из operation_log (target = channel_id, только числовые)
-    failed_rows = await pool.fetch(
-        "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='error'",
+    # 2) Упавшие каналы из operation_log (target = channel_id, только числовые).
+    #
+    # Канал, у которого есть ХОТЯ БЫ ОДНА успешная запись, исключается: он мог
+    # упасть на одном аккаунте и пройти на резервном, либо пройти на повторном
+    # прогоне этой же операции. Повторить такой канал — значит опубликовать в
+    # него второй раз: мусор у подписчиков и сожжённый лимит аккаунта. Ровно это
+    # правило уже действует в operation_bus.collect_failed_targets; здесь оно
+    # отсутствовало, и ручной повтор дублировал публикации.
+    log_rows = await pool.fetch(
+        "SELECT target, status FROM operation_log "
+        " WHERE op_id=$1 AND target IS NOT NULL AND status IN ('ok','error')",
         src_op_id,
     )
-    # Error-лог mass_publish пишет target=channel_id (числовой) — берём уникальные.
+
+    def _chan_id(raw) -> int | None:
+        t = (raw or "").strip()
+        return int(t) if t.lstrip("-").isdigit() else None
+
+    published: set[int] = set()
     failed_ids: list[int] = []
-    for r in failed_rows:
-        t = (r["target"] or "").strip().lstrip("-")
-        if t.isdigit():
-            failed_ids.append(int(r["target"]))
-    failed_ids = list(dict.fromkeys(failed_ids))
+    for r in log_rows:
+        cid = _chan_id(r["target"])
+        if cid is None:
+            continue
+        if r["status"] == "ok":
+            published.add(cid)
+        elif cid not in failed_ids:
+            failed_ids.append(cid)
+    failed_ids = [c for c in failed_ids if c not in published]
 
     if not failed_ids:
         await callback.message.edit_text(
