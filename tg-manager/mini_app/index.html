@@ -172,8 +172,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .hdr{padding:calc(var(--safe-t) + 8px) 14px 10px;background:var(--glass);backdrop-filter:saturate(150%) blur(16px);-webkit-backdrop-filter:saturate(150%) blur(16px);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
 .back{width:34px;height:34px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text);flex-shrink:0;border:1px solid var(--border);transition:transform .15s var(--spring),opacity .12s}
 .back:active{opacity:.6;transform:scale(.88)}
-.hdr-title{flex:1;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.hdr-meta{text-align:right;flex-shrink:0}
+/* flex:1 означает основу 0: заголовок не претендовал на место вообще и первым
+   отдавал его соседям. Стоило в шапке аккаунтов появиться счётчику «6
+   аккаунтов» рядом с кнопкой «Добавить», как «📱 Аккаунты» схлопывалось в
+   одно многоточие — по шапке нельзя было понять, где находишься. Основа по
+   содержимому плюс нижний предел: заголовок ужимается наравне с соседями и
+   всегда показывает хотя бы начало названия. */
+.hdr-title{flex:1 1 auto;min-width:88px;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr-meta{text-align:right;flex-shrink:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:8px}
 /* ── Боковая навигация (drawer) ── */
 .hdr-burger{flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);cursor:pointer;color:var(--text);font-size:18px;line-height:1;user-select:none;border:1px solid var(--sep)}
 .hdr-burger:active{background:var(--sep);transform:scale(.92)}
@@ -198,8 +204,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .nav-item:active{background:var(--bg-input)}
 .nav-item.on{background:var(--accent-soft);color:var(--accent)}
 .nav-item .ni-ico{font-size:18px;width:22px;text-align:center;flex-shrink:0}
-.hdr-user{font-size:12px;color:var(--hint);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr-user{font-size:12px;color:var(--hint);max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-live{font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:1px}
+/* На узком экране в шапке не помещаются сразу три вещи: название экрана,
+   счётчик и кнопка действия. Счётчик при этом почти всегда дублирует ленту
+   показателей прямо под шапкой («6 аккаунтов» в шапке и «6 Все» в ленте), а
+   обрезанный до «6 а…» счётчик не сообщает вообще ничего. Поэтому там, где в
+   шапке есть кнопка действия, счётчик на узком экране уступает место названию.
+   На широком экране остаются оба. :has не поддержан в совсем старых webview —
+   там просто остаётся прежнее поведение, ничего не ломается. */
+@media (max-width:380px){
+  .hdr-meta:has(.btn) .hdr-user{display:none}
+}
 
 /* ─── Tabbar ─────────────────────────────────────────────────── */
 #tabbar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:var(--glass);backdrop-filter:saturate(150%) blur(20px);-webkit-backdrop-filter:saturate(150%) blur(20px);border-top:1px solid var(--glass-border);display:flex;z-index:100}
@@ -684,7 +700,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .acc-phone{font-size:11px;color:var(--hint);margin-top:1px;display:flex;align-items:center;gap:4px}
 .acc-trust{height:2px;border-radius:1px;background:var(--sep);margin-top:4px;overflow:hidden;width:70px}
 .acc-trust-fill{height:100%;border-radius:1px}
-.acc-right{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+/* Плашка, процент траста и шеврон лежали одной колонкой, поэтому шеврон
+   оказывался ПОД процентом, у нижнего края строки, и выглядел оторванным от
+   неё. Сетка ставит его сбоку и по центру строки, как в остальных списках. */
+.acc-right{flex-shrink:0;display:grid;grid-template-columns:auto auto;align-items:center;justify-items:end;column-gap:6px;row-gap:2px}
+.acc-right > .badge{grid-column:1;grid-row:1}
+.acc-right > span:not(.badge):not(.chev){grid-column:1;grid-row:2}
+.acc-right > .chev{grid-column:2;grid-row:1 / span 2}
 /* Лечение прямо в строке: список называл проблему, но чинить её заставлял
    идти в карточку и разворачивать «Действия». */
 .acc-fix{margin-top:5px;padding:4px 9px;font-size:11px;font-weight:600;border:none;border-radius:7px;cursor:pointer;background:var(--bg-orange-16,rgba(245,158,11,.16));color:var(--orange)}
