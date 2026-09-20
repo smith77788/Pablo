@@ -156,6 +156,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Screens ───────────────────────────────────────────────── */
 .screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:none;background:radial-gradient(130% 52% at 100% -8%,rgba(45,212,191,.06),transparent 60%),radial-gradient(95% 42% at -12% 2%,rgba(91,157,255,.045),transparent 55%),var(--bg)}
 .screen.show{display:block;animation:fadeIn .2s var(--ease)}
+/* Страховка от длинного слова без пробелов. Имя канала, @username, ссылка или
+   склеенная фамилия не переносятся по обычным правилам и вылезают за рамку
+   блока: замер длинной строкой нашёл 25 таких мест — подписи плиток, ярлыки
+   карточек, вкладки сегментов, названия строк. break-word (а не anywhere)
+   выбран намеренно: он рвёт слово только тогда, когда иначе оно вылезет, и не
+   меняет минимальную ширину блока, то есть не ломает существующие раскладки.
+   Слоты с nowrap это правило не трогает — там работает многоточие. */
+.screen{overflow-wrap:break-word}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px)}
 .sub-sb{padding-bottom:28px}
@@ -212,7 +220,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .sec-btn:active{opacity:.6}
 
 /* ─── Cards ──────────────────────────────────────────────────── */
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px 0}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px 16px 0}
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;cursor:pointer;transition:transform .2s var(--spring),box-shadow .2s var(--ease),border-color .2s;min-height:90px;box-shadow:var(--shadow)}
 .card:active{transform:translateY(1px) scale(.975);box-shadow:var(--shadow-lg);border-color:rgba(45,212,191,.15)}
 .card-ico{font-size:20px;margin-bottom:6px}
@@ -251,7 +259,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .row-right{flex-shrink:0;font-size:12px;color:var(--hint);display:flex;align-items:center;gap:4px}
 
 /* ─── Stats grid (2x2) ────────────────────────────────────────── */
-.stats2{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--sep);border-radius:var(--radius);overflow:hidden;margin:10px 16px 0}
+.stats2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--sep);border-radius:var(--radius);overflow:hidden;margin:10px 16px 0}
 .s2col{background:var(--bg2);padding:10px 8px;text-align:center}
 .s2val{font-size:20px;font-weight:700;letter-spacing:-.3px}
 .s2lbl{font-size:11px;color:var(--hint);margin-top:2px}
@@ -272,7 +280,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .btn-d{background:rgba(248,113,113,.12);color:var(--red)}
 
 /* ─── Badge ──────────────────────────────────────────────────── */
-.badge{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 7px;border-radius:16px;white-space:nowrap}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:16px;white-space:nowrap;max-width:44vw;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;line-height:1.45}
 .b-gr{background:rgba(52,211,153,.14);color:var(--green)}
 .b-bl{background:rgba(96,165,250,.14);color:var(--blue)}
 .b-or{background:rgba(251,191,36,.14);color:var(--orange)}
@@ -513,7 +521,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .profile-badges{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin-bottom:4px}
 
 /* ─── Capability grid ─────────────────────────────────────── */
-.cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:0 16px 6px}
+.cap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:0 16px 6px}
 .cap-item{background:var(--bg2);border-radius:var(--radius);padding:10px 10px;display:flex;align-items:center;gap:8px}
 .cap-ico{font-size:16px;flex-shrink:0}
 .cap-body{flex:1;min-width:0}
@@ -526,7 +534,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .trust-fill{height:100%;border-radius:3px;transition:width .5s}
 
 /* ─── Management tile grid ───────────────────────────────── */
-.mgmt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 4px}
+.mgmt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 16px 4px}
 .mgmt-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 7px 11px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:transform .18s var(--spring),box-shadow .2s var(--ease),border-color .2s,background .2s;text-align:center;min-height:78px;justify-content:center;box-shadow:var(--shadow)}
 .mgmt-tile:active{transform:translateY(1px) scale(.95);box-shadow:var(--shadow-lg);border-color:var(--border-strong);background:var(--bg3)}
 /* Иконочный чип: своя приглушённая заливка по currentColor (hue-класс задаёт цвет).
@@ -535,7 +543,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .mgmt-tile-ico::after{content:"";position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:.15;z-index:0}
 .mgmt-tile-ico svg{width:23px;height:23px;display:block;position:relative;z-index:1;stroke-width:2}
 .mgmt-tile-ico>*:not(svg){position:relative;z-index:1}
-.mgmt-tile-lbl{font-size:11px;font-weight:600;color:var(--text);opacity:.9;line-height:1.22}
+.mgmt-tile-lbl{font-size:11px;font-weight:600;color:var(--text);opacity:.9;line-height:1.22;max-width:100%}
 .mgmt-tile-val{font-size:10px;color:var(--accent);font-weight:700;min-height:12px;line-height:1;font-variant-numeric:tabular-nums}
 /* Слот значения есть у каждой плитки, но счётчик приходит далеко не всем:
    у пустого слота всё равно оставались min-height:12px и gap:8px — двадцать
@@ -580,7 +588,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .bot-phdr-sub{font-size:12px;color:var(--hint);margin-bottom:4px}
 
 /* ─── KPI bar (4-col) ───────────────────────────────────── */
-.kpi-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--sep);border-radius:var(--radius);overflow:hidden;margin:0 16px 4px}
+.kpi-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--sep);border-radius:var(--radius);overflow:hidden;margin:0 16px 4px}
 .kpi-col{background:var(--bg2);padding:9px 5px;text-align:center}
 .kpi-val{font-size:18px;font-weight:700;letter-spacing:-.3px}
 .kpi-lbl{font-size:10px;color:var(--hint);margin-top:1px;line-height:1.2}
@@ -602,7 +610,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .hint{color:var(--hint);font-size:13px}
 
 /* ─── Bot cards grid ─────────────────────────────────────── */
-.bot-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 16px 0}
+.bot-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 16px 0}
 .bot-card{background:var(--bg2);border-radius:var(--radius-lg);padding:12px;cursor:pointer;transition:transform .2s var(--spring),box-shadow .2s var(--ease);position:relative;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow)}
 .bot-card:active{transform:translateY(1px) scale(.975);box-shadow:var(--shadow-lg)}
 .bot-card-ava{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px;letter-spacing:-.2px}
@@ -632,7 +640,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .ffstep-text{font-size:12px;line-height:1.4;color:var(--text)}
 
 /* ─── Home dashboard ─────────────────────────────────────── */
-.dash-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 16px 0}
+.dash-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 16px 0}
 .dash-card{background:var(--bg2);border-radius:var(--radius-lg);padding:12px;cursor:pointer;transition:transform .2s var(--spring),box-shadow .2s var(--ease);min-height:90px;position:relative;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow)}
 .dash-card:active{transform:translateY(1px) scale(.975);box-shadow:var(--shadow-lg)}
 .dash-card-ico{font-size:18px;margin-bottom:5px}
@@ -652,7 +660,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Filter chip row ────────────────────────────────────── */
 .filter-chips{display:flex;gap:6px;padding:4px 16px 6px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
 .filter-chips::-webkit-scrollbar{display:none}
-.chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease)}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
 /* Раскрываемая панель «Действия с аккаунтом»: явная стрелка-индикатор, чтобы
    свёрнутые кнопки не читались как «функции исчезли». */
 .acc-actions>summary{list-style:none;outline:none}
@@ -699,14 +707,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .mini-bar-lbl{font-size:9px;color:var(--hint)}
 
 /* ─── Quick action tiles ─────────────────────────────────── */
-.qa-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 16px 4px}
+.qa-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:0 16px 4px}
 .qa-tile{background:var(--bg2);border-radius:var(--radius-lg);padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;transition:transform .12s,opacity .12s;text-align:center}
 .qa-tile:active{transform:scale(.93);opacity:.7}
 .qa-tile-ico{position:relative;font-size:21px;line-height:1;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:13px;margin:0 auto;color:var(--c-teal)}
 .qa-tile-ico::after{content:"";position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:.15;z-index:0}
 .qa-tile-ico svg{width:23px;height:23px;display:block;position:relative;z-index:1;stroke-width:2}
 .qa-tile-ico>*:not(svg){position:relative;z-index:1}
-.qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2}
+.qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2;max-width:100%}
 .qa-tile-val{font-size:16px;font-weight:700;margin-top:1px}
 /* Copilot «Что делать дальше» */
 .copilot-card{display:flex;align-items:flex-start;gap:11px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-lg);padding:12px 12px 12px 13px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow);transition:transform .12s,opacity .12s;position:relative}
@@ -3855,7 +3863,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Сегменты пользователей</div>
-    <div id="engGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 16px"></div>
+    <div id="engGrid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:10px 16px"></div>
     <div class="sec" style="margin-top:12px">О сегментах</div>
     <div class="card" style="font-size:13px;line-height:1.6;color:var(--hint)">
       <b>🔥 Горячие</b> — активны сегодня<br>
@@ -3909,7 +3917,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title" id="bstats-title">📊 Статистика</div>
   </div>
   <div class="sub-sb">
-    <div id="bstatsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px"></div>
+    <div id="bstatsGrid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px"></div>
     <div class="sec" style="margin-top:8px">Рост аудитории (7 дней)</div>
     <div id="bstatsChart" style="background:var(--bg);border-radius:12px;padding:14px;min-height:60px"></div>
     <div class="sec" style="margin-top:8px">Детали</div>
@@ -3985,7 +3993,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🗺 Карта топологии</div>
   </div>
   <div class="sub-sb">
-    <div id="topoStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
+    <div id="topoStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div id="topoBody"></div>
   </div>
 </div>
@@ -3997,7 +4005,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">⚡ Инфраструктура</div>
   </div>
   <div class="sub-sb">
-    <div id="infraStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
+    <div id="infraStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Пулы аккаунтов</div>
     <div class="lst" id="infraPools"></div>
     <div class="sec" style="margin-top:8px">Последние операции (аудит)</div>
@@ -4478,7 +4486,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🤝 Реферальная программа</div>
   </div>
   <div class="sub-sb">
-    <div id="referralStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
+    <div id="referralStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div id="referralCode" style="padding:8px 16px 12px"></div>
     <div class="sec">Рефералы</div>
     <div class="lst" id="referralList"></div>
@@ -4893,7 +4901,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openStarsExpModal()">+ A/B тест</button></div>
   </div>
   <div class="sub-sb">
-    <div id="starsStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
+    <div id="starsStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">A/B Эксперименты</div>
     <div class="lst" id="starsExps"></div>
   </div>
@@ -5211,7 +5219,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">❤️ Дэшборд здоровья</div>
   </div>
   <div class="sub-sb">
-    <div id="healthStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
+    <div id="healthStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Последние флуд-события (7 дней)</div>
     <div class="lst" id="healthEvents"></div>
   </div>
@@ -5224,7 +5232,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🛡 Щит аккаунтов</div>
   </div>
   <div class="sub-sb">
-    <div id="shieldStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
+    <div id="shieldStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Конфигурация</div>
     <div class="lst" id="shieldConfig"></div>
     <div class="sec" style="margin-top:8px">История действий</div>
