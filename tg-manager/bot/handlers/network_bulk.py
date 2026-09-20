@@ -17,6 +17,7 @@ from database import db
 from services import bot_api
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from services.secret_masking import mask_bot_token
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -538,7 +539,7 @@ async def msg_import_tokens(
     for token, info in zip(lines, results):
         if isinstance(info, Exception) or not info:
             log.warning("network_bulk: token check failed [REDACTED]: %s", info)
-            failed.append(f"❌ {token[:25]}…")
+            failed.append(f"❌ {mask_bot_token(token)}")
             continue
         try:
             ok = await db.add_bot(

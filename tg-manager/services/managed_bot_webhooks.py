@@ -21,6 +21,7 @@ from typing import Optional
 
 import asyncpg
 import aiohttp
+from services.secret_masking import mask_bot_token
 
 log = logging.getLogger(__name__)
 
@@ -177,7 +178,8 @@ def make_webhook_route(pool: asyncpg.Pool):
                 log.warning("managed_bot_webhooks: queue full for bot_id=%d, update dropped", bot_id)
         else:
             # bot_id unknown — queue with token only, auto_responder can process by token
-            log.debug("managed_bot_webhooks: update received for unknown bot_id, token=%s...", bot_token[:10])
+            log.debug("managed_bot_webhooks: update received for unknown bot_id, %s",
+                      mask_bot_token(bot_token))
 
         return _web.Response(status=200, text="OK")
 

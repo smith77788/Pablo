@@ -31,6 +31,8 @@ import traceback
 import uuid
 from typing import Any, ClassVar
 
+from services.secret_masking import redact_secrets
+
 # ── Correlation context ────────────────────────────────────────────
 
 _correlation_id: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -103,13 +105,31 @@ class _StructuredFormatter(logging.Formatter):
             return self._format_text(record)
         return self._format_json(record)
 
+    @staticmethod
+    def _safe(text: str) -> str:
+        """Вычистить секреты из строки лога.
+
+        Последний рубеж: маскировать в КАЖДОМ из сотен мест, где что-то
+        логируется, невозможно — рано или поздно токен или строка сессии
+        просочится в текст исключения. Форматтер один на весь процесс, поэтому
+        чистим здесь. Короткие строки не проверяем: самый короткий секрет,
+        который ищут выражения, длиннее 36 символов.
+        """
+        if not text or len(text) < 37:
+            return text
+        try:
+            return redact_secrets(text, limit=len(text))
+        except Exception:
+            return text
+
     def _format_text(self, record: logging.LogRecord) -> str:
         """Human-readable: 2026-05-30 12:34:56 [svc.scheduler] WARNING: message  cid=abc123"""
         ts = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
         cid = _correlation_id.get()
         cid_part = f"  cid={cid}" if cid else ""
         return (
-            f"{ts} [{record.name}] {record.levelname}: {record.getMessage()}{cid_part}"
+            f"{ts} [{record.name}] {record.levelname}: "
+            f"{self._safe(record.getMessage())}{cid_part}"
         )
 
     def _format_json(self, record: logging.LogRecord) -> str:
@@ -117,7 +137,7 @@ class _StructuredFormatter(logging.Formatter):
             "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
             "logger": record.name,
             "level": record.levelname,
-            "msg": record.getMessage(),
+            "msg": self._safe(record.getMessage()),
             "correlation_id": _correlation_id.get() or None,
         }
         user_id = _user_id.get()
@@ -128,7 +148,7 @@ class _StructuredFormatter(logging.Formatter):
             base["op_id"] = op_id
 
         if record.exc_info and record.exc_info[1]:
-            base["exc"] = str(record.exc_info[1])
+            base["exc"] = self._safe(str(record.exc_info[1]))
             base["exc_type"] = type(record.exc_info[1]).__name__
 
         # Merge extra fields from record.__dict__

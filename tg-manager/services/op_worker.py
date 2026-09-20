@@ -22,6 +22,7 @@ from services import infra_memory as _infra_mem
 from services import session_simulator
 from services import geo_tempo
 from services.pacing_engine import get_pacing_engine
+from services.secret_masking import mask_bot_token, redact_secrets
 
 log = logging.getLogger(__name__)
 
@@ -6165,7 +6166,9 @@ async def _exec_bot_factory_multi(
                                 bot_id = data["result"]["id"]
                                 actual_uname = data["result"].get("username", actual_uname)
                 except Exception as e:
-                    log.warning("bot_factory_multi getMe failed for token=...%s: %s", token[-8:], e)
+                    # Хвост токена — это кусок секрета. В лог только id бота.
+                    log.warning("bot_factory_multi getMe failed for %s: %s",
+                                mask_bot_token(token), redact_secrets(str(e)))
                 if not bot_id:
                     failed_count += 1
                     await pool.execute(

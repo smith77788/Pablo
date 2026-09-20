@@ -15,6 +15,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from services.secret_masking import mask_bot_token
 
 router = Router()
 
@@ -591,7 +592,10 @@ async def msg_import_tokens(
     added, skipped, failed = [], [], []
     for token, info in zip(lines, results):
         if isinstance(info, Exception) or not info:
-            failed.append(f"❌ {token[:25]}…")
+            # Первые 25 символов токена — это id бота И начало секретной
+            # части. Сообщение остаётся в истории чата, поэтому показываем
+            # только id, по которому владелец узнает своего бота.
+            failed.append(f"❌ {mask_bot_token(token)}")
             continue
         try:
             ok = await db.add_bot(

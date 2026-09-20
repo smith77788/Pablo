@@ -16,6 +16,7 @@ from aiohttp import web
 
 from services import operation_bus as _obus
 from services.mini_app_auth import validate_init_data, make_token, parse_token
+from services.secret_masking import redact_secrets
 from services.security import (
     check_rate_limit,
     rate_limit_response,
@@ -506,6 +507,11 @@ def _json_resp(data: Any, status: int = 200) -> web.Response:
 
 
 def _err(msg: str, status: int = 400) -> web.Response:
+    # Единственная дверь наружу для текста ошибки, а текст этот чаще всего —
+    # str(исключения). Ошибки asyncpg несут строку подключения, ошибки Telethon
+    # — токен, ошибки прокси — логин с паролем. Чистим здесь, чтобы утечка не
+    # зависела от того, вспомнил ли автор конкретного из 500 мест про секреты.
+    msg = redact_secrets(msg) if msg else msg
     body = {"error": msg}
     # Единый маркер пейволла: ЛЮБОЙ 403 «требуется подписка» помечаем, чтобы фронт
     # показал экран апгрейда (ценность + 1 тап к оформлению) вместо сухого тоста —

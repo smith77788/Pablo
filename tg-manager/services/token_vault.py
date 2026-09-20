@@ -43,11 +43,43 @@ def _warn_decrypt_failure() -> None:
         )
 
 
+_DEFAULT_KEY = "changeme-set-TOKEN_ENCRYPTION_KEY"
+_key_warned = False
+
+
 def _key() -> bytes:
-    """Derive 32-byte AES key from env var (or BOT_TOKEN as fallback)."""
+    """32-байтный ключ AES из окружения (запасной вариант — токен бота).
+
+    Оба запасных варианта опасны молча, поэтому о них предупреждаем один раз
+    за процесс:
+
+    * без TOKEN_ENCRYPTION_KEY ключ выводится из токена бота — смена токена
+      превращает все зашифрованные сессии, токены и прокси в мусор, причём не
+      сразу, а при первом же обращении к ним;
+    * без обеих переменных ключом становится строка из исходников, то есть
+      шифрование «на диске» перестаёт быть шифрованием вовсе.
+    """
+    global _key_warned
     raw = os.environ.get("TOKEN_ENCRYPTION_KEY", "")
     if not raw:
-        raw = os.environ.get("MANAGER_BOT_TOKEN", "changeme-set-TOKEN_ENCRYPTION_KEY")
+        raw = os.environ.get("MANAGER_BOT_TOKEN", "")
+        if raw:
+            if not _key_warned:
+                _key_warned = True
+                log.warning(
+                    "token_vault: TOKEN_ENCRYPTION_KEY не задан — ключ выводится "
+                    "из токена бота. Смена токена бота сделает НЕЧИТАЕМЫМИ все "
+                    "сохранённые сессии, токены и прокси. Задайте "
+                    "TOKEN_ENCRYPTION_KEY отдельной переменной.")
+        else:
+            raw = _DEFAULT_KEY
+            if not _key_warned:
+                _key_warned = True
+                log.error(
+                    "token_vault: ни TOKEN_ENCRYPTION_KEY, ни MANAGER_BOT_TOKEN не "
+                    "заданы — используется ключ по умолчанию из исходников. "
+                    "Сессии и токены в базе фактически НЕ ЗАШИФРОВАНЫ. Задайте "
+                    "TOKEN_ENCRYPTION_KEY немедленно.")
     return hashlib.sha256(raw.encode()).digest()
 
 
