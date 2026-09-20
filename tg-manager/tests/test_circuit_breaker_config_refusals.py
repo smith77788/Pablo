@@ -31,7 +31,13 @@ WORKER = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
 
 
 def _record_site() -> str:
-    m = re.search(r"# Circuit breaker: считаем.*?_circuit_breaker_record\(owner_id, _final_status == \"done\"\)",
+    # Условие успеха переехало с литерала `_final_status == "done"` на
+    # op_status.is_productive(): у недоведённой работы появился собственный
+    # терминальный статус `partial`, и он тоже НЕ повод открывать цепь —
+    # операция, взявшая часть целей, доказывает, что Telegram нас пускает.
+    # Инвариант, который сторожит этот файл, от этого не меняется: отказ ДО
+    # работы предохранителя не трогает вовсе.
+    m = re.search(r"# Circuit breaker: считаем.*?_circuit_breaker_record\(owner_id, op_status\.is_productive\(_final_status\)\)",
                   WORKER, re.DOTALL)
     assert m, "точка учёта результата в предохранителе не найдена"
     return m.group(0)
@@ -92,3 +98,19 @@ def test_many_executors_return_config_failures():
     размечать их по одному — не вариант."""
     n = len(re.findall(r'return \{"status": "failed", "summary": "⚠️', WORKER))
     assert n >= 20, f"ожидались десятки конфигурационных отказов, найдено {n}"
+
+
+def test_partial_success_does_not_count_as_failure():
+    """Массовым операциям терять часть целей положено по их природе.
+
+    Считая `partial` сбоем, предохранитель открывал бы цепь ровно на инвайте и
+    DM — то есть глушил бы то, ради чего существует продукт.
+    """
+    site = _record_site()
+    assert "op_status.is_productive(_final_status)" in site, (
+        "успехом для предохранителя обязана считаться ЛЮБАЯ взятая работа, "
+        "а не только полностью доведённая"
+    )
+    from services import op_status
+    assert op_status.is_productive(op_status.PARTIAL)
+    assert not op_status.is_productive(op_status.FAILED)

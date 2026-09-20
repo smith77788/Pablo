@@ -1719,7 +1719,9 @@ async def cb_acc_op_history(
             _op_icons = {
                 "running": "⏳",
                 "done": "✅",
+                "partial": "⚠️",
                 "error": "❌",
+                "failed": "❌",
                 "cancelled": "🚫",
                 "pending": "🕐",
             }

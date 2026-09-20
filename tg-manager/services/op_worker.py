@@ -80,7 +80,6 @@ async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "
 _POLL_INTERVAL = 10  # секунд между проверками очереди
 _STALE_RUNNING_TIMEOUT_MIN = 60  # операции в running > N минут → reset в pending
 
-
 def _int_env(name: str, default: int, lo: int, hi: int) -> int:
     """Целое из окружения с зажимом в разумные границы (мусор → default)."""
     try:
@@ -98,6 +97,41 @@ _MAX_PARALLEL = _int_env("OP_MAX_PARALLEL", 8, 1, 256)
 # Максимум на одного владельца — чтобы один клиент не занял весь воркер.
 _MAX_PARALLEL_PER_OWNER = _int_env("OP_MAX_PARALLEL_PER_OWNER", 3, 1, 64)
 _MIN_ACCOUNTS_PER_OP = 1     # честный дележ флота: минимум аккаунтов на операцию
+
+# Сколько раз операцию можно воскресить после падения/зависания ВОРКЕРА, прежде
+# чем признать её ядовитой. Бюджет отдельный от retry_count: тот тратится на
+# повторы по ошибке исполнителя (FloodWait, сеть), и смешивать их нельзя —
+# иначе честный повтор после флуда съедал бы живучесть, а ядовитая операция
+# пряталась бы за неизрасходованным бюджетом флуда.
+#
+# Без этого предела операция, которая роняет или вешает сам процесс, воскресала
+# БЕСКОНЕЧНО: упала → рестарт → снова подхвачена → снова уронила. Каждый круг
+# держал слот параллельности и забирал аккаунты флота, а снаружи это выглядело
+# как операция, которая «всегда выполняется».
+_MAX_REVIVES = _int_env("OP_MAX_REVIVES", 3, 1, 20)
+
+_POISON_ERROR = (
+    "Операция {n} раз(а) прерывалась вместе с воркером и не дошла до конца — "
+    "остановлена, чтобы не занимать флот бесконечно. Запустите её заново."
+)
+
+
+async def _ensure_revive_column(pool: "asyncpg.Pool") -> None:
+    """Досоздать operation_queue.revive_count, если миграция ещё не доехала.
+
+    create_pool применяет schema_v218, но деплой и миграции расходятся во
+    времени; без колонки ОБА сторожа зависших операций падали бы на каждом
+    тике, то есть живучесть исчезала целиком вместо того, чтобы ограничиться.
+    """
+    try:
+        await pool.execute(
+            "ALTER TABLE operation_queue "
+            "ADD COLUMN IF NOT EXISTS revive_count INT NOT NULL DEFAULT 0"
+        )
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: ensure revive_count column failed: {e}")
+
+
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
@@ -761,6 +795,7 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
 # services/op_errors.py (распил монолита). Импортируем обратно, чтобы
 # op_worker._classify_op_error / _FATAL_ERRORS / _normalize_result и т.п.
 # остались доступны как раньше (публичный/приватный контракт не изменился).
+from services import op_status
 from services.op_errors import (  # noqa: E402,F401
     _RETRYABLE_ERRORS,
     _FATAL_ERRORS,
@@ -1332,15 +1367,42 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
     Нужно после SIGTERM/рестарта: операции могли оказаться в running-состоянии
     без реально работающей задачи. Сбрасываем их с очисткой started_at, чтобы
     они были подхвачены воркером заново.
+
+    Воскрешение ОГРАНИЧЕНО _MAX_REVIVES: операция, которая роняет сам воркер,
+    иначе поднималась бы после каждого рестарта вечно (см. _MAX_REVIVES).
     """
+    await _ensure_revive_column(pool)
+    # Сначала — исчерпавшие бюджет: честный терминальный статус вместо ещё
+    # одного круга. Порядок важен: иначе тот же UPDATE ниже снова поднял бы их.
+    poisoned = await _safe_execute(
+        pool,
+        """UPDATE operation_queue
+           SET status = 'failed', finished_at = now(), started_at = NULL,
+               error_msg = COALESCE(error_msg, $2)
+           WHERE status = 'running' AND COALESCE(revive_count, 0) >= $1""",
+        _MAX_REVIVES,
+        _POISON_ERROR.format(n=_MAX_REVIVES),
+        log_ctx="[reset_stale_poison]",
+    )
+    try:
+        poisoned_n = int(str(poisoned).split()[-1])
+    except (ValueError, IndexError):
+        poisoned_n = 0
+    if poisoned_n:
+        log.error(
+            "op_worker startup: %d operations exceeded revive budget (%d) → failed",
+            poisoned_n, _MAX_REVIVES,
+        )
     result = await _safe_execute(
             pool,
         # done_items=0: операцию подхватит воркер заново и исполнитель прогонит её
         # с нуля — без сброса счётчик копился бы поверх прошлого прогона (класс
         # «done>total»/«34/17», как и в _maybe_requeue).
         """UPDATE operation_queue
-           SET status = 'pending', started_at = NULL, done_items = 0
+           SET status = 'pending', started_at = NULL, done_items = 0,
+               revive_count = COALESCE(revive_count, 0) + 1
            WHERE status = 'running'""",
+        log_ctx="[reset_stale_revive]",
     )
     # asyncpg возвращает строку вида "UPDATE N"
     try:
@@ -1368,11 +1430,37 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
 
         active_ids_list = list(active_now) if active_now else None
 
+        # Исчерпавшие бюджет живучести — в failed, а не на очередной круг.
+        # Без этого операция, которая ВЕШАЕТ исполнителя (а не роняет его),
+        # раз в 60 минут бесконечно забирала слот и аккаунты флота: сторож
+        # исправно возвращал её в pending, воркер исправно подхватывал, и так
+        # до ручного вмешательства владельца.
+        poisoned = await pool.execute(
+            """UPDATE operation_queue
+                SET status = 'failed', finished_at = now(), started_at = NULL,
+                    error_msg = COALESCE(error_msg, $4)
+                WHERE status = 'running'
+                  AND started_at < now() - make_interval(mins => $1)
+                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                  AND COALESCE(revive_count, 0) >= $3""",
+            _STALE_RUNNING_TIMEOUT_MIN,
+            active_ids_list,
+            _MAX_REVIVES,
+            _POISON_ERROR.format(n=_MAX_REVIVES),
+        )
+        poisoned_n = int((poisoned or "UPDATE 0").split()[-1])
+        if poisoned_n:
+            log.error(
+                "op_worker watchdog: %d hung ops exceeded revive budget (%d) → failed",
+                poisoned_n, _MAX_REVIVES,
+            )
+
         result = await pool.execute(
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
             # нуля, счётчик не должен копиться поверх прошлого (класс «done>total»).
             """UPDATE operation_queue
-                SET status = 'pending', started_at = NULL, done_items = 0
+                SET status = 'pending', started_at = NULL, done_items = 0,
+                    revive_count = COALESCE(revive_count, 0) + 1
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
@@ -1966,7 +2054,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 await _safe_execute(
                     pool,
                     "UPDATE operation_queue SET status='cancelled', finished_at=now() "
-                    "WHERE id=$1 AND status NOT IN ('done','failed','cancelled')",
+                    f"WHERE id=$1 AND status NOT IN {op_status.sql_terminal_list()}",
                     op_id,
                     log_ctx=f"[run_op_cancelled op={op_id}]",
                 )
@@ -1991,20 +2079,35 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             elapsed = time.monotonic() - _t_start
             duration_seconds = round(elapsed, 1)
             result = _normalize_result(result, op_type, duration_seconds)
-            # Честный финальный статус. Раньше success-путь жёстко писал 'done',
-            # из-за чего операция выглядела выполненной, даже когда исполнитель
-            # вернул status='failed' (нет аккаунтов/текста и т.п.) или когда все
-            # элементы провалились (ok=0 при наличии ошибок). Это и создавало
-            # «рабочий вид без реального исполнения».
+            # Честный финальный статус — решает services/op_status.classify_final
+            # по РЕАЛЬНЫМ счётчикам, а не по слову исполнителя.
+            #
+            # История класса. Сначала success-путь жёстко писал 'done', из-за
+            # чего операция выглядела выполненной, даже когда исполнитель вернул
+            # status='failed' или когда все элементы провалились. Это чинилось
+            # здесь же ветвлением done/failed — и осталась вторая половина той же
+            # лжи: операция, взявшая 203 цели из 380 со 177 ошибками, попадала в
+            # ветку 'done' и уходила владельцу с зелёной галочкой. Недоведённая
+            # работа теперь имеет собственный терминальный статус 'partial'.
             _ok = int(result.get("ok", 0) or 0)
             _failed = int(result.get("failed", 0) or 0)
-            if str(result.get("status") or "").lower() == "failed":
-                _final_status = "failed"
-            elif _ok == 0 and _failed > 0:
-                _final_status = "failed"
-                result["status"] = "failed"
-            else:
-                _final_status = "done"
+            _progress = await _safe_fetchrow(
+                pool,
+                "SELECT done_items, total_items FROM operation_queue WHERE id=$1",
+                op_id,
+                log_ctx=f"[run_op_progress op={op_id}]",
+            )
+            _final_status = op_status.classify_final(
+                result.get("status"),
+                ok=_ok,
+                failed=_failed,
+                done_items=(_progress["done_items"] if _progress else None),
+                total_items=(_progress["total_items"] if _progress else None),
+            )
+            # result["status"] обязан совпадать с тем, что легло в очередь: его
+            # читают отчёты, мини-апп и кнопка повтора. Разъехавшись, они
+            # показывали разный исход одной операции.
+            result["status"] = _final_status
             log.info(
                 "op_worker: op_id=%d op_type=%s → %s in %.1fs (ok=%d failed=%d) — %s",
                 op_id, op_type, _final_status, elapsed, _ok, _failed,
@@ -2036,13 +2139,20 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     op_id, (result.get("summary") or "")[:80],
                 )
             else:
-                await _circuit_breaker_record(owner_id, _final_status == "done")
+                # partial считаем успехом ДЛЯ ПРЕДОХРАНИТЕЛЯ: цепь существует,
+                # чтобы остановить владельца, у которого операции ломаются
+                # целиком. Операция, взявшая часть целей, — доказательство
+                # обратного: Telegram нас пускает. Открыв цепь на партиалах, мы
+                # бы глушили ровно те массовые операции, которым по их природе
+                # положено терять часть целей (инвайт, DM).
+                await _circuit_breaker_record(owner_id, op_status.is_productive(_final_status))
             # Adaptive pacing: record result for learning
-            session_simulator.record_success(op_type, 0, elapsed) if _final_status == "done" else session_simulator.record_failure(op_type, 0, elapsed)
+            _productive = op_status.is_productive(_final_status)
+            session_simulator.record_success(op_type, 0, elapsed) if _productive else session_simulator.record_failure(op_type, 0, elapsed)
             # ML pacing engine: feed success/failure so get_multiplier() learns
             try:
                 get_pacing_engine().record_result(
-                    success=_final_status == "done", action_type=op_type
+                    success=_productive, action_type=op_type
                 )
             except Exception as e:
                 log.warning("pacing_engine record_result failed for op %d: %s", op_id, e)
@@ -2051,12 +2161,13 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # заполнялся, а operation_status читает summary/error_msg → пользователь
             # видел «Ошибка» без причины. Пишем error_msg из reason/summary.
             _err_text = None
-            if _final_status == "failed":
+            if _final_status in ("failed", op_status.PARTIAL):
                 _err_text = (str(result.get("reason") or result.get("summary") or "").strip()[:300]) or None
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb, "
-                "error_msg=COALESCE($4, error_msg) WHERE id=$2 AND status NOT IN ('done','failed','cancelled')",
+                "error_msg=COALESCE($4, error_msg) "
+                f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
                 json.dumps(result, ensure_ascii=False),
                 op_id,
                 _final_status,
@@ -2095,7 +2206,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # repeat_interval_min>0 → после успешного прогона ставим следующий с
             # scheduled_for=now()+interval. Только постинг-op'ы (allowlist) — чтобы
             # аккаунт-действия не зациклились. repeat_count (если задан) декрементим.
-            if _final_status == "done" and op_type in _RECURRING_OK_OPS:
+            # partial тоже продлевает расписание: иначе один сбойный канал в
+            # серии навсегда обрывал автопостинг — операция закрывалась не
+            # «done», следующий запуск не ставился, и владелец узнавал об этом
+            # только по тишине в канале.
+            if op_status.is_productive(_final_status) and op_type in _RECURRING_OK_OPS:
                 try:
                     _rmin = int(params.get("repeat_interval_min") or 0)
                 except (TypeError, ValueError):
@@ -2128,7 +2243,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                             log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
             # Audit trail: write operation completion to operation_audit.
             # Outcome согласован с финальным статусом — провал не пишется как success.
-            _audit_outcome = "success" if _final_status == "done" else "failed"
+            _audit_outcome = {
+                op_status.DONE: "success",
+                op_status.PARTIAL: "partial",
+            }.get(_final_status, "failed")
             _op_summary = result.get("summary", "")
             _acc_ids_done = params.get("account_ids") or []
             if _acc_ids_done:
@@ -2211,8 +2329,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             kb.adjust(1)
             # Strike summaries can be very long (one block per target × many accounts).
             # Telegram messages cap at 4096 chars; truncate to leave room for the header.
-            _notify_icon = "✅" if _final_status == "done" else "⚠️"
-            _notify_verb = "завершена" if _final_status == "done" else "завершена с ошибкой"
+            _notify_icon = op_status.icon(_final_status)
+            _notify_verb = op_status.label(_final_status)
             _notify_header = f"{_notify_icon} <b>Операция #{op_id}</b> {_notify_verb} за {duration_seconds}с\n"
             _max_summary = 4096 - len(_notify_header) - 50
             _summary_notify = summary[:_max_summary] + ("…" if len(summary) > _max_summary else "")
@@ -2228,7 +2346,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             try:
                 from services.infra_memory import record_account_op
 
-                _mem_ok = _final_status == "done"
+                _mem_ok = op_status.is_productive(_final_status)
                 for _acc_id in params.get("account_ids") or []:
                     record_account_op(
                         int(_acc_id), op_type, success=_mem_ok, duration_s=duration_seconds

@@ -23,8 +23,11 @@ def test_allowlist_has_posting_ops_only():
 
 def test_op_worker_reschedules_on_done():
     src = inspect.getsource(op_worker)
-    # переочередь гейтится статусом done + allowlist + repeat_interval_min
-    assert '_final_status == "done" and op_type in _RECURRING_OK_OPS' in src
+    # Переочередь гейтится результативностью + allowlist + repeat_interval_min.
+    # Раньше гейт был `_final_status == "done"`, и один сбойный канал в серии
+    # НАВСЕГДА обрывал автопостинг: итерация закрывалась не «done», следующая
+    # не ставилась, и владелец узнавал об этом только по тишине в канале.
+    assert "op_status.is_productive(_final_status) and op_type in _RECURRING_OK_OPS" in src
     assert "repeat_interval_min" in src
     # реально вставляет новый op со сдвигом времени
     assert "make_interval(mins => $6)" in src
@@ -44,3 +47,14 @@ def test_ui_has_repeat_control():
     html = (Path(op_worker.__file__).resolve().parents[1] / "mini_app" / "index.html").read_text(encoding="utf-8")
     assert 'id="qpRepeat"' in html
     assert "payload.repeat_interval_min=repMin" in html
+
+
+def test_partial_iteration_keeps_schedule_alive():
+    """Частично выполненная итерация обязана продлевать расписание."""
+    from services import op_status
+    assert op_status.is_productive(op_status.PARTIAL), (
+        "иначе один сбойный канал в серии навсегда обрывает автопостинг"
+    )
+    assert not op_status.is_productive(op_status.FAILED), (
+        "полностью провалившаяся итерация расписание продлевать не должна"
+    )

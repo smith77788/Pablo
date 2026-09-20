@@ -342,7 +342,7 @@ async def cb_growth_history(
 
     lines = ["🌱 <b>История Growth Agent</b>\n"]
     status_icons = {
-        "done": "✅", "failed": "❌", "cancelled": "🚫",
+        "done": "✅", "partial": "⚠️", "failed": "❌", "cancelled": "🚫",
         "pending": "⏳", "running": "🔄", "skipped": "⏭",
     }
     for r in rows:

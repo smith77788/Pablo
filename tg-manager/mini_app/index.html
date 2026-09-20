@@ -10989,6 +10989,10 @@ async function pollOpResult(opId, label, onDone){
     let d;
     try { d = await api('/api/miniapp/operation/'+opId); } catch(_){ continue; }
     if(d.status==='done'){ toast('✅ '+(label||'Готово')+': '+(d.summary||'выполнено')); if(typeof onDone==='function'){ try{ onDone(); }catch(_){} } return; }
+    // 'partial' — завершённое состояние недоведённой работы (services/op_status.py).
+    // Опрос обязан на нём остановиться: иначе частично выполненная операция
+    // висела бы все 60с и врала «ещё выполняется», хотя она уже закончилась.
+    if(d.status==='partial'){ toast('⚠️ '+(label||'Частично')+': '+(d.summary||'выполнено не полностью')); if(typeof onDone==='function'){ try{ onDone(); }catch(_){} } return; }
     if(d.status==='failed'){ toast('❌ '+(label||'Ошибка')+': '+(d.error_msg||d.summary||'не выполнено')); return; }
     if(d.status==='cancelled'){ toast('⏹ '+(label||'Отменено')); return; }
   }
@@ -21604,7 +21608,7 @@ function txt(id, html) {
   if(el) el.innerHTML=html;
 }
 function stb(s) {
-  return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],empty:['b-gy','∅ Пусто'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено']}[s]||['b-gy',s||'—'];
+  return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],partial:['b-or','⚠ Частично'],empty:['b-gy','∅ Пусто'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено']}[s]||['b-gy',s||'—'];
 }
 let _tt=null;
 function toast(msg) {

@@ -4704,8 +4704,11 @@ async def cancel_global_presence_plan(
             )
             if plan["op_id"]:
                 await conn.execute(
+                    # 'partial' — тоже завершённое состояние (services/op_status):
+                    # отмена плана не должна задним числом переписывать исход
+                    # операции, которая УЖЕ отработала часть целей.
                     "UPDATE operation_queue SET status='cancelled', finished_at=now() "
-                    "WHERE id=$1 AND status NOT IN ('done','failed','cancelled')",
+                    "WHERE id=$1 AND status NOT IN ('done','partial','failed','cancelled')",
                     plan["op_id"],
                 )
     return True

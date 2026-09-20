@@ -565,7 +565,8 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
         log_exc_swallow(log, "cmd_report: fetch recent operations")
         ops = []
 
-    _icons = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
+    _icons = {"pending": "⏳", "running": "🔄", "done": "✅", "partial": "⚠️",
+              "failed": "❌", "cancelled": "🚫"}
     lines = ["📊 <b>Отчёт по операциям</b>\n"]
     if not ops:
         lines.append("<i>Операций ещё не было.</i>")

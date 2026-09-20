@@ -15,7 +15,13 @@
 from __future__ import annotations
 
 # Статусы, где операция ещё живёт: повторять нечего, надо ждать или отменить.
-_IN_FLIGHT = ("pending", "running", "paused", "scheduled")
+# Источник правды — services/op_status.IN_FLIGHT; локальный кортеж остаётся
+# фолбэком, чтобы модуль сохранил свойство «без зависимостей» (его импортируют
+# из тестов и из мест, где services может быть не поднят целиком).
+try:  # pragma: no cover - тривиальный фолбэк импорта
+    from services.op_status import IN_FLIGHT as _IN_FLIGHT
+except Exception:  # pragma: no cover
+    _IN_FLIGHT = ("pending", "running", "paused", "scheduled", "waiting_approval")
 
 
 def can_retry(status: str, done_items=0, total_items=0, err_count=0) -> tuple[bool, str]:
@@ -40,6 +46,16 @@ def can_retry(status: str, done_items=0, total_items=0, err_count=0) -> tuple[bo
         return True, "операция провалилась"
     if st == "cancelled":
         return True, "операция была отменена — можно запустить заново"
+    if st == "partial":
+        # Собственный статус недоведённой работы (services/op_status.py). Раньше
+        # такая операция приходила сюда под видом «done», и правду приходилось
+        # восстанавливать по счётчикам — ниже. Теперь статус говорит сам, а
+        # счётчики лишь уточняют формулировку для интерфейса.
+        if total > 0 and done < total:
+            return True, f"обработано {done} из {total} — остаток не доработан"
+        if errs > 0:
+            return True, f"завершена с ошибками ({errs}) — можно повторить неудавшиеся"
+        return True, "операция выполнена частично"
     if st == "done":
         # Главный случай: «done», но цель не достигнута.
         if total > 0 and done < total:

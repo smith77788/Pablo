@@ -773,6 +773,7 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     _status_icon = {
         "done": "✅",
+        "partial": "⚠️",
         "running": "⏳",
         "pending": "🕐",
         "failed": "❌",

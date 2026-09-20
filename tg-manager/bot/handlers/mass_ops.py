@@ -978,7 +978,8 @@ async def cb_op_detail(
         log.warning('handler error in cb_op_detail: %s', e)
         log_rows = []
 
-    _STATUS_ICONS = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
+    _STATUS_ICONS = {"pending": "⏳", "running": "🔄", "done": "✅", "partial": "⚠️",
+                     "failed": "❌", "cancelled": "🚫"}
     _LOG_ICONS = {"ok": "✅", "skip": "⏭", "error": "❌"}
     icon = _STATUS_ICONS.get(op["status"], "❓")
     op_type_label = html.escape(op["op_type"])
@@ -1215,6 +1216,8 @@ async def cb_queue(
         "pending": "⏳",
         "running": "🔄",
         "done": "✅",
+        # Недоведённая работа (services/op_status.PARTIAL) — не зелёная галочка.
+        "partial": "⚠️",
         "failed": "❌",
         "cancelled": "🚫",
     }
