@@ -9,6 +9,7 @@ import logging
 import os
 import re  # модульный: часть хендлеров зовёт re.split/re.sub без локального import
 import time
+from collections import deque
 from typing import Any
 
 import asyncpg
@@ -976,38 +977,51 @@ def _dna_to_dict(dna: Any) -> dict:
 
 
 async def _stats(pool: asyncpg.Pool, uid: int, admin: bool = False) -> dict:
-    bots = await _safe_count(pool,
-        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
-    channels = await _safe_count(pool,
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
-    subscribers = await _safe_count(pool,
-        """SELECT COUNT(DISTINCT bu.user_id)
-           FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-           WHERE mb.added_by=$1""", uid)
-    campaigns_active = await _safe_count(pool,
-        "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1 AND status='running'", uid)
+    """Счётчики дашборда. Семь независимых COUNT — считаем их параллельно.
+
+    Последовательно это семь round-trip к Postgres подряд, и платит за них не
+    только открытие дашборда: поток событий зовёт _stats КАЖДЫЕ 15 секунд на
+    каждое открытое приложение. Запросы друг от друга не зависят, пул asyncpg
+    рассчитан на одновременные — ждать их по очереди незачем.
+    """
     # Скоуп аккаунтов ДОЛЖЕН совпадать с экраном «Аккаунты»: там админ видит все
     # аккаунты платформы (межтенантно), а обычный пользователь — свои. Иначе на
     # дашборде «Аккаунтов: 0», а на экране — «25» (админ владеет 0, но видит все).
     # Счётчик — ВСЕГО в области видимости (совпадает с крупной «25 аккаунтов»
     # в шапке экрана), а не только активные.
-    if admin:
-        accounts = await _safe_count(pool,
-            "SELECT COUNT(*) FROM tg_accounts")
-    else:
-        accounts = await _safe_count(pool,
-            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid)
-    ops_running = await _safe_count(pool,
-        "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'", uid)
-    try:
-        # funnels.bot_id → managed_bots.added_by = owner
-        funnels_active = int(await pool.fetchval(
-            """SELECT COUNT(*) FROM funnel_subscriptions fs
-               JOIN funnels f ON f.id=fs.funnel_id
-               JOIN managed_bots mb ON mb.bot_id=f.bot_id
-               WHERE mb.added_by=$1 AND COALESCE(fs.completed, false)=false""", uid) or 0)
-    except Exception:
-        funnels_active = 0
+    accounts_q = (("SELECT COUNT(*) FROM tg_accounts", ()) if admin
+                  else ("SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", (uid,)))
+
+    async def _funnels() -> int:
+        try:
+            # funnels.bot_id → managed_bots.added_by = owner
+            return int(await pool.fetchval(
+                """SELECT COUNT(*) FROM funnel_subscriptions fs
+                   JOIN funnels f ON f.id=fs.funnel_id
+                   JOIN managed_bots mb ON mb.bot_id=f.bot_id
+                   WHERE mb.added_by=$1 AND COALESCE(fs.completed, false)=false""",
+                uid) or 0)
+        except Exception:
+            log.debug("_stats: счётчик воронок не посчитался", exc_info=True)
+            return 0
+
+    (bots, channels, subscribers, campaigns_active,
+     accounts, ops_running, funnels_active) = await asyncio.gather(
+        _safe_count(pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid),
+        _safe_count(pool, "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid),
+        _safe_count(pool,
+                    """SELECT COUNT(DISTINCT bu.user_id)
+                       FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                       WHERE mb.added_by=$1""", uid),
+        _safe_count(pool,
+                    "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1 AND status='running'",
+                    uid),
+        _safe_count(pool, accounts_q[0], *accounts_q[1]),
+        _safe_count(pool,
+                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'",
+                    uid),
+        _funnels(),
+    )
     return {
         "bots": bots,
         "channels": channels,
@@ -16945,8 +16959,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         })
         await response.prepare(request)
 
-        async def push(event: str, data: Any) -> None:
+        # Последний отправленный текст по каждому событию. Поток шлёт полные
+        # снимки каждые 15 секунд, и раньше они уходили даже когда ничего не
+        # изменилось: на мобильной сети это постоянный трафик и постоянные
+        # перерисовки экрана на пустом месте. Теперь одинаковый снимок не
+        # отправляется повторно — соединение держит keepalive-строка.
+        _last_sent: dict[str, str] = {}
+
+        async def push(event: str, data: Any, *, only_if_changed: bool = False) -> None:
             payload = json.dumps(data, ensure_ascii=False, default=str)
+            if only_if_changed and _last_sent.get(event) == payload:
+                return
+            _last_sent[event] = payload
             await response.write(f"event: {event}\ndata: {payload}\n\n".encode())
 
         async def fetch_activity() -> list:
@@ -16996,7 +17020,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 return []
 
+        # Завершённые операции, о которых уже сказали. Раньше набор ЦЕЛИКОМ
+        # очищался на 500 записях — а запрос ниже возвращает всё, что
+        # завершилось за последние 30 минут, поэтому сразу после очистки те же
+        # операции уезжали клиенту повторно как «только что завершилась».
+        # Теперь вытесняем по одной, самые давние.
         _seen_completed: set[int] = set()
+        _seen_order: deque[int] = deque()
 
         async def fetch_completed_ops() -> list:
             try:
@@ -17022,15 +17052,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await push("op_progress", {"items": await fetch_op_progress()})
             while True:
                 await asyncio.sleep(15)
-                data = await _stats(pool, uid, _adm)
-                await push("stats", data)
-                await push("activity", {"items": await fetch_activity()})
-                await push("op_progress", {"items": await fetch_op_progress()})
-                completed = await fetch_completed_ops()
+                # Четыре независимых выборки — одним заходом, а не по очереди:
+                # это цикл на КАЖДОЕ открытое приложение, и он крутится вечно.
+                data, activity, progress, completed = await asyncio.gather(
+                    _stats(pool, uid, _adm),
+                    fetch_activity(),
+                    fetch_op_progress(),
+                    fetch_completed_ops(),
+                )
+                await push("stats", data, only_if_changed=True)
+                await push("activity", {"items": activity}, only_if_changed=True)
+                await push("op_progress", {"items": progress}, only_if_changed=True)
                 for op in completed:
                     op_id = op["id"]
                     if op_id not in _seen_completed:
                         _seen_completed.add(op_id)
+                        _seen_order.append(op_id)
                         await push("op_complete", {
                             "id": op_id,
                             "op_type": op["op_type"],
@@ -17044,8 +17081,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                             # но не «что получилось».
                             "summary": op.get("summary"),
                         })
-                if len(_seen_completed) > 500:
-                    _seen_completed.clear()
+                while len(_seen_order) > 500:
+                    _seen_completed.discard(_seen_order.popleft())
                 await response.write(b": keepalive\n\n")
         except (asyncio.CancelledError, ConnectionResetError):
             pass
