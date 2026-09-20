@@ -11021,8 +11021,14 @@ async def _exec_mass_invite(
         len(user_refs) + len(phones), op_id,
     )
 
+    # Владелец может ПРИНУДИТЕЛЬНО взять рисковые аккаунты («если очень нужно»):
+    # include_risky снимает МЯГКИЕ гейты — кулдаун и карантин риск-пульса. Жёсткие
+    # (banned/spamblock/session_expired, мёртвый прокси) остаются: забаненный
+    # аккаунт всё равно не пригласит, форсить его — только жечь. По умолчанию OFF.
+    _include_risky = bool(params.get("include_risky"))
     accounts = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
+        pool, owner_id, include_ids=[int(_i) for _i in account_ids],
+        min_trust_score=0.0, respect_cooldown=not _include_risky)
     if not accounts:
         return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
 
@@ -11037,16 +11043,31 @@ async def _exec_mass_invite(
 
     # Риск-пульс (Волна S/1B + M, fail-open): инвайт с флагнутого аккаунта = быстрый
     # бан. Отсеиваем карантинные; пустой результат НЕ обнуляет операцию.
-    try:
-        _kept = [a for a in accounts
-                 if not await _infra_mem.is_account_quarantined(pool, a["id"])]
-        if _kept and len(_kept) != len(accounts):
-            _quarantined_n = len(accounts) - len(_kept)
-            log.info("mass_invite op=%d: пропущено %d аккаунтов в карантине",
-                     op_id, _quarantined_n)
-            accounts = _kept
-    except Exception:
-        log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
+    # include_risky (владелец форсит рисковых) отключает этот отсев осознанно.
+    _risky_forced = 0
+    if _include_risky:
+        # Считаем, сколько форсированных было бы отсеяно — для честного итога.
+        try:
+            for a in accounts:
+                if await _infra_mem.is_account_quarantined(pool, a["id"]):
+                    _risky_forced += 1
+        except Exception:
+            log_exc_swallow(log, f"mass_invite op={op_id}: risky count failed")
+        if _risky_forced:
+            log.info("mass_invite op=%d: включены ПРИНУДИТЕЛЬНО %d рисковых аккаунтов "
+                     "(include_risky) — карантин и кулдаун сняты владельцем",
+                     op_id, _risky_forced)
+    else:
+        try:
+            _kept = [a for a in accounts
+                     if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+            if _kept and len(_kept) != len(accounts):
+                _quarantined_n = len(accounts) - len(_kept)
+                log.info("mass_invite op=%d: пропущено %d аккаунтов в карантине",
+                         op_id, _quarantined_n)
+                accounts = _kept
+        except Exception:
+            log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
 
     # Гейт готовности (fail-open): не инвайтить с неготовых аккаунтов — низкий
     # trust / нет прокси / spamblock / cooldown = инвайт с них = быстрый бан
@@ -12120,6 +12141,8 @@ async def _exec_mass_invite(
     _acc_parts = []
     if _quarantined_n:
         _acc_parts.append(f"🚫 в карантине (риск бана): {_quarantined_n}")
+    if _include_risky and _risky_forced:
+        _acc_parts.append(f"⚠️ включены рисковые ПРИНУДИТЕЛЬНО (кулдаун/карантин сняты): {_risky_forced}")
     if _daily_capped:
         _acc_parts.append(f"⏳ исчерпан суточный лимит: {len(_daily_capped)}")
     if _given_back_n:

@@ -509,6 +509,9 @@ async function submitMassInvite() {
       !document.getElementById('massInviteAutoPromote').checked) body.auto_promote = false;
   if (document.getElementById('massInvitePromoteTrick') &&
       !document.getElementById('massInvitePromoteTrick').checked) body.promote_trick = false;
+  // Принудительно взять РИСКОВЫЕ аккаунты (снять кулдаун/карантин) — «если очень
+  // нужно». По умолчанию OFF: рисковые копятся, и без этого работает лишь часть флота.
+  if (document.getElementById('massInviteIncludeRisky')?.checked) body.include_risky = true;
   const _vm = document.getElementById('massInviteVolMode')?.value;
   if (_vm === 'progressive') body.volume_mode = 'progressive';
   // Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.

@@ -8962,6 +8962,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Явный True/False; отсутствие ключа = как решит окружение.
             if body.get("bulk_api") is not None:
                 params["bulk_api"] = bool(body.get("bulk_api"))
+            # Принудительно взять РИСКОВЫЕ аккаунты («если очень нужно»): снимает
+            # мягкие гейты кулдауна и карантина риск-пульса. Осознанный выбор
+            # владельца — по умолчанию OFF (безопасно). Банённые/spamblock всё
+            # равно не берутся: их форсить бессмысленно.
+            if body.get("include_risky") is True:
+                params["include_risky"] = True
             if account_ids:
                 params["account_ids"] = account_ids
             # Шов «Инвайт → Welcome»: приветствие вступившим одной транзакцией.
