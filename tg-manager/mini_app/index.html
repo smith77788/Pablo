@@ -203,7 +203,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .nav-item{display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer;font-size:14px;font-weight:500;color:var(--text);border-radius:8px;margin:0 8px}
 .nav-item:active{background:var(--bg-input)}
 .nav-item.on{background:var(--accent-soft);color:var(--accent)}
-.nav-item .ni-ico{font-size:18px;width:22px;text-align:center;flex-shrink:0}
+.nav-item .ni-ico{font-size:18px;width:24px;text-align:center;flex-shrink:0;line-height:1.4}
+/* Пункт с пояснением занимает две строки, а значок при align-items:center
+   вставал МЕЖДУ названием и пояснением — в списке это читалось как сбитая
+   сетка: у коротких пунктов значок против названия, у длинных — против
+   пустоты. Здесь он выравнивается по первой строке, как и положено. */
+.nav-item.has-desc{align-items:flex-start}
+.ni-body{display:flex;flex-direction:column;min-width:0;gap:1px}
+.ni-desc{font-size:11px;font-weight:400;line-height:1.25;color:var(--hint)}
 .hdr-user{font-size:12px;color:var(--hint);max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-live{font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:1px}
 /* На узком экране в шапке не помещаются сразу три вещи: название экрана,
@@ -7576,8 +7583,12 @@ function buildDrawer() {
         const handler = (tile.getAttribute('onclick')||'').replace(/"/g,'&quot;');
         const desc = MODULE_DESCS[lbl] || '';
         if (desc && !tile.title) tile.title = desc;  // tooltip на плитке каталога
-        const descHtml = desc ? `<span style="font-size:11px;opacity:.55;font-weight:400;line-height:1.25">${esc(desc)}</span>` : '';
-        items += `<div class="nav-item" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span><span style="display:flex;flex-direction:column;min-width:0;gap:1px"><span>${esc(lbl)}</span>${descHtml}</span></div>`;
+        // Пояснение — цветом --hint, а не прозрачностью поверх основного текста:
+        // opacity:.55 опускала контраст ниже читаемого.
+        const descHtml = desc ? `<span class="ni-desc">${esc(desc)}</span>` : '';
+        // has-desc: у пункта с пояснением значок выравнивается по ПЕРВОЙ строке,
+        // иначе он повисал между названием и пояснением.
+        items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span></div>`;
       });
       if (items) html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>` + items;  // категорию — только если есть непустые пункты
     });
