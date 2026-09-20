@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiohttp
 import asyncpg
@@ -1864,16 +1864,31 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
     user_id = callback.from_user.id
 
     now = datetime.now(timezone.utc)
+    # Пауза бывает двух видов, и второй не виден в базе: кулдаун flood_engine
+    # живёт в памяти процесса, а его читают strike_engine.preflight и экран
+    # страйка. Раньше меню смотрело только в базу и на таком аккаунте писало
+    # «нет активных кулдаунов — все аккаунты доступны», пока страйк отвечал
+    # «аккаунт на остывании». Список берём общий — тот же, что у массового
+    # сброса, иначе экран и кнопка снова разъедутся.
     try:
-        rows = await pool.fetch(
-            """SELECT id, phone, first_name, username, cooldown_until
-               FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > NOW()
-               ORDER BY cooldown_until""",
-            user_id,
-        )
+        from services.account_reset import cooled_account_ids
+        cooled_ids = await cooled_account_ids(pool, user_id)
     except Exception:
-        rows = []
+        log_exc_swallow(log, f"reset_cooldown_menu: список остывающих user_id={user_id}")
+        cooled_ids = []
+    rows = []
+    if cooled_ids:
+        try:
+            rows = await pool.fetch(
+                """SELECT id, phone, first_name, username, cooldown_until
+                   FROM tg_accounts
+                   WHERE owner_id=$1 AND id = ANY($2::bigint[])
+                   ORDER BY cooldown_until NULLS LAST, id""",
+                user_id,
+                cooled_ids,
+            )
+        except Exception:
+            rows = []
 
     kb = InlineKeyboardBuilder()
 
@@ -1897,11 +1912,24 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
             or acc.get("phone")
             or f"id{acc['id']}"
         )
+        # cooldown_until пуст, когда аккаунт остывает ТОЛЬКО в памяти процесса —
+        # тогда остаток берём у flood_engine, иначе экран падал бы на None.
         cd_until = acc["cooldown_until"]
-        cd_aware = (
-            cd_until if cd_until.tzinfo else cd_until.replace(tzinfo=timezone.utc)
-        )
-        human_cd = _human_cooldown(cd_aware, now)
+        if cd_until is not None:
+            cd_aware = (
+                cd_until if cd_until.tzinfo else cd_until.replace(tzinfo=timezone.utc)
+            )
+            human_cd = _human_cooldown(cd_aware, now)
+        else:
+            human_cd = "скоро"
+            try:
+                from services.flood_engine import seconds_until_ready
+                left = int(seconds_until_ready(acc["id"]))
+                if left > 0:
+                    human_cd = _human_cooldown(
+                        now + timedelta(seconds=left), now)
+            except Exception:
+                log_exc_swallow(log, f"reset_cooldown_menu: остаток acc={acc['id']}")
         lines.append(f"⏸ <b>{html.escape(name)}</b> — ещё {human_cd}")
         kb.button(
             text=f"🔓 {name[:22]}",
@@ -1974,7 +2002,8 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
 
     # Те же пять шагов, что и для одного аккаунта, одной реализацией
     # (services/account_reset.py): DB-сброс без очистки памяти не помогает —
-    # подбор аккаунтов смотрит flood_engine.is_account_cooling() независимо.
+    # strike_engine.preflight и экран страйка смотрят
+    # flood_engine.is_account_cooling() независимо от БД.
     # Набор прежний: только аккаунты с ЖИВЫМ окном кулдауна.
     try:
         from services.account_reset import reset_all_cooled

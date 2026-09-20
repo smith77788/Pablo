@@ -4,8 +4,11 @@
 — все сразу), и все три были написаны отдельно, каждая со своим набором шагов.
 В итоге результат зависел от того, откуда владелец нажал:
 
-  * Mini App не чистил in-memory кулдаун flood_engine — `wait_if_cooling` и
-    подбор аккаунтов продолжали держать аккаунт в паузе до перезапуска процесса;
+  * Mini App не чистил in-memory кулдаун flood_engine, а его читают отдельно от
+    БД: `strike_engine` отсеивает такой аккаунт в preflight, экран страйка в
+    боте отвечает «аккаунт на остывании, попробуйте позже», а пульс флота
+    показывает «остывает». Кулдаун в памяти живёт до перезапуска процесса, и
+    сброс в БД сам по себе его не трогает;
   * бот не ставил `risk_cleared_at` — гейт операций `is_account_quarantined` и
     риск-пульс продолжали считать старые ограничения, и аккаунт не брался в
     работу;
@@ -53,9 +56,11 @@ _CLEAR_STATUS_SQL = """
 def _clear_in_memory(account_ids: list[int]) -> None:
     """Снять process-local тормоза: кулдаун flood_engine и запрет suitability.
 
-    Оба живут в памяти процесса и переживают очистку БД. main.py держит бот,
-    Mini App API и op_worker в ОДНОМ процессе, поэтому правка видна сразу.
-    Обе части — вспомогательные: их сбой не должен ронять сброс.
+    Оба живут в памяти процесса и переживают очистку БД: кулдаун читает
+    strike_engine.preflight и экран страйка в боте, запрет suitability —
+    account_health.get_sorted_accounts. main.py держит бот, Mini App API и
+    op_worker в ОДНОМ процессе, поэтому правка видна сразу. Обе части
+    вспомогательные: их сбой не должен ронять сброс.
     """
     if not account_ids:
         return
@@ -101,30 +106,67 @@ async def reset_account(pool, acc_id: int, owner_id: int) -> bool:
         return True
 
 
-async def reset_all_cooled(pool, owner_id: int) -> int:
-    """Сброс всех аккаунтов владельца с ЖИВЫМ окном кулдауна. Возвращает счёт.
+async def cooled_account_ids(pool, owner_id: int) -> list[int]:
+    """Аккаунты владельца, реально стоящие на паузе, — ОДИН список на всех.
 
-    Набор намеренно узкий (`cooldown_until > NOW()`), как и в кнопке бота до
-    сведения: массовое снятие риска не должно захватывать аккаунты, которые
-    владелец в этот момент не видит в списке остывающих.
+    Пауза бывает двух видов, и второй не виден в базе: `cooldown_until` в
+    `tg_accounts` (переживает перезапуск) и кулдаун flood_engine в памяти
+    процесса (его читают strike_engine.preflight и экран страйка в боте).
+    Меню «Сбросить кулдауны» смотрело только в базу и на аккаунте, остывающем
+    в памяти, писало «✅ Нет активных кулдаунов — все аккаунты доступны», пока
+    страйк отвечал «аккаунт на остывании, попробуйте позже». Считаем оба вида
+    здесь, чтобы список на экране и набор массового сброса не разъезжались.
+    """
+    if not pool or not owner_id:
+        return []
+    try:
+        rows = await pool.fetch(
+            "SELECT id, (cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS cd_db "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            owner_id)
+    except Exception:
+        log.warning("account_reset: список аккаунтов не получен owner=%s",
+                    owner_id, exc_info=True)
+        return []
+    try:
+        from services.flood_engine import is_account_cooling
+    except Exception:
+        is_account_cooling = None  # нет сигнала памяти → считаем только базу
+
+    cooled: list[int] = []
+    for r in rows:
+        acc_id = int(r["id"])
+        if r["cd_db"]:
+            cooled.append(acc_id)
+            continue
+        if is_account_cooling is None:
+            continue
+        try:
+            if is_account_cooling(acc_id):
+                cooled.append(acc_id)
+        except Exception:
+            log.debug("account_reset: проверка памяти не удалась acc=%s", acc_id,
+                      exc_info=True)
+    return cooled
+
+
+async def reset_all_cooled(pool, owner_id: int) -> int:
+    """Сброс всех стоящих на паузе аккаунтов владельца. Возвращает счёт.
+
+    Набор — ровно тот, что владелец видит в меню (см. cooled_account_ids), и не
+    шире: массовое снятие риска не должно захватывать аккаунты, которых в
+    списке остывающих нет.
     """
     if not pool or not owner_id:
         return 0
-    cooled_ids: list[int] = []
-    try:
-        rows = await pool.fetch(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND cooldown_until > NOW()",
-            owner_id)
-        cooled_ids = [int(r["id"]) for r in rows]
-    except Exception:
-        # Без списка id почистить память нечем, но сброс в БД всё равно делаем.
-        log.warning("account_reset: список остывающих не получен owner=%s",
-                    owner_id, exc_info=True)
+    cooled_ids = await cooled_account_ids(pool, owner_id)
+    if not cooled_ids:
+        return 0
     try:
         res = await pool.execute(
             f"UPDATE tg_accounts SET {_CLEAR_STATUS_SQL} "
-            "WHERE owner_id=$1 AND cooldown_until > NOW()",
-            owner_id)
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            owner_id, cooled_ids)
     except Exception:
         log.warning("account_reset: массовый сброс не удался owner=%s",
                     owner_id, exc_info=True)

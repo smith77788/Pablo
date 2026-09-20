@@ -182,19 +182,15 @@ def test_reset_in_memory_failure_is_not_fatal(monkeypatch):
     assert pool.executed, "сброс в БД обязан состояться несмотря на сбой памяти"
 
 
-def test_reset_all_uses_same_steps_and_narrow_set():
-    """Массовый сброс — та же логика, набор только с живым окном кулдауна."""
+def test_reset_all_uses_same_steps_as_single():
+    """Массовый сброс не должен расходиться с одиночным по шагам."""
     from services.account_reset import reset_all_cooled
 
-    pool = _RecordingPool(rows=[{"id": 1}, {"id": 2}], result="UPDATE 2")
-    n = asyncio.run(reset_all_cooled(pool, 99))
-    assert n == 2, "счётчик освобождённых аккаунтов обязан быть честным"
+    pool = _AccountsPool([(1, True), (2, True)], result="UPDATE 2")
+    assert asyncio.run(reset_all_cooled(pool, 99)) == 2, (
+        "счётчик освобождённых аккаунтов обязан быть честным")
     sql = pool.executed[0][0]
-    assert "risk_cleared_at = NOW()" in sql and "session_conflict_at IS NULL" in sql, (
-        "массовый сброс не должен расходиться с одиночным")
-    assert "cooldown_until > NOW()" in sql, (
-        "массовое снятие риска не должно захватывать аккаунты, "
-        "которых владелец не видит в списке остывающих")
+    assert "risk_cleared_at = NOW()" in sql and "session_conflict_at IS NULL" in sql
     assert "owner_id=$1" in sql, "массовый сброс обязан быть owner-scoped"
 
 
@@ -224,3 +220,81 @@ def test_all_reset_buttons_go_through_one_implementation():
             f"кнопка «{name}» снова правит tg_accounts своим запросом")
         assert "clear_account_cooldown" not in body and "clear_all_cooldowns" not in body, (
             f"кнопка «{name}» чистит память в обход общего сброса")
+
+
+# ── список остывающих: база И память процесса ────────────────────────────────
+
+class _AccountsPool(_RecordingPool):
+    """Пул, отвечающий на запрос списка аккаунтов владельца."""
+
+    def __init__(self, accounts, result="UPDATE 0"):
+        super().__init__(rows=[{"id": i, "cd_db": cd} for i, cd in accounts],
+                         result=result)
+
+
+def test_cooled_list_sees_memory_cooldown_not_only_db():
+    """Аккаунт, остывающий ТОЛЬКО в памяти, обязан попасть в список.
+
+    Меню «Сбросить кулдауны» смотрело лишь в базу и писало «нет активных
+    кулдаунов — все аккаунты доступны», пока strike_engine.preflight и экран
+    страйка отсеивали аккаунт по кулдауну flood_engine.
+    """
+    from services import flood_engine as _fe
+    from services.account_reset import cooled_account_ids
+    import time
+
+    in_db, in_mem, clean = 8801, 8802, 8803
+    _fe.get_account_state(in_mem).cooldown_until = time.monotonic() + 600
+    _fe.get_account_state(clean).cooldown_until = 0.0
+
+    pool = _AccountsPool([(in_db, True), (in_mem, False), (clean, False)])
+    cooled = asyncio.run(cooled_account_ids(pool, 99))
+
+    assert in_db in cooled, "кулдаун из базы обязан попадать в список"
+    assert in_mem in cooled, (
+        "кулдаун в памяти невидим в базе, но страйк по нему аккаунт отсеивает")
+    assert clean not in cooled, "свободный аккаунт в списке остывающих не место"
+
+
+def test_reset_all_covers_exactly_the_listed_accounts():
+    """Массовый сброс бьёт ровно по тому набору, что владелец видит в меню."""
+    from services import flood_engine as _fe
+    from services.account_reset import reset_all_cooled
+    import time
+
+    in_db, in_mem, clean = 8811, 8812, 8813
+    _fe.get_account_state(in_mem).cooldown_until = time.monotonic() + 600
+    _fe.get_account_state(clean).cooldown_until = 0.0
+
+    pool = _AccountsPool([(in_db, True), (in_mem, False), (clean, False)],
+                         result="UPDATE 2")
+    n = asyncio.run(reset_all_cooled(pool, 99))
+
+    assert n == 2
+    sql, args = pool.executed[0]
+    assert "id = ANY($2::bigint[])" in sql and "owner_id=$1" in sql
+    assert sorted(args[1]) == [in_db, in_mem], (
+        "набор сброса обязан совпадать со списком в меню")
+    assert not _fe.is_account_cooling(in_mem), (
+        "кулдаун в памяти обязан сняться массовым сбросом")
+
+
+def test_reset_all_without_cooled_accounts_does_nothing():
+    """Нечего сбрасывать — не трогаем базу вовсе."""
+    from services.account_reset import reset_all_cooled
+
+    pool = _AccountsPool([(8821, False)])
+    assert asyncio.run(reset_all_cooled(pool, 99)) == 0
+    assert not pool.executed, "пустой набор не должен порождать UPDATE"
+
+
+def test_cooldown_menu_uses_shared_list():
+    """Меню бота обязано брать общий список, а не свой SELECT по базе."""
+    dash = (ROOT / "bot" / "handlers" / "health_dashboard.py").read_text(encoding="utf-8")
+    m = re.search(r"async def cb_reset_cooldown_menu\(.*?\n(?=@router)", dash, re.S)
+    assert m, "меню сброса не найдено — тест устарел"
+    seg = m.group(0)
+    assert "cooled_account_ids" in seg, (
+        "меню снова считает остывающих само — разъедется с массовым сбросом")
+    assert "cooldown_until > NOW()" not in seg, (
+        "меню снова смотрит только в базу и не видит остывание в памяти")
