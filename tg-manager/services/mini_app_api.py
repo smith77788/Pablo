@@ -844,6 +844,9 @@ _ADMIN_SCAN_CONCURRENCY = max(1, int(os.getenv("ADMIN_SCAN_CONCURRENCY", "4") or
 # Одновременных расчётов ёмкости аккаунта (запросы в БД). Держим ниже
 # размера пула asyncpg, чтобы оценка не забирала соединения у остальных.
 _PREFLIGHT_CONCURRENCY = max(1, int(os.getenv("PREFLIGHT_CONCURRENCY", "8") or 8))
+# Ниже этого размера сжимать ответ невыгодно: заголовок и работа
+# компрессора съедают выигрыш, а пакет всё равно уходит одним куском.
+_COMPRESS_MIN_BYTES = max(256, int(os.getenv("API_COMPRESS_MIN_BYTES", "1024") or 1024))
 
 
 async def _scan_admin_status(rows: list, group: str, *,
@@ -1248,6 +1251,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("unhandled API error: %s %s", request.method, request.rel_url.path)
             return _err("Внутренняя ошибка сервера. Повторите позже.", 500)
 
+    @web.middleware
+    async def compress_middleware(request: web.Request, handler) -> web.StreamResponse:
+        """Сжимать крупные JSON-ответы API.
+
+        Мини-апп открывают с телефона по мобильной сети, а списки аккаунтов,
+        каналов и ботов отдаются целиком, до нескольких сотен килобайт. Статику
+        (index.html) сжимали и раньше, а вот ответы API уходили как есть, хотя
+        сжимаются они лучше разметки — на однотипном JSON это раз в десять
+        меньше трафика и ровно во столько же раз меньше ожидания на плохой
+        связи.
+
+        Трогаем только обычные ответы с готовым телом: поток событий (SSE)
+        сжимать нельзя — ответ должен уходить клиенту по кускам, а не
+        накапливаться в буфере компрессора. Мелочь тоже не трогаем: на коротком
+        теле сжатие стоит дороже, чем экономит.
+        """
+        response = await handler(request)
+        try:
+            if (isinstance(response, web.Response)
+                    and isinstance(response.body, (bytes, bytearray))
+                    and len(response.body) >= _COMPRESS_MIN_BYTES
+                    and not response.headers.get("Content-Encoding")
+                    and "gzip" in request.headers.get("Accept-Encoding", "").lower()):
+                response.enable_compression()
+                response.headers["Vary"] = "Accept-Encoding"
+        except Exception:
+            log.debug("compress_middleware: сжатие пропущено", exc_info=True)
+        return response
+
+    app.middlewares.append(compress_middleware)
     app.middlewares.append(plan_gate_middleware)
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
