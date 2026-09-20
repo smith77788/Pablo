@@ -382,6 +382,38 @@ async def _requeue_op_no_accounts(pool: "asyncpg.Pool", op_id: int, defer_s: int
 _FLOOD_INLINE_MAX_S = _int_env("OP_FLOOD_INLINE_MAX_SEC", 15 * 60, 30, 6 * 3600)
 
 
+async def bounded_flood_sleep(seconds: float, where: str = "") -> float:
+    """Переждать флуд-паузу ВНУТРИ прогона, но не дольше _FLOOD_INLINE_MAX_S.
+
+    Зачем предел. Пауза назначается ОДНОМУ аккаунту за ОДНО действие, а этот сон
+    останавливает весь прогон: слот параллельности (один из восьми) и все
+    арендованные аккаунты простаивают, хотя следующая цель обычно идёт через
+    другой аккаунт и другой канал. Сон на несколько часов ради одного
+    упёршегося аккаунта — это простой флота, а не осторожность.
+
+    Ограничение НЕ обходит лимиты Telegram: штраф аккаунту уже записан в
+    flood_engine, и дальше его держат пейсинг и карантин — то есть само
+    флудившее действие раньше срока не повторяется. Ограничивается ровно то,
+    сколько прогон стоит на месте.
+
+    Там, где ждать надо всю паузу целиком, операция откладывается через
+    _defer_op_for_flood: ждёт очередь, а не занятый слот.
+
+    Возвращает фактическую длительность сна — чтобы вызывающий мог её залогировать.
+    """
+    want = max(0.0, float(seconds or 0))
+    actual = min(want, float(_FLOOD_INLINE_MAX_S))
+    if want > actual:
+        log.warning(
+            "op_worker%s: флуд-пауза %.0fс урезана до %.0fс — прогон не должен "
+            "держать слот и флот столько времени",
+            f" {where}" if where else "", want, actual,
+        )
+    if actual > 0:
+        await asyncio.sleep(actual)
+    return actual
+
+
 async def _defer_op_for_flood(
     pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = ""
 ) -> None:
@@ -3413,8 +3445,11 @@ async def _exec_mass_publish(
         )
         if delay > 0 and idx < total:
             if flood_wait:
-                # Flood-пауза мандатная (Telegram) — не масштабируем губернатором.
-                await asyncio.sleep(max(delay, float(flood_wait) + 5))
+                # Flood-пауза мандатная (Telegram) — не масштабируем губернатором,
+                # но и не даём ей остановить весь прогон на часы: следующая цель
+                # идёт через другой канал и часто через другой аккаунт.
+                await bounded_flood_sleep(
+                    max(delay, float(flood_wait) + 5), "mass_publish")
             else:
                 # Базовый темп — под глобальным губернатором (давление флота).
                 await _governed_sleep(pool, owner_id, delay)
@@ -4549,10 +4584,26 @@ async def _exec_global_presence_channel(
 
                         m = _re.search(r"(\d+)", err)
                         flood_wait = int(m.group(1)) + 5 if m else 60
-                        log.info(
-                            "op_worker gp_channel: FloodWait %ds, sleeping...", flood_wait
-                        )
-                        await asyncio.sleep(flood_wait)
+                        if flood_wait > _FLOOD_INLINE_MAX_S:
+                            # Пауза без предела здесь держала слот и аккаунты
+                            # часами ради ОДНОГО имени: канал к этому моменту
+                            # уже создан, и без имени он остаётся рабочим.
+                            # Ветка перебора вариантов ниже уже обрывается на
+                            # своём пределе (600с) — приводим и этот сон к тому
+                            # же принципу вместо бесконечного ожидания.
+                            log.warning(
+                                "op_worker gp_channel: FloodWait %ds превышает предел %ds — "
+                                "имя не ставим, канал остаётся без username",
+                                flood_wait, _FLOOD_INLINE_MAX_S,
+                            )
+                            # username_error проставляется ниже по итогу перебора
+                            # вариантов — здесь его трогать нельзя, затрётся.
+                            flood_wait = 0
+                        else:
+                            log.info(
+                                "op_worker gp_channel: FloodWait %ds, sleeping...", flood_wait
+                            )
+                            await asyncio.sleep(flood_wait)
                     from services.username_engine import generate_username_variants
 
                     geo = {
@@ -5372,7 +5423,9 @@ async def _exec_global_presence_bot(
                     "UPDATE global_presence_targets SET status='pending' WHERE id=$1",
                     target["id"],
                 )
-                await asyncio.sleep(wait_s)
+                # Лимит BotFather считается на аккаунт, а ретрай идёт уже с
+                # ДРУГОГО аккаунта — держать весь прогон всю паузу незачем.
+                await bounded_flood_sleep(wait_s, "gp_bot")
                 # Switch to next account for retry (use round-robin index over accounts_list)
                 acc_rr_idx += 1
                 acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
@@ -5814,7 +5867,8 @@ async def _exec_bulk_create_channels_multi(
                 else:
                     delay = random.uniform(*preset["item_delay"])
                 chaos = session_simulator.chaos_factor()
-                await asyncio.sleep(max(delay * chaos, flood_wait))
+                await bounded_flood_sleep(
+                    max(delay * chaos, flood_wait), "bulk_create_channels")
     finally:
         await release_accounts(claimed_ids)
 

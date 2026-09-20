@@ -174,3 +174,46 @@ def test_resume_after_defer_does_not_duplicate_posts():
     """Отсрочка возобновляет операцию — без пропуска уже взятых целей это дубли."""
     body = _fn(_read("services/op_worker.py"), "_exec_mass_publish")
     assert "_already_published = await completed_targets(pool, op_id)" in body
+
+
+# ── Общая обёртка ожидания флуда внутри прогона ──────────────────────────────
+
+def test_bounded_sleep_caps_at_the_threshold():
+    code = _code(_read("services/op_worker.py"), "bounded_flood_sleep")
+    assert "min(want, float(_FLOOD_INLINE_MAX_S))" in code, (
+        "сон обязан быть ограничен порогом, иначе обёртка ничего не даёт"
+    )
+    assert "max(0.0, float(seconds or 0))" in code, (
+        "мусор и отрицательные значения не должны превращаться в ошибку"
+    )
+
+
+def test_bounded_sleep_is_loud_when_it_truncates():
+    """Урезанная пауза — решение, а не мелочь: оно должно быть видно в логах."""
+    code = _code(_read("services/op_worker.py"), "bounded_flood_sleep")
+    assert "log.warning" in code
+    assert "want > actual" in code
+
+
+def test_bounded_sleep_math_is_right():
+    """Поведение формулы проверяем напрямую, а не только по тексту."""
+    def bounded(seconds, cap):
+        return min(max(0.0, float(seconds or 0)), float(cap))
+
+    cap = 900
+    assert bounded(30, cap) == 30, "короткую паузу режем — ошибка"
+    assert bounded(900, cap) == 900, "ровно порог обязан проходить целиком"
+    assert bounded(82800, cap) == 900, "23 часа обязаны быть урезаны до порога"
+    assert bounded(0, cap) == 0
+    assert bounded(-5, cap) == 0, "отрицательная пауза не должна ломать сон"
+    assert bounded(None, cap) == 0
+
+
+def test_all_three_inter_item_sleeps_use_the_wrapper():
+    """Эти три места спали всю флуд-паузу, останавливая весь прогон."""
+    src = _read("services/op_worker.py")
+    for where in ("mass_publish", "gp_bot", "bulk_create_channels"):
+        assert f'bounded_flood_sleep(\n' in src or f'"{where}"' in src, where
+    assert src.count("bounded_flood_sleep(") >= 4, (
+        "ожидались определение обёртки и три места её применения"
+    )
