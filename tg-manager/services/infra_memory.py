@@ -670,6 +670,8 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
     Агрегирует поверх иммунных таблиц (read-only, продюсеры не трогаем):
       - restriction_events: critical/ban/block/restrict → карантин; warning → риск;
       - account_flood_log: частые флуд-ожидания → риск.
+    Ограничения и флуды СТАРШЕ tg_accounts.risk_cleared_at не считаются: владелец
+    снял риск вручную (кнопка «Сбросить кулдаун»), и пульс обязан это показать.
     score 0..1 (1 = здоров). status: quarantine|at_risk|healthy.
     Возвращает {accounts:[...], summary:{healthy, at_risk, quarantine, total}}.
     """
@@ -686,18 +688,29 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
               -- (само-heal в account_monitor чистит статус, но здесь окно закрываем
               -- сразу, чтобы UI не держал «Под риском» до следующего цикла монитора)
               (a.cooldown_until IS NOT NULL AND a.cooldown_until > NOW()) AS cd_active,
-              (SELECT COUNT(*) FROM restriction_events r
-                 WHERE r.account_id=a.id
-                   AND r.created_at > NOW() - make_interval(days => $2)) AS restrictions,
+              -- risk_cleared_at — владелец вручную снял риск («взять в работу»).
+              -- Тот же фильтр, что в is_account_quarantined: иначе операции
+              -- аккаунт уже берут, а пульс продолжает светить «Карантин», и
+              -- владелец видит ту же жалобу «кулдаун не сбрасывается».
+              -- История событий цела, новое ограничение снова уводит в карантин.
               (SELECT COUNT(*) FROM restriction_events r
                  WHERE r.account_id=a.id
                    AND r.created_at > NOW() - make_interval(days => $2)
+                   AND (a.risk_cleared_at IS NULL
+                        OR r.created_at > a.risk_cleared_at)) AS restrictions,
+              (SELECT COUNT(*) FROM restriction_events r
+                 WHERE r.account_id=a.id
+                   AND r.created_at > NOW() - make_interval(days => $2)
+                   AND (a.risk_cleared_at IS NULL
+                        OR r.created_at > a.risk_cleared_at)
                    AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
                         OR r.event_type ILIKE '%block%'
                         OR r.event_type ILIKE '%restrict%')) AS severe,
               (SELECT COUNT(*) FROM account_flood_log f
                  WHERE f.account_id=a.id
-                   AND f.created_at > NOW() - make_interval(days => $2)) AS floods
+                   AND f.created_at > NOW() - make_interval(days => $2)
+                   AND (a.risk_cleared_at IS NULL
+                        OR f.created_at > a.risk_cleared_at)) AS floods
             FROM tg_accounts a
             WHERE a.owner_id=$1 AND a.is_active=TRUE
             ORDER BY a.id

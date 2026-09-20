@@ -65,3 +65,121 @@ async def test_risk_cleared_at_lifts_quarantine():
             await conn.execute("DELETE FROM tg_accounts WHERE id=$1", acc_id)
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_risk_cleared_at_lifts_pulse_quarantine():
+    """Пульс (его мержит список/деталь аккаунта в Mini App) тоже обязан отпускать.
+
+    Хвост первой итерации: операции аккаунт уже брали (is_account_quarantined
+    чинён), а get_account_health продолжал считать старые restriction_events и
+    светил «Карантин» — для владельца это та же жалоба «не сбрасывается».
+    """
+    from services.infra_memory import get_account_health
+
+    conn = await asyncpg.connect(_DSN)
+    try:
+        owner = 918273646
+        acc_id = await _mk_account(conn, owner)
+        try:
+            await conn.execute(
+                "INSERT INTO restriction_events(owner_id, account_id, event_type, severity) "
+                "VALUES($1, $2, 'ban_detected', 'critical')", owner, acc_id)
+            pool = await asyncpg.create_pool(_DSN, min_size=1, max_size=2)
+            try:
+                def _status(res):
+                    by_id = {a["account_id"]: a for a in res["accounts"]}
+                    assert acc_id in by_id, "аккаунт обязан быть в пульсе владельца"
+                    return by_id[acc_id]["status"]
+
+                assert _status(await get_account_health(pool, owner)) == "quarantine", (
+                    "свежее критическое ограничение обязано давать карантин в пульсе")
+
+                await conn.execute(
+                    "UPDATE tg_accounts SET cooldown_until=NULL, risk_cleared_at=NOW() "
+                    "WHERE id=$1", acc_id)
+                assert _status(await get_account_health(pool, owner)) == "healthy", (
+                    "после ручного сброса пульс не должен держать «Карантин»")
+
+                await conn.execute(
+                    "INSERT INTO restriction_events(owner_id, account_id, event_type, severity) "
+                    "VALUES($1, $2, 'ban_detected', 'critical')", owner, acc_id)
+                assert _status(await get_account_health(pool, owner)) == "quarantine", (
+                    "ограничение ПОСЛЕ сброса обязано снова уводить в карантин: "
+                    "сброс не должен ослеплять пульс навсегда")
+            finally:
+                await pool.close()
+        finally:
+            await conn.execute("DELETE FROM restriction_events WHERE account_id=$1", acc_id)
+            await conn.execute("DELETE FROM tg_accounts WHERE id=$1", acc_id)
+    finally:
+        await conn.close()
+
+
+# SQL кнопки «Сбросить кулдаун» (services/mini_app_api.py, act == "reset_cooldown").
+# Здесь он повторён дословно, чтобы прогнать по живому Postgres; что хендлер не
+# разошёлся с этим текстом, стережёт tests/test_risk_cleared_at.py.
+_RESET_SQL = (
+    "UPDATE tg_accounts SET cooldown_until=NULL, risk_cleared_at=NOW(), "
+    "  acc_status = CASE WHEN COALESCE(acc_status,'active')='cooldown' "
+    "                     AND session_conflict_at IS NULL "
+    "                    THEN 'active' ELSE acc_status END, "
+    "  status_reason = CASE WHEN COALESCE(acc_status,'active')='cooldown' "
+    "                        AND session_conflict_at IS NULL "
+    "                       THEN NULL ELSE status_reason END "
+    "WHERE id=$1 AND owner_id=$2"
+)
+
+
+@pytest.mark.asyncio
+async def test_reset_sql_clears_only_transient_cooldown():
+    """acc_status='cooldown' снимается сразу; жёсткие статусы и конфликт сессии — нет.
+
+    Пока acc_status оставался 'cooldown', account_health.load_from_db считал
+    аккаунт спамблоком (suitability dm/invite = False) и get_sorted_accounts
+    молча выкидывал его из подбора — до часового цикла монитора.
+    """
+    conn = await asyncpg.connect(_DSN)
+    try:
+        owner = 918273647
+        cases = {}
+        try:
+            for name, status, conflict in (
+                ("cooldown", "cooldown", None),
+                ("banned", "banned", None),
+                ("conflict", "cooldown", "NOW()"),
+            ):
+                acc_id = await _mk_account(conn, owner + len(cases))
+                await conn.execute(
+                    f"UPDATE tg_accounts SET owner_id=$1, acc_status=$2, "
+                    f"status_reason='было', cooldown_until=NOW()+INTERVAL '1 hour', "
+                    f"session_conflict_at={conflict or 'NULL'} WHERE id=$3",
+                    owner, status, acc_id)
+                cases[name] = acc_id
+
+            for acc_id in cases.values():
+                await conn.execute(_RESET_SQL, acc_id, owner)
+
+            rows = {r["id"]: r for r in await conn.fetch(
+                "SELECT id, acc_status, status_reason, cooldown_until, risk_cleared_at "
+                "FROM tg_accounts WHERE id = ANY($1::bigint[])", list(cases.values()))}
+
+            for name, acc_id in cases.items():
+                r = rows[acc_id]
+                assert r["cooldown_until"] is None, f"{name}: кулдаун обязан сняться"
+                assert r["risk_cleared_at"] is not None, f"{name}: отметка сброса риска"
+
+            assert rows[cases["cooldown"]]["acc_status"] == "active", (
+                "транзиентный 'cooldown' обязан сняться сразу, а не через час")
+            assert rows[cases["cooldown"]]["status_reason"] is None, (
+                "причина статуса обязана уйти вместе со статусом")
+            assert rows[cases["banned"]]["acc_status"] == "banned", (
+                "жёсткий статус трогать нельзя")
+            assert rows[cases["conflict"]]["acc_status"] == "cooldown", (
+                "при конфликте сессии статус не снимаем — сессию надо перезалить")
+        finally:
+            if cases:
+                await conn.execute("DELETE FROM tg_accounts WHERE id = ANY($1::bigint[])",
+                                   list(cases.values()))
+    finally:
+        await conn.close()
