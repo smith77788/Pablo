@@ -129,7 +129,6 @@ def test_set_owner_proxy_policy_normalizes_and_ignores_none():
     import importlib
     # account_manager не импортируется в песочнице (env) — проверяем через proxy_policy,
     # что set_owner_proxy_policy нормализует так же (контракт normalize_policy).
-    from services.proxy_policy import normalize_policy
     assert normalize_policy("STRICT") == "strict"
     assert normalize_policy("bogus") == DEFAULT_POLICY
 

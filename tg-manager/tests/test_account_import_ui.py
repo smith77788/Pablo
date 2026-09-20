@@ -52,7 +52,6 @@ def test_import_assigns_selected_proxy():
     """Ре-аудит шага 1: выбранный в модалке прокси должен ЗАКРЕПЛЯТЬСЯ за
     импортированным аккаунтом (изоляция), а не только использоваться для проверки —
     иначе аккаунт падает на общий CF-relay с единым IP."""
-    import inspect
     from services import session_importer
     src = inspect.getsource(session_importer.import_sessions)
     assert "proxy_id" in src, "import_sessions должен принимать proxy_id"

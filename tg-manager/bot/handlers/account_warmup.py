@@ -633,7 +633,6 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     await callback.answer("▶️ Запускаю в фоне...")
     from services.account_warmer import get_active_plans, run_daily_warmup
     from services import task_registry
-    import asyncio
 
     plans = await get_active_plans(pool, callback.from_user.id)
     if not plans:
@@ -686,7 +685,6 @@ async def cb_warmup_run_one(
     await callback.answer("▶️ Запускаю в фоне...")
     from services.account_warmer import get_active_plans, run_daily_warmup
     from services import task_registry
-    import asyncio
 
     plan_id = callback_data.plan_id
     acc_id = callback_data.account_id
@@ -1529,7 +1527,6 @@ async def cb_wu_sess_run(
 ) -> None:
     from services.account_warmer import run_warmup_session
     from services import task_registry
-    import asyncio
 
     sess_id = callback_data.session_id
     try:
@@ -2140,7 +2137,6 @@ async def cb_ract_run(
 ) -> None:
     from services.activity_engine import run_resource_activity_session
     from services import task_registry
-    import asyncio
 
     sess_id = callback_data.session_id
     uid = callback.from_user.id

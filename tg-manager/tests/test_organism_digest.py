@@ -82,7 +82,7 @@ def test_endpoint_route_and_ui_wired():
 
 
 def test_new_trend_metrics_retained_and_seo():
-    from services.organism.digest import _flat_metrics, _TREND_METRICS, _LOWER_IS_BETTER
+    from services.organism.digest import _TREND_METRICS, _LOWER_IS_BETTER
     assert "retained" in _TREND_METRICS and "seo_weak" in _TREND_METRICS
     assert "seo_weak" in _LOWER_IS_BETTER  # рост слабых по SEO — негатив
     m = _flat_metrics({"retention": {"retained": 12}, "seo": {"weak": 4}})

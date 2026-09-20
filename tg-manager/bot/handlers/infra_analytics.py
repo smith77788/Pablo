@@ -773,13 +773,14 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         f"   🔍 Ключевых слов: <b>{keyword_total}</b>",
     ]
 
+    # AccCb и ProxyCb импортированы на уровне модуля — повторный локальный
+    # import сделал бы их локальными для всей функции (UnboundLocalError на
+    # ветках, куда этот import не доезжает).
     from bot.callbacks import (
-        AccCb,
         BotCb,
         ChanCb,
         GroupFCb,
         ClustMCb,
-        ProxyCb,
         AssetTplCb,
     )
 

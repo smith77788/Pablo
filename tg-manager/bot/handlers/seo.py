@@ -1270,8 +1270,6 @@ async def fsm_seo_feedback(
         log.warning("seo feedback: failed to fetch channel row")
         chan = None
     if not chan:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await thinking.edit_text("⚠️ Канал не найден. Откройте меню заново.", reply_markup=kb.as_markup())

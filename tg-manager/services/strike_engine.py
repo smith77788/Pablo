@@ -407,7 +407,6 @@ def _parse_rdap_abuse_email(data: dict) -> str | None:
 async def _rdap_registrar_abuse(domain: str, _fetch=None) -> str | None:
     """abuse-email регистратора домена через публичный RDAP (rdap.org). Fail-open."""
     async def _default_fetch(url: str):
-        import aiohttp
         async with aiohttp.ClientSession() as s:
             async with s.get(
                 url,
@@ -833,7 +832,6 @@ def smart_detect_preset(text: str) -> str | None:
     
     Returns preset name or None if no match found.
     """
-    import re
     
     text_lower = text.lower()
     scores = {}
@@ -4202,7 +4200,6 @@ async def _ai_classify_with_providers(
     import json as _json
 
     from services.ai_providers import configured_providers
-    from services.logger import log_exc_swallow
 
     providers = configured_providers()
     if not providers:

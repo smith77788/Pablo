@@ -660,7 +660,6 @@ async def cb_health_real_check(
     )
 
     from services.account_manager import check_account_status_full
-    from services.logger import log_exc_swallow
 
     status_label = {
         "active": "активен",
@@ -1713,7 +1712,6 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     ]
 
     kb = InlineKeyboardBuilder()
-    from bot.callbacks import AccCb
 
     for acc in rows:
         st = _effective_acc_status(acc)

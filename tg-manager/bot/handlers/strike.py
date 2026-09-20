@@ -1051,8 +1051,6 @@ async def cb_mini_strike_run(
     await state.clear()
 
     if not target or not acc_id:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await safe_edit(callback, "⚠️ Сессия истекла. Начните заново.", kb.as_markup())
@@ -1075,8 +1073,6 @@ async def cb_mini_strike_run(
         acc_row = None
 
     if not acc_row or not acc_row["session_str"]:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await safe_edit(callback, "⚠️ Аккаунт не найден. Начните заново.", kb.as_markup())
@@ -1089,8 +1085,6 @@ async def cb_mini_strike_run(
     from services import flood_engine as _fe
 
     if acc.get("is_active") is False:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await safe_edit(callback,
@@ -1101,8 +1095,6 @@ async def cb_mini_strike_run(
         _min_trust = _fe.min_trust_for_action("strike")
         _ts = float(acc.get("trust_score") or 0)
         if _ts < _min_trust:
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from bot.callbacks import BmCb
             kb = InlineKeyboardBuilder()
             kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
             await safe_edit(callback,
@@ -1113,8 +1105,6 @@ async def cb_mini_strike_run(
     except (TypeError, ValueError):
         pass
     if _fe.is_account_cooling(acc["id"]):
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await safe_edit(callback,
@@ -1129,8 +1119,6 @@ async def cb_mini_strike_run(
     # двумя шагами аккаунт успевал уйти другой операции (TOCTOU), а снимок
     # is_account_in_use к тому же видел только память СВОЕГО процесса.
     if not await _opw.try_claim_account(int(acc["id"])):
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await safe_edit(callback,

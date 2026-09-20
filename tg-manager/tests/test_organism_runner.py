@@ -112,7 +112,6 @@ def test_open_button_includes_op_id_for_operation(monkeypatch):
     """Кнопка «Открыть» на уведомлении об операции ведёт К ОПЕРАЦИИ (#operation:<id>),
     а не просто в приложение. Раньше op_id отбрасывался → deep-link был #operation."""
     import config
-    from services.organism import runner
     monkeypatch.setattr(config, "MINI_APP_URL", "https://app.example/", raising=False)
     ob = runner._open_button({"kind": "operation", "op_id": 20})
     assert ob is not None, "кнопка не построилась (проверь MINI_APP_URL)"

@@ -264,7 +264,6 @@ def test_device_exec_gated_off_by_default(monkeypatch):
 # ── интеграция: роуты API и оплата ───────────────────────────────────────────
 
 def test_all_api_routes_registered():
-    import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py").read_text("utf-8")
     for route in (
         '/api/miniapp/host_server/status',
@@ -302,7 +301,6 @@ def test_bot_handler_router_loads_and_is_wired():
 
 def test_payment_checker_activates_host_server_as_module_not_subscription():
     """plan='host_server' → grant_access, и НЕ уходит в _activate_subscription."""
-    import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1] / "services" / "payment_checker.py").read_text("utf-8")
     assert "host_server.grant_access" in src, "нет выдачи доступа при оплате host_server"
     # разовые модули исключены из активации подписки

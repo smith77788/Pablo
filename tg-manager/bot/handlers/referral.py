@@ -81,7 +81,6 @@ def _dashboard_keyboard(share_url: str | None = None) -> object:
 
 @router.message(Command("referral"))
 async def cmd_referral(message: Message) -> None:
-    from bot.callbacks import BmCb
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))

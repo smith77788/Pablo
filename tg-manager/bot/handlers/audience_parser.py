@@ -971,7 +971,6 @@ async def cb_parser_geo_radius(
 
 async def _exec_geo_parse(acc: dict, lat: float, lon: float, radius: int) -> list[dict]:
     """Выполнить GetLocatedRequest и вернуть список пользователей."""
-    import asyncio
     from services.account_manager import _make_client
     from telethon.tl.functions.contacts import GetLocatedRequest
     from telethon.tl.types import InputGeoPoint, User

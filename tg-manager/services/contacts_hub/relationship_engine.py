@@ -37,7 +37,6 @@ async def compute_relationships(pool, owner_id: int, contact_id: str = None) -> 
         cid = c['id']
         phones = c['phones'] or []
         if isinstance(phones, str):
-            import json
             try:
                 phones = json.loads(phones)
             except (json.JSONDecodeError, TypeError):

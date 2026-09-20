@@ -199,7 +199,6 @@ async def _get_avatar_metrics(client, entity) -> dict[str, Any]:
                 if hasattr(dt, "timestamp"):
                     oldest_photo_date = dt
                 elif isinstance(dt, int):
-                    from datetime import datetime, timezone
                     oldest_photo_date = datetime.fromtimestamp(dt, tz=timezone.utc)
             elif photos:
                 oldest = min(photos, key=lambda p: p.id)

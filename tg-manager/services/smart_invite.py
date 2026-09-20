@@ -276,7 +276,6 @@ async def assess_and_store_liveness(pool, owner_id: int, chat_key: str,
     governor просто не режет темп по живости.
     """
     try:
-        from datetime import datetime, timezone
         participants = 0
         try:
             from telethon.tl.functions.channels import GetFullChannelRequest

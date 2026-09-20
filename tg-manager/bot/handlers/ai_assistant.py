@@ -878,7 +878,6 @@ async def _process_ai_turn(
 
 @router.message(Command("ai"))
 async def cmd_ai(message: Message) -> None:
-    from bot.callbacks import BmCb, AiCb
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Открыть ИИ Помощник", callback_data=AiCb(action="start"))
@@ -971,7 +970,6 @@ async def cb_ai_start(
 ) -> None:
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await safe_edit(callback,

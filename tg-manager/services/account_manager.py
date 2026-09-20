@@ -2048,7 +2048,6 @@ async def import_tdata_from_zip_bytes(zip_bytes: bytes) -> tuple[str, dict]:
     поиск корня tdata и конвертацию. Единая точка для веб-API и бота.
     Бросает ValueError с человекочитаемой причиной.
     """
-    import os as _os
     import tempfile
     import zipfile
 
@@ -7454,7 +7453,6 @@ async def create_bot_via_botfather(
     Returns dict with 'token' and 'username' on success,
     or 'error' key with message on failure.
     """
-    import re
 
     client = _make_client(session_string, _acc)
     try:

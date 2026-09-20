@@ -466,7 +466,6 @@ async def cb_broadcast_resend(
 ) -> None:
     """Повтор рассылки недоставленным получателям (паритет с mini-app)."""
     await callback.answer("⏳ Готовлю повтор…")
-    from services import broadcaster
 
     res = await broadcaster.resend_undelivered(
         pool, callback.from_user.id, callback_data.broadcast_id

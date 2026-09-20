@@ -369,7 +369,7 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
 async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
     """Show a real-data analytics summary: accounts, operations, queue, errors."""
     from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from bot.callbacks import InfraCb, MassOpCb, BmCb
+    from bot.callbacks import InfraCb
 
     uid = message.from_user.id
 

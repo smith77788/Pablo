@@ -237,7 +237,6 @@ async def cb_dl_leaders(
     await safe_answer(callback)
     leaders = await db.get_referral_leaderboard(pool, callback_data.bot_id, limit=10)
     total = await db.get_referral_total(pool, callback_data.bot_id)
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     kb = InlineKeyboardBuilder()
     kb.button(

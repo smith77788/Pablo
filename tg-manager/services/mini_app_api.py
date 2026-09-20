@@ -1061,7 +1061,6 @@ async def _retry_failed_ops_core(pool: asyncpg.Pool, uid: int, hours: int = 24) 
            WHERE owner_id=$1 AND status='failed'
              AND created_at > NOW() - ($2 * INTERVAL '1 hour')
            ORDER BY created_at DESC LIMIT 100""", uid, hours)
-    from services import operation_bus as _obus
     retried, skipped = 0, 0
     for r in (rows or []):
         if r["op_type"] == "mass_publish":
@@ -1162,7 +1161,6 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
         ids = [int(r["id"]) for r in (rows or [])]
         if not ids:
             return {"ok": True, "message": "Нет аккаунтов для проверки"}
-        from services import operation_bus as _obus
         op_id = await _obus.submit(
             pool, uid, "check_accounts_health",
             {"account_ids": ids, "check_spambot": True},
@@ -3183,7 +3181,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # (дубликаты). Работает и для partial-success ('done' с ошибками) —
             # паритет с ботом (retry_failed).
             if row["op_type"] == "mass_publish":
-                import json as _json
                 failed = await pool.fetch(
                     "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='error'",
                     op_id)
@@ -3681,7 +3678,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("profile_setter_submit fetch uid=%d", uid)
             return _err(str(exc), 500)
         account_ids = [r["id"] for r in rows]
-        import json as _json
         params: dict = {"op": op, "account_ids": account_ids}
         if op == "name":
             params["name_data"] = {
@@ -3704,7 +3700,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         label_map = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
         label = f"Сеттер: {label_map.get(op, op)} × {len(account_ids)} акк."
         try:
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "bulk_set_profile", params,
                 total_items=len(account_ids), label=label)
@@ -3769,7 +3764,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc), 500)
         if not row:
             return _err("Аккаунт не найден или нет сессии", 404)
-        import json as _json
         label_map = {"leave_all_chats": "Выход из чатов", "delete_contacts": "Удаление контактов"}
         label = f"Cleaner: {label_map[op]} акк #{account_id}"
         try:
@@ -4051,7 +4045,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not ids:
             return _err("Нет аккаунтов для проверки", 400)
         try:
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "check_accounts_health",
                 {"account_ids": ids, "check_spambot": True},
@@ -4176,14 +4169,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         n = len(ids)
         try:
             if op == "check":
-                from services import operation_bus as _obus
                 op_id = await _obus.submit(
                     pool, uid, "check_accounts_health",
                     {"account_ids": ids, "check_spambot": True},
                     total_items=n, label=f"Проверка {n} аккаунтов")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             if op == "scan":
-                from services import operation_bus as _obus
                 op_id = await _obus.submit(
                     pool, uid, "scan_owned_resources", {"account_ids": ids},
                     total_items=n, label=f"Скан ресурсов: {n} акк.")
@@ -4416,7 +4407,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         params = {"name": name, "username_prefix": prefix, "digits": int(digits),
                   "account_ids": account_ids, "offset": int(offset)}
         try:
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "find_contact", params, total_items=0,
                 label=f"Поиск контакта @{prefix}*")
@@ -4596,7 +4586,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("У канала нет привязанного аккаунта (создателя)", 400)
         params = {"channel_id": ch_id, "owner_acc_id": int(ch["acc_id"])}
         try:
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "promote_all_admins", params,
                 total_items=1, label="Назначение админов")
@@ -4668,7 +4657,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if op == "promote":
                 op_ids = []
                 for c in chans:
-                    from services import operation_bus as _obus
                     oid = await _obus.submit(
                         pool, uid, "promote_all_admins",
                         {"channel_id": int(c["channel_id"]),
@@ -5579,7 +5567,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not owns:
             return _err("Аккаунт не найден", 404)
         try:
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "check_accounts_health",
                 {"account_ids": [acc_id], "check_spambot": True},
@@ -6021,7 +6008,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нет активных аккаунтов", 400)
         try:
             label = f"Проверка на запрещёнку: {len(resources)} ресурсов"
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "compliance_scan",
                 {"resources": resources, "per_resource_limit": per_limit, "acc_count": acc_count},
@@ -6242,7 +6228,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         chan_ids = [int(r["channel_id"]) for r in (rows or [])]
         if not chan_ids:
             return _err("Нет каналов с SEO-предложениями для применения", 400)
-        from services import operation_bus as _obus
         try:
             op_id = await _obus.submit(
                 pool, uid, "bulk_seo_apply", {"channel_ids": chan_ids},
@@ -7778,7 +7763,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                 "администраторов». Сделайте один свой аккаунт таким админом "
                                 "в Telegram — тогда я раздам право приглашать остальным."),
                 })
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "promote_all_admins",
                 {"channel_id": channel_id, "owner_acc_id": int(promoter["id"])},
@@ -8473,7 +8457,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         phones = phones[:500]
         try:
             label = f"Проверка {len(phones)} номеров"
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "phone_check", {"phones": phones},
                 total_items=len(phones), label=label)
@@ -8919,7 +8902,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             label = "Сканирование подарков во всех аккаунтах"
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "gift_scan", {}, total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
@@ -9112,7 +9094,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # op_type новые прогоны блокируются). except PermissionError ниже уже
             # был написан в расчёте на PlanRequiredError от submit(), но раньше
             # submit() здесь не вызывался — ветка была мертва.
-            from services import operation_bus as _obus
 
             total_items = (len(user_refs) + len(phones)) if (user_refs or phones) else 1
             op_id = await _obus.submit(
@@ -9438,7 +9419,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Укажите цель проверки", 400)
         try:
             label = f"Проверка даты регистрации: {target}"
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "reg_check", {"target": target}, total_items=1, label=label)
             return _json_resp({"ok": True, "op_id": op_id, "label": label})
@@ -11220,10 +11200,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad body", 400)
         if not channel:
             return _err("channel обязателен", 400)
-        import json as _json
         label = f"Ad Intel scan @{channel}"
         try:
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "ad_intel_scan", {"channel": channel},
                 total_items=1, label=label)
@@ -12162,11 +12140,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             days_back = max(1, min(365, int(body.get("days_back") or 30)))
         except (TypeError, ValueError):
             days_back = 30
-        import json as _json
         _win = f", {days_back}д" if parse_type in ("active", "comments") else ""
         label = f"Парсинг {parse_type} из @{source_ref} (до {limit}{_win})"
         try:
-            from services import operation_bus as _obus
             op_id = await _obus.submit(
                 pool, uid, "parse_audience",
                 {"source_ref": source_ref, "parse_type": parse_type,
@@ -13384,7 +13360,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                ORDER BY created_at DESC LIMIT 30""", uid)
         for r in rows:
             if isinstance(r.get("template"), str):
-                import json as _json
                 try:
                     r["template"] = _json.loads(r["template"])
                 except Exception:
@@ -13409,7 +13384,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("text required")
         if len(text) > 4096:
             return _err("text too long (max 4096)")
-        import json as _json
         try:
             row = await pool.fetchrow(
                 "INSERT INTO asset_templates(owner_id, asset_type, name, template) VALUES($1,'post',$2,$3::jsonb) RETURNING id",
@@ -13988,7 +13962,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             row = await pool.fetchrow(
                 "SELECT settings_json FROM platform_users WHERE user_id=$1", uid)
             if row and row["settings_json"]:
-                import json as _json
                 settings.update(_json.loads(row["settings_json"]))
         except Exception as e:
             log.warning("user_settings_get: %s", e)
@@ -14014,7 +13987,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             data = await request.json()
-            import json as _json
             settings_json = _json.dumps(data)
             await pool.execute(
                 """UPDATE platform_users SET settings_json=$1 WHERE user_id=$2""",
@@ -20807,7 +20779,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def _cf_resolve_creds(uid: int) -> dict:
         """Доступы CF: сперва из БД владельца (заданы в приложении, шифр),
         иначе — из env (обратная совместимость с Railway-переменными)."""
-        import os
         from database import db
         creds = await db.get_cf_credentials(pool, uid) or {}
         return {

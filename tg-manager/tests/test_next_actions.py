@@ -212,7 +212,6 @@ async def test_compute_next_actions_end_to_end():
 def test_relog_expired_sessions_suggested():
     """Критично (связано с AuthKeyUnregistered при синке контактов): аккаунты с
     acc_status='session_expired' должны давать высокоприоритетную подсказку релога."""
-    from services.next_actions import build_suggestions
     r = build_suggestions({"acc_active": 5, "acc_expired": 3, "recent_ops": []})
     relog = [x for x in r if x["id"] == "relog_expired"]
     assert relog, "нет подсказки релога при session_expired"

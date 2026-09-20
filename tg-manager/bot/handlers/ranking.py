@@ -101,7 +101,6 @@ async def _has_active_account(pool: asyncpg.Pool, owner_id: int) -> bool:
 
 @router.message(Command("ranking"))
 async def cmd_ranking(message: Message) -> None:
-    from bot.callbacks import BmCb
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 Открыть Infragram OS", callback_data=BmCb(action="main"))

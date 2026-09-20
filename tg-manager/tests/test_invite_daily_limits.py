@@ -329,7 +329,6 @@ def test_health_check_persists_profile_facts():
 
 
 def test_schema_migration_present():
-    from pathlib import Path
     sql = (Path(__file__).resolve().parents[1] / "schema_v160.sql").read_text(encoding="utf-8")
     for col in ("is_premium", "has_photo", "profile_checked_at"):
         assert col in sql, f"колонка {col} обязана быть в миграции"

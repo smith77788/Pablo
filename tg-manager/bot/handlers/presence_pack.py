@@ -858,7 +858,7 @@ async def cb_pack_promote(
         )
         return
 
-    from bot.callbacks import BmCb, MassOpCb
+    from bot.callbacks import MassOpCb
     from aiogram.utils.keyboard import InlineKeyboardBuilder as IKB
     kb = IKB()
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue", op_type="all", page=0))

@@ -26,7 +26,6 @@ _GEO_LIMITS = {"name": 64, "short": 120, "desc": 512}
 
 def _geo_lang_kb(field: str) -> InlineKeyboardMarkup:
     """Inline keyboard for GEO language selection (name/desc/short/cmd)."""
-    from aiogram.types import InlineKeyboardMarkup
     kb = InlineKeyboardBuilder()
     for code, flag, lang_name in LANGUAGES:
         kb.button(text=f"{flag} {lang_name}", callback_data=f"netgeo:{field}:{code}")

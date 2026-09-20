@@ -34,13 +34,11 @@ def test_file_upload_bounded_and_guarded():
     assert "import_tdata_from_zip_bytes" in API
     assert "import_from_session_file" in API
     from services import account_manager as am
-    import inspect
     assert inspect.iscoroutinefunction(am.import_tdata_from_zip_bytes)
 
 
 def test_tdata_zip_helper_guards():
     """import_tdata_from_zip_bytes защищает от zip-bomb и path-traversal."""
-    import inspect
     from services import account_manager as am
     src = inspect.getsource(am.import_tdata_from_zip_bytes)
     assert "_MAX_UNCOMPRESSED" in src and "_MAX_FILES" in src

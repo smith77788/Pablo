@@ -1544,7 +1544,6 @@ class TestBroadcasterSecurity:
     @pytest.mark.asyncio
     async def test_broadcaster_access_check_authorized(self):
         from services.broadcaster import get_broadcast_analytics
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         bc_row = {
             "id": 1, "bot_id": 10, "message_text": "Test",

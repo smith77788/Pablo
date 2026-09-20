@@ -2135,7 +2135,6 @@ async def _run_warmup_session_impl(
 
                     dur_s = time.monotonic() - t0
                     try:
-                        from services import infra_memory
 
                         infra_memory.record_account_op(
                             acc_id, "warmup_session", success, duration_s=dur_s
@@ -2455,7 +2454,6 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1, bot=None)
     таймзоне гео его прокси, см. geo_tempo), а не по серверному Киеву — иначе
     поведение рассинхронизировано с заявленным гео аккаунта.
     """
-    import datetime
     while True:
         try:
             # Сначала — рассказать о планах, которые движок остановил сам

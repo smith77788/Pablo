@@ -2275,7 +2275,6 @@ async def assign_experiment_variant(
     pool, bot_id: int, user_id: int, exp_id: int
 ) -> asyncpg.Record | None:
     """Assign user to variant using weighted random. Returns variant record."""
-    import random
 
     existing = await pool.fetchrow(
         """SELECT ea.*, ev.content, ev.name as variant_name
@@ -2733,7 +2732,6 @@ async def autotag_by_activity(pool, bot_id: int) -> dict:
 
 
 async def record_message_keywords(pool, bot_id: int, text: str) -> None:
-    import re
 
     words = list(set(re.findall(r"[а-яёА-ЯЁa-zA-Z]{3,}", text.lower())))[:10]
     for word in words:
@@ -4408,7 +4406,6 @@ async def create_global_presence_plan(
     Поля генератора (roles/levels/пулы/seed) необязательны: планы, собранные
     старым путём «один паттерн», продолжают работать без них.
     """
-    import json
 
     def _j(value):
         return json.dumps(value, ensure_ascii=False) if value else None
@@ -5402,7 +5399,6 @@ async def update_presence_pack_channels(
     channel_ids: list[int],
     group_ids: list[int],
 ) -> None:
-    import json
 
     await pool.execute(
         "UPDATE presence_packs SET channel_ids=$3, group_ids=$4 WHERE id=$1 AND owner_id=$2",
@@ -5815,7 +5811,6 @@ async def get_all_proxy_quality_stats(pool: asyncpg.Pool, owner_id: int) -> list
 async def save_pressure_cache(
     pool: asyncpg.Pool, owner_id: int, score: int, breakdown: dict
 ) -> None:
-    import json
 
     await pool.execute(
         """INSERT INTO infra_pressure_cache (owner_id, pressure_score, breakdown, computed_at)
@@ -5835,7 +5830,6 @@ async def get_pressure_cache(pool: asyncpg.Pool, owner_id: int) -> dict | None:
     )
     if not row:
         return None
-    import json
 
     breakdown = row["breakdown"]
     if isinstance(breakdown, str):
@@ -6124,7 +6118,6 @@ async def create_intent(
     strategy: str,
     forecast: dict,
 ) -> int:
-    import json
 
     return await pool.fetchval(
         """INSERT INTO intents (owner_id, intent_type, description, plan, strategy, forecast)
@@ -6162,7 +6155,6 @@ async def list_intents(
 async def update_intent_strategy(
     pool: asyncpg.Pool, intent_id: int, owner_id: int, strategy: str, forecast: dict
 ) -> None:
-    import json
 
     await pool.execute(
         "UPDATE intents SET strategy=$1, forecast=$2::jsonb WHERE id=$3 AND owner_id=$4",
@@ -6192,7 +6184,6 @@ async def update_intent_status(
 async def save_intent_feedback(
     pool: asyncpg.Pool, intent_id: int, owner_id: int, feedback: dict
 ) -> None:
-    import json
 
     await pool.execute(
         "UPDATE intents SET feedback=$1::jsonb, status='completed', completed_at=NOW() "
@@ -7059,7 +7050,6 @@ async def promo_log(
     order_id: int | None = None,
     meta: dict | None = None,
 ) -> None:
-    import json
     try:
         await pool.execute(
             """INSERT INTO promo_logs (order_id, owner_id, level, event, message, meta)

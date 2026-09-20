@@ -85,7 +85,7 @@ def test_seo_apply_all_route_registered():
 
 def test_bulk_seo_apply_registered_and_dispatched():
     # op_type должен быть в реестре И обрабатываться воркером (иначе зависнет pending)
-    from services import operation_bus, op_worker
+    from services import operation_bus
     assert "bulk_seo_apply" in operation_bus.OP_REGISTRY, (
         "bulk_seo_apply должен быть в OP_REGISTRY"
     )
@@ -97,7 +97,6 @@ def test_bulk_seo_apply_registered_and_dispatched():
 
 
 def test_bulk_seo_executor_reuses_shared_helper():
-    from services import op_worker
     src = inspect.getsource(op_worker)
     m = re.search(r"async def _exec_bulk_seo_apply\(.*?\n(.*?)\n\nasync def ", src, re.DOTALL)
     assert m, "_exec_bulk_seo_apply not found"

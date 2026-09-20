@@ -322,7 +322,6 @@ def _parse_tme_post_link(text: str) -> tuple[int | str | None, int | None]:
 
 def _human_delay(min_s: float, max_s: float) -> float:
     """Return a random human-like delay between min_s and max_s seconds."""
-    import random
 
     return random.uniform(min_s, max_s)
 
@@ -502,7 +501,7 @@ def _account_picker_kb(accounts: list, action: str) -> InlineKeyboardBuilder:
 @router.message(Command("ops"))
 async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     """Quick access to operation reports and queue."""
-    from bot.callbacks import BmCb, MassOpCb, InfraCb
+    from bot.callbacks import InfraCb
 
     uid = message.from_user.id
     # Fetch quick stats from operation_queue
@@ -549,7 +548,7 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
 @router.message(Command("report"))
 async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
     """Quick access to operation reports — last 5 completed operations with results."""
-    from bot.callbacks import BmCb, MassOpCb, InfraCb
+    from bot.callbacks import InfraCb
     import html as _html
 
     uid = message.from_user.id
@@ -762,8 +761,6 @@ async def _start_create_channel_fsm(
 async def fsm_create_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not title or len(title) > 128:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import ChanCb
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
         await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:", reply_markup=kb.as_markup())
@@ -927,8 +924,6 @@ async def cb_bulk_create_start(
 async def fsm_bulk_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not title or len(title) > 128:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import ChanCb
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
         await message.answer("⚠️ Название от 1 до 128 символов:", reply_markup=kb.as_markup())
@@ -1257,7 +1252,6 @@ async def cb_do_bulk_create(
         )
         return
 
-    from services import operation_bus
 
     pacing_key = data.get("bulk_pacing", _DEFAULT_PACING)
     risk_note = ""
@@ -1504,8 +1498,6 @@ async def fsm_bpchans_text(
     await state.clear()
 
     if not acc_id or not selected_ids:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await message.answer("❌ Данные операции устарели. Начните заново.", reply_markup=kb.as_markup())
@@ -2318,7 +2310,6 @@ async def cb_promote_all(
         return
 
     await safe_answer(callback)
-    from services import operation_bus
 
     op_id = await operation_bus.submit(
         pool, owner_id, "promote_all_admins",
@@ -2326,7 +2317,6 @@ async def cb_promote_all(
         total_items=int(n_others),
     )
 
-    from bot.callbacks import MassOpCb
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -3395,7 +3385,6 @@ async def fsm_botfather_username(
         await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
         return
 
-    from services import operation_bus
 
     total = len(accounts) * bot_count
     op_id = await operation_bus.submit(
@@ -4279,7 +4268,6 @@ async def cb_br_confirm(
     if len(peers) > 3:
         peers_preview += f" <i>и ещё {len(peers) - 3}</i>"
 
-    from bot.callbacks import MassOpCb
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))
     kb.button(text="◀️ Меню", callback_data=ChanCb(action="menu"))
@@ -4694,7 +4682,6 @@ async def fsm_bulk_channel_id(
         return
 
     if op == "leave":
-        from services import operation_bus
 
         total = len(accounts)
         proxy_mode = data.get("bulk_proxy_mode", "bound")
@@ -4912,7 +4899,6 @@ async def fsm_join_invite_combined(
     from services import account_manager
 
     if is_bulk:
-        from services import operation_bus
 
         try:
             count = await pool.fetchval(
@@ -5093,7 +5079,6 @@ async def fsm_update_profile(
 
 def _parse_username_list(raw: str) -> list[str]:
     """Parse a multiline/comma-separated username list into clean targets."""
-    import re
 
     # split on newlines, commas, semicolons, spaces
     parts = re.split(r"[\n,;]+", raw)
@@ -5219,7 +5204,6 @@ async def fsm_bulk_dm_text(
     total = len(usernames)
     account_ids_list = [int(a["id"]) for a in accounts]
 
-    from services import operation_bus
 
     op_id = await operation_bus.submit(
         pool,
@@ -5268,7 +5252,6 @@ async def fsm_bulk_chan_value(
 
     # Validate username pattern
     if op == "chan_uname":
-        import re
 
         base_uname = value.lstrip("@")
         if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{3,}$", base_uname):

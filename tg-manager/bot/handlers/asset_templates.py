@@ -1357,7 +1357,6 @@ async def cb_lib_apply(
             action_key = "create_acc"
             icon = "📡"
         else:
-            from bot.states import CreateGroupFSM
 
             await state.set_state(CreateGroupFSM.choosing_account)
             action_key = "create_acc"

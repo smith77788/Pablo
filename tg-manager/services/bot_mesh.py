@@ -231,7 +231,6 @@ def decode_message(text: str) -> dict | None:
     битым JSON — это не наша задача, а не повод падать в чужом хот-лупе.
     """
     import json
-    from datetime import datetime, timezone
     if not isinstance(text, str):
         return None
     t = text.strip()

@@ -202,7 +202,6 @@ def bench_memory_structures():
     print("6. Memory-Efficient Data Structures")
     print("=" * 60)
 
-    import sys
 
     NOTIFY_CACHE_MAX = 10000
 

@@ -748,7 +748,6 @@ async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
 
 async def _show_transfer_preview(message, state, user_id, pool):
     """Build and show transfer preview."""
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     data = await state.get_data()
     account_ids = data.get("transfer_accounts", [])

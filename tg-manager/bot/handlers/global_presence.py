@@ -2507,7 +2507,6 @@ async def cb_gp_retry(
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
-        from bot.keyboards import subscription_locked_markup
 
         await callback.message.edit_text(
             locked_text("Global Presence", "enterprise"),

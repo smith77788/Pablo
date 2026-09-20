@@ -114,7 +114,6 @@ def test_narrative_mentions_critical_anomaly():
 
 
 def test_restricted_accounts_suggestion():
-    from services.organism.brain import build_suggestions
     s = build_suggestions(_snap(fleet={"accounts": 20, "active": 15, "dead": 0,
                                        "restricted": 3, "pressure": 20,
                                        "governor_mult": 1.0, "governor_level": "green",

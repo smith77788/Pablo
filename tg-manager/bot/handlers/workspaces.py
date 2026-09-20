@@ -62,8 +62,6 @@ def _ws_view_kb(ws_id: int, is_owner: bool) -> ...:
 async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        from bot.utils.subscription import locked_text
-        from bot.keyboards import subscription_locked_markup
 
         await safe_answer(callback)
         await callback.message.edit_text(

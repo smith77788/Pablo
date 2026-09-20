@@ -1260,7 +1260,6 @@ async def run_copilot_loop(pool: asyncpg.Pool, bot) -> None:
 
     При обнаружении critical-проблем — уведомляет владельцев через notify_if_enabled.
     """
-    import asyncio
     from database import db as _db
 
     log.info("infra_copilot: background loop started (interval=30min)")

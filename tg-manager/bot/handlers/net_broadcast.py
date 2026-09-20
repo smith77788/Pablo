@@ -113,7 +113,6 @@ async def cb_net_bc_target(
 ) -> None:
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
-        from bot.callbacks import NetworkCb
 
         await callback.message.edit_text(
             locked_text("Сетевая рассылка v2", "enterprise"),
@@ -568,7 +567,6 @@ async def cb_net_bc_confirm(
         "cluster": f"Кластер «{_cluster_name_label}»",
     }.get(segment, segment)
 
-    from bot.callbacks import BmCb
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
     kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))

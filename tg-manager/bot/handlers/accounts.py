@@ -1664,7 +1664,6 @@ async def cb_acc_export_json(
         return
     await callback.answer("⏳ Генерирую JSON...")
     from services import session_export
-    from config import TG_API_ID
     try:
         payload = session_export.session_to_pyrogram_json(
             acc["session_str"], TG_API_ID,
@@ -2211,8 +2210,6 @@ async def handle_post_text(
     chat_id: int = data.get("chat_id", 0)
 
     if not acc_id or not chat_id:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await message.answer("❌ Ошибка: не выбран аккаунт или канал. Начните заново.", reply_markup=kb.as_markup())
@@ -2221,8 +2218,6 @@ async def handle_post_text(
 
     acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
     if not acc:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await message.answer("❌ Аккаунт не найден.", reply_markup=kb.as_markup())
@@ -3271,8 +3266,6 @@ async def handle_send_msg_text(
     chat_id = data.get("chat_id")
 
     if not acc_id or chat_id is None:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await message.answer("❌ Ошибка состояния. Начните заново.", reply_markup=kb.as_markup())
@@ -4038,10 +4031,6 @@ async def _do_batch_import(
     user_id: int,
 ) -> None:
     """Common logic for batch session import. Accepts plain strings or (session, cluster) tuples."""
-    from services.account_manager import (
-        import_from_session_string,
-        generate_device_fingerprint,
-    )
 
     # Normalise input: always work with (session_str, cluster) pairs
     pairs: list[tuple[str, str]] = []

@@ -71,7 +71,6 @@ async def cb_list(
         "• Каждый бот управляется независимо"
     )
     if not bots:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         empty_kb = InlineKeyboardBuilder()
         empty_kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
@@ -112,7 +111,6 @@ async def cb_add(
     effective_count = await get_effective_bot_count(pool, callback.from_user.id)
     current_bots = await db.get_bots(pool, callback.from_user.id)
     if effective_count >= limit:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         kb = InlineKeyboardBuilder()
 
@@ -146,7 +144,6 @@ async def cb_add(
         )
         return
     await state.set_state(AddBot.waiting_token)
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     _cancel_kb = InlineKeyboardBuilder()
     _cancel_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
@@ -171,7 +168,6 @@ async def msg_token(
 
     # Validate token format before hitting Telegram API
     if not _TOKEN_RE.match(token):
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         _fmt_kb = InlineKeyboardBuilder()
         _fmt_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
@@ -190,7 +186,6 @@ async def msg_token(
 
     bot_info = await bot_api.get_me(http, token)
     if not bot_info:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         _retry_kb = InlineKeyboardBuilder()
         _retry_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))

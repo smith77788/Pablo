@@ -250,7 +250,6 @@ def is_safe_public_url(url: str) -> bool:
     кодировки IPv4 — для реального fetch используйте ``resolve_url_is_public``.
     Чистая функция — тестируема.
     """
-    from urllib.parse import urlparse
     if not url or not isinstance(url, str):
         return False
     try:
@@ -278,7 +277,6 @@ async def resolve_url_is_public(url: str) -> bool:
     но http-схема (нужная большинству metadata-эндпоинтов) запрещена.
     """
     import socket
-    from urllib.parse import urlparse
     if not is_safe_public_url(url):
         return False
     try:

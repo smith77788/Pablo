@@ -910,7 +910,6 @@ async def cb_retry_failed_targets(
     лимиты аккаунтов и повторно обрабатывает успешные цели — то есть даёт
     дубли постов и повторные вступления.
     """
-    from services import operation_bus
 
     op_id = callback_data.op_id
     if not op_id:

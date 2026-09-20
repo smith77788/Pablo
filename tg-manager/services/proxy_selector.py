@@ -152,7 +152,6 @@ def extract_ip_from_proxy(proxy_url: str) -> Optional[str]:
     # Старый regex требовал '@' → прокси без auth (очень частый формат) давали
     # None → аккаунт молча выпадал из проверки изоляции, и общий IP НЕ ловился
     # (ложно-негативная изоляция — прямой удар по ядру-дифференциатору).
-    from urllib.parse import urlparse
 
     try:
         parsed = urlparse(proxy_url if "://" in proxy_url else "//" + proxy_url)

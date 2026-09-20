@@ -731,8 +731,6 @@ async def cb_eco_autodiscover(
     # Refresh members view
     eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
     if not eco:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         await callback.message.edit_text("❌ Экосистема не найдена.", reply_markup=kb.as_markup())

@@ -35,7 +35,6 @@ async def _get_all_active_accounts(
     owner_id: int,
 ) -> list[asyncpg.Record]:
     """Return trusted active accounts ordered by trust_score DESC."""
-    from database import db
 
     return await db.get_trusted_accounts(pool, owner_id)
 

@@ -93,9 +93,7 @@ async def run_cleanup_loop(*, interval: int = 600) -> None:
     Also removes entries for user buckets that have been empty for >1 hour
     (those should already be cleaned by _cleanup, but this is a safety net).
     """
-    import asyncio
     import logging
-    import time
 
     log = logging.getLogger(__name__)
     last_empty_bucket_sweep: dict[int, float] = {}

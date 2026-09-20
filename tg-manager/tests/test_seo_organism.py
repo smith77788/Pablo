@@ -106,7 +106,6 @@ def test_pulse_action_routes_seo():
 
 
 def test_vault_waiting_reply_suggestion():
-    from services.organism.brain import build_suggestions
     s = build_suggestions(_snap(vault={"health": "ok", "waiting_reply": 4}))
     w = next((x for x in s if x["id"] == "vault_waiting"), None)
     assert w is not None and w["action"]["kind"] == "vault"

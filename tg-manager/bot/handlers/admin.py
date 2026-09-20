@@ -374,7 +374,6 @@ async def cmd_reconcile_payments(message: Message, pool: asyncpg.Pool, bot) -> N
         return
     apply = (message.text or "").strip().lower().endswith("apply")
     from services import payment_recovery
-    import aiohttp
     await message.answer(
         "🔎 Собираю историю платежей…" if not apply
         else "♻️ Восстанавливаю подписки из истории платежей…")
@@ -1317,7 +1316,6 @@ async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 "Authorization": f"Bearer {provider.api_key}",
                 "Content-Type": "application/json",
             }
-            import aiohttp
 
             async with aiohttp.ClientSession() as sess:
                 async with sess.post(

@@ -618,7 +618,6 @@ async def cb_group_members_list(
 async def cb_group_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: выбор аккаунта для импорта групп."""
     await safe_answer(callback)
-    from bot.utils.op_helpers import _get_active_accounts, _acc_label
 
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:

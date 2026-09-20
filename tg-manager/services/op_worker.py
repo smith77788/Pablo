@@ -3371,7 +3371,7 @@ async def _exec_bulk_join(
 async def _exec_bulk_join_inner(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict, accounts
 ) -> dict:
-    from services import account_manager, session_simulator
+    from services import account_manager
     from services.flood_engine import (
         gaussian_delay,
         recommended_delay,
@@ -3690,7 +3690,7 @@ async def _exec_find_contact(
     ранней остановкой при совпадении имени. Резолв username — лёгкий вызов (легче
     инвайта), но всё равно паузим и не молотим вслепую (слой массовых действий).
     """
-    from services import account_manager, contact_finder, resource_selector
+    from services import account_manager, contact_finder
     from services import global_search_engine as gse
 
     name = str(params.get("name") or "").strip()
@@ -3880,7 +3880,7 @@ async def _exec_bulk_leave(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Выйти из списка каналов/групп несколькими аккаунтами."""
-    from services import account_manager, session_simulator
+    from services import account_manager
     from services.flood_engine import gaussian_delay, recommended_delay
 
     channels = params.get("channels", [])
@@ -4128,8 +4128,7 @@ async def _exec_global_presence_channel(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Создать каналы или группы для всех ожидающих целей плана global_presence."""
-    from services import account_manager, session_simulator
-    import random
+    from services import account_manager
 
     plan_id = params.get("plan_id")
     if not plan_id:
@@ -4767,10 +4766,9 @@ async def _exec_gp_bulk_apply(
       only_missing  — для action='username': доназначить только тем, у кого его
                       нет (по умолчанию True — это безопаснее, чем менять всем).
     """
-    from services import account_manager, avatar_factory, session_simulator
+    from services import account_manager, avatar_factory
     from services.presence_planner import render_pattern
     from services.username_engine import UsernameAllocator
-    import random
 
     plan_id = params.get("plan_id")
     action = params.get("action") or "both"
@@ -5126,8 +5124,7 @@ async def _exec_global_presence_bot(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Создать ботов через BotFather для каждой цели плана global_presence."""
-    from services import account_manager, session_simulator
-    import random
+    from services import account_manager
 
     plan_id = params.get("plan_id")
     if not plan_id:
@@ -5451,8 +5448,7 @@ async def _exec_bulk_create_channels_multi(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Multi-account round-robin bulk channel creation (from UI handler via operation_bus)."""
-    from services import account_manager, session_simulator
-    import random
+    from services import account_manager
 
     account_ids = [int(x) for x in (params.get("account_ids") or [])]
     if not account_ids:
@@ -5750,8 +5746,7 @@ async def _exec_bulk_create_channels(
     - multi-account: account_ids, title, name_mode, channel_count, bulk_pacing, is_group
     - legacy single-account: acc_id, prefix, count, about, username_pattern
     """
-    from services import account_manager, session_simulator
-    import random
+    from services import account_manager
     from datetime import datetime, timezone
 
     # ── Multi-account mode (new handler path via operation_bus) ───────────────
@@ -6029,9 +6024,8 @@ async def _exec_bot_factory_multi(
     account_ids: list[int],
 ) -> dict:
     """Массовое создание ботов — несколько аккаунтов, round-robin с fallback."""
-    from services import account_manager, session_simulator
+    from services import account_manager
     from services.username_engine import unique_bot_username
-    import random
 
     bot_count = max(1, min(int(params.get("bot_count", 1)), 10))
     bot_name = (params.get("bot_name") or "Bot").strip()
@@ -6196,8 +6190,7 @@ async def _exec_bot_factory(
       bot_name       — str, отображаемое имя
       base_username  — str, базовый username
     """
-    from services import account_manager, session_simulator
-    import random
+    from services import account_manager
 
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
     if account_ids:
@@ -8541,7 +8534,7 @@ async def _exec_channel_import_all(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Импорт каналов со всех (или указанных) аккаунтов в managed_channels."""
-    from services import account_manager, session_simulator
+    from services import account_manager
     from database.db import add_managed_channels
 
     account_ids = [int(x) for x in (params.get("account_ids") or [])]
@@ -9049,7 +9042,7 @@ async def _exec_enable_bot_to_bot(
     прогон — канарейкой на 1–2 ботах (params limit). Пункт не найден → не врём,
     а помечаем «проверьте вручную».
     """
-    from services import bot_b2b, resource_selector  # noqa: F401
+    from services import bot_b2b  # noqa: F401
 
     only_disabled = params.get("only_disabled", True)
     limit = int(params.get("limit") or 50)
@@ -9428,7 +9421,7 @@ async def _exec_reclassify_channels(
     Безопасность: удаляем ТОЛЬКО строки, которые сессия положительно
     подтвердила как «только участник». Каналы недоступных (мёртвых) сессий и
     любые, что не встретились в диалогах, остаются нетронутыми (роль NULL)."""
-    from services import account_manager, session_simulator
+    from services import account_manager
 
     prune = bool(params.get("prune", True))
 
@@ -12743,7 +12736,7 @@ async def _exec_ai_comment(
     задержки, обработка FloodWait, content_safety-гард на нишу.
     params: {channels: [ref...], niche, tone, acc_count, per_channel_delay}
     """
-    from services import ai_comment_engine, resource_selector, account_manager, content_safety
+    from services import ai_comment_engine, account_manager, content_safety
 
     channels = [str(c).strip() for c in (params.get("channels") or []) if str(c).strip()]
     niche = (params.get("niche") or "").strip()
@@ -12820,7 +12813,7 @@ async def _exec_compliance_scan(
     в т.ч. через strike_engine). Round-robin по аккаунтам, паузы между ресурсами.
     params: {resources: [ref...], per_resource_limit, acc_count}
     """
-    from services import content_watch, resource_selector
+    from services import content_watch
 
     resources = [str(c).strip() for c in (params.get("resources") or []) if str(c).strip()]
     per_limit = max(1, min(int(params.get("per_resource_limit") or 50), 200))
@@ -12904,8 +12897,7 @@ async def _exec_niche_growth_post(
     - 10-20 минут между группами (Telegram не замечает паттерн спама)
     - Round-robin по аккаунтам с обработкой FloodWait
     """
-    import random
-    from services import niche_searcher, resource_selector, account_manager
+    from services import niche_searcher, account_manager
     # Anti-detection: свой вариант рекламного текста в каждую группу (spintax; no-op
     # без него) — иначе один и тот же promo_text в 5 групп = сигнатура координации.
     from services.dm_engine import expand_spintax as _expand_spintax
