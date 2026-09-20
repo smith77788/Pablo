@@ -645,11 +645,19 @@ async def is_account_quarantined(pool, account_id: int, *, days: int = 3) -> boo
     if not pool or not account_id:
         return False
     try:
+        # risk_cleared_at — владелец вручную снял риск («взять в работу»): считаем
+        # только ограничения ПОЗЖЕ этой отметки, иначе ручной сброс не работал бы
+        # (кнопка чистит кулдаун, а карантин по старым событиям держал аккаунт вне
+        # операций — жалоба «кулдаун не сбрасывается»). Событие new-severity
+        # свежее сброса снова уводит аккаунт в карантин — это правильно.
         n = await pool.fetchval(
-            "SELECT COUNT(*) FROM restriction_events "
-            "WHERE account_id=$1 AND created_at > NOW() - make_interval(days => $2) "
-            "AND (severity='critical' OR event_type ILIKE '%ban%' "
-            "OR event_type ILIKE '%block%' OR event_type ILIKE '%restrict%')",
+            "SELECT COUNT(*) FROM restriction_events re "
+            "JOIN tg_accounts a ON a.id = re.account_id "
+            "WHERE re.account_id=$1 "
+            "AND re.created_at > NOW() - make_interval(days => $2) "
+            "AND (a.risk_cleared_at IS NULL OR re.created_at > a.risk_cleared_at) "
+            "AND (re.severity='critical' OR re.event_type ILIKE '%ban%' "
+            "OR re.event_type ILIKE '%block%' OR re.event_type ILIKE '%restrict%')",
             account_id, days)
         return bool(n and n > 0)
     except Exception:

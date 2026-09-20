@@ -4691,12 +4691,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_type, params, label = "delete_private_dialogs", {"account_id": acc_id}, "Удаление личных диалогов"
         elif act == "reset_cooldown":
             # СИНХРОННО (раньше был фантомный op reset_cooldown без исполнителя →
-            # кнопка ничего не делала). Чистим durable-кулдаун.
+            # кнопка ничего не делала). Чистим durable-кулдаун И снимаем карантин
+            # риск-пульса: раньше сбрасывался только cooldown_until, а карантин по
+            # restriction_events держал аккаунт вне операций — владелец видел
+            # «кулдаун не сбрасывается». risk_cleared_at=NOW() говорит
+            # is_account_quarantined считать только НОВЫЕ ограничения (история
+            # событий цела; свежее ограничение снова уведёт в карантин).
             try:
                 await pool.execute(
-                    "UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1 AND owner_id=$2",
+                    "UPDATE tg_accounts SET cooldown_until=NULL, risk_cleared_at=NOW() "
+                    "WHERE id=$1 AND owner_id=$2",
                     acc_id, uid)
-                return _json_resp({"ok": True, "message": "⚡ Кулдаун сброшен"})
+                return _json_resp({"ok": True, "message": "⚡ Кулдаун и риск-карантин сброшены"})
             except Exception as exc:
                 log.exception("reset_cooldown uid=%d acc=%d", uid, acc_id)
                 return _err(str(exc)[:120], 500)
