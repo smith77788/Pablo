@@ -126,7 +126,7 @@
   --accent:#2dd4bf;
   --accent-2:#14b8a6;
   --accent-3:#0d9488;
-  --accent-soft:rgba(45,212,191,.13);
+  --accent-soft:rgba(45,212,191,.13);--accent-soft-2:rgba(45,212,191,.20);
   --btn:linear-gradient(135deg,#2dd4bf 0%,#14b8a6 50%,#0ea5a4 100%);
   --btn-solid:#14b8a6;
   --btn-text:#041a17;
@@ -188,7 +188,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .nav-cat{padding:12px 16px 4px;font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--hint)}
 .nav-item{display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer;font-size:14px;font-weight:500;color:var(--text);border-radius:8px;margin:0 8px}
 .nav-item:active{background:var(--bg-input)}
-.nav-item.on{background:rgba(91,141,239,.12);color:var(--accent)}
+.nav-item.on{background:var(--accent-soft);color:var(--accent)}
 .nav-item .ni-ico{font-size:18px;width:22px;text-align:center;flex-shrink:0}
 .hdr-user{font-size:12px;color:var(--hint);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-live{font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:1px}
@@ -268,6 +268,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .btn-g{background:rgba(52,211,153,.12);color:var(--green)}
 .btn-r{background:rgba(248,113,113,.12);color:var(--red)}
 .btn-o{background:rgba(251,191,36,.12);color:var(--orange)}
+.btn-t{background:var(--accent-soft);color:var(--accent)}
 .btn-d{background:rgba(248,113,113,.12);color:var(--red)}
 
 /* ─── Badge ──────────────────────────────────────────────────── */
@@ -338,7 +339,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    край: рамка ввода вплотную к границе экрана — визуально «кривое окно». 16px —
    канонический отступ приложения (тот же, что у .sec). Правило узкое, только для
    прямых детей тела экрана, чтобы не задвоить отступ там, где обёртка уже есть. */
-.sub-sb > .field{padding-left:16px;padding-right:16px}
+.sb > .field,.sub-sb > .field{padding-left:16px;padding-right:16px}
+/* Отдельная карточка, лежащая прямо в теле экрана (не в сетке .cards,
+   у которой свой отступ), собственного отступа не имела и упиралась в
+   край — так стояли поясняющие карточки на экранах заметки к боту и
+   баг-репорта. Тот же кант 16px, что у .lst. */
+.sb > .card,.sub-sb > .card{margin-left:16px;margin-right:16px}
 /* Боковой отступ содержимого экрана. 16px — канон приложения: его держат .sec,
    .lst (margin:0 16px), .cards, .qa-grid, .mgmt-grid, .kpi-scroll. Но десятки
    блоков в разметке экранов — ряды кнопок, ленты KPI, строки пояснений —
@@ -364,6 +370,36 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .sb > div:not([class]):not([id]),      .sub-sb > div:not([class]):not([id]),
 .sb > details:not([class]):not([id]),  .sub-sb > details:not([class]):not([id]){
   padding-left:16px !important;padding-right:16px !important;flex-wrap:wrap
+}
+/* Та же беда у полей и кнопок, лежащих ПРЯМО в теле экрана: они написаны как
+   width:100% с margin:0 0 8px и потому тянулись от края до края, пока соседние
+   карточки и списки отступали на 16px. Замер нашёл 22 таких элемента — поиск
+   по аккаунтам, три кнопки флота, «Отправить» в рассылке админа, поля разогрева
+   чата и ещё полтора десятка кнопок запуска.
+
+   width:auto вместо calc(100% - 32px) намеренно: блочный элемент с auto сам
+   занимает остаток ширины за вычетом полей, поэтому отступ получается ровно
+   16px от края независимо от того, есть ли у тела экрана собственный паддинг.
+   Для этого кнопке нужен блочный display — отсюда flex с центровкой, она же
+   сохраняет раскладку .btn (у .btn и так inline-flex с центровкой).
+
+   !important — потому что и ширина, и поля заданы инлайном. */
+/* white-space:normal — у .btn стоит nowrap, он нужен кнопкам внутри рядов,
+   чтобы они не рвали надпись по словам. Но кнопке во всю ширину экрана он
+   вреден: длинная надпись делала кнопку ШИРЕ экрана, потому что <button>
+   считает ширину по содержимому даже при width:auto. «🎯 Планировщик: цель
+   → план по ёмкости флота» выходила на 336px при ширине 320. С переносом
+   надпись встаёт в две строки и читается целиком. */
+.sb > button,.sub-sb > button{display:flex;align-items:center;justify-content:center;white-space:normal;text-align:center}
+.sb > button,.sub-sb > button,
+.sb > input,.sub-sb > input,
+.sb > select,.sub-sb > select,
+.sb > textarea,.sub-sb > textarea{
+  /* calc, а не auto: <button> и <input> считают ширину по содержимому даже
+     при width:auto, поэтому auto схлопывал их до надписи, хотя в разметке
+     они заданы как width:100% — кнопки во всю ширину. calc даёт ровно
+     ширину экрана за вычетом двух отступов. */
+  width:calc(100% - 32px) !important;margin-left:16px !important;margin-right:16px !important
 }
 /* Чекбоксы и радио — НЕ текстовые поля. Правило выше писалось под ввод текста
    (width:100%, padding, appearance:none), но `input` без уточнения типа накрывало
@@ -424,7 +460,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Activity feed ──────────────────────────────────────────── */
 .act{padding:9px 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--sep)}
 .act:last-child{border-bottom:none}
-.act-ico{width:32px;height:32px;border-radius:var(--radius);background:rgba(91,141,239,.1);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.act-ico{width:32px;height:32px;border-radius:var(--radius);background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
 .act-body{flex:1;min-width:0}
 .act-txt{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .act-time{font-size:11px;color:var(--hint);margin-top:1px}
@@ -675,7 +711,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* Copilot «Что делать дальше» */
 .copilot-card{display:flex;align-items:flex-start;gap:11px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-lg);padding:12px 12px 12px 13px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow);transition:transform .12s,opacity .12s;position:relative}
 .copilot-card:active{transform:scale(.985);opacity:.85}
-.copilot-ico{font-size:20px;line-height:1;flex-shrink:0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:linear-gradient(145deg,rgba(91,141,239,.14),rgba(176,123,232,.1))}
+.copilot-ico{font-size:20px;line-height:1;flex-shrink:0;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:linear-gradient(145deg,var(--accent-soft),rgba(176,123,232,.1))}
 .copilot-body{flex:1;min-width:0}
 .copilot-title{font-size:14px;font-weight:700;line-height:1.25;margin-bottom:2px}
 .copilot-reason{font-size:12px;color:var(--hint);line-height:1.35;margin-bottom:5px}
@@ -697,7 +733,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .freq-row::-webkit-scrollbar{display:none}
 .freq-chip{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:74px;max-width:92px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:9px 8px;cursor:pointer;box-shadow:var(--shadow);transition:transform .12s,opacity .12s}
 .freq-chip:active{transform:scale(.93);opacity:.75}
-.freq-chip-ico{font-size:19px;line-height:1;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:linear-gradient(145deg,rgba(91,141,239,.12),rgba(176,123,232,.08))}
+.freq-chip-ico{font-size:19px;line-height:1;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:linear-gradient(145deg,var(--accent-soft),rgba(176,123,232,.08))}
 .freq-chip-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 
 /* ═══════════════ Advanced UI polish (Infragram) ═══════════════ */
@@ -1026,9 +1062,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
     <!-- Поднять флот: снять залипшие блокировки с недавно переподключённых аккаунтов -->
-    <button onclick="reviveFleet()" title="Снять залипшие блокировки (in_operation/кулдаун/траст) с переподключённого флота, чтобы он сразу заработал" style="width:100%;margin:0 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(52,199,89,.14);color:var(--green);font-size:13px;font-weight:600;cursor:pointer">🚀 Поднять флот</button>
-    <button onclick="openChatWarmup()" title="Флот вступает в указанный чат и ведёт осмысленный LLM-диалог: между собой и с реальными участниками" style="width:100%;margin:0 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(91,141,239,.14);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">💬 Разогрев чата флотом</button>
-    <button onclick="openFleetDoctor()" title="Почему операции не исполняются: воронка отбора аккаунтов, залипшие состояния, последние ошибки" style="width:100%;margin:0 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(245,158,11,.14);color:var(--orange);font-size:13px;font-weight:600;cursor:pointer">🩺 Диагностика флота</button>
+    <button class="btn btn-g" onclick="reviveFleet()" title="Снять залипшие блокировки (in_operation/кулдаун/траст) с переподключённого флота, чтобы он сразу заработал" style="width:100%;margin:0 0 8px">🚀 Поднять флот</button>
+    <button class="btn btn-t" onclick="openChatWarmup()" title="Флот вступает в указанный чат и ведёт осмысленный LLM-диалог: между собой и с реальными участниками" style="width:100%;margin:0 0 8px">💬 Разогрев чата флотом</button>
+    <button class="btn btn-o" onclick="openFleetDoctor()" title="Почему операции не исполняются: воронка отбора аккаунтов, залипшие состояния, последние ошибки" style="width:100%;margin:0 0 8px">🩺 Диагностика флота</button>
     <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
     <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
@@ -2179,7 +2215,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
-      <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(91,141,239,.18);color:#fff;cursor:pointer">🔀 Смешанный</button>
+      <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">🔀 Смешанный</button>
       <button class="cw-mode" data-m="engage" onclick="cwPickMode('engage')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🗣 Вовлечение</button>
       <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🌱 Оживление</button>
     </div>
@@ -2188,7 +2224,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Интенсивность</div>
     <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-int" data-i="calm" onclick="cwPickInt('calm')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🐢 Спокойно</button>
-      <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(91,141,239,.18);color:#fff;cursor:pointer">⚖️ Обычно</button>
+      <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">⚖️ Обычно</button>
       <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">⚡ Активно</button>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
@@ -3837,7 +3873,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">📝 Заметка к боту</div>
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="saveBotNote()">Сохранить</button></div>
   </div>
-  <div class="sub-sb" style="padding:12px">
+  <div class="sub-sb" style="padding:12px 0">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:10px">
       Личная пометка, видна только вам. Помогает не запутаться среди нескольких ботов.<br>
       Отправьте пустой текст чтобы удалить заметку.
@@ -5579,7 +5615,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🐛 Баг-репорт</div>
   </div>
-  <div class="sub-sb" style="padding:12px">
+  <div class="sub-sb" style="padding:12px 0">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:10px">
       Опишите что произошло: что делали, какая ошибка, когда произошло.
     </div>
@@ -7743,10 +7779,10 @@ const CW_MODE_HINT={
   engage:'Вовлечение: флот только реагирует на сообщения реальных участников (сам с собой не болтает).',
   seed:'Оживление: флот общается между собой по заданным темам — чтобы наполнить тихий чат активностью.'};
 function cwPickMode(m){CW_MODE=m;
-  document.querySelectorAll('#cwMode .cw-mode').forEach(b=>{b.style.background=b.dataset.m===m?'rgba(91,141,239,.18)':'rgba(255,255,255,.06)';});
+  document.querySelectorAll('#cwMode .cw-mode').forEach(b=>{b.style.background=b.dataset.m===m?'var(--accent-soft-2)':'rgba(255,255,255,.06)';});
   const h=document.getElementById('cwModeHint'); if(h) h.textContent=CW_MODE_HINT[m]||'';}
 function cwPickInt(i){CW_INT=i;
-  document.querySelectorAll('#cwInt .cw-int').forEach(b=>{b.style.background=b.dataset.i===i?'rgba(91,141,239,.18)':'rgba(255,255,255,.06)';});}
+  document.querySelectorAll('#cwInt .cw-int').forEach(b=>{b.style.background=b.dataset.i===i?'var(--accent-soft-2)':'rgba(255,255,255,.06)';});}
 let CW_ACCS=new Set(), CW_ACC_ALL=[];
 function openChatWarmup(){push('s-chatwarmup'); CW_ACCS=new Set(); cwLoadAccounts(); cwLoad(); cwAiStatus();}
 async function cwAiStatus(){
@@ -7774,7 +7810,7 @@ async function cwLoadAccounts(){
     el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" style="font-size:11.5px;padding:5px 10px;border-radius:14px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;border:1px solid transparent">${esc(a.label)}</span>`).join('');
   }catch(e){el.innerHTML=errHtml(e.message,'cwLoadAccounts()');}
 }
-function _cwChipStyle(el,on){el.style.background=on?'rgba(91,141,239,.22)':'rgba(255,255,255,.06)';el.style.borderColor=on?'var(--accent)':'transparent';}
+function _cwChipStyle(el,on){el.style.background=on?'var(--accent-soft-2)':'rgba(255,255,255,.06)';el.style.borderColor=on?'var(--accent)':'transparent';}
 function cwToggleAcc(id){
   if(CW_ACCS.has(id)) CW_ACCS.delete(id); else CW_ACCS.add(id);
   const el=document.querySelector(`#cwAccs .cw-chip[data-id="${id}"]`); if(el)_cwChipStyle(el,CW_ACCS.has(id));
@@ -9421,7 +9457,7 @@ function renderStageChips(byStage) {
   const entries = Object.keys(ACC_STAGES).filter(k => (byStage||{})[k]);
   if(!entries.length){ box.style.display='none'; box.innerHTML=''; ACC_STAGE_FILTER=''; return; }
   box.style.display='flex';
-  const chip=(stage,label,count,on)=>`<span class="st-chip${on?' on':''}" data-stage="${stage}" onclick="filterStage('${stage}')" style="flex:none;cursor:pointer;font-size:12px;padding:6px 10px;border-radius:20px;border:1.5px solid ${on?'var(--accent,#5b8def)':'rgba(255,255,255,.12)'};background:${on?'rgba(91,141,239,.18)':'rgba(255,255,255,.04)'};color:var(--text);white-space:nowrap">${label} ${count}</span>`;
+  const chip=(stage,label,count,on)=>`<span class="st-chip${on?' on':''}" data-stage="${stage}" onclick="filterStage('${stage}')" style="flex:none;cursor:pointer;font-size:12px;padding:6px 10px;border-radius:20px;border:1.5px solid ${on?'var(--accent)':'rgba(255,255,255,.12)'};background:${on?'var(--accent-soft-2)':'rgba(255,255,255,.04)'};color:var(--text);white-space:nowrap">${label} ${count}</span>`;
   let html = chip('', 'Все', Object.values(byStage).reduce((a,b)=>a+b,0), ACC_STAGE_FILTER==='');
   html += entries.map(k=>chip(k, ACC_STAGES[k].emoji+' '+ACC_STAGES[k].label, byStage[k], ACC_STAGE_FILTER===k)).join('');
   box.innerHTML = html;
