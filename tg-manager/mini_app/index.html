@@ -7,7 +7,8 @@
 <!-- PWA: установка на Android как приложение (вне Telegram). Пути относительные —
      как у telegram-web-app.js и screens/*.js: приложение отдаётся из /miniapp/. -->
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#0c1016">
+<meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -106,11 +107,22 @@
 :root{
   /* Мягче для глаз: фон чуть приподнят от чёрного, текст не чисто-белый
      (#f0f4f8 «светился» на тёмном → #dce4ee). Фирменный teal сохранён. */
-  --bg:var(--tg-theme-bg-color,#0c1016);
-  --bg2:var(--tg-theme-secondary-bg-color,#151d29);
+  /* Тема приложения — собственная тёмная, а не подхват темы Telegram.
+     Раньше четыре токена читались из --tg-theme-*, а остальные тридцать были
+     жёстко тёмными. У клиента со СВЕТЛОЙ темой получался разнобой: страница
+     белая, а шапка и нижняя панель (--glass) — тёмно-синие; разделители и
+     рамки заданы как белый с прозрачностью 6–8%, то есть на белом фоне
+     невидимы — карточки теряли границы; подписи --hint #999 на почти белом
+     не читались. Плюс около ста двадцати цветов зашиты прямо в разметку и в
+     screens/*.js, и они остались бы тёмными в любом случае — светлая тема
+     всё равно не получилась бы целой. Поэтому палитра одна и всегда
+     согласованная, а системной панели Telegram ниже сообщается наш цвет,
+     чтобы её полоса не спорила с приложением. */
+  --bg:#0c1016;
+  --bg2:#151d29;
   --bg3:#1a2432;
-  --text:var(--tg-theme-text-color,#dce4ee);
-  --hint:var(--tg-theme-hint-color,#7a8ba1);
+  --text:#dce4ee;
+  --hint:#7a8ba1;
   --accent:#2dd4bf;
   --accent-2:#14b8a6;
   --accent-3:#0d9488;
@@ -638,6 +650,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .kpi-chip:active{transform:translateY(1px) scale(.96)}
 .kpi-chip.hi{border-color:rgba(45,212,191,.25);box-shadow:var(--shadow-glow)}
 .kpi-chip-val{font-size:24px;font-weight:700;letter-spacing:-.4px;line-height:1;margin-bottom:4px}
+/* Заглушка «нет данных»: тот же размер, чтобы лента не прыгала, но без
+   акцентного цвета и веса — прочерк не должен спорить с настоящими числами. */
+.kpi-chip-val.is-empty{color:var(--hint);font-weight:500;opacity:.55}
 .kpi-chip-lbl{font-size:10px;color:var(--hint);white-space:nowrap}
 
 /* ─── Mini bar chart ─────────────────────────────────────── */
@@ -1527,7 +1542,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="moreNoResult" style="display:none;text-align:center;color:var(--hint);padding:20px;font-size:13px">Ничего не найдено</div>
 
     <!-- ⚡ Быстрые действия (всегда наверху) -->
-    <div class="sec" style="color:var(--accent)">⚡ Быстрые действия</div>
+    <div class="sec">⚡ Быстрые действия</div>
     <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openUnifiedDashboard()">
         <div class="mgmt-tile-ico">📊</div>
@@ -6713,6 +6728,17 @@ const tg = (window.Telegram && window.Telegram.WebApp) || {
   openTelegramLink() {}, openLink() {}, showAlert() {}, showConfirm() {},
 };
 try { tg.ready(); tg.expand(); } catch (_) {}
+// Системная полоса Telegram над приложением и фон под ним красятся в наш цвет.
+// Без этого у клиента со светлой темой сверху оставалась белая полоса, а снизу
+// белая подложка выглядывала из-под нижней панели при оттягивании — тёмное
+// приложение стояло в светлой рамке. Оба вызова появились в Bot API 6.1,
+// поэтому проверяем версию: на старом клиенте метода просто нет.
+try {
+  if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.1')) {
+    tg.setHeaderColor('#0c1016');
+    tg.setBackgroundColor('#0c1016');
+  }
+} catch (_) {}
 // Нативная кнопка «Назад» Telegram управляет навигацией по STACK
 try { tg.BackButton?.onClick(() => back()); } catch(_) {}
 
@@ -8166,9 +8192,14 @@ function renderCards(d) {
   ];
   document.getElementById('kpiScroll').innerHTML = kpis.map(k=>{
     const display = k.raw !== undefined ? k.raw : num(k.val);
+    // num() отдаёт «—», когда значения нет. Прочерк красился в полный цвет
+    // показателя и при 24px/700 читался как жирная цветная полоса — будто
+    // индикатор загрузки или значение, которого не разобрать. «Нет данных»
+    // должно выглядеть как «нет данных»: приглушённо и без акцентного цвета.
+    const empty = (display === '—' || display === '');
     const hi = k.raw !== undefined ? (k.raw!=='—') : (k.val||0)>0;
     return `<div class="kpi-chip ${hi?'hi':''}" onclick="${k.act}">
-      <div class="kpi-chip-val" style="color:${k.color}">${display}</div>
+      <div class="kpi-chip-val${empty?' is-empty':''}"${empty?'':` style="color:${k.color}"`}>${display}</div>
       <div class="kpi-chip-lbl">${k.lbl}</div>
     </div>`;
   }).join('');
