@@ -237,7 +237,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Action buttons ─────────────────────────────────────────── */
 .actions{display:flex;gap:8px;padding:10px 16px 4px;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:nowrap;flex:1;min-width:110px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:nowrap;flex:1 0 auto;min-width:88px;max-width:100%;overflow:hidden}
 .btn:active{opacity:.85;transform:translateY(1px) scale(.97)}
 .btn:disabled{opacity:.3;pointer-events:none}
 .btn-p{background:var(--btn);color:var(--btn-text);box-shadow:0 2px 12px rgba(45,212,191,.25),inset 0 1px 0 rgba(255,255,255,.15)}
@@ -318,6 +318,32 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    канонический отступ приложения (тот же, что у .sec). Правило узкое, только для
    прямых детей тела экрана, чтобы не задвоить отступ там, где обёртка уже есть. */
 .sub-sb > .field{padding-left:16px;padding-right:16px}
+/* Боковой отступ содержимого экрана. 16px — канон приложения: его держат .sec,
+   .lst (margin:0 16px), .cards, .qa-grid, .mgmt-grid, .kpi-scroll. Но десятки
+   блоков в разметке экранов — ряды кнопок, ленты KPI, строки пояснений —
+   написаны инлайном как `padding:8px 0` / `margin:10px 0` и упираются прямо в
+   край экрана. Рядом с карточками, отступающими на 16px, это читается как
+   «окно съехало»; замер на 320px нашёл 62 таких блока на ~40 экранах.
+
+   Область действия узкая и намеренная: только ПРЯМЫЕ дети тела экрана, у
+   которых нет ни класса, ни id, — то есть безымянные блоки-обёртки из
+   разметки. Контейнер с классом (.lst, .cards, .seg…) свой отступ уже держит,
+   а контейнер с id наполняет JS, и его содержимое может нести собственный
+   отступ — добавка здесь задвоила бы его.
+
+   !important — вынужденно и только здесь: отступ у этих блоков задан инлайном,
+   а инлайновое правило сильнее любого селектора.
+
+   flex-wrap — та же беда с другой стороны. Ряды кнопок написаны как
+   `display:flex;gap:8px` без переноса, и на узком экране третья кнопка
+   уезжала за правый край: «🔌 Подключить найденных» на экране ботов
+   заканчивалась на 464px при ширине 320 — до неё нельзя было дотянуться.
+   Инлайн задаёт только display и gap, поэтому перенос дописывается отсюда
+   без !important. Для не-flex блоков свойство безвредно. */
+.sb > div:not([class]):not([id]),      .sub-sb > div:not([class]):not([id]),
+.sb > details:not([class]):not([id]),  .sub-sb > details:not([class]):not([id]){
+  padding-left:16px !important;padding-right:16px !important;flex-wrap:wrap
+}
 /* Чекбоксы и радио — НЕ текстовые поля. Правило выше писалось под ввод текста
    (width:100%, padding, appearance:none), но `input` без уточнения типа накрывало
    и их: галочка получала appearance:none (нативная отрисовка отключена, своей
@@ -330,6 +356,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .field input[type=checkbox],.field input[type=radio]{width:auto;min-width:0;padding:0;margin:0;flex:none;-webkit-appearance:auto;appearance:auto;accent-color:var(--btn);cursor:pointer}
 .field-note{font-size:11px;color:var(--hint);margin-top:4px}
 .field-err{font-size:12px;color:var(--red);background:rgba(248,113,113,.08);border-radius:var(--radius);padding:7px 10px;margin-top:6px;display:none}
+/* Поле ввода внутри flex-ряда. У <input> и <select> есть СОБСТВЕННАЯ
+   минимальная ширина по содержимому: у поля — около 20 символов, у списка —
+   самый длинный пункт. Для flex-элемента это min-width:auto, и его не
+   пересиливает ни flex:1, ни width:100% — ряд просто перестаёт сжиматься.
+   Из-за этого ряды «поле + кнопка» вылезали за правый край: «Добавить» в
+   позициях каналов заканчивалась на 354px при ширине экрана 320, а список
+   с пунктом «🔎 SEO: перестановка ключей» в фабрике каналов — на 375px.
+   min-width:0 снимает этот нижний предел; вне flex-ряда свойство ни на что
+   не влияет, поэтому правило безопасно применять ко всем полям экранов. */
+.sb input,.sb select,.sb textarea,.sub-sb input,.sub-sb select,.sub-sb textarea{min-width:0}
+/* Та же причина в сегментном переключателе: вкладка не сжималась уже своей
+   подписи, и «↔ Взаимные» в контактах уезжала за край. */
+.seg-opt,.seg-btn{min-width:0}
 
 /* ─── Inline → utility classes (replace hardcoded rgba(255,255,255,...)) ── */
 .inp{padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
@@ -775,7 +814,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:0 0 8px">
       <textarea id="quickBcText" rows="3" placeholder="Введите текст рассылки..." class="input-bc"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn btn-p" id="quickBcBtn" onclick="submitQuickBroadcast()" style="flex:1">📢 Отправить всем</button>
+        <button class="btn btn-p" id="quickBcBtn" onclick="submitQuickBroadcast()" style="flex:1 1 auto">📢 Отправить всем</button>
         <button class="btn btn-s" onclick="openBcastPick()" style="flex:0;padding:10px 16px">⚙️ Настроить</button>
       </div>
       <div id="quickBcErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
@@ -824,20 +863,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <!-- Массовые действия по ботам -->
     <div style="display:flex;gap:8px;padding:0 0 6px">
-      <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1;font-size:13px;padding:10px 6px">📢 Рассылка</button>
-      <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1;font-size:13px;padding:10px 6px">📣 Self Promo</button>
-      <button class="btn btn-s" onclick="openBotFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
+      <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📢 Рассылка</button>
+      <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📣 Self Promo</button>
+      <button class="btn btn-s" onclick="openBotFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 10px">
-      <button class="btn btn-s" id="botSelToggle" onclick="toggleBotSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+      <button class="btn btn-s" id="botSelToggle" onclick="toggleBotSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
       <!-- Инвентаризация флота: боты, созданные с аккаунтов, скану ресурсов
            не видны (бот — не канал), и раньше их нельзя было найти вовсе. -->
-      <button class="btn btn-s" onclick="scanFleetBots()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Найти на флоте</button>
-      <button class="btn btn-s" onclick="showDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">📋 Найденные</button>
-      <button class="btn btn-p" onclick="connectDiscoveredBots()" style="flex:1;font-size:13px;padding:10px 6px">🔌 Подключить найденных</button>
+      <button class="btn btn-s" onclick="scanFleetBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🔍 Найти на флоте</button>
+      <button class="btn btn-s" onclick="showDiscoveredBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📋 Найденные</button>
+      <button class="btn btn-p" onclick="connectDiscoveredBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🔌 Подключить найденных</button>
       <!-- Bot Mesh: без включённого режима bot-to-bot боты не получают апдейты
            друг от друга; включает только аккаунт-владелец через @BotFather. -->
-      <button class="btn btn-s" onclick="enableBotMesh()" style="flex:1;font-size:13px;padding:10px 6px" title="Включить режим bot-to-bot у сети ботов">🕸 Включить сеть</button>
+      <button class="btn btn-s" onclick="enableBotMesh()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Включить режим bot-to-bot у сети ботов">🕸 Включить сеть</button>
     </div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -950,10 +989,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(239,68,68,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
     <!-- Массовые действия по аккаунтам -->
     <div style="display:flex;gap:8px;padding:4px 0 8px">
-      <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
-      <button class="btn btn-s" onclick="openMassOps()" style="flex:1;font-size:13px;padding:10px 6px">⚡ История</button>
-      <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
-      <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1;font-size:13px;padding:10px 6px">📤 JSON</button>
+      <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
+      <button class="btn btn-s" onclick="openMassOps()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">⚡ История</button>
+      <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
+      <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
     <!-- Поднять флот: снять залипшие блокировки с недавно переподключённых аккаунтов -->
     <button onclick="reviveFleet()" title="Снять залипшие блокировки (in_operation/кулдаун/траст) с переподключённого флота, чтобы он сразу заработал" style="width:100%;margin:0 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(52,199,89,.14);color:var(--green);font-size:13px;font-weight:600;cursor:pointer">🚀 Поднять флот</button>
@@ -964,7 +1003,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
     <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div id="accLoadMore" style="padding:6px 0 0"></div>
+    <div id="accLoadMore" style="padding:6px 16px 0"></div>
     <div class="sec-row" style="margin-top:12px">
       <div class="sec">📡 Каналы и чаты</div>
       <span class="sec-btn" onclick="openChannels()">Открыть →</span>
@@ -1038,8 +1077,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div style="display:flex;gap:8px;padding:4px 0 8px">
-      <button class="btn btn-p" onclick="openChannelFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
-      <button class="btn btn-s" onclick="accAction(ACC_CONSOLE_ID,'scan','Сканировать каналы/группы этого аккаунта и завести их сюда?')" style="flex:1;font-size:13px;padding:10px 6px" title="Найти каналы/группы, где состоит аккаунт">🔎 Скан ресурсов</button>
+      <button class="btn btn-p" onclick="openChannelFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
+      <button class="btn btn-s" onclick="accAction(ACC_CONSOLE_ID,'scan','Сканировать каналы/группы этого аккаунта и завести их сюда?')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти каналы/группы, где состоит аккаунт">🔎 Скан ресурсов</button>
     </div>
     <div class="lst" id="acchanList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -1146,14 +1185,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div id="vaultConnect" style="display:none"></div>
     <div style="display:flex;gap:8px;padding:4px 0 6px">
-      <button class="btn btn-s" style="flex:1;font-size:12px;padding:9px 4px" onclick="openVaultRecent('deleted')">🗑 Удалённые собеседником</button>
-      <button class="btn btn-s" style="flex:1;font-size:12px;padding:9px 4px" onclick="openVaultRecent('edited')">✏️ Изменённые</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:9px 4px" onclick="openVaultRecent('deleted')">🗑 Удалённые собеседником</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:9px 4px" onclick="openVaultRecent('edited')">✏️ Изменённые</button>
     </div>
-    <div id="vaultAnalytics" style="padding:2px 0"></div>
+    <div id="vaultAnalytics" style="padding:2px 16px"></div>
     <div style="padding:2px 0 6px"><input type="text" id="vaultSearch" placeholder="🔍 Поиск по сообщениям..." oninput="vaultSearchDebounced()" class="inp"></div>
     <div id="vaultInboxTabs" style="display:none;gap:6px;padding:2px 0 6px">
-      <button class="btn btn-s vinbox on" data-f="all" style="flex:1;font-size:12px;padding:8px 4px" onclick="setVaultInbox('all')">Все</button>
-      <button class="btn btn-s vinbox" id="vinboxWaiting" data-f="waiting" style="flex:1;font-size:12px;padding:8px 4px" onclick="setVaultInbox('waiting')">⏳ Ждут ответа</button>
+      <button class="btn btn-s vinbox on" data-f="all" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="setVaultInbox('all')">Все</button>
+      <button class="btn btn-s vinbox" id="vinboxWaiting" data-f="waiting" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="setVaultInbox('waiting')">⏳ Ждут ответа</button>
     </div>
     <div class="lst" id="vaultList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div style="padding:8px 0"><button class="btn btn-s" style="width:100%;font-size:12px" onclick="downloadVaultExport('html', null)">⬇️ Экспорт всего архива (HTML)</button></div>
@@ -1218,17 +1257,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <!-- Массовые действия по каналам -->
     <div style="display:flex;gap:8px;padding:4px 0 6px">
-      <button class="btn btn-p" onclick="openMassPub()" style="flex:1;font-size:13px;padding:10px 6px">📤 Массовый пост</button>
-      <button class="btn btn-s" onclick="openQuickPost()" style="flex:1;font-size:13px;padding:10px 6px">✍️ Quick Post</button>
-      <button class="btn btn-s" onclick="openChannelFactory()" style="flex:1;font-size:13px;padding:10px 6px">🏭 Создать</button>
+      <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 Массовый пост</button>
+      <button class="btn btn-s" onclick="openQuickPost()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">✍️ Quick Post</button>
+      <button class="btn btn-s" onclick="openChannelFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
-      <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1;font-size:13px;padding:10px 6px" title="Найти каналы, где ваш аккаунт создатель/админ, и завести их сюда">📥 Импорт с аккаунтов</button>
+      <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
+      <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти каналы, где ваш аккаунт создатель/админ, и завести их сюда">📥 Импорт с аккаунтов</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
-      <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🧹 Только мои (убрать чужие)</button>
+      <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
+      <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🧹 Только мои (убрать чужие)</button>
     </div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -1285,9 +1324,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="copilot-list"></div>
     </div>
     <div style="display:flex;gap:8px;padding:6px 0 2px">
-      <button class="btn btn-s" onclick="openSpintax()" style="flex:1;font-size:13px;padding:9px 6px">🎲 Spintax</button>
-      <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1;font-size:13px;padding:9px 6px">📅 Расписание</button>
-      <button class="btn btn-s" onclick="openExperiments()" style="flex:1;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
+      <button class="btn btn-s" onclick="openSpintax()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🎲 Spintax</button>
+      <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
+      <button class="btn btn-s" onclick="openExperiments()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
     </div>
     <div class="sec-row"><div class="sec">Рассылки по ботам</div></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1371,8 +1410,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="card"><div class="card-ico">⏱</div><div class="card-val" id="pp-avg-latency">—</div><div class="card-lbl">Ср. задержка</div></div>
     </div>
     <div style="display:flex;gap:8px;margin:10px 0">
-      <button class="btn btn-p" onclick="proxyPoolCheckAll()" style="flex:1;font-size:13px;padding:9px 6px">🔄 Проверить все</button>
-      <button class="btn btn-r" onclick="proxyPoolCleanDead()" style="flex:1;font-size:13px;padding:9px 6px">🧹 Удалить мёртвые</button>
+      <button class="btn btn-p" onclick="proxyPoolCheckAll()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🔄 Проверить все</button>
+      <button class="btn btn-r" onclick="proxyPoolCleanDead()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🧹 Удалить мёртвые</button>
     </div>
     <div class="seg" id="proxyPoolSeg">
       <div class="seg-opt on" onclick="proxyPoolFilter('all',this)">Все</div>
@@ -1405,8 +1444,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="card"><div class="card-ico">❌</div><div class="card-val" id="arp-failed" style="color:var(--red)">—</div><div class="card-lbl">Ошибка</div></div>
     </div>
     <div style="display:flex;gap:8px;margin:10px 0">
-      <button class="btn btn-p" onclick="openAutoregProModal()" style="flex:1;font-size:13px;padding:9px 6px">📱 Новый пакет</button>
-      <button class="btn btn-s" onclick="autoregProCheckAll()" style="flex:1;font-size:13px;padding:9px 6px">🔍 Проверить все</button>
+      <button class="btn btn-p" onclick="openAutoregProModal()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📱 Новый пакет</button>
+      <button class="btn btn-s" onclick="autoregProCheckAll()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🔍 Проверить все</button>
     </div>
     <div class="seg" id="autoregProSeg">
       <div class="seg-opt on" onclick="autoregProFilter('all',this)">Все</div>
@@ -1468,7 +1507,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
              class="input-l">
     </div>
     <!-- Категории действий -->
-    <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 0 4px;-ms-overflow-style:none;scrollbar-width:none"></div>
+    <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 16px 4px;-ms-overflow-style:none;scrollbar-width:none"></div>
     <div id="moreNoResult" style="display:none;text-align:center;color:var(--hint);padding:20px;font-size:13px">Ничего не найдено</div>
 
     <!-- ⚡ Быстрые действия (всегда наверху) -->
@@ -2107,26 +2146,26 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cwAiStatus" style="font-size:11.5px;line-height:1.5;margin-bottom:10px"></div>
     <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
-    <div style="font-size:12px;color:var(--hint);margin:4px 2px">Режим работы</div>
-    <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px">
+    <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
+    <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(91,141,239,.18);color:#fff;cursor:pointer">🔀 Смешанный</button>
       <button class="cw-mode" data-m="engage" onclick="cwPickMode('engage')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🗣 Вовлечение</button>
       <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🌱 Оживление</button>
     </div>
-    <div id="cwModeHint" style="font-size:11.5px;color:var(--hint);margin:0 2px 8px;line-height:1.4">Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.</div>
+    <div id="cwModeHint" style="font-size:11.5px;color:var(--hint);margin:0 16px 8px;line-height:1.4">Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.</div>
     <input id="cwTopics" type="text" placeholder="Темы через запятую (пусто = любые)" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
-    <div style="font-size:12px;color:var(--hint);margin:4px 2px">Интенсивность</div>
-    <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px">
+    <div style="font-size:12px;color:var(--hint);margin:4px 0">Интенсивность</div>
+    <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-int" data-i="calm" onclick="cwPickInt('calm')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🐢 Спокойно</button>
       <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(91,141,239,.18);color:#fff;cursor:pointer">⚖️ Обычно</button>
       <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">⚡ Активно</button>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 2px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
       <span style="font-size:12px;color:var(--hint)">Аккаунты флота</span>
       <span onclick="cwToggleAllAccs()" style="font-size:11.5px;color:var(--accent);cursor:pointer">выбрать все / сбросить</span>
     </div>
-    <div id="cwAccs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div style="font-size:11px;color:var(--hint);margin:0 2px 10px">Ничего не выбрано = весь живой флот (до 30 аккаунтов).</div>
+    <div id="cwAccs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;padding-left:16px;padding-right:16px"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div style="font-size:11px;color:var(--hint);margin:0 0 10px">Ничего не выбрано = весь живой флот (до 30 аккаунтов).</div>
     <button class="btn btn-p" onclick="cwStart()" style="width:100%;padding:11px;font-size:14px">▶ Запустить разогрев</button>
     <div class="sec" style="margin-top:14px">Активные разогревы</div>
     <div class="lst" id="cwList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2152,8 +2191,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Объединяет ВАШИ существующие бота + каналы + группы в одну воронку: бот-админ, посевные посты, синхронная работа. Это <b>не</b> создание новых каналов.</div>
     <div style="display:flex;gap:8px;padding:0 0 10px">
-      <button class="btn btn-s" style="flex:1;padding:9px 4px;font-size:12px" onclick="openBotFactory()">🏭 Создать бота</button>
-      <button class="btn btn-s" style="flex:1;padding:9px 4px;font-size:12px" onclick="openChannelFactory()">📡 Создать канал/группу</button>
+      <button class="btn btn-s" style="flex:1 1 auto;padding:9px 4px;font-size:12px" onclick="openBotFactory()">🏭 Создать бота</button>
+      <button class="btn btn-s" style="flex:1 1 auto;padding:9px 4px;font-size:12px" onclick="openChannelFactory()">📡 Создать канал/группу</button>
     </div>
     <div class="sec">Мои связки</div>
     <div class="lst" id="ppList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2174,11 +2213,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec">Группы (<span id="ppGrCount">0</span> выбрано)</div>
     <div class="lst" id="ppDetailGroups"></div>
     <div style="display:flex;gap:8px;margin:12px 0">
-      <button class="btn btn-p" id="ppSaveBtn" style="flex:1" onclick="savePresencePackConfig()">💾 Сохранить</button>
+      <button class="btn btn-p" id="ppSaveBtn" style="flex:1 1 auto" onclick="savePresencePackConfig()">💾 Сохранить</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
-      <button class="btn btn-s" style="flex:1" onclick="seedPresencePack()">🌱 Посеять посты</button>
-      <button class="btn btn-s" style="flex:1" onclick="promotePresencePack()">👑 Бот → admin</button>
+      <button class="btn btn-s" style="flex:1 1 auto" onclick="seedPresencePack()">🌱 Посеять посты</button>
+      <button class="btn btn-s" style="flex:1 1 auto" onclick="promotePresencePack()">👑 Бот → admin</button>
     </div>
     <div class="field-err" id="ppDetailErr"></div>
   </div>
@@ -2205,7 +2244,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-presencemap">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🗺️ Карта присутствия</div></div>
   <div class="sub-sb">
-    <div id="pmTotals" style="display:flex;gap:8px;padding:6px 0 4px;flex-wrap:wrap"></div>
+    <div id="pmTotals" style="display:flex;gap:8px;padding:6px 16px 4px;flex-wrap:wrap"></div>
     <div class="sec">Флот по странам</div>
     <div class="lst" id="pmGeo"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Пробелы присутствия</div>
@@ -2287,8 +2326,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div id="gpCreateErr" style="color:var(--red);font-size:12px;margin-top:8px"></div>
       
       <div style="display:flex;gap:8px;margin-top:16px">
-        <button class="btn btn-s" onclick="closeModal('mo-gp-create')" style="flex:1">Отмена</button>
-        <button class="btn btn-p" onclick="submitGpCreate()" style="flex:1">🌍 Создать</button>
+        <button class="btn btn-s" onclick="closeModal('mo-gp-create')" style="flex:1 1 auto">Отмена</button>
+        <button class="btn btn-p" onclick="submitGpCreate()" style="flex:1 1 auto">🌍 Создать</button>
       </div>
     </div>
   </div>
@@ -2315,8 +2354,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="font-size:12px;color:var(--hint);margin-bottom:6px">Аккаунты (чем больше — тем выше нагрузка на каждый):</div>
       <div id="mjAccounts" style="max-height:150px;overflow-y:auto;margin-bottom:8px"><div class="spin-wrap"><div class="spin"></div></div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-p" style="flex:1" onclick="submitMassMembership('join')">🔗 Вступить</button>
-        <button class="btn btn-d" style="flex:1" onclick="submitMassMembership('leave')">🚪 Выйти</button>
+        <button class="btn btn-p" style="flex:1 1 auto" onclick="submitMassMembership('join')">🔗 Вступить</button>
+        <button class="btn btn-d" style="flex:1 1 auto" onclick="submitMassMembership('leave')">🚪 Выйти</button>
       </div>
       <div id="mjErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
@@ -2453,8 +2492,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div style="font-size:12px;color:var(--hint);margin:2px 0 6px">Аккаунты — создаём у каждого выбранного (по «на аккаунт» штук):</div>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="cfAccAll(true)">Выбрать все</button>
-        <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="cfAccAll(false)">Очистить</button>
+        <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="cfAccAll(true)">Выбрать все</button>
+        <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="cfAccAll(false)">Очистить</button>
       </div>
       <div id="cfAccts" style="max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px;margin-bottom:10px"></div>
       <button class="btn btn-p" style="width:100%" onclick="submitChannelFactory()">🏭 Создать</button>
@@ -2581,7 +2620,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Краткое описание (макс. 120 символов)</label><input id="mg-short" type="text" maxlength="120" placeholder="Краткое описание" class="inp"></div>
     <div class="field-err" id="mg-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-multigeo')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-multigeo')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitMultigeoSet()" style="flex:2">💾 Сохранить</button>
     </div>
   </div>
@@ -2652,8 +2691,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <label>Аватар бота (публичный https URL картинки)</label>
       <input type="url" id="bpAvatar" placeholder="https://example.com/avatar.jpg" class="inp">
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="btn btn-s" style="flex:1;font-size:13px;padding:8px" onclick="setBotAvatar()">🖼 Поставить</button>
-        <button class="btn btn-d" style="flex:1;font-size:13px;padding:8px" onclick="deleteBotAvatar()">🗑 Удалить фото</button>
+        <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:8px" onclick="setBotAvatar()">🖼 Поставить</button>
+        <button class="btn btn-d" style="flex:1 1 auto;font-size:13px;padding:8px" onclick="deleteBotAvatar()">🗑 Удалить фото</button>
       </div>
     </div>
     <div class="field-err" id="bpErr"></div>
@@ -2931,7 +2970,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="at-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-asset-tpl')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-asset-tpl')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitAssetTplCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -2953,7 +2992,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Первое сообщение</label><textarea id="af-msg" rows="3" placeholder="Привет! Это первое сообщение воронки..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="af-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-autofunnel')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-autofunnel')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitAutofunnelCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -2970,7 +3009,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Метка цели</label><input id="pp-label" type="text" placeholder="Мой бот" class="inp"></div>
     <div class="field-err" id="pp-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-presence-pack')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-presence-pack')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitPresencePackCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -2993,7 +3032,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Регион (необязательно)</label><input id="eco-region" type="text" placeholder="RU, EU, GLOBAL..." class="inp"></div>
     <div class="field-err" id="eco-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-ecosystem')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-ecosystem')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitEcosystemCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -3017,7 +3056,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="cl-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-clone')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-clone')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitCloneAdapt()" style="flex:2">Клонировать</button>
     </div>
   </div>
@@ -3049,7 +3088,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field-err" id="mc-err"></div>
     <div style="font-size:11px;color:var(--hint);margin-bottom:8px">После создания добавьте каналы-цели (кнопка «🎯 Цели») — без них меш ничего не репостит.</div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-mesh')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-mesh')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitMeshCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -3102,7 +3141,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:6px 0;color:var(--purple-light);font-size:13px" id="nc-selcount">Выбрано: 0 каналов</div>
     <div class="field-err" id="nc-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-narrative')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-narrative')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitNarrativeCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -3244,7 +3283,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
   </div>
   <div class="sub-sb">
-    <div id="opsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
+    <div id="opsKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
     <div class="seg" id="ops-seg">
       <div class="seg-opt on" onclick="filterOps(null,this)">Все</div>
       <div class="seg-opt" onclick="filterOps('running',this)">🟢 Работают</div>
@@ -3253,9 +3292,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterOps('done',this)">✅ Готово</div>
     </div>
     <div style="padding:6px 0;display:flex;gap:6px">
-      <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="pauseAllOps()" title="Приостановить все running">⏸ Пауза</button>
-      <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Возобновить все paused">▶️ Старт</button>
-      <button class="btn btn-r" style="flex:1;font-size:12px;padding:8px 4px" onclick="clearDoneOps()" title="Удалить завершённые">🗑 Очистить</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="pauseAllOps()" title="Приостановить все running">⏸ Пауза</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Возобновить все paused">▶️ Старт</button>
+      <button class="btn btn-r" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="clearDoneOps()" title="Удалить завершённые">🗑 Очистить</button>
     </div>
     <div style="padding:0 0 6px">
       <!-- Разбирать очередь по одной операции — не работа. Перезапускает всё
@@ -3332,7 +3371,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span class="chip contact-stage" data-s="won" style="flex:0 0 auto" onclick="toggleStageFilter('won',this)">Выиграно</span>
       <span class="chip contact-stage" data-s="lost" style="flex:0 0 auto" onclick="toggleStageFilter('lost',this)">Проиграно</span>
     </div>
-    <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 0 4px;overflow-x:auto"></div>
+    <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
     <div id="contactFilterHint" style="display:none;font-size:12px;color:var(--hint);padding:2px 2px 6px;line-height:1.35"></div>
     <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 16px 8px">
       <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="contactSelCount">0</span>
@@ -3659,19 +3698,19 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="checkAllProxies()">🔄 Проверить все</button>
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="toggleProxyImport()">📥 Импорт списком</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="checkAllProxies()">🔄 Проверить все</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="toggleProxyImport()">📥 Импорт списком</button>
     </div>
     <div style="margin-bottom:8px">
       <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px" onclick="checkProxyIsolation()">🛡 Уникальность IP (изоляция)</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="exportProxies()">📤 Экспорт</button>
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="cleanupDeadProxies()">🧹 Очистить мёртвые</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="exportProxies()">📤 Экспорт</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="cleanupDeadProxies()">🧹 Очистить мёртвые</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="toggleProxyStats()">📊 Аналитика прокси</button>
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:9px 6px" onclick="rotateProxies()">🔁 Ротация IP</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="toggleProxyStats()">📊 Аналитика прокси</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="rotateProxies()">🔁 Ротация IP</button>
     </div>
     <div id="proxyStatsBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
     <div id="proxyIsolationBox" style="display:none;margin-bottom:8px;font-size:13px"></div>
@@ -3713,13 +3752,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </details>
       <div style="display:flex;gap:8px;align-items:center">
         <input type="number" id="cfPoolCount" value="10" min="1" max="100" class="inp" style="width:80px" title="Сколько воркеров (0/пусто = по числу аккаунтов)">
-        <button class="btn btn-p" id="cfDeployBtn" style="flex:1;font-size:13px;padding:9px 6px" onclick="deployCfPool()">☁️ Задеплоить пул</button>
+        <button class="btn btn-p" id="cfDeployBtn" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="deployCfPool()">☁️ Задеплоить пул</button>
       </div>
       <div id="cfAutoHint" style="font-size:12px;opacity:.7;margin-top:6px"></div>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="btn btn-s" id="cfCheckBtn" style="flex:1;font-size:13px;padding:8px 6px" onclick="checkCfWorkers()">🩺 Проверить</button>
-        <button class="btn btn-s" id="cfAssignBtn" style="flex:1;font-size:13px;padding:8px 6px" onclick="assignCfRelay()" title="Раздать пул новым аккаунтам без пересоздания">🔗 Раздать</button>
-        <button class="btn btn-s" id="cfClearBtn" style="flex:1;font-size:13px;padding:8px 6px" onclick="clearCfPool()" title="Снести пул">🗑 Снести</button>
+        <button class="btn btn-s" id="cfCheckBtn" style="flex:1 1 auto;font-size:13px;padding:8px 6px" onclick="checkCfWorkers()">🩺 Проверить</button>
+        <button class="btn btn-s" id="cfAssignBtn" style="flex:1 1 auto;font-size:13px;padding:8px 6px" onclick="assignCfRelay()" title="Раздать пул новым аккаунтам без пересоздания">🔗 Раздать</button>
+        <button class="btn btn-s" id="cfClearBtn" style="flex:1 1 auto;font-size:13px;padding:8px 6px" onclick="clearCfPool()" title="Снести пул">🗑 Снести</button>
       </div>
     </div>
     <div class="sec">Мои прокси</div>
@@ -3735,7 +3774,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openDlModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
-    <div id="dlStats" style="display:flex;gap:10px;padding:10px 0 4px"></div>
+    <div id="dlStats" style="display:flex;gap:10px;padding:10px 16px 4px"></div>
     <div class="sec">Ссылки</div>
     <div class="lst" id="dlList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -3749,7 +3788,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div class="sec">Сегменты пользователей</div>
-    <div id="engGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 0"></div>
+    <div id="engGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 16px"></div>
     <div class="sec" style="margin-top:12px">О сегментах</div>
     <div class="card" style="font-size:13px;line-height:1.6;color:var(--hint)">
       <b>🔥 Горячие</b> — активны сегодня<br>
@@ -3803,7 +3842,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title" id="bstats-title">📊 Статистика</div>
   </div>
   <div class="sub-sb">
-    <div id="bstatsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0"></div>
+    <div id="bstatsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px"></div>
     <div class="sec" style="margin-top:8px">Рост аудитории (7 дней)</div>
     <div id="bstatsChart" style="background:var(--bg);border-radius:12px;padding:14px;min-height:60px"></div>
     <div class="sec" style="margin-top:8px">Детали</div>
@@ -3879,7 +3918,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🗺 Карта топологии</div>
   </div>
   <div class="sub-sb">
-    <div id="topoStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div id="topoStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
     <div id="topoBody"></div>
   </div>
 </div>
@@ -3891,7 +3930,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">⚡ Инфраструктура</div>
   </div>
   <div class="sub-sb">
-    <div id="infraStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div id="infraStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Пулы аккаунтов</div>
     <div class="lst" id="infraPools"></div>
     <div class="sec" style="margin-top:8px">Последние операции (аудит)</div>
@@ -3948,11 +3987,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="sec">Тип накрутки</div>
     <div style="display:flex;gap:8px;padding:8px 0;flex-wrap:wrap">
-      <button class="btn btn-s" id="boostTab-views" onclick="boostSetType('views')" style="flex:1;padding:9px 4px;font-size:13px">👁 Просмотры</button>
-      <button class="btn btn-s" id="boostTab-reactions" onclick="boostSetType('reactions')" style="flex:1;padding:9px 4px;font-size:13px">❤ Реакции</button>
-      <button class="btn btn-s" id="boostTab-stories" onclick="boostSetType('stories')" style="flex:1;padding:9px 4px;font-size:13px">📖 Сторис</button>
-      <button class="btn btn-s" id="boostTab-subscribers" onclick="boostSetType('subscribers')" style="flex:1;padding:9px 4px;font-size:13px">👥 Подписчики</button>
-      <button class="btn btn-s" id="boostTab-bot_starts" onclick="boostSetType('bot_starts')" style="flex:1;padding:9px 4px;font-size:13px">🚀 Старты в ботах</button>
+      <button class="btn btn-s" id="boostTab-views" onclick="boostSetType('views')" style="flex:1 1 auto;padding:9px 4px;font-size:13px">👁 Просмотры</button>
+      <button class="btn btn-s" id="boostTab-reactions" onclick="boostSetType('reactions')" style="flex:1 1 auto;padding:9px 4px;font-size:13px">❤ Реакции</button>
+      <button class="btn btn-s" id="boostTab-stories" onclick="boostSetType('stories')" style="flex:1 1 auto;padding:9px 4px;font-size:13px">📖 Сторис</button>
+      <button class="btn btn-s" id="boostTab-subscribers" onclick="boostSetType('subscribers')" style="flex:1 1 auto;padding:9px 4px;font-size:13px">👥 Подписчики</button>
+      <button class="btn btn-s" id="boostTab-bot_starts" onclick="boostSetType('bot_starts')" style="flex:1 1 auto;padding:9px 4px;font-size:13px">🚀 Старты в ботах</button>
     </div>
     <div style="padding:8px 16px">
       <div class="field" id="boostF-channel"><label>Канал (@username или ссылка)</label><input type="text" id="boostChannel" placeholder="@channel"></div>
@@ -4000,7 +4039,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <!-- Сегменты: платформа (@MEXAHI3MBOT) только для админов -->
-    <div class="seg" id="nuSeg" style="display:flex;gap:6px;margin:4px 0 10px">
+    <div class="seg" id="nuSeg" style="display:flex;gap:6px;margin:4px 16px 10px">
       <button class="seg-btn on" id="nuTabBots" onclick="nuSwitch('bots')">🤖 Подписчики ботов</button>
       <button class="seg-btn" id="nuTabPlat" onclick="nuSwitch('plat')" style="display:none">👑 Платформа</button>
     </div>
@@ -4034,14 +4073,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 4px">
       Единый взгляд на продвижение: активность инструментов и прирост каналов за период.
     </div>
-    <div id="growthHubTotals" style="display:flex;gap:8px;padding:6px 0 4px;flex-wrap:wrap"></div>
+    <div id="growthHubTotals" style="display:flex;gap:8px;padding:6px 16px 4px;flex-wrap:wrap"></div>
     <div class="sec">🎯 Цель роста</div>
     <div style="display:flex;gap:8px;padding:4px 0 2px;align-items:flex-end;flex-wrap:wrap">
       <div style="flex:1;min-width:110px"><label style="font-size:11px;color:var(--hint)">+подписчиков</label><input type="number" id="ghGoal" value="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
       <div style="flex:1;min-width:90px"><label style="font-size:11px;color:var(--hint)">за дней</label><input type="number" id="ghDays" value="14" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
       <button class="btn btn-p" style="flex:0 0 auto" onclick="runGrowthPlan()">План →</button>
     </div>
-    <div id="growthHubPlan" style="padding:2px 0"></div>
+    <div id="growthHubPlan" style="padding:2px 16px"></div>
     <div class="sec">Инструменты роста</div>
     <div class="lst" id="growthHubTools"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Прирост каналов</div>
@@ -4103,7 +4142,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec">Выберите каналы</div>
     <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div id="quickPostSelected" style="padding:8px 0;color:var(--purple-light);font-size:13px"></div>
+    <div id="quickPostSelected" style="padding:8px 16px;color:var(--purple-light);font-size:13px"></div>
     <div class="field">
       <label style="font-size:13px;color:var(--hint)">Когда опубликовать</label>
       <select id="qpSchedule" class="sel">
@@ -4171,7 +4210,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <input type="checkbox" id="reoptToggle" onchange="toggleReopt(this)" style="vertical-align:middle"> авто при падении
       </label>
     </div>
-    <div class="hint" style="padding:0 2px 6px">При падении позиции бота в поиске система готовит рекомендацию по имени/описанию — примените в один клик.</div>
+    <div class="hint" style="padding:0 16px 6px">При падении позиции бота в поиске система готовит рекомендацию по имени/описанию — примените в один клик.</div>
     <div class="lst" id="seoBotSuggestions"></div>
   </div>
 </div>
@@ -4183,11 +4222,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🏭 Фабрика ботов</div>
   </div>
   <div class="sub-sb">
-    <div id="botFactoryStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="botFactoryStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div class="sec">Создание ботов</div>
     <div style="display:flex;gap:6px;padding:6px 0 2px">
-      <button class="btn btn-s" id="bfModeNewBtn" onclick="bfSetMode('new')" style="flex:1;font-size:13px;padding:9px 6px">🏭 Создать новых</button>
-      <button class="btn btn-s" id="bfModeTokenBtn" onclick="bfSetMode('token')" style="flex:1;font-size:13px;padding:9px 6px">🔑 По токену</button>
+      <button class="btn btn-s" id="bfModeNewBtn" onclick="bfSetMode('new')" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🏭 Создать новых</button>
+      <button class="btn btn-s" id="bfModeTokenBtn" onclick="bfSetMode('token')" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🔑 По токену</button>
     </div>
     <div style="padding:8px 16px">
       <!-- РЕЖИМ «создать новых»: аккаунт реально переписывается с @BotFather -->
@@ -4195,8 +4234,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div class="field">
           <label>Аккаунты для @BotFather * (можно несколько)</label>
           <div style="display:flex;gap:8px;margin-bottom:6px">
-            <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="bfAccAll(true)">Выбрать все</button>
-            <button class="btn btn-s" style="flex:1;font-size:12px;padding:6px" onclick="bfAccAll(false)">Очистить</button>
+            <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="bfAccAll(true)">Выбрать все</button>
+            <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="bfAccAll(false)">Очистить</button>
           </div>
           <div id="bfAccts" style="max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px"></div>
           <div class="field-note">Каждый выбранный аккаунт напишет @BotFather и создаст ботов. Нужны активные аккаунты с сессией.</div>
@@ -4267,7 +4306,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🎭 Персоны</div>
   </div>
   <div class="sub-sb">
-    <div id="personaStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="personaStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:12px">Создать персону</div>
     <div style="padding:8px 16px">
@@ -4314,7 +4353,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">📱 Авторег</div>
   </div>
   <div class="sub-sb">
-    <div id="autoregStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="autoregStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div class="sec">Новая регистрация</div>
     <div style="padding:8px 16px">
       <div class="field">
@@ -4372,8 +4411,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🤝 Реферальная программа</div>
   </div>
   <div class="sub-sb">
-    <div id="referralStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
-    <div id="referralCode" style="padding:8px 0 12px"></div>
+    <div id="referralStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
+    <div id="referralCode" style="padding:8px 16px 12px"></div>
     <div class="sec">Рефералы</div>
     <div class="lst" id="referralList"></div>
   </div>
@@ -4408,7 +4447,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       2. Добавьте бота в группу как администратора<br>
       3. Скопируйте Chat ID и нажмите «+ Добавить»
     </div>
-    <div id="nodesStats" style="display:flex;gap:10px;padding:4px 0 10px"></div>
+    <div id="nodesStats" style="display:flex;gap:10px;padding:4px 16px 10px"></div>
     <div class="lst" id="nodesList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -4445,7 +4484,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="addCommunityChannel()">+ Канал</button></div>
   </div>
   <div class="sub-sb">
-    <div id="cnodeActions" style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 8px"></div>
+    <div id="cnodeActions" style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 16px 8px"></div>
     <div class="sec">Каналы (топики)</div>
     <div class="lst" id="cnodeChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -4454,9 +4493,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-communitymembers">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🛡 Участники и роли</div></div>
   <div class="sub-sb">
-    <div id="cmembersStats" style="display:flex;gap:8px;padding:6px 0"></div>
-    <div class="hint" style="font-size:12px;color:var(--hint);padding:0 2px 6px">Участники-флот ноды. «Назначить стаффом» — промоут аккаунтов в модераторы/админы.</div>
-    <div style="display:flex;gap:6px;padding:0 0 8px"><button class="btn btn-s" onclick="setCommunityStaff('moderator')" style="flex:1">🛡 В модераторы</button><button class="btn btn-s" onclick="setCommunityStaff('admin')" style="flex:1">👑 В админы</button></div>
+    <div id="cmembersStats" style="display:flex;gap:8px;padding:6px 16px"></div>
+    <div class="hint" style="font-size:12px;color:var(--hint);padding:0 16px 6px">Участники-флот ноды. «Назначить стаффом» — промоут аккаунтов в модераторы/админы.</div>
+    <div style="display:flex;gap:6px;padding:0 0 8px"><button class="btn btn-s" onclick="setCommunityStaff('moderator')" style="flex:1 1 auto">🛡 В модераторы</button><button class="btn btn-s" onclick="setCommunityStaff('admin')" style="flex:1 1 auto">👑 В админы</button></div>
     <div class="lst" id="cmembersList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -4482,7 +4521,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="scanGifts()">📡 Скан</button></div>
   </div>
   <div class="sub-sb">
-    <div id="giftsStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="giftsStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div class="lst" id="giftsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -4503,7 +4542,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <input type="text" id="seoKw" placeholder="Целевые ключи через запятую (необязательно)" class="inp" style="width:100%;box-sizing:border-box">
       <button class="btn btn-p" onclick="runSeoAnalyze()">📊 Проанализировать</button>
     </div>
-    <div id="seoResult" style="padding:6px 0"></div>
+    <div id="seoResult" style="padding:6px 16px"></div>
   </div>
 </div>
 
@@ -4515,7 +4554,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       Последний A/B-тест рассылки: доставка по вариантам. Победитель определяется
       статистически (нужна достаточная выборка и значимый отрыв).
     </div>
-    <div id="abResults" style="padding:4px 0"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="abResults" style="padding:4px 16px"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -4544,7 +4583,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <button class="btn btn-p" style="width:100%" onclick="computeCampaignPlan()">📐 Рассчитать план</button>
     </div>
-    <div id="cpResult" style="padding:4px 0"></div>
+    <div id="cpResult" style="padding:4px 16px"></div>
   </div>
 </div>
 
@@ -4701,8 +4740,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="field">
         <div style="display:flex;gap:8px">
-          <button class="btn btn-s" style="flex:1" onclick="loadFleetReadiness()">🔍 Готовность флота</button>
-          <button class="btn btn-s" style="flex:1" onclick="joinAllToGroup()">🚪 Вступить всеми</button>
+          <button class="btn btn-s" style="flex:1 1 auto" onclick="loadFleetReadiness()">🔍 Готовность флота</button>
+          <button class="btn btn-s" style="flex:1 1 auto" onclick="joinAllToGroup()">🚪 Вступить всеми</button>
         </div>
         <div id="massInviteReadiness" style="font-size:12px;margin-top:6px;padding:0 2px"></div>
       </div>
@@ -4787,7 +4826,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openStarsExpModal()">+ A/B тест</button></div>
   </div>
   <div class="sub-sb">
-    <div id="starsStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div id="starsStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">A/B Эксперименты</div>
     <div class="lst" id="starsExps"></div>
   </div>
@@ -4812,7 +4851,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="se-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-starsexp')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-starsexp')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitStarsExp()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -4851,7 +4890,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Действий в день</label><input id="gc-cap" type="number" min="1" max="50" value="8" class="inp"></div>
     <div class="field-err" id="gc-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-ghost')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-ghost')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitGhostCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -4877,7 +4916,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCmpModal()">+ Новая</button></div>
   </div>
   <div class="sub-sb">
-    <div id="dmStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="dmStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div class="lst" id="dmList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -4902,7 +4941,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openWarmupModal()">+ Запустить</button></div>
   </div>
   <div class="sub-sb">
-    <div id="warmupStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="warmupStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div id="warmupWarn" style="display:none;margin-bottom:8px"></div>
     <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="bulkWarmup()">🔥 Прогреть все подходящие аккаунты</button>
     <div class="sec">Активные планы</div>
@@ -4921,7 +4960,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       держит аккаунт живым только пассивными действиями и перепроверяет статус.
       Ничего никому не рассылается.
     </div>
-    <div id="rehabStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
+    <div id="rehabStats" style="display:flex;gap:10px;padding:0 16px 10px"></div>
     <div class="lst" id="rehabList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5032,7 +5071,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       Боты, найденные на ваших аккаунтах через @BotFather. Подключение забирает
       токен у BotFather от лица аккаунта-владельца — после этого ботом можно управлять.
     </div>
-    <div id="foundBotsStats" style="display:flex;gap:10px;padding:0 0 10px"></div>
+    <div id="foundBotsStats" style="display:flex;gap:10px;padding:0 16px 10px"></div>
     <div class="lst" id="foundBotsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5043,7 +5082,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🌱 Что делает аккаунт</div>
   </div>
   <div class="sub-sb">
-    <div id="wlogHead" style="padding:8px 0 4px"></div>
+    <div id="wlogHead" style="padding:8px 16px 4px"></div>
     <div class="sec">Последние действия</div>
     <div class="lst" id="wlogList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -5081,7 +5120,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="field"><label>Текст</label><textarea id="ec-vb-text" rows="2" placeholder="Добро пожаловать! 🎉" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="ec-err"></div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-d" onclick="closeModal('mo-exp')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-exp')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitExpCreate()" style="flex:2">Создать</button>
     </div>
   </div>
@@ -5105,7 +5144,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">❤️ Дэшборд здоровья</div>
   </div>
   <div class="sub-sb">
-    <div id="healthStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div id="healthStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Последние флуд-события (7 дней)</div>
     <div class="lst" id="healthEvents"></div>
   </div>
@@ -5118,7 +5157,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🛡 Щит аккаунтов</div>
   </div>
   <div class="sub-sb">
-    <div id="shieldStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div id="shieldStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 16px 12px"></div>
     <div class="sec">Конфигурация</div>
     <div class="lst" id="shieldConfig"></div>
     <div class="sec" style="margin-top:8px">История действий</div>
@@ -5134,7 +5173,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
   </div>
   <div class="sub-sb">
-    <div id="adIntelStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div id="adIntelStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div class="sec">Топ каналов по качеству</div>
     <div class="lst" id="adIntelChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Топ рекламодателей</div>
@@ -5149,7 +5188,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🕸 Сеть ботов</div>
   </div>
   <div class="sub-sb">
-    <div id="networkStats" style="display:flex;gap:10px;padding:8px 0 12px"></div>
+    <div id="networkStats" style="display:flex;gap:10px;padding:8px 16px 12px"></div>
     <div id="networkClusters"></div>
   </div>
 </div>
@@ -5218,7 +5257,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="ak-err"></div>
     <div style="display:flex;gap:8px" id="ak-btns">
-      <button class="btn btn-d" onclick="closeModal('mo-apikey')" style="flex:1">Отмена</button>
+      <button class="btn btn-d" onclick="closeModal('mo-apikey')" style="flex:1 1 auto">Отмена</button>
       <button class="btn btn-p" onclick="submitApiKeyCreate()" style="flex:2" id="ak-submit">Создать</button>
     </div>
   </div>
@@ -5233,7 +5272,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div id="strikeAccessBar"></div>
-    <div id="strikeStats" style="display:flex;gap:10px;padding:6px 0 4px;overflow-x:auto;padding-left:16px"></div>
+    <div id="strikeStats" style="display:flex;gap:10px;padding:6px 16px 4px;overflow-x:auto"></div>
     <div class="sec">Последние операции</div>
     <div class="lst" id="strikeList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -5301,7 +5340,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <button class="btn" style="width:100%;margin-bottom:8px;background:var(--bg)" onclick="openTakedownKit()">📋 Пакет жалобы (App Store/Google Play/DMCA)</button>
       <div style="display:flex;gap:8px">
-        <button class="btn" style="flex:1;background:var(--bg)" onclick="strikeBackStep()">← Назад</button>
+        <button class="btn" style="flex:1 1 auto;background:var(--bg)" onclick="strikeBackStep()">← Назад</button>
         <button class="btn btn-p" style="flex:2;background:var(--red);border-color:var(--red)" onclick="strikeLaunch()" id="strikeLaunchBtn">⚔️ Запустить Strike</button>
       </div>
     </div>
@@ -5355,7 +5394,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openDealModal()">+ Сделка</button></div>
   </div>
   <div class="sub-sb">
-    <div id="dealSummary" style="display:flex;gap:8px;overflow-x:auto;padding:6px 0 10px;-webkit-overflow-scrolling:touch"></div>
+    <div id="dealSummary" style="display:flex;gap:8px;overflow-x:auto;padding:6px 16px 10px;-webkit-overflow-scrolling:touch"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 0 8px">
       <button class="btn btn-p" onclick="filterDeals(null,this)" id="dealFilterAll">Все</button>
       <button class="btn btn-s" onclick="filterDeals('lead',this)" id="dealFilterLead">Лид</button>
@@ -6358,9 +6397,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="netTopologyNodes" style="display:none">
       <div class="sec" style="margin-top:12px">Узлы и рёбра</div>
       <div style="padding:4px 16px;display:flex;gap:8px">
-        <button class="btn btn-s" onclick="openNetAddNodeModal()" style="flex:1;font-size:13px;padding:8px 6px">+ Узел</button>
-        <button class="btn btn-s" onclick="openNetAddEdgeModal()" style="flex:1;font-size:13px;padding:8px 6px">+ Ребро</button>
-        <button class="btn btn-p" onclick="showNetDeployPlan()" style="flex:1;font-size:13px;padding:8px 6px">🚀 План</button>
+        <button class="btn btn-s" onclick="openNetAddNodeModal()" style="flex:1 1 auto;font-size:13px;padding:8px 6px">+ Узел</button>
+        <button class="btn btn-s" onclick="openNetAddEdgeModal()" style="flex:1 1 auto;font-size:13px;padding:8px 6px">+ Ребро</button>
+        <button class="btn btn-p" onclick="showNetDeployPlan()" style="flex:1 1 auto;font-size:13px;padding:8px 6px">🚀 План</button>
       </div>
       <div id="netDeployPlan" style="padding:0 16px"></div>
       <div class="lst" id="netNodesList"></div>
@@ -7755,7 +7794,7 @@ async function fleetDoctorLoad(){
       </div>`;
     }
     const st=d.stuck||{};
-    h+=`<div style="font-size:12px;color:var(--hint);margin:0 2px 10px">В работе: ${st.running_ops||0} · в очереди: ${st.pending_ops||0} · помечено in_operation: ${f.in_operation||0}</div>`;
+    h+=`<div style="font-size:12px;color:var(--hint);margin:0 0 10px">В работе: ${st.running_ops||0} · в очереди: ${st.pending_ops||0} · помечено in_operation: ${f.in_operation||0}</div>`;
     // Последние реальные ошибки операций.
     const errs=d.recent_errors||[];
     if(errs.length){
@@ -8569,9 +8608,9 @@ function buildBotDetail(d) {
       <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${num(d.auto_replies)}</div><div class="kpi-lbl">Авто-отв.</div></div>
     </div>
     <div style="display:flex;gap:8px;padding:4px 0 4px">
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:10px 6px" onclick="toggleBotActive(${bid},this)">${b.is_active?'⏸ Выключить':'▶️ Включить'}</button>
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
-      <button class="btn btn-s" style="flex:1;font-size:13px;padding:10px 6px;color:var(--red)" onclick="removeBotConfirm(${bid},'${bn}')">🗑 Убрать</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="toggleBotActive(${bid},this)">${b.is_active?'⏸ Выключить':'▶️ Включить'}</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px;color:var(--red)" onclick="removeBotConfirm(${bid},'${bn}')">🗑 Убрать</button>
     </div>
     ${mgmtSections.map(s=>`
       <div class="sec">${s.title}</div>
@@ -9996,20 +10035,20 @@ function buildAccDetail(d) {
     ${transportRow}
 
     <div style="display:flex;gap:8px;padding:0 0 6px;flex-wrap:wrap">
-      <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
-      <button class="btn btn-s" onclick="toggleAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">${a.is_active?'⏸ Выключить':'▶️ Включить'}</button>
-      <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
-      ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1;min-width:130px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
+      <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
+      <button class="btn btn-s" onclick="toggleAccount(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">${a.is_active?'⏸ Выключить':'▶️ Включить'}</button>
+      <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
+      ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1 1 auto;min-width:130px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
     </div>
 
     <div class="sec">Ресурсы аккаунта</div>
     <div style="display:flex;gap:8px;padding:2px 0 4px">
-      <button class="btn btn-s" onclick="openAccountDialogs(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">💬 Диалоги</button>
-      <button class="btn btn-s" onclick="openAccountContacts(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">📇 Контакты</button>
+      <button class="btn btn-s" onclick="openAccountDialogs(${a.id})" style="flex:1 1 auto;font-size:14px;padding:13px 6px">💬 Диалоги</button>
+      <button class="btn btn-s" onclick="openAccountContacts(${a.id})" style="flex:1 1 auto;font-size:14px;padding:13px 6px">📇 Контакты</button>
     </div>
     <div style="display:flex;gap:8px;padding:2px 0 4px">
-      <button class="btn btn-s" onclick="openAccountChannels(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">📡 Каналы и чаты</button>
-      <button class="btn btn-s" onclick="openAccountBots(${a.id})" style="flex:1;font-size:14px;padding:13px 6px">🤖 Боты</button>
+      <button class="btn btn-s" onclick="openAccountChannels(${a.id})" style="flex:1 1 auto;font-size:14px;padding:13px 6px">📡 Каналы и чаты</button>
+      <button class="btn btn-s" onclick="openAccountBots(${a.id})" style="flex:1 1 auto;font-size:14px;padding:13px 6px">🤖 Боты</button>
     </div>
 
     <details class="acc-actions" style="margin:6px 0;background:var(--bg2);border-radius:12px">
@@ -10019,19 +10058,19 @@ function buildAccDetail(d) {
         <span class="acc-chev" style="color:var(--hint)">▾</span>
       </summary>
       <div style="display:flex;gap:8px;padding:2px 12px 12px;flex-wrap:wrap">
-        <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
-        <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
-        <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
-        <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
-        <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
-        <button class="btn btn-s" onclick="accAction(${a.id},'delete_pm','Удалить ВСЕ личные диалоги этого аккаунта? История ЛС будет очищена.')" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить ЛС</button>
-        <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
-        <button class="btn btn-s" onclick="openAccProxy(${a.id}, ${a.proxy_id||'null'})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
-        <button class="btn btn-s" onclick="unbindAccProxy(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🔌 Снять прокси</button>
-        <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
-        <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>
-        <button class="btn btn-s" onclick="exportAccSession(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">💾 Экспорт сессии</button>
-        <button class="btn btn-s" onclick="resetAccCooldown(${a.id})" style="flex:1;min-width:88px;font-size:13px;padding:10px 6px">⚡ Сброс кулдауна</button>
+        <button class="btn btn-s" onclick="openAccProfile(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🎨 Профиль</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'scan','Сканировать каналы/группы аккаунта?')" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🔎 Скан ресурсов</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'leave_all','Выйти из ВСЕХ чатов этого аккаунта?')" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🚪 Выйти из всех</button>
+        <button class="btn btn-s" onclick="appealSpamblock(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🛡 Снять спамблок</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'read_all','Пометить все диалоги прочитанными?')" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">📖 Прочитать всё</button>
+        <button class="btn btn-s" onclick="accAction(${a.id},'delete_pm','Удалить ВСЕ личные диалоги этого аккаунта? История ЛС будет очищена.')" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить ЛС</button>
+        <button class="btn btn-s" onclick="postStory(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">📸 История</button>
+        <button class="btn btn-s" onclick="openAccProxy(${a.id}, ${a.proxy_id||'null'})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🌐 Прокси</button>
+        <button class="btn btn-s" onclick="unbindAccProxy(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🔌 Снять прокси</button>
+        <button class="btn btn-s" onclick="openAccNote(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">📝 Заметка</button>
+        <button class="btn btn-s" onclick="openAccMeta(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🏷 Кластер/метка</button>
+        <button class="btn btn-s" onclick="exportAccSession(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">💾 Экспорт сессии</button>
+        <button class="btn btn-s" onclick="resetAccCooldown(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">⚡ Сброс кулдауна</button>
       </div>
     </details>
 
@@ -10208,14 +10247,14 @@ function buildChDetail(d) {
     </div>
 
     <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1;min-width:88px">📝 Опубликовать</button>
-      <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1;min-width:88px">📌 Закрепить пост</button>
-      <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1;min-width:88px">✏️ Изменить</button>
-      <button class="btn btn-s" onclick="getChannelInviteLink(${c.channel_id})" style="flex:1;min-width:88px">🔗 Ссылка</button>
-      <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1;min-width:88px">👑 Админы</button>
-      <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1;min-width:88px">👥 Инвайтинг</button>
-      <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1;min-width:88px">📊 Собрать аудиторию</button>
-      <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1;min-width:88px">🗑 Убрать</button>
+      <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
+      <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>
+      <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1 1 auto;min-width:88px">✏️ Изменить</button>
+      <button class="btn btn-s" onclick="getChannelInviteLink(${c.channel_id})" style="flex:1 1 auto;min-width:88px">🔗 Ссылка</button>
+      <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
+      <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👥 Инвайтинг</button>
+      <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📊 Собрать аудиторию</button>
+      <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">🗑 Убрать</button>
     </div>
 
     <div class="sec">Информация</div>
@@ -10763,7 +10802,7 @@ async function openOpDetail(opId) {
     const canControl = o.status==='pending'||o.status==='running';
     if (canControl) {
       html += `<div style="padding:0 16px;display:flex;gap:8px">
-        <button class="btn btn-r" onclick="cancelOp(${o.id});back()" style="flex:1">⏸ Приостановить</button>
+        <button class="btn btn-r" onclick="cancelOp(${o.id});back()" style="flex:1 1 auto">⏸ Приостановить</button>
       </div>`;
     }
     if (o.status==='failed') {
@@ -15032,8 +15071,8 @@ async function openSavedSegments() {
         <span style="cursor:pointer;color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id})">🗑</span>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-p" style="flex:1;font-size:12px" onclick="segmentActFromSaved(${s.id},'write')">✍️ Написать</button>
-        <button class="btn btn-s" style="flex:1;font-size:12px" onclick="segmentActFromSaved(${s.id},'invite')">➕ Пригласить</button>
+        <button class="btn btn-p" style="flex:1 1 auto;font-size:12px" onclick="segmentActFromSaved(${s.id},'write')">✍️ Написать</button>
+        <button class="btn btn-s" style="flex:1 1 auto;font-size:12px" onclick="segmentActFromSaved(${s.id},'invite')">➕ Пригласить</button>
       </div>
     </div>`).join('');
   } catch(e){ box.innerHTML = errHtml(e.message,'openSavedSegments()'); }
@@ -15354,8 +15393,8 @@ async function loadEditForm(id) {
         <input id="ef-color" type="hidden" value="${esc(c.color_label||'')}">
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn btn-p" onclick="saveContactEdit('${id}')" style="flex:1">💾 Сохранить</button>
-        <button class="btn" onclick="back()" style="flex:1;background:var(--bg2)">Отмена</button>
+        <button class="btn btn-p" onclick="saveContactEdit('${id}')" style="flex:1 1 auto">💾 Сохранить</button>
+        <button class="btn" onclick="back()" style="flex:1 1 auto;background:var(--bg2)">Отмена</button>
       </div>
       <div style="margin-top:12px"><button class="btn" style="width:100%;background:rgba(239,68,68,.15);color:var(--red)" onclick="deleteContact('${id}')">🗑 Удалить контакт</button></div>
     </div>`;
@@ -17689,9 +17728,9 @@ async function openNotaryCert(id) {
         ${sigRow}
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="btn btn-s" style="flex:1;min-width:120px" onclick="notaryCheckNow(${id})">🔄 Проверить сейчас</button>
-        <button class="btn btn-s" style="flex:1;min-width:120px" onclick="copyNotaryCert()">📄 Скопировать протокол</button>
-        <button class="btn btn-d" style="flex:1;min-width:120px" onclick="notaryCancel(${id})">⏹ Снять с наблюдения</button>
+        <button class="btn btn-s" style="flex:1 1 auto;min-width:120px" onclick="notaryCheckNow(${id})">🔄 Проверить сейчас</button>
+        <button class="btn btn-s" style="flex:1 1 auto;min-width:120px" onclick="copyNotaryCert()">📄 Скопировать протокол</button>
+        <button class="btn btn-d" style="flex:1 1 auto;min-width:120px" onclick="notaryCancel(${id})">⏹ Снять с наблюдения</button>
       </div>
       <div class="sec">Журнал наблюдений</div>
       <div class="lst">${(d.journal||[]).slice(0,50).map(o=>{
@@ -18361,7 +18400,7 @@ async function submitApiKeyCreate() {
     _lastApiKey = r.key;
     document.getElementById('ak-key-display').textContent = r.key;
     document.getElementById('ak-result').style.display='block';
-    document.getElementById('ak-btns').innerHTML='<button class="btn btn-p" onclick="closeModal(\'mo-apikey\');openApiKeys()" style="flex:1;width:100%">✅ Готово</button>';
+    document.getElementById('ak-btns').innerHTML='<button class="btn btn-p" onclick="closeModal(\'mo-apikey\');openApiKeys()" style="flex:1 1 auto;width:100%">✅ Готово</button>';
     toast('✅ API ключ создан');
     openApiKeys();
   } catch(e) { errEl.textContent=e.message; btn.disabled=false; btn.textContent='Создать'; }
@@ -21518,8 +21557,8 @@ function askPrompt(title, opts) {
     bg.innerHTML = '<div class="modal"><div class="modal-title">' + esc(title || 'Ввод') + '</div>'
       + fieldTag
       + '<div style="display:flex;gap:8px;margin-top:12px">'
-      + '<button class="btn btn-d" id="_apc" style="flex:1">Отмена</button>'
-      + '<button class="btn btn-p" id="_apo" style="flex:1">OK</button>'
+      + '<button class="btn btn-d" id="_apc" style="flex:1 1 auto">Отмена</button>'
+      + '<button class="btn btn-p" id="_apo" style="flex:1 1 auto">OK</button>'
       + '</div></div>';
     document.body.appendChild(bg);
     const inp = bg.querySelector('#_apf');
@@ -22425,7 +22464,7 @@ async function openWorkflowDetail(wfId, wfName) {
     let html = '';
 
     html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
-      <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
+      <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
       <button class="btn btn-r" onclick="deleteWorkflow(${wfId})" style="flex:0;padding:8px 14px;font-size:13px">🗑</button>
     </div>`;
 
