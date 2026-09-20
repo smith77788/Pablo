@@ -21553,13 +21553,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Diagnostics ──────────────────────────────────────────────────────────
     async def api_health(request: web.Request) -> web.Response:
-        """Публичный health endpoint — только статус БД, без sensitive данных."""
+        """Публичный health endpoint — только статус БД, без sensitive данных.
+
+        Текст исключения наружу НЕ отдаём: ошибки asyncpg несут в себе хост,
+        порт, имя базы и пользователя, а эндпоинт открыт без авторизации.
+        Подробности уходят в лог, наружу — факт «база недоступна».
+        """
         checks = {}
         try:
             await pool.fetchval("SELECT 1")
             checks["db"] = "ok"
-        except Exception as e:
-            checks["db"] = f"error: {e}"
+        except Exception:
+            log.exception("api_health: база недоступна")
+            checks["db"] = "error"
         checks["status"] = "ok" if checks.get("db") == "ok" else "degraded"
         return _json_resp(checks)
     app.router.add_get("/api/miniapp/sys_health", api_health)

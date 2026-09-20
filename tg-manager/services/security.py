@@ -37,15 +37,44 @@ _RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in ("true"
 _RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
 _RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "120"))
 _RATE_LIMIT_AUTH_MAX = int(os.getenv("RATE_LIMIT_AUTH_MAX", "30"))
+# Сколько ДОВЕРЕННЫХ прокси стоит перед приложением. X-Forwarded-For дописывает
+# каждый прокси справа, а клиент волен прислать сколько угодно значений слева —
+# поэтому реальный адрес берём N-м С КОНЦА, где N — число своих прокси
+# (Railway/Cloudflare — обычно 1). 0 отключает доверие к заголовку целиком.
+_TRUSTED_PROXY_HOPS = max(0, int(os.getenv("TRUSTED_PROXY_HOPS", "1") or 0))
+# Потолок числа ключей в лимитере: ключ — это user id ИЛИ адрес клиента, а
+# адресов может быть сколько угодно. Без потолка словарь растёт бесконечно.
+_RATE_LIMIT_MAX_KEYS = max(1000, int(os.getenv("RATE_LIMIT_MAX_KEYS", "20000") or 20000))
 
 # ── Rate Limiter ───────────────────────────────────────────────────────────────
 
 class _RateLimiter:
-    """In-memory sliding-window rate limiter with IP fallback."""
+    """In-memory sliding-window rate limiter with IP fallback.
+
+    Записи чистятся не только при обращении к тому же ключу: ключ — это адрес
+    клиента, и адресов может быть сколько угодно. Раньше ключ, к которому
+    больше не обращались, оставался в словаре навсегда — поток запросов с
+    меняющихся адресов надувал память процесса без ограничений. Теперь есть
+    периодическая вычистка протухших окон и жёсткий потолок числа ключей.
+    """
 
     def __init__(self) -> None:
         self._requests: dict[str, list[float]] = {}
         self._lock = asyncio.Lock()
+        self._last_sweep = 0.0
+
+    def _sweep(self, now: float, window: int) -> None:
+        """Выбросить ключи, у которых в окне не осталось ни одного запроса."""
+        cutoff = now - window
+        for k in [k for k, ts in self._requests.items()
+                  if not ts or ts[-1] <= cutoff]:
+            self._requests.pop(k, None)
+        if len(self._requests) > _RATE_LIMIT_MAX_KEYS:
+            # Всё ещё тесно: жертвуем самыми давними — у них меньше всего шансов
+            # оказаться живой сессией, а лимит для них просто начнётся заново.
+            victims = sorted(self._requests.items(), key=lambda kv: kv[1][-1])
+            for k, _ in victims[: len(self._requests) - _RATE_LIMIT_MAX_KEYS]:
+                self._requests.pop(k, None)
 
     async def check(self, key: str, max_requests: int, window: int) -> bool:
         """Return True if allowed, False if rate-limited."""
@@ -54,11 +83,17 @@ class _RateLimiter:
         async with self._lock:
             now = time.time()
             cutoff = now - window
+            # Вычистка не чаще раза в окно — стоимость размазана по запросам.
+            if now - self._last_sweep >= window:
+                self._last_sweep = now
+                self._sweep(now, window)
             reqs = self._requests.setdefault(key, [])
-            self._requests[key] = [t for t in reqs if t > cutoff]
-            if len(self._requests[key]) >= max_requests:
+            kept = [t for t in reqs if t > cutoff]
+            if len(kept) >= max_requests:
+                self._requests[key] = kept
                 return False
-            self._requests[key].append(now)
+            kept.append(now)
+            self._requests[key] = kept
             return True
 
     def get_retry_after(self, key: str, window: int) -> int:
@@ -72,18 +107,58 @@ class _RateLimiter:
 _rate_limiter = _RateLimiter()
 
 
+def _peer_ip(request: web.Request) -> str:
+    """Адрес, с которого реально пришло соединение (подделать нельзя)."""
+    try:
+        peername = request.transport.get_extra_info("peername") if request.transport else None
+    except Exception:
+        peername = None
+    if peername:
+        return str(peername[0])
+    return "unknown"
+
+
 def _client_ip(request: web.Request) -> str:
-    """Extract client IP from request (supports X-Forwarded-For)."""
+    """Адрес клиента для лимитера: X-Forwarded-For, но только доверенная часть.
+
+    Заголовок дописывается СПРАВА каждым прокси, а слева клиент может написать
+    что угодно. Раньше брали самое левое значение — то есть ровно то, что
+    полностью контролирует клиент. Любой мог слать новый X-Forwarded-For на
+    каждый запрос, получая каждый раз чистый лимит: ограничение частоты для
+    всех незалогиненных маршрутов (вход, обмен кода связывания) фактически не
+    работало, а словарь лимитера рос с каждым выдуманным адресом.
+
+    Теперь берём N-е значение С КОНЦА, где N — число собственных прокси
+    (TRUSTED_PROXY_HOPS, по умолчанию 1: Railway). Если заголовка нет, короче
+    ожидаемого или значение не похоже на адрес — откатываемся на адрес
+    соединения. При TRUSTED_PROXY_HOPS=0 заголовок игнорируется целиком.
+    """
+    if _TRUSTED_PROXY_HOPS <= 0:
+        return _peer_ip(request)
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("X-Real-Ip", "")
-    if real_ip:
-        return real_ip.strip()
-    peername = request.transport.get_extra_info("peername") if request.transport else None
-    if peername:
-        return peername[0]
-    return "unknown"
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if len(parts) >= _TRUSTED_PROXY_HOPS:
+            cand = parts[-_TRUSTED_PROXY_HOPS]
+            if _looks_like_ip(cand):
+                return cand
+    real_ip = (request.headers.get("X-Real-Ip", "") or "").strip()
+    if real_ip and _looks_like_ip(real_ip):
+        return real_ip
+    return _peer_ip(request)
+
+
+_IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def _looks_like_ip(value: str) -> bool:
+    """Грубая проверка формата адреса: мусор в ключ лимитера не пускаем."""
+    if not value or len(value) > 45:
+        return False
+    if _IPV4_RE.match(value):
+        return all(0 <= int(p) <= 255 for p in value.split("."))
+    # IPv6: допускаем только hex-группы, двоеточия и зону/встроенный IPv4.
+    return bool(re.fullmatch(r"[0-9A-Fa-f:.%]+", value)) and ":" in value
 
 
 def _user_key(request: web.Request, uid: Optional[int] = None) -> str:
