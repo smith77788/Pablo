@@ -953,7 +953,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">🤖 Мои боты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
-      <span id="bots-cnt" style="font-size:12px;color:var(--hint)"></span>
+      <span class="hdr-user" id="bots-cnt"></span>
       <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openBotAddModal()">+ Бот</button>
     </div>
   </div>
@@ -8383,12 +8383,12 @@ function updateMoreStats(d) {
 
 // ── Bots ───────────────────────────────────────────────
 const BOT_GRADS = [
-  'linear-gradient(135deg,#3b82f6,#1d4ed8)',
-  'linear-gradient(135deg,#22c55e,#15803d)',
-  'linear-gradient(135deg,#a855f7,#7c3aed)',
-  'linear-gradient(135deg,#f59e0b,#b45309)',
-  'linear-gradient(135deg,#14b8a6,#0f766e)',
-  'linear-gradient(135deg,#ef4444,#b91c1c)',
+  'linear-gradient(135deg,#60a5fa,#1d4ed8)',
+  'linear-gradient(135deg,#34d399,#15803d)',
+  'linear-gradient(135deg,#c084fc,#6d28d9)',
+  'linear-gradient(135deg,#fbbf24,#b45309)',
+  'linear-gradient(135deg,#2dd4bf,#0f766e)',
+  'linear-gradient(135deg,#f87171,#991b1b)',
 ];
 
 async function loadBots() {
@@ -8516,7 +8516,7 @@ function renderBots() {
     const active = b.is_active;
     const subs = b.subscriber_count||0;
     const sel = BOT_SEL.has(b.bot_id);
-    const handleHtml = handle ? `<div class="bot-card-lbl" style="margin-top:-2px;opacity:.75">${esc(handle)}</div>` : '';
+    const handleHtml = handle ? `<div class="bot-card-lbl" style="margin-top:-2px">${esc(handle)}</div>` : '';
     if (BOT_SEL_MODE) {
       return `<div class="bot-card ${sel?'sel':''}" onclick="toggleBotSel(${b.bot_id})">
         <div class="bot-card-ava" style="background:${grad}">${initials}</div>
