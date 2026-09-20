@@ -41,7 +41,9 @@ def test_grant_admin_submits_operation_via_bus():
     body = m.group(1)
     assert "if not uid" in body and "401" in body
     assert "owner_id=$1" in body, "скоуп по владельцу (не чужие аккаунты)"
-    assert "channel_admin_status" in body and "can_promote" in body, "должен искать промоутера"
+    # Права аккаунтов проверяются общим параллельным сканом (_scan_admin_status),
+    # он и зовёт channel_admin_status; важно, что промоутера ищут по can_promote.
+    assert "_scan_admin_status" in body and "can_promote" in body, "должен искать промоутера"
     assert 'operation_bus' in body and '"promote_all_admins"' in body, (
         "должен сабмитить операцию через operation_bus, а не инлайн"
     )

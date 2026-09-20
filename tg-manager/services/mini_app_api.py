@@ -832,6 +832,54 @@ async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
         return 0
 
 
+# Проверка прав аккаунта в чате идёт через реальное подключение к Telegram:
+# секунды в норме и до таймаута на мёртвой сессии. Последовательный обход
+# восьми аккаунтов складывал эти секунды в одну HTTP-паузу, и в худшем случае
+# (8 × 25 с) запрос гарантированно обрывался по таймауту раньше, чем успевал
+# ответить. Идём управляемо параллельно: одновременных подключений немного,
+# чтобы не расширять след флота, но общее ожидание больше не сумма, а максимум
+# по пачке.
+_ADMIN_SCAN_TIMEOUT = 25
+_ADMIN_SCAN_CONCURRENCY = max(1, int(os.getenv("ADMIN_SCAN_CONCURRENCY", "4") or 4))
+# Одновременных расчётов ёмкости аккаунта (запросы в БД). Держим ниже
+# размера пула asyncpg, чтобы оценка не забирала соединения у остальных.
+_PREFLIGHT_CONCURRENCY = max(1, int(os.getenv("PREFLIGHT_CONCURRENCY", "8") or 8))
+
+
+async def _scan_admin_status(rows: list, group: str, *,
+                             timeout: int = _ADMIN_SCAN_TIMEOUT,
+                             concurrency: int = _ADMIN_SCAN_CONCURRENCY) -> list[dict]:
+    """Права каждого аккаунта в чате, в ПОРЯДКЕ строк.
+
+    Аккаунт, который не ответил или упал, даёт пустой словарь — вызывающий
+    отличает его по отсутствию "ok". Порядок сохраняется, поэтому «первый
+    подходящий» остаётся тем же аккаунтом, что и при последовательном обходе.
+    """
+    if not rows:
+        return []
+    from services.mass_inviter_engine import channel_admin_status
+
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(r) -> dict:
+        async with sem:
+            try:
+                st = await asyncio.wait_for(
+                    channel_admin_status(r["session_str"], dict(r), group),
+                    timeout=timeout)
+                return st if isinstance(st, dict) else {}
+            except asyncio.TimeoutError:
+                log.warning("_scan_admin_status: аккаунт %s не ответил за %ss",
+                            r.get("id"), timeout)
+                return {}
+            except Exception:
+                log.debug("_scan_admin_status: аккаунт %s упал", r.get("id"),
+                          exc_info=True)
+                return {}
+
+    return list(await asyncio.gather(*(_one(r) for r in rows)))
+
+
 async def _safe_fetch(pool: asyncpg.Pool, query: str, *args) -> list:
     try:
         rows = await pool.fetch(query, *args)
@@ -7289,20 +7337,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # один проход».
             from services.flood_engine import recommended_daily_limit, _INVITE_LIMIT_CEILING
             from services import infra_memory as _im
-            per_pass, quarantined = 0, 0
-            for r in usable_rows[:200]:  # предел на случай огромного флота
-                try:
-                    if await _im.is_account_quarantined(pool, r["id"]):
-                        quarantined += 1
-                        continue
-                    if one_pass:
-                        # ёмкость одного прохода = потолок на аккаунт
-                        per_pass += _INVITE_LIMIT_CEILING
-                    else:
+
+            # Карантин и остаток лимита — это запросы в БД на КАЖДЫЙ аккаунт.
+            # Последовательно на флоте в 200 аккаунтов это сотни round-trip
+            # подряд, и экран ёмкости ждал их все. Считаем управляемо
+            # параллельно: пул asyncpg рассчитан на одновременные запросы, а
+            # число одновременных держим заметно ниже его размера, чтобы
+            # оценка не выедала соединения у остальных запросов.
+            _preflight_sem = asyncio.Semaphore(_PREFLIGHT_CONCURRENCY)
+
+            async def _capacity(r) -> tuple[int, int]:
+                """(вклад в ёмкость, 1 если аккаунт в карантине)."""
+                async with _preflight_sem:
+                    try:
+                        if await _im.is_account_quarantined(pool, r["id"]):
+                            return 0, 1
+                        if one_pass:
+                            # ёмкость одного прохода = потолок на аккаунт
+                            return _INVITE_LIMIT_CEILING, 0
                         _rec = await recommended_daily_limit(pool, int(r["id"]))
-                        per_pass += int(_rec.get("remaining") or 0)
-                except Exception:
-                    per_pass += _INVITE_LIMIT_CEILING if one_pass else 15
+                        return int(_rec.get("remaining") or 0), 0
+                    except Exception:
+                        log.debug("invite_preflight: ёмкость аккаунта %s не посчиталась",
+                                  r.get("id"), exc_info=True)
+                        return (_INVITE_LIMIT_CEILING if one_pass else 15), 0
+
+            # Потолок в 200 — на случай огромного флота.
+            parts = await asyncio.gather(*(_capacity(r) for r in usable_rows[:200]))
+            per_pass = sum(p for p, _q in parts)
+            quarantined = sum(q for _p, q in parts)
             import math as _math
             est_passes = (_math.ceil(audience / per_pass) if audience and per_pass else
                           (1 if audience and audience <= per_pass else 0))
@@ -7378,26 +7441,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not rows:
                 return _json_resp({"has_promoter": False, "has_inviter": False,
                                    "checked": 0, "usable": 0, "promoter_label": None})
-            from services.mass_inviter_engine import channel_admin_status
-            import asyncio as _aio
             has_promoter = has_inviter = False
             promoter_label = None
             checked = 0
-            for r in rows:
-                try:
-                    st = await _aio.wait_for(
-                        channel_admin_status(r["session_str"], dict(r), group), timeout=25)
-                except Exception:
-                    continue
+            for r, st in zip(rows, await _scan_admin_status(rows, group)):
                 if not st.get("ok"):
                     continue
                 checked += 1
                 if st.get("can_invite") or st.get("creator"):
                     has_inviter = True
-                if st.get("can_promote"):
+                if st.get("can_promote") and not has_promoter:
+                    # Достаточно одного — он раздаст право остальным. Берём
+                    # первого по порядку строк, как и при обходе по очереди.
                     has_promoter = True
                     promoter_label = str(r["phone"] or f"#{r['id']}")
-                    break  # достаточно одного — он раздаст право остальным
             return _json_resp({
                 "has_promoter": has_promoter,
                 "has_inviter": has_inviter,
@@ -7748,16 +7805,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "ORDER BY a.id LIMIT 8", uid) or []
             if not rows:
                 return _err("Нет доступных аккаунтов", 404)
-            from services.mass_inviter_engine import channel_admin_status
-            import asyncio as _aio
             promoter = None
             channel_id = None
-            for r in rows:
-                try:
-                    st = await _aio.wait_for(
-                        channel_admin_status(r["session_str"], dict(r), group), timeout=25)
-                except Exception:
-                    continue
+            for r, st in zip(rows, await _scan_admin_status(rows, group)):
                 if st.get("ok") and st.get("can_promote") and st.get("channel_id"):
                     promoter = r
                     channel_id = int(st["channel_id"])
