@@ -835,6 +835,29 @@ async def _safe_fetch(pool: asyncpg.Pool, query: str, *args) -> list:
         return []
 
 
+async def _apply_proxy_moves(pool: asyncpg.Pool, uid: int,
+                             moves: list[tuple[int, int]]) -> int:
+    """Переселить аккаунты на новые прокси ОДНИМ запросом. Вернуть число переехавших.
+
+    Раньше здесь был UPDATE на каждый аккаунт: на флоте в сотни аккаунтов это
+    сотни последовательных round-trip внутри одного HTTP-запроса. Пары
+    (аккаунт, прокси) уезжают в Postgres массивами и джойнятся через unnest.
+    owner_id в WHERE обязателен — чужой аккаунт переселить нельзя даже при
+    подделанном плане переезда.
+    """
+    if not moves:
+        return 0
+    accs = [int(a) for a, _p in moves]
+    pids = [int(p) for _a, p in moves]
+    rows = await pool.fetch(
+        """UPDATE tg_accounts a SET proxy_id = m.pid
+             FROM unnest($1::bigint[], $2::bigint[]) AS m(acc_id, pid)
+            WHERE a.id = m.acc_id AND a.owner_id = $3
+         RETURNING a.id""",
+        accs, pids, uid)
+    return len(rows or [])
+
+
 async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args) -> dict | None:
     try:
         row = await pool.fetchrow(query, *args)
@@ -970,25 +993,34 @@ async def _warmup_bulk_core(
                custom_channels TEXT[] DEFAULT '{}', flood_wait_count INT NOT NULL DEFAULT 0,
                last_flood_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW())"""
     )
-    started = 0
-    for acc_id in acc_ids:
-        await pool.execute(
-            """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
-               VALUES($1,$2,$3,$4,now())
-               ON CONFLICT (account_id) DO UPDATE SET niche=$3, profile_type=$4, updated_at=now()""",
-            acc_id, uid, niche, profile_type)
-        await pool.execute(
-            """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
-               VALUES($1,$2,$3,$4,$5)
-               ON CONFLICT (account_id) DO UPDATE
-               SET plan_type=$3, target_days=$4, daily_actions=$5, status='active',
-                   started_at=now(),
-                   -- Старую жалобу снимаем вместе с перезапуском: иначе экран
-                   -- показывал бы «аккаунт был забанен» на плане, который уже идёт.
-                   pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
-                   pause_notified_at=NULL, last_skip_reason=NULL, last_skip_at=NULL""",
-            uid, acc_id, plan_type, target_days, daily_actions)
-        started += 1
+    # Два запроса на ВЕСЬ пакет вместо двух на каждый аккаунт: при лимите в 500
+    # аккаунтов это было до 1000 последовательных round-trip к Postgres внутри
+    # одного HTTP-запроса — секунды ожидания и столько же захватов соединения из
+    # пула. unnest разворачивает массив id прямо в SELECT-источник INSERT.
+    # Транзакция нужна, чтобы пакет не оставался наполовину заведённым: профиль
+    # ниши без плана прогрева — мусор, который потом никто не подберёт.
+    # Дубликатов в acc_ids нет (id — первичный ключ), поэтому ON CONFLICT
+    # безопасен: одна строка не затрагивается дважды.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO account_niche_profiles(account_id, owner_id, niche, profile_type, updated_at)
+                   SELECT acc_id, $2, $3, $4, now() FROM unnest($1::bigint[]) AS acc_id
+                   ON CONFLICT (account_id) DO UPDATE SET niche=$3, profile_type=$4, updated_at=now()""",
+                acc_ids, uid, niche, profile_type)
+            done = await conn.fetch(
+                """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
+                   SELECT $1, acc_id, $3, $4, $5 FROM unnest($2::bigint[]) AS acc_id
+                   ON CONFLICT (account_id) DO UPDATE
+                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active',
+                       started_at=now(),
+                       -- Старую жалобу снимаем вместе с перезапуском: иначе экран
+                       -- показывал бы «аккаунт был забанен» на плане, который уже идёт.
+                       pause_reason=NULL, pause_detail=NULL, paused_at=NULL,
+                       pause_notified_at=NULL, last_skip_reason=NULL, last_skip_at=NULL
+                   RETURNING account_id""",
+                uid, acc_ids, plan_type, target_days, daily_actions)
+    started = len(done or [])
     return {"ok": True, "started": started, "plan_type": plan_type,
             "profile_type": profile_type, "niche": niche}
 
@@ -13762,15 +13794,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         loads = [(int(r["id"]), int(r["used"] or 0)) for r in (live or [])]
         prior = dict(loads)
         plan = plan_evacuation(acc_ids, loads)
-        moved = 0
-        for acc_id, pid in plan["moves"]:
-            try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
-                    pid, acc_id, uid)
-                moved += 1
-            except Exception:
-                log.warning("proxy_evacuate: не удалось переселить acc=%s", acc_id)
+        try:
+            moved = await _apply_proxy_moves(pool, uid, plan["moves"])
+        except Exception:
+            log.exception("proxy_evacuate: пакетный переезд не удался uid=%s", uid)
+            return _err("Не удалось переселить аккаунты", 500)
         iso = isolation_summary([p for _a, p in plan["moves"]], prior)
         return _json_resp({
             "ok": True, "moved": moved,
