@@ -3396,12 +3396,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt on" onclick="filterOps(null,this)">Все</div>
       <div class="seg-opt" onclick="filterOps('running',this)">🟢 Работают</div>
       <div class="seg-opt" onclick="filterOps('pending',this)">⏳ Ожидают</div>
+      <div class="seg-opt" onclick="filterOps('paused',this)">⏸ Пауза</div>
       <div class="seg-opt" onclick="filterOps('failed',this)">❌ Ошибки</div>
       <div class="seg-opt" onclick="filterOps('done',this)">✅ Готово</div>
     </div>
     <div style="padding:6px 0;display:flex;gap:6px">
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="pauseAllOps()" title="Приостановить все running">⏸ Пауза</button>
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Возобновить все paused">▶️ Старт</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="pauseAllOps()" title="Приостановить все ожидающие в очереди (запущенные доигрывают)">⏸ Пауза</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="resumeAllOps()" title="Вернуть в очередь все приостановленные">▶️ Старт</button>
       <button class="btn btn-r" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="clearDoneOps()" title="Удалить завершённые">🗑 Очистить</button>
     </div>
     <div style="padding:0 0 6px">
@@ -10843,6 +10844,11 @@ function explainError(msg) {
 
 // ── Operations ─────────────────────────────────────────
 let OPS_FILTER = null;
+// Подписи статусов очереди по-русски. Пустое состояние показывало сырое
+// «running»/«failed» — владелец читает интерфейс на русском.
+const OPS_STATUS_LABELS = {pending:'ожидают', running:'работают', paused:'пауза',
+                           done:'готово', failed:'ошибки', cancelled:'отменены'};
+function OPS_STATUS_RU(s) { return OPS_STATUS_LABELS[s] || s; }
 function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
 
 // ── Создать операцию: категорийный лаунчер ──────────────
@@ -10906,6 +10912,9 @@ async function loadOps() {
     // KPI cards
     const running = ops.filter(o=>o.status==='running').length;
     const pending = ops.filter(o=>o.status==='pending').length;
+    // Приостановленные считаем отдельно: после «Пауза» они уходят из «Ожидают»,
+    // и без своей плитки выглядело так, будто очередь просто испарилась.
+    const paused = ops.filter(o=>o.status==='paused').length;
     const failed = ops.filter(o=>o.status==='failed').length;
     const done = ops.filter(o=>o.status==='done').length;
     txt('opsKpi',`
@@ -10913,15 +10922,18 @@ async function loadOps() {
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--green)">${num(done)}</div><div class="kpi-lbl">Готово</div></div>
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--blue)">${num(running)}</div><div class="kpi-lbl">Работают</div></div>
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val">${num(pending)}</div><div class="kpi-lbl">Ожидают</div></div>
+      ${paused?`<div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--orange)">${num(paused)}</div><div class="kpi-lbl">Пауза</div></div>`:''}
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--red)">${num(failed)}</div><div class="kpi-lbl">Ошибки</div></div>
     `);
-    if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?'По фильтру «'+OPS_FILTER+'»':''))); return; }
+    if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?('По фильтру «'+OPS_STATUS_RU(OPS_FILTER)+'»'):''))); return; }
     txt('opsList', ops.map(o=>{
       const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
       // done не может превышать total — защита от «34/17» у старых операций.
       const dDone = o.total_items>0?Math.min(o.done_items||0,o.total_items):(o.done_items||0);
       const [bc,bl]=stb(o.status);
-      const canCancel = o.status==='pending'||o.status==='running';
+      // Приостановленную тоже можно отменить — иначе она висит в очереди, пока
+      // пользователь не возобновит ВСЮ очередь целиком.
+      const canCancel = o.status==='pending'||o.status==='running'||o.status==='paused';
       return `<div class="li" style="display:block;cursor:pointer;padding:11px 14px" onclick="openOpDetail(${o.id})">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-orange">⚙️</div>
@@ -10931,6 +10943,7 @@ async function loadOps() {
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
+            ${o.status==='paused'?`<span style="font-size:13px;color:var(--green);cursor:pointer;font-weight:500" onclick="event.stopPropagation();resumeOp(${o.id})">▶ Возобновить</span>`:''}
             ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="event.stopPropagation();cancelOp(${o.id})">Отмена</span>`:''}
             ${opCanRetry(o)?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="event.stopPropagation();retryOp(${o.id})">↺ Повтор</span>`:''}
           </div>
@@ -10970,11 +10983,26 @@ async function openOpDetail(opId) {
     if (o.status==='running') {
       html += `<div style="padding:12px 16px"><div class="prog" style="margin-bottom:8px"><div class="prog-fill" style="width:${pct}%"></div></div></div>`;
     }
-    const canControl = o.status==='pending'||o.status==='running';
-    if (canControl) {
+    // Кнопка «⏸ Приостановить» звала cancelOp — операция уходила в 'cancelled'
+    // безвозвратно, хотя подпись обещала обратимое действие. Теперь пауза — это
+    // пауза (pending → paused, возвращается «Возобновить»), а отмена названа
+    // отменой и спрашивает подтверждение. Запущенную паузить нечем: без
+    // чекпоинта пере-прогон продублировал бы уже сделанное.
+    if (o.status==='pending') {
       html += `<div style="padding:0 16px;display:flex;gap:8px">
-        <button class="btn btn-r" onclick="cancelOp(${o.id});back()" style="flex:1 1 auto">⏸ Приостановить</button>
+        <button class="btn btn-s" onclick="pauseOp(${o.id});back()" style="flex:1 1 auto">⏸ Приостановить</button>
+        <button class="btn btn-r" onclick="cancelOp(${o.id},true);back()" style="flex:1 1 auto">✕ Отменить</button>
       </div>`;
+    } else if (o.status==='paused') {
+      html += `<div style="padding:0 16px;display:flex;gap:8px">
+        <button class="btn btn-p" onclick="resumeOp(${o.id});back()" style="flex:1 1 auto">▶ Возобновить</button>
+        <button class="btn btn-r" onclick="cancelOp(${o.id},true);back()" style="flex:1 1 auto">✕ Отменить</button>
+      </div>`;
+    } else if (o.status==='running') {
+      html += `<div style="padding:0 16px;display:flex;gap:8px">
+        <button class="btn btn-r" onclick="cancelOp(${o.id},true);back()" style="flex:1 1 auto">✕ Отменить</button>
+      </div>
+      <div style="padding:6px 16px 0;font-size:12px;color:var(--hint)">Запущенную операцию можно только отменить: приостановка без точки возврата привела бы к повтору уже сделанных действий.</div>`;
     }
     if (o.status==='failed') {
       html += `<div style="padding:0 16px"><button class="btn btn-p" onclick="retryOp(${o.id});back()" style="width:100%">↺ Повторить</button></div>`;
@@ -11023,11 +11051,29 @@ async function openOpDetail(opId) {
   } catch(e) { txt('opdetBody', errHtml(e.message)); }
 }
 
-async function cancelOp(id) {
+// Отмена необратима: возобновить отменённую операцию нечем, остаётся только
+// повтор с нуля. С экрана деталей спрашиваем подтверждение (confirm=true) —
+// в списке действие точечное и подпись уже говорит «Отмена».
+async function cancelOp(id, confirm) {
+  if (confirm && !(await askConfirm('Отменить операцию? Вернуть её в очередь будет нельзя — только повторить заново.'))) return;
   try {
     await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
     toast('Операция отменена'); loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
+}
+
+async function pauseOp(id) {
+  try {
+    await api('/api/miniapp/operation/'+id+'/pause', {method:'POST'});
+    toast('⏸ Операция приостановлена — воркер её не возьмёт'); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+
+async function resumeOp(id) {
+  try {
+    await api('/api/miniapp/operation/'+id+'/resume', {method:'POST'});
+    toast('▶ Операция возвращена в очередь'); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 // Опрос статуса операции после enqueue — показывает РЕАЛЬНЫЙ итог (успех/ошибка),
 // а не только «поставлено в очередь». Для единичных действий: устраняет ощущение

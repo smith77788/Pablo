@@ -40,6 +40,12 @@ log = logging.getLogger(__name__)
 # Ключ хранится в tg_accounts.stage; подпись/эмодзи — на клиенте.
 ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "reserve"}
 
+# Статусы operation_queue, которые вправе прийти фильтром с фронта. Колонка —
+# обычный TEXT без CHECK, поэтому список живёт здесь и его сторожит тест
+# tests/test_miniapp_paused_operations.py.
+OPERATION_STATUSES = frozenset(
+    {"pending", "running", "paused", "done", "failed", "cancelled"})
+
 _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL = 30  # секунд
 # Потолок числа записей кэша ответов: ключ включает user id и query string,
@@ -3046,8 +3052,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         status_filter = request.query.get("status")
-        if status_filter and status_filter not in ("pending", "running", "done", "failed", "cancelled"):
-            status_filter = None
+        # 'paused' обязан быть в списке: «Пауза» переводит pending → paused, и без
+        # него фильтр по приостановленным молча отдавал ВСЮ очередь — человек
+        # видел список и считал, что паузы не было. Неизвестный статус тоже не
+        # глотаем: молча проигнорированный фильтр читается как сломанный фильтр.
+        if status_filter:
+            if status_filter not in OPERATION_STATUSES:
+                return _err(
+                    "Неизвестный статус операции: " + status_filter, 400)
         # err_cnt — число упавших под-элементов (каналов) для показа кнопки
         # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
         _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
@@ -3163,17 +3175,87 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("Invalid op_id", 400)
         try:
+            # 'paused' обязателен: приостановленную операцию иначе нельзя было ни
+            # отменить, ни снять поштучно — она навсегда висела в очереди, пока
+            # пользователь не возобновит ВСЮ очередь целиком.
             row = await pool.fetchrow(
                 """UPDATE operation_queue SET status='cancelled'
-                   WHERE id=$1 AND owner_id=$2 AND status IN ('pending','running')
+                   WHERE id=$1 AND owner_id=$2
+                     AND status IN ('pending','running','paused')
                    RETURNING id""",
                 op_id, uid)
             if not row:
-                return _err("Not found or already finished", 404)
+                return _err("Операция не найдена или уже завершена", 404)
             return _json_resp({"ok": True})
         except Exception as e:
             log.warning("cancel_operation op=%d uid=%d: %s", op_id, uid, e)
-            return _err("Failed to cancel", 500)
+            return _err("Не удалось отменить операцию", 500)
+
+    async def pause_operation(request: web.Request) -> web.Response:
+        """Приостановить ОДНУ операцию: pending → paused.
+
+        Раньше пауза была только на всю очередь, а на экране деталей кнопка
+        «⏸ Приостановить» звала cancel — операция уходила в 'cancelled'
+        безвозвратно, хотя подпись обещала обратимое действие.
+
+        Запущенную (running) не паузим: без чекпоинта пере-прогон продублировал
+        бы уже сделанные действия и сжёг аккаунты — та же причина, что и у
+        очереди целиком (см. pause_operations).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid op_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE operation_queue SET status='paused'
+                   WHERE id=$1 AND owner_id=$2 AND status='pending'
+                   RETURNING id""", op_id, uid)
+            if not row:
+                # Разделяем «нет такой» и «уже запущена»: пользователю важно
+                # понимать, почему кнопка не сработала.
+                cur = await _safe_fetchval(
+                    pool, "SELECT status FROM operation_queue "
+                          "WHERE id=$1 AND owner_id=$2", op_id, uid)
+                if cur is None:
+                    return _err("Операция не найдена", 404)
+                if cur == "running":
+                    return _err(
+                        "Операция уже выполняется — её можно только отменить", 409)
+                return _err(f"Операцию нельзя приостановить в статусе «{cur}»", 409)
+            return _json_resp({"ok": True, "status": "paused"})
+        except Exception as e:
+            log.warning("pause_operation op=%d uid=%d: %s", op_id, uid, e)
+            return _err("Не удалось приостановить операцию", 500)
+
+    async def resume_operation(request: web.Request) -> web.Response:
+        """Возобновить ОДНУ операцию: paused → pending (воркер подхватит)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid op_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE operation_queue SET status='pending'
+                   WHERE id=$1 AND owner_id=$2 AND status='paused'
+                   RETURNING id""", op_id, uid)
+            if not row:
+                cur = await _safe_fetchval(
+                    pool, "SELECT status FROM operation_queue "
+                          "WHERE id=$1 AND owner_id=$2", op_id, uid)
+                if cur is None:
+                    return _err("Операция не найдена", 404)
+                return _err(f"Операция не приостановлена (статус «{cur}»)", 409)
+            return _json_resp({"ok": True, "status": "pending"})
+        except Exception as e:
+            log.warning("resume_operation op=%d uid=%d: %s", op_id, uid, e)
+            return _err("Не удалось возобновить операцию", 500)
 
     async def clear_operations(request: web.Request) -> web.Response:
         """Очистить очередь: УДАЛИТЬ терминальные операции (done/failed/cancelled)
@@ -16474,6 +16556,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/operation/{op_id}", operation_status)
     app.router.add_get("/api/miniapp/operation/{op_id}/log", operation_log)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
+    app.router.add_post("/api/miniapp/operation/{op_id}/pause", pause_operation)
+    app.router.add_post("/api/miniapp/operation/{op_id}/resume", resume_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     app.router.add_post("/api/miniapp/operations/clear", clear_operations)
     app.router.add_post("/api/miniapp/operations/pause", pause_operations)
