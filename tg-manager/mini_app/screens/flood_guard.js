@@ -55,7 +55,7 @@ function _fgRender(d) {
 
   // Короткий статус-баннер: включена/выключена
   h += '<div style="padding:10px 12px;border-radius:10px;margin-bottom:10px;background:' +
-    (on ? 'rgba(52,199,89,.10)' : 'var(--bg2)') + '">' +
+    (on ? 'rgba(52,211,153,.10)' : 'var(--bg2)') + '">' +
     '<b>' + (on ? '🛡 Защита включена' : '⚪️ Защита выключена') + '</b>' +
     '<div style="font-size:12px;color:var(--hint);margin-top:3px">' +
     (on ? 'Бот под наблюдением. Обычные подписчики не затрагиваются — реагируем только на резкий всплеск.'
