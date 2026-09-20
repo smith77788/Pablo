@@ -157,6 +157,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ── Боковая навигация (drawer) ── */
 .hdr-burger{flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);cursor:pointer;color:var(--text);font-size:18px;line-height:1;user-select:none;border:1px solid var(--sep)}
 .hdr-burger:active{background:var(--sep);transform:scale(.92)}
+/* Иконочная кнопка (обновить, свернуть и т.п.). Такие кнопки жили в разметке
+   как голое эмодзи с font-size:17px и opacity:.7 — то есть как текст: без
+   фона, без формы и с областью нажатия около 17px при рекомендованных 44px.
+   Рядом с бургером-чипом 34×34 это выглядело как случайный символ, а не как
+   кнопка, и в неё было трудно попасть пальцем. Здесь тот же чип, что у
+   бургера, и честная область нажатия. */
+.icon-btn{flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);border:1px solid var(--sep);color:var(--text);font-size:16px;line-height:1;cursor:pointer;user-select:none;transition:transform .15s var(--spring),background .12s}
+.icon-btn:active{background:var(--sep);transform:scale(.92)}
+.icon-btn.sm{width:30px;height:30px;font-size:14px}
 #navOverlay{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;visibility:hidden;transition:opacity .2s;z-index:120}
 #navOverlay.on{opacity:1;visibility:visible}
 #navDrawer{position:fixed;top:0;left:0;bottom:0;width:80%;max-width:320px;background:var(--bg);border-right:1px solid var(--sep);transform:translateX(-102%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:121;display:flex;flex-direction:column;box-shadow:2px 0 20px rgba(0,0,0,.35)}
@@ -480,6 +489,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .mgmt-tile-ico>*:not(svg){position:relative;z-index:1}
 .mgmt-tile-lbl{font-size:11px;font-weight:600;color:var(--text);opacity:.9;line-height:1.22}
 .mgmt-tile-val{font-size:10px;color:var(--accent);font-weight:700;min-height:12px;line-height:1;font-variant-numeric:tabular-nums}
+/* Слот значения есть у каждой плитки, но счётчик приходит далеко не всем:
+   у пустого слота всё равно оставались min-height:12px и gap:8px — двадцать
+   точек пустоты под подписью в КАЖДОЙ плитке без счётчика. На экране «Ещё»
+   из-за этого плитки выглядели наполовину пустыми. :empty убирает слот
+   ровно тогда, когда показывать нечего, и возвращает его, как только
+   счётчик проставлен. */
+.mgmt-tile-val:empty,.qa-tile-val:empty,.dash-card-badge:empty,.kpi-chip-lbl:empty{display:none}
 /* Оттенки иконок модулей */
 .ico-teal{color:var(--c-teal)}.ico-blue{color:var(--c-blue)}.ico-violet{color:var(--c-violet)}
 .ico-amber{color:var(--c-amber)}.ico-rose{color:var(--c-rose)}.ico-emerald{color:var(--c-emerald)}
@@ -730,7 +746,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
-    <div style="flex-shrink:0;font-size:17px;cursor:pointer;opacity:.7" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
+    <div class="icon-btn" role="button" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
       <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
@@ -6799,22 +6815,29 @@ function askPairingCode() {
     if (!ov) {
       const wrap = document.createElement('div');
       wrap.innerHTML =
-        '<div id="pairOverlay" style="position:fixed;inset:0;z-index:99999;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,-apple-system,sans-serif">'
+        // Экран входа — первое, что видит пользователь вне Telegram, и он был
+        // нарисован чужой сине-серой палитрой (#0f172a, #3b82f6, #334155):
+        // синяя кнопка вместо фирменной бирюзовой, поле не как остальные поля
+        // приложения. Здесь всё переведено на токены темы и на штатные классы
+        // кнопки, поэтому вход выглядит частью приложения и следует за темой
+        // Telegram вместе с ним.
+        '<div id="pairOverlay" style="position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;padding:24px calc(16px + env(safe-area-inset-left,0px)) 24px calc(16px + env(safe-area-inset-right,0px));font-family:inherit">'
         + '<div style="max-width:360px;width:100%;text-align:center">'
-        + '<div style="font-size:44px;margin-bottom:8px">🔗</div>'
-        + '<h2 style="margin:0 0 8px;font-size:20px">Вход в Infragram</h2>'
-        + '<p style="margin:0 0 16px;font-size:14px;color:#94a3b8;line-height:1.5">'
+        + '<div style="font-size:44px;margin-bottom:10px">🔗</div>'
+        + '<h2 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-.3px">Вход в Infragram</h2>'
+        + '<p style="margin:0 0 18px;font-size:14px;color:var(--hint);line-height:1.5">'
         + 'Откройте бота Infragram в Telegram, отправьте команду <b>/pair</b> '
         + 'и введите здесь полученный код.</p>'
-        + '<input id="pairInput" autocapitalize="characters" autocomplete="off" '
-        + 'placeholder="XXXX-XXXX" maxlength="9" '
+        + '<input id="pairInput" autocapitalize="characters" autocomplete="one-time-code" '
+        + 'inputmode="latin" placeholder="XXXX-XXXX" maxlength="9" '
         + 'style="width:100%;box-sizing:border-box;padding:14px;font-size:20px;'
-        + 'text-align:center;letter-spacing:2px;border-radius:12px;border:1px solid #334155;'
-        + 'background:#1e293b;color:#e2e8f0;text-transform:uppercase;margin-bottom:12px">'
-        + '<button id="pairBtn" style="width:100%;padding:14px;font-size:16px;cursor:pointer;'
-        + 'border:none;border-radius:12px;background:#3b82f6;color:#fff;font-weight:600">'
+        + 'font-variant-numeric:tabular-nums;text-align:center;letter-spacing:2px;'
+        + 'border-radius:var(--radius);border:1px solid var(--border-input);'
+        + 'background:var(--bg2);color:var(--text);text-transform:uppercase;'
+        + 'outline:none;margin-bottom:12px;transition:border-color .2s,box-shadow .2s">'
+        + '<button id="pairBtn" class="btn btn-p" style="width:100%;padding:14px;font-size:16px">'
         + 'Войти</button>'
-        + '<div id="pairErr" style="color:#f87171;font-size:13px;margin-top:10px;min-height:18px"></div>'
+        + '<div id="pairErr" role="alert" style="color:var(--red);font-size:13px;margin-top:10px;min-height:18px;line-height:1.4"></div>'
         + '</div>'
         + '</div>';
       ov = wrap.firstElementChild;
@@ -6823,6 +6846,13 @@ function askPairingCode() {
     ov.style.display = 'flex';
     const input = ov.querySelector('#pairInput');
     const btn = ov.querySelector('#pairBtn');
+    // Поле создаётся скриптом, селектор .field input на него не действует —
+    // подсветку фокуса ставим вручную, чтобы она была фирменной бирюзовой,
+    // а не системной рамкой браузера.
+    input.onfocus = function(){ this.style.borderColor='var(--accent)';
+      this.style.boxShadow='0 0 0 3px rgba(45,212,191,.12)'; };
+    input.onblur  = function(){ this.style.borderColor='var(--border-input)';
+      this.style.boxShadow='none'; };
     ov.querySelector('#pairErr').textContent = '';
     input.value = '';
     setTimeout(function(){ try{input.focus();}catch(_){} }, 50);
@@ -7588,9 +7618,9 @@ async function loadOrganismPulse() {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-size:18px">🫀</span>
         <span style="font-size:14px;font-weight:700">Пульс</span>
-        <span style="margin-left:auto;font-size:16px;cursor:pointer;opacity:.6" onclick="loadOrganismPulse()">🔄</span>
+        <span class="icon-btn sm" role="button" aria-label="Обновить пульс" style="margin-left:auto" onclick="loadOrganismPulse()">🔄</span>
       </div>
-      <div style="font-size:12.5px;color:var(--hint);line-height:1.5">${esc(p.narrative||'')}</div>`;
+      <div style="font-size:12.5px;color:var(--hint);line-height:1.5">${esc(p.narrative) || 'Пока тихо: ничего, что требует вмешательства. Как появятся события, сводка будет здесь.'}</div>`;
     if (sugs.length) {
       html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">';
       html += sugs.map(s=>{
@@ -7608,11 +7638,27 @@ async function loadOrganismPulse() {
       }).join('');
       html += '</div>';
     }
+    // Ссылка на полный отчёт — строкой ВНУТРИ карточки. Раньше она висела
+    // отдельным центрированным текстом под карточкой: ни к чему не привязана,
+    // выровнена не как остальные ссылки-разделы (те стоят справа в .sec-row).
+    html += `<div style="border-top:1px solid var(--sep);margin-top:12px;padding-top:10px;text-align:right">
+      <span onclick="openDigest()" style="cursor:pointer;color:var(--accent);font-size:12.5px;font-weight:600">📈 Полный отчёт →</span>
+    </div>`;
     html += '</div>';
-    // Ссылка на полный Пульс-отчёт (дайджест).
-    html += `<div style="text-align:center;margin-top:10px"><span onclick="openDigest()" style="cursor:pointer;color:var(--accent);font-size:12.5px;font-weight:600">📈 Полный отчёт →</span></div>`;
     el.innerHTML = html;
-  } catch(e) { el.innerHTML = ''; }
+  } catch(e) {
+    // Раньше блок молча исчезал: `el.innerHTML = ''`. Пользователь, у которого
+    // отвалилась сеть, видел на месте пульса пустоту и не мог понять, это
+    // «всё спокойно» или «не загрузилось». Показываем причину и кнопку повтора.
+    el.innerHTML = `<div style="background:var(--bg);border:1px solid var(--sep);border-radius:16px;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:18px">🫀</span>
+        <span style="font-size:14px;font-weight:700">Пульс</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--hint);line-height:1.5">Не удалось загрузить сводку: ${esc((e && e.message) || 'нет связи с сервером')}.</div>
+      <button class="btn btn-s" style="margin-top:10px;font-size:12px;padding:6px 12px" onclick="loadOrganismPulse()">↻ Повторить</button>
+    </div>`;
+  }
 }
 
 // 📈 Пульс-отчёт (дайджест) — цельная картина проекта с трендами и действиями.
