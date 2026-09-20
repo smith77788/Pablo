@@ -373,6 +373,44 @@ async def _requeue_op_no_accounts(pool: "asyncpg.Pool", op_id: int, defer_s: int
         log_ctx=f"[requeue_no_acc op={op_id}]")
 
 
+# Сколько секунд флуд-паузы ещё имеет смысл переждать ПРЯМО В ПРОГОНЕ.
+# Telegram отдаёт FloodWait и на десятки секунд, и на часы. Короткую паузу
+# дешевле переждать на месте; длинную — нельзя: прогон держит слот
+# параллельности (один из восьми) и арендованные аккаунты всё это время, не делая
+# ничего. Флот при этом простаивает, а с введением потолка прогона такой сон ещё
+# и съедает его целиком, обрывая всю операцию.
+_FLOOD_INLINE_MAX_S = _int_env("OP_FLOOD_INLINE_MAX_SEC", 15 * 60, 30, 6 * 3600)
+
+
+async def _defer_op_for_flood(
+    pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = ""
+) -> None:
+    """Отложить операцию до конца длинной флуд-паузы, освободив слот и флот.
+
+    Отдельно от _requeue_op_no_accounts: там отсчитывается _ACCT_WAIT_MAX_MIN от
+    СОЗДАНИЯ операции и по его истечении операция проваливается. Для ожидания
+    свободных аккаунтов это верно, а для флуда — нет: пауза назначена Telegram,
+    ждать её штатно, и провалить операцию за то, что Telegram попросил подождать
+    час, было бы наказанием за соблюдение правил платформы.
+
+    done_items сбрасывается, как и на прочих путях возврата в очередь: прогресс
+    пересчитается при возобновлении (исполнитель пропустит уже взятые цели по
+    operation_log и снова их засчитает). Без сброса счётчик копился бы поверх
+    прошлого прогона — класс «done > total».
+    """
+    delay = max(1, int(wait_s))
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        "last_error=$3, scheduled_for = now() + make_interval(secs => $2) WHERE id=$1",
+        op_id, float(delay), (reason or "")[:300],
+        log_ctx=f"[defer_flood op={op_id}]")
+    log.warning(
+        "op_worker: op=%d отложена на %dс из-за длинной флуд-паузы — слот и аккаунты освобождены",
+        op_id, delay,
+    )
+
+
 # ── Адаптивный темп по времени суток + ML ─────────────────────────────────────
 # Расчёт адаптивной задержки вынесен в services/op_pacing.py (распил монолита).
 # Импортируем обратно, чтобы op_worker.get_adaptive_delay / get_adaptive_batch_delay
@@ -2112,7 +2150,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # Флот временно занят другими операциями — не проваливаем, а мягко
             # возвращаем в очередь (запустится, когда освободятся аккаунты).
             if result.get("status") == "requeue":
-                await _requeue_op_no_accounts(pool, op_id)
+                # defer_s задаётся, когда задержку назначил не дефицит флота, а
+                # внешнее ограничение (флуд-пауза Telegram). У таких возвратов
+                # свой путь: _requeue_op_no_accounts проваливает операцию, если
+                # та ждёт дольше _ACCT_WAIT_MAX_MIN от создания, а ждать час,
+                # который назначил Telegram, — штатное поведение, а не сбой.
+                _defer_s = result.get("defer_s")
+                if _defer_s:
+                    await _defer_op_for_flood(
+                        pool, op_id, int(_defer_s), result.get("reason") or "")
+                else:
+                    await _requeue_op_no_accounts(pool, op_id)
                 return
 
             # Не перезаписывать статус если операция была отменена в процессе
@@ -3300,6 +3348,23 @@ async def _exec_mass_publish(
                         )
                     except Exception:
                         log_exc_swallow(log, "mass_publish: record_flood failed")
+                    if flood_wait > _FLOOD_INLINE_MAX_S:
+                        # Длинную паузу пересиживать нельзя: прогон держал бы
+                        # слот и арендованные аккаунты часами, ничего не делая.
+                        # Откладываем операцию целиком — она возобновится, когда
+                        # пауза истечёт, и пропустит уже опубликованные каналы
+                        # (completed_targets), так что дублей не будет.
+                        await release_accounts(mp_used_acc_ids)
+                        return {
+                            "status": "requeue",
+                            "defer_s": flood_wait + 60,
+                            "reason": (
+                                f"Telegram назначил паузу {flood_wait // 60} мин — "
+                                f"операция продолжится автоматически"
+                            ),
+                            "ok": ok_count,
+                            "failed": fail_count,
+                        }
                     await asyncio.sleep(flood_wait + random.uniform(2, 8))
                     continue  # retry
                 # Non-retryable failure or second attempt failed
