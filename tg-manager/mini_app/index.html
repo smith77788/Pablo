@@ -170,7 +170,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Header ─────────────────────────────────────────────────── */
 .hdr{padding:calc(var(--safe-t) + 8px) 14px 10px;background:var(--glass);backdrop-filter:saturate(150%) blur(16px);-webkit-backdrop-filter:saturate(150%) blur(16px);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
-.back{width:32px;height:32px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text);flex-shrink:0;border:1px solid var(--border);transition:transform .15s var(--spring),opacity .12s}
+.back{width:34px;height:34px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text);flex-shrink:0;border:1px solid var(--border);transition:transform .15s var(--spring),opacity .12s}
 .back:active{opacity:.6;transform:scale(.88)}
 .hdr-title{flex:1;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-meta{text-align:right;flex-shrink:0}
@@ -216,8 +216,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .sec{padding:16px 16px 6px;font-size:11px;font-weight:700;color:var(--hint);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:6px}
 .sec-row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 6px}
 .sec-row .sec{padding:0}
-.sec-btn{font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;transition:opacity .12s}
-.sec-btn:active{opacity:.6}
+/* Ссылка раздела («Подробнее →», «Все →») — строка высотой 18px, попасть в неё
+   пальцем трудно. Отрицательные поля гасят добавленный паддинг, поэтому
+   область нажатия вырастает до 32px, а вёрстка не сдвигается ни на пиксель. */
+.sec-btn,.sec-act{font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;transition:opacity .12s;padding:7px 6px;margin:-7px -6px;margin-left:auto}
+.sec-btn:active,.sec-act:active{opacity:.6}
 
 /* ─── Cards ──────────────────────────────────────────────────── */
 .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px 16px 0}
@@ -419,7 +422,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    клон-адаптации. Часть чекбоксов по приложению спасалась инлайновым
    width:18px — то есть симптом лечили поштучно, не находя причину.
    Здесь причина снята один раз для всех. */
-.field input[type=checkbox],.field input[type=radio]{width:auto;min-width:0;padding:0;margin:0;flex:none;-webkit-appearance:auto;appearance:auto;accent-color:var(--btn);cursor:pointer}
+.field input[type=checkbox],.field input[type=radio]{width:auto;min-width:0;padding:0;margin:0;flex:none;-webkit-appearance:auto;appearance:auto;accent-color:var(--accent);cursor:pointer}
 .field-note{font-size:11px;color:var(--hint);margin-top:4px}
 .field-err{font-size:12px;color:var(--red);background:rgba(248,113,113,.08);border-radius:var(--radius);padding:7px 10px;margin-top:6px;display:none}
 /* Поле ввода внутри flex-ряда. У <input> и <select> есть СОБСТВЕННАЯ
@@ -487,11 +490,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Segmented control ──────────────────────────────────────── */
 .seg{display:flex;background:var(--bg2);border-radius:var(--radius);padding:2px;gap:2px;margin:6px 16px;border:1px solid var(--border)}
-.seg-opt{flex:1;padding:5px;text-align:center;font-size:13px;font-weight:500;color:var(--hint);cursor:pointer;border-radius:8px;transition:all .2s var(--ease)}
+.seg-opt{flex:1;padding:7px 5px;text-align:center;font-size:13px;font-weight:500;color:var(--hint);cursor:pointer;border-radius:8px;transition:all .2s var(--ease)}
 .seg-opt.on{background:var(--bg);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .seg-btn{flex:1;padding:7px 10px;text-align:center;font-size:13px;font-weight:600;color:var(--hint);cursor:pointer;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2);transition:all .2s var(--ease)}
 .seg-btn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(45,212,191,.25)}
-.mini-btn{padding:5px 10px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(45,212,191,.1);border:none;border-radius:8px;cursor:pointer;white-space:nowrap;transition:opacity .12s}
+.mini-btn{padding:8px 12px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(45,212,191,.1);border:none;border-radius:8px;cursor:pointer;white-space:nowrap;transition:opacity .12s}
 .mini-btn:active{opacity:.7}
 .kpi-mini{flex:1;background:var(--bg2);border-radius:var(--radius);padding:9px;text-align:center;border:1px solid var(--border)}
 .kpi-mini-v{font-size:18px;font-weight:700;color:var(--text)}
@@ -661,7 +664,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Filter chip row ────────────────────────────────────── */
 .filter-chips{display:flex;gap:6px;padding:4px 16px 6px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
 .filter-chips::-webkit-scrollbar{display:none}
-.chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
 /* Раскрываемая панель «Действия с аккаунтом»: явная стрелка-индикатор, чтобы
    свёрнутые кнопки не читались как «функции исчезли». */
 .acc-actions>summary{list-style:none;outline:none}
@@ -726,7 +729,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .copilot-reason{font-size:12px;color:var(--hint);line-height:1.35;margin-bottom:5px}
 .copilot-cta{font-size:12px;font-weight:600;color:var(--accent)}
 .copilot-actions{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
-.copilot-apply{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
+.copilot-apply{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;transition:transform .1s,opacity .12s}
 .copilot-apply:active{transform:scale(.95)}
 .copilot-apply:disabled{opacity:.6}
 /* Пресеты в формах ввода (шаблоны в один тап) */
@@ -1122,7 +1125,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">💬 Диалоги</div>
-    <div class="hdr-meta"><span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openAccountContacts(ACC_CONSOLE_ID)" title="Контакты аккаунта">📇</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" onclick="openAccountContacts(ACC_CONSOLE_ID)" title="Контакты аккаунта" aria-label="Контакты аккаунта">📇</span></div>
   </div>
   <div class="sub-sb"><div class="lst" id="adlgList"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
@@ -1132,7 +1135,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="achat-title">Чат</div>
-    <div class="hdr-meta"><span style="font-size:16px;cursor:pointer;opacity:.7" onclick="reloadAccountChat()" title="Обновить">🔄</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
   </div>
   <div class="sub-sb" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
     <div id="achatBody" style="flex:1;overflow-y:auto;padding:8px 12px"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1179,7 +1182,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📇 Контакты аккаунта</div>
-    <div class="hdr-meta"><span style="font-size:17px;cursor:pointer;opacity:.7" id="accContSelBtn" onclick="toggleAccContSelect()" title="Выбрать несколько">☑️</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" id="accContSelBtn" onclick="toggleAccContSelect()" title="Выбрать несколько" aria-label="Выбрать несколько">☑️</span></div>
   </div>
   <div class="sub-sb">
     <div style="padding:6px 0"><input type="text" id="accContSearch" placeholder="🔍 Поиск..." oninput="filterAccountContacts()" class="inp"></div>
@@ -1249,14 +1252,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════ -->
 <style>
-.vfilter{flex:0 0 auto;font-size:12px;padding:5px 12px;border-radius:14px;background:var(--bg2);color:var(--hint);border:1px solid var(--sep);cursor:pointer;white-space:nowrap}
+.vfilter{flex:0 0 auto;font-size:12px;padding:8px 12px;border-radius:14px;background:var(--bg2);color:var(--hint);border:1px solid var(--sep);cursor:pointer;white-space:nowrap}
 .vfilter.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 </style>
 <div class="screen" id="s-vault">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🗄 Хранилище</div>
-    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span style="font-size:17px;cursor:pointer;opacity:.75" onclick="openVaultSettings()" title="Уведомления">🔔</span></div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span class="icon-btn" role="button" onclick="openVaultSettings()" title="Уведомления" aria-label="Уведомления">🔔</span></div>
   </div>
   <div class="sub-sb">
     <div id="vaultConnect" style="display:none"></div>
@@ -1308,7 +1311,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="vchat-title">Диалог</div>
-    <div class="hdr-meta"><span style="font-size:15px;cursor:pointer;opacity:.75" onclick="downloadVaultExport('html', VAULT_CHAT)" title="Экспорт чата">⬇️</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" onclick="downloadVaultExport('html', VAULT_CHAT)" title="Экспорт чата" aria-label="Экспорт чата">⬇️</span></div>
   </div>
   <div style="display:flex;gap:6px;padding:6px 12px;overflow-x:auto;border-bottom:1px solid var(--sep)">
     <span class="vfilter on" data-f="all" onclick="setVaultFilter('all')">Все</span>
@@ -2200,7 +2203,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ PULSE DIGEST ══════════════════════ -->
 <div class="screen" id="s-digest">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📈 Пульс-отчёт</div>
-    <div style="margin-left:auto;font-size:18px;cursor:pointer;opacity:.7" onclick="openDigest()">🔄</div></div>
+    <div class="icon-btn" role="button" aria-label="Обновить" style="margin-left:auto" onclick="openDigest()">🔄</div></div>
   <div class="sub-sb">
     <div id="digestBody"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -2209,7 +2212,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ FLEET DOCTOR ══════════════════════ -->
 <div class="screen" id="s-fleetdoctor">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🩺 Диагностика флота</div>
-    <div style="margin-left:auto;font-size:18px;cursor:pointer;opacity:.7" onclick="openFleetDoctor()">🔄</div></div>
+    <div class="icon-btn" role="button" aria-label="Обновить" style="margin-left:auto" onclick="openFleetDoctor()">🔄</div></div>
   <div class="sub-sb"><div id="fleetDoctorBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
@@ -2217,10 +2220,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-chatwarmup">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">💬 Разогрев чата</div></div>
   <div class="sub-sb">
-    <div style="font-size:12.5px;color:var(--hint);line-height:1.5;margin-bottom:10px">
+    <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:10px">
       Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (LLM понимает контекст). Темп человеческий, сессии защищены.
     </div>
-    <div id="cwAiStatus" style="font-size:11.5px;line-height:1.5;margin-bottom:10px"></div>
+    <div id="cwAiStatus" style="font-size:11px;line-height:1.5;margin-bottom:10px"></div>
     <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
@@ -2228,7 +2231,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="cw-mode" data-m="engage" onclick="cwPickMode('engage')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🗣 Вовлечение</button>
       <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🌱 Оживление</button>
     </div>
-    <div id="cwModeHint" style="font-size:11.5px;color:var(--hint);margin:0 16px 8px;line-height:1.4">Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.</div>
+    <div id="cwModeHint" style="font-size:11px;color:var(--hint);margin:0 16px 8px;line-height:1.4">Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.</div>
     <input id="cwTopics" type="text" placeholder="Темы через запятую (пусто = любые)" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Интенсивность</div>
     <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
@@ -2238,7 +2241,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
       <span style="font-size:12px;color:var(--hint)">Аккаунты флота</span>
-      <span onclick="cwToggleAllAccs()" style="font-size:11.5px;color:var(--accent);cursor:pointer">выбрать все / сбросить</span>
+      <span onclick="cwToggleAllAccs()" style="font-size:11px;color:var(--accent);cursor:pointer">выбрать все / сбросить</span>
     </div>
     <div id="cwAccs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;padding-left:16px;padding-right:16px"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div style="font-size:11px;color:var(--hint);margin:0 0 10px">Ничего не выбрано = весь живой флот (до 30 аккаунтов).</div>
@@ -2648,7 +2651,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-compliance">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">✅ Комплаенс</div></div>
   <div class="sub-sb">
-    <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Выгрузить отчёт →</span></div>
+    <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()">Выгрузить отчёт →</span></div>
     <div class="lst" id="complianceStats"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Последние записи</div>
     <div class="lst" id="complianceList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3354,7 +3357,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-ops">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Диспетчер задач</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="exportOpsCSV()" title="Экспорт CSV">📥</span>
+      <span class="icon-btn" role="button" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
       <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openOpCreate()">+ Создать</button>
     </div>
   </div>
@@ -3401,9 +3404,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-contacts">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openUchAI()" title="AI Ассистент">🤖</span>
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="toggleContactSelect()" title="Выбор" id="contactSelectBtn">☑️</span>
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="openContactStats()" title="Статистика">📊</span>
+      <span class="icon-btn" role="button" onclick="openUchAI()" title="AI Ассистент" aria-label="AI Ассистент">🤖</span>
+      <span class="icon-btn" role="button" onclick="toggleContactSelect()" title="Выбор" aria-label="Выбор" id="contactSelectBtn">☑️</span>
+      <span class="icon-btn" role="button" onclick="openContactStats()" title="Статистика" aria-label="Статистика">📊</span>
     </div>
   </div>
   <div class="sub-sb">
@@ -3519,8 +3522,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-contactdetail">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cdTitle">Контакт</div>
     <div class="hdr-meta" style="display:flex;gap:6px">
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="editContact()" title="Редактировать">✏️</span>
-      <span style="font-size:17px;cursor:pointer;opacity:.7" onclick="toggleContactFavorite()" title="Избранное" id="cdFavBtn">⭐</span>
+      <span class="icon-btn" role="button" onclick="editContact()" title="Редактировать" aria-label="Редактировать">✏️</span>
+      <span class="icon-btn" role="button" onclick="toggleContactFavorite()" title="Избранное" id="cdFavBtn" aria-label="Избранное">⭐</span>
     </div>
   </div>
   <div class="sub-sb" id="cdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3736,7 +3739,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
         <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
-        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div>
+        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
       </div>
       <div class="field" style="margin-bottom:12px">
         <label>Задержка между постами</label>
@@ -4214,7 +4217,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:8px 16px">
       <div class="preset-row" id="qpPresetRow"></div>
       <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
-      <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div></div>
+      <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div></div>
     </div>
     <div class="sec">Выберите каналы</div>
     <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4279,7 +4282,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec">Популярные ключевые слова</div>
     <div class="lst" id="seoKeywords"></div>
-    <div class="sec" style="margin-top:8px">AI SEO-предложения <span class="sec-act" onclick="applySeoAll()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Применить всё →</span></div>
+    <div class="sec" style="margin-top:8px">AI SEO-предложения <span class="sec-act" onclick="applySeoAll()">Применить всё →</span></div>
     <div class="lst" id="seoSuggestions"></div>
     <div class="sec" style="margin-top:8px">Переоптимизация ботов
       <label style="float:right;font-size:12px;color:var(--hint);cursor:pointer">
@@ -6297,7 +6300,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до Spintax</div>
       <input type="text" id="cmpNameFb" maxlength="32" placeholder="Если имени нет, писать: друг">
       <div class="field-note">Чем заменить {name}, когда у получателя нет ни имени, ни ника</div>
-      <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--btn)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--btn)">📝 Вставить шаблон</a></div>
+      <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--accent)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
     <div class="field">
@@ -6481,7 +6484,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="lst" id="netNodesList"></div>
       <div class="lst" id="netEdgesList" style="margin-top:8px"></div>
     </div>
-    <div class="sec" style="margin-top:12px">🔁 Кросспостинг <span class="sec-act" onclick="runCrosspost()" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Прогнать →</span></div>
+    <div class="sec" style="margin-top:12px">🔁 Кросспостинг <span class="sec-act" onclick="runCrosspost()">Прогнать →</span></div>
     <div class="lst" id="crosspostList" style="padding:0 16px"><div style="font-size:12px;color:var(--hint)">Правила создаются при развёртывании связки с ребром «кросспостинг».</div></div>
   </div>
 </div>
@@ -7673,7 +7676,7 @@ async function loadOnboarding() {
     return `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--sep)">
       <div style="font-size:15px;line-height:1.4;width:16px;text-align:center;flex:0 0 auto">${mark}</div>
       <div style="flex:1;min-width:0">
-        <div style="font-size:13.5px;font-weight:600;${s.done?'opacity:.6':''}">${esc(s.title)}${opt}</div>
+        <div style="font-size:13px;font-weight:600;${s.done?'opacity:.6':''}">${esc(s.title)}${opt}</div>
         ${s.done?'':`<div style="font-size:12px;color:var(--hint);line-height:1.4;margin-top:2px">${esc(s.hint)}</div>`}
       </div>
       ${cta}
@@ -7704,7 +7707,7 @@ async function loadOrganismPulse() {
         <span style="font-size:14px;font-weight:700">Пульс</span>
         <span class="icon-btn sm" role="button" aria-label="Обновить пульс" style="margin-left:auto" onclick="loadOrganismPulse()">🔄</span>
       </div>
-      <div style="font-size:12.5px;color:var(--hint);line-height:1.5">${esc(p.narrative) || 'Пока тихо: ничего, что требует вмешательства. Как появятся события, сводка будет здесь.'}</div>`;
+      <div style="font-size:12px;color:var(--hint);line-height:1.5">${esc(p.narrative) || 'Пока тихо: ничего, что требует вмешательства. Как появятся события, сводка будет здесь.'}</div>`;
     if (sugs.length) {
       html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">';
       html += sugs.map(s=>{
@@ -7712,7 +7715,7 @@ async function loadOrganismPulse() {
         return `<div style="border-left:3px solid ${sv.c};background:var(--bg2);border-radius:0 10px 10px 0;padding:9px 12px">
           <div style="display:flex;align-items:flex-start;gap:6px">
             <div style="flex:1">
-              <div style="font-size:13.5px;font-weight:600">${sv.e} ${esc(s.title)}</div>
+              <div style="font-size:13px;font-weight:600">${sv.e} ${esc(s.title)}</div>
               <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
             </div>
             <span onclick="dismissPulse('${esc(s.id)}')" style="cursor:pointer;color:var(--hint);font-size:13px;padding:2px">✕</span>
@@ -7726,7 +7729,7 @@ async function loadOrganismPulse() {
     // отдельным центрированным текстом под карточкой: ни к чему не привязана,
     // выровнена не как остальные ссылки-разделы (те стоят справа в .sec-row).
     html += `<div style="border-top:1px solid var(--sep);margin-top:12px;padding-top:10px;text-align:right">
-      <span onclick="openDigest()" style="cursor:pointer;color:var(--accent);font-size:12.5px;font-weight:600">📈 Полный отчёт →</span>
+      <span onclick="openDigest()" style="cursor:pointer;color:var(--accent);font-size:12px;font-weight:600">📈 Полный отчёт →</span>
     </div>`;
     html += '</div>';
     el.innerHTML = html;
@@ -7739,7 +7742,7 @@ async function loadOrganismPulse() {
         <span style="font-size:18px">🫀</span>
         <span style="font-size:14px;font-weight:700">Пульс</span>
       </div>
-      <div style="font-size:12.5px;color:var(--hint);line-height:1.5">Не удалось загрузить сводку: ${esc((e && e.message) || 'нет связи с сервером')}.</div>
+      <div style="font-size:12px;color:var(--hint);line-height:1.5">Не удалось загрузить сводку: ${esc((e && e.message) || 'нет связи с сервером')}.</div>
       <button class="err-retry" onclick="loadOrganismPulse()">↺ Повторить</button>
     </div>`;
   }
@@ -7761,7 +7764,7 @@ async function openDigest() {
     const d = await api('/api/miniapp/organism/digest');
     let h = `<div style="background:var(--bg2);border-radius:14px;padding:14px 16px;margin-bottom:12px">
       <div style="font-size:15px;font-weight:700;line-height:1.4">${esc(d.headline||'')}</div>`;
-    if (d.narrative) h += `<div style="font-size:12.5px;color:var(--hint);margin-top:8px;line-height:1.5">${esc(d.narrative)}</div>`;
+    if (d.narrative) h += `<div style="font-size:12px;color:var(--hint);margin-top:8px;line-height:1.5">${esc(d.narrative)}</div>`;
     if (!d.has_prev) h += `<div style="font-size:11px;color:var(--hint);margin-top:8px;opacity:.7">Тренды появятся со следующего отчёта.</div>`;
     h += '</div>';
     (d.sections||[]).forEach(sec=>{
@@ -7771,9 +7774,9 @@ async function openDigest() {
           <span style="font-size:14px;font-weight:600">${s.value}${esc(s.suffix||'')}${_digTrend(s.trend)}</span>
         </div>`).join('');
       h += `<div style="background:var(--bg);border:1px solid var(--sep);border-radius:12px;padding:10px 14px;margin-bottom:10px">
-        <div style="font-size:13.5px;font-weight:700;margin-bottom:4px">${esc(sec.title)}</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${esc(sec.title)}</div>
         ${stats}
-        ${sec.note?`<div style="font-size:11.5px;color:var(--hint);margin-top:6px;line-height:1.4">${esc(sec.note)}</div>`:''}
+        ${sec.note?`<div style="font-size:11px;color:var(--hint);margin-top:6px;line-height:1.4">${esc(sec.note)}</div>`:''}
       </div>`;
     });
     const recs = d.recommendations||[];
@@ -7783,7 +7786,7 @@ async function openDigest() {
       h += recs.map(s=>{
         const sv = ORG_SEV[s.severity]||ORG_SEV.info;
         return `<div style="border-left:3px solid ${sv.c};background:var(--bg2);border-radius:0 10px 10px 0;padding:9px 12px">
-          <div style="font-size:13.5px;font-weight:600">${sv.e} ${esc(s.title)}</div>
+          <div style="font-size:13px;font-weight:600">${sv.e} ${esc(s.title)}</div>
           <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
           <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
@@ -7829,7 +7832,7 @@ async function cwLoadAccounts(){
   try{
     const r=await api('/api/miniapp/chatwarmup/accounts'); CW_ACC_ALL=r.accounts||[];
     if(!CW_ACC_ALL.length){el.innerHTML='<span style="font-size:12px;color:var(--hint)">Нет живых аккаунтов</span>';return;}
-    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" style="font-size:11.5px;padding:5px 10px;border-radius:14px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;border:1px solid transparent">${esc(a.label)}</span>`).join('');
+    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" style="font-size:11px;padding:5px 10px;border-radius:14px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;border:1px solid transparent">${esc(a.label)}</span>`).join('');
   }catch(e){el.innerHTML=errHtml(e.message,'cwLoadAccounts()');}
 }
 function _cwChipStyle(el,on){el.style.background=on?'var(--accent-soft-2)':'rgba(255,255,255,.06)';el.style.borderColor=on?'var(--accent)':'transparent';}
@@ -7907,20 +7910,20 @@ async function fleetDoctorLoad(){
     h+='</div>';
     // Конфиг + залипшие.
     const tg=d.config&&d.config.telethon_ready;
-    if(tg===false) h+='<div style="background:rgba(239,68,68,.10);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12.5px;color:var(--red)">⛔ TG_API_ID / TG_API_HASH не заданы — ни один аккаунт не подключится. Укажите их в переменных окружения.</div>';
+    if(tg===false) h+='<div style="background:rgba(239,68,68,.10);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--red)">⛔ TG_API_ID / TG_API_HASH не заданы — ни один аккаунт не подключится. Укажите их в переменных окружения.</div>';
     // Транспорт: как аккаунты выходят в сеть (частый корень «подключение падает»).
     const tr=d.transport||{};
     if(tr.total){
       const warn=(tr.direct_only>0 && !tr.cf_relay_configured && !tr.ipv6_configured && !tr.global_proxy);
       h+=`<div style="background:${warn?'rgba(245,158,11,.10)':'var(--bg)'};border:1px solid var(--sep);border-radius:12px;padding:10px 14px;margin-bottom:10px">
         <div style="font-size:13px;font-weight:700;margin-bottom:4px">🌐 Транспорт (выход в сеть)</div>
-        <div style="font-size:12.5px;color:var(--hint);line-height:1.6">
+        <div style="font-size:12px;color:var(--hint);line-height:1.6">
           Со своим прокси: <b style="color:${tr.with_proxy?'var(--green)':'var(--hint)'}">${tr.with_proxy||0}</b> ·
           через CF-релей: <b>${tr.with_relay||0}</b> ·
           только прямой (host-IP): <b style="color:${warn?'var(--orange)':'inherit'}">${tr.direct_only||0}</b><br>
           CF-релей: ${tr.cf_relay_configured?'✅':'—'} · IPv6: ${tr.ipv6_configured?'✅':'—'} · глоб. прокси: ${tr.global_proxy?'✅':'—'}
         </div>
-        ${warn?'<div style="font-size:11.5px;color:var(--orange);margin-top:6px;line-height:1.4">⚠️ У аккаунтов нет стабильного выходного IP. На общем datacenter-IP импортированные сессии падают в подключении/AUTH_KEY_DUPLICATED. Назначьте прокси или настройте CF-релей/IPv6.</div>':''}
+        ${warn?'<div style="font-size:11px;color:var(--orange);margin-top:6px;line-height:1.4">⚠️ У аккаунтов нет стабильного выходного IP. На общем datacenter-IP импортированные сессии падают в подключении/AUTH_KEY_DUPLICATED. Назначьте прокси или настройте CF-релей/IPv6.</div>':''}
       </div>`;
     }
     const st=d.stuck||{};
@@ -7930,8 +7933,8 @@ async function fleetDoctorLoad(){
     if(errs.length){
       h+='<div class="sec" style="margin-top:4px">Последние ошибки операций</div>';
       h+=errs.map(e=>`<div style="background:var(--bg2);border-radius:10px;padding:8px 12px;margin-bottom:6px">
-        <div style="font-size:12.5px;font-weight:600">${esc(e.op||'')}</div>
-        <div style="font-size:11.5px;color:var(--red);margin-top:2px;line-height:1.4">${esc(e.error||'')}</div></div>`).join('');
+        <div style="font-size:12px;font-weight:600">${esc(e.op||'')}</div>
+        <div style="font-size:11px;color:var(--red);margin-top:2px;line-height:1.4">${esc(e.error||'')}</div></div>`).join('');
     }
     el.innerHTML=h;
   }catch(e){ el.innerHTML=errHtml(e.message,'fleetDoctorLoad()'); }
@@ -11240,7 +11243,7 @@ function buildFunnelDetail(d) {
             ${isLast?'':'<div class="ffstep-tail"></div>'}
           </div>
           <div class="ffstep-body">
-            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''} <span style="color:var(--btn);cursor:pointer;margin-left:8px" onclick="editFunnelStep(${s.id})">✏️ изменить</span>${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
+            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''} <span style="color:var(--accent);cursor:pointer;margin-left:8px" onclick="editFunnelStep(${s.id})">✏️ изменить</span>${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
             ${statLine}
             <div class="ffstep-text">${esc((s.message_text||'').substring(0,120))}${(s.message_text||'').length>120?'…':''}</div>
             ${s.button_text?`<div style="margin-top:6px"><span class="badge b-bl">🔗 ${esc(s.button_text)}</span></div>`:''}
@@ -12134,7 +12137,7 @@ async function loadProxies() {
         </div>
         <div class="li-right">
           <span title="Резервный прокси" style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
-          <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
+          <span class="icon-btn sm" role="button" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
           <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
         </div>
       </div>`;
@@ -12764,7 +12767,7 @@ function renderProxyPoolList(items) {
       </div>
       <div class="li-right">
         <span style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})" title="Резервный">${p.is_backup?'🛟':'⚪'}</span>
-        <span style="font-size:17px;cursor:pointer;padding:4px" onclick="checkProxy(${p.id},this)">🔄</span>
+        <span class="icon-btn sm" role="button" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
         <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
       </div>
     </div>`;
@@ -21658,12 +21661,12 @@ function showPaywall(msg) {
   if (!el) { el = document.createElement('div'); el.id='paywallSheet'; document.body.appendChild(el); }
   const m = (msg||'').trim();
   const extra = (m && !/подписк/i.test(m))
-    ? `<div style="font-size:12.5px;color:var(--hint);background:var(--bg);border:1px solid var(--sep);border-radius:10px;padding:8px 10px;margin-bottom:12px">${esc(m)}</div>` : '';
+    ? `<div style="font-size:12px;color:var(--hint);background:var(--bg);border:1px solid var(--sep);border-radius:10px;padding:8px 10px;margin-bottom:12px">${esc(m)}</div>` : '';
   el.style.cssText = 'position:fixed;inset:0;z-index:9000;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.55);animation:fadeIn .15s ease';
   el.innerHTML = `<div style="background:var(--bg2);border-top:1px solid var(--border);border-radius:22px 22px 0 0;width:100%;max-width:460px;padding:18px 18px calc(18px + var(--safe-b));box-shadow:var(--shadow-lg)">
     <div style="width:38px;height:4px;border-radius:2px;background:var(--sep);margin:0 auto 14px"></div>
     <div style="font-size:18px;font-weight:750;letter-spacing:-.01em;margin-bottom:6px">🔓 Откройте полный доступ</div>
-    <div style="font-size:13.5px;color:var(--hint);line-height:1.55;margin-bottom:14px">Массовые действия, рост, автоматизация и приоритетная скорость — в подписке. Оформите доступ и запускайте без лимитов.</div>
+    <div style="font-size:13px;color:var(--hint);line-height:1.55;margin-bottom:14px">Массовые действия, рост, автоматизация и приоритетная скорость — в подписке. Оформите доступ и запускайте без лимитов.</div>
     ${extra}
     <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="closePaywall();try{openBilling()}catch(_){}">Оформить подписку</button>
     <button class="btn btn-s" style="width:100%" onclick="closePaywall()">Позже</button>

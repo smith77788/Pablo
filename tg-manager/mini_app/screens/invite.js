@@ -209,7 +209,7 @@ async function openMassInvite() {
     // чекбокс вместо перехода.
     wrap.innerHTML = accs.map(a=>`<div style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:13px">
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0">
-        <input type="checkbox" value="${a.id}" style="accent-color:var(--btn)">
+        <input type="checkbox" value="${a.id}" style="accent-color:var(--accent)">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.first_name||a.phone)} <span style="color:var(--hint)">${a.username?'@'+esc(a.username):''}</span>${riskBadge(a)}</span>
       </label>
       <span onclick="openInviteAccount(${a.id})" title="Лимит, пауза и риск этого аккаунта" style="color:var(--accent);cursor:pointer;padding:0 4px;flex:none">ⓘ</span>
