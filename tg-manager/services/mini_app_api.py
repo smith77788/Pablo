@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import json as _json  # модульный алиас: ряд эндпоинтов используют _json без локального import
 import logging
@@ -40,6 +41,10 @@ ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "re
 
 _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL = 30  # секунд
+# Потолок числа записей кэша ответов: ключ включает user id и query string,
+# так что без потолка словарь растёт с каждым новым пользователем/набором
+# параметров и держит тела ответов в памяти до перезапуска процесса.
+_CACHE_MAX_ENTRIES = 512
 
 # Инлайн-миграции схемы (self-heal при старте mini_app через on_startup).
 # Единый источник истины: применяются в проде _apply_inline_migrations, а в
@@ -340,36 +345,113 @@ INLINE_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
 ]
 
+# Заголовки, которые НЕЛЬЗЯ переносить из снимка в новый ответ: их считает сам
+# aiohttp под конкретное соединение. Перенос Content-Length/Transfer-Encoding
+# ломает кадрирование ответа.
+_CACHE_SKIP_HEADERS = {
+    "content-length", "content-type", "transfer-encoding",
+    "date", "server", "connection", "keep-alive",
+}
+
+
+def _cache_snapshot(resp: Any) -> tuple | None:
+    """Снимок ответа для кэша: (status, body, content_type, charset, headers).
+
+    Кладём в кэш ДАННЫЕ, а не объект ``web.Response``. Один и тот же объект
+    ответа нельзя отдать дважды: aiohttp при первой отдаче выставляет ему
+    ``_eof_sent``, и на втором запросе ``prepare()`` возвращает None, тело не
+    пишется — клиент просто ВИСНЕТ до таймаута. Кэшируется только обычный
+    ``web.Response`` с готовым телом и статусом 200: стримы (SSE) и ошибки
+    кэшировать нельзя — 401/500 залипли бы на весь TTL.
+    """
+    if not isinstance(resp, web.Response) or resp.status != 200:
+        return None
+    body = resp.body
+    if not isinstance(body, (bytes, bytearray)):
+        return None  # StreamResponse / file sender / пустое тело
+    headers = {
+        k: v for k, v in resp.headers.items()
+        if k.lower() not in _CACHE_SKIP_HEADERS
+    }
+    return (resp.status, bytes(body), resp.content_type, resp.charset, headers)
+
+
+def _cache_replay(snap: tuple) -> web.Response:
+    """Собрать НОВЫЙ ответ из снимка — каждый запрос получает свой объект."""
+    status, body, content_type, charset, headers = snap
+    return web.Response(
+        body=body, status=status, content_type=content_type,
+        charset=charset, headers=headers,
+    )
+
+
+def _cache_prune(now: float, max_ttl: float = _CACHE_TTL) -> None:
+    """Выбросить протухшее и, если всё ещё тесно, самое старое.
+
+    Ключ кэша включает user id и query string, поэтому без вычистки словарь рос
+    бы неограниченно (по записи на каждого пользователя × каждый набор
+    параметров) и удерживал тела ответов в памяти процесса навсегда.
+    """
+    for k in [k for k, (ts, _) in _cache.items() if now - ts >= max_ttl]:
+        _cache.pop(k, None)
+    if len(_cache) > _CACHE_MAX_ENTRIES:
+        for k, _ in sorted(_cache.items(), key=lambda kv: kv[1][0])[
+            : len(_cache) - _CACHE_MAX_ENTRIES
+        ]:
+            _cache.pop(k, None)
+
+
 def _cached(key: str, ttl: int = _CACHE_TTL):
-    """Декоратор для кэширования результатов."""
+    """Кэш ОБЩИХ (не привязанных к пользователю) ответов под фиксированным ключом.
+
+    Ключ не содержит user id — применять только там, где ответ одинаков для
+    всех. Для пользовательских данных есть _cached_user.
+    """
     def wrapper(fn):
+        @functools.wraps(fn)
         async def wrapped(*args, **kwargs):
             now = time.time()
-            if key in _cache and now - _cache[key][0] < ttl:
-                return _cache[key][1]
+            hit = _cache.get(key)
+            if hit and now - hit[0] < ttl:
+                return _cache_replay(hit[1])
             result = await fn(*args, **kwargs)
-            _cache[key] = (now, result)
+            snap = _cache_snapshot(result)
+            if snap is not None:
+                _cache[key] = (now, snap)
+                _cache_prune(now, ttl)
             return result
         return wrapped
     return wrapper
 
+
 def _cached_user(ttl: int = _CACHE_TTL):
-    """Декоратор для кэширования результатов по user ID."""
+    """Кэш ответа по user id И параметрам запроса.
+
+    В ключ обязательно входит query string: `bots`/`channels` принимают
+    limit/offset, и без этого вторая страница отдавала бы закэшированную первую.
+    """
     def wrapper(fn):
+        @functools.wraps(fn)
         async def wrapped(*args, **kwargs):
             request = args[0] if args else kwargs.get('request')
-            uid = None
-            if request:
-                uid = _get_uid(request)
-            if uid:
-                key = f"{fn.__name__}:{uid}"
-                now = time.time()
-                if key in _cache and now - _cache[key][0] < ttl:
-                    return _cache[key][1]
-                result = await fn(*args, **kwargs)
-                _cache[key] = (now, result)
-                return result
-            return await fn(*args, **kwargs)
+            uid = _get_uid(request) if request is not None else None
+            if not uid:
+                return await fn(*args, **kwargs)
+            try:
+                qs = request.query_string or ""
+            except Exception:
+                qs = ""
+            key = f"{fn.__name__}:{uid}:{qs}"
+            now = time.time()
+            hit = _cache.get(key)
+            if hit and now - hit[0] < ttl:
+                return _cache_replay(hit[1])
+            result = await fn(*args, **kwargs)
+            snap = _cache_snapshot(result)
+            if snap is not None:
+                _cache[key] = (now, snap)
+                _cache_prune(now, ttl)
+            return result
         return wrapped
     return wrapper
 
