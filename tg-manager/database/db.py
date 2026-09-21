@@ -481,7 +481,81 @@ async def create_pool() -> asyncpg.Pool:
         if failed and _strict:
             raise SchemaMigrationError(
                 f"SCHEMA_STRICT: миграции с ошибками: {', '.join(failed_files[:30])}")
+
+        await verify_vault_key(conn, strict=_strict)
     return pool
+
+
+# Канарейка хранилища: строка, зашифрованная тем же ключом, что и секреты.
+_VAULT_CANARY_PLAIN = "infragram-vault-canary-v1"
+
+
+async def verify_vault_key(conn, *, strict: bool = False) -> str:
+    """Проверить на старте, что ключ шифрования тот же, что и раньше.
+
+    Все секреты — строки сессий, прокси, токены ботов, ключи SMM-панелей —
+    лежат зашифрованными одним ключом. Если ключ сменился, расшифровка падает
+    не на старте, а при первом обращении к каждой строке: аккаунты по одному
+    перестают подключаться, прокси «не работают», и в логе видно только
+    троттленное предупреждение из token_vault. Весь флот тихо умирает, а
+    причина выглядит как отказ Telegram.
+
+    Сменить ключ незаметно особенно легко, когда TOKEN_ENCRYPTION_KEY не задан:
+    тогда ключ выводится из токена бота, и обычная ротация токена бота —
+    операция, к шифрованию отношения не имеющая, — обесценивает всё хранилище.
+
+    Поэтому при первом старте рядом с секретами сохраняется канарейка,
+    зашифрованная тем же ключом, а каждый следующий старт её расшифровывает.
+    Возвращает 'ok', 'initialized', 'changed' или 'skipped'.
+    """
+    from services.token_vault import decrypt_token, encrypt_token
+
+    # Таблицу заводит schema_v219_vault_key_check.sql. Здесь её не создаём:
+    # таблица, появляющаяся при первом обращении, не оставляет следа в схеме —
+    # перестали звать создателя, и раздел молча исчез.
+    try:
+        row = await conn.fetchrow("SELECT canary FROM vault_key_check WHERE id=1")
+    except Exception:
+        # Таблицы нет или база недоступна — это не повод не стартовать.
+        log.warning("vault_key_check: проверка ключа шифрования не выполнена", exc_info=True)
+        return "skipped"
+
+    # Дальше работает шифрование. Самопроверка старта не имеет права ронять
+    # процесс собственной поломкой — отсутствием библиотеки, отказом записи, —
+    # поэтому всё, что не является самим несовпадением ключа, лишь помечается.
+    try:
+        if row is None:
+            await conn.execute(
+                "INSERT INTO vault_key_check(id, canary) VALUES(1, $1) "
+                "ON CONFLICT (id) DO NOTHING",
+                encrypt_token(_VAULT_CANARY_PLAIN),
+            )
+            log.info("vault_key_check: канарейка ключа шифрования сохранена")
+            return "initialized"
+        matches = decrypt_token(row["canary"]) == _VAULT_CANARY_PLAIN
+    except Exception:
+        log.warning("vault_key_check: проверка ключа шифрования не выполнена", exc_info=True)
+        return "skipped"
+
+    if matches:
+        return "ok"
+
+    log.error(
+        "КЛЮЧ ШИФРОВАНИЯ ИЗМЕНИЛСЯ. Всё, что было зашифровано прежним ключом, "
+        "сейчас нечитаемо: строки сессий (tg_accounts, booster_sessions), "
+        "прокси (user_proxies), токены ботов (bot_warehouse), ключи SMM-панелей "
+        "(smm_panels). Аккаунты будут по одному переставать подключаться, и "
+        "выглядеть это будет как отказ Telegram. Верните прежний "
+        "TOKEN_ENCRYPTION_KEY — данные при этом не теряются, они просто "
+        "зашифрованы старым ключом. Если ключ сменён намеренно, перешифруйте "
+        "секреты старым ключом на новый и обновите строку vault_key_check. "
+        "Частая причина: TOKEN_ENCRYPTION_KEY не задан, ключ выводится из "
+        "токена бота, и токен бота ротировали."
+    )
+    if strict:
+        raise SchemaMigrationError(
+            "ключ шифрования не совпадает с тем, которым зашифрованы секреты")
+    return "changed"
 
 
 # ── Performance Helpers ────────────────────────────────────────────────────
