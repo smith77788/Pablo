@@ -26,6 +26,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.utils.event_status import mark_handled_error
 from database import db
 from services.logger import log_exc_swallow
+from services.proxy_hygiene import proxy_display, proxy_plain_url
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
@@ -218,7 +219,7 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             else:
                 status = "❓"
 
-            label = row["label"] or row["proxy_url"][:30]
+            label = proxy_display(row["proxy_url"], row["label"])
             ptype = row["proxy_type"] or "socks5"
             lat = f" {row['latency_avg_ms']}ms" if row.get("latency_avg_ms") else ""
             geo = ""
@@ -551,7 +552,10 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
     )
 
-    tasks = [_check_proxy_alive(r["proxy_url"]) for r in rows]
+    # proxy_url зашифрован: шифротекст в ProxyConnector.from_url бросает, и
+    # «проверить все» объявляла мёртвыми ВСЕ прокси. Ниже стоит порог
+    # _DEAD_THRESHOLD=3, то есть три таких проверки гасили весь пул владельца.
+    tasks = [_check_proxy_alive(proxy_plain_url(r["proxy_url"])) for r in rows]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     ok_count = 0
@@ -571,7 +575,7 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 alive = False
                 latency_ms = None
 
-            label = row["label"] or row["proxy_url"][:30]
+            label = proxy_display(row["proxy_url"], row["label"])
             if alive:
                 ok_count += 1
                 # Classify speed: slow > 3000ms, normal otherwise
@@ -694,8 +698,8 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     updated = 0
     lines = ["🌍 <b>Гео прокси</b>\n"]
     for row in rows:
-        geo = await _detect_proxy_geo(row["proxy_url"])
-        label = html.escape(row["label"] or row["proxy_url"][:30])
+        geo = await _detect_proxy_geo(proxy_plain_url(row["proxy_url"]))
+        label = html.escape(proxy_display(row["proxy_url"], row["label"]))
         if geo:
             country = geo.get("geo_country") or "?"
             city = geo.get("geo_city") or "?"
@@ -832,7 +836,7 @@ async def cb_proxy_delete(
         )
         return
 
-    label = html.escape(row["label"] or row["proxy_url"])
+    label = html.escape(proxy_display(row["proxy_url"], row["label"]))
     await callback.message.edit_text(
         f"🗑 Прокси <code>{label}</code> удалён.",
         parse_mode="HTML",

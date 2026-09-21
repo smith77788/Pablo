@@ -53,6 +53,38 @@ def mask_proxy_url(url) -> str:
     return re.sub(r"(://)[^@/]+@", r"\1***@", s)
 
 
+def proxy_plain_url(proxy_url) -> str:
+    """Адрес прокси в открытом виде из того, что лежит в базе.
+
+    `user_proxies.proxy_url` хранится зашифрованным (token_vault). Всё, что
+    подключается к прокси или разбирает его адрес, обязано пройти через
+    расшифровку: `ProxyConnector.from_url` на строке «ENC:…» бросает, и прокси
+    оказывается «мёртвым», хотя он жив. Для старых незашифрованных строк
+    decrypt_token — passthrough, так что вызывать можно всегда.
+    """
+    if not proxy_url:
+        return ""
+    from services.token_vault import decrypt_token
+
+    return decrypt_token(str(proxy_url))
+
+
+def proxy_display(proxy_url, label=None) -> str:
+    """Как показать прокси человеку: свой ярлык, иначе адрес без логина-пароля.
+
+    Раньше запасным вариантом была нарезка `proxy_url[:30]` прямо из базы —
+    то есть кусок ШИФРОТЕКСТА: пользователь видел «ENC:8f2a…» вместо адреса и
+    не мог отличить один прокси от другого. Здесь адрес сначала
+    расшифровывается, потом с него снимаются логин и пароль.
+    """
+    if label:
+        return str(label)
+    plain = proxy_plain_url(proxy_url)
+    if not plain:
+        return "без названия"
+    return mask_proxy_url(plain)[:60]
+
+
 async def cleanup_dead_proxies(pool, owner_id: int) -> dict:
     """Очистка мёртвых прокси: безопасное удаление подтверждённо-мёртвых НЕназначенных.
 

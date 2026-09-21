@@ -1911,7 +1911,11 @@ async def cb_set_proxy(
     )
     for px in proxies[:10]:
         alive = "✅" if px["is_alive"] else ("❓" if px["is_alive"] is None else "❌")
-        label = px["label"] or px["proxy_url"][:30]
+        # proxy_url зашифрован: нарезка из базы показывала кусок шифротекста,
+        # и все прокси в списке выглядели одинаково.
+        from services.proxy_hygiene import proxy_display
+
+        label = proxy_display(px["proxy_url"], px["label"])
         kb.button(
             text=f"{alive} {escape(label)}",
             callback_data=AccCb(action="assign_proxy", acc_id=acc_id, page=px["id"]),

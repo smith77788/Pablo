@@ -649,7 +649,12 @@ async def _fetch_member_names(
         except Exception:
             log_exc_swallow(log, "_fetch_member_names: proxy fetch failed")
             rows = []
-        name_map = {r["id"]: (r["proxy_url"] or str(r["id"]))[:40] for r in rows}
+        # proxy_url зашифрован — показываем расшифрованный адрес без кредов,
+        # иначе в составе экосистемы стоит кусок шифротекста.
+        from services.proxy_hygiene import proxy_display
+
+        name_map = {r["id"]: (proxy_display(r["proxy_url"]) or str(r["id"]))[:40]
+                    for r in rows}
         result["proxy"] = [
             html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}"))
             for m in by_type["proxy"]

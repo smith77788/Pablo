@@ -130,9 +130,16 @@ async def check_once(pool, bot) -> dict:
 
     sem = asyncio.Semaphore(CONCURRENCY)
 
+    # proxy_url хранится зашифрованным. Раньше сюда уходил шифротекст:
+    # ProxyConnector.from_url("ENC:…") бросает, check_proxy_alive возвращает
+    # alive=False, и сторож объявлял мёртвым КАЖДЫЙ живой прокси — с письмом
+    # владельцу и пометкой в базе. Снаружи это выглядело как «все прокси
+    # умерли разом». Для старых незашифрованных строк расшифровка — passthrough.
+    from services.proxy_hygiene import proxy_plain_url
+
     async def _one(r):
         async with sem:
-            return r, await check_proxy_alive(r["proxy_url"])
+            return r, await check_proxy_alive(proxy_plain_url(r["proxy_url"]))
 
     results = await asyncio.gather(*[_one(r) for r in rows], return_exceptions=True)
 
@@ -165,10 +172,12 @@ async def check_once(pool, bot) -> dict:
             continue
         if d["notify"]:
             # Полный адрес прокси содержит логин и пароль — в сообщение он
-            # попадать не должен.
-            from services.proxy_hygiene import mask_proxy_url
+            # попадать не должен. И маскировать надо расшифрованный адрес:
+            # у шифротекста нет ни «://», ни «@», маска его не трогала, и в
+            # письме владельцу оказывалась строка «ENC:…».
+            from services.proxy_hygiene import proxy_display
 
-            label = r["label"] or mask_proxy_url(r["proxy_url"])
+            label = proxy_display(r["proxy_url"], r["label"])
             if await _notify(pool, bot, r["owner_id"],
                              build_alert(label, r["assigned"], d["streak"])):
                 alerted += 1

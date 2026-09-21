@@ -685,37 +685,50 @@ def get_proxy_stats(proxy_url: str) -> dict:
 async def auto_select_proxy(account_id: int, pool: "asyncpg.Pool") -> str | None:
     """Auto-select best proxy for account based on statistics and latency."""
     # Get account's current proxy
+    # owner_id обязателен: запасной прокси берётся ТОЛЬКО из пула того же
+    # владельца. Раньше выбор шёл по всей таблице, и аккаунт одного владельца
+    # мог уехать через чужой платный прокси — чужие креды в чужой сессии.
     acc = await pool.fetchrow(
-        "SELECT proxy_id FROM tg_accounts WHERE id=$1", account_id
+        "SELECT proxy_id, owner_id FROM tg_accounts WHERE id=$1", account_id
     )
     if not acc or not acc["proxy_id"]:
         return None
-    
+
     proxy = await pool.fetchrow(
-        "SELECT id, proxy_url, is_active FROM user_proxies WHERE id=$1",
-        acc["proxy_id"],
+        "SELECT id, proxy_url, is_active FROM user_proxies WHERE id=$1 AND owner_id=$2",
+        acc["proxy_id"], acc["owner_id"],
     )
     if not proxy or not proxy["is_active"]:
         return None
-    
-    # Test current proxy
-    result = await test_proxy(proxy["proxy_url"])
+
+    # proxy_url хранится зашифрованным: без расшифровки _parse_proxy не разберёт
+    # строку, и ЛЮБОЙ прокси окажется нерабочим. Возвращаем тоже открытый адрес
+    # — вызывающему нужен адрес для подключения, а не шифротекст.
+    from services.proxy_hygiene import mask_proxy_url, proxy_plain_url
+
+    current_url = proxy_plain_url(proxy["proxy_url"])
+    result = await test_proxy(current_url)
     if result["ok"]:
-        return proxy["proxy_url"]
-    
+        return current_url
+
     # Current proxy failed — try to find a better one
     alternatives = await pool.fetch(
-        "SELECT proxy_url FROM user_proxies WHERE is_active=TRUE AND id != $1",
-        acc["proxy_id"],
+        "SELECT proxy_url FROM user_proxies "
+        "WHERE owner_id=$2 AND is_active=TRUE AND id != $1",
+        acc["proxy_id"], acc["owner_id"],
     )
-    
+
     for alt in alternatives:
-        alt_result = await test_proxy(alt["proxy_url"])
+        alt_url = proxy_plain_url(alt["proxy_url"])
+        alt_result = await test_proxy(alt_url)
         if alt_result["ok"]:
+            # В лог — адрес без логина и пароля: раньше сюда уходили первые 20
+            # символов строки, а это ровно «socks5://логин:пар».
             log.info("proxy_intelligence: acc=%d switching proxy %d→%s (latency=%dms)",
-                     account_id, acc["proxy_id"], alt["proxy_url"][:20], alt_result["latency_ms"])
-            return alt["proxy_url"]
-    
+                     account_id, acc["proxy_id"], mask_proxy_url(alt_url),
+                     alt_result["latency_ms"])
+            return alt_url
+
     return None  # No working proxy found
 
 
