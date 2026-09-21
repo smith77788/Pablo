@@ -5091,66 +5091,77 @@ async def grant_plan_to_user(
     # subscriptions — источник правды (тут get_plan() проверяет доступ). Пишем
     # ЕЁ первой, а platform_users синхронизируем ровно от возвращённого
     # expires_at, а не вторым независимым CASE — иначе две даты могут разойтись.
-    if plan == "free":
-        await pool.execute(
-            "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
-        )
-        await pool.execute(
-            "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL WHERE user_id=$1",
-            user_id,
-        )
-    else:
-        sub_row = await pool.fetchrow(
-            """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-               VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-               ON CONFLICT(user_id) DO UPDATE
-               SET plan      = EXCLUDED.plan,
-                   is_active = true,
-                   expires_at = CASE
-                       WHEN subscriptions.expires_at > now()
-                           THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                       ELSE now() + ($3 || ' months')::INTERVAL
-                   END
-               RETURNING plan, expires_at""",
-            user_id,
-            plan,
-            str(months),
-        )
-        if sub_row:
-            expires = sub_row["expires_at"]
-            await pool.execute(
-                "UPDATE platform_users SET current_plan=$2, plan_expires_at=$3 WHERE user_id=$1",
-                user_id,
-                sub_row["plan"],
-                sub_row["expires_at"],
-            )
-
-        # Зафиксировать подтверждённую оплату, чтобы выручка/счётчики были точными.
-        if record_payment:
-            try:
-                base = PLAN_PRICES_USD.get(plan, 0)
-                disc = PERIOD_DISCOUNTS.get(months, 0)
-                amount_usd = round(base * months * (1 - disc / 100), 2)
-                reference = f"ADMIN-{admin_id}-{user_id}-{int(time.time())}"
-                await pool.execute(
-                    """INSERT INTO payments
-                           (user_id, plan, period_months, currency, amount_crypto,
-                            amount_usd, wallet_address, reference, status, confirmed_at)
-                       VALUES ($1,$2,$3,'USDT_TRC20',$4,$4,'manual',$5,'confirmed', now())
-                       ON CONFLICT (reference) DO NOTHING""",
+    # Обе таблицы прав — одной транзакцией. Комментарий выше требует, чтобы
+    # даты не разошлись, но два независимых запроса этого не гарантируют:
+    # обрыв между ними (передеплой, разрыв соединения) оставлял подписку
+    # активной при 'free' в platform_users или наоборот. Платёж пишется тут же
+    # — выданный доступ без записи об оплате искажает выручку.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if plan == "free":
+                await conn.execute(
+                    "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
+                )
+                await conn.execute(
+                    "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL WHERE user_id=$1",
+                    user_id,
+                )
+            else:
+                sub_row = await conn.fetchrow(
+                    """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+                       VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
+                       ON CONFLICT(user_id) DO UPDATE
+                       SET plan      = EXCLUDED.plan,
+                           is_active = true,
+                           expires_at = CASE
+                               WHEN subscriptions.expires_at > now()
+                                   THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                               ELSE now() + ($3 || ' months')::INTERVAL
+                           END
+                       RETURNING plan, expires_at""",
                     user_id,
                     plan,
-                    months,
-                    amount_usd,
-                    reference,
+                    str(months),
                 )
-            except Exception:
-                log_exc_swallow(
-                    log,
-                    "grant_plan_to_user: failed to record payment",
-                    admin_id=admin_id,
-                    user_id=user_id,
-                )
+                if sub_row:
+                    expires = sub_row["expires_at"]
+                    await conn.execute(
+                        "UPDATE platform_users SET current_plan=$2, plan_expires_at=$3 WHERE user_id=$1",
+                        user_id,
+                        sub_row["plan"],
+                        sub_row["expires_at"],
+                    )
+
+                # Зафиксировать подтверждённую оплату, чтобы выручка/счётчики
+                # были точными. Вложенная транзакция — это SAVEPOINT: сбой
+                # записи платежа откатывает только её, а выданный доступ
+                # остаётся, как и было задумано здесь изначально.
+                if record_payment:
+                    base = PLAN_PRICES_USD.get(plan, 0)
+                    disc = PERIOD_DISCOUNTS.get(months, 0)
+                    amount_usd = round(base * months * (1 - disc / 100), 2)
+                    reference = f"ADMIN-{admin_id}-{user_id}-{int(time.time())}"
+                    try:
+                        async with conn.transaction():
+                            await conn.execute(
+                                """INSERT INTO payments
+                                       (user_id, plan, period_months, currency, amount_crypto,
+                                        amount_usd, wallet_address, reference, status, confirmed_at)
+                                   VALUES ($1,$2,$3,'USDT_TRC20',$4,$4,'manual',$5,'confirmed', now())
+                                   ON CONFLICT (reference) DO NOTHING""",
+                                user_id,
+                                plan,
+                                months,
+                                amount_usd,
+                                reference,
+                            )
+                    except Exception:
+                        log_exc_swallow(
+                            log,
+                            "grant_plan_to_user: failed to record payment",
+                            admin_id=admin_id,
+                            user_id=user_id,
+                        )
 
     # Логировать действие
     try:
@@ -5194,22 +5205,35 @@ async def revoke_plan_from_user(
     pool: asyncpg.Pool, user_id: int, admin_id: int
 ) -> None:
     """Забрать подписку у пользователя (вернуть на free)."""
-    await pool.execute(
-        "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL WHERE user_id=$1",
-        user_id,
-    )
-    # Отключить в subscriptions (именно здесь get_plan() проверяет)
-    await pool.execute(
-        "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
-    )
+    # Обе таблицы — одной транзакцией. Права проверяются по subscriptions, а
+    # админка показывает platform_users: обрыв между двумя UPDATE оставлял
+    # пользователя с платным доступом при надписи «free» в админке, то есть
+    # отзыв выглядел выполненным, а на деле не действовал.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL WHERE user_id=$1",
+                user_id,
+            )
+            # Отключить в subscriptions (именно здесь get_plan() проверяет)
+            await conn.execute(
+                "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
+            )
 
-    # Логировать действие
-    await pool.execute(
-        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-           VALUES ($1, 'revoke_plan', $2, '{}')""",
-        admin_id,
-        user_id,
-    )
+    # Логировать действие. Отдельно от транзакции и со снятием исключения:
+    # отзыв доступа уже состоялся, и ронять его из-за журнала нельзя — но и
+    # промолчать о несостоявшейся записи тоже.
+    try:
+        await pool.execute(
+            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+               VALUES ($1, 'revoke_plan', $2, '{}')""",
+            admin_id,
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(
+            log, "Сбой записи admin_audit_log", admin_id=admin_id, user_id=user_id
+        )
     # Сброс кеша — иначе отозванный юзер до 60с считается платным.
     _invalidate_plan_cache(user_id)
 
@@ -5496,18 +5520,24 @@ async def get_pending_approvals(pool: asyncpg.Pool, owner_id: int) -> list:
 async def create_workspace(
     pool: asyncpg.Pool, owner_id: int, name: str, description: str = ""
 ) -> int:
-    row = await pool.fetchrow(
-        "INSERT INTO workspaces (owner_id, name, description) VALUES ($1,$2,$3) RETURNING id",
-        owner_id,
-        name[:64],
-        description[:256],
-    )
-    ws_id = row["id"]
-    await pool.execute(
-        "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'owner',$2)",
-        ws_id,
-        owner_id,
-    )
+    # Одна транзакция: workspace без строки владельца в workspace_members —
+    # это workspace, в который никто не может войти, в том числе его создатель,
+    # потому что доступ считается по членству. Обрыв между двумя вставками
+    # (передеплой, разрыв соединения) оставлял ровно такой объект.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "INSERT INTO workspaces (owner_id, name, description) VALUES ($1,$2,$3) RETURNING id",
+                owner_id,
+                name[:64],
+                description[:256],
+            )
+            ws_id = row["id"]
+            await conn.execute(
+                "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'owner',$2)",
+                ws_id,
+                owner_id,
+            )
     return ws_id
 
 
