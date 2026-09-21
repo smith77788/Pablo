@@ -34,6 +34,7 @@ from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
 from config import TG_API_ID, TG_API_HASH
 from database import db
+from services import story_manager
 from services.account_manager import (
     check_account_health,
     check_account_status_full,
@@ -1522,7 +1523,6 @@ async def handle_story_caption(
         return
 
     await message.answer("⏳ Публикую историю…")
-    from services import story_manager
 
     try:
         res = await story_manager.post_story(

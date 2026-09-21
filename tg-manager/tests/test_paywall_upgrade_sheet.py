@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -42,6 +43,42 @@ def test_err_does_not_mark_non_subscription_errors():
     # маркер строго под 403+подписка: обычные ошибки его не получают
     seg = _err_source()
     assert 'if status == 403 and msg and "подписк" in str(msg).lower():' in seg
+
+def _err_body(msg: str, status: int) -> dict:
+    """Ответ _err как разобранный JSON.
+
+    Проверка выше держит АРХИТЕКТУРУ (маркер стоит именно в _err, в одном месте
+    на все 20+ гейтов) и читает для этого исходник. Эта — держит ПОВЕДЕНИЕ: что
+    _err действительно так отвечает. Вторая не зависит от текста исходника
+    вообще, поэтому переживает любое переформатирование функции.
+    """
+    from services.mini_app_api import _err
+
+    resp = _err(msg, status)
+    return json.loads(resp.text)
+
+
+def test_err_response_carries_paywall_marker():
+    body = _err_body("Требуется подписка", 403)
+    assert body["paywall"] is True
+    assert body["code"] == "subscription_required"
+
+
+def test_err_marks_paywall_regardless_of_wording():
+    # гейты пишут отказ по-разному — маркер не должен зависеть от формулировки
+    for msg in ("Требуется подписка", "нужна ПОДПИСКА уровня Pro",
+                "Эта функция доступна по подписке"):
+        assert _err_body(msg, 403).get("paywall") is True, msg
+
+
+def test_err_response_has_no_marker_for_other_errors():
+    # маркер строго под 403+подписка: обычные ошибки его не получают
+    for msg, status in (("Требуется подписка", 400),   # та же причина, не 403
+                        ("Нет доступа к каналу", 403),  # 403, но не подписка
+                        ("Некорректный запрос", 400)):
+        body = _err_body(msg, status)
+        assert "paywall" not in body, (msg, status)
+        assert "code" not in body, (msg, status)
 
 
 def test_frontend_shows_paywall_on_marked_403():

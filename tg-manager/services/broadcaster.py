@@ -188,8 +188,8 @@ async def run(
                 op_id=broadcast_id,
                 params={"category": _verdict.category, "rule": _verdict.rule},
             )
-        except Exception as e:
-            log_exc_swallow(log, "run")
+        except Exception:
+            log_exc_swallow(logger, "запись блокировки контента в журнал соответствия")
         if _own_session and session is not None:
             await session.close()
         return

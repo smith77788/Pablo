@@ -9,6 +9,8 @@ import re
 import socket
 import time
 import uuid
+from collections.abc import Awaitable, Callable
+
 import aiohttp
 import asyncpg
 from aiogram import Bot
@@ -2012,7 +2014,11 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
 # Словарь строится ЛЕНИВО и кэшируется: сами _exec_* определены ниже по файлу,
 # и словарь-литерал на этом месте упал бы с NameError при импорте модуля.
 
-_DISPATCH: dict[str, "OpHandler"] | None = None
+# Контракт исполнителя из комментария выше, записанный типом: имя OpHandler
+# нигде не определено, и аннотация ссылалась в пустоту.
+OpHandler = Callable[[asyncpg.Pool, Bot, int, int, dict], Awaitable[dict]]
+
+_DISPATCH: dict[str, OpHandler] | None = None
 
 
 async def _dispatch_gift_transfer(pool, bot, op_id, owner_id, params) -> dict:
@@ -3266,7 +3272,6 @@ async def _exec_mass_publish(
                     "username": row["username"] or "",
                     "access_hash": row["access_hash"] or 0,
                     "type": row["type"] or "channel",
-                    "username": row["username"] or "",
                 },
                 "accounts": [],
             }
@@ -4646,6 +4651,16 @@ async def _exec_global_presence_channel(
     if not acc_ids:
         return {"status": "failed", "reason": "Нет аккаунтов для выполнения"}
 
+    # Пул поднимаем ДО захвата: захват берёт идентификаторы именно из него.
+    # Раньше выборка стояла ниже, внутри try, и захват обращался к ещё не
+    # существующему accounts_rows — операция падала с NameError, не создав
+    # ни одного канала.
+    accounts_rows = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=acc_ids, respect_cooldown=False
+    )
+    if not accounts_rows:
+        return {"status": "failed", "reason": "Нет доступных аккаунтов для выполнения"}
+
     # Отказной захват всего пула: дальше аккаунты выбираются из него по ходу
     # (в т.ч. запасной при карантине), поэтому захватываем пул целиком.
     claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts_rows])
@@ -4656,10 +4671,6 @@ async def _exec_global_presence_channel(
     accounts_rows = [a for a in accounts_rows if int(a["id"]) in set(claimed_ids)]
 
     try:
-
-        accounts_rows = await resource_selector.select_all_active(
-            pool, owner_id, include_ids=acc_ids, respect_cooldown=False
-        )
         acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
 
         created_count = 0

@@ -14297,7 +14297,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # notif_ops→op_complete, notif_error→restriction+flood_warning.
             try:
                 _op = bool(data.get("notif_ops", True))
-                _err = bool(data.get("notif_error", True))
+                # Имя _err занято функцией ответа об ошибке (_err(msg, status)).
+                # Локальная переменная с тем же именем делала _err локальным на всю
+                # user_settings_save: ветка 401 падала с UnboundLocalError, а ветка
+                # 500 — с TypeError «bool не вызывается». Оба отказа уходили
+                # пользователю сырым 500.
+                _notif_err = bool(data.get("notif_error", True))
                 # new_user/position_change сохраняем, только если фронт их прислал:
                 # иначе старый клиент, не знающий про эти поля, молча сбрасывал бы
                 # их в дефолт при каждом сохранении настроек.
@@ -14311,7 +14316,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         "VALUES($1,$2,$3,$3,$4,$5) "
                         "ON CONFLICT(user_id) DO UPDATE SET op_complete=$2, restriction=$3, "
                         "flood_warning=$3, new_user=$4, position_change=$5, updated_at=now()",
-                        uid, _op, _err, _nu, _pos,
+                        uid, _op, _notif_err, _nu, _pos,
                     )
                 else:
                     await pool.execute(
@@ -14319,7 +14324,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         "VALUES($1,$2,$3,$3) "
                         "ON CONFLICT(user_id) DO UPDATE SET op_complete=$2, restriction=$3, "
                         "flood_warning=$3, updated_at=now()",
-                        uid, _op, _err,
+                        uid, _op, _notif_err,
                     )
             except Exception as _ne:
                 log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
