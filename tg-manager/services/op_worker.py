@@ -1861,6 +1861,47 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     return {str(r["target"]) for r in (rows or []) if r["target"]}
 
 
+async def completed_account_targets(
+    pool: asyncpg.Pool, op_id: int, action: str
+) -> set[tuple[int, str]]:
+    """Пары (аккаунт, цель), уже отработанные УСПЕШНО в этой операции.
+
+    Пара к `completed_targets`, но для операций, где единица работы — не цель
+    сама по себе, а цель В ИСПОЛНЕНИИ КОНКРЕТНОГО АККАУНТА. Массовое вступление
+    ведёт в один и тот же канал СО ВСЕХ аккаунтов: пропустить ссылку целиком
+    потому, что в канал вошёл аккаунт A, значит не завести туда аккаунт B и
+    молча недоделать работу. Поэтому ключ здесь составной.
+
+    ЗАЧЕМ ЭТО НУЖНО. Повтор операции — и автоматический (`_maybe_requeue` после
+    сетевой ошибки или флуда), и после сброса зависшей — запускает исполнителя
+    заново с done_items=0, и тот проходит ВЕСЬ список целей сначала. Для
+    вступления это повторный joinChannel туда, где аккаунт уже состоит: Telegram
+    считает его в лимит вступлений и в давление, ведущее к PEER_FLOOD, а
+    дневной счётчик аккаунта выгорает на работе, которая уже сделана. То есть
+    повтор после сетевого блипа сам по себе поднимал риск бана — ровно то, от
+    чего защищает весь пейсинг вокруг.
+
+    Источник — `operation_audit`: там у каждого успешного действия есть и
+    operation_id, и account_id, и target, причём пишутся они в той же строке
+    кода, что выполняет действие. `operation_log` для этого не годится: в нём
+    нет account_id.
+
+    Пустое множество на первом прогоне, поэтому вызов безопасен и там, где
+    повтора не было. Никогда не бросает: не смогли прочитать журнал — работаем
+    как раньше (лучше лишний повтор, чем сорванная операция).
+    """
+    rows = await _safe_fetch(
+        pool,
+        "SELECT DISTINCT account_id, target FROM operation_audit "
+        " WHERE operation_id=$1 AND action=$2 AND result='success' "
+        "   AND account_id IS NOT NULL AND target IS NOT NULL",
+        op_id,
+        action,
+        log_ctx=f"[completed_account_targets op={op_id}]",
+    )
+    return {(int(r["account_id"]), str(r["target"])) for r in (rows or [])}
+
+
 async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
     """Check if operation was cancelled by user.
 
@@ -3749,6 +3790,19 @@ async def _exec_bulk_join_inner(
     # Объявляем до цикла — иначе NameError при первом же proxy_error.
     isolated_accounts: set[int] = set()
 
+    # Идемпотентность повтора. Операция перезапускается целиком — после сетевой
+    # ошибки (_maybe_requeue), после флуд-паузы, после сброса зависшей. Без этой
+    # выборки каждый такой перезапуск снова вступал в каналы, где аккаунт уже
+    # состоит: Telegram считает повторный joinChannel в лимит вступлений и в
+    # давление, ведущее к PEER_FLOOD, а дневной счётчик аккаунта выгорал на уже
+    # сделанной работе. Повтор после блипа сети сам поднимал риск бана.
+    _already_joined = await completed_account_targets(pool, op_id, "join")
+    if _already_joined:
+        log.info(
+            "bulk_join op=%d: повтор прогона, пропускаю %d уже выполненных пар "
+            "(аккаунт, ссылка)", op_id, len(_already_joined),
+        )
+
     for acc_idx, acc in enumerate(accounts):
         if acc["id"] in isolated_accounts:
             continue
@@ -3786,6 +3840,21 @@ async def _exec_bulk_join_inner(
             skipped_by_limit += 1
             continue
         for i, link in enumerate(links):
+            # Уже вступали этим аккаунтом в эту ссылку на прошлом прогоне —
+            # цель закрыта, второй joinChannel только жжёт лимит и риск.
+            # Считаем её успешной: работа сделана, и отчёт обязан это отражать,
+            # иначе владелец увидит «выполнено 12 из 50» на полностью
+            # доведённой операции.
+            if (int(acc["id"]), str(link)) in _already_joined:
+                ok_count += 1
+                step += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
+                    log_ctx=f"[bulk_join_skip_done op={op_id}]",
+                )
+                continue
             if await _is_cancelled(pool, op_id):
                 return {
                     "status": "cancelled",
