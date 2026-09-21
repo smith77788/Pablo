@@ -145,8 +145,37 @@ def test_rebalance_and_requarantine_release_admin_seat_for_departed_accounts():
     без явного освобождения держал бы место админа впустую до конца прогона."""
     body = _exec_body()
     i = body.index("_before_ids = {int(x[\"id\"]) for x in accounts}")
-    seg = body[i:i + 1700]
+    seg = body[i:i + 2500]
     assert "_left_ids = _before_ids - _kept_ids" in seg
-    assert "await _release_admin_seat(_lid)" in seg
+    assert "_release_admin_seat(_lid)" in seg
     # порядок: сначала считаем ушедших, потом чистим retired/budget по оставшимся
     assert seg.index("_release_admin_seat(_lid)") < seg.index("retired = {a for a in retired if a in _kept_ids}")
+
+
+def test_departed_seat_releases_run_concurrently_not_sequentially():
+    """Регресс на реальный «зависла на 2/77» с живого прогона (владелец кликал
+    «Перезапустить» несколько раз — несколько операций делили один и тот же,
+    богатый на admin-промоуты, флот; каждый 20с-цикл ребаланса мог разом
+    вывести из accounts десяток+ аккаунтов). Первая версия фикса освобождала
+    место КАЖДОМУ уходящему аккаунту ПО ОЧЕРЕДИ — вызов сетевой (демоут в
+    Telegram, потолок 30с внутри _release_admin_seat), и это стояло ПРЯМО
+    внутри главного цикла инвайта, блокируя набор следующего батча. Десяток
+    аккаунтов разом — уже 5+ минут простоя ради одной лишь уборки: снаружи это
+    и есть «операция зависла», хотя формально она жива и рано или поздно
+    продолжит. Параллельно — тот же потолок в 30с НЕЗАВИСИМО от того, сколько
+    аккаунтов ушло разом."""
+    body = _exec_body()
+    i = body.index("_left_ids = _before_ids - _kept_ids")
+    j = body.index("retired = {a for a in retired if a in _kept_ids}", i)
+    seg = body[i:j]
+    assert "asyncio.gather(" in seg, (
+        "освобождение мест ушедших аккаунтов обязано идти параллельно "
+        "(asyncio.gather), а не последовательным await в цикле — иначе "
+        "десяток+ аккаунтов, ушедших за один ребаланс, стопорят весь прогон "
+        "на несколько минут внутри главного цикла инвайта"
+    )
+    assert "for _lid in _left_ids:" not in seg, (
+        "не должно быть последовательного `for ... await _release_admin_seat` "
+        "(с двоеточием — цикл-оператор, не генератор внутри gather) — это и "
+        "есть регрессия"
+    )
