@@ -11322,7 +11322,13 @@ async function openOpDetail(opId) {
     // отменой и спрашивает подтверждение. Запущенную паузить нечем: без
     // чекпоинта пере-прогон продублировал бы уже сделанное.
     if (o.status==='pending') {
-      html += `<div style="padding:0 16px;display:flex;gap:8px">
+      // «Запустить сейчас» — только когда реально есть что торопить (операция
+      // ждёт scheduled_for в будущем: например, живая очередь сама отложила её
+      // из-за занятого флота — см. _requeue_op_no_accounts). Обычный pending без
+      // расписания и так возьмётся на ближайшем тике воркера (~10с).
+      const _scheduled = o.scheduled_for && new Date(o.scheduled_for) > new Date();
+      html += `<div style="padding:0 16px;display:flex;gap:8px;flex-wrap:wrap">
+        ${_scheduled?`<button class="btn btn-p" onclick="runNowOp(${o.id});back()" style="flex:1 1 auto">▶ Запустить сейчас</button>`:''}
         <button class="btn btn-s" onclick="pauseOp(${o.id});back()" style="flex:1 1 auto">⏸ Приостановить</button>
         <button class="btn btn-r" onclick="cancelOp(${o.id},true);back()" style="flex:1 1 auto">✕ Отменить</button>
       </div>`;
@@ -11406,6 +11412,13 @@ async function resumeOp(id) {
   try {
     await api('/api/miniapp/operation/'+id+'/resume', {method:'POST'});
     toast('▶ Операция возвращена в очередь'); loadOps();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
+}
+
+async function runNowOp(id) {
+  try {
+    await api('/api/miniapp/operation/'+id+'/run_now', {method:'POST'});
+    toast('▶ Запущена — воркер подхватит в ближайшие секунды'); loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
 // Опрос статуса операции после enqueue — показывает РЕАЛЬНЫЙ итог (успех/ошибка),

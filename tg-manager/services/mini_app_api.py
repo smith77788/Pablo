@@ -3232,7 +3232,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось приостановить операцию", 500)
 
     async def resume_operation(request: web.Request) -> web.Response:
-        """Возобновить ОДНУ операцию: paused → pending (воркер подхватит)."""
+        """Возобновить ОДНУ операцию: paused → pending (воркер подхватит).
+
+        Заодно снимаем scheduled_for: если операцию поставили на паузу, пока
+        она ждала своего scheduled_for (например, после авто-переноса живой
+        очередью при занятом флоте — см. _requeue_op_no_accounts), «возобновить»
+        должно значить «дать шанс прямо сейчас», а не молча досидеть остаток
+        старого расписания — тот же принцип, что и в run_now_operation ниже.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -3242,7 +3249,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid op_id", 400)
         try:
             row = await pool.fetchrow(
-                """UPDATE operation_queue SET status='pending'
+                """UPDATE operation_queue SET status='pending', scheduled_for=NULL
                    WHERE id=$1 AND owner_id=$2 AND status='paused'
                    RETURNING id""", op_id, uid)
             if not row:
@@ -3256,6 +3263,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception as e:
             log.warning("resume_operation op=%d uid=%d: %s", op_id, uid, e)
             return _err("Не удалось возобновить операцию", 500)
+
+    async def run_now_operation(request: web.Request) -> web.Response:
+        """Снять scheduled_for у операции в 'pending' — поллер (тик раз в
+        _POLL_INTERVAL=10с) подхватит её на ближайшем цикле вместо того, чтобы
+        ждать исходное время.
+
+        Раньше единственный способ «поторопить» операцию, автоматически
+        отложенную живой очередью (флот был занят другой операцией —
+        _requeue_op_no_accounts выставляет scheduled_for = now() + до 90с, при
+        долгом ожидании — больше), был приостановить и снова возобновить
+        (см. resume_operation) — не очевидно и требовало двух действий вместо
+        одного явного «запустить сейчас»."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            op_id = int(request.match_info["op_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid op_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE operation_queue SET scheduled_for=NULL
+                   WHERE id=$1 AND owner_id=$2 AND status='pending'
+                   RETURNING id""", op_id, uid)
+            if not row:
+                cur = await _safe_fetchval(
+                    pool, "SELECT status FROM operation_queue "
+                          "WHERE id=$1 AND owner_id=$2", op_id, uid)
+                if cur is None:
+                    return _err("Операция не найдена", 404)
+                return _err(f"Операцию нельзя запустить сейчас в статусе «{cur}»", 409)
+            return _json_resp({"ok": True, "status": "pending"})
+        except Exception as e:
+            log.warning("run_now_operation op=%d uid=%d: %s", op_id, uid, e)
+            return _err("Не удалось запустить операцию сейчас", 500)
 
     async def clear_operations(request: web.Request) -> web.Response:
         """Очистить очередь: УДАЛИТЬ терминальные операции (done/failed/cancelled)
@@ -16580,6 +16622,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/pause", pause_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/resume", resume_operation)
+    app.router.add_post("/api/miniapp/operation/{op_id}/run_now", run_now_operation)
     app.router.add_post("/api/miniapp/operation/{op_id}/retry", retry_operation)
     app.router.add_post("/api/miniapp/operations/clear", clear_operations)
     app.router.add_post("/api/miniapp/operations/pause", pause_operations)
