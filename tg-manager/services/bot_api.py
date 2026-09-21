@@ -14,6 +14,41 @@ TG_FILE = "https://api.telegram.org/file/bot{token}/{file_path}"
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 3
 _BASE_BACKOFF = 1.0
+
+# ── Потолок на ВСТРОЕННЫЙ сон по 429 ─────────────────────────────────────────
+# Telegram отдаёт ботам retry_after и в сотни секунд (рассылка по многим чатам,
+# лимит на бота целиком). Спать ровно столько, сколько он попросил, — значит
+# повесить вызывающего (рассылку, воронку, релей оператору) на всё это время,
+# а с тремя ретраями подряд — втрое дольше.
+#
+# Уважать паузу надо, но ждать должна ОЧЕРЕДЬ, а не занятый исполнитель. Поэтому
+# клиент сам отсыпает только короткие паузы (их дешевле переждать на месте, чем
+# перепланировать), а длинную ОТДАЁТ НАВЕРХ нетронутой: в ответе остаётся
+# настоящий parameters.retry_after, и вызывающий переносит задачу.
+_MAX_INLINE_RETRY_AFTER_S = 30
+
+
+def retry_after_of(data: dict | None) -> int | None:
+    """Пауза из ответа Telegram (parameters.retry_after) — или None.
+
+    Единственное место, где это поле читается: Telegram присылает
+    ``"parameters": null`` наравне с объектом, и ``data["parameters"]["..."]``
+    на таком ответе падает AttributeError внутри ретрай-цикла.
+    """
+    if not isinstance(data, dict):
+        return None
+    params = data.get("parameters") or {}
+    if not isinstance(params, dict):
+        return None
+    raw = params.get("retry_after")
+    if raw is None:
+        return None
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return None
+
+
 log = logging.getLogger(__name__)
 
 
@@ -42,12 +77,36 @@ async def _call(
                 async with session.post(
                     url, json=payload, timeout=aiohttp.ClientTimeout(total=15)
                 ) as resp:
+                    http_status = resp.status
                     data = await resp.json()
 
-            status = data.get("error_code", 0) or resp.status
+            # Ответ не-объектом (шлюз/прокси вместо Telegram) — дальше по коду
+            # везде .get(); приводим к понятной форме, а не падаем AttributeError.
+            if not isinstance(data, dict):
+                return {
+                    "ok": False,
+                    "error_code": http_status,
+                    "description": f"Неожиданный ответ Telegram (HTTP {http_status})",
+                }
+
+            status = data.get("error_code", 0) or http_status
             if status in _RETRYABLE_STATUSES or not data.get("ok"):
                 if status == 429:
-                    retry_after = data.get("parameters", {}).get("retry_after", 5)
+                    retry_after = retry_after_of(data)
+                    if retry_after is None:
+                        retry_after = 5
+                    # Длинную паузу на месте не отсыпаем: возвращаем ответ как
+                    # есть — в нём настоящий retry_after, и вызывающий перенесёт
+                    # задачу вместо того, чтобы стоять.
+                    if retry_after > _MAX_INLINE_RETRY_AFTER_S:
+                        log.info(
+                            "bot_api %s: Telegram просит ждать %dс (> %dс) — "
+                            "отдаём наверх для переноса, не спим",
+                            method,
+                            retry_after,
+                            _MAX_INLINE_RETRY_AFTER_S,
+                        )
+                        return data
                     log.debug(
                         "bot_api %s rate-limited, sleeping %ds (attempt %d/%d)",
                         method,
@@ -184,16 +243,57 @@ async def set_photo(
     photo_bytes: bytes,
     filename: str = "photo.jpg",
 ) -> bool:
-    """Upload raw photo bytes to the managed bot via multipart form."""
+    """Upload raw photo bytes to the managed bot via multipart form.
+
+    Идёт мимо ``_call`` (там JSON, а здесь multipart), поэтому ретраи и разбор
+    ошибок продублированы здесь же. Без них единственный обрыв сети на загрузке
+    аватара улетал вызывающему СЫРЫМ исключением — в отличие от всех соседних
+    методов файла, которые возвращают bool. Как и в ``_call``, длинную паузу по
+    429 на месте не отсыпаем.
+    """
     url = TG.format(token=token, method="setMyPhoto")
-    form = aiohttp.FormData()
-    form.add_field("photo", photo_bytes, filename=filename, content_type="image/jpeg")
-    async with _sem():
-        async with session.post(
-            url, data=form, timeout=aiohttp.ClientTimeout(total=30)
-        ) as resp:
-            data = await resp.json()
-    return data.get("ok", False)
+    for attempt in range(_MAX_RETRIES):
+        try:
+            form = aiohttp.FormData()
+            form.add_field(
+                "photo", photo_bytes, filename=filename, content_type="image/jpeg"
+            )
+            async with _sem():
+                async with session.post(
+                    url, data=form, timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    http_status = resp.status
+                    data = await resp.json()
+            if not isinstance(data, dict):
+                log.warning("bot_api setMyPhoto: неожиданный ответ HTTP %d", http_status)
+                return False
+            if data.get("ok"):
+                return True
+            status = data.get("error_code", 0) or http_status
+            if status == 429:
+                retry_after = retry_after_of(data) or 5
+                if retry_after > _MAX_INLINE_RETRY_AFTER_S or attempt >= _MAX_RETRIES - 1:
+                    log.info(
+                        "bot_api setMyPhoto: Telegram просит ждать %dс — не спим",
+                        retry_after,
+                    )
+                    return False
+                await asyncio.sleep(retry_after)
+                continue
+            if status in (500, 502, 503, 504) and attempt < _MAX_RETRIES - 1:
+                await asyncio.sleep(_BASE_BACKOFF * (2**attempt))
+                continue
+            log.warning(
+                "bot_api setMyPhoto: %s", str(data.get("description", ""))[:120]
+            )
+            return False
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            if attempt < _MAX_RETRIES - 1:
+                await asyncio.sleep(_BASE_BACKOFF * (2**attempt))
+                continue
+            log.warning("bot_api setMyPhoto failed after %d retries: %s",
+                        _MAX_RETRIES, e)
+    return False
 
 
 async def delete_my_photo(session: aiohttp.ClientSession, token: str) -> bool:
@@ -354,7 +454,7 @@ async def send_message(
         return True, None
     error_code = data.get("error_code", 0)
     if error_code == 429:
-        retry = data.get("parameters", {}).get("retry_after", 5)
+        retry = retry_after_of(data) or 5
         return False, retry
     return False, None
 
@@ -396,7 +496,7 @@ async def send_message_classified(
     error_code = data.get("error_code", 0)
     cat = classify_send_error(error_code, data.get("description", ""))
     if error_code == 429:
-        return False, data.get("parameters", {}).get("retry_after", 5), cat
+        return False, retry_after_of(data) or 5, cat
     return False, None, cat
 
 
@@ -424,7 +524,7 @@ async def send_photo(
         return True, None
     error_code = data.get("error_code", 0)
     if error_code == 429:
-        retry = data.get("parameters", {}).get("retry_after", 5)
+        retry = retry_after_of(data) or 5
         return False, retry
     return False, None
 

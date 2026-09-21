@@ -8554,8 +8554,13 @@ async def _exec_bulk_post_to_channel(
                 attempt = 0
             else:
                 attempt += 1
-            flood = result.get("flood_wait", 0) or 0
-            await asyncio.sleep(max(backoff(attempt), flood))
+            # Пауза из ответа Telegram — через общую обёртку с пределом.
+            # max(backoff, flood) выглядел ограниченным, но backoff ограничивает
+            # только СВОЁ слагаемое: flood_wait в час проходил через max() целиком
+            # и останавливал прогон на час вместе со слотом и всем флотом.
+            slept = await bounded_flood_sleep(
+                result.get("flood_wait", 0) or 0, "bulk_post")
+            await asyncio.sleep(max(0.0, backoff(attempt) - slept))
 
         lines = (
             [f"\U0001f4e4 <b>Публикация в {_html.escape(channel_ref)}</b>\n"]
@@ -9033,8 +9038,10 @@ async def _exec_bulk_post_chans(
                 attempt = 0
             else:
                 attempt += 1
-            flood = last_result.get("flood_wait", 0) or 0
-            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
+            # Тот же класс, что в bulk_post: max() не ограничивал flood_wait.
+            slept = await bounded_flood_sleep(
+                last_result.get("flood_wait", 0) or 0, "bulk_publish")
+            await asyncio.sleep(max(0.0, backoff(attempt, base=2.0, cap=30.0) - slept))
 
         return {
             "status": "done",
@@ -13218,6 +13225,37 @@ async def _exec_content_clone(
                     "content_clone op=%d target=%s: ok=0 errors=%s",
                     op_id, target_ref, res["errors"][:2],
                 )
+            # Аккаунт упёрся во флуд — идти следующей целью ТЕМ ЖЕ аккаунтом
+            # значит гарантированно получить флуд снова и приблизить бан.
+            # Ставим cooldown и либо откладываем операцию, либо останавливаемся.
+            _fw = int(res.get("flood_wait") or 0)
+            if _fw or res.get("peer_flood"):
+                try:
+                    from services.flood_engine import record_flood
+
+                    await record_flood(
+                        pool, acc["id"], _fw or 3600, "content_clone", op_id)
+                except Exception:
+                    log_exc_swallow(log, "content_clone: record_flood failed")
+                if res.get("peer_flood"):
+                    return {
+                        "status": "failed",
+                        "ok": ok_count,
+                        "failed": fail_count + (total - idx),
+                        "summary": (
+                            f"🚫 Аккаунт ограничен Telegram (peer flood) на {idx}/{total}.\n"
+                            f"✅ Успели: {ok_count}"
+                        ),
+                    }
+                if _fw > _FLOOD_INLINE_MAX_S:
+                    # Тот же контракт, что у остальных исполнителей: откладывает
+                    # операцию сам _run_op_task по defer_s, освобождая слот и флот.
+                    return {
+                        "status": "requeue",
+                        "defer_s": _fw,
+                        "reason": f"content_clone: FloodWait {_fw}s на {idx}/{total}",
+                    }
+                await bounded_flood_sleep(_fw, "content_clone")
         except Exception as exc:
             log.warning("content_clone op=%d target=%s: %s", op_id, target_ref, exc)
             fail_count += 1

@@ -24,10 +24,53 @@ _CONNECT_TIMEOUT = 15.0
 _ACTION_TIMEOUT = 12.0
 
 
+class ConnectFailed(Exception):
+    """Клиент не поднялся. Текст исключения — уже готовое сообщение владельцу."""
+
+
+def _connect_error_text(exc: BaseException) -> str:
+    """Причина несостоявшегося коннекта человеческим языком.
+
+    Владелец видит этот текст в мини-аппе и в сводке операции, поэтому
+    «SessionBusyError» и «TimeoutError» здесь не годятся: по ним непонятно,
+    ждать, чинить прокси или переподключать аккаунт.
+    """
+    name = type(exc).__name__
+    if name == "SessionBusyError":
+        return ("Сессия аккаунта занята другой операцией или прогревом — "
+                "повторите через минуту")
+    if name == "ProxyIsolationError":
+        return ("У аккаунта не назначен прокси, а политика изоляции запрещает "
+                "прямой выход — назначьте прокси аккаунту")
+    if isinstance(exc, asyncio.TimeoutError):
+        return (f"Аккаунт не ответил за {_CONNECT_TIMEOUT:.0f}с — "
+                "проверьте прокси и живость сессии")
+    if name in ("AuthKeyUnregisteredError", "AuthKeyDuplicatedError",
+                "SessionRevokedError", "SessionExpiredError",
+                "UserDeactivatedBanError", "UserDeactivatedError"):
+        return "Сессия аккаунта недействительна — нужен повторный вход"
+    return f"Не удалось подключиться к Telegram: {str(exc)[:120]}"
+
+
 async def _connect(session_string: str, _acc: dict | None):
+    """Поднять клиента — либо ConnectFailed с понятной причиной.
+
+    Коннект вызывался ДО try вызывающей функции, поэтому его сбой уходил наверх
+    сырым исключением вместо ``{"ok": false, "error": ...}``, а полуподнятый
+    клиент никто не отключал: он держал сокет и — через мьютекс сессии — сам
+    аккаунт до протухания записи. Следующая подсистема получала «сессия занята»
+    на живом аккаунте.
+    """
     from services.account_manager import _make_client
     client = _make_client(session_string, _acc)
-    await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+    except BaseException as exc:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "_connect: disconnect после сбоя коннекта")
+        raise ConnectFailed(_connect_error_text(exc)) from exc
     return client
 
 
@@ -42,7 +85,10 @@ async def set_name_bio(
 ) -> dict[str, Any]:
     from telethon.tl.functions.account import UpdateProfileRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         kwargs: dict = {}
         if first_name:
@@ -76,7 +122,10 @@ async def set_avatar_from_url(
     import aiohttp
     from telethon.tl.functions.photos import UploadProfilePhotoRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         async with aiohttp.ClientSession() as http:
             async with http.get(photo_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
@@ -113,7 +162,10 @@ async def set_avatar_from_bytes(
 ) -> dict[str, Any]:
     from telethon.tl.functions.photos import UploadProfilePhotoRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         file = await asyncio.wait_for(
             client.upload_file(photo_bytes, file_name=filename),
@@ -143,7 +195,10 @@ async def set_username(
 ) -> dict[str, Any]:
     from telethon.tl.functions.account import UpdateUsernameRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         await asyncio.wait_for(
             client(UpdateUsernameRequest(username=username)),
@@ -176,7 +231,10 @@ async def set_2fa_password(
         account,
     )
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         # Используем встроенный edit_2fa метода telethon если есть
         await asyncio.wait_for(
@@ -205,7 +263,10 @@ async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[s
     Аналог «Закрыть сторонние сессии» — защита угнанных/прогретых аккаунтов."""
     from telethon.tl.functions.auth import ResetAuthorizationsRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         await asyncio.wait_for(client(ResetAuthorizationsRequest()), timeout=_ACTION_TIMEOUT)
         return {"ok": True, "error": None}
@@ -241,7 +302,10 @@ async def set_privacy(session_string: str, _acc: dict | None, key: str, allow: b
     }
     if key not in keymap:
         return {"ok": False, "error": f"unknown privacy key {key}"}
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         rule = InputPrivacyValueAllowAll() if allow else InputPrivacyValueDisallowAll()
         await asyncio.wait_for(
@@ -276,7 +340,10 @@ def extract_login_code(text: str) -> str | None:
 async def get_login_code(session_string: str, _acc: dict | None) -> dict[str, Any]:
     """Прочитать последний код входа Telegram из служебного чата (777000).
     Возвращает {ok, code, error}. Аналог «Получить код авторизации»."""
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         msgs = await asyncio.wait_for(client.get_messages(777000, limit=5), timeout=_ACTION_TIMEOUT)
         for m in (msgs or []):
@@ -300,7 +367,10 @@ async def clear_bio(session_string: str, _acc: dict | None) -> dict[str, Any]:
     """Очистить bio (О себе). Аналог «Удалить bio» Telegram Expert."""
     from telethon.tl.functions.account import UpdateProfileRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         await asyncio.wait_for(
             client(UpdateProfileRequest(about="")), timeout=_ACTION_TIMEOUT
@@ -322,7 +392,10 @@ async def set_bio(session_string: str, _acc: dict | None, about: str) -> dict[st
     Описание обрезается до 70 символов (лимит Telegram)."""
     from telethon.tl.functions.account import UpdateProfileRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         await asyncio.wait_for(
             client(UpdateProfileRequest(about=(about or "")[:70])),
@@ -349,7 +422,10 @@ async def remove_avatar(session_string: str, _acc: dict | None) -> dict[str, Any
     from telethon import utils
     from telethon.tl.functions.photos import DeletePhotosRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         photos = await asyncio.wait_for(
             client.get_profile_photos("me"), timeout=_ACTION_TIMEOUT
@@ -375,7 +451,10 @@ async def reset_2fa(
     session_string: str, _acc: dict | None, current_password: str
 ) -> dict[str, Any]:
     """Снять 2FA-пароль (нужен текущий пароль). Аналог «Сбросить/удалить 2FA»."""
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         if not current_password:
             return {"ok": False, "error": "нужен текущий пароль для снятия 2FA"}
@@ -401,7 +480,10 @@ async def set_online(session_string: str, _acc: dict | None) -> dict[str, Any]:
     Непрерывный keep-online — задача планировщика (см. backlog)."""
     from telethon.tl.functions.account import UpdateStatusRequest
 
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         await asyncio.wait_for(
             client(UpdateStatusRequest(offline=False)), timeout=_ACTION_TIMEOUT
@@ -423,7 +505,10 @@ async def check_restriction(session_string: str, _acc: dict | None) -> dict[str,
     """Проверить состояние аккаунта: жив / ограничен / удалён.
     Аналог раздела «ПРОВЕРКА» Telegram Expert. Возвращает
     {ok, alive, restricted, deleted, reason, username, user_id}."""
-    client = await _connect(session_string, _acc)
+    try:
+        client = await _connect(session_string, _acc)
+    except ConnectFailed as _cf:
+        return {"ok": False, "error": str(_cf)}
     try:
         me = await asyncio.wait_for(client.get_me(), timeout=_ACTION_TIMEOUT)
         if me is None:

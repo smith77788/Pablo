@@ -38,10 +38,23 @@ _EXTRA_TARGETS = (
 )
 
 # Имена, в которых лежит длительность флуд-паузы.
-_FLOOD_NAMES = {"flood_wait", "fw", "flood_wait_s", "wait_s", "retry_after"}
+#
+# Имя в этом списке — единственное, по чему детектор узнаёт флуд-сон, поэтому
+# новую переменную под паузу надо называть одним из этих имён либо дописывать
+# сюда. `flood` и `retry_after` попали позже остальных: до них проходили мимо
+# храповика две паузы bulk-публикации (звались `flood`) и сны фоновых циклов на
+# паузе от Bot API (звались `retry_after`).
+_FLOOD_NAMES = {"flood_wait", "fw", "flood_wait_s", "wait_s", "flood",
+                "retry_after"}
 
 # Как сон может быть ограничен. Достаточно любого из способов.
 _GUARD_MARKERS = ("_FLOOD_INLINE_MAX_S", "600", "wait_for_retry_after")
+
+# `max(backoff(...), flood)` ограничивает ТОЛЬКО своё второе слагаемое: бэкофф
+# у него с потолком, а флуд-пауза проходит целиком. Выглядит как предел, пределом
+# не является — поэтому сон, длина которого посчитана через max(), храповик
+# считает неограниченным независимо от окружающих строк.
+_FAKE_GUARD_CALLS = ("max",)
 
 # Сон через общую обёртку ограничен по построению — её и ищем в первую очередь.
 _BOUNDED_CALL = "bounded_flood_sleep"
@@ -73,6 +86,15 @@ def _flood_sleeps(tree: ast.AST) -> list[ast.Call]:
     return found
 
 
+def _fake_guarded(call: ast.Call) -> bool:
+    """Длина сна посчитана через max() — предел мнимый (см. _FAKE_GUARD_CALLS)."""
+    for n in ast.walk(call.args[0]):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+            if n.func.id in _FAKE_GUARD_CALLS:
+                return True
+    return False
+
+
 def _guarding_lines(src_lines: list[str], lineno: int, window: int = 30) -> str:
     """Строки вокруг сна — там, где стоит проверка предела."""
     lo = max(0, lineno - 1 - window)
@@ -94,6 +116,9 @@ def test_every_flood_sleep_is_bounded():
     lines = src.splitlines()
     unbounded = []
     for call in _flood_sleeps(ast.parse(src)):
+        if _fake_guarded(call):
+            unbounded.append((call.lineno, lines[call.lineno - 1].strip()))
+            continue
         context = _guarding_lines(lines, call.lineno)
         if not any(marker in context for marker in _GUARD_MARKERS):
             unbounded.append((call.lineno, lines[call.lineno - 1].strip()))
@@ -195,3 +220,15 @@ def test_short_retry_after_is_actually_awaited():
         assert slept == [8.0]                # пауза + запас, ничего не урезано
     finally:
         loop.close()
+def test_max_does_not_count_as_a_bound():
+    """Сам детектор обязан считать max(backoff, flood) НЕограниченным.
+
+    Две паузы bulk-публикации так и выглядели — и проходили храповик, потому что
+    рядом стояло слово-маркер. Без этой проверки правило можно обойти обратно
+    одной строкой.
+    """
+    tree = ast.parse("import asyncio\nasync def f(flood, backoff):\n"
+                     "    await asyncio.sleep(max(backoff(1), flood))\n")
+    sleeps = _flood_sleeps(tree)
+    assert sleeps, "детектор не увидел сон по имени flood"
+    assert _fake_guarded(sleeps[0]), "max() принят за предел — храповик дырявый"
