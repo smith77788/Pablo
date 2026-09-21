@@ -326,9 +326,43 @@ async def get_webhook_info(session: aiohttp.ClientSession, token: str) -> dict:
 # ── Audience collection ───────────────────────────────────────────────────
 
 
+class UpdatesUnavailable(Exception):
+    """getUpdates невозможен для этого бота. Текст — готовое объяснение владельцу."""
+
+
+def _updates_conflict(data: dict) -> str | None:
+    """Причина, по которой getUpdates не сработает, или None.
+
+    Telegram отвечает 409 Conflict, когда у бота включён вебхук: два способа
+    получать обновления одновременно не работают, и это НЕ временный сбой —
+    повтор не поможет, пока вебхук стоит.
+
+    Раньше такой ответ просто превращался в пустой список: сбор аудитории
+    показывал владельцу «Новых пользователей: +0» и выглядел успешным, хотя не
+    прочитал ни одного обновления и прочитать не мог. Молчаливый ноль хуже
+    ошибки: по нему кажется, что писать боту никто не начинал.
+    """
+    if data.get("ok"):
+        return None
+    desc = str(data.get("description") or "").lower()
+    if data.get("error_code") == 409 or "webhook is active" in desc:
+        return ("У этого бота включён вебхук — Telegram не отдаёт обновления "
+                "через getUpdates, пока он стоит. Аудитория у такого бота "
+                "набирается сама из входящих сообщений; разовый сбор доступен "
+                "после отключения вебхука.")
+    return None
+
+
 async def fetch_updates(session: aiohttp.ClientSession, token: str) -> list[dict]:
-    """Pull up to 100 pending updates."""
+    """Pull up to 100 pending updates.
+
+    Бросает UpdatesUnavailable, если getUpdates у этого бота невозможен, —
+    вызывающий обязан сказать владельцу причину, а не показать пустой сбор.
+    """
     data = await _call(session, token, "getUpdates", offset=0, limit=100, timeout=0)
+    reason = _updates_conflict(data)
+    if reason:
+        raise UpdatesUnavailable(reason)
     return data.get("result", []) if data.get("ok") else []
 
 
@@ -356,6 +390,9 @@ async def scan_all_users(
             limit=100,
             timeout=0,
         )
+        reason = _updates_conflict(data)
+        if reason:
+            raise UpdatesUnavailable(reason)
         batch = data.get("result", []) if data.get("ok") else []
         if not batch:
             break

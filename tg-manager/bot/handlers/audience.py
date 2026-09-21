@@ -71,7 +71,15 @@ async def cb_refresh(
 
     await callback.message.edit_text("⏳ Собираю обновления…")
 
-    updates = await bot_api.fetch_updates(http, row["token"])
+    try:
+        updates = await bot_api.fetch_updates(http, row["token"])
+    except bot_api.UpdatesUnavailable as exc:
+        await callback.message.edit_text(
+            f"ℹ️ <b>Сбор аудитории недоступен</b>\n\n{exc}",
+            parse_mode="HTML",
+            reply_markup=audience_menu(row["bot_id"]),
+        )
+        return
     users = bot_api.extract_users_from_updates(updates)
     new_count = await db.upsert_users(pool, row["bot_id"], users)
     total = await db.get_audience_count(pool, row["bot_id"])
@@ -319,9 +327,17 @@ async def cb_scan(
     from services import bot_api as _api
 
     start_offset = await _db.get_update_offset(pool, callback_data.bot_id)
-    users, last_id = await _api.scan_all_users(
-        http, row["token"], start_offset=start_offset
-    )
+    try:
+        users, last_id = await _api.scan_all_users(
+            http, row["token"], start_offset=start_offset
+        )
+    except _api.UpdatesUnavailable as exc:
+        await callback.message.edit_text(
+            f"ℹ️ <b>Сканирование недоступно</b>\n\n{exc}",
+            parse_mode="HTML",
+            reply_markup=audience_menu(row["bot_id"]),
+        )
+        return
 
     new_count = 0
     if users:
