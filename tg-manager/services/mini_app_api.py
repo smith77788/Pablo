@@ -12627,13 +12627,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("keyword обязателен", 400)
         if target_position < 1 or target_position > 50:
             return _err("target_position 1-50", 400)
+
+        # Бот и панель приходят из тела запроса, то есть от клиента. Без этой
+        # проверки заказ можно было создать с ЧУЖИМ smm_panel_id: запуск
+        # накрутки уходил в чужую панель с чужим API-ключом и тратил чужие
+        # деньги. Проверяем принадлежность здесь, при записи, чтобы в заказе
+        # заведомо не могло оказаться чужого номера.
+        from database import db as _db
+
+        bot_id_val = int(bot_id) if bot_id else None
+        panel_id_val = int(smm_panel_id) if smm_panel_id else None
+        if bot_id_val is not None and not await _db.warehouse_get_bot(
+            pool, bot_id_val, owner_id=uid
+        ):
+            return _err("Бот не найден в вашем складе", 404)
+        if panel_id_val is not None and not await _db.smm_get_panel(
+            pool, panel_id_val, owner_id=uid
+        ):
+            return _err("SMM-панель не найдена", 404)
+
         try:
             order_id = await pool.fetchval(
                 """INSERT INTO promo_orders(owner_id, keyword, target_position, bot_id, smm_panel_id, target_subs)
                    VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
                 uid, keyword, target_position,
-                int(bot_id) if bot_id else None,
-                int(smm_panel_id) if smm_panel_id else None,
+                bot_id_val,
+                panel_id_val,
                 int(target_subs) if target_subs else None,
             )
         except Exception as exc:
@@ -12657,16 +12676,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from database import db
         from services import smm_panel as smm_svc
 
-        order = await db.promo_get_order(pool, order_id)
-        if not order or order["owner_id"] != uid:
+        order = await db.promo_get_order(pool, order_id, owner_id=uid)
+        if not order:
             return _err("Заказ не найден", 404)
         if not order["bot_id"] or not order["smm_panel_id"]:
             return _err("У заказа не выбраны бот и SMM-панель", 400)
 
-        panel = await db.smm_get_panel(pool, order["smm_panel_id"])
+        # Номера бота и панели лежат в строке заказа, но попали туда из тела
+        # запроса — второй рубеж на случай заказов, созданных до проверки при
+        # записи, и на случай бота/панели, удалённых или сменивших владельца.
+        panel = await db.smm_get_panel(pool, order["smm_panel_id"], owner_id=uid)
         if not panel:
             return _err("SMM-панель не найдена", 404)
-        bot_rec = await db.warehouse_get_bot(pool, order["bot_id"])
+        bot_rec = await db.warehouse_get_bot(pool, order["bot_id"], owner_id=uid)
         if not bot_rec:
             return _err("Бот не найден в складе", 404)
 

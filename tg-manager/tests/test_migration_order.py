@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import glob
 import os
+import random
 import pathlib
 import re
 
-from database.db import migration_version_key
+from database.db import migration_version_key, ordered_migration_files
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -71,3 +72,61 @@ def test_duplicate_numbers_are_distinct_files():
     assert not dupes, (
         f"одинаковые имена файлов миграций — вторая будет молча пропущена: {sorted(dupes)}"
     )
+
+
+# ── Порядок при одинаковых номерах ────────────────────────────────────────────
+
+def test_order_is_independent_of_filesystem_order():
+    """Порядок применения не зависит от того, как файлы легли на диск.
+
+    Девять пар файлов делят номер версии (v146, v185, v193, v200, v201, v206,
+    v211, v212, v213). Раньше сортировка шла по одному номеру, а сортировка в
+    Python устойчивая — при равных ключах порядок оставался тем, в каком файлы
+    вернула файловая система. На поднятой базе это незаметно: журнал
+    schema_migrations ключуется по имени файла, применённое не переприменяется.
+    Но чистая база прокатывает всю историю с нуля, и порядок DDL получался
+    разным на разных машинах.
+    """
+    files = _migration_files()
+    forward = ordered_migration_files(list(files))
+    backward = ordered_migration_files(list(reversed(files)))
+    assert forward == backward, "порядок миграций зависит от порядка файлов на диске"
+
+    shuffled = list(files)
+    random.Random(1234).shuffle(shuffled)
+    assert ordered_migration_files(shuffled) == forward
+
+
+def test_order_never_goes_backwards_in_version():
+    """Внутри итогового списка номера версий не убывают."""
+    versions = [migration_version_key(p) for p in ordered_migration_files(_migration_files())]
+    assert versions == sorted(versions)
+
+
+def test_duplicate_versions_are_ordered_by_name():
+    """У пары с общим номером порядок задаётся именем файла, а не диском."""
+    got = ordered_migration_files([
+        "/x/schema_v200_discovered_bots.sql",
+        "/x/schema_v200_daughter_groups.sql",
+        "/x/schema_v199_chatlist_folders.sql",
+    ])
+    assert [os.path.basename(p) for p in got] == [
+        "schema_v199_chatlist_folders.sql",
+        "schema_v200_daughter_groups.sql",
+        "schema_v200_discovered_bots.sql",
+    ]
+
+
+def test_same_basename_applied_once():
+    """Один и тот же файл в корне и в database/ применяется один раз."""
+    got = ordered_migration_files([
+        "/x/schema_v10.sql",
+        "/x/database/schema_v10.sql",
+    ])
+    assert len(got) == 1
+
+
+def test_real_files_survive_ordering():
+    """Дедуп не должен выбрасывать ничего из настоящего набора."""
+    files = _migration_files()
+    assert len(ordered_migration_files(files)) == len(files)

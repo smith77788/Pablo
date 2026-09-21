@@ -49,6 +49,32 @@ def migration_version_key(path: str) -> int:
     return int(digits) if digits else 0
 
 
+def ordered_migration_files(paths: list[str]) -> list[str]:
+    """Порядок применения миграций: по номеру версии, при равном — по имени.
+
+    Одного номера версии недостаточно: девять пар файлов делят номер (v146,
+    v185, v193, v200, v201, v206, v211, v212, v213), а сортировка в Python
+    устойчивая — при равных ключах сохраняется исходный порядок, то есть тот,
+    в каком файлы вернула файловая система. На поднятой базе это незаметно
+    (журнал schema_migrations ключуется по имени файла, применённое не
+    переприменяется), но чистая база прокатывает всю историю, и порядок DDL
+    оказывался разным на разных машинах. Имя файла во втором элементе ключа
+    делает порядок одинаковым везде.
+
+    Дедуп по базовому имени: файл ищется и в корне, и в database/, и одно имя
+    не должно примениться дважды.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for path in sorted(paths, key=lambda p: (migration_version_key(p), os.path.basename(p))):
+        name = os.path.basename(path)
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(path)
+    return out
+
+
 def parse_baseline_manifest(text: str) -> set[str]:
     """Разобрать манифест baseline: имена файлов схемы, которые снимок содержит.
 
@@ -276,17 +302,9 @@ async def create_pool() -> asyncpg.Pool:
             os.path.join(db_dir, "schema*.sql")
         )
 
-        # Sort by version number, deduplicate by basename
-        _version_key = migration_version_key
-
-        all_paths.sort(key=_version_key)
-        seen: set[str] = set()
-        schema_files = []
-        for p in all_paths:
-            bn = os.path.basename(p)
-            if bn not in seen:
-                seen.add(bn)
-                schema_files.append(p)
+        # Порядок применения и дедуп — в ordered_migration_files, чтобы он был
+        # один и проверяемый тестом, а не переписан здесь по месту.
+        schema_files = ordered_migration_files(all_paths)
 
         # Таблица учёта миграций — наблюдаемость (какие файлы применились чисто,
         # какие с ошибками). Не влияет на поведение, только фиксирует статус.
@@ -5505,14 +5523,66 @@ async def get_user_workspaces(pool: asyncpg.Pool, user_id: int) -> list:
     )
 
 
-async def get_workspace(pool: asyncpg.Pool, ws_id: int) -> dict | None:
-    row = await pool.fetchrow(
-        "SELECT * FROM workspaces WHERE id=$1 AND is_active=TRUE", ws_id
+# Роли workspace по убыванию прав. Приглашать и управлять составом может
+# владелец и админ; участник и наблюдатель — только смотреть.
+WORKSPACE_ROLES = ("owner", "admin", "member", "viewer")
+WORKSPACE_INVITE_ROLES = ("owner", "admin")
+
+
+async def get_workspace_role(
+    pool: asyncpg.Pool, ws_id: int, user_id: int
+) -> str | None:
+    """Роль пользователя в workspace, либо None, если он не участник.
+
+    Единственный источник правды о доступе к workspace. Номер workspace
+    приходит из callback_data кнопки, то есть фактически от клиента: данные
+    кнопки отправляет клиент, а не Telegram, и у всех пользователей этого
+    продукта есть MTProto-клиент. Поэтому ни один обработчик не имеет права
+    считать, что раз номер пришёл — доступ есть.
+    """
+    return await pool.fetchval(
+        """SELECT wm.role FROM workspace_members wm
+           JOIN workspaces w ON w.id = wm.workspace_id AND w.is_active = TRUE
+           WHERE wm.workspace_id=$1 AND wm.user_id=$2""",
+        ws_id,
+        user_id,
     )
+
+
+async def get_workspace(
+    pool: asyncpg.Pool, ws_id: int, viewer_id: int | None = None
+) -> dict | None:
+    """Workspace по номеру. С viewer_id — только если тот в нём состоит.
+
+    viewer_id необязателен ради фоновых вызовов, где пользователя нет, но
+    любой путь, куда номер пришёл от человека, обязан его передавать.
+    """
+    if viewer_id is not None:
+        row = await pool.fetchrow(
+            """SELECT w.* FROM workspaces w
+               JOIN workspace_members wm
+                 ON wm.workspace_id = w.id AND wm.user_id = $2
+               WHERE w.id=$1 AND w.is_active=TRUE""",
+            ws_id,
+            viewer_id,
+        )
+    else:
+        row = await pool.fetchrow(
+            "SELECT * FROM workspaces WHERE id=$1 AND is_active=TRUE", ws_id
+        )
     return dict(row) if row else None
 
 
-async def get_workspace_members(pool: asyncpg.Pool, ws_id: int) -> list:
+async def get_workspace_members(
+    pool: asyncpg.Pool, ws_id: int, viewer_id: int | None = None
+) -> list:
+    """Состав workspace. С viewer_id — пустой список для постороннего.
+
+    Список участников — это чужие user_id и имена, то есть персональные
+    данные; отдавать их по одному лишь номеру workspace нельзя.
+    """
+    if viewer_id is not None and not await get_workspace_role(pool, ws_id, viewer_id):
+        return []
     return await pool.fetch(
         """SELECT wm.user_id, wm.role, wm.joined_at, pu.username, pu.first_name
            FROM workspace_members wm
@@ -5524,7 +5594,22 @@ async def get_workspace_members(pool: asyncpg.Pool, ws_id: int) -> list:
 
 async def create_workspace_invite(
     pool: asyncpg.Pool, ws_id: int, created_by: int
-) -> str:
+) -> str | None:
+    """Код-приглашение в workspace. None, если у создателя нет на это прав.
+
+    Раньше код выписывался по одному номеру workspace: посторонний выпускал
+    себе приглашение в чужой workspace и входил в него участником. Право
+    приглашать проверяется здесь, а не только в обработчике, потому что
+    обработчиков со временем станет больше одного.
+    """
+    role = await get_workspace_role(pool, ws_id, created_by)
+    if role not in WORKSPACE_INVITE_ROLES:
+        log.warning(
+            "workspace invite отклонён: user=%s ws=%s роль=%s",
+            created_by, ws_id, role or "не участник",
+        )
+        return None
+
     import secrets as _sec
 
     code = _sec.token_urlsafe(12)
@@ -6776,6 +6861,17 @@ async def promo_create_order(
     smm_panel_id: int | None = None,
     target_subs: int | None = None,
 ) -> int:
+    """Создать заказ продвижения.
+
+    bot_id и smm_panel_id приходят из данных кнопки, то есть от клиента.
+    Чужой номер панели, попав в заказ, потом превращается в запуск накрутки по
+    чужому API-ключу и за чужой счёт, поэтому принадлежность проверяется здесь,
+    при записи: дальше по коду заказ уже считается согласованным.
+    """
+    if bot_id is not None and not await warehouse_get_bot(pool, bot_id, owner_id=owner_id):
+        raise ValueError("Бот не найден в складе этого пользователя")
+    if smm_panel_id is not None and not await smm_get_panel(pool, smm_panel_id, owner_id=owner_id):
+        raise ValueError("SMM-панель не принадлежит этому пользователю")
     row = await pool.fetchrow(
         """INSERT INTO promo_orders
                (owner_id, keyword, target_position, bot_id, smm_panel_id, target_subs)
@@ -6786,7 +6882,20 @@ async def promo_create_order(
     return row["id"]
 
 
-async def promo_get_order(pool: asyncpg.Pool, order_id: int) -> asyncpg.Record | None:
+async def promo_get_order(
+    pool: asyncpg.Pool, order_id: int, owner_id: int | None = None
+) -> asyncpg.Record | None:
+    """Заказ продвижения. С owner_id — только свой, иначе None.
+
+    owner_id необязателен ради планировщика, который обходит заказы всех
+    владельцев. Любой путь, где номер заказа пришёл от человека (кнопка,
+    запрос Mini App), обязан его передавать.
+    """
+    if owner_id is not None:
+        return await pool.fetchrow(
+            "SELECT * FROM promo_orders WHERE id=$1 AND owner_id=$2",
+            order_id, owner_id,
+        )
     return await pool.fetchrow(
         "SELECT * FROM promo_orders WHERE id=$1", order_id
     )
@@ -6861,7 +6970,19 @@ async def warehouse_add_bot(
     return row["id"]
 
 
-async def warehouse_get_bot(pool: asyncpg.Pool, bot_id: int) -> asyncpg.Record | None:
+async def warehouse_get_bot(
+    pool: asyncpg.Pool, bot_id: int, owner_id: int | None = None
+) -> asyncpg.Record | None:
+    """Бот со склада. С owner_id — только свой, иначе None.
+
+    Строка содержит bot_token_enc и путь к файлу сессии, то есть полный доступ
+    к боту. Отдавать её по одному номеру нельзя.
+    """
+    if owner_id is not None:
+        return await pool.fetchrow(
+            "SELECT * FROM bot_warehouse WHERE id=$1 AND owner_id=$2",
+            bot_id, owner_id,
+        )
     return await pool.fetchrow("SELECT * FROM bot_warehouse WHERE id=$1", bot_id)
 
 
@@ -6962,7 +7083,20 @@ async def bb_get_sessions(pool: asyncpg.Pool, owner_id: int) -> list:
     return out
 
 
-async def smm_get_panel(pool: asyncpg.Pool, panel_id: int) -> asyncpg.Record | None:
+async def smm_get_panel(
+    pool: asyncpg.Pool, panel_id: int, owner_id: int | None = None
+) -> asyncpg.Record | None:
+    """SMM-панель. С owner_id — только своя, иначе None.
+
+    В строке лежит api_key_enc — ключ к платному счёту владельца. Запуск
+    накрутки по чужой панели тратит чужие деньги, поэтому все пути от человека
+    обязаны передавать owner_id.
+    """
+    if owner_id is not None:
+        return await pool.fetchrow(
+            "SELECT * FROM smm_panels WHERE id=$1 AND owner_id=$2",
+            panel_id, owner_id,
+        )
     return await pool.fetchrow("SELECT * FROM smm_panels WHERE id=$1", panel_id)
 
 

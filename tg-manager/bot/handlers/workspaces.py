@@ -100,7 +100,10 @@ async def cb_ws_view(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    ws = await db.get_workspace(pool, callback_data.ws_id)
+    # Номер workspace приходит из данных кнопки, то есть от клиента. Берём
+    # workspace только вместе с проверкой членства — иначе посторонний читал бы
+    # чужое название, описание и весь список участников по одному номеру.
+    ws = await db.get_workspace(pool, callback_data.ws_id, viewer_id=callback.from_user.id)
     if not ws:
         kb = InlineKeyboardBuilder()
         kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
@@ -109,7 +112,9 @@ async def cb_ws_view(
         )
         return
     is_owner = ws["owner_id"] == callback.from_user.id
-    members = await db.get_workspace_members(pool, callback_data.ws_id)
+    members = await db.get_workspace_members(
+        pool, callback_data.ws_id, viewer_id=callback.from_user.id
+    )
     role_map = {m["user_id"]: m["role"] for m in members}
     user_role = role_map.get(callback.from_user.id, "?")
     text = (
@@ -129,7 +134,16 @@ async def cb_ws_members(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    members = await db.get_workspace_members(pool, callback_data.ws_id)
+    members = await db.get_workspace_members(
+        pool, callback_data.ws_id, viewer_id=callback.from_user.id
+    )
+    if not members:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+        await callback.message.edit_text(
+            "❌ Workspace не найден.", reply_markup=kb.as_markup()
+        )
+        return
     lines = []
     for m in members:
         name = m.get("first_name") or m.get("username") or str(m["user_id"])
@@ -158,6 +172,14 @@ async def cb_ws_invite(
     code = await db.create_workspace_invite(
         pool, callback_data.ws_id, callback.from_user.id
     )
+    if code is None:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+        await callback.message.edit_text(
+            "❌ Приглашать в workspace может только его владелец или админ.",
+            reply_markup=kb.as_markup(),
+        )
+        return
     kb = InlineKeyboardBuilder()
     kb.button(
         text="⬅️ Назад",
@@ -315,7 +337,7 @@ async def cb_ws_leave(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
     await safe_answer(callback)
-    ws = await db.get_workspace(pool, callback_data.ws_id)
+    ws = await db.get_workspace(pool, callback_data.ws_id, viewer_id=callback.from_user.id)
     if ws and ws["owner_id"] == callback.from_user.id:
         kb = InlineKeyboardBuilder()
         kb.button(

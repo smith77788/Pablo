@@ -250,7 +250,7 @@ async def cb_promo_orders(callback: CallbackQuery, callback_data: PromoCb, pool:
 @router.callback_query(PromoCb.filter(F.action == "order_detail"))
 async def cb_order_detail(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    order = await db.promo_get_order(pool, callback_data.item_id)
+    order = await db.promo_get_order(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not order or order["owner_id"] != callback.from_user.id:
         await callback.answer("Заказ не найден", show_alert=True)
         return
@@ -258,13 +258,13 @@ async def cb_order_detail(callback: CallbackQuery, callback_data: PromoCb, pool:
     st = _ORDER_STATUS.get(order["status"], order["status"])
     bot_line = ""
     if order["bot_id"]:
-        bot = await db.warehouse_get_bot(pool, order["bot_id"])
+        bot = await db.warehouse_get_bot(pool, order["bot_id"], owner_id=callback.from_user.id)
         if bot:
             bot_line = f"🤖 Бот: @{html.escape(bot['bot_username'])}\n"
 
     panel_line = ""
     if order["smm_panel_id"]:
-        panel = await db.smm_get_panel(pool, order["smm_panel_id"])
+        panel = await db.smm_get_panel(pool, order["smm_panel_id"], owner_id=callback.from_user.id)
         if panel:
             panel_line = f"📡 Панель: {html.escape(panel['name'])}"
             if order["smm_order_id"]:
@@ -319,7 +319,7 @@ async def cb_order_detail(callback: CallbackQuery, callback_data: PromoCb, pool:
 
 @router.callback_query(PromoCb.filter(F.action == "order_cancel"))
 async def cb_order_cancel(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    order = await db.promo_get_order(pool, callback_data.item_id)
+    order = await db.promo_get_order(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not order or order["owner_id"] != callback.from_user.id:
         await callback.answer("Заказ не найден", show_alert=True)
         return
@@ -334,7 +334,7 @@ async def cb_order_cancel(callback: CallbackQuery, callback_data: PromoCb, pool:
 
 @router.callback_query(PromoCb.filter(F.action == "order_delete"))
 async def cb_order_delete(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    order = await db.promo_get_order(pool, callback_data.item_id)
+    order = await db.promo_get_order(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not order or order["owner_id"] != callback.from_user.id:
         await callback.answer("Заказ не найден", show_alert=True)
         return
@@ -345,7 +345,7 @@ async def cb_order_delete(callback: CallbackQuery, callback_data: PromoCb, pool:
 
 @router.callback_query(PromoCb.filter(F.action == "order_mark_topped"))
 async def cb_order_mark_topped(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    order = await db.promo_get_order(pool, callback_data.item_id)
+    order = await db.promo_get_order(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not order or order["owner_id"] != callback.from_user.id:
         await callback.answer("Заказ не найден", show_alert=True)
         return
@@ -367,17 +367,17 @@ async def cb_order_mark_topped(callback: CallbackQuery, callback_data: PromoCb, 
 @router.callback_query(PromoCb.filter(F.action == "order_boost"))
 async def cb_order_boost(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await callback.answer("⏳ Отправляю заказ в панель...")
-    order = await db.promo_get_order(pool, callback_data.item_id)
+    order = await db.promo_get_order(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not order or order["owner_id"] != callback.from_user.id:
         await callback.answer("Заказ не найден", show_alert=True)
         return
 
-    panel = await db.smm_get_panel(pool, order["smm_panel_id"])
+    panel = await db.smm_get_panel(pool, order["smm_panel_id"], owner_id=callback.from_user.id)
     if not panel:
         await callback.message.answer("⚠️ SMM-панель не найдена. Проверьте настройки заказа.")
         return
 
-    bot_rec = await db.warehouse_get_bot(pool, order["bot_id"])
+    bot_rec = await db.warehouse_get_bot(pool, order["bot_id"], owner_id=callback.from_user.id)
     if not bot_rec:
         await callback.message.answer("⚠️ Бот не найден в складе.")
         return
@@ -440,12 +440,12 @@ async def cb_order_boost(callback: CallbackQuery, callback_data: PromoCb, pool: 
 @router.callback_query(PromoCb.filter(F.action == "order_check_smm"))
 async def cb_order_check_smm(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await callback.answer("⏳ Проверяю статус в панели...")
-    order = await db.promo_get_order(pool, callback_data.item_id)
+    order = await db.promo_get_order(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not order or order["owner_id"] != callback.from_user.id:
         await callback.answer("Заказ не найден", show_alert=True)
         return
 
-    panel = await db.smm_get_panel(pool, order["smm_panel_id"])
+    panel = await db.smm_get_panel(pool, order["smm_panel_id"], owner_id=callback.from_user.id)
     if not panel or not order["smm_order_id"]:
         await callback.answer("Нет данных для проверки", show_alert=True)
         return
@@ -580,7 +580,7 @@ async def fsm_order_pick_bot(callback: CallbackQuery, state: FSMContext, pool: a
 
     bot_label = "не выбран"
     if bot_id:
-        b = await db.warehouse_get_bot(pool, bot_id)
+        b = await db.warehouse_get_bot(pool, bot_id, owner_id=callback.from_user.id)
         if b:
             bot_label = f"@{b['bot_username']}"
 
@@ -624,13 +624,13 @@ async def fsm_order_target_subs(message: Message, state: FSMContext, pool: async
     # Resolve names for confirmation
     bot_name = "не выбран"
     if data.get("bot_id"):
-        b = await db.warehouse_get_bot(pool, data["bot_id"])
+        b = await db.warehouse_get_bot(pool, data["bot_id"], owner_id=message.from_user.id)
         if b:
             bot_name = f"@{b['bot_username']}"
 
     panel_name = "не выбрана"
     if data.get("panel_id"):
-        p = await db.smm_get_panel(pool, data["panel_id"])
+        p = await db.smm_get_panel(pool, data["panel_id"], owner_id=message.from_user.id)
         if p:
             panel_name = p["name"]
 
@@ -661,15 +661,23 @@ async def fsm_order_confirm(callback: CallbackQuery, state: FSMContext, pool: as
     data = await state.get_data()
     await state.clear()
 
-    order_id = await db.promo_create_order(
-        pool,
-        owner_id=callback.from_user.id,
-        keyword=data["keyword"],
-        target_position=data["target_position"],
-        bot_id=data.get("bot_id"),
-        smm_panel_id=data.get("panel_id"),
-        target_subs=data.get("target_subs"),
-    )
+    try:
+        order_id = await db.promo_create_order(
+            pool,
+            owner_id=callback.from_user.id,
+            keyword=data["keyword"],
+            target_position=data["target_position"],
+            bot_id=data.get("bot_id"),
+            smm_panel_id=data.get("panel_id"),
+            target_subs=data.get("target_subs"),
+        )
+    except ValueError as exc:
+        # Бот или панель из шагов мастера не принадлежат этому пользователю:
+        # номера приходят из данных кнопки, которые отправляет клиент.
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Заказы", callback_data=PromoCb(action="orders"))
+        await safe_edit(callback, f"❌ {exc}", reply_markup=kb.as_markup())
+        return
     await db.promo_log(
         pool, callback.from_user.id, "scheduler",
         f"Заказ #{order_id} создан: {data['keyword']}", order_id=order_id
@@ -767,7 +775,7 @@ async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: as
 @router.callback_query(PromoCb.filter(F.action == "bot_detail"))
 async def cb_bot_detail(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    bot = await db.warehouse_get_bot(pool, callback_data.item_id)
+    bot = await db.warehouse_get_bot(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not bot or bot["owner_id"] != callback.from_user.id:
         await callback.answer("Бот не найден", show_alert=True)
         return
@@ -824,7 +832,7 @@ async def cb_bot_setstatus(
     if new_status not in ("ready", "working", "topped", "transferred", "banned"):
         await callback.answer("Недопустимый статус", show_alert=True)
         return
-    bot = await db.warehouse_get_bot(pool, callback_data.item_id)
+    bot = await db.warehouse_get_bot(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not bot or bot["owner_id"] != callback.from_user.id:
         await callback.answer("Бот не найден", show_alert=True)
         return
@@ -862,7 +870,7 @@ async def cb_bot_setstatus(
 
 @router.callback_query(PromoCb.filter(F.action == "bot_delete"))
 async def cb_bot_delete(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
-    bot = await db.warehouse_get_bot(pool, callback_data.item_id)
+    bot = await db.warehouse_get_bot(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not bot or bot["owner_id"] != callback.from_user.id:
         await callback.answer("Бот не найден", show_alert=True)
         return
@@ -1121,7 +1129,7 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(PromoCb.filter(F.action == "bot_transfer"))
 async def cb_bot_transfer_start(callback: CallbackQuery, callback_data: PromoCb, state: FSMContext, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    bot = await db.warehouse_get_bot(pool, callback_data.item_id)
+    bot = await db.warehouse_get_bot(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not bot or bot["owner_id"] != callback.from_user.id:
         await callback.answer("Бот не найден", show_alert=True)
         return
@@ -1263,7 +1271,7 @@ async def cb_panels(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(PromoCb.filter(F.action == "panel_detail"))
 async def cb_panel_detail(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    panel = await db.smm_get_panel(pool, callback_data.item_id)
+    panel = await db.smm_get_panel(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
         return
@@ -1292,7 +1300,7 @@ async def cb_panel_detail(callback: CallbackQuery, callback_data: PromoCb, pool:
 @router.callback_query(PromoCb.filter(F.action == "panel_check"))
 async def cb_panel_check(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await callback.answer("⏳ Проверяю баланс...")
-    panel = await db.smm_get_panel(pool, callback_data.item_id)
+    panel = await db.smm_get_panel(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
         return
@@ -1333,7 +1341,7 @@ async def cb_panel_check(callback: CallbackQuery, callback_data: PromoCb, pool: 
 @router.callback_query(PromoCb.filter(F.action == "panel_services"))
 async def cb_panel_services(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await callback.answer("⏳ Загружаю список сервисов...")
-    panel = await db.smm_get_panel(pool, callback_data.item_id)
+    panel = await db.smm_get_panel(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
         return
@@ -1385,7 +1393,7 @@ async def cb_panel_services(callback: CallbackQuery, callback_data: PromoCb, poo
 @router.callback_query(PromoCb.filter(F.action == "panel_toggle"))
 async def cb_panel_toggle(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    panel = await db.smm_get_panel(pool, callback_data.item_id)
+    panel = await db.smm_get_panel(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
         return
@@ -1399,7 +1407,7 @@ async def cb_panel_toggle(callback: CallbackQuery, callback_data: PromoCb, pool:
 @router.callback_query(PromoCb.filter(F.action == "panel_delete"))
 async def cb_panel_delete(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
     await safe_answer(callback)
-    panel = await db.smm_get_panel(pool, callback_data.item_id)
+    panel = await db.smm_get_panel(pool, callback_data.item_id, owner_id=callback.from_user.id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
         return
