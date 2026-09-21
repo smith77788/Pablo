@@ -18,10 +18,21 @@ def _read(rel: str) -> str:
         return f.read()
 
 
-def test_err_marks_subscription_403_centrally():
+def _err_source() -> str:
+    """Тело def _err(...) целиком — до первой пустой строки после его
+    return. НЕ фиксированное число символов: комментарии внутри функции
+    (например, про redact_secrets) со временем растут, и жёсткое окно вида
+    src[i:i+600] обрезает маркер пейволла раньше, чем до него доходит текст —
+    тест начинает падать на ЗДОРОВОМ коде. Границей служит сама структура
+    функции, а не подобранное когда-то число."""
     src = _read("services/mini_app_api.py")
-    i = src.find("def _err(")
-    seg = src[i:i + 600]
+    i = src.index("def _err(")
+    j = src.index("\n\n", src.index("return _json_resp(body, status)", i))
+    return src[i:j]
+
+
+def test_err_marks_subscription_403_centrally():
+    seg = _err_source()
     # маркер ставится в ЕДИНОМ месте (_err) для всех 20+ платных гейтов
     assert '"paywall"' in seg and "subscription_required" in seg
     assert "status == 403" in seg and "подписк" in seg
@@ -29,9 +40,7 @@ def test_err_marks_subscription_403_centrally():
 
 def test_err_does_not_mark_non_subscription_errors():
     # маркер строго под 403+подписка: обычные ошибки его не получают
-    src = _read("services/mini_app_api.py")
-    i = src.find("def _err(")
-    seg = src[i:i + 600]
+    seg = _err_source()
     assert 'if status == 403 and msg and "подписк" in str(msg).lower():' in seg
 
 

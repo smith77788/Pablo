@@ -1471,8 +1471,6 @@ async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Execute auto-rotation: apply cooldowns to low-trust accounts."""
     await callback.answer("⏳ Ротирую аккаунты...")
     user_id = callback.from_user.id
-    from datetime import timedelta
-
     now = datetime.now(timezone.utc)
 
     # Critical: trust < 0.3 → 72h cooldown
@@ -1805,8 +1803,6 @@ async def cb_set_cooldown_confirm(
     await safe_answer(callback)
     user_id = callback.from_user.id
     acc_id = callback_data.page  # используем page как acc_id
-
-    from datetime import timedelta
 
     now = datetime.now(timezone.utc)
     cd_until = now + timedelta(hours=24)
