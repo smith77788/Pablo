@@ -136,6 +136,22 @@ _POISON_ERROR = (
 )
 
 
+async def _ensure_acct_wait_column(pool: "asyncpg.Pool") -> None:
+    """Досоздать operation_queue.acct_wait_since, если миграция ещё не доехала.
+
+    Та же причина, что у _ensure_revive_column: деплой и миграции расходятся во
+    времени. Без колонки предел ожидания флота просто не наступал бы (операция
+    ждала бы дольше положенного) — но лучше досоздать и работать штатно.
+    """
+    try:
+        await pool.execute(
+            "ALTER TABLE operation_queue "
+            "ADD COLUMN IF NOT EXISTS acct_wait_since TIMESTAMPTZ"
+        )
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: ensure acct_wait_since column failed: {e}")
+
+
 async def _ensure_revive_column(pool: "asyncpg.Pool") -> None:
     """Досоздать operation_queue.revive_count, если миграция ещё не доехала.
 
@@ -319,6 +335,43 @@ from services.op_circuit_breaker import (  # noqa: E402,F401
 )
 
 
+# Троттлинг объяснения про открытый предохранитель: owner_id -> monotonic-время,
+# до которого повторно не пишем. Цепь останавливает ВСЕ операции владельца, и без
+# троттлинга он получил бы столько же сообщений, сколько у него операций.
+_cb_explained_until: dict[int, float] = {}
+
+
+async def _explain_circuit_pause(
+    pool: "asyncpg.Pool", bot, owner_id: int | None, remaining_s: int
+) -> None:
+    """Объяснить владельцу, почему его операции вдруг перестали стартовать.
+
+    Предохранитель открывается после череды сбоев и на полчаса откладывает ВСЕ
+    операции владельца. Это правильная защита, но до сих пор она срабатывала
+    молча: операции уходили в «ожидает» и не стартовали, а причины не было
+    нигде. Снаружи это ровно «ничего не работает» — и владелец начинает
+    отменять, перезапускать и заводить новые операции, то есть делать именно то,
+    от чего цепь его и уберегает.
+    """
+    if not bot or not owner_id:
+        return
+    now = time.monotonic()
+    until = _cb_explained_until.get(int(owner_id), 0.0)
+    if now < until:
+        return
+    _cb_explained_until[int(owner_id)] = now + max(60, int(remaining_s or 0))
+    _mins = max(1, int(remaining_s or 0) // 60)
+    await _notify_owner_about_op(
+        pool, bot, owner_id,
+        f"⏸ <b>Операции приостановлены на {_mins} мин</b>\n\n"
+        f"Сработал предохранитель: подряд несколько операций завершились сбоем, "
+        f"и продолжать в том же темпе опасно для аккаунтов. Очередь не потеряна "
+        f"— операции стартуют сами, когда пауза закончится.\n\n"
+        f"Пока идёт пауза, проверьте состояние аккаунтов и прокси: обычно "
+        f"причина там.",
+    )
+
+
 async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: int) -> None:
     """Вернуть операцию в очередь при открытой цепи — с отложенным повтором.
 
@@ -345,33 +398,98 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
 
 _ACCT_WAIT_MAX_MIN = 20  # сколько ждать свободные аккаунты, потом — провал
 
+# Длинное откладывание, о котором владелец обязан узнать. Короткие технические
+# паузы (90с ожидания флота) его не касаются: операция всё равно стартует,
+# прежде чем он успеет заметить. Час и дольше — это уже «сегодня не будет».
+_DEFER_NOTIFY_MIN_S = _int_env("OP_DEFER_NOTIFY_MIN_SEC", 30 * 60, 60, 24 * 3600)
 
-async def _requeue_op_no_accounts(pool: "asyncpg.Pool", op_id: int, defer_s: int = 90) -> None:
+
+async def _notify_owner_about_op(
+    pool: "asyncpg.Pool", bot, owner_id: int | None, text: str
+) -> None:
+    """Сказать владельцу о судьбе его операции. Никогда не бросает.
+
+    Пути отложенного возврата в очередь не проходят через общий блок финальных
+    уведомлений в _run_op_task — он ниже по коду, а они делают `return`. Из-за
+    этого целый класс исходов уходил в тишину: операция проваливалась «флот
+    занят» вообще без единого слова владельцу, а флуд-пауза на 48 часов
+    выглядела как «ожидает» без объяснения, почему.
+    """
+    if not bot or not owner_id:
+        return
+    try:
+        await db.notify_if_enabled(pool, bot, owner_id, "op_complete", text)
+    except Exception:
+        log_exc_swallow(log, f"op_worker: уведомление владельцу {owner_id} не ушло")
+
+
+
+async def _requeue_op_no_accounts(
+    pool: "asyncpg.Pool", op_id: int, defer_s: int = 90,
+    bot=None, owner_id: int | None = None,
+) -> None:
     """Флот временно занят другими операциями — вернуть op в очередь с задержкой,
     а не проваливать. Ограничено по времени: если операция ждёт свободные
     аккаунты дольше _ACCT_WAIT_MAX_MIN — провалить (без вечного цикла).
 
     Это делает параллельные операции «живой очередью»: конкурентная операция не
     падает «все аккаунты заняты», а мягко ждёт и стартует, когда флот освободится
-    (после честного дележа большинство операций стартуют сразу)."""
+    (после честного дележа большинство операций стартуют сразу).
+
+    ОТСЧЁТ ИДЁТ ОТ НАЧАЛА ОЖИДАНИЯ, А НЕ ОТ ПОСТАНОВКИ. Раньше предел считался
+    от created_at, и для операции, запускаемой сразу, разница была незаметна. Но
+    отложенный пост, поставленный утром на вечер, очередной круг рекуррентного
+    автопостинга, повтор после флуд-паузы (PeerFlood откладывает на 48 часов) и
+    операция, возвращённая предохранителем, к моменту запуска заведомо старше
+    двадцати минут. ПЕРВАЯ же встреча с занятым флотом проваливала их мгновенно
+    с текстом «не дождались свободных аккаунтов» — хотя не ждали нисколько.
+    Владелец видел отложенную рассылку, упавшую ровно в назначенное время, без
+    единой попытки.
+
+    Отметка живёт в acct_wait_since (schema_v220): scheduled_for каждое
+    откладывание сдвигает вперёд, started_at обнуляется здесь же, а retry_count
+    тратится на повторы по ошибке исполнителя — переиспользовать нечего.
+    """
     import datetime as __dt
     row = await _safe_fetchrow(
-        pool, "SELECT created_at FROM operation_queue WHERE id=$1", op_id,
+        pool, "SELECT acct_wait_since FROM operation_queue WHERE id=$1", op_id,
         log_ctx=f"[requeue_no_acc op={op_id}]")
-    if row and row.get("created_at"):
-        age = __dt.datetime.now(__dt.timezone.utc) - row["created_at"]
-        if age > __dt.timedelta(minutes=_ACCT_WAIT_MAX_MIN):
+    # Колонки может ещё не быть (деплой опередил миграцию) — тогда row=None и
+    # операция просто продолжает ждать. Ждать дольше положенного безопаснее, чем
+    # провалить работу владельца из-за отставшей миграции.
+    waiting_since = row["acct_wait_since"] if row else None
+    if waiting_since is not None:
+        if waiting_since.tzinfo is None:
+            waiting_since = waiting_since.replace(tzinfo=__dt.timezone.utc)
+        waited = __dt.datetime.now(__dt.timezone.utc) - waiting_since
+        if waited > __dt.timedelta(minutes=_ACCT_WAIT_MAX_MIN):
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status='failed', finished_at=now(), "
                 "error_msg=$2 WHERE id=$1"
                 f" AND status NOT IN {op_status.sql_terminal_list()}",
-                op_id, "Флот занят другими операциями — не дождались свободных аккаунтов",
+                op_id,
+                f"Флот занят другими операциями — не дождались свободных аккаунтов "
+                f"за {int(waited.total_seconds() // 60)} мин",
                 log_ctx=f"[requeue_no_acc_fail op={op_id}]")
+            # Этот провал НЕ проходит через общий блок уведомлений в
+            # _run_op_task (он ниже по коду, а мы делаем return), поэтому
+            # раньше операция владельца умирала совершенно молча: он видел
+            # «ожидает», потом ничего.
+            await _notify_owner_about_op(
+                pool, bot, owner_id,
+                f"❌ <b>Операция #{op_id}</b> не запустилась: все аккаунты "
+                f"{int(waited.total_seconds() // 60)} мин были заняты другими "
+                f"операциями.\n\nЗапустите её снова, когда очередь разгрузится, "
+                f"или добавьте аккаунтов.",
+            )
             return
     await _safe_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        # COALESCE: отметку ставит ПЕРВОЕ откладывание и дальше её не сдвигает,
+        # иначе предел не наступал бы никогда и вечный цикл вернулся бы.
+        "acct_wait_since = COALESCE(acct_wait_since, now()), "
         "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(defer_s),
@@ -420,7 +538,8 @@ async def bounded_flood_sleep(seconds: float, where: str = "") -> float:
 
 
 async def _defer_op_for_flood(
-    pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = ""
+    pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = "",
+    bot=None, owner_id: int | None = None,
 ) -> None:
     """Отложить операцию до конца длинной флуд-паузы, освободив слот и флот.
 
@@ -447,6 +566,20 @@ async def _defer_op_for_flood(
         "op_worker: op=%d отложена на %dс из-за длинной флуд-паузы — слот и аккаунты освобождены",
         op_id, delay,
     )
+    # Пауза в часы (PeerFlood откладывает на 48) без объяснения выглядит как
+    # зависшая операция: в очереди «ожидает» и никаких причин. Молчание здесь
+    # обходится дороже сообщения — владелец начинает отменять и запускать
+    # заново, добирая новых ограничений.
+    if delay >= _DEFER_NOTIFY_MIN_S:
+        _hours, _mins = divmod(delay // 60, 60)
+        _when = f"{_hours} ч {_mins} мин" if _hours else f"{_mins} мин"
+        await _notify_owner_about_op(
+            pool, bot, owner_id,
+            f"⏸ <b>Операция #{op_id}</b> отложена на {_when}: Telegram попросил "
+            f"паузу.\n\nОна продолжится сама, отменять и запускать заново не "
+            f"нужно — повторный запуск только добавит ограничений."
+            + (f"\n\n<i>{reason[:200]}</i>" if reason else ""),
+        )
 
 
 # ── Адаптивный темп по времени суток + ML ─────────────────────────────────────
@@ -1070,6 +1203,10 @@ async def _maybe_requeue(
             SET status='pending',
                 retry_count=$1,
                 last_error=$2,
+                -- Повтор по ошибке исполнителя — это НОВАЯ попытка сделать
+                -- работу, а не продолжение ожидания флота. Старая отметка иначе
+                -- провалила бы её на первом же занятом флоте.
+                acct_wait_since=NULL,
                 scheduled_for=now() + make_interval(secs => $4::numeric),
                 started_at=NULL,
                 done_items=0
@@ -1483,6 +1620,7 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
     иначе поднималась бы после каждого рестарта вечно (см. _MAX_REVIVES).
     """
     await _ensure_revive_column(pool)
+    await _ensure_acct_wait_column(pool)
     # Сначала — исчерпавшие бюджет: честный терминальный статус вместо ещё
     # одного круга. Порядок важен: иначе тот же UPDATE ниже снова поднял бы их.
     poisoned = await _safe_execute(
@@ -2227,6 +2365,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             await _release_op_for_circuit(pool, op_id, remaining)
         except Exception:
             log_exc_swallow(log, "op_worker: circuit release failed op=%d", op_id)
+        await _explain_circuit_pause(pool, bot, owner_id, remaining)
         async with _active_lock:
             _active_op_ids.discard(op_id)
         return
@@ -2382,9 +2521,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _defer_s = result.get("defer_s")
                 if _defer_s:
                     await _defer_op_for_flood(
-                        pool, op_id, int(_defer_s), result.get("reason") or "")
+                        pool, op_id, int(_defer_s), result.get("reason") or "",
+                        bot=bot, owner_id=owner_id)
                 else:
-                    await _requeue_op_no_accounts(pool, op_id)
+                    await _requeue_op_no_accounts(
+                        pool, op_id, bot=bot, owner_id=owner_id)
                 return
 
             # Не перезаписывать статус если операция была отменена в процессе
@@ -2504,6 +2645,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb, "
+                # Исполнитель отработал — накопленное ожидание флота больше не
+                # относится к делу. Без сброса повтор этой же операции по другой
+                # причине унаследовал бы старую отметку и провалился бы на первом
+                # же занятом флоте.
+                "acct_wait_since=NULL, "
                 "error_msg=COALESCE($4, error_msg) "
                 f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
                 json.dumps(result, ensure_ascii=False),

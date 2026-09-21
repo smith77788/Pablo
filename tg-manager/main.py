@@ -152,6 +152,7 @@ from services import search_observer
 from services import account_monitor
 from services import trust_engine
 from services import shadowban_monitor
+from services import service_supervisor
 from services import op_worker
 from services import behavioral_engine
 from services import account_warmer
@@ -973,33 +974,27 @@ async def main() -> None:
             return
         nonlocal _svc_stagger_index
         _svc_stagger_index += 1
-        delay = _svc_stagger_index * 2  # 2s gap between each service
-        await asyncio.sleep(delay)
-        while True:
-            try:
-                await fn(*args)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                log.error(
-                    "Service %s crashed: %s — restarting in 30s", name, e, exc_info=True
-                )
-                await asyncio.sleep(30)
+        # Сам цикл присмотра живёт в services/service_supervisor.py: вложенной
+        # функцией он был непроверяем, и там пряталось зависание всего процесса
+        # на сервисе, выключенном настройкой (подробности — в докстринге модуля).
+        await service_supervisor.supervise(
+            name, fn, *args,
+            restart_delay=30.0,
+            start_delay=_svc_stagger_index * 2,   # разносим старты по 2с
+            restart_on_return=False,              # вернулся значит выключен
+        )
 
     async def _web_resilient(name: str, fn, *args):
         """Like _resilient but starts immediately (no stagger) and restarts in 5s.
         Used for the HTTP server which must bind to PORT before Railway health checks.
         """
-        while True:
-            try:
-                await fn(*args)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                log.error(
-                    "Web service %s crashed: %s — restarting in 5s", name, e, exc_info=True
-                )
-                await asyncio.sleep(5)
+        await service_supervisor.supervise(
+            name, fn, *args,
+            restart_delay=5.0,
+            # Сетевому сервису положено работать всегда: вернулся — поднимаем
+            # снова, но через паузу, а не вхолостую в тесном цикле.
+            restart_on_return=True,
+        )
 
     # Определяем webhook режим ДО старта сервера, чтобы передать dp в payment_webhook
     _webhook_path = "/webhook"

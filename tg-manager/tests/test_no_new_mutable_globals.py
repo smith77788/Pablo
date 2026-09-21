@@ -189,6 +189,11 @@ CACHE: dict[str, str] = {
     "services/mini_app_api.py:_cache": "ответы API с TTL",
     "services/op_worker.py:_cancel_cache": "флаг отмены с коротким TTL; истина в БД",
     "services/op_worker.py:_eta_data": "оценка времени, отображение",
+    "services/op_worker.py:_cb_explained_until": (
+        "троттлинг объяснения про открытый предохранитель по владельцу; сама "
+        "цепь общая и живёт в БД (op_circuit_breaker), здесь лишь «этому "
+        "владельцу уже написали». Расхождение реплик стоит одного лишнего "
+        "сообщения, потеря при рестарте — тоже"),
     "services/op_worker.py:_progress_milestones": "пороги отчёта о прогрессе",
     "services/organism/runner.py:_last_prune": "троттл ретеншена журнала",
     "services/proxy_selector.py:_datacenter_ip_cache": "признак датацентрового IP",

@@ -123,8 +123,18 @@ def test_worker_honours_defer_seconds():
     seg = seg[:seg.index("return") + 20]
     assert '_defer_s = result.get("defer_s")' in seg
     assert "_defer_op_for_flood(" in seg
-    assert "_requeue_op_no_accounts(pool, op_id)" in seg, (
+    assert "_requeue_op_no_accounts(" in seg, (
         "возврат без defer_s обязан идти прежним путём"
+    )
+    # Проверяем СМЫСЛ, а не буквальный текст вызова: обоим путям теперь
+    # передаются bot и owner_id (иначе провал «флот занят» и пауза на 48 часов
+    # уходили владельцу в тишину), и сверка по литералу ломалась бы на каждом
+    # таком дополнении.
+    _fleet_call = seg[seg.index("_requeue_op_no_accounts("):]
+    _fleet_call = _fleet_call[:_fleet_call.index(")") + 1]
+    assert "defer_s" not in _fleet_call, (
+        "дефициту флота назначили внешнюю отсрочку — это путь флуд-паузы, "
+        "а не ожидания аккаунтов"
     )
 
 
