@@ -12333,6 +12333,15 @@ async def _exec_mass_invite(
     _given_back_n = 0
     _last_rebalance = time.monotonic()
     _REBALANCE_EVERY_S = 20.0  # не долбить БД COUNT(*) на каждый батч
+    # Карантин (is_account_quarantined) проверяется здесь ЖИВЫМ пульсом, а не
+    # только один раз на старте (_filter_quarantined_accounts выше). Прогон может
+    # идти часами (паузы до 900с на флуде, ребаланс каждые 20с) — аккаунт, ушедший
+    # в карантин ПОСЛЕ старта (например, поймал critical-ограничение в ДРУГОЙ
+    # операции — тот же реальный Telegram-аккаунт), иначе продолжал бы приглашать
+    # до конца прогона. Реже ребаланса: запрос идёт по КАЖДОМУ аккаунту флота, а не
+    # COUNT(*), 20с для полусотни аккаунтов — заметная лишняя нагрузка на БД.
+    _last_quarantine_check = time.monotonic()
+    _REQUARANTINE_EVERY_S = 300.0
 
     # Ограничитель одновременных инвайтов флота. Разные аккаунты бьют по сети
     # независимо; семафор держит не больше _parallel одновременно, чтобы не
@@ -12475,12 +12484,34 @@ async def _exec_mass_invite(
         # чтобы обе шли постепенно-параллельно, а не по очереди «до конца».
         if time.monotonic() - _last_rebalance >= _REBALANCE_EVERY_S:
             _last_rebalance = time.monotonic()
+            _before_ids = {int(x["id"]) for x in accounts}
             _before_n = len(accounts)
             accounts = await _rebalance_claim(op_id, owner_id, accounts)
             if len(accounts) < _before_n:
                 _given_back_n += _before_n - len(accounts)
-                retired = {a for a in retired if a in {int(x["id"]) for x in accounts}}
-                budget = {k: v for k, v in budget.items() if k in {int(x["id"]) for x in accounts}}
+
+            # Живой риск-пульс: не реже раза в _REQUARANTINE_EVERY_S — аккаунт,
+            # ушедший в карантин ПОСЛЕ старта прогона, не должен приглашать до
+            # самого конца (см. комментарий у _REQUARANTINE_EVERY_S выше).
+            # include_risky — владелец ОСОЗНАННО оставил рисковых в круге; повторная
+            # проверка не должна тайком выкидывать их же через несколько минут.
+            if not _include_risky and time.monotonic() - _last_quarantine_check >= _REQUARANTINE_EVERY_S:
+                _last_quarantine_check = time.monotonic()
+                accounts, _fresh_q = await _filter_quarantined_accounts(pool, op_id, accounts)
+                _quarantined_n += _fresh_q
+
+            _kept_ids = {int(x["id"]) for x in accounts}
+            _left_ids = _before_ids - _kept_ids
+            if _left_ids:
+                # Отданный другой операции или свежекарантинный аккаунт больше
+                # НИКОГДА не выведется из круга обычным путём этого прогона (он
+                # просто исчез из accounts) — без явного освобождения держал бы
+                # место админа впустую до конца прогона, хотя реально им уже не
+                # пользуется.
+                for _lid in _left_ids:
+                    await _release_admin_seat(_lid)
+                retired = {a for a in retired if a in _kept_ids}
+                budget = {k: v for k, v in budget.items() if k in _kept_ids}
 
         active = [a for a in accounts if int(a["id"]) not in retired]
         if not active:
@@ -12915,6 +12946,21 @@ async def _exec_mass_invite(
     # (суточный лимит / мёртвая сессия / сбой подключения).
     _engaged_n = len(_used_accounts)
     _idle_n = max(0, len(accounts) - _engaged_n)
+
+    # Разбор «не ответили» по ПРИЧИНЕ (живой прогон, операция #90: 43 из 51 —
+    # единое непрозрачное число, оператор не мог понять, мёртвые ли это сессии,
+    # мёртвые прокси или что-то ещё, и раз за разом впустую тратил на них
+    # попытки). errors[] от каждого сбоя подключения уже лежат в _noconnect_errs
+    # — просто нигде не считались по типам. См. invite_recovery.classify_noconnect_error.
+    from services import invite_recovery as _irec2
+    _noconnect_reasons: dict[str, int] = {}
+    for _ne in _noconnect_errs:
+        _nk = _irec2.classify_noconnect_error(_ne)
+        _noconnect_reasons[_nk] = _noconnect_reasons.get(_nk, 0) + 1
+    _noconnect_breakdown = " · ".join(
+        f"{_irec2.NOCONNECT_LABELS.get(k, k)}: {v}"
+        for k, v in sorted(_noconnect_reasons.items(), key=lambda kv: -kv[1]) if v)
+
     _acc_parts = []
     if _quarantined_n:
         _acc_parts.append(f"🚫 в карантине (риск бана): {_quarantined_n}")
@@ -12926,7 +12972,8 @@ async def _exec_mass_invite(
         _acc_parts.append(f"🔀 отдано другим параллельным операциям владельца: {_given_back_n}")
     _idle_other = _idle_n - len(_daily_capped)
     if _idle_other > 0:
-        _acc_parts.append(f"⚪ не ответили (сессия/сеть): {_idle_other}")
+        _acc_parts.append(f"⚪ не ответили (сессия/сеть): {_idle_other}"
+                           + (f" [{_noconnect_breakdown}]" if _noconnect_breakdown else ""))
     # Предупреждение о риске: аккаунты БЕЗ назначенного прокси могли работать
     # напрямую с IP хоста (разрешено политикой allow_direct как последний резерв,
     # но это риск блокировок). Показываем оператору — это его сигнал назначить прокси.
@@ -12943,12 +12990,14 @@ async def _exec_mass_invite(
         + _proxy_warn
     ) if _selected_n else ""
 
-    # Подсказка по типовой причине сбоя подключения (для «одного прохода без ошибок»):
-    # сырой английский текст Telethon пользователю не нужен — нужна причина + действие.
+    # Подсказка по КРУПНЕЙШЕЙ корзине сбоя подключения (для «одного прохода без
+    # ошибок»): сырой английский текст Telethon пользователю не нужен — нужна
+    # причина + действие. Раньше ловились только 2 конкретные подстроки на весь
+    # список сразу — прокси/таймаут/занятая сессия оставались без единого совета.
     _sess_hint = ""
-    if _noconnect_errs:
-        _blob = " ".join(_noconnect_errs).upper()
-        if "TWO DIFFERENT IP" in _blob or "AUTH_KEY_DUPLICATED" in _blob:
+    if _noconnect_reasons:
+        _top_nc = max(_noconnect_reasons.items(), key=lambda kv: kv[1])[0]
+        if _top_nc == _irec2.NOCONNECT_AUTH_CONFLICT:
             _sess_hint = (
                 "\n⚠️ Кратковременный конфликт: сессия шла с двух IP одновременно "
                 "(AUTH_KEY_DUPLICATED). Аккаунты НЕ отключены — это временно. Обычно "
@@ -12958,10 +13007,10 @@ async def _exec_mass_invite(
                 "здесь: у каждого устройства свой ключ, они спокойно сосуществуют. "
                 "Повторите инвайт — при снятии конфликта аккаунты подключатся."
             )
-        elif ("AUTH_KEY_UNREGISTERED" in _blob or "SESSION_REVOKED" in _blob
-              or "SESSION_EXPIRED" in _blob or "AUTHORIZATION KEY" in _blob):
-            _sess_hint = ("\n⚠️ Сессии недействительны — переавторизуйте аккаунты "
-                          "в разделе «Аккаунты».")
+        else:
+            _nc_advice = _irec2.NOCONNECT_ADVICE.get(_top_nc, "")
+            if _nc_advice:
+                _sess_hint = f"\n⚠️ {_nc_advice}"
 
     # Метод «ссылка в ЛС» не добавляет насильно — честно называем ok доставкой
     # ссылки, а не вступлением (вступление зависит от согласия человека).

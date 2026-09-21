@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+import re
+
 # Сколько раз пробуем выдать права одному инвайтеру по ходу прогона.
 # Одна попытка — слишком хрупко: промоут идёт через сеть (join + promote), и
 # любой таймаут стоил аккаунта на весь прогон. Три — потолок против зацикливания
@@ -94,3 +96,64 @@ def should_schedule_continuation(
                            "чат или аудиторию; повтор только сожжёт аккаунты")
         return True, "флот перегрет — остаток уедет на следующий запуск, когда аккаунты отдохнут"
     return True, "остаток уедет на следующий запуск"
+
+
+# Третий разрыв, найденный на живом прогоне (операция #90, флот 51, "не ответили
+# (сессия/сеть): 43"): «не подключился» — единая непрозрачная корзина. Отчёт
+# показывал оператору голое число без единого намёка на причину, хотя сам текст
+# исключения (errors[]) уже лежал в _noconnect_errs — просто нигде не считался
+# по типам, только искался на 2 конкретные подстроки для одной подсказки.
+# Мёртвая сессия («переавторизуйте») и мёртвый/нестабильный прокси («назначьте
+# другой прокси») требуют РАЗНЫХ действий оператора — свалены в одно число,
+# отчёт не мог их различить, и 40+ реально нерабочих аккаунтов раз за разом
+# получали новую попытку вместо диагностируемой причины.
+NOCONNECT_DEAD_SESSION = "dead_session"
+NOCONNECT_AUTH_CONFLICT = "auth_conflict"
+NOCONNECT_PROXY = "proxy"
+NOCONNECT_TIMEOUT = "timeout"
+NOCONNECT_BUSY = "busy"
+NOCONNECT_OTHER = "other"
+
+NOCONNECT_LABELS = {
+    NOCONNECT_DEAD_SESSION: "🔑 сессия недействительна",
+    NOCONNECT_AUTH_CONFLICT: "⚡ конфликт сессии (два IP, временно)",
+    NOCONNECT_PROXY: "🌐 прокси недоступен",
+    NOCONNECT_TIMEOUT: "⏱ таймаут подключения",
+    NOCONNECT_BUSY: "🔒 сессия занята другой операцией",
+    NOCONNECT_OTHER: "❓ прочее",
+}
+
+NOCONNECT_ADVICE = {
+    NOCONNECT_DEAD_SESSION: "Переавторизуйте эти аккаунты в разделе «Аккаунты» — сессии недействительны.",
+    NOCONNECT_PROXY: "Назначьте рабочий прокси этим аккаунтам — текущий не отвечает.",
+    NOCONNECT_TIMEOUT: "Сеть/прокси нестабильны — проверьте прокси или повторите позже.",
+}
+
+
+def classify_noconnect_error(err: str) -> str:
+    """Текст ошибки подключения аккаунта → корзина (см. NOCONNECT_LABELS).
+
+    По подстроке, не по классу исключения: сюда попадают и текст Telethon-ошибок
+    (RPC-имя вроде AUTH_KEY_UNREGISTERED), и текст обычных сетевых/прокси-исключений
+    (ConnectionRefusedError, TimeoutError, наш SessionBusyError) — единого базового
+    класса у них нет, а строка есть всегда. Сравниваем по СЖАТОЙ форме (без
+    пробелов/подчёркиваний): один и тот же сбой приходит то как TL RPC-константа
+    (AUTH_KEY_UNREGISTERED), то как имя Python-исключения (SessionExpiredError),
+    то как обычная человеческая фраза («Session expired») — раздельные подстроки
+    ловили только один вариант написания из трёх."""
+    u = (err or "").upper()
+    c = re.sub(r"[^A-ZА-Я0-9]", "", u)  # compact: без пробелов/подчёркиваний/пунктуации
+    if "AUTHKEYDUPLICATED" in c or "TWODIFFERENTIP" in c:
+        return NOCONNECT_AUTH_CONFLICT
+    if ("AUTHKEYUNREGISTERED" in c or "SESSIONREVOKED" in c or "SESSIONEXPIRED" in c
+            or "AUTHORIZATIONKEY" in c or "USERDEACTIVATED" in c):
+        return NOCONNECT_DEAD_SESSION
+    if "СЕССИЯЗАНЯТА" in c or "SESSIONBUSY" in c:
+        return NOCONNECT_BUSY
+    if ("PROXY" in c or "SOCKS" in c or "CONNECTIONREFUSED" in c or "ECONNREFUSED" in c
+            or "CONNECTIONRESET" in c or "UNREACHABLE" in c or "NAMEORSERVICENOTKNOWN" in c
+            or "GETADDRINFO" in c):
+        return NOCONNECT_PROXY
+    if "TIMEOUT" in c or "TIMEDOUT" in c:
+        return NOCONNECT_TIMEOUT
+    return NOCONNECT_OTHER
