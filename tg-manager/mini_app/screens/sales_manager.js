@@ -486,6 +486,9 @@ async function spAddFaq() {
 
 async function spDelFaq(fid) {
   const pid = _spCurrent && _spCurrent.id;
+  // Вопрос и ответ человек писал руками, а 🗑 стоит в строке списка: промах
+  // пальцем стирал их без вопроса и без отмены.
+  if (!await askConfirm('Удалить этот вопрос и ответ?')) return;
   try {
     await api('/api/miniapp/sales/faq/' + fid, { method: 'DELETE' });
     const d = await api('/api/miniapp/sales/persona/' + pid);
@@ -513,6 +516,7 @@ async function spAddExample() {
 
 async function spDelExample(eid) {
   const pid = _spCurrent && _spCurrent.id;
+  if (!await askConfirm('Удалить этот пример диалога?')) return;
   try {
     await api('/api/miniapp/sales/example/' + eid, { method: 'DELETE' });
     const d = await api('/api/miniapp/sales/persona/' + pid);
@@ -571,6 +575,7 @@ async function spAddDelivery() {
 
 async function spDelDelivery(did) {
   const pid = _spCurrent && _spCurrent.id;
+  if (!await askConfirm('Удалить способ доставки?')) return;
   try {
     await api('/api/miniapp/sales/delivery/' + did, { method: 'DELETE' });
     const d = await api('/api/miniapp/sales/persona/' + pid);
@@ -601,6 +606,7 @@ async function spAddPromo() {
 
 async function spDelPromo(prid) {
   const pid = _spCurrent && _spCurrent.id;
+  if (!await askConfirm('Удалить промокод? Он перестанет действовать сразу.')) return;
   try {
     await api('/api/miniapp/sales/promo/' + prid, { method: 'DELETE' });
     const d = await api('/api/miniapp/sales/persona/' + pid);
@@ -736,6 +742,7 @@ async function spAddProduct() {
 
 async function spDelProduct(prid) {
   const pid = _spCurrent && _spCurrent.id;
+  if (!await askConfirm('Удалить товар из каталога менеджера?')) return;
   try {
     await api('/api/miniapp/sales/product/' + prid, { method: 'DELETE' });
     const d = await api('/api/miniapp/sales/persona/' + pid);
@@ -744,7 +751,11 @@ async function spDelProduct(prid) {
 }
 
 async function spDelete(pid) {
-  if (!confirm('Удалить менеджера? Заказы сохранятся.')) return;
+  // window.confirm во встроенном браузере Telegram часто блокируется: диалог не
+  // показывался, вызов возвращал false — и кнопка «Удалить» просто не работала.
+  // askConfirm идёт через нативный диалог Telegram и падает на confirm только
+  // там, где нативного нет.
+  if (!await askConfirm('Удалить менеджера? Заказы сохранятся.')) return;
   try {
     await api('/api/miniapp/sales/persona/' + pid, { method: 'DELETE' });
     toast('Удалён');

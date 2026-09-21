@@ -465,6 +465,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Inline → utility classes (replace hardcoded rgba(255,255,255,...)) ── */
 .inp{padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
 .inp:focus{border-color:var(--accent)}
+/* Поиск и срезы над длинным списком (боты, каналы). Списки рисовались целиком:
+   после «Фабрики» это сотни карточек, и нужную можно было найти только
+   прокруткой. Высота чипа — 34px: меньше не попасть пальцем на телефоне. */
+.lst-search{width:100%;box-sizing:border-box;margin:0 0 8px}
+.lf-chips{display:flex;gap:6px;overflow-x:auto;padding:0 16px 8px;scrollbar-width:none}
+.lf-chips::-webkit-scrollbar{display:none}
+.lf-chip{flex:none;cursor:pointer;font-size:12px;min-height:34px;display:inline-flex;align-items:center;padding:6px 12px;border-radius:20px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:var(--text);white-space:nowrap}
+.lf-chip.on{border-color:var(--accent);background:var(--accent-soft-2)}
+.lst-more{padding:2px 16px 10px}
+.lst-more-note{font-size:12px;color:var(--hint);text-align:center;padding:6px 8px 8px;line-height:1.45}
 .inp-s{padding:9px;border-radius:8px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px}
 .inp-s:focus{border-color:var(--accent)}
 .inp-sm{padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace}
@@ -986,7 +996,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
            друг от друга; включает только аккаунт-владелец через @BotFather. -->
       <button class="btn btn-s" onclick="enableBotMesh()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Включить режим bot-to-bot у сети ботов">🕸 Включить сеть</button>
     </div>
+    <!-- Поиск и срезы по списку. Раньше список рисовался целиком и без единого
+         фильтра: после «Фабрики ботов» это сотни карточек, и найти нужного бота
+         можно было только прокруткой. Состояние бота сервер уже считает
+         (services/bot_health.py) — даём по нему отобрать, а не только увидеть. -->
+    <input type="text" id="botSearch" class="inp lst-search" oninput="onBotSearch(this.value)"
+           placeholder="🔍 Поиск: имя или @username" autocomplete="off" aria-label="Поиск по ботам">
+    <div class="lf-chips" id="botFilterChips" role="group" aria-label="Срез списка ботов"></div>
     <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <!-- Остаток списка: сервер отдаёт срез, а в шапке стоит полное число. Без
+         этой строки «700 ботов» в шапке и 500 карточек в списке выглядели как
+         одно и то же, а «Выбрать все» молча брал только загруженных. -->
+    <div class="lst-more" id="botLoadMore"></div>
   </div>
   <!-- Плавающая панель: рассылка выбранным ботам -->
   <div id="botSelBar" style="display:none">
@@ -1366,7 +1387,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Массовые действия по каналам -->
     <div style="display:flex;gap:8px;padding:4px 0 6px">
       <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 Массовый пост</button>
-      <button class="btn btn-s" onclick="openQuickPost()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">✍️ Quick Post</button>
+      <button class="btn btn-s" onclick="openQuickPost()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">✍️ Быстрый пост</button>
       <button class="btn btn-s" onclick="openChannelFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
@@ -1377,7 +1398,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
       <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🧹 Только мои (убрать чужие)</button>
     </div>
+    <!-- Поиск и срезы. Список рисовался целиком и без фильтров: после «Фабрики
+         каналов» это сотни строк, а роль (владелец / админ / просто участник)
+         приходит с сервера и решает, что с каналом вообще можно сделать. -->
+    <input type="text" id="chSearch" class="inp lst-search" oninput="onChSearch(this.value)"
+           placeholder="🔍 Поиск: название или @username" autocomplete="off" aria-label="Поиск по каналам">
+    <div class="lf-chips" id="chFilterChips" role="group" aria-label="Срез списка каналов"></div>
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <!-- Остаток списка. Сервер отдаёт страницу, в шапке стоит полное число:
+         без этой строки 500 строк при 700 каналах выглядели как весь список,
+         и «Выбрать все» молча брал только их. -->
+    <div class="lst-more" id="chLoadMore"></div>
   </div>
   <!-- Плавающая панель массовых действий по каналам -->
   <div id="chSelBar" style="display:none">
@@ -2649,7 +2680,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <input type="checkbox" id="gfSupergroup" checked style="width:16px;height:16px">
         Супергруппа
       </label>
-      <button class="btn btn-p" style="width:100%" onclick="submitGroupFactory()">👥 Создать группу</button>
+      <button class="btn btn-p" id="gfSubmit" style="width:100%" onclick="submitGroupFactory()">👥 Создать группу</button>
       <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="importAllResources('groups')" title="Найти группы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт групп с аккаунтов</button>
       <div id="gfErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
@@ -7630,6 +7661,18 @@ function _syncBackButton() {
 
 function push(sid) {
   closeAllModals();
+  // Экраны — синглтоны по id, и один и тот же id дважды подряд в стеке не
+  // означает ничего, кроме ловушки: «назад» снимет верхний и покажет ТОТ ЖЕ
+  // экран. Так и было везде, где экран перерисовывают повторным вызовом своей
+  // же open-функции: ⟳ на «Защите от накрутки», сохранение в редакторе
+  // менеджера продаж, любое действие на этих экранах. Каждое нажатие добавляло
+  // лишний шаг назад, и выйти получалось только перебором.
+  if (STACK.length && STACK[STACK.length - 1] === sid) {
+    const same = document.getElementById(sid);
+    // Позицию прокрутки НЕ трогаем: это обновление на месте, а не переход.
+    if (same) same.classList.add('show');
+    return;
+  }
   // Прячем все видимые экраны — иначе абсолютно спозиционированные элементы
   // предыдущего экрана (напр. кнопки удаления с z-index) «протекают» поверх
   // нового экрана.
@@ -8403,18 +8446,130 @@ const BOT_GRADS = [
   'linear-gradient(135deg,#f87171,#991b1b)',
 ];
 
+// Список ботов: срез сервера + поиск и фильтры на клиенте.
+//
+// Эндпоинт /api/miniapp/bots отдаёт СРЕЗ (по умолчанию 500, потолок 5000) и
+// рядом — полное число. Фронтенд брал срез, писал в шапку полное число и про
+// остаток молчал: при 700 ботах в шапке стояло «700 ботов», в списке лежало
+// 500 карточек, а «Выбрать все» брал только их — и рассылка уходила по
+// неполному списку, не сказав об этом ни слова.
+let BOT_LIMIT = 500;            // сколько запрошено у сервера сейчас
+const BOT_PAGE = 500;           // шаг «загрузить ещё»
+const BOT_MAX  = 5000;          // потолок эндпоинта
+let BOT_TOTAL = 0;              // сколько всего у пользователя (серверный счёт)
+let BOT_LOADING = false;
+let BOT_SEARCH = '';
+let BOT_FILTER = 'all';
+let _botSearchT = null;
+
 async function loadBots() {
   try {
-    const d = await api('/api/miniapp/bots');
+    const d = await api('/api/miniapp/bots?limit=' + BOT_LIMIT);
     BOTS = d.bots||[];
-    const botTotal = (d.total!=null?d.total:BOTS.length);
+    BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
     const cntEl = document.getElementById('bots-cnt');
-    if (cntEl) cntEl.textContent = botTotal ? botTotal+' ботов' : '';
+    if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
+    renderBotFilterChips();
     renderBots();
   } catch(e) {
     const wrap = document.getElementById('botList');
     if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(e.message,'loadBots()'); }
   }
+}
+
+// Эндпоинт ботов не умеет offset, только limit, поэтому «загрузить ещё» — это
+// перезапрос с бóльшим срезом. Выбор хранится по bot_id и перезапрос его не рвёт.
+async function loadMoreBots() {
+  if (BOT_LOADING || BOTS.length >= BOT_TOTAL || BOT_LIMIT >= BOT_MAX) return;
+  BOT_LOADING = true;
+  const box = document.getElementById('botLoadMore');
+  if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  BOT_LIMIT = Math.min(BOT_LIMIT + BOT_PAGE, BOT_MAX);
+  try {
+    const d = await api('/api/miniapp/bots?limit=' + BOT_LIMIT);
+    BOTS = d.bots||[];
+    BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
+    const cntEl = document.getElementById('bots-cnt');
+    if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
+    renderBotFilterChips();
+    renderBots();
+    if (BOT_SEL_MODE) updateBotSelBar();
+  } catch(e) {
+    toast('⚠️ '+((e.message||'Ошибка').substring(0,60)));
+    // Не оставляем застрявшую крутилку: у сценария всегда есть видимый выход.
+    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+  } finally { BOT_LOADING = false; }
+}
+
+// Состояние бота одним словом: ok | degraded | broken | off (services/bot_health.py).
+// Старые ответы без health не должны выпадать из срезов — отсюда запасной разбор.
+function _botState(b) {
+  const h = (b && b.health) || {};
+  if (h.state) return h.state;
+  return (b && b.is_active) ? 'ok' : 'off';
+}
+function _botsFiltered() {
+  const q = BOT_SEARCH;
+  return BOTS.filter(b => {
+    const st = _botState(b);
+    if (BOT_FILTER === 'ok'      && st !== 'ok') return false;
+    if (BOT_FILTER === 'problem' && st !== 'broken' && st !== 'degraded') return false;
+    if (BOT_FILTER === 'off'     && st !== 'off') return false;
+    if (!q) return true;
+    return ((b.first_name||'') + ' @' + (b.username||'') + ' ' + (b.bot_id||'')).toLowerCase().includes(q);
+  });
+}
+function onBotSearch(v) {
+  BOT_SEARCH = (v||'').trim().toLowerCase();
+  clearTimeout(_botSearchT);
+  _botSearchT = setTimeout(()=>{ renderBotFilterChips(); renderBots(); }, 200);
+}
+function filterBots(mode) {
+  BOT_FILTER = mode;
+  renderBotFilterChips();
+  renderBots();
+  try { tg.HapticFeedback?.selectionChanged(); } catch(_) {}
+}
+function resetBotFilters() {
+  BOT_SEARCH = ''; BOT_FILTER = 'all';
+  const i = document.getElementById('botSearch'); if (i) i.value = '';
+  renderBotFilterChips(); renderBots();
+}
+function renderBotFilterChips() {
+  const box = document.getElementById('botFilterChips');
+  if (!box) return;
+  const by = {ok:0, problem:0, off:0};
+  BOTS.forEach(b => { const st=_botState(b); if (st==='ok') by.ok++; else if (st==='off') by.off++; else by.problem++; });
+  // Пустой срез не показываем: чип, за которым никого нет, — обещание без содержания.
+  const defs = [['all','Все',BOTS.length], ['problem','⚠️ Проблема',by.problem],
+                ['ok','🟢 Работают',by.ok], ['off','⏸ Выключены',by.off]];
+  const vis = defs.filter(([k,,n]) => k==='all' || n>0);
+  // Активный срез мог опустеть после перезагрузки — иначе список остался бы
+  // пустым, а чипа, которым это снять, на экране уже нет.
+  if (!vis.some(([k]) => k === BOT_FILTER)) BOT_FILTER = 'all';
+  if (vis.length <= 1) { box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='flex';
+  box.innerHTML = vis.map(([k,lbl,n]) =>
+    `<span class="lf-chip${BOT_FILTER===k?' on':''}" role="button" tabindex="0" aria-pressed="${BOT_FILTER===k}" onclick="filterBots('${k}')">${lbl} ${n}</span>`).join('');
+}
+// Остаток списка — честной строкой, а не молчанием.
+function renderBotLoadMore(shownCount) {
+  const box = document.getElementById('botLoadMore');
+  if (!box) return;
+  const loaded = BOTS.length;
+  if (!loaded || loaded >= BOT_TOTAL) { box.innerHTML=''; return; }
+  const filtering = !!(BOT_SEARCH || BOT_FILTER !== 'all');
+  // Поиск идёт по загруженным: «ничего не найдено» при неполном списке — не
+  // ответ, а половина ответа. Говорим, сколько именно просмотрено.
+  const note = filtering
+    ? `Найдено ${shownCount!=null?shownCount:0} среди загруженных ${loaded} из ${BOT_TOTAL}.`
+    : '';
+  if (BOT_LIMIT >= BOT_MAX) {
+    box.innerHTML = `<div class="lst-more-note">Показано ${loaded} из ${BOT_TOTAL} — больше сервер за раз не отдаёт. Сузьте поиск.</div>`;
+    return;
+  }
+  box.innerHTML = (note ? `<div class="lst-more-note">${esc(note)}</div>` : '')
+    + `<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${loaded} из ${BOT_TOTAL}</button>`;
 }
 
 // Скан флота на ботов: спрашивает @BotFather от лица каждого аккаунта.
@@ -8516,9 +8671,19 @@ function renderBots() {
   // Пустой список ≠ «ботов нет»: боты могли быть созданы с аккаунтов флота, а
   // скан ресурсов их никогда не находил (бот — не канал). Даём найти их, а не
   // только вставлять токены руками по одному.
-  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет подключённых ботов','Боты, созданные с ваших аккаунтов, можно найти сканом флота — или подключить по токену от @BotFather',{label:'🔍 Найти ботов на флоте',fn:'scanFleetBots()'}); return; }
+  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет подключённых ботов','Боты, созданные с ваших аккаунтов, можно найти сканом флота — или подключить по токену от @BotFather',{label:'🔍 Найти ботов на флоте',fn:'scanFleetBots()'}); renderBotLoadMore(0); return; }
+  const _list = _botsFiltered();
+  // Пустой результат поиска ≠ «ботов нет»: разные причины, разный выход.
+  if (!_list.length) {
+    wrap.className='';
+    wrap.innerHTML = empty('🔍','Ничего не найдено',
+      'Ни один бот не подходит под поиск и выбранный срез',
+      {label:'✖️ Сбросить поиск и срез', fn:'resetBotFilters()'});
+    renderBotLoadMore(0);
+    return;
+  }
   wrap.className = 'bot-cards';
-  wrap.innerHTML = BOTS.map(b=>{
+  wrap.innerHTML = _list.map(b=>{
     // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй
     // строкой (раньше выводился только @username, имя не было видно вовсе).
     const name = b.first_name || (b.username?'@'+b.username:'Бот #'+b.bot_id);
@@ -8556,6 +8721,7 @@ function renderBots() {
       ${badge}
     </div>`;
   }).join('');
+  renderBotLoadMore(_list.length);
 }
 
 // ── Режим выбора ботов и массовая рассылка ──────────────
@@ -8575,7 +8741,17 @@ function toggleBotSel(id) {
   renderBots();
   updateBotSelBar();
 }
-function botSelAll() { BOTS.forEach(b=>BOT_SEL.add(b.bot_id)); renderBots(); updateBotSelBar(); }
+// «Все» — это все, кто сейчас в списке после поиска и среза. Раньше сюда
+// попадали все ЗАГРУЖЕННЫЕ боты, тогда как в шапке стояло полное число: при 700
+// ботах и срезе в 500 рассылка молча уходила по неполному списку.
+function botSelAll() {
+  const list = _botsFiltered();
+  list.forEach(b=>BOT_SEL.add(b.bot_id));
+  renderBots(); updateBotSelBar();
+  if (BOTS.length < BOT_TOTAL) {
+    toast(`Выбрано ${list.length} · загружено ${BOTS.length} из ${BOT_TOTAL}`);
+  }
+}
 function botSelClear() { BOT_SEL.clear(); renderBots(); updateBotSelBar(); }
 function updateBotSelBar() {
   const el = document.getElementById('botSelCount');
@@ -8612,7 +8788,13 @@ async function submitQuickBroadcast() {
   const errEl=document.getElementById('quickBcErr'); errEl.textContent='';
   if(!text){ errEl.textContent='Введите текст'; return; }
   if(!BOTS.length){ errEl.textContent='Нет ботов. Добавьте бота в разделе 🤖'; return; }
-  const preview=`Разослать сообщение всем ${BOTS.length} ботам?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`;
+  // Подтверждение обещает ровно то, что уйдёт. BOTS — загруженный срез: пока
+  // остаток не подгружен, «всем ботам» было бы неправдой.
+  const _partial = (typeof BOT_TOTAL === 'number' && BOT_TOTAL > BOTS.length);
+  const preview = (_partial
+      ? `Разослать сообщение ${BOTS.length} загруженным ботам из ${BOT_TOTAL}?\nОстальные не получат — сначала нажмите «Загрузить ещё» в списке ботов.`
+      : `Разослать сообщение всем ${BOTS.length} ботам?`)
+    + `\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`;
   if(!await askConfirm(preview)) return;
   const btn=document.getElementById('quickBcBtn'); btn.disabled=true; btn.textContent='⏳ Отправка…';
   try {
@@ -8883,8 +9065,14 @@ async function toggleAr(id, el) {
   }
 }
 
+// Диалог здесь был декоративным. `tg.showConfirm(...)` возвращает undefined
+// (см. telegram-web-app.js), поэтому `?? await doDeleteAr(id)` срабатывал ВСЕГДА:
+// авто-ответ удалялся в момент касания 🗑, ещё до ответа пользователя, — а если
+// тот жал «ОК», удаление уходило вторым запросом. Нажатая «Отмена» не отменяла
+// ничего. Тот же диалог, но через общий askConfirm, который ждёт ответа.
 async function deleteAr(id) {
-  tg.showConfirm?.('Удалить авто-ответ?', async ok => { if (ok) { await doDeleteAr(id); } }) ?? await doDeleteAr(id);
+  if (!await askConfirm('Удалить авто-ответ?')) return;
+  await doDeleteAr(id);
 }
 async function doDeleteAr(id) {
   try {
@@ -9353,11 +9541,22 @@ async function loadAccounts() {
   }).catch(e => {
     document.getElementById('accList').innerHTML=errHtml(e.message,'loadAccounts()');
   });
-  api('/api/miniapp/channels').then(cd => {
-    CUR_CHANNELS = cd.channels||[];
-    // Истинное число каналов из cd.total (список ограничен 50) — иначе подпись врала
-    txt('m-ch-cnt', (cd.total!=null?cd.total:CUR_CHANNELS.length)+' каналов');
-    renderChPreview(CUR_CHANNELS, cd.total);
+  // Превью на вкладке аккаунтов показывает ТРИ канала. Раньше оно тянуло срез в
+  // 500 строк и затирало им CUR_CHANNELS — тот самый список, который экран
+  // каналов подгрузил постранично. После переключения вкладок «Выбрать все» на
+  // экране каналов работал уже по другому набору, чем тот, что видел
+  // пользователь. Теперь превью берёт ровно столько, сколько показывает, и
+  // только ДОПОЛНЯЕТ кэш, никогда его не укорачивая.
+  api('/api/miniapp/channels?limit=20&offset=0').then(cd => {
+    const list = cd.channels||[];
+    const chScreenOpen = (typeof STACK !== 'undefined' && STACK.indexOf('s-channels') !== -1);
+    if (!chScreenOpen) {
+      const known = new Set(CUR_CHANNELS.map(c=>String(c.channel_id)));
+      list.forEach(c => { if (!known.has(String(c.channel_id))) CUR_CHANNELS.push(c); });
+    }
+    // Истинное число каналов из cd.total (список ограничен) — иначе подпись врала
+    txt('m-ch-cnt', (cd.total!=null?cd.total:list.length)+' каналов');
+    renderChPreview(list, cd.total);
   }).catch(() => {
     txt('chPreview', '');
   });
@@ -10270,36 +10469,159 @@ function buildAccDetail(d) {
 }
 
 // ── Channels ───────────────────────────────────────────
+// Список каналов: страница с сервера + поиск и срезы на клиенте.
+//
+// Эндпоинт /api/miniapp/channels умеет limit и offset и возвращает полное
+// число. Фронтенд брал первую страницу, писал в шапку полное число и про
+// остаток молчал: при 700 каналах в шапке стояло «700 каналов», в списке
+// лежало 500 строк, а «Все» в панели массовых действий брал только их — и
+// пост, смена названия или выдача админки уходили по неполному набору.
+const CH_PAGE = 500;            // размер страницы
+let CH_TOTAL = 0;               // сколько всего каналов (серверный счёт)
+let CH_OFFSET = 0;              // сколько строк уже получено с сервера
+let CH_LOADING = false;
+let CH_SEARCH = '';
+let CH_FILTER = 'all';
+let _chSearchT = null;
+
 async function openChannels() {
   push('s-channels');
   txt('chList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  const box = document.getElementById('chLoadMore'); if (box) box.innerHTML = '';
+  CH_OFFSET = 0;
   try {
-    const d = await api('/api/miniapp/channels');
+    const d = await api('/api/miniapp/channels?limit=' + CH_PAGE + '&offset=0');
     CUR_CHANNELS = d.channels||[];
-    txt('ch-cnt', (d.total!=null?d.total:CUR_CHANNELS.length)+' каналов');
+    CH_OFFSET = CUR_CHANNELS.length;
+    CH_TOTAL = (d.total!=null?d.total:CUR_CHANNELS.length);
+    txt('ch-cnt', CH_TOTAL+' каналов');
+    renderChFilterChips();
     if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Создайте сеть каналов или импортируйте существующие',
-      {label:'📡 Фабрика каналов', fn:'openChannelFactory()'})); return; }
-    renderChannels(CUR_CHANNELS);
+      {label:'📡 Фабрика каналов', fn:'openChannelFactory()'})); renderChLoadMore(0); return; }
+    renderChannels();
   } catch(e) {
     txt('chList', errHtml(e.message,'openChannels()'));
   }
 }
 
-function renderChannels(list) {
+async function loadMoreChannels() {
+  if (CH_LOADING || CH_OFFSET >= CH_TOTAL) return;
+  CH_LOADING = true;
+  const box = document.getElementById('chLoadMore');
+  if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/channels?limit=' + CH_PAGE + '&offset=' + CH_OFFSET);
+    const more = d.channels||[];
+    // Страница могла вернуться пустой (каналы удалили между запросами) — тогда
+    // дальше идти некуда, иначе кнопка «загрузить ещё» осталась бы вечной.
+    if (!more.length) { CH_TOTAL = CUR_CHANNELS.length; }
+    else {
+      const known = new Set(CUR_CHANNELS.map(c=>String(c.channel_id)));
+      more.forEach(c => { if (!known.has(String(c.channel_id))) CUR_CHANNELS.push(c); });
+      CH_OFFSET += more.length;
+      if (d.total!=null) CH_TOTAL = d.total;
+    }
+    txt('ch-cnt', CH_TOTAL+' каналов');
+    renderChFilterChips();
+    renderChannels();
+    if (CH_SEL_MODE) updateChSelBar();
+  } catch(e) {
+    toast('⚠️ '+((e.message||'Ошибка').substring(0,60)));
+    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreChannels()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+  } finally { CH_LOADING = false; }
+}
+
+function _chFiltered() {
+  const q = CH_SEARCH;
+  return CUR_CHANNELS.filter(c => {
+    const isGroup = (c.type==='supergroup' || c.type==='group' || c.type==='chat');
+    if (CH_FILTER==='channel' && isGroup) return false;
+    if (CH_FILTER==='group'   && !isGroup) return false;
+    if (CH_FILTER==='mine'    && c.role!=='owner') return false;
+    if (CH_FILTER==='foreign' && c.role!=='member') return false;
+    if (!q) return true;
+    return ((c.title||'') + ' @' + (c.username||'') + ' ' + (c.channel_id||'')).toLowerCase().includes(q);
+  });
+}
+function onChSearch(v) {
+  CH_SEARCH = (v||'').trim().toLowerCase();
+  clearTimeout(_chSearchT);
+  _chSearchT = setTimeout(()=>{ renderChFilterChips(); renderChannels(); }, 200);
+}
+function filterChannels(mode) {
+  CH_FILTER = mode;
+  renderChFilterChips();
+  renderChannels();
+  try { tg.HapticFeedback?.selectionChanged(); } catch(_) {}
+}
+function resetChFilters() {
+  CH_SEARCH = ''; CH_FILTER = 'all';
+  const i = document.getElementById('chSearch'); if (i) i.value = '';
+  renderChFilterChips(); renderChannels();
+}
+function renderChFilterChips() {
+  const box = document.getElementById('chFilterChips');
+  if (!box) return;
+  const by = {channel:0, group:0, mine:0, foreign:0};
+  CUR_CHANNELS.forEach(c => {
+    if (c.type==='supergroup'||c.type==='group'||c.type==='chat') by.group++; else by.channel++;
+    if (c.role==='owner') by.mine++;
+    else if (c.role==='member') by.foreign++;
+  });
+  const defs = [['all','Все',CUR_CHANNELS.length], ['mine','👑 Мои',by.mine],
+                ['channel','📡 Каналы',by.channel], ['group','💬 Группы',by.group],
+                ['foreign','👤 Чужие',by.foreign]];
+  const vis = defs.filter(([k,,n]) => k==='all' || n>0);
+  // Активный срез мог опуститься до нуля после подгрузки — иначе список остался
+  // бы пустым, а чипа, которым это снять, на экране уже нет.
+  if (!vis.some(([k]) => k === CH_FILTER)) CH_FILTER = 'all';
+  if (vis.length <= 1) { box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='flex';
+  box.innerHTML = vis.map(([k,lbl,n]) =>
+    `<span class="lf-chip${CH_FILTER===k?' on':''}" role="button" tabindex="0" aria-pressed="${CH_FILTER===k}" onclick="filterChannels('${k}')">${lbl} ${n}</span>`).join('');
+}
+function renderChLoadMore(shownCount) {
+  const box = document.getElementById('chLoadMore');
+  if (!box) return;
+  const loaded = CUR_CHANNELS.length;
+  if (!loaded || CH_OFFSET >= CH_TOTAL) { box.innerHTML=''; return; }
+  const filtering = !!(CH_SEARCH || CH_FILTER !== 'all');
+  // Поиск идёт по загруженным: «ничего не найдено» при неполном списке — не
+  // ответ, а половина ответа. Говорим, сколько именно просмотрено.
+  const note = filtering
+    ? `Найдено ${shownCount!=null?shownCount:0} среди загруженных ${loaded} из ${CH_TOTAL}.`
+    : '';
+  box.innerHTML = (note ? `<div class="lst-more-note">${esc(note)}</div>` : '')
+    + `<button class="btn btn-s" onclick="loadMoreChannels()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${loaded} из ${CH_TOTAL}</button>`;
+}
+
+// Аргумент больше не нужен: срез всегда считается от CUR_CHANNELS, чтобы поиск,
+// фильтр и «Выбрать все» не могли разойтись между собой.
+function renderChannels(_ignored) {
+  const list = _chFiltered();
+  if (CUR_CHANNELS.length && !list.length) {
+    txt('chList', empty('🔍','Ничего не найдено',
+      'Ни один канал не подходит под поиск и выбранный срез',
+      {label:'✖️ Сбросить поиск и срез', fn:'resetChFilters()'}));
+    renderChLoadMore(0);
+    return;
+  }
+  renderChLoadMore(list.length);
   txt('chList', list.map(c=>{
     const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
     const type = c.type==='supergroup'?'💬 Группа':c.type==='channel'?'📡 Канал':'💬 Чат';
     const role = c.role==='owner'?' · 👑 владелец':c.role==='admin'?' · 🛡 админ':c.role==='member'?' · 👤 участник':'';
+    const isGroup = (c.type==='supergroup'||c.type==='group'||c.type==='chat');
     const sel = CH_SEL.has(c.channel_id);
     const onclick = CH_SEL_MODE ? `toggleChSel('${c.channel_id}')` : `openChannel(${c.channel_id})`;
     const checkbox = CH_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
     const right = CH_SEL_MODE ? '' : `<div class="li-right"><span class="badge b-bl">${num(c.member_count||0)}</span><span class="chev">›</span></div>`;
     return `<div class="li tap ${CH_SEL_MODE&&sel?'sel':''}" onclick="${onclick}">
       ${checkbox}
-      <div class="ava ava-purple">📡</div>
+      <div class="ava ava-purple">${isGroup?'💬':'📡'}</div>
       <div class="li-body">
         <div class="li-name">${esc(name)}</div>
-        <div class="li-sub">${type} · ${num(c.member_count||0)} участников${role}</div>
+        <div class="li-sub">${type}${role}${CH_SEL_MODE?' · '+num(c.member_count||0)+' участников':''}</div>
       </div>
       ${right}
     </div>`;
@@ -10325,7 +10647,18 @@ function toggleChSel(id) {
   renderChannels(CUR_CHANNELS);
   updateChSelBar();
 }
-function chSelAll() { CUR_CHANNELS.forEach(c=>CH_SEL.add(Number(c.channel_id))); renderChannels(CUR_CHANNELS); updateChSelBar(); }
+// «Все» — это все, кто сейчас в списке после поиска и среза. Раньше сюда
+// попадала вся ЗАГРУЖЕННАЯ страница, тогда как в шапке стояло полное число: при
+// 700 каналах и странице в 500 массовое действие молча уходило по неполному
+// набору, а подтверждение обещало «в 500 каналах».
+function chSelAll() {
+  const list = _chFiltered();
+  list.forEach(c=>CH_SEL.add(Number(c.channel_id)));
+  renderChannels(); updateChSelBar();
+  if (CH_OFFSET < CH_TOTAL) {
+    toast(`Выбрано ${list.length} · загружено ${CUR_CHANNELS.length} из ${CH_TOTAL}`);
+  }
+}
 function chSelClear() { CH_SEL.clear(); renderChannels(CUR_CHANNELS); updateChSelBar(); }
 function updateChSelBar() {
   const el = document.getElementById('chSelCount');
@@ -11577,6 +11910,7 @@ async function saveComp() {
 }
 
 async function deleteComp(id) {
+  if (!await askConfirm('Убрать конкурента из наблюдения? Собранная по нему история пропадёт.')) return;
   try {
     await api('/api/miniapp/competitor/'+id, {method:'DELETE'});
     toast('Удалено'); loadCompetitors();
@@ -11782,6 +12116,7 @@ async function loadKeywords() {
 }
 
 async function deleteKw(id) {
+  if (!await askConfirm('Снять слово с отслеживания? История позиций по нему больше не собирается.')) return;
   try {
     await api('/api/miniapp/keyword/'+id, {method:'DELETE'});
     toast('Удалено'); loadKeywords();
@@ -12001,6 +12336,7 @@ function useTpl(id, name, text) {
 }
 
 async function deleteTpl(id) {
+  if (!await askConfirm('Удалить шаблон? Его текст не восстановить.')) return;
   try {
     await api('/api/miniapp/template/'+id, {method:'DELETE'});
     toast('Удалено'); loadTemplates();
@@ -13602,19 +13938,56 @@ async function loadEngagement() {
 
 // ── Bot Note ───────────────────────────────────────────
 let NOTE_BOT_ID = null;
+// Заметка к боту открывалась с пустым полем, а текст с сервера подставлялся
+// ПОВЕРХ него. Кто начинал печатать, не дождавшись ответа, терял написанное:
+// через секунду его слова молча заменял прошлый вариант заметки. Второй случай
+// того же — быстро открыть заметку одного бота, вернуться и открыть другого:
+// поздний ответ первого приземлялся в поле второго.
+let _noteReq = 0;   // токен запроса: чужой ответ не приземляется в открытое поле
+
 async function openBotNote(botId) {
-  NOTE_BOT_ID = botId;
   push('s-botnote');
-  document.getElementById('noteText').value='';
-  document.getElementById('noteErr').textContent='';
+  _botNoteLoad(botId);
+}
+// Повтор после сбоя вызывает ИМЕННО загрузку: push() ещё раз положил бы тот же
+// экран в стек, и «назад» пришлось бы жать дважды.
+async function _botNoteLoad(botId) {
+  NOTE_BOT_ID = botId;
+  const my = ++_noteReq;
+  const ta = document.getElementById('noteText');
+  const err = document.getElementById('noteErr');
+  err.textContent = '';
+  ta.value = '';
+  // Поле под замком, пока текст не пришёл, — печатать не во что затирать.
+  ta.readOnly = true;
+  ta.dataset.loaded = '';
+  ta.placeholder = 'Загрузка заметки…';
   try {
     const d = await api('/api/miniapp/bot/'+botId+'/note');
-    document.getElementById('noteText').value = d.note||'';
-  } catch(e) { document.getElementById('noteErr').textContent=e.message; }
+    if (my !== _noteReq) return;   // поле уже про другого бота
+    ta.value = d.note||'';
+    ta.readOnly = false;
+    ta.dataset.loaded = '1';
+    ta.placeholder = 'Например: продажи, тест, клиент X...';
+  } catch(e) {
+    if (my !== _noteReq) return;
+    // Поле остаётся закрытым: сохранить сейчас — значит затереть заметку,
+    // которой мы так и не увидели.
+    ta.placeholder = 'Заметка не загрузилась';
+    err.innerHTML = esc(e.message||'Не удалось загрузить заметку')
+      + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
+      + `onclick="_botNoteLoad(${Number(botId)})">↺ Повторить</span>`;
+  }
 }
 async function saveBotNote() {
-  const note = document.getElementById('noteText').value.trim();
+  const ta = document.getElementById('noteText');
   const errEl = document.getElementById('noteErr');
+  // Сохранять то, чего не видели, нельзя: прошлая заметка ушла бы под запись.
+  if (!ta.dataset.loaded) {
+    errEl.textContent = 'Заметка ещё не загрузилась — сохранение затёрло бы прошлую.';
+    return;
+  }
+  const note = ta.value.trim();
   errEl.textContent='';
   try {
     await api('/api/miniapp/bot/'+NOTE_BOT_ID+'/note', {method:'PUT', body:JSON.stringify({note})});
@@ -19258,8 +19631,20 @@ function openPromoOrderModal() {
   const panelSel = document.getElementById('promoOrderPanel');
   const bots = (PROMO_DATA&&PROMO_DATA.bots||[]).filter(b=>b.status!=='transferred');
   const panels = (PROMO_DATA&&PROMO_DATA.panels||[]).filter(p=>p.is_active);
-  botSel.innerHTML = '<option value="">— не выбран —</option>' + bots.map(b=>`<option value="${b.id}">@${esc(b.bot_username)} (${esc(BOT_STATUS[b.status]||b.status)})</option>`).join('');
-  panelSel.innerHTML = '<option value="">— не выбрана —</option>' + panels.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  // Пустая выпадашка «— не выбран —» ничего не объясняла: пользователь заполнял
+  // форму, жал «Создать заказ» и упирался в отказ. Склад и панель — это условие
+  // запуска, поэтому про их отсутствие говорим сразу и рядом с полем.
+  botSel.innerHTML = bots.length
+    ? '<option value="">— не выбран —</option>' + bots.map(b=>`<option value="${b.id}">@${esc(b.bot_username)} (${esc(BOT_STATUS[b.status]||b.status)})</option>`).join('')
+    : '<option value="">Склад пуст — добавьте бота</option>';
+  panelSel.innerHTML = panels.length
+    ? '<option value="">— не выбрана —</option>' + panels.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')
+    : '<option value="">Активных панелей нет</option>';
+  const miss = [];
+  if (!bots.length) miss.push('склад ботов пуст — добавьте бота кнопкой «📦 Склад»');
+  if (!panels.length) miss.push('нет активной SMM-панели — её добавляют в боте командой /promo');
+  const errEl = document.getElementById('promoOrderErr');
+  if (miss.length) errEl.textContent = 'Заказ создать можно, но запустить накрутку не получится: ' + miss.join('; ') + '.';
   document.getElementById('promoOrderMbg').classList.add('show');
 }
 function closePromoOrderModal() { document.getElementById('promoOrderMbg').classList.remove('show'); }
@@ -20510,16 +20895,54 @@ async function checkChannelRanks() {
 }
 
 // ── Group Factory ───────────────────────────────────────
+// Группу создаёт АККАУНТ: без единого подключённого аккаунта здесь делать
+// нечего. Раньше экран этого не говорил — выпадашка показывала «Выберите
+// аккаунт…» и ни одного варианта, кнопка «Создать группу» оставалась активной
+// и всегда падала на «Выберите аккаунт». Тупик из трёх шагов вместо ответа на
+// первом. Теперь состояние экрана честное на каждом шаге: загрузка → список,
+// пусто или ошибка, и кнопка живёт только когда есть чем создавать.
+function _gfSetSubmit(enabled, label) {
+  const b = document.getElementById('gfSubmit');
+  if (!b) return;
+  b.disabled = !enabled;
+  b.style.opacity = enabled ? '' : '.5';
+  b.textContent = label || '👥 Создать группу';
+}
 async function openGroupFactory() {
   push('s-groupfactory');
   document.getElementById('gfTitle').value='';
+  _gfLoadAccounts();
+}
+// Повтор после сбоя вызывает ИМЕННО загрузку, а не открытие экрана: push() ещё
+// раз положил бы тот же экран в стек, и «назад» пришлось бы жать дважды.
+async function _gfLoadAccounts() {
   document.getElementById('gfErr').textContent='';
   const sel = document.getElementById('gfAccount');
+  // Пока идёт запрос, в выпадашке висели аккаунты с ПРОШЛОГО открытия экрана.
+  sel.innerHTML = '<option value="">Загрузка аккаунтов…</option>';
+  _gfSetSubmit(false, '⏳ Загрузка аккаунтов…');
   try {
     const d = await api('/api/miniapp/accounts');
     const accs = d.accounts||d||[];
+    if (!accs.length) {
+      sel.innerHTML = '<option value="">Нет подключённых аккаунтов</option>';
+      document.getElementById('gfErr').innerHTML =
+        'Группу создаёт аккаунт, а их пока нет. '
+        + '<span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
+        + 'onclick="goTab(\'accounts\')">Подключить аккаунт</span>';
+      _gfSetSubmit(false, 'Нужен хотя бы один аккаунт');
+      return;
+    }
     sel.innerHTML='<option value="">Выберите аккаунт...</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
-  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+    _gfSetSubmit(true);
+  } catch(e) {
+    sel.innerHTML = '<option value="">Аккаунты не загрузились</option>';
+    // Причина отказа не должна оставаться только в консоли: без неё непонятно,
+    // повторить сейчас или чинить связь.
+    document.getElementById('gfErr').innerHTML = esc(e.message||'Ошибка загрузки')
+      + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="_gfLoadAccounts()">↺ Повторить</span>';
+    _gfSetSubmit(false, 'Аккаунты не загрузились');
+  }
 }
 async function submitGroupFactory() {
   const title = document.getElementById('gfTitle').value.trim();
@@ -20889,6 +21312,7 @@ async function addMeshTarget() {
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 async function deleteMeshTarget(targetId) {
+  if (!await askConfirm('Убрать цель из сети контента?')) return;
   try {
     await api(`/api/miniapp/content_mesh/target/${targetId}`,{method:'DELETE'});
     loadMeshTargets();

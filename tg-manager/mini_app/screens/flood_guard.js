@@ -153,7 +153,9 @@ async function fgSave() {
 
 async function fgFlagRecent() {
   const minutes = parseInt((document.getElementById('fg_minutes') || {}).value || '10', 10) || 10;
-  if (!confirm('Пометить всех, кто присоединился за последние ' + minutes + ' мин, как накрученных?')) return;
+  // window.confirm во встроенном браузере Telegram часто блокируется: диалог не
+  // показывался, вызов возвращал false — и кнопка просто не срабатывала.
+  if (!await askConfirm('Пометить всех, кто присоединился за последние ' + minutes + ' мин, как накрученных?')) return;
   try {
     const r = await api('/api/miniapp/flood/' + _fgBotId + '/flag-recent',
       { method: 'POST', body: JSON.stringify({ minutes: minutes }) });
@@ -166,7 +168,7 @@ async function fgPurge(hard) {
   const msg = hard
     ? 'Удалить накрученных подписчиков БЕЗВОЗВРАТНО?'
     : 'Убрать накрученных из аудитории (мягко, можно вернуть)?';
-  if (!confirm(msg)) return;
+  if (!await askConfirm(msg)) return;
   try {
     const r = await api('/api/miniapp/flood/' + _fgBotId + '/purge',
       { method: 'POST', body: JSON.stringify({ hard: !!hard }) });
@@ -176,7 +178,7 @@ async function fgPurge(hard) {
 }
 
 async function fgUnflag() {
-  if (!confirm('Снять флаги «накрутка» со всех подписчиков этого бота?')) return;
+  if (!await askConfirm('Снять флаги «накрутка» со всех подписчиков этого бота?')) return;
   try {
     const r = await api('/api/miniapp/flood/' + _fgBotId + '/unflag', { method: 'POST', body: '{}' });
     toast('Снято флагов: ' + (r.unflagged || 0));
