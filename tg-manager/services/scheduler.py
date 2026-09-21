@@ -34,11 +34,116 @@ _MISSED_THRESHOLD = timedelta(
 _AB_MIN_AGE = timedelta(hours=float(os.environ.get("AB_WINNER_MIN_AGE_HOURS", "24")))
 
 
+# Занятие строки расписания (status='processing') живёт секунды: проверка
+# токена, создание записи рассылки, запуск задачи. Строка, провисевшая в нём
+# дольше порога, заведомо брошена умершим процессом, а не выполняется.
+_STUCK_CLAIM_MIN = float(os.environ.get("SCHEDULER_STUCK_CLAIM_MIN", "15"))
+
+
+async def _ensure_claim_columns(pool: asyncpg.Pool) -> None:
+    """Досоздать колонки восстановления, если миграция v219 ещё не доехала.
+
+    Деплой и миграции расходятся во времени; без колонок сторож падал бы на
+    каждом тике, то есть восстановление исчезало бы целиком вместо того, чтобы
+    подождать. Тот же приём, что у op_worker._ensure_revive_column.
+    """
+    try:
+        await pool.execute(
+            "ALTER TABLE scheduled_broadcasts "
+            "ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ, "
+            "ADD COLUMN IF NOT EXISTS broadcast_id BIGINT"
+        )
+    except Exception:
+        log.warning("Scheduler: ensure claim columns failed", exc_info=True)
+
+
+async def recover_stuck_claims(pool: asyncpg.Pool) -> dict[str, int]:
+    """Вернуть к жизни расписания, брошенные умершим процессом.
+
+    Планировщик занимает строку переводом в 'processing' и снимает занятость
+    только сам. Процесс умер между занятием и завершением — а на Railway это
+    каждый деплой — и строка остаётся в 'processing' НАВСЕГДА:
+    get_pending_scheduled выбирает только 'pending'. Отложенная рассылка молча
+    не уходит и молча не отчитывается, а у повторяемого расписания вместе с ней
+    обрывается вся дальнейшая цепочка.
+
+    Вслепую возвращать в 'pending' нельзя: если процесс умер ПОСЛЕ
+    create_broadcast, второй запуск создал бы ВТОРУЮ рассылку на всю аудиторию.
+    Поэтому решает broadcast_id:
+
+      • есть → рассылка создана, её докатит broadcaster.resume_interrupted
+        (он пропускает уже доставленных по журналу, без дублей); расписание
+        закрываем как выполненное и продлеваем, если оно повторяемое;
+      • нет → работа не начиналась, честно возвращаем в очередь, а дальше
+        обычная логика решит: запускать или пометить 'missed'.
+
+    Возвращает {"closed": N, "requeued": M}. Никогда не бросает: это уборка, а
+    не критический путь.
+    """
+    stats = {"closed": 0, "requeued": 0}
+    try:
+        rows = await pool.fetch(
+            # message_text и created_by нужны reschedule_if_recurring: без них
+            # продление повторяемого расписания падало бы на KeyError, и цепочка
+            # обрывалась бы ровно там, где мы её чиним.
+            """SELECT id, bot_id, message_text, created_by, execute_at,
+                      repeat_interval_min, broadcast_id
+                 FROM scheduled_broadcasts
+                WHERE status = 'processing'
+                  AND (claimed_at IS NULL
+                       OR claimed_at < NOW() - make_interval(mins => $1))""",
+            _STUCK_CLAIM_MIN,
+        )
+    except Exception:
+        log.warning("Scheduler: не удалось найти брошенные занятия", exc_info=True)
+        return stats
+
+    for row in rows or []:
+        try:
+            if row["broadcast_id"]:
+                await pool.execute(
+                    "UPDATE scheduled_broadcasts SET status='done' "
+                    "WHERE id=$1 AND status='processing'",
+                    row["id"],
+                )
+                stats["closed"] += 1
+                # Повторяемое расписание не должно оборваться на рестарте.
+                try:
+                    await db.reschedule_if_recurring(pool, dict(row))
+                except Exception:
+                    log.exception(
+                        "Scheduler: продление после восстановления #%d не удалось",
+                        row["id"])
+            else:
+                await pool.execute(
+                    "UPDATE scheduled_broadcasts SET status='pending', claimed_at=NULL "
+                    "WHERE id=$1 AND status='processing'",
+                    row["id"],
+                )
+                stats["requeued"] += 1
+        except Exception:
+            log.exception("Scheduler: восстановление расписания #%d не удалось", row["id"])
+
+    if stats["closed"] or stats["requeued"]:
+        log.warning(
+            "Scheduler: восстановлено брошенных занятий — закрыто %d (рассылка уже "
+            "создана), возвращено в очередь %d",
+            stats["closed"], stats["requeued"],
+        )
+    return stats
+
+
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     # Track scheduled IDs currently being processed to prevent duplicate firing
     # within a single scheduler cycle (in case processing takes longer than sleep interval).
     _in_flight: set[int] = set()
     _ab_sweep_cycle = 0  # run AB winner sweep every 60 cycles (≈1 hour)
+    _recover_cycle = 0
+
+    await _ensure_claim_columns(pool)
+    # На старте — сразу: мы и есть тот процесс, который поднялся после рестарта,
+    # оборвавшего занятия. Ждать пятнадцать циклов тут нечего.
+    await recover_stuck_claims(pool)
 
     while True:
         try:
@@ -82,7 +187,10 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 # Uses status='processing' as a transient state; reverted to 'pending'
                 # on failure if no broadcast was created yet.
                 claimed = await pool.execute(
-                    "UPDATE scheduled_broadcasts SET status='processing' "
+                    # claimed_at обязателен: по нему сторож отличает живое
+                    # занятие от брошенного умершим процессом.
+                    "UPDATE scheduled_broadcasts "
+                    "SET status='processing', claimed_at=NOW() "
                     "WHERE id=$1 AND status='pending'",
                     row["id"],
                 )
@@ -125,6 +233,18 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         row["created_by"],
                     )
                     created_bc = True
+                    # Записываем id рассылки ДО запуска задачи: если процесс
+                    # умрёт сейчас, сторож обязан увидеть, что рассылка уже
+                    # создана, и не создавать вторую на всю аудиторию.
+                    try:
+                        await pool.execute(
+                            "UPDATE scheduled_broadcasts SET broadcast_id=$2 WHERE id=$1",
+                            row["id"], bc_id,
+                        )
+                    except Exception:
+                        log.exception(
+                            "Scheduler: не записан broadcast_id для расписания #%d",
+                            row["id"])
                     broadcaster.start(
                         pool,
                         http,
@@ -188,6 +308,14 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
         # именно на систему experiments мы ведём пользователя). Свип ограничен
         # (активные эксперименты) и со своим try/except; идёт перед sleep(60),
         # firing рассылок не задерживает.
+        # Сторож брошенных занятий — раз в ~15 минут (цикл 60с).
+        # На старте он уже отработал; здесь он ловит случай, когда процесс
+        # пережил рестарт СОСЕДНЕЙ реплики.
+        _recover_cycle += 1
+        if _recover_cycle >= 15:
+            _recover_cycle = 0
+            await recover_stuck_claims(pool)
+
         _ab_sweep_cycle += 1
         if _ab_sweep_cycle >= 60:
             _ab_sweep_cycle = 0
