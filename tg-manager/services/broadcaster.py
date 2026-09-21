@@ -26,6 +26,7 @@ from datetime import datetime
 import aiohttp
 import asyncpg
 from database import db
+from services import flood_sleep
 from services import bot_api
 from services import brand_injection
 from services import content_safety
@@ -346,12 +347,24 @@ async def run(
                         )
             else:
                 failed += 1
-                if retry_after:
+                # Ждём столько, сколько просит Telegram, но не дольше предела:
+                # без него ОДИН получатель с длинным retry_after останавливал
+                # рассылку целиком на всё это время (services/flood_sleep.py).
+                # Пропущенного получателя НЕ помечаем неактивным: он не «мёртв»,
+                # он под лимитом, и пометка выкинула бы живого подписчика из
+                # аудитории навсегда. Он остаётся в failed этого круга.
+                if retry_after and not await flood_sleep.wait_for_retry_after(
+                    retry_after, where=f"broadcast#{broadcast_id}"
+                ):
                     logger.info(
-                        "Broadcast %d: rate-limited, sleeping %ds",
+                        "Broadcast %d: получатель %s пропущен — лимит дольше предела",
+                        broadcast_id, uid,
+                    )
+                elif retry_after:
+                    logger.info(
+                        "Broadcast %d: rate-limited, slept %ds",
                         broadcast_id, retry_after,
                     )
-                    await asyncio.sleep(retry_after)
                     if photo_file_id:
                         ok, _ = await bot_api.send_photo(
                             session, token, uid, photo_file_id, user_text, buttons=buttons, disable_notification=silent

@@ -333,7 +333,8 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
         # cooldown исполнитель считает прогресс заново, иначе done копится поверх
         # прошлого прогона → счётчик done>total (класс #8).
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
-        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1",
+        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
+        f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id,
         float(defer),
         log_ctx=f"[circuit_release op={op_id}]",
@@ -361,14 +362,16 @@ async def _requeue_op_no_accounts(pool: "asyncpg.Pool", op_id: int, defer_s: int
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status='failed', finished_at=now(), "
-                "error_msg=$2 WHERE id=$1",
+                "error_msg=$2 WHERE id=$1"
+                f" AND status NOT IN {op_status.sql_terminal_list()}",
                 op_id, "Флот занят другими операциями — не дождались свободных аккаунтов",
                 log_ctx=f"[requeue_no_acc_fail op={op_id}]")
             return
     await _safe_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
-        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1",
+        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
+        f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(defer_s),
         log_ctx=f"[requeue_no_acc op={op_id}]")
 
@@ -434,7 +437,8 @@ async def _defer_op_for_flood(
     await _safe_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
-        "last_error=$3, scheduled_for = now() + make_interval(secs => $2) WHERE id=$1",
+        "last_error=$3, scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
+        f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(delay), (reason or "")[:300],
         log_ctx=f"[defer_flood op={op_id}]")
     log.warning(
@@ -1058,7 +1062,7 @@ async def _maybe_requeue(
             penalty_exc,
         )
 
-    await _safe_execute(
+    res = await _safe_execute(
         pool,
         """UPDATE operation_queue
             SET status='pending',
@@ -1067,13 +1071,24 @@ async def _maybe_requeue(
                 scheduled_for=now() + make_interval(secs => $4::numeric),
                 started_at=NULL,
                 done_items=0
-            WHERE id=$3""",
+            WHERE id=$3
+              AND status NOT IN """ + op_status.sql_terminal_list(),
         retry_count,
         str(exc)[:300],
         op_id,
         float(backoff),
         log_ctx=f"[maybe_requeue_update op={op_id}]",
     )
+    # Ноль строк = операция уже терминальна. Практически всегда это ОТМЕНА
+    # владельцем во время прогона: он нажал «Отменить», исполнитель оборвался
+    # ошибкой, и повтор вернул бы операцию в очередь — отмена молча отменялась
+    # бы, а операция запускалась заново. Честно говорим «не поставлена».
+    if str(res or "").strip().endswith(" 0"):
+        log.info(
+            "op_worker: op %d уже в терминальном статусе — повтор НЕ ставим "
+            "(отмена владельца сильнее повтора)", op_id,
+        )
+        return False
     log.info(
         "op_worker: op %d queued for retry %d/%d in %ds",
         op_id,
@@ -1277,6 +1292,12 @@ _active_op_ids: set[int] = set()
 # смерть на самом критичном пути). done-callback снимает ссылку по завершении.
 _active_op_tasks: set[asyncio.Task] = set()
 _active_lock = asyncio.Lock()
+
+# Процесс получил SIGTERM и сворачивается (см. shutdown()). Поллер очереди
+# перестаёт забирать новые операции: взять операцию в 'running' за секунду до
+# закрытия пула — значит оставить её сиротой в очереди и потратить единицу
+# бюджета живучести ни за что.
+_shutting_down = False
 
 # Per-owner semaphores: не более _MAX_PARALLEL_PER_OWNER параллельных операций на владельца
 _owner_semaphores: dict[int, asyncio.Semaphore] = {}
@@ -1711,6 +1732,95 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         await asyncio.sleep(_POLL_INTERVAL)
 
 
+async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
+    """Свернуть воркер по SIGTERM, не оставив после себя сирот.
+
+    ПОЧЕМУ ЭТО НУЖНО. Railway шлёт SIGTERM на каждом деплое, и до сих пор
+    процесс просто закрывал пул поверх работающих операций. Последствий было
+    два, и оба видел владелец.
+
+    1. Флот замерзал до 15 минут. Аренда аккаунта (`op_lease_until`) снимается
+       либо своим процессом, либо по TTL. Новый процесс чужой арендой не
+       считается «своей»: `_WORKER_ID` содержит свежий uuid4, поэтому ветка
+       «аренда наша собственная» в reset_stale_in_operation после рестарта НЕ
+       срабатывает никогда. Аккаунты оставались `in_operation=TRUE` до
+       истечения TTL, а операции, стартовавшие сразу после деплоя, упирались в
+       «флот занят» и уходили в отложенный повтор (а через _ACCT_WAIT_MAX_MIN —
+       в провал).
+    2. Живая операция теряла единицу бюджета живучести. Она оставалась в
+       'running', и на старте `_reset_stale_running` считал её жертвой падения:
+       revive_count += 1. Три деплоя за время одной многочасовой рассылки — и
+       здоровая операция помечалась ядовитой и падала в 'failed', ни разу не
+       сломавшись. Бюджет живучести обязан тратиться на операции, которые
+       РОНЯЮТ воркер, а не на наши собственные плановые рестарты.
+
+    Поэтому плановая остановка возвращает свои операции в очередь САМА — с
+    revive_count нетронутым — и снимает свои аренды сразу. Следующий процесс
+    подхватывает работу с чистого листа и со свободным флотом.
+
+    Идемпотентна и никогда не бросает: вызывается из finally при остановке,
+    где исключение похоронило бы остаток уборки (закрытие пула и сессии бота).
+
+    Возвращает {"requeued": N, "released": M} — для лога и тестов.
+    """
+    global _shutting_down
+    _shutting_down = True
+
+    async with _active_lock:
+        op_ids = sorted(_active_op_ids)
+        tasks = [t for t in _active_op_tasks if not t.done()]
+
+    # Даём задачам короткий шанс закончиться самим (исполнители проверяют
+    # отмену между целями). Дольше ждать нельзя: платформа убьёт контейнер
+    # по своему таймауту, и уборка не успеет отработать вовсе.
+    if tasks:
+        log.info("op_worker shutdown: жду %d активных операций до %.0fс", len(tasks), grace_s)
+        try:
+            await asyncio.wait(tasks, timeout=max(0.0, float(grace_s)))
+        except Exception as e:
+            log_exc_swallow(log, f"op_worker shutdown: ожидание задач: {e}")
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+
+    # Кто успел закончиться — уже в терминальном статусе, и guard ниже их не
+    # тронет. Возвращаем в очередь только те, что реально оборвались.
+    requeued = 0
+    if op_ids:
+        res = await _safe_execute(
+            pool,
+            # revive_count НЕ трогаем: это плановая остановка, а не падение.
+            # done_items=0 — как на всех путях возврата в очередь: исполнитель
+            # считает прогресс заново, пропуская уже взятые цели по
+            # operation_log (иначе класс «done > total»).
+            """UPDATE operation_queue
+                  SET status='pending', started_at=NULL, done_items=0,
+                      last_error=$2
+                WHERE id = ANY($1::bigint[]) AND status='running'""",
+            [int(i) for i in op_ids],
+            "Воркер остановлен на рестарте — операция возвращена в очередь",
+            log_ctx="[shutdown_requeue]",
+        )
+        try:
+            requeued = int(str(res).rsplit(" ", 1)[-1])
+        except (TypeError, ValueError):
+            requeued = 0
+
+    # Снять СВОИ аренды немедленно, не дожидаясь TTL (см. пункт 1 выше).
+    async with _accounts_lock:
+        held = [int(a) for a in _accounts_in_use]
+        _accounts_in_use.clear()
+        _operation_account_locks.clear()
+    if held:
+        await _db_release(held)
+
+    log.warning(
+        "op_worker shutdown: %d операций возвращено в очередь, %d аккаунтов освобождено",
+        requeued, len(held),
+    )
+    return {"requeued": requeued, "released": len(held)}
+
+
 async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     """Цели операции, уже отработанные УСПЕШНО (operation_log, status='ok').
 
@@ -1759,6 +1869,8 @@ async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
 
 
 async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
+    if _shutting_down:
+        return
     async with _active_lock:
         available_slots = _MAX_PARALLEL - len(_active_op_ids)
 
@@ -2540,13 +2652,26 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # Попытаться поставить на повтор перед тем как помечать как failed
             requeued = await _maybe_requeue(pool, op_id, e, params, op_type)
             if not requeued:
-                await _safe_execute(
+                _fail_res = await _safe_execute(
                     pool,
-                    "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
+                    "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 "
+                    f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
                     str(e)[:500],
                     op_id,
                     log_ctx=f"[run_op_failed op={op_id}]",
                 )
+                # Ноль строк = операция уже в терминальном статусе, и почти
+                # всегда это ОТМЕНА владельцем: он нажал «Отменить», исполнитель
+                # в этот момент оборвался, и мы пришли сюда с исключением.
+                # Отмену не переписываем и не докладываем о ней как об ошибке —
+                # иначе владелец получает «❌ завершилась с ошибкой» на то, что
+                # сам только что остановил.
+                if str(_fail_res or "").strip().endswith(" 0"):
+                    log.info(
+                        "op_worker: op=%d уже в терминальном статусе (вероятно отмена) "
+                        "— провал не записываем", op_id,
+                    )
+                    return
                 # Circuit breaker: record failure
                 await _circuit_breaker_record(owner_id, False)
                 # ML pacing engine: feed failure with flood/ban granularity

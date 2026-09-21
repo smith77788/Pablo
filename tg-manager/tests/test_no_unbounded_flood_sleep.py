@@ -26,18 +26,29 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGET = os.path.join(ROOT, "services", "op_worker.py")
 
+# Фоновые циклы вне op_worker, где действует ТО ЖЕ правило. Они спят не на
+# FloodWait от MTProto, а на `retry_after` от Bot API — величина та же по смыслу
+# и так же назначается Telegram. Цикл здесь один на всех получателей, поэтому
+# цена безграничного сна даже выше: 429 на ОДНОМ адресате останавливал рассылку,
+# шаг воронки и пересылку оператору целиком.
+_EXTRA_TARGETS = (
+    os.path.join(ROOT, "services", "broadcaster.py"),
+    os.path.join(ROOT, "services", "funnel_runner.py"),
+    os.path.join(ROOT, "services", "relay.py"),
+)
+
 # Имена, в которых лежит длительность флуд-паузы.
-_FLOOD_NAMES = {"flood_wait", "fw", "flood_wait_s", "wait_s"}
+_FLOOD_NAMES = {"flood_wait", "fw", "flood_wait_s", "wait_s", "retry_after"}
 
 # Как сон может быть ограничен. Достаточно любого из способов.
-_GUARD_MARKERS = ("_FLOOD_INLINE_MAX_S", "600")
+_GUARD_MARKERS = ("_FLOOD_INLINE_MAX_S", "600", "wait_for_retry_after")
 
 # Сон через общую обёртку ограничен по построению — её и ищем в первую очередь.
 _BOUNDED_CALL = "bounded_flood_sleep"
 
 
-def _source() -> str:
-    with open(TARGET, encoding="utf-8") as f:
+def _source(path: str | None = None) -> str:
+    with open(path or TARGET, encoding="utf-8") as f:
         return f.read()
 
 
@@ -107,3 +118,80 @@ def test_global_presence_username_flood_is_capped():
     seg = seg[:seg.index("имя не ставим") + 200]
     assert "if flood_wait > _FLOOD_INLINE_MAX_S:" in seg
     assert "username" in seg
+
+
+def test_background_loops_never_sleep_on_raw_retry_after():
+    """Рассылка, воронка и пересылка оператору — тот же класс, что op_worker.
+
+    `await asyncio.sleep(retry_after)` в общем цикле останавливает доставку ВСЕМ
+    из-за лимита на ОДНОМ. Ждать должен следующий круг цикла, а не текущий:
+    услуга `services.flood_sleep.wait_for_retry_after` ждёт короткую паузу и
+    честно отказывается от длинной, возвращая False.
+    """
+    unbounded = []
+    for path in _EXTRA_TARGETS:
+        src = _source(path)
+        lines = src.splitlines()
+        for call in _flood_sleeps(ast.parse(src)):
+            context = _guarding_lines(lines, call.lineno)
+            if not any(marker in context for marker in _GUARD_MARKERS):
+                unbounded.append(
+                    f"  {os.path.basename(path)}:{call.lineno}: "
+                    f"{lines[call.lineno - 1].strip()}"
+                )
+    assert not unbounded, (
+        "сон на сыром retry_after останавливает весь фоновый цикл:\n"
+        + "\n".join(unbounded)
+        + "\nИспользуйте services.flood_sleep.wait_for_retry_after()."
+    )
+
+
+def test_bounded_wait_helper_exists_and_is_capped():
+    """Правило требует альтернативы — она обязана быть на месте и с пределом."""
+    from services import flood_sleep
+
+    assert flood_sleep.MAX_RETRY_AFTER_S > 0
+    assert flood_sleep.MAX_RETRY_AFTER_S <= 3600
+
+
+def test_long_retry_after_is_refused_not_slept_through():
+    """Длинную паузу обёртка НЕ спит: возвращает False, не задержав цикл."""
+    import asyncio
+    import time
+
+    from services import flood_sleep
+
+    started = time.monotonic()
+    waited = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        flood_sleep.wait_for_retry_after(
+            flood_sleep.MAX_RETRY_AFTER_S + 1, where="test")
+    )
+    assert waited is False
+    assert time.monotonic() - started < 1.0
+
+
+def test_short_retry_after_is_actually_awaited():
+    """Короткую паузу обёртка выдерживает целиком — иначе повтор поймает лимит
+    подлиннее. Половинчатого сна быть не должно."""
+    import asyncio
+
+    from services import flood_sleep
+
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    try:
+        slept: list[float] = []
+
+        async def _fake_sleep(sec):
+            slept.append(sec)
+
+        real = asyncio.sleep
+        asyncio.sleep = _fake_sleep          # noqa: F811 — подмена на время теста
+        try:
+            waited = loop.run_until_complete(
+                flood_sleep.wait_for_retry_after(3, where="test", extra_s=5))
+        finally:
+            asyncio.sleep = real
+        assert waited is True
+        assert slept == [8.0]                # пауза + запас, ничего не урезано
+    finally:
+        loop.close()

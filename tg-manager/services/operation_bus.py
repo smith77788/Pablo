@@ -857,14 +857,20 @@ async def list_recent(
     owner_id: int,
     limit: int = 10,
 ) -> list[dict]:
-    """Список завершённых/отменённых операций для истории."""
+    """Список завершённых/отменённых операций для истории.
+
+    `partial` обязан быть в списке. Это терминальный статус недоведённой работы
+    (services/op_status.py), и без него операция, взявшая часть целей, не
+    попадала НИКУДА: в активных её нет (не pending/running), в истории тоже —
+    владелец видел, как операция просто исчезает.
+    """
     rows = await pool.fetch(
         """SELECT id, op_type, status, done_items, total_items,
                   created_at, started_at, finished_at,
                   error_msg, retry_count
            FROM operation_queue
            WHERE owner_id = $1
-             AND status IN ('done', 'failed', 'cancelled', 'skipped')
+             AND status IN ('done', 'partial', 'failed', 'cancelled', 'skipped')
            ORDER BY finished_at DESC NULLS LAST, created_at DESC
            LIMIT $2""",
         owner_id,

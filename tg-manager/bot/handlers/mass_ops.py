@@ -1360,7 +1360,7 @@ async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     try:
         result = await pool.execute(
             "DELETE FROM operation_queue "
-            "WHERE owner_id=$1 AND status IN ('done', 'failed') "
+            "WHERE owner_id=$1 AND status IN ('done', 'partial', 'failed', 'cancelled') "
             "AND finished_at < now() - interval '24 hours'",
             callback.from_user.id,
         )

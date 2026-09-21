@@ -2513,7 +2513,10 @@ async def handle_admin_message(
         try:
             ops_del = (
                 await pool.fetchval(
-                    "WITH d AS (DELETE FROM operation_queue WHERE status IN ('done','failed') "
+                    # partial/cancelled — те же терминальные статусы (op_status.py);
+                    # без них их строки не вычищались никогда.
+                    "WITH d AS (DELETE FROM operation_queue "
+                    "WHERE status IN ('done','partial','failed','cancelled') "
                     "AND finished_at < now() - INTERVAL '7 days' RETURNING 1) SELECT COUNT(*) FROM d"
                 )
                 or 0

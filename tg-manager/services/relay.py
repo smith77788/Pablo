@@ -6,6 +6,7 @@ import logging
 import aiohttp
 import asyncpg
 from database import db
+from services import flood_sleep
 from services import bot_api
 from config import BOT_TOKEN
 
@@ -46,7 +47,13 @@ async def _send_via_management(
                     operator_id,
                     attempt + 1,
                 )
-                await asyncio.sleep(retry_after + 5)
+                # Предел обязателен: этот вызов идёт из общего цикла
+                # обработки входящих, и сон на «сколько просят» останавливал
+                # пересылку ВСЕХ сообщений всем операторам (flood_sleep.py).
+                if not await flood_sleep.wait_for_retry_after(
+                    retry_after, where=f"relay op#{operator_id}", extra_s=5
+                ):
+                    return None
                 continue
             log.warning(
                 "relay: sendMessage not ok for operator %d: %s",

@@ -46,7 +46,10 @@ _RETENTION: list[tuple[str, str, str]] = [
 ]
 
 _OPERATION_QUEUE_RETENTION = "30 days"
-_DONE_STATUSES = ("done", "failed", "cancelled", "skipped", "missed")
+# "partial" — такой же терминальный статус, как done/failed
+# (services/op_status.py). Без него частично выполненные операции НИКОГДА не
+# вычищались: их строки копились в operation_queue бессрочно.
+_DONE_STATUSES = ("done", "partial", "failed", "cancelled", "skipped", "missed")
 
 
 async def run_once(pool: asyncpg.Pool) -> dict[str, int]:

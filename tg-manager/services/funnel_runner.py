@@ -6,6 +6,7 @@ import logging
 import aiohttp
 import asyncpg
 from database import db
+from services import flood_sleep
 from services import bot_api, brand_injection
 
 log = logging.getLogger(__name__)
@@ -94,7 +95,15 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                             row["sub_id"],
                             retry_after,
                         )
-                        await asyncio.sleep(retry_after)
+                        # Предел обязателен: цикл воронки один на всех
+                        # подписчиков, и сон на «сколько просят» останавливал
+                        # доставку ВСЕМ из-за одного лимита. Слишком длинная
+                        # пауза → подписчик остаётся должным, его заберёт
+                        # следующий круг (см. services/flood_sleep.py).
+                        if not await flood_sleep.wait_for_retry_after(
+                            retry_after, where=f"funnel sub#{row['sub_id']}"
+                        ):
+                            break
                         continue
                     # Non-429 failure (403 blocked, user deactivated, etc.) — don't retry
                     permanently_failed = True
