@@ -642,7 +642,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .op-progress-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .op-progress-label{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .op-progress-pct{font-size:13px;font-weight:700;color:var(--accent);flex-shrink:0}
-.op-progress-bar{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--hint);margin-top:3px;letter-spacing:-.5px}
+.op-progress-bar{font-size:11px;color:var(--hint);margin-top:4px}
+/* Строка живого прогресса — вход в операцию и кнопка остановки. Панель была
+   только «посмотреть»: ни открыть операцию, ни отменить её отсюда было нельзя,
+   хотя id операции приходит в том же событии. */
+.op-progress-item.tap{cursor:pointer}
+.op-progress-item.tap:active{opacity:.7}
+.op-progress-stop{font-size:12px;font-weight:600;color:var(--red);flex-shrink:0;cursor:pointer;padding:4px 6px;margin:-4px -6px -4px 0}
 /* .hint — приглушённый текст подсказок/empty-state (использовался без определения) */
 .hint{color:var(--hint);font-size:13px}
 
@@ -7300,14 +7306,28 @@ function renderOpProgress(items) {
   }
   _hadOpProgress = true;
   el.style.display = 'block';
+  // Место, где за операцией НАБЛЮДАЮТ, должно быть и местом, где с ней можно
+  // что-то сделать. Панель была тупиком: подпись, процент и полоска из «█░» —
+  // ни открыть операцию, ни остановить её отсюда было нельзя, хотя id операции
+  // приходит в том же событии SSE. Запущенную массовую операцию оставалось
+  // только досматривать: экран операций надо было ещё найти.
   el.innerHTML = items.map(op => {
-    const bar = '█'.repeat(Math.floor(op.pct/10)) + '░'.repeat(10 - Math.floor(op.pct/10));
-    return `<div class="op-progress-item">
+    const pct = Math.max(0, Math.min(100, Number(op.pct) || 0));
+    const total = Number(op.total) || 0;
+    // done не может превышать total — та же защита, что в списке операций.
+    const done = total > 0 ? Math.min(Number(op.done) || 0, total) : (Number(op.done) || 0);
+    const oid = Number(op.id) || 0;
+    const stop = oid
+      ? `<span class="op-progress-stop" role="button" tabindex="0" onclick="event.stopPropagation();cancelOp(${oid},true)">Отмена</span>`
+      : '';
+    return `<div class="op-progress-item${oid?' tap':''}"${oid?` id="op-prog-${oid}" onclick="openOpDetail(${oid})"`:''}>
       <div class="op-progress-header">
         <span class="op-progress-label">${esc(op.label || op.op_type)}</span>
-        <span class="op-progress-pct">${op.pct}%</span>
+        <span class="op-progress-pct">${pct}%</span>
+        ${stop}
       </div>
-      <div class="op-progress-bar">[${bar}] ${op.done}/${op.total}</div>
+      <div class="prog"><div class="prog-fill" style="width:${pct}%"></div></div>
+      <div class="op-progress-bar">${num(done)} из ${num(total)}${oid?' · нажмите, чтобы открыть':''}</div>
     </div>`;
   }).join('');
 }
@@ -11393,11 +11413,25 @@ async function openOpDetail(opId) {
 // Отмена необратима: возобновить отменённую операцию нечем, остаётся только
 // повтор с нуля. С экрана деталей спрашиваем подтверждение (confirm=true) —
 // в списке действие точечное и подпись уже говорит «Отмена».
+// Живой прогресс приходит по SSE раз в 15 секунд. Отменённая операция всё это
+// время оставалась в панели «⏳ Выполняется» с работающей кнопкой «Отмена»:
+// повторное нажатие приносило ошибку, а полоска продолжала идти, будто ничего
+// не случилось. Сервер отмену уже подтвердил — говорим об этом сразу, не
+// выдумывая состояния: следующее событие SSE строку всё равно уберёт.
+function _opProgressMarkCancelled(id) {
+  const row = document.getElementById('op-prog-' + Number(id));
+  if (!row) return;
+  row.style.opacity = '.55';
+  const stop = row.querySelector('.op-progress-stop');
+  if (stop) { stop.removeAttribute('onclick'); stop.style.color = 'var(--hint)'; stop.textContent = 'Отменена'; }
+}
 async function cancelOp(id, confirm) {
   if (confirm && !(await askConfirm('Отменить операцию? Вернуть её в очередь будет нельзя — только повторить заново.'))) return;
   try {
     await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
-    toast('Операция отменена'); loadOps();
+    toast('Операция отменена');
+    _opProgressMarkCancelled(id);
+    loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
