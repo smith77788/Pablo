@@ -17220,7 +17220,7 @@ async function openCommunityNode(id, title, chatId) {
   txt('cnodeTitle','🏛 '+(title||'Сообщество'));
   txt('cnodeChannels','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('cnodeActions',`
-    <button class="btn btn-p" onclick="inviteToCommunity(${chatId})" style="flex:0">➕ Пригласить аудиторию</button>
+    <button class="btn btn-p" onclick="inviteToCommunity(${id},${chatId})" style="flex:0">➕ Пригласить аудиторию</button>
     <button class="btn btn-s" onclick="livenCommunity(${id})" style="flex:0">🏛 Оживить флотом</button>
     <button class="btn btn-s" onclick="openCommunityMembers(${id})" style="flex:0">🛡 Участники и роли</button>
     <button class="btn btn-d" onclick="deleteCommunityNode(${id})" style="flex:0">🗑 Убрать</button>`);
@@ -17248,9 +17248,25 @@ async function deleteCommunityNode(id) {
   try { await api('/api/miniapp/community/node/'+id,{method:'DELETE'}); back(); openCommunity(); } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 // Пригласить аудиторию в ноду = инвайт в её супергруппу (переиспользуем инвайт).
-function inviteToCommunity(chatId) {
-  openMassInvite();
-  setTimeout(()=>{ const g=document.getElementById('massInviteGroup'); if(g && chatId){ g.value=String(chatId); } toast('🏛 Группа сообщества подставлена — выберите источник аудитории'); }, 250);
+// Голый числовой tg_chat_id инвайту почти бесполезен: аккаунт-приглашатель,
+// который никогда не видел этот чат, его не резолвит (см. community_node_invite_link
+// на бэке) — поэтому сначала выпускаем ссылку через аккаунт флота, реально
+// состоящий в ноде (community_node_members, заполняется «Оживить»), и уже её
+// подставляем в поле инвайта.
+async function inviteToCommunity(nodeId, chatId) {
+  await openMassInvite();
+  const g = document.getElementById('massInviteGroup');
+  if (g) g.value = 'Получаю ссылку…';
+  try {
+    const r = await api('/api/miniapp/community/node/'+nodeId+'/invite_link');
+    if (g) g.value = (r && r.invite_link) ? r.invite_link : String(chatId || '');
+    toast(r && r.invite_link
+      ? '🏛 Ссылка ноды подставлена — выберите источник аудитории'
+      : '⚠️ Ссылку получить не удалось — подставлен голый ID, инвайт может не сработать');
+  } catch (e) {
+    if (g) g.value = String(chatId || '');
+    toast('⚠️ '+(e.message||'Не удалось получить ссылку ноды').substring(0, 100));
+  }
 }
 async function livenCommunity(id) {
   const n = await askPrompt('Сколько аккаунтов флота ввести в сообщество?', {value:'5'});

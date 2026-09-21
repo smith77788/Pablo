@@ -8958,6 +8958,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         await nodes_engine.deactivate_community_node(pool, uid, node_id)
         return _json_resp({"ok": True})
 
+    async def community_node_invite_link(request: web.Request) -> web.Response:
+        """Инвайт-ссылка ноды-сообщества, чтобы инвайтить в её чат по ссылке, а
+        не голым числовым tg_chat_id.
+
+        Раньше «Пригласить аудиторию» в ноде (inviteToCommunity) подставляло в
+        поле инвайта СЫРОЙ tg_chat_id: регистрация ноды (community_node_create)
+        просит только число, без привязки аккаунта/username/access_hash. Для
+        аккаунта-приглашателя, который никогда не видел этот чат,
+        `get_entity(числовой_id)` не резолвится — инвайт падал у всех, кроме
+        случайного совпадения.
+
+        Решение переиспользует уже накопленное: `community_node_members`
+        (заполняется «Оживить» — services/nodes_engine.livenCommunity) хранит,
+        какие аккаунты ФЛОТА реально состоят в этой ноде. Пробуем их по
+        порядку (админы сначала — им точно можно экспортировать ссылку),
+        останавливаемся на первом успехе. Не «операция» — единичный синхронный
+        Telethon-вызов, как и channel_invite_link рядом."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            node_id = int(request.match_info["node_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid node_id", 400)
+        node = await _safe_fetchrow(
+            pool, "SELECT id, tg_chat_id FROM community_nodes WHERE id=$1 AND owner_id=$2",
+            node_id, uid)
+        if not node:
+            return _err("Нода не найдена", 404)
+        members = await _safe_fetch(pool,
+            """SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version,
+                      a.lang_code, a.system_lang_code,
+                      (SELECT proxy_url FROM user_proxies up
+                       WHERE up.id=a.proxy_id AND up.is_active=TRUE) AS proxy_url
+               FROM community_node_members m
+               JOIN tg_accounts a ON a.id=m.account_id
+               WHERE m.node_id=$1 AND a.owner_id=$2 AND a.is_active=TRUE
+                     AND a.session_str IS NOT NULL AND a.session_str <> ''
+               ORDER BY CASE m.role WHEN 'admin' THEN 0 WHEN 'moderator' THEN 1 ELSE 2 END,
+                        m.joined_at
+               LIMIT 8""", node_id, uid) or []
+        if not members:
+            return _err(
+                "Ни один аккаунт флота не отмечен участником этой ноды — сначала "
+                "«Оживить» её (добавить аккаунты в чат), иначе инвайтить некому "
+                "разрезолвить чат.", 400)
+        from services import account_manager
+        for acc in members:
+            try:
+                link = await account_manager.get_channel_invite_link(
+                    acc["session_str"], int(node["tg_chat_id"]), _acc=dict(acc))
+            except Exception:
+                link = ""
+            if link:
+                return _json_resp({"ok": True, "invite_link": link})
+        return _err(
+            "Не удалось получить ссылку — ни один известный аккаунт флота не "
+            "смог экспортировать приглашение (нет прав или чат недоступен).", 400)
+
     async def community_channels_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -17657,6 +17716,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/community/nodes", community_nodes_list)
     app.router.add_post("/api/miniapp/community/node", community_node_create)
     app.router.add_delete("/api/miniapp/community/node/{node_id}", community_node_delete)
+    app.router.add_get("/api/miniapp/community/node/{node_id}/invite_link", community_node_invite_link)
     app.router.add_get("/api/miniapp/community/node/{node_id}/channels", community_channels_list)
     app.router.add_post("/api/miniapp/community/node/{node_id}/channels", community_channel_add)
     app.router.add_get("/api/miniapp/community/node/{node_id}/members", community_members_list)
