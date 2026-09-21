@@ -4851,6 +4851,13 @@ async def promote_to_admin_ex(
                           несколько секунд обычно проходит;
       "no_add_admins"   — у выдающего нет права add_admins. ОКОНЧАТЕЛЬНО для
                           этого промоутера, повторять с ним бессмысленно;
+      "admins_too_much" — у ЧАТА исчерпан лимит одновременных админов
+                          (Telegram: CHAT_ADMINS_TOO_MUCH). ВРЕМЕННО в смысле
+                          «не для этого пользователя окончательно» — освободится,
+                          если кто-то из текущих админов будет снят
+                          (op_worker._exec_mass_invite ротирует места: у
+                          отработавшего свой батч аккаунта права снимаются,
+                          следующий в очереди получает их взамен);
       "flood"           — Telegram просит подождать. ВРЕМЕННО;
       "error"           — прочее, считаем временным.
 
@@ -4926,12 +4933,72 @@ async def promote_to_admin_ex(
         log.warning(
             "promote_to_admin error user=%s chan=%s: %s", user_id, channel_id, e
         )
+        # Telethon генерирует классы ошибок из строки RPC-ответа Telegram —
+        # для превышения лимита одновременных админов чата это
+        # CHAT_ADMINS_TOO_MUCH → ChatAdminsTooMuchError. Матчим по подстроке
+        # (не импортируем класс напрямую): в песочнице этой сессии telethon не
+        # ставится (нативный pyaes не собирается, см. CLAUDE.md), проверить
+        # точное имя класса на живой библиотеке нечем — подстрока устойчивее
+        # к разночтениям версий, чем импорт конкретного символа.
+        if "AdminsTooMuch" in _name:
+            return False, "admins_too_much"
         return False, ("flood" if "Flood" in _name or "Wait" in _name else "error")
     finally:
         try:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в promote_to_admin")
+
+
+async def demote_from_admin(
+    session_string: str,
+    channel_id: int | str,
+    user_id: int,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+) -> bool:
+    """Снять права админа (все флаги — False), оставив пользователя обычным
+    участником. Зеркало promote_to_admin_ex с обратным набором прав — нужно
+    для ротации мест: у аккаунта, отработавшего свой батч инвайта, забираем
+    место, чтобы освободить его для следующего в очереди (см. docstring
+    "admins_too_much" выше и op_worker._exec_mass_invite).
+
+    Best-effort: сбой не критичен для самого инвайта (аккаунт просто остаётся
+    админом дольше, чем нужно) — вызывающий не обязан считать это провалом
+    операции, только залогировать и продолжить."""
+    from telethon.tl.functions.channels import EditAdminRequest
+    from telethon.tl.types import ChatAdminRights, PeerUser
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        channel = await _resolve_channel_peer(client, channel_id, access_hash)
+        try:
+            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+        except (ValueError, TypeError):
+            try:
+                await asyncio.wait_for(
+                    client.get_participants(channel, limit=_PROMOTE_WARM_LIMIT), timeout=60)
+            except Exception:
+                log_exc_swallow(log, "demote_from_admin: participant warm failed")
+            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+        rights = ChatAdminRights(
+            post_messages=False, edit_messages=False, delete_messages=False,
+            ban_users=False, invite_users=False, pin_messages=False, add_admins=False,
+            manage_call=False, other=False, change_info=False, anonymous=False,
+            manage_topics=False,
+        )
+        await client(EditAdminRequest(channel=channel, user_id=input_user, admin_rights=rights, rank=""))
+        log.info("demote_from_admin: user %s demoted in channel %s", user_id, channel_id)
+        return True
+    except Exception as e:
+        log.warning("demote_from_admin error user=%s chan=%s: %s", user_id, channel_id, e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в demote_from_admin")
 
 
 

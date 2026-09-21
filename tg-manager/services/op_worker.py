@@ -11951,6 +11951,14 @@ async def _exec_mass_invite(
     _promoter = None            # (acc_dict) — аккаунт с правами выдавать админку
     _privacy_blocked: list = []  # цели, отклонённые приватностью (для промоут-трюка)
     _promoted_n = 0
+    # Ротация мест админа: при большом флоте у чата не хватает мест на всех
+    # разом (Telegram: CHAT_ADMINS_TOO_MUCH) — аккаунты, отработавшие свой
+    # батч, обязаны отдавать место следующим в очереди, а не держать права
+    # админа до конца прогона впустую. _admin_seats — кто СЕЙЧАС держит место
+    # (наполняется при каждом успешном промоуте — и в первичной раздаче, и «на
+    # лету»); _admin_seats_freed — счётчик для честного итога.
+    _admin_seats: set[int] = set()
+    _admin_seats_freed = 0
     _promote_failed = 0          # инвайтеры, кому промоут вернул False/ошибку (не участник/нет прав)
     _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
     _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
@@ -11967,6 +11975,7 @@ async def _exec_mass_invite(
     # promote_to_admin_ex.
     from services.invite_recovery import (
         promote_retry_allowed as _irec_promote_retry_allowed,
+        MAX_ADMIN_SEAT_WAIT_ATTEMPTS as _MAX_ADMIN_SEAT_WAIT_ATTEMPTS,
     )
     _no_rights_on_demand: dict = {}
     _auto_promote = params.get("auto_promote", True)
@@ -12020,9 +12029,22 @@ async def _exec_mass_invite(
                 "(см. причину «сессия/сеть»). Права admin могли быть — но проверить их "
                 "без подключения нельзя.")
         elif _auto_promote:
+            # Потолок мест админа у ЭТОГО чата ещё не известен (узнаём только
+            # по факту первого отказа Telegram, см. admins_too_much) — пока не
+            # уткнулись в него, раздаём права как раньше, всем подряд.
+            _admin_cap_hit = False
             for a in accounts:
                 if int(a["id"]) == int(_promoter["id"]):
                     continue
+                if _admin_cap_hit:
+                    # Дальше пытаться бессмысленно — И дорого: join+promote на
+                    # каждый гарантированно неудачный аккаунт стоит секунды
+                    # впустую при большом флоте (сотни аккаунтов сверх лимита
+                    # чата — это были бы лишние минуты работы ради заведомого
+                    # отказа). Остаток получит права «на лету» — по очереди, по
+                    # мере того как ротация освобождает места (см. ниже,
+                    # ветка res.get("no_rights") и "admins_too_much").
+                    break
                 _u = _acc_uid.get(int(a["id"]))
                 if not _u:
                     # tg_user_id не заполнен (частый случай при импорте сессий) —
@@ -12059,8 +12081,8 @@ async def _exec_mass_invite(
                     log.debug("mass_invite op=%d: pre-promote join acc=%s failed",
                               op_id, a.get("id"))
                 try:
-                    okp = await asyncio.wait_for(
-                        account_manager.promote_to_admin(
+                    okp, _pr_reason = await asyncio.wait_for(
+                        account_manager.promote_to_admin_ex(
                             _promoter["session_str"], group, int(_u),
                             _acc=dict(_promoter), invite_users=True, post_messages=False,
                             # Метод «admin»: инвайтер сам добавляет цели промоут-трюком,
@@ -12070,8 +12092,11 @@ async def _exec_mass_invite(
                         timeout=45)
                     if okp:
                         _promoted_n += 1
+                        _admin_seats.add(int(a["id"]))
                     else:
                         _promote_failed += 1
+                        if _pr_reason == "admins_too_much":
+                            _admin_cap_hit = True
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                 except Exception as _pe:
                     _promote_failed += 1
@@ -12084,9 +12109,42 @@ async def _exec_mass_invite(
             if _promote_failed:
                 _promote_msg += (f"; {_promote_failed} не выдана — промоутер без права "
                                  "«Назначать администраторов» или аккаунт не вступил в чат")
+            if _admin_cap_hit:
+                _promote_msg += (f"; у чата закончились места админа ({len(_admin_seats)}) — "
+                                 "остальные аккаунты получат права по очереди, по мере того как "
+                                 "отработавшие свой батч их освобождают")
             await _safe_execute(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','ok',$2)", op_id, _promote_msg)
+
+    async def _release_admin_seat(acc_id: int) -> None:
+        """Снять права админа с аккаунта, если он их держал, — освобождает
+        место для следующего в очереди ротации (см. "admins_too_much" выше).
+
+        Вызывается при КАЖДОМ выводе аккаунта из круга (retired.add): аккаунт,
+        закончивший работу (батч/лимит/флуд/сбой), больше не нуждается в
+        админке, и держать её впустую — и лишний след для детекта, и напрасно
+        занятое место, если у чата их не хватает на весь флот. Best-effort:
+        сбой демоута не должен ронять прогон — аккаунт просто останется
+        админом чуть дольше."""
+        nonlocal _admin_seats_freed
+        if acc_id not in _admin_seats or _promoter is None:
+            return
+        _u = _acc_uid.get(acc_id)
+        if not _u:
+            _admin_seats.discard(acc_id)  # без user_id снять права нечем — просто забываем о месте
+            return
+        try:
+            ok = await asyncio.wait_for(
+                account_manager.demote_from_admin(
+                    _promoter["session_str"], group, int(_u), _acc=dict(_promoter)),
+                timeout=30)
+            if ok:
+                _admin_seats_freed += 1
+        except Exception as _de:
+            log.debug("mass_invite op=%d acc=%s: demote_from_admin failed: %s",
+                      op_id, acc_id, _de)
+        _admin_seats.discard(acc_id)
 
     # ── Очередь-планировщик ──────────────────────────────────────────────────
     # Раньше аудитория НАРЕЗАЛАСЬ по аккаунтам заранее (_chunks). Цену платил
@@ -12340,6 +12398,7 @@ async def _exec_mass_invite(
                 cap = budget[acc_id]
                 if cap <= 0:
                     retired.add(acc_id)
+                    await _release_admin_seat(acc_id)
                     # Выбыл по суточному лимиту, ни разу не сработав → «не
                     # задействовали» именно из-за лимита (для честного итога).
                     if acc_id not in _used_accounts:
@@ -12443,6 +12502,7 @@ async def _exec_mass_invite(
                 log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), res)
                 _give_back(queue, batch)
                 retired.add(acc_id)
+                await _release_admin_seat(acc_id)
                 _noconnect_errs.append(str(res)[:160])
                 continue
 
@@ -12457,7 +12517,14 @@ async def _exec_mass_invite(
                 _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
                 _tries = int(_no_rights_on_demand.get(acc_id, 0))
                 _reason = "no_promoter"
-                if _promoter is not None and _irec_promote_retry_allowed(_tries):
+                # Внешний гейт обязан пропускать до САМОГО щедрого бюджета (30,
+                # admins_too_much) — иначе аккаунт, реально ждущий ротации места,
+                # обрывался бы после 3-й попытки, так и не дождавшись своей
+                # очереди: причина текущей попытки известна только ПОСЛЕ звонка
+                # в Telegram, а не до него. За точный бюджет для КАЖДОЙ причины
+                # отвечает _retry_ok ниже, уже по факту свежего отказа.
+                if _promoter is not None and _irec_promote_retry_allowed(
+                        _tries, _MAX_ADMIN_SEAT_WAIT_ATTEMPTS):
                     _no_rights_on_demand[acc_id] = _no_rights_on_demand.get(acc_id, 0) + 1
                     try:
                         from services import account_manager as _am
@@ -12492,6 +12559,7 @@ async def _exec_mass_invite(
                                 timeout=45)
                             if _okp:
                                 _promoted_n += 1
+                                _admin_seats.add(acc_id)
                                 log.info("mass_invite op=%d acc=%s: права выданы на лету — "
                                          "остаётся в круге", op_id, acc.get("id"))
                                 continue  # НЕ ретайрим — попробует снова уже с правами
@@ -12504,21 +12572,31 @@ async def _exec_mass_invite(
 
                     # Временный отказ — аккаунт остаётся в круге и попробует в
                     # следующем круге, пока не исчерпает попытки. Окончательный
-                    # (у промоутера нет права add_admins) повторять бессмысленно.
-                    # Временный отказ — аккаунт остаётся в круге и попробует в
-                    # следующем круге, пока не исчерпает попытки. Окончательный
                     # (у промоутера нет права add_admins) повторять бессмысленно:
                     # тратить на него попытки — терять аккаунт медленнее, но так же.
-                    if (_reason in ("not_participant", "flood", "error")
-                            and _irec_promote_retry_allowed(_no_rights_on_demand[acc_id])):
+                    #
+                    # admins_too_much — отдельный, более терпеливый бюджет попыток:
+                    # это не сетевая заминка, а ожидание своей очереди на РОТАЦИЮ
+                    # места (см. _release_admin_seat) — она освобождается не по
+                    # таймеру, а когда ДРУГОЙ аккаунт отработает свой батч и
+                    # выбудет из круга, а это может занять много раундов.
+                    _tries_now = _no_rights_on_demand[acc_id]
+                    _retry_ok = (
+                        _irec_promote_retry_allowed(_tries_now)
+                        if _reason in ("not_participant", "flood", "error")
+                        else _irec_promote_retry_allowed(_tries_now, _MAX_ADMIN_SEAT_WAIT_ATTEMPTS)
+                        if _reason == "admins_too_much"
+                        else False
+                    )
+                    if _retry_ok:
                         log.info("mass_invite op=%d acc=%s: выдача прав не прошла (%s), "
                                  "попытка %d — аккаунт остаётся в круге",
-                                 op_id, acc.get("id"), _reason,
-                                 _no_rights_on_demand[acc_id])
+                                 op_id, acc.get("id"), _reason, _tries_now)
                         continue
 
                 # Промоутера нет / попытки исчерпаны / отказ окончательный
                 retired.add(acc_id)
+                await _release_admin_seat(acc_id)
                 _no_rights_retired += 1
                 log.info("mass_invite op=%d acc=%s: нет прав админа, выдать не удалось (%s) — "
                          "выведен из круга, продолжаем аккаунтами с правами",
@@ -12679,6 +12757,7 @@ async def _exec_mass_invite(
                                        fail=fail_n, invites=ok_n)
                 await _rest_invite_account(acc["id"], res)
                 retired.add(acc_id)
+                await _release_admin_seat(acc_id)
                 # Стоп-кран: подряд-флуды без успеха = флот перегрет. Успех сбросил
                 # бы счётчик ниже; здесь — только флуды. При пороге останавливаем всю
                 # операцию, чтобы не жечь оставшиеся аккаунты в бан.
@@ -12723,6 +12802,7 @@ async def _exec_mass_invite(
                     op_id, acc.get("id"), _errs[:120],
                 )
                 retired.add(acc_id)
+                await _release_admin_seat(acc_id)
                 _noconnect_errs.append(_errs[:160] or "аккаунт не ответил (сессия/сеть)")
                 continue
 
@@ -12731,7 +12811,12 @@ async def _exec_mass_invite(
                 flood_streak = 0  # реальный успех разрывает серию флудов
             await _invite_learn_ok(acc_id, ok_n)
             if budget[acc_id] <= 0:
+                # Аккаунт честно отработал свой батч до конца — ГЛАВНЫЙ случай
+                # ротации мест админа: если он держал место (был промоутнут),
+                # оно освобождается для следующего в очереди ПРЯМО СЕЙЧАС, а не
+                # простаивает у отработавшего аккаунта до самого конца прогона.
                 retired.add(acc_id)
+                await _release_admin_seat(acc_id)
             await _humanize(acc)
             await asyncio.sleep(_invite_pause(acc_id))
 
