@@ -4530,6 +4530,62 @@ async def _exec_bulk_leave(
     }
 
 
+async def _revive_abandoned_gp_targets(pool: asyncpg.Pool, plan_id: int, what: str) -> None:
+    """Расклинить цели плана Global Presence, брошенные прошлым прогоном.
+
+    Цель берётся атомарным переводом pending → running, и снимает этот статус
+    только тот же прогон. Если воркер умер между занятием и исходом — деплой,
+    падение, потолок прогона — цель остаётся в 'running' НАВСЕГДА: исполнитель
+    при повторе выбирает `status='pending'`, и брошенная цель больше не
+    рассматривается никогда. План молча не достраивается: владелец видит «22 из
+    30» и никакой ошибки, потому что ошибки и не было.
+
+    Разбор по `result_asset_id`, а не по одному возрасту, и это принципиально:
+
+      • пусто → ресурс создать не успели, работа не начиналась. Честно
+        возвращаем в очередь, повтор сделает её с нуля.
+      • заполнено → канал/бот в Telegram УЖЕ СОЗДАН. Вернуть такую цель в
+        очередь значит создать второй такой же — для аккаунта это лишнее
+        дорогое действие и лишний повод для ограничений. Закрываем цель как
+        выполненную и пишем в error_message, что довеска (имя, аватар, запись в
+        каталог) могло не примениться: ресурс есть, и его подберёт сканирование
+        собственных ресурсов.
+
+    Не бросает: это расклинивание, а не критический путь.
+    """
+    try:
+        requeued = await _safe_execute(
+            pool,
+            "UPDATE global_presence_targets SET status='pending' "
+            " WHERE plan_id=$1 AND status='running' AND result_asset_id IS NULL",
+            plan_id, log_ctx=f"[gp_revive_pending plan={plan_id}]",
+        )
+        closed = await _safe_execute(
+            pool,
+            "UPDATE global_presence_targets SET status='done', "
+            "       error_message=COALESCE(error_message, $2) "
+            " WHERE plan_id=$1 AND status='running' AND result_asset_id IS NOT NULL",
+            plan_id,
+            "Ресурс создан, но прогон оборвался — оформление могло не примениться. "
+            "Проверьте сканированием собственных ресурсов.",
+            log_ctx=f"[gp_revive_done plan={plan_id}]",
+        )
+    except Exception:
+        log_exc_swallow(log, f"gp: расклинивание целей плана {plan_id}")
+        return
+    def _n(res):
+        try:
+            return int(str(res).rsplit(" ", 1)[-1])
+        except (TypeError, ValueError):
+            return 0
+    if _n(requeued) or _n(closed):
+        log.warning(
+            "gp %s: план %d — расклинено брошенных целей: возвращено в очередь %d, "
+            "закрыто как созданные %d",
+            what, plan_id, _n(requeued), _n(closed),
+        )
+
+
 async def _exec_global_presence_channel(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -4561,6 +4617,10 @@ async def _exec_global_presence_channel(
         plan_id,
         owner_id,
     )
+
+    # Цели, брошенные прошлым прогоном, застревают в 'running' и в выборку ниже
+    # уже не попадают — план молча не достраивается. Расклиниваем их до выборки.
+    await _revive_abandoned_gp_targets(pool, plan_id, "channel")
 
     targets = await _safe_fetch(
             pool,
@@ -4818,6 +4878,18 @@ async def _exec_global_presence_channel(
 
             channel_id = result.get("channel_id")
             channel_access_hash = result.get("access_hash", 0)
+            # Отмечаем созданный ресурс СРАЗУ. Дальше идёт пауза 90-180с перед
+            # установкой имени (анти-детект) и оформление — окно в минуты, и
+            # смерть процесса в нём оставляла цель в 'running' без следа. По
+            # этой отметке расклинивание отличает «канал уже создан» от «работа
+            # не начиналась» и не создаёт второй канал.
+            if channel_id:
+                await _safe_execute(
+                    pool,
+                    "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
+                    channel_id, target["id"],
+                    log_ctx=f"[gp_mark_created target={target['id']}]",
+                )
 
             username_error = None
             planned_username = target.get("planned_username")
@@ -5604,6 +5676,10 @@ async def _exec_global_presence_bot(
         # Fallback list for round-robin when target has no selected_account_id
         accounts_list = list(accounts_rows)
 
+        # То же расклинивание, что у каналов: брошенная цель иначе не
+        # рассматривается никогда, и план застывает недостроенным.
+        await _revive_abandoned_gp_targets(pool, plan_id, "bot")
+
         targets = await _safe_fetch(
                 pool,
             "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
@@ -5747,6 +5823,19 @@ async def _exec_global_presence_bot(
 
             token = result.get("token", "")
             actual_username = result.get("username", bot_username)
+            # Отмечаем созданного бота СРАЗУ, до записи в каталог: BotFather его
+            # уже отдал, и повторное создание после обрыва завело бы ВТОРОГО.
+            # По этой отметке расклинивание отличает созданное от неначатого.
+            if token and ":" in token:
+                try:
+                    await _safe_execute(
+                        pool,
+                        "UPDATE global_presence_targets SET result_asset_id=$1 WHERE id=$2",
+                        int(token.split(":")[0]), target["id"],
+                        log_ctx=f"[gp_bot_mark_created target={target['id']}]",
+                    )
+                except (TypeError, ValueError):
+                    log.debug("gp_bot: токен без числового id, отметка пропущена")
 
             # Save bot to managed_bots (token format: "{bot_id}:{hash}")
             try:
