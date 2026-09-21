@@ -133,6 +133,14 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/op_worker.py:_accounts_in_use": "быстрый локальный фильтр; арбитр — аренда в БД",
     "services/op_worker.py:_operation_account_locks": "то же, привязка операция→аккаунты",
     "services/op_worker.py:_db_pool": "пул asyncpg привязан к циклу событий",
+    "services/op_worker.py:_shutting_down": (
+        "ЭТОТ процесс получил SIGTERM и сворачивается (op_worker.shutdown). "
+        "Делить нечего и НЕ НУЖНО: флаг означает «я сейчас умру», и сосед, "
+        "который жив, обязан продолжать забирать операции из очереди — "
+        "разошедшись, он поступит правильно. Общий флаг, наоборот, остановил "
+        "бы разбор очереди на всей платформе из-за рестарта одной реплики. "
+        "Потеря при рестарте безвредна: новый процесс поднимается с False, и "
+        "это ровно то, что нужно"),
     "services/op_circuit_breaker.py:_db_pool": "пул asyncpg привязан к циклу событий",
     "services/organism/spine.py:_SUBS": "подписчики внутрипроцессной шины",
     "services/pacing_engine.py:_engine": "синглтон процесса",
