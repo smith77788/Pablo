@@ -12593,6 +12593,12 @@ async def _exec_mass_invite(
                                 _admin_seats.add(acc_id)
                                 log.info("mass_invite op=%d acc=%s: права выданы на лету — "
                                          "остаётся в круге", op_id, acc.get("id"))
+                                # Тот же джиттер, что и у промоутера в bulk-выдаче
+                                # выше (1.5-3.0с): без паузы ПРОМОУТЕР делает
+                                # EditAdminRequest подряд по разным целям каждый
+                                # раз, когда кому-то не хватило прав, — машинный
+                                # темп на ОДНОМ аккаунте, а не только на инвайтере.
+                                await asyncio.sleep(random.uniform(1.5, 3.0))
                                 continue  # НЕ ретайрим — попробует снова уже с правами
                         else:
                             _reason = "no_uid"

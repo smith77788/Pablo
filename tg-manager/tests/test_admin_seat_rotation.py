@@ -140,6 +140,19 @@ def test_outer_retry_gate_uses_the_wide_seat_wait_budget():
     )
 
 
+def test_on_demand_promote_success_paces_the_promoter():
+    """Промоут «на лету» успел уйти в continue БЕЗ единой паузы — в отличие от
+    bulk-выдачи выше (там после каждого promote_to_admin_ex стоит sleep
+    random.uniform(1.5, 3.0)). Один и тот же ПРОМОУТЕР делает EditAdminRequest
+    подряд по разным целям каждый раз, когда кому-то не хватило прав — без
+    паузы это машинный темп на одном аккаунте, не только на инвайтере."""
+    seg = _exec_mass_invite_source()
+    i = seg.index('log.info("mass_invite op=%d acc=%s: права выданы на лету')
+    j = seg.index("continue  # НЕ ретайрим", i)
+    block = seg[i:j]
+    assert "asyncio.sleep(random.uniform(1.5, 3.0))" in block
+
+
 def test_inner_retry_decision_branches_by_reason():
     seg = _exec_mass_invite_source()
     i = seg.index("_retry_ok = (")
