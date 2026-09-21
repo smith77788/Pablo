@@ -29,8 +29,16 @@ def test_op_worker_reschedules_on_done():
     # не ставилась, и владелец узнавал об этом только по тишине в канале.
     assert "op_status.is_productive(_final_status) and op_type in _RECURRING_OK_OPS" in src
     assert "repeat_interval_min" in src
-    # реально вставляет новый op со сдвигом времени
-    assert "make_interval(mins => $6)" in src
+    # Реально ставит новый op со сдвигом времени — ЧЕРЕЗ ШИНУ.
+    # Раньше здесь стоял прямой INSERT с `make_interval(mins => $6)`, и это
+    # означало, что расписание сильнее защиты: круг заводился даже тогда, когда
+    # предохранитель Ban Weather приостановил этот тип операций, а автопостинг
+    # на платном плане продолжал крутиться после отмены подписки. Проверяем
+    # смысл (следующий круг ставится со сдвигом на repeat_interval_min), а не
+    # конкретный SQL: механизм теперь общий для всего продукта.
+    seg = src[src.index("op_type in _RECURRING_OK_OPS"):][:4000]
+    assert "submit(" in seg, "переочередь идёт мимо operation_bus"
+    assert "timedelta(minutes=_rmin)" in seg, "следующий круг ставится без сдвига времени"
     # repeat_count декрементится (ограничение числа повторов)
     assert "repeat_count" in src
 

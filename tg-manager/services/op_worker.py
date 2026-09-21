@@ -1593,17 +1593,30 @@ async def _reconcile_in_operation(pool: asyncpg.Pool) -> None:
     прогрева/призрака/ротации до полного рестарта. Реконсилер лечит это без
     рестарта: чистит флаг там, где память говорит «свободен».
 
-    Однопроцессная модель (как и весь claim по _accounts_in_use): в памяти этого
-    процесса — полная картина занятых аккаунтов.
+    ПАМЯТЬ ЭТОГО ПРОЦЕССА — НЕ ПОЛНАЯ КАРТИНА. Раньше здесь стоял ровно такой
+    вывод, и запрос снимал флаг со всего, чего нет в `_accounts_in_use`. Пока
+    процесс один, это верно; со второй репликой (роль web + worker штатно
+    разносится) реконсилер видит своё множество и отбирает сессии, которые
+    прямо сейчас держит сосед — то есть ведёт ровно к AUTH_KEY_DUPLICATED, от
+    которого аренда и защищает. `_db_release` это давно учитывает, реконсилер —
+    нет, хотя пишет в ту же колонку.
+
+    Поэтому чистим только то, за что никто живой не отвечает: свою аренду
+    (наш зомби-флаг), истёкшую и отсутствующую (legacy-строки до миграции
+    аренды). Чужую живую аренду не трогаем — тот же предикат, что на старте в
+    reset_stale_in_operation.
     """
     try:
         async with _accounts_lock:
             held = [int(a) for a in _accounts_in_use]
         result = await pool.execute(
-            "UPDATE tg_accounts SET in_operation=FALSE "
+            "UPDATE tg_accounts SET in_operation=FALSE, "
+            "       op_lease_until=NULL, op_lease_owner=NULL "
             "WHERE COALESCE(in_operation, FALSE)=TRUE "
-            "  AND ($1::int[] IS NULL OR id <> ALL($1::int[]))",
-            held or None,
+            "  AND ($1::int[] IS NULL OR id <> ALL($1::int[])) "
+            "  AND (op_lease_owner = $2 OR op_lease_owner IS NULL "
+            "       OR op_lease_until IS NULL OR op_lease_until < now())",
+            held or None, _WORKER_ID,
         )
         freed = int((result or "UPDATE 0").split()[-1])
         if freed:
@@ -2102,6 +2115,26 @@ def handler_for(op_type: str):
     return dispatch_table().get(op_type)
 
 
+async def _notify_recurring_stopped(
+    pool: asyncpg.Pool, bot: Bot, owner_id: int, op_id: int, op_type: str, why: str
+) -> None:
+    """Сказать владельцу, что повторяющаяся операция больше не продлевается.
+
+    Расписание, оборвавшееся молча, — худший вид отказа: канал просто перестаёт
+    наполняться, и владелец узнаёт об этом через неделю, если заметит вообще.
+    Best-effort: уведомление не должно ронять завершение операции.
+    """
+    try:
+        await db.notify_if_enabled(
+            pool, bot, owner_id, "op_complete",
+            f"⏹ <b>Повтор операции #{op_id}</b> (<code>{op_type}</code>) остановлен: {why}.\n\n"
+            f"Следующий запуск по расписанию не поставлен. "
+            f"Запустите операцию заново, когда ограничение снимется.",
+        )
+    except Exception:
+        log_exc_swallow(log, f"op_worker: уведомление об остановке расписания op#{op_id}")
+
+
 async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     """Запустить одну операцию в отдельной asyncio-задаче."""
     op_id = row["id"]
@@ -2485,18 +2518,58 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         _next_params["repeat_count"] = _rc
                         _go = _rc > 0
                     if _go:
+                        # Следующий круг ставится ЧЕРЕЗ ШИНУ, а не прямым INSERT.
+                        # Прямая запись обходила предохранитель Ban Weather: если
+                        # этот тип операции прямо сейчас массово убивает аккаунты
+                        # владельца, расписание всё равно заводило новый круг —
+                        # расписание оказывалось сильнее защиты, ради которой
+                        # предохранитель и существует. Обходился и гейт тарифа:
+                        # автопостинг, заведённый на платном плане, продолжал
+                        # работать вечно после отмены подписки.
+                        from services import operation_bus as _obus_r
+                        import datetime as _dt_r
+
+                        _row = await _safe_fetchrow(
+                            pool,
+                            "SELECT label, total_items FROM operation_queue WHERE id=$1",
+                            op_id, log_ctx=f"[recurring_label op={op_id}]")
+                        _base_label = (_row["label"] if _row else None) or op_type
+                        # Метку повтора ставим один раз: без этой проверки она
+                        # копилась кругами («Пост ↻↻↻↻») и к сотому запуску
+                        # вытесняла из очереди само название.
+                        _next_label = _base_label if _base_label.endswith(" ↻") else _base_label + " ↻"
                         try:
-                            _row = await pool.fetchrow(
-                                "SELECT label, total_items FROM operation_queue WHERE id=$1", op_id)
-                            await pool.execute(
-                                "INSERT INTO operation_queue(owner_id, op_type, status, params, "
-                                "total_items, label, scheduled_for) "
-                                "VALUES($1,$2,'pending',$3::jsonb,$4,$5, now() + make_interval(mins => $6))",
-                                owner_id, op_type, json.dumps(_next_params, ensure_ascii=False),
-                                (_row["total_items"] if _row else 0),
-                                (_row["label"] if _row else op_type) + " ↻",
-                                _rmin,
+                            _next_id = await _obus_r.submit(
+                                pool, owner_id, op_type, _next_params,
+                                total_items=(_row["total_items"] if _row else 0),
+                                scheduled_for=_dt_r.datetime.now(_dt_r.timezone.utc)
+                                + _dt_r.timedelta(minutes=_rmin),
+                                label=_next_label,
                             )
+                            log.info(
+                                "autopost v2: op=%d → следующий круг op=%d через %d мин",
+                                op_id, _next_id, _rmin,
+                            )
+                        except _obus_r.ImmunityBlockedError as _ie:
+                            # Не сбой: предохранитель намеренно не пускает этот
+                            # тип операции. Круг пропущен, расписание оборвано —
+                            # владелец должен узнать об этом, а не по тишине в
+                            # канале.
+                            log.warning(
+                                "autopost v2: op=%d — следующий круг НЕ поставлен, "
+                                "предохранитель: %s", op_id, _ie,
+                            )
+                            await _notify_recurring_stopped(
+                                pool, bot, owner_id, op_id, op_type,
+                                f"предохранитель приостановил этот тип операций: {_ie}")
+                        except _obus_r.PlanRequiredError as _pe:
+                            log.warning(
+                                "autopost v2: op=%d — следующий круг НЕ поставлен, "
+                                "тариф: %s", op_id, _pe,
+                            )
+                            await _notify_recurring_stopped(
+                                pool, bot, owner_id, op_id, op_type,
+                                "у подписки больше нет доступа к этому типу операций")
                         except Exception as _e:
                             log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
             # Audit trail: write operation completion to operation_audit.
