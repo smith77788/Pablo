@@ -75,6 +75,18 @@ def media_label(media_type: str | None) -> str:
     return "📎 Вложение"
 
 
+def human_wait(seconds: int) -> str:
+    """Длительность паузы словами владельца. «3600 с» ему ничего не говорит."""
+    secs = max(0, int(seconds or 0))
+    if secs < 60:
+        return f"{secs} с"
+    if secs < 3600:
+        return f"{secs // 60} мин"
+    hours, rest = divmod(secs, 3600)
+    minutes = rest // 60
+    return f"{hours} ч" if not minutes else f"{hours} ч {minutes} мин"
+
+
 def classify_error(msg: str) -> tuple[str, str]:
     """Сырое сообщение ошибки → (код, человекочитаемая причина по-русски).
 
@@ -85,6 +97,25 @@ def classify_error(msg: str) -> tuple[str, str]:
     if any(k in s for k in ("auth", "unauthorized", "unregistered", "session",
                             "authkey", "key is invalid")):
         return ("session_expired", "🔑 Сессия недействительна — нужна переавторизация.")
+    # Сколько ждать — у Telegram это число есть всегда, и владельцу оно нужнее
+    # слова «часто»: по нему видно, отдохнуть минуту или отложить на час.
+    # Формы: наш FloodHandoff («FloodWait handoff: 45s») и сырой текст telethon
+    # («A wait of 45 seconds is required…»), который до сюда доходит из кода,
+    # не обёрнутого предохранителем — и без этой ветки уезжал владельцу
+    # по-английски.
+    _wait = re.search(r"wait[^0-9]{0,20}(\d+)\s*(?:s\b|sec|second)", s)
+    if _wait:
+        secs = int(_wait.group(1))
+        # Опознаём слоу-мод по ТЕКСТУ telethon: слова «slow» в нём нет, есть
+        # только «before sending another message in this chat» (сверено с
+        # telethon 1.36.0, SlowModeWaitError). Проверка на «slow» пропускала
+        # самое частое ожидание при отправке в чат.
+        if "another message in this chat" in s or "slowmode" in s or "slow mode" in s:
+            return ("slow_mode",
+                    f"🐢 В чате включён медленный режим — следующее сообщение "
+                    f"можно отправить через {human_wait(secs)}.")
+        return ("flood", f"⏳ Telegram просит паузу {human_wait(secs)} — "
+                         f"дайте аккаунту отдохнуть.")
     if "flood" in s:
         return ("flood", "⏳ Слишком часто (FloodWait) — дайте аккаунту отдохнуть.")
     if any(k in s for k in ("privacy", "not mutual")):

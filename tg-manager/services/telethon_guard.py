@@ -11,8 +11,17 @@ try/except в каждом движке:
   • Critical   → немедленный проброс (протухшая сессия, спам-блок, отказ прав) —
     ретраить бессмысленно и вредно.
 
-Классификация — по имени класса исключения и атрибутам (без жёстких импортов
-telethon), поэтому модуль импортируется и тестируется без сети и без telethon.
+Классификация — по ТОЧНОМУ имени класса, числовому коду RPCError и атрибутам
+(без жёстких импортов telethon), поэтому модуль импортируется и тестируется без
+сети и без telethon.
+
+Почему код, а не только имена. В telethon 1.36 у ServerError (500) тридцать
+подклассов, у FloodError (420) — пять, и перечислить их поимённо нельзя: список
+растёт со схемой Telegram. Зато `RPCError.code` есть у каждого и стабилен —
+по нему целый класс ошибок разбирается разом. Без этого 26 из 30 транзиентных
+серверных сбоев (ChatGetFailedError, HistoryGetFailedError, RandomIdDuplicateError,
+PersistentTimestampOutdatedError и прочие «повтори запрос») считались
+критичными и не ретраились ни разу.
 """
 from __future__ import annotations
 
@@ -23,13 +32,16 @@ from typing import Any, Awaitable, Callable
 
 log = logging.getLogger(__name__)
 
-# Транзиентные (стоит ретраить) — по подстроке имени класса исключения.
+# Транзиентные (стоит ретраить) — по ТОЧНОМУ имени класса исключения. Это лишь
+# быстрый путь и подстраховка для не-RPC ошибок; целые семейства разбирает код
+# ниже (_TRANSIENT_CODES).
 _TRANSIENT_NAMES = (
     "TimeoutError", "ConnectionError", "ConnectionResetError", "OSError",
     "ServerError", "RpcCallFailError", "RpcMcgetFailError", "TimedOutError",
     "DisconnectError", "ConnectionAbortedError",
 )
-# Критичные (ретрай вреден/бесполезен) — сессия/права/спам-блок.
+# Критичные (ретрай вреден/бесполезен) — сессия/права/спам-блок. Проверяются
+# ПЕРЕД кодом: имя здесь — осознанное решение и перекрывает общее правило.
 _CRITICAL_NAMES = (
     "AuthKeyError", "AuthKeyUnregisteredError", "AuthKeyDuplicatedError",
     "UnauthorizedError", "SessionRevokedError", "SessionExpiredError",
@@ -38,6 +50,18 @@ _CRITICAL_NAMES = (
     "ChatAdminRequiredError", "UserPrivacyRestrictedError",
     "ProxyIsolationError",                  # kill-switch: прямой выход запрещён
 )
+
+# Коды RPCError, которые стоит ретраить: 500 INTERNAL и 503 Timeout. Telegram
+# отдаёт их и со знаком минус (в telethon так и написано: «Also witnessed as
+# -500»), поэтому сравниваем по модулю.
+_TRANSIENT_CODES = frozenset({500, 503})
+
+# 420 — семейство FloodError целиком: FloodWaitError, SlowModeWaitError,
+# TakeoutInitDelayError, FloodTestPhoneWaitError. Все несут .seconds и все
+# означают одно: подождать столько-то. Раньше «flood» узнавали только по имени,
+# начинающемуся с Flood, и ожидание слоу-мода при отправке в чат считалось
+# фатальной ошибкой аккаунта.
+_FLOOD_CODE = 420
 
 
 class FloodHandoff(Exception):
@@ -49,16 +73,35 @@ class FloodHandoff(Exception):
         self.original = original
 
 
+def _rpc_code(exc: BaseException) -> int | None:
+    """Числовой код RPCError по модулю, если он есть и осмыслен."""
+    raw = getattr(exc, "code", None)
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return abs(int(raw))
+    except (TypeError, ValueError):
+        return None
+
+
 def classify_telethon_error(exc: BaseException) -> str:
     """'flood' | 'transient' | 'critical'. Неизвестное → 'critical' (безопасно:
     не ретраим вслепую, пробрасываем наверх)."""
     name = type(exc).__name__
-    # FloodWait: у telethon это FloodWaitError с .seconds; ловим и по атрибуту.
+    code = _rpc_code(exc)
+    # Ожидание: у telethon это семейство FloodError (420) с .seconds. Ловим и по
+    # имени (на случай подмены/обёртки), и по коду — так же попадают
+    # SlowModeWait, TakeoutInitDelay и прочие «подожди N секунд».
     if "FloodWait" in name or (name.startswith("Flood") and hasattr(exc, "seconds")):
         return "flood"
+    if code == _FLOOD_CODE and hasattr(exc, "seconds"):
+        return "flood"
+    # Осознанные решения по имени сильнее общего правила по коду.
     if name in _CRITICAL_NAMES:
         return "critical"
     if name in _TRANSIENT_NAMES or isinstance(exc, (asyncio.TimeoutError, ConnectionError, OSError)):
+        return "transient"
+    if code in _TRANSIENT_CODES:
         return "transient"
     return "critical"
 
@@ -91,6 +134,12 @@ async def guarded_call(
         try:
             return await factory()
         except FloodHandoff:
+            raise
+        except asyncio.CancelledError:
+            # Отмена операции — не ошибка Telegram. Ниже ловится BaseException,
+            # и без этой ветки отмена пошла бы в классификатор; стоит ему хоть
+            # раз счесть её транзиентной — и мы уснём в уже отменённой задаче,
+            # проглотив отмену.
             raise
         except BaseException as exc:  # noqa: BLE001 — классифицируем и решаем осознанно
             kind = classify_telethon_error(exc)
