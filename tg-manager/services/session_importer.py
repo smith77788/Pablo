@@ -254,7 +254,7 @@ async def import_sessions(
     _assigned: list = []
 
     # Дальше — строго по порядку строк: и записи в БД, и нумерация ошибок.
-    for i, session_str, parse_error in parsed:
+    for _pos, (i, session_str, parse_error) in enumerate(parsed):
         if parse_error:
             failed += 1
             errors.append(f"Строка {i+1}: {parse_error}")
@@ -309,6 +309,24 @@ async def import_sessions(
         # прочие отсеянные строки позиции в плане НЕ занимают: план сдвигается
         # только на реально записанный аккаунт.
         _acc_proxy = (_plan[_plan_pos] if _plan_pos < len(_plan) else proxy_id)
+        # Шифрование — не запись в БД. Раньше encrypt_token стоял внутри того же
+        # try, и его отказ (ключа нет, ключ сменили, библиотека не встала)
+        # приходил владельцу как «ошибка БД» — на КАЖДОЙ строке. При импорте
+        # пачкой это пятьсот одинаковых сообщений, все не про то: человек идёт
+        # чинить базу, а дело в ключе шифрования. Причина тут общая для всех
+        # строк, поэтому говорим её один раз и останавливаемся.
+        try:
+            _enc_session = encrypt_token(session_str)
+        except Exception as e:
+            _rest = len(parsed) - _pos - 1
+            failed += 1 + _rest
+            errors.append(
+                f"Строка {i+1}: не удалось зашифровать сессию — {str(e)[:80]}. "
+                "Причина одна для всех строк: проверьте ключ шифрования "
+                "(INFRAGRAM_VAULT_KEY). Импорт остановлен"
+                + (f", ещё {_rest} строк не обработано." if _rest else ".")
+            )
+            break
         try:
             await pool.execute(
                 """INSERT INTO tg_accounts
@@ -317,7 +335,7 @@ async def import_sessions(
                         api_id, proxy_id)
                    VALUES ($1, $2, $3, $4, TRUE, 'active',
                         $5, $6, $7, $8, $9, $10, $11)""",
-                owner_id, encrypt_token(session_str), _fp, phone,
+                owner_id, _enc_session, _fp, phone,
                 dev["device_model"], dev["system_version"], dev["app_version"],
                 dev["lang_code"], dev["system_lang_code"],
                 _assign_api_id(_fp), _acc_proxy,
