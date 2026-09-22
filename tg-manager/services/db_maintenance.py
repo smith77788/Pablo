@@ -12,6 +12,15 @@ Runs every 6 hours. Prunes append-only tables that have no TTL:
 Without this, a platform with 50 active users generating ~200 events/day fills
 behavioral_events with 900 000+ rows in 90 days and search_snapshots can hit
 gigabytes within months.
+
+Удаление идёт ПАЧКАМИ (см. `_prune_batched`). Один безлимитный
+`DELETE ... WHERE дата < ...` на большой таблице — это одна транзакция на
+миллионы строк: она держит блокировки и раздувает WAL, а если не успеет
+(таймаут запроса, редеплой Railway, рестарт контейнера), Postgres откатывает
+её целиком. Тогда не удаляется НИЧЕГО и таблица растёт бессрочно, при этом в
+логе видно лишь warning раз в шесть часов — снаружи уборка выглядит рабочей.
+Пачка = отдельная транзакция: удалённое остаётся удалённым, а хвост, который
+не влез в проход, уйдёт на следующем.
 """
 
 from __future__ import annotations
@@ -51,48 +60,92 @@ _OPERATION_QUEUE_RETENTION = "30 days"
 # вычищались: их строки копились в operation_queue бессрочно.
 _DONE_STATUSES = ("done", "partial", "failed", "cancelled", "skipped", "missed")
 
+# Размер пачки. Одна пачка — одна транзакция; 5000 строк удаляются за доли
+# секунды даже на медленном диске, но при этом их не миллион под блокировкой.
+_BATCH = 5_000
+# Потолок на таблицу за один проход. Гигантский накопленный хвост не должен
+# занимать соединение часами: остаток уйдёт через 6 часов следующим проходом.
+_MAX_PER_TABLE = 500_000
+# Пауза между пачками — вернуть соединение пулу, чтобы уборка не мешала боту.
+_BATCH_PAUSE = 0.2
+
+
+async def _prune_batched(
+    pool: asyncpg.Pool, table: str, where: str, *args: object
+) -> tuple[int, Exception | None]:
+    """Удаляет строки пачками по `_BATCH`. Возвращает (сколько удалено, ошибка).
+
+    Выборка идёт по ctid — физическому адресу строки: подзапрос с LIMIT
+    отбирает адреса, DELETE удаляет ровно их. Это стандартный способ
+    ограничить DELETE в Postgres (у самого DELETE нет LIMIT).
+
+    Ошибка не выбрасывается наружу: уже удалённые пачки зафиксированы, и вызов
+    честно сообщает и их число, и причину остановки.
+    """
+    sql = (
+        f"WITH d AS (DELETE FROM {table} WHERE ctid IN ("
+        f"SELECT ctid FROM {table} WHERE ({where}) LIMIT {_BATCH}"
+        f") RETURNING 1) SELECT COUNT(*) FROM d"
+    )
+    total = 0
+    while total < _MAX_PER_TABLE:
+        try:
+            n = int(await pool.fetchval(sql, *args) or 0)
+        except Exception as e:  # noqa: BLE001 — причину отдаём вызывающему
+            return total, e
+        total += n
+        if n < _BATCH:
+            return total, None
+        await asyncio.sleep(_BATCH_PAUSE)
+
+    log.warning(
+        "db_maintenance: %s — упёрлись в потолок %d строк за проход, "
+        "остаток уйдёт следующим проходом",
+        table,
+        _MAX_PER_TABLE,
+    )
+    return total, None
+
+
+def _record(results: dict[str, int], key: str, deleted: int, err: Exception | None) -> int:
+    """Кладёт результат уборки одной таблицы. -1 — не удалено ничего из-за ошибки."""
+    if err is not None:
+        log.warning("db_maintenance: failed to prune %s: %s", key, err)
+        results[key] = deleted if deleted else -1
+    else:
+        results[key] = deleted
+    return deleted
+
 
 async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
     """Execute one maintenance pass. Returns {table: rows_deleted}."""
     results: dict[str, int] = {}
 
     for table, ts_col, interval in _RETENTION:
-        try:
-            deleted = await pool.fetchval(
-                f"WITH d AS (DELETE FROM {table} "
-                f"WHERE {ts_col} < NOW() - INTERVAL '{interval}' RETURNING 1) "
-                f"SELECT COUNT(*) FROM d"
+        deleted, err = await _prune_batched(
+            pool, table, f"{ts_col} < NOW() - INTERVAL '{interval}'"
+        )
+        _record(results, table, deleted, err)
+        if deleted:
+            log.info(
+                "db_maintenance: pruned %d rows from %s (>%s)", deleted, table, interval
             )
-            n = int(deleted or 0)
-            results[table] = n
-            if n:
-                log.info(
-                    "db_maintenance: pruned %d rows from %s (>%s)", n, table, interval
-                )
-        except Exception as e:
-            log.warning("db_maintenance: failed to prune %s: %s", table, e)
-            results[table] = -1
 
     # Orphaned infra_memory rows — rows whose account/proxy no longer exists.
     # infra_memory_accounts has no FK to tg_accounts, so deleted accounts leave
     # dangling rows. Clean them up; also prune rows inactive for >90 days.
-    try:
-        deleted = await pool.fetchval(
-            "WITH d AS (DELETE FROM infra_memory_accounts "
-            "WHERE NOT EXISTS (SELECT 1 FROM tg_accounts WHERE id = infra_memory_accounts.account_id) "
-            "   OR updated_at < NOW() - INTERVAL '90 days' "
-            "RETURNING 1) "
-            "SELECT COUNT(*) FROM d"
+    deleted, err = await _prune_batched(
+        pool,
+        "infra_memory_accounts",
+        "NOT EXISTS (SELECT 1 FROM tg_accounts WHERE id = infra_memory_accounts.account_id) "
+        "   OR updated_at < NOW() - INTERVAL '90 days'",
+    )
+    _record(results, "infra_memory_accounts(orphan)", deleted, err)
+    if deleted:
+        log.info(
+            "db_maintenance: pruned %d orphaned/stale rows from infra_memory_accounts",
+            deleted,
         )
-        n = int(deleted or 0)
-        results["infra_memory_accounts(orphan)"] = n
-        if n:
-            log.info(
-                "db_maintenance: pruned %d orphaned/stale rows from infra_memory_accounts", n
-            )
-    except Exception as e:
-        log.warning("db_maintenance: failed to prune infra_memory_accounts: %s", e)
-        results["infra_memory_accounts(orphan)"] = -1
 
     try:
         # user_proxies.proxy_url зашифрован → SQL-equality join с infra_memory_proxies
@@ -106,23 +159,23 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         }
         _im_urls = await pool.fetch("SELECT DISTINCT proxy_url FROM infra_memory_proxies")
         _orphans = [r["proxy_url"] for r in _im_urls if r["proxy_url"] not in _active]
-        deleted = await pool.fetchval(
-            "WITH d AS (DELETE FROM infra_memory_proxies "
-            "WHERE proxy_url = ANY($1::text[]) "
-            "   OR updated_at < NOW() - INTERVAL '90 days' "
-            "RETURNING 1) "
-            "SELECT COUNT(*) FROM d",
-            _orphans,
-        )
-        n = int(deleted or 0)
-        results["infra_memory_proxies(orphan)"] = n
-        if n:
-            log.info(
-                "db_maintenance: pruned %d orphaned/stale rows from infra_memory_proxies", n
-            )
     except Exception as e:
         log.warning("db_maintenance: failed to prune infra_memory_proxies: %s", e)
         results["infra_memory_proxies(orphan)"] = -1
+    else:
+        deleted, err = await _prune_batched(
+            pool,
+            "infra_memory_proxies",
+            "proxy_url = ANY($1::text[]) "
+            "   OR updated_at < NOW() - INTERVAL '90 days'",
+            _orphans,
+        )
+        _record(results, "infra_memory_proxies(orphan)", deleted, err)
+        if deleted:
+            log.info(
+                "db_maintenance: pruned %d orphaned/stale rows from infra_memory_proxies",
+                deleted,
+            )
 
     # Orphaned account-scoped state/stats — эти таблицы ссылаются на tg_accounts.id
     # БЕЗ внешнего ключа, поэтому удаление аккаунта (mini_app account_delete / bulk
@@ -136,47 +189,36 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         ("account_daily_stats", "account_id"),
         ("account_rehab_state", "acc_id"),
     ):
-        try:
-            deleted = await pool.fetchval(
-                f"WITH d AS (DELETE FROM {_tbl} t "
-                f"WHERE NOT EXISTS (SELECT 1 FROM tg_accounts a WHERE a.id = t.{_col}) "
-                f"RETURNING 1) SELECT COUNT(*) FROM d"
-            )
-            n = int(deleted or 0)
-            results[f"{_tbl}(orphan)"] = n
-            if n:
-                log.info("db_maintenance: pruned %d orphaned rows from %s", n, _tbl)
-        except Exception as e:
-            log.warning("db_maintenance: failed to prune %s: %s", _tbl, e)
-            results[f"{_tbl}(orphan)"] = -1
+        deleted, err = await _prune_batched(
+            pool,
+            _tbl,
+            f"NOT EXISTS (SELECT 1 FROM tg_accounts a WHERE a.id = {_tbl}.{_col})",
+        )
+        _record(results, f"{_tbl}(orphan)", deleted, err)
+        if deleted:
+            log.info("db_maintenance: pruned %d orphaned rows from %s", deleted, _tbl)
 
     # Completed operation_queue entries — but only if operation_log entries are
     # also gone (FK safety: operation_log.op_id refs operation_queue.id).
     # We prune operation_log first (above), then queue entries.
-    try:
-        deleted = await pool.fetchval(
-            "WITH d AS (DELETE FROM operation_queue "
-            "WHERE status = ANY($1::text[]) "
-            "  AND created_at < NOW() - $2::INTERVAL "
-            "  AND NOT EXISTS ("
-            "      SELECT 1 FROM operation_log WHERE op_id = operation_queue.id"
-            "  ) "
-            "RETURNING 1) "
-            "SELECT COUNT(*) FROM d",
-            list(_DONE_STATUSES),
+    deleted, err = await _prune_batched(
+        pool,
+        "operation_queue",
+        "status = ANY($1::text[]) "
+        "  AND created_at < NOW() - $2::INTERVAL "
+        "  AND NOT EXISTS ("
+        "      SELECT 1 FROM operation_log WHERE op_id = operation_queue.id"
+        "  )",
+        list(_DONE_STATUSES),
+        _OPERATION_QUEUE_RETENTION,
+    )
+    _record(results, "operation_queue(done)", deleted, err)
+    if deleted:
+        log.info(
+            "db_maintenance: pruned %d completed operations from operation_queue (>%s)",
+            deleted,
             _OPERATION_QUEUE_RETENTION,
         )
-        n = int(deleted or 0)
-        results["operation_queue(done)"] = n
-        if n:
-            log.info(
-                "db_maintenance: pruned %d completed operations from operation_queue (>%s)",
-                n,
-                _OPERATION_QUEUE_RETENTION,
-            )
-    except Exception as e:
-        log.warning("db_maintenance: failed to prune operation_queue: %s", e)
-        results["operation_queue(done)"] = -1
 
     return results
 
