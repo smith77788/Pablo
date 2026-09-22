@@ -276,14 +276,14 @@ async def cb_confirm_del_contacts(
     await safe_answer(callback)
     acc_id = callback_data.account_id
 
-    try:
-        acc = await pool.fetchrow(
-            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+    # acc_id приходит из callback_data — целиком со стороны клиента. Подпись
+    # берём со скоупом по владельцу, иначе чужой телефон уходил на экран.
+    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
+    if label is None:
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
         )
-    except Exception:
-        log_exc_swallow(log, "confirm_del_contacts fetchrow failed")
-        acc = None
-    label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
+        return
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -334,14 +334,12 @@ async def cb_do_leave_all(
     kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
     kb.adjust(1)
 
-    try:
-        acc = await pool.fetchrow(
-            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
+    if label is None:
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
         )
-    except Exception:
-        log_exc_swallow(log, "do_leave_all fetchrow failed")
-        acc = None
-    label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
+        return
 
     await callback.message.edit_text(
         f"⚠️ <b>Подтвердите действие</b>\n\n"

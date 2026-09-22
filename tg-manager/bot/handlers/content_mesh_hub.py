@@ -34,16 +34,14 @@ async def _get_mesh(pool: asyncpg.Pool, mesh_id: int, owner_id: int):
     )
 
 
-async def _get_account_name(pool: asyncpg.Pool, account_id: int | None) -> str:
+async def _get_account_name(pool: asyncpg.Pool, account_id: int | None, owner_id: int) -> str:
+    """Подпись аккаунта — только своего: чужой телефон на экран не выносим."""
     if not account_id:
         return "не задан"
-    row = await pool.fetchrow(
-        "SELECT phone, username, first_name FROM tg_accounts WHERE id=$1",
-        account_id,
-    )
-    if not row:
-        return f"id{account_id}"
-    return html.escape(row["username"] or row["first_name"] or row["phone"] or f"id{account_id}")
+    from database import db as _db
+
+    label = await _db.get_account_label(pool, account_id, owner_id)
+    return html.escape(label or f"id{account_id}")
 
 
 # ── menu ──────────────────────────────────────────────────────────────────────
@@ -141,7 +139,7 @@ async def msg_mesh_name(
 async def _show_mesh(msg_or_cb, pool: asyncpg.Pool, mesh, owner_id: int, edit: bool = True) -> None:
     mesh_id = mesh["id"]
     targets = await pool.fetch("SELECT * FROM mesh_targets WHERE mesh_id=$1 ORDER BY id", mesh_id)
-    acc_name = await _get_account_name(pool, mesh["source_account_id"])
+    acc_name = await _get_account_name(pool, mesh["source_account_id"], owner_id)
 
     stats = await pool.fetchrow(
         """
@@ -414,16 +412,19 @@ async def cb_mesh_del_target(
     except (ValueError, TypeError):
         await callback.answer("Ошибка.", show_alert=True)
         return
+    # Проверка владения — ДО удаления. Раньше она стояла ниже, после DELETE:
+    # mesh_id приходит из callback_data, и подставив чужой, можно было удалить
+    # цель из чужой сети, а уже потом увидеть «Mesh не найдена».
+    mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
+    if not mesh:
+        await callback.answer("Mesh не найдена.", show_alert=True)
+        return
     await pool.execute(
         "DELETE FROM mesh_targets WHERE id=$1 AND mesh_id=$2",
         target_id, callback_data.mesh_id,
     )
     await callback.answer("🗑 Цель удалена")
     # Redirect back to targets list
-    mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
-    if not mesh:
-        await callback.message.edit_text("Mesh не найдена.", reply_markup=_back_to_menu())
-        return
     targets = await pool.fetch(
         "SELECT * FROM mesh_targets WHERE mesh_id=$1 ORDER BY id", callback_data.mesh_id
     )

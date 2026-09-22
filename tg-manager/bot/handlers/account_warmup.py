@@ -21,6 +21,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from database import db
 from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
 from bot.states import WarmupSessionFSM, ResourceActivityFSM
 from bot.utils.event_status import mark_handled_error
@@ -185,14 +186,12 @@ async def cb_warmup_select_plan(
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="create_list"))
     kb.adjust(1)
 
-    try:
-        acc = await pool.fetchrow(
-            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
-        )
-    except Exception:
-        log_exc_swallow(log, "fetch account for plan selection")
-        acc = None
-    label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
+    # acc_id из callback_data — сторона клиента. Подпись со скоупом, иначе
+    # чужой телефон показывался на экране выбора режима.
+    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
+    if label is None:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
 
     await callback.message.edit_text(
         f"🌡 <b>Разогрев: {html.escape(label)}</b>\n\nВыберите режим разогрева:",
@@ -334,14 +333,10 @@ async def cb_warmup_start(
     plans = await get_active_plans(pool, callback.from_user.id)
     plan = next((p for p in plans if p["id"] == plan_id), None)
 
-    try:
-        acc = await pool.fetchrow(
-            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
-        )
-    except Exception:
-        log_exc_swallow(log, "fetch account for warmup start")
-        acc = None
-    label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
+    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
+    if label is None:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
 
     run_status = ""
     if plan:
@@ -468,14 +463,10 @@ async def cb_warmup_pick_profile(
         )
         return
 
-    try:
-        acc = await pool.fetchrow(
-            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
-        )
-    except Exception:
-        log_exc_swallow(log, "fetch account for create_plan")
-        acc = None
-    label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
+    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
+    if label is None:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
 
     await callback.message.edit_text(
         f"✅ <b>План разогрева создан!</b>\n\n"
@@ -758,16 +749,12 @@ async def cb_warmup_plan_log(
     plan_id = callback_data.plan_id
 
     # Get account name
-    try:
-        acc_row = await pool.fetchrow(
-            "SELECT first_name, phone FROM tg_accounts WHERE id=$1", acc_id
-        )
-    except Exception:
-        log_exc_swallow(log, "fetch account for plan log")
-        acc_row = None
-    label = ""
-    if acc_row:
-        label = acc_row.get("first_name") or acc_row.get("phone") or f"id{acc_id}"
+    # Со скоупом по владельцу: иначе по чужому acc_id открывался и телефон,
+    # и весь журнал разогрева чужого аккаунта.
+    label = await db.get_account_label(pool, acc_id, callback.from_user.id)
+    if label is None:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
 
     # Get plan info
     try:

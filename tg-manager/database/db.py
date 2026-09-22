@@ -3624,6 +3624,29 @@ async def add_tg_account(
     return acc_id
 
 
+async def get_account_label(
+    pool: asyncpg.Pool, acc_id: int, owner_id: int
+) -> str | None:
+    """Подпись аккаунта для экранов бота. None — аккаунт не этого владельца.
+
+    Экраны подтверждения и деталей показывали имя и ТЕЛЕФОН аккаунта, найдя
+    его запросом `WHERE id=$1` без владельца. id приходит в callback_data, то
+    есть целиком со стороны клиента, а у каждого пользователя этого продукта
+    есть свой MTProto-клиент: подставив чужой номер, посторонний читал чужой
+    телефон прямо с экрана. Само действие дальше отбивалось проверкой
+    владельца — утекали именно личные данные.
+
+    Одна функция на все такие экраны: их много, и каждый писал запрос сам.
+    """
+    row = await pool.fetchrow(
+        "SELECT first_name, phone FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        int(acc_id), int(owner_id),
+    )
+    if not row:
+        return None
+    return row["first_name"] or row["phone"] or f"id{int(acc_id)}"
+
+
 async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> bool:
     # managed_channels.acc_id не имеет FK ON DELETE CASCADE — чистим вручную в
     # одной транзакции, иначе каналы удалённого аккаунта остаются «фантомами»

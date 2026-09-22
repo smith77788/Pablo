@@ -813,8 +813,8 @@ async def _process_ai_turn(
         acc_info = ""
         if action_data.get("acc_id"):
             acc_row = await pool.fetchrow(
-                "SELECT phone, first_name FROM tg_accounts WHERE id=$1",
-                action_data["acc_id"],
+                "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                action_data["acc_id"], message.from_user.id,
             )
             if acc_row:
                 acc_name = acc_row["first_name"] or acc_row["phone"]

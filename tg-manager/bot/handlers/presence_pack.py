@@ -236,8 +236,12 @@ async def cb_pack_pick_bot(
     bot_username = None
     if bot_id:
         try:
+            # bot_id из callback_data: со скоупом по владельцу, иначе по
+            # чужому id читался чужой username (в соседних местах файла скоуп
+            # уже есть — разошлись).
             bot_row = await pool.fetchrow(
-                "SELECT username FROM managed_bots WHERE bot_id=$1", bot_id
+                "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, callback.from_user.id,
             )
         except Exception:
             log_exc_swallow(log, "pool.fetchrow managed_bots pick_bot")

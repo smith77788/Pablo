@@ -1558,7 +1558,8 @@ async def cb_join_pick_account(
     if len(active) == 1:
         try:
             acc = await pool.fetchrow(
-                "SELECT id, session_str FROM tg_accounts WHERE id=$1", active[0]["id"]
+                "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                active[0]["id"], callback.from_user.id,
             )
         except Exception:
             log_exc_swallow(log, "cb_join_start: fetch single account session")
@@ -5456,7 +5457,8 @@ async def cb_my_chans(
     if len(active) == 1:
         try:
             acc = await pool.fetchrow(
-                "SELECT * FROM tg_accounts WHERE id=$1", active[0]["id"]
+                "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                active[0]["id"], callback.from_user.id,
             )
         except Exception:
             log_exc_swallow(log, "cb_my_chans: fetch single account")

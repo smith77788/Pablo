@@ -180,7 +180,12 @@ async def cb_detail(callback: CallbackQuery, callback_data: StarsCb, pool: async
     await safe_answer(callback)
     exp_id = callback_data.experiment_id
 
-    row = await pool.fetchrow("SELECT * FROM stars_experiments WHERE id = $1", exp_id)
+    # exp_id из callback_data — сторона клиента. Без owner_id экран отдавал
+    # чужой эксперимент целиком, вместе с выручкой в Stars.
+    row = await pool.fetchrow(
+        "SELECT * FROM stars_experiments WHERE id = $1 AND owner_id = $2",
+        exp_id, callback.from_user.id,
+    )
     if not row:
         await callback.answer("Эксперимент не найден", show_alert=True)
         return

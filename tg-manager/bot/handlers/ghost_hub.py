@@ -47,15 +47,13 @@ async def _get_profile(pool: asyncpg.Pool, profile_id: int, owner_id: int):
     )
 
 
-async def _get_account_name(pool: asyncpg.Pool, account_id: int) -> str:
-    row = await pool.fetchrow(
-        "SELECT phone, username, first_name FROM tg_accounts WHERE id = $1",
-        account_id,
-    )
-    if not row:
-        return f"id{account_id}"
+async def _get_account_name(pool: asyncpg.Pool, account_id: int, owner_id: int) -> str:
+    """Подпись аккаунта — только своего: чужой телефон на экран не выносим."""
+    from database import db as _db
+
+    label = await _db.get_account_label(pool, account_id, owner_id)
     return html.escape(
-        row["username"] or row["first_name"] or row["phone"] or f"id{account_id}"
+        label or f"id{account_id}"
     )
 
 
@@ -206,7 +204,7 @@ async def _show_profile(
     message, pool: asyncpg.Pool, profile, owner_id: int, edit: bool = True
 ) -> None:
     profile_id = profile["id"]
-    acc_name = await _get_account_name(pool, profile["account_id"])
+    acc_name = await _get_account_name(pool, profile["account_id"], owner_id)
 
     p_label, p_desc = _PERSONALITY.get(profile["personality"], ("?", ""))
     status = "🟢 Активен" if profile["enabled"] else "🔴 Выключен"
@@ -507,7 +505,7 @@ async def cb_ghost_logs(
             lines.append(f"<code>{t}</code> {ico} {lbl}{tgt}{err}")
         text = "👻 <b>Ghost Engine — Последние 20 действий</b>\n\n" + "\n".join(lines)
 
-    acc_name = await _get_account_name(pool, profile["account_id"])
+    acc_name = await _get_account_name(pool, profile["account_id"], callback.from_user.id)
     text = text.replace("Ghost Engine —", f"Ghost Engine — {acc_name} —", 1)
 
     kb = InlineKeyboardBuilder()
@@ -527,7 +525,7 @@ async def cb_ghost_del(
     if not profile:
         await callback.answer("Профиль не найден.", show_alert=True)
         return
-    acc_name = await _get_account_name(pool, profile["account_id"])
+    acc_name = await _get_account_name(pool, profile["account_id"], callback.from_user.id)
     kb = InlineKeyboardBuilder()
     kb.button(text="🗑 Да, удалить", callback_data=GhostCb(action="del_confirm", profile_id=callback_data.profile_id))
     kb.button(text="◀️ Отмена", callback_data=GhostCb(action="view", profile_id=callback_data.profile_id))

@@ -585,8 +585,11 @@ async def cb_mp_timing(
     filter_label = _FILTER_LABELS.get(filter_type, filter_type)
     if filter_type == "account" and mp_acc_id:
         try:
+            # Скоуп по владельцу: id аккаунта пришёл из состояния диалога,
+            # но подпись всё равно не должна уметь показать чужой телефон.
             acc_row = await pool.fetchrow(
-                "SELECT first_name, phone FROM tg_accounts WHERE id=$1", mp_acc_id
+                "SELECT first_name, phone FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                mp_acc_id, callback.from_user.id,
             )
         except Exception as e:
             log.warning('handler error in cb_mp_timing: %s', e)

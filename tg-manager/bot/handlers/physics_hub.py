@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from database import db
 from bot.callbacks import BmCb, PhysicsCb
 from services import physics_engine
 from bot.utils.op_helpers import safe_answer
@@ -158,22 +159,14 @@ async def cb_physics_detail(
     await safe_answer(callback)
     account_id = callback_data.account_id
 
-    try:
-        acc = await pool.fetchrow(
-            "SELECT id, phone, username, first_name FROM tg_accounts WHERE id=$1",
-            account_id,
-        )
-    except Exception:
-        acc = None
+    # account_id приходит из callback_data — сторона клиента. Без скоупа по
+    # владельцу экран показывал телефон и телеметрию ЧУЖОГО аккаунта.
+    name = await db.get_account_label(pool, account_id, callback.from_user.id)
+    if name is None:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
 
     risk = await physics_engine.get_account_risk(pool, account_id)
-
-    name = "Неизвестный аккаунт"
-    if acc:
-        name = (
-            f"@{acc['username']}" if acc.get("username")
-            else (acc.get("first_name") or acc.get("phone") or f"id{acc['id']}")
-        )
 
     score    = risk["risk_score"]
     ban_prob = risk["ban_probability"]

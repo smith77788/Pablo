@@ -468,6 +468,13 @@ async def cb_af_del_step(
     except (ValueError, TypeError):
         await callback.answer("Ошибка.", show_alert=True)
         return
+    # Проверка владения — ДО удаления. Раньше она стояла ниже, после DELETE:
+    # funnel_id приходит из callback_data, и подставив чужой, можно было
+    # удалить шаг из чужой воронки, а уже потом увидеть «Воронка не найдена».
+    funnel = await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id)
+    if not funnel:
+        await callback.answer("Воронка не найдена.", show_alert=True)
+        return
     await pool.execute(
         "DELETE FROM auto_funnel_steps WHERE id=$1 AND funnel_id=$2",
         step_id, callback_data.funnel_id,
@@ -480,10 +487,6 @@ async def cb_af_del_step(
         await pool.execute("UPDATE auto_funnel_steps SET step_num=$1 WHERE id=$2", i, st["id"])
     await callback.answer("🗑 Шаг удалён")
     # Show updated steps list
-    funnel = await _get_funnel(pool, callback_data.funnel_id, callback.from_user.id)
-    if not funnel:
-        await callback.message.edit_text("Воронка не найдена.", reply_markup=_back_to_menu())
-        return
     steps = await pool.fetch(
         "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", callback_data.funnel_id
     )
