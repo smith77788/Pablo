@@ -188,7 +188,8 @@ async def cb_ws_invite(
     await callback.message.edit_text(
         f"🔗 <b>Ссылка-приглашение создана</b>\n\n"
         f"Код: <code>{code}</code>\n\n"
-        f"До 5 пользователей могут войти по этому коду через меню Workspaces → Войти по коду.",
+        f"До 5 пользователей могут войти по этому коду через меню Workspaces → Войти по коду.\n"
+        f"Код действует {db.WORKSPACE_INVITE_TTL_DAYS} дней, потом перестаёт работать.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

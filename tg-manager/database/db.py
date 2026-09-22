@@ -5689,6 +5689,10 @@ async def get_user_workspaces(pool: asyncpg.Pool, user_id: int) -> list:
 # владелец и админ; участник и наблюдатель — только смотреть.
 WORKSPACE_ROLES = ("owner", "admin", "member", "viewer")
 WORKSPACE_INVITE_ROLES = ("owner", "admin")
+# Сколько живёт код-приглашение в workspace. Вход в workspace даёт доступ к
+# ботам и каналам его владельца, поэтому код — секрет с ограниченным сроком,
+# а не постоянный ключ.
+WORKSPACE_INVITE_TTL_DAYS = 7
 
 
 async def get_workspace_role(
@@ -5776,7 +5780,8 @@ async def create_workspace_invite(
 
     code = _sec.token_urlsafe(12)
     await pool.execute(
-        "INSERT INTO workspace_invites (workspace_id, invite_code, created_by, uses_left) VALUES ($1,$2,$3,5)",
+        "INSERT INTO workspace_invites (workspace_id, invite_code, created_by, uses_left, expires_at) "
+        f"VALUES ($1,$2,$3,5, now() + INTERVAL '{WORKSPACE_INVITE_TTL_DAYS} days')",
         ws_id,
         code,
         created_by,
@@ -5791,7 +5796,17 @@ async def use_workspace_invite(
     async with pool.acquire() as conn:
         async with conn.transaction():
             invite = await conn.fetchrow(
-                "SELECT * FROM workspace_invites WHERE invite_code=$1 AND uses_left>0 FOR UPDATE",
+                # Срок жизни обязателен. Колонка expires_at была, но её никто не
+                # заполнял и никто не проверял: код на пять входов работал
+                # вечно. А вход в workspace — это доступ к ботам владельца
+                # (get_bot отдаёт их с РАСШИФРОВАННЫМ токеном) и к его каналам,
+                # так что утёкший полгода назад код оставался рабочим ключом.
+                # У старых строк expires_at пуст — считаем их живущими те же
+                # дни от создания, а не вечно.
+                "SELECT * FROM workspace_invites "
+                " WHERE invite_code=$1 AND uses_left>0 "
+                f"   AND now() < COALESCE(expires_at, created_at + INTERVAL '{WORKSPACE_INVITE_TTL_DAYS} days') "
+                " FOR UPDATE",
                 code,
             )
             if not invite:
