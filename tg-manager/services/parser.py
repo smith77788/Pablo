@@ -111,6 +111,63 @@ def audience_to_json(users: list[dict]) -> str:
     return _json.dumps(list(users), ensure_ascii=False, default=str, indent=2)
 
 
+# Сколько ждём флуд на месте. Дольше — обрываем разбор и честно говорим об
+# этом: продолжать раньше срока значит получить следующий FloodWait длиннее
+# предыдущего и подвести аккаунт под спамблок.
+_FLOOD_INLINE_MAX_S = 120
+
+
+def flood_seconds(exc: BaseException) -> int | None:
+    """Сколько Telegram просит подождать, или None если это не флуд.
+
+    Сначала спрашиваем сам объект ошибки: у Telethon это `FloodWaitError.seconds`.
+    Разбор текста — запасной путь, и по НАСТОЯЩЕМУ тексту Telethon: «A wait of
+    300 seconds is required». Прежний разбор делил строку по «wait » и брал
+    следующее слово, а это «of» — int() падал всегда, и вместо настоящей паузы
+    подставлялось 30 секунд. То есть на просьбу подождать пять минут разбор
+    возвращался через полминуты, каждый раз.
+    """
+    secs = getattr(exc, "seconds", None)
+    if secs is not None:
+        try:
+            return max(0, int(secs))
+        except (TypeError, ValueError):
+            pass
+    import re as _re
+
+    text = str(exc)
+    # Канонический текст Telethon. В нём нет слова «flood», поэтому проверка
+    # «есть ли flood в тексте» его не узнаёт — а это и есть тот самый текст,
+    # который приходит чаще всего.
+    m = _re.search(r"a wait of\s+(\d+)\s*second", text, _re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    if "flood" not in text.lower() and "flood" not in type(exc).__name__.lower():
+        return None
+    m = _re.search(r"(\d+)\s*second", text)
+    if m:
+        return int(m.group(1))
+    m = _re.search(r"(\d+)", text)
+    return int(m.group(1)) if m else None
+
+
+async def _record_parse_flood(pool, account_id, seconds: int) -> None:
+    """Флуд обязан попасть в общий пульс здоровья аккаунта.
+
+    По нему остальные подсистемы понижают темп и держат аккаунт в покое.
+    Раньше разбор переживал флуд в одиночку, и для продукта аккаунт оставался
+    «спокойным» — следующая операция шла к нему как ни в чём не бывало.
+    """
+    if not account_id:
+        return
+    try:
+        from services import flood_engine as _fe
+
+        await _fe.record_flood(pool, int(account_id), int(seconds), "parse")
+    except Exception:
+        log_exc_swallow(log, "parser: FloodWait не записан в пульс здоровья")
+
+
 async def _get_best_account(pool: asyncpg.Pool, owner_id: int) -> dict | None:
     from services.flood_engine import get_best_account
 
@@ -245,6 +302,7 @@ async def parse_members(
     t0_parse = time.monotonic()
     total_found = 0
     total_saved = 0
+    flood_wait = 0
     source_id = 0
     source_title = source_ref
     source_username = source_ref.lstrip("@")
@@ -327,16 +385,16 @@ async def parse_members(
                 await asyncio.sleep(1.5)  # Anti-flood pause
 
             except Exception as e:
-                err = str(e)
-                if "FloodWait" in err:
-                    wait = 30
-                    try:
-                        wait = int(err.split("wait ")[1].split(" ")[0])
-                    except Exception:
-                        log_exc_swallow(log, "Не удалось распарсить FloodWait в parser")
-                        wait = 30
-                    log.info("parser FloodWait %ds, sleeping", wait)
-                    await asyncio.sleep(min(wait + 5, 120))
+                _fw = flood_seconds(e)
+                if _fw is not None:
+                    await _record_parse_flood(pool, acc["id"], _fw)
+                    if _fw > _FLOOD_INLINE_MAX_S:
+                        log.info(
+                            "parser: FloodWait %dс дольше порога — разбор оборван", _fw)
+                        flood_wait = _fw
+                        break
+                    log.info("parser FloodWait %ds, sleeping", _fw)
+                    await asyncio.sleep(_fw + 5)
                     continue
                 log.warning("parser GetParticipants error: %s", e)
                 break
@@ -348,7 +406,16 @@ async def parse_members(
             log_exc_swallow(log, "Сбой disconnect клиента в parser")
 
     status = "done" if total_found > 0 else "empty"
-    await _update_run(pool, run_id, status, total_found, total_saved)
+    # Оборванный флудом разбор — НЕ полный результат. Раньше он выглядел как
+    # обычное завершение, и владелец считал, что в источнике ровно столько
+    # людей, сколько успели собрать.
+    _flood_note = (
+        f"Разбор остановлен: Telegram просит подождать {flood_wait} с. "
+        f"Собрано {total_found} — это не вся аудитория, повторите позже."
+        if flood_wait else None
+    )
+    await _update_run(pool, run_id, status, total_found, total_saved,
+                      error=_flood_note)
     _parse_dur = time.monotonic() - t0_parse
     if total_found > 0:
         infra_memory.record_account_op(acc["id"], "parse", True, duration_s=_parse_dur)
@@ -362,6 +429,8 @@ async def parse_members(
         "total_found": total_found,
         "total_saved": total_saved,
         "source_title": source_title,
+        "flood_wait": flood_wait,
+        "partial": bool(flood_wait),
     }
 
 
@@ -380,18 +449,26 @@ async def _collect_and_save_senders(
     limit: int,
     scan_cap: int = 5000,
     progress_cb: Optional[Callable[[int, int], Any]] = None,
-) -> tuple[int, int]:
+    account_id: int | None = None,
+) -> tuple[int, int, int]:
     """Итерирует сообщения ``entity`` и сохраняет уникальных отправителей.
 
     Общая логика для парсинга активных участников группы и комментаторов
     (сообщения в привязанной к каналу группе обсуждений). Возвращает
-    (total_found, total_saved).
+    (total_found, total_saved, flood_wait).
+
+    `flood_wait` — сколько Telegram попросил подождать, если разбор пришлось
+    оборвать. Раньше `get_entity` на каждого отправителя стоял под голым
+    `except Exception`, то есть FloodWait просто проглатывался: цикл шёл
+    дальше и продолжал долбить Telegram под действующим ограничением. Так
+    аккаунт и зарабатывает спамблок вместо паузы.
     """
     from datetime import datetime, timedelta, timezone
 
     seen_ids: set[int] = set()
     total_found = 0
     total_saved = 0
+    flood_wait = 0
     cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
 
     async for msg in client.iter_messages(entity, limit=scan_cap):
@@ -404,7 +481,18 @@ async def _collect_and_save_senders(
         user = None
         try:
             user = await client.get_entity(msg.sender_id)
-        except Exception:
+        except Exception as exc:
+            _fw = flood_seconds(exc)
+            if _fw is not None:
+                await _record_parse_flood(pool, account_id, _fw)
+                if _fw > _FLOOD_INLINE_MAX_S:
+                    log.info(
+                        "parser: FloodWait %dс дольше порога — сбор оборван", _fw)
+                    flood_wait = _fw
+                    break
+                log.info("parser: FloodWait %dс при сборе отправителей", _fw)
+                await asyncio.sleep(_fw + 5)
+                continue
             log_exc_swallow(log, "Сбой get_entity в parser", sender_id=msg.sender_id)
 
         if user:
@@ -445,7 +533,7 @@ async def _collect_and_save_senders(
                     log_exc_swallow(log, "Сбой progress_cb в parser")
             await asyncio.sleep(0.5)
 
-    return total_found, total_saved
+    return total_found, total_saved, flood_wait
 
 
 async def parse_active_users(
@@ -492,7 +580,7 @@ async def parse_active_users(
             )
             return {"status": "error", "error": str(e), "run_id": run_id}
 
-        total_found, total_saved = await _collect_and_save_senders(
+        total_found, total_saved, flood_wait = await _collect_and_save_senders(
             pool,
             owner_id,
             run_id,
@@ -505,6 +593,7 @@ async def parse_active_users(
             days_back=days_back,
             limit=limit,
             progress_cb=progress_cb,
+            account_id=acc["id"],
         )
 
     finally:
@@ -514,7 +603,16 @@ async def parse_active_users(
             log_exc_swallow(log, "Сбой disconnect клиента в parser")
 
     status = "done" if total_found > 0 else "empty"
-    await _update_run(pool, run_id, status, total_found, total_saved)
+    # Оборванный флудом разбор — НЕ полный результат. Раньше он выглядел как
+    # обычное завершение, и владелец считал, что в источнике ровно столько
+    # людей, сколько успели собрать.
+    _flood_note = (
+        f"Разбор остановлен: Telegram просит подождать {flood_wait} с. "
+        f"Собрано {total_found} — это не вся аудитория, повторите позже."
+        if flood_wait else None
+    )
+    await _update_run(pool, run_id, status, total_found, total_saved,
+                      error=_flood_note)
     _parse_dur = time.monotonic() - t0_parse
     if total_found > 0:
         infra_memory.record_account_op(acc["id"], "parse", True, duration_s=_parse_dur)
@@ -528,6 +626,8 @@ async def parse_active_users(
         "total_found": total_found,
         "total_saved": total_saved,
         "source_title": source_title,
+        "flood_wait": flood_wait,
+        "partial": bool(flood_wait),
     }
 
 
@@ -596,7 +696,7 @@ async def parse_commenters(
         # но заголовок/username оставляем исходного канала для узнаваемости.
         source_id = getattr(target, "id", 0) or 0
 
-        total_found, total_saved = await _collect_and_save_senders(
+        total_found, total_saved, flood_wait = await _collect_and_save_senders(
             pool,
             owner_id,
             run_id,
@@ -609,6 +709,7 @@ async def parse_commenters(
             days_back=days_back,
             limit=limit,
             progress_cb=progress_cb,
+            account_id=acc["id"],
         )
 
     finally:
@@ -618,7 +719,16 @@ async def parse_commenters(
             log_exc_swallow(log, "Сбой disconnect клиента в parser")
 
     status = "done" if total_found > 0 else "empty"
-    await _update_run(pool, run_id, status, total_found, total_saved)
+    # Оборванный флудом разбор — НЕ полный результат. Раньше он выглядел как
+    # обычное завершение, и владелец считал, что в источнике ровно столько
+    # людей, сколько успели собрать.
+    _flood_note = (
+        f"Разбор остановлен: Telegram просит подождать {flood_wait} с. "
+        f"Собрано {total_found} — это не вся аудитория, повторите позже."
+        if flood_wait else None
+    )
+    await _update_run(pool, run_id, status, total_found, total_saved,
+                      error=_flood_note)
     _parse_dur = time.monotonic() - t0_parse
     if total_found > 0:
         infra_memory.record_account_op(acc["id"], "parse", True, duration_s=_parse_dur)
@@ -632,6 +742,8 @@ async def parse_commenters(
         "total_found": total_found,
         "total_saved": total_saved,
         "source_title": source_title,
+        "flood_wait": flood_wait,
+        "partial": bool(flood_wait),
     }
 
 
