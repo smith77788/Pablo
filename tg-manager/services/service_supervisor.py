@@ -67,6 +67,14 @@ async def supervise(
 
     Отмена (CancelledError) пробрасывается: остановка процесса — не сбой.
     """
+    # Имя на самой задаче: без него в логе видно только «Task-37», и сообщение
+    # об упавшей фоновой задаче не говорит, КАКОЙ сервис отвалился.
+    try:
+        _task = asyncio.current_task()
+        if _task is not None:
+            _task.set_name(f"svc:{name}")
+    except Exception:
+        pass
     if start_delay > 0:
         await asyncio.sleep(start_delay)
     while True:

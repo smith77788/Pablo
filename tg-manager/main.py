@@ -178,6 +178,50 @@ configure_root_logger(
 )
 log = get_logger(__name__)
 
+
+# ── Фоновые задачи: держим на них ссылки ─────────────────────────────────────
+# Event loop держит задачу только СЛАБОЙ ссылкой (это прямо оговорено в
+# документации asyncio.create_task). Задача, на которую больше никто не
+# ссылается, может быть собрана сборщиком мусора ПОСРЕДИ работы — снаружи это
+# выглядит как «сервис молча перестал работать», причём без единой строчки в
+# логе. Здесь так запускались все ~59 фоновых циклов и, что хуже всего,
+# одноразовое возобновление прерванных рассылок: его потеря означает, что
+# рассылка, оборванная деплоем, не догонится никогда.
+#
+# Тот же приём уже применён в op_worker для задач операций (_active_op_tasks) —
+# там это записано как «тихая смерть на самом критичном пути».
+#
+# Второе назначение множества — видимость. Фоновая задача, упавшая с
+# исключением, до сих пор не оставляла следа: create_task без обработчика
+# прячет ошибку до сборки мусора, и максимум, что получал владелец, —
+# «Task exception was never retrieved» в неизвестный момент.
+_BG_TASKS: set[asyncio.Task] = set()
+
+
+def _on_bg_task_done(task: "asyncio.Task") -> None:
+    """Снять ссылку и ГРОМКО сообщить, если задача упала или тихо вышла."""
+    _BG_TASKS.discard(task)
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except Exception:
+        return
+    name = task.get_name()
+    if exc is not None:
+        log.error("Фоновая задача %s упала: %s", name, exc, exc_info=exc)
+    else:
+        log.info("Фоновая задача %s завершилась", name)
+
+
+def _spawn(coro, name: str | None = None) -> "asyncio.Task":
+    """Запустить фоновую задачу и УДЕРЖАТЬ на неё ссылку (см. выше)."""
+    task = asyncio.create_task(coro, name=name)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_on_bg_task_done)
+    return task
+
+
 # ── Роль процесса (находка аудита №2) ────────────────────────────────────────
 # Один образ — разные процессы. По умолчанию «all»: ровно текущее поведение,
 # чтобы включение ролей было ОСОЗНАННЫМ шагом, а не сюрпризом при деплое.
@@ -555,7 +599,7 @@ async def main() -> None:
             await asyncio.wait_for(_run(), timeout=20)
         except Exception:
             log.warning("DB-DIAG: диагностика не отработала (таймаут/ошибка)", exc_info=True)
-    asyncio.create_task(_db_diag())
+    _spawn(_db_diag(), name="db_diag")
     fsm_storage = await PostgresFSMStorage.create(pool)
     dp = build_dispatcher(fsm_storage)
 
@@ -904,7 +948,7 @@ async def main() -> None:
         log.warning("startup: failed to finalize stale parser_runs", exc_info=True)
 
     # Send deployment notification to admins on startup (detects new deploys)
-    asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
+    _spawn(deploy_notifier.notify_deploy(pool, bot), name="deploy_notifier")
 
     # Register bot commands (shows in Telegram "/" menu)
     #
@@ -1023,11 +1067,11 @@ async def main() -> None:
         # Если задан WEBHOOK_URL — передаём dp чтобы Telegram webhook работал на том же порту.
         # Это предотвращает конфликт двух серверов на одном PORT.
         if _webhook_url:
-            asyncio.create_task(_web_resilient(
+            _spawn(_web_resilient(
                 "payment_webhook", payment_webhook.run, pool, bot, dp, _webhook_path, http
             ))
         else:
-            asyncio.create_task(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
+            _spawn(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
 
         # Карта транспорта аккаунтов (релей/прокси) — через _web_resilient, то
         # есть ВО ВСЕХ ролях. Под ROLE=web фоновые циклы не запускаются вовсе, а
@@ -1036,78 +1080,78 @@ async def main() -> None:
         # тогда как операции идут через релей. Два адреса на одну сессию — это
         # AUTH_KEY_DUPLICATED, то есть мёртвый аккаунт.
         from services.account_manager import run_transport_refresh_loop
-        asyncio.create_task(
+        _spawn(
             _web_resilient("account_transport_map", run_transport_refresh_loop, pool))
 
         # Страж «одной реплики» (ось №3): лимиты флуда живут в памяти процесса, и
         # вторая реплика молча разгоняет темп по флоту → риск бана. Guard бьёт
         # хартбит и громко предупреждает, если реплик больше одной. Во всех ролях.
         from services import replica_guard as _rguard
-        asyncio.create_task(_web_resilient(
+        _spawn(_web_resilient(
             "replica_guard", _rguard.run_heartbeat_loop, pool, op_worker._WORKER_ID, _ROLE))
 
-        asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
-        asyncio.create_task(
+        _spawn(_resilient("scheduler", scheduler.run, pool, http))
+        _spawn(
             _resilient("auto_responder", auto_responder.run, pool, http, bot)
         )
-        asyncio.create_task(_resilient("relay", relay_service.run, pool, http))
-        asyncio.create_task(_resilient("funnel_runner", funnel_runner.run, pool, http))
-        asyncio.create_task(_resilient("keyword_watcher", keyword_watcher.run, pool, bot))
+        _spawn(_resilient("relay", relay_service.run, pool, http))
+        _spawn(_resilient("funnel_runner", funnel_runner.run, pool, http))
+        _spawn(_resilient("keyword_watcher", keyword_watcher.run, pool, bot))
         # Сметатель капчи «Модератора чатов»: кикает новичков, не прошедших
         # проверку «Я не бот» к дедлайну.
-        asyncio.create_task(_resilient("chat_guard_runner", chat_guard_runner.run, pool, bot))
+        _spawn(_resilient("chat_guard_runner", chat_guard_runner.run, pool, bot))
         # Сторож «Хранилища»: замечает, что бизнес-подключение тихо отвалилось,
         # и один раз предупреждает владельца в ЛС (иначе узнаёт, только зайдя в архив).
         from services import vault_watchdog
-        asyncio.create_task(_resilient("vault_watchdog", vault_watchdog.run, pool, bot))
+        _spawn(_resilient("vault_watchdog", vault_watchdog.run, pool, bot))
         # Сторож прокси: фоновой проверки не было вовсе — is_alive обновлялся
         # только вручную, и молча умерший прокси продолжал раздавать аккаунтам
         # сетевые ошибки. Снаружи это выглядит как «сломались аккаунты».
         from services import proxy_watchdog
-        asyncio.create_task(_resilient("proxy_watchdog", proxy_watchdog.run, pool, bot))
+        _spawn(_resilient("proxy_watchdog", proxy_watchdog.run, pool, bot))
         # «Нотариус»: панель наблюдателей ведёт хронологию купленных размещений.
         # Наблюдение пассивное (чтение одного поста), поэтому флот от него не
         # изнашивается — цикл может работать постоянно.
         from services import notary_observer
-        asyncio.create_task(_resilient("notary_observer", notary_observer.run, pool, bot))
+        _spawn(_resilient("notary_observer", notary_observer.run, pool, bot))
         # Пульс организма: сердцебиение — смотрит на мир владельца и проактивно
         # подсказывает срочное в ЛС (с кулдауном). Система «живёт» между сессиями.
         from services.organism import runner as organism_runner
-        asyncio.create_task(_resilient("organism_runner", organism_runner.run, pool, bot))
-        asyncio.create_task(
+        _spawn(_resilient("organism_runner", organism_runner.run, pool, bot))
+        _spawn(
             _resilient("payment_checker", payment_checker.run, pool, http, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("ranking_checker", ranking_checker.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient(
                 "search_observer", search_observer.run_confirmation_loop, pool, bot
             )
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("account_monitor", account_monitor.run, pool, bot)
         )
-        asyncio.create_task(_resilient("trust_engine", trust_engine.run, pool, bot))
-        asyncio.create_task(
+        _spawn(_resilient("trust_engine", trust_engine.run, pool, bot))
+        _spawn(
             _resilient("shadowban_monitor", shadowban_monitor.run, pool, bot)
         )
-        asyncio.create_task(_resilient("op_worker", op_worker.run, pool, bot))
-        asyncio.create_task(
+        _spawn(_resilient("op_worker", op_worker.run, pool, bot))
+        _spawn(
             _resilient("behavioral_engine", behavioral_engine.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             # bot нужен циклу, чтобы сообщать о планах, которые он останавливает
             # сам (бан/спам-блок/длинный flood) — раньше это было немым.
             _resilient("account_warmer", account_warmer.run_warmup_loop, pool, 1, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("account_health", account_health.run_health_check_loop, pool)
         )
         # Авто-реабилитация ограниченных аккаунтов: спам-блок → тихий прогрев →
         # перепроверка → возврат в строй (иначе аккаунт замирал навсегда).
         from services import account_rehab
-        asyncio.create_task(
+        _spawn(
             # bot нужен циклу, чтобы сообщать об итоге: вернувшийся аккаунт
             # иначе будет списан, а застрявший — вечно ждать разбора.
             _resilient("account_rehab", account_rehab.run_rehab_loop, pool, bot)
@@ -1116,38 +1160,38 @@ async def main() -> None:
         # эфемерной базы: система сама регулярно снимает дамп и кладёт его ЗА
         # пределы Railway, чтобы потеря тома/проекта не была фатальной.
         from services import db_backup
-        asyncio.create_task(
+        _spawn(
             _resilient("db_backup", db_backup.run_backup_loop, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("activity_engine", activity_engine.run_activity_loop, pool)
         )
         # payment_webhook already started via _web_resilient above (no stagger)
-        asyncio.create_task(_resilient("task_registry", task_registry.run_cleanup_loop))
+        _spawn(_resilient("task_registry", task_registry.run_cleanup_loop))
         # Сессии админки живут в БД (schema_v181); процесс держит лишь кэш —
         # обновляем, чтобы вход в одном процессе был виден остальным.
         from bot.handlers.admin import run_session_admin_refresh
-        asyncio.create_task(_resilient("session_admin_refresh", run_session_admin_refresh, pool))
+        _spawn(_resilient("session_admin_refresh", run_session_admin_refresh, pool))
         # proxy_scraper (бесплатный публичный пул) УДАЛЁН: пул нестабилен и блокировал
         # работу. Транспорт — прокси пользователя или прямой host-IP; CF/IPv6 opt-in.
-        asyncio.create_task(_resilient("activity_logger", activity_logger.run, pool))
-        asyncio.create_task(_resilient("drift_detector", drift_detector.run, pool, bot))
+        _spawn(_resilient("activity_logger", activity_logger.run, pool))
+        _spawn(_resilient("drift_detector", drift_detector.run, pool, bot))
         # Витрина: открывает следующую порцию мест в боевой канал. Без цикла
         # буфер отдал бы только первую волну и замер — люди копятся, а войти
         # некуда.
         from services import showcase_layer as _showcase_layer
-        asyncio.create_task(
+        _spawn(
             _resilient("showcase_waves", _showcase_layer.run, pool, bot))
-        asyncio.create_task(
+        _spawn(
             _resilient("ecosystem_auto_management", ecosystem_brain.run_auto_management, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("infra_memory", infra_memory.run_flush_loop, pool)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("infra_copilot", infra_copilot.run_copilot_loop, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient(
                 "ecosystem_copilot",
                 ecosystem_copilot.run_ecosystem_copilot_loop,
@@ -1155,52 +1199,52 @@ async def main() -> None:
                 bot,
             )
         )
-        asyncio.create_task(_resilient("db_maintenance", db_maintenance.run, pool))
-        asyncio.create_task(
+        _spawn(_resilient("db_maintenance", db_maintenance.run, pool))
+        _spawn(
             _resilient("recovery_engine", recovery_engine.run_recovery_loop, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("anomaly_detector", anomaly_detector.run_anomaly_loop, pool, bot)
         )
         from services import follow_checker as _follow_checker
-        asyncio.create_task(
+        _spawn(
             _resilient("follow_checker", _follow_checker.run_follow_checker, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("promo_scheduler", promo_scheduler.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("ghost_engine", ghost_engine.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("audience_listener", audience_listener.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("chat_warmup", chat_warmup.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("content_mesh", content_mesh.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("auto_funnel", auto_funnel_svc.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("physics_engine", physics_engine.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("graph_engine", graph_engine.run, pool, bot)
         )
-        asyncio.create_task(
+        _spawn(
             _resilient("narrative_engine", narrative_engine.run, pool, bot)
         )
         from services import account_shield as _account_shield
         from services import stars_optimizer as _stars_optimizer
         from services import audience_dna as _audience_dna
-        asyncio.create_task(_resilient("account_shield", _account_shield.run, pool, bot))
-        asyncio.create_task(_resilient("stars_optimizer", _stars_optimizer.run, pool, bot))
-        asyncio.create_task(_resilient("audience_dna", _audience_dna.run, pool, bot))
+        _spawn(_resilient("account_shield", _account_shield.run, pool, bot))
+        _spawn(_resilient("stars_optimizer", _stars_optimizer.run, pool, bot))
+        _spawn(_resilient("audience_dna", _audience_dna.run, pool, bot))
         from services import cf_pool_manager as _cf_pool_manager
-        asyncio.create_task(_resilient("cf_pool_monitor", _cf_pool_manager.run, pool, bot))
+        _spawn(_resilient("cf_pool_monitor", _cf_pool_manager.run, pool, bot))
         # Ban Weather, Фаза 1 (schema_v146). Триггер БД trg_immunity_capture_status
         # пишет КАЖДУЮ смену acc_status в account_status_events с самого развёртывания
         # схемы, но обработчик никогда не запускался: processed_at оставался NULL
@@ -1208,17 +1252,17 @@ async def main() -> None:
         # тестами — ему не хватало ровно этой строки. Fail-soft по устройству:
         # сбой обработки одного события не роняет цикл и не влияет на операции.
         from services import immunity_engine as _immunity_engine
-        asyncio.create_task(_resilient("immunity_engine", _immunity_engine.start, pool))
+        _spawn(_resilient("immunity_engine", _immunity_engine.start, pool))
         # Докатить рассылки, оборванные предыдущим рестартом (status running/pending).
         # broadcaster.run пропускает уже доставленных через delivery log — без дублей.
         from services import broadcaster as _broadcaster
-        asyncio.create_task(_broadcaster.resume_interrupted(pool))
+        _spawn(_broadcaster.resume_interrupted(pool), name="resume_interrupted")
         # Session Health Monitor — проверка сессий каждые 6 часов
         from services.account_manager import run_session_health_monitor
-        asyncio.create_task(_resilient("session_health_monitor", run_session_health_monitor, pool))
+        _spawn(_resilient("session_health_monitor", run_session_health_monitor, pool))
         # Pool Monitor — проверка пула соединений каждые 5 минут
         from database.db import run_pool_monitor
-        asyncio.create_task(_resilient("pool_monitor", run_pool_monitor, pool))
+        _spawn(_resilient("pool_monitor", run_pool_monitor, pool))
         log.info("TG Manager started")
 
         # ── Webhook or long-polling ───────────────────────────────────────────
