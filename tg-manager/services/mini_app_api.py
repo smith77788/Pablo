@@ -13820,6 +13820,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        # Список был жёстко обрезан двумя сотнями без единого признака обрезки:
+        # плитка «Всего» на экране пула считалась по этой же странице, а четыре
+        # выпадашки назначения прокси показывали её как весь парк. У владельца
+        # с 300 прокси триста первый нельзя было ни увидеть, ни назначить.
+        try:
+            limit = min(validate_integer(request.query.get("limit", "200"),
+                                         min_val=1, max_val=1000) or 200, 1000)
+        except (ValueError, TypeError):
+            limit = 200
+        try:
+            offset = max(validate_integer(request.query.get("offset", "0"),
+                                          min_val=0, max_val=100000) or 0, 0)
+        except (ValueError, TypeError):
+            offset = 0
         # is_backup может ещё не примениться (лаг миграции) — тогда селект с колонкой
         # упадёт; фолбэк без неё, чтобы список прокси НИКОГДА не ломался.
         # acc_count — сколько аккаунтов сидит на прокси. Без него мёртвый прокси
@@ -13836,11 +13850,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           latency_avg_ms AS latency_ms,
                           (SELECT COUNT(*) FROM tg_accounts a
                             WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id) AS acc_count
-                   FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
+                   FROM user_proxies WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT $2 OFFSET $3""", uid, limit, offset)
         except Exception:
             rows = await _safe_fetch(pool,
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
-                   FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 200""", uid)
+                   FROM user_proxies WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT $2 OFFSET $3""", uid, limit, offset)
             rows = [dict(r, is_backup=False, acc_count=0, latency_ms=None) for r in rows]
         # proxy_url хранится зашифрованным — расшифровываем для отображения (passthrough legacy)
         from services.token_vault import decrypt_token
@@ -13851,7 +13867,38 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if d.get("proxy_url"):
                 d["proxy_url"] = decrypt_token(d["proxy_url"])
             out.append(d)
-        return _json_resp({"proxies": out})
+        # Счётчики — по ВСЕМУ парку, а не по странице: иначе плитки на экране
+        # пула утверждали бы то, чего не проверяли.
+        total = await _safe_count(
+            pool, "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1", uid)
+        counts = {"total": total}
+        try:
+            agg = await pool.fetchrow(
+                """SELECT COUNT(*) FILTER (WHERE is_alive IS TRUE)  AS alive,
+                          COUNT(*) FILTER (WHERE is_alive IS FALSE) AS dead,
+                          COUNT(*) FILTER (WHERE is_alive IS NULL)  AS unchecked,
+                          COUNT(*) FILTER (WHERE COALESCE(is_backup, FALSE)) AS backup,
+                          AVG(latency_avg_ms) FILTER (WHERE latency_avg_ms > 0) AS avg_latency
+                     FROM user_proxies WHERE owner_id=$1""", uid)
+            if agg:
+                counts.update({
+                    "alive": int(agg["alive"] or 0),
+                    "dead": int(agg["dead"] or 0),
+                    "unchecked": int(agg["unchecked"] or 0),
+                    "backup": int(agg["backup"] or 0),
+                    "avg_latency": int(agg["avg_latency"]) if agg["avg_latency"] else None,
+                })
+        except Exception as exc:
+            # Колонок могло не быть (лаг миграции) — тогда отдаём только total,
+            # а фронт честно подпишет плитки «Показано», а не «Всего».
+            log.warning("proxies uid=%d: агрегат недоступен: %s", uid, exc)
+        return _json_resp({
+            "proxies": out,
+            "total": total,
+            "counts": counts,
+            "page": {"offset": offset, "limit": limit,
+                     "has_more": offset + len(out) < total},
+        })
 
     async def add_proxy(request: web.Request) -> web.Response:
         uid = _get_uid(request)

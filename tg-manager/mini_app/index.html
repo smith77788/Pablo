@@ -1571,7 +1571,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div style="display:flex;align-items:flex-end;gap:3px;height:50px" id="proxyPoolBars"></div>
     </div>
     <div class="sec">Пул прокси</div>
+    <input class="inp lst-search" id="ppSearch" type="search" placeholder="Поиск по названию или адресу" oninput="onPpSearch(this.value)" aria-label="Поиск по пулу прокси">
     <div class="lst" id="proxyPoolList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="lst-more" id="ppLoadMore"></div>
   </div>
 </div>
 
@@ -9308,13 +9310,14 @@ async function openAccProxy(id, currentPid) {
   sel.innerHTML = '<option value="">Загрузка…</option>';
   showModal('mo-acc-proxy');
   try {
-    const d = await api('/api/miniapp/proxies');
+    const d = await api('/api/miniapp/proxies?limit='+PROXY_PICK_LIMIT+'&offset=0');
     const list = Array.isArray(d) ? d : (d.proxies||[]);
     // Текущий прокси предвыбираем — иначе сохранение случайно снимет назначенный.
     const cur = (currentPid===null||currentPid===undefined) ? '' : String(currentPid);
     const selAttr = v => (String(v)===cur ? ' selected' : '');
     let html = `<option value=""${cur===''?' selected':''}>🚫 Без прокси (напрямую / CF relay)</option>`;
     html += list.map(p=>`<option value="${p.id}"${selAttr(p.id)}>${esc(p.label||p.proxy_url||('Прокси #'+p.id))}${p.geo_country?(' · '+esc(p.geo_country)):''}</option>`).join('');
+    html += _proxyTruncOption(d, list.length);
     sel.innerHTML = html;
   } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
 }
@@ -12711,9 +12714,11 @@ async function saveIpv6Subnet() {
 async function loadProxies() {
   loadCfPoolStatus(); loadTransport();
   try {
-    const d = await api('/api/miniapp/proxies');
+    const d = await api('/api/miniapp/proxies?limit='+PROXY_PICK_LIMIT+'&offset=0');
     const items = d.proxies||[];
-    txt('m-proxy-cnt', items.length ? items.length+' прокси' : 'Нет прокси');
+    // Число в шапке считалось по странице и называло её всем парком.
+    const totalProxies = (d.total != null) ? d.total : items.length;
+    txt('m-proxy-cnt', totalProxies ? totalProxies+' прокси' : 'Нет прокси');
     if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить прокси',fn:'openProxyModal()'})); return; }
     const backupCount = items.filter(p=>p.is_backup).length;
     // Переселение показываем, только когда есть куда и откуда: failover умеет
@@ -12835,7 +12840,7 @@ async function openAccImportModal() {
   const sel=document.getElementById('accImportProxy');
   sel.innerHTML='<option value="">Авто — разложить по моим прокси</option>';
   try {
-    const d=await api('/api/miniapp/proxies');
+    const d=await api('/api/miniapp/proxies?limit='+PROXY_PICK_LIMIT+'&offset=0');
     (d.proxies||[]).forEach(p=>{
       const host=(p.proxy_url||'').split('@').pop();
       const o=document.createElement('option');
@@ -12844,6 +12849,8 @@ async function openAccImportModal() {
       o.textContent=(p.label?p.label+' · ':'')+(host||('#'+p.id));
       sel.appendChild(o);
     });
+    const note=_proxyTruncOption(d,(d.proxies||[]).length);
+    if (note) sel.insertAdjacentHTML('beforeend', note);
   } catch(e) {
     // Пустая выпадашка неотличима от «прокси нет»: владелец завёл бы аккаунты
     // напрямую, хотя прокси у него есть. Говорим, что это сбой загрузки.
@@ -13327,31 +13334,122 @@ async function submitProxyImport() {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
+// Выпадашки назначения прокси показывали серверный срез как весь парк: прокси
+// за границей среза нельзя было ни увидеть, ни назначить, и причина нигде не
+// называлась. Берём максимум, который отдаёт сервер, и если парк всё равно
+// больше — говорим об этом прямо в списке, а не молчим.
+const PROXY_PICK_LIMIT = 1000;
+function _proxyTruncOption(d, shown) {
+  const total = (d && d.total != null) ? d.total : shown;
+  if (total <= shown) return '';
+  return `<option value="" disabled>⚠️ Показаны ${num(shown)} из ${num(total)} — остальные в «Пуле прокси»</option>`;
+}
+
 // ── Proxy Pool Manager ─────────────────────────────────
+// Список отдавался обрезанным на двухстах без единого признака обрезки, а
+// плитка «Всего» считалась по этой же странице — то есть у владельца с 300
+// прокси она показывала 200 и называла это всем парком. Теперь счётчики
+// приходят с сервера по всему парку, а страница догружается явной строкой.
+const PP_PAGE = 200;
 let _proxyPoolData = [];
+let PP_TOTAL = 0, PP_LOADING = false, PP_FILTER = 'all', PP_SEARCH = '', _ppSearchT = null;
 function openProxyPool() {
   push('s-proxy-pool');
   txt('proxyPoolList','<div class="spin-wrap"><div class="spin"></div></div>');
+  const inp = document.getElementById('ppSearch'); if (inp) inp.value = '';
+  PP_SEARCH = '';
   loadProxyPool();
+}
+function _ppApplyCounts(d) {
+  const c = (d.counts && d.counts.total != null) ? d.counts : null;
+  PP_TOTAL = (d.total != null) ? d.total : _proxyPoolData.length;
+  const page = _proxyPoolData;
+  const known = c && c.alive != null;
+  // Без серверного агрегата считать можно только по загруженному. Пока парк не
+  // догружен целиком, это НЕ ответ на вопрос «сколько живых всего»: подставить
+  // сюда число со страницы значило бы выдать непроверенное за проверенное.
+  // Лучше «—», чем цифра, которой нельзя верить.
+  const partial = !known && page.length < PP_TOTAL;
+  const alive = known ? c.alive : page.filter(p=>p.is_alive===true).length;
+  const dead  = known ? c.dead  : page.filter(p=>p.is_alive===false).length;
+  let avgLat = known ? c.avg_latency : null;
+  if (avgLat == null) {
+    const l = page.filter(p=>p.latency_ms).map(p=>p.latency_ms);
+    avgLat = l.length ? Math.round(l.reduce((a,b)=>a+b,0)/l.length) : null;
+  }
+  txt('pp-total', num(PP_TOTAL));
+  txt('pp-alive', partial ? '—' : num(alive));
+  txt('pp-dead', partial ? '—' : num(dead));
+  txt('pp-avg-latency', (partial || avgLat == null) ? '—' : avgLat+'мс');
+  // Подпись плиток говорит, что именно посчитано: весь парк или одна страница.
+  const lbl = document.querySelector('#proxyPoolKpi .card .card-lbl');
+  if (lbl) lbl.textContent = known ? 'Всего' : 'Показано';
 }
 async function loadProxyPool() {
   try {
-    const d = await api('/api/miniapp/proxies');
+    // Перезагрузка после действия в строке не должна схлопывать догруженный
+    // список обратно до одной страницы.
+    const want = Math.min(Math.max(PP_PAGE, _proxyPoolData.length), 1000);
+    const d = await api('/api/miniapp/proxies?limit='+want+'&offset=0');
     _proxyPoolData = d.proxies||[];
-    const alive = _proxyPoolData.filter(p=>p.is_alive===true).length;
-    const dead = _proxyPoolData.filter(p=>p.is_alive===false).length;
-    const total = _proxyPoolData.length;
-    const latencies = _proxyPoolData.filter(p=>p.latency_ms).map(p=>p.latency_ms);
-    const avgLat = latencies.length ? Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length) : '—';
-    txt('pp-total', num(total));
-    txt('pp-alive', num(alive));
-    txt('pp-dead', num(dead));
-    txt('pp-avg-latency', avgLat === '—' ? '—' : avgLat+'мс');
+    _ppApplyCounts(d);
     renderProxyPoolBars(_proxyPoolData);
-    renderProxyPoolList(_proxyPoolData);
+    renderProxyPoolList(_ppFiltered());
+    renderPpLoadMore();
   } catch(e) {
     txt('proxyPoolList', errHtml(e.message,'loadProxyPool()'));
+    txt('ppLoadMore','');
   }
+}
+async function loadMoreProxies() {
+  if (PP_LOADING) return;
+  PP_LOADING = true;
+  const box = document.getElementById('ppLoadMore');
+  if (box) box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/proxies?limit='+PP_PAGE+'&offset='+_proxyPoolData.length);
+    const known = new Set(_proxyPoolData.map(p=>String(p.id)));
+    (d.proxies||[]).forEach(p => { if (!known.has(String(p.id))) _proxyPoolData.push(p); });
+    _ppApplyCounts(d);
+    renderProxyPoolBars(_proxyPoolData);
+    renderProxyPoolList(_ppFiltered());
+  } catch(e) {
+    // Крутилка снимается здесь же, а не только в finally: гейт
+    // tests/test_no_stuck_spinner.py требует, чтобы выход из ошибки был виден
+    // прямо в обработчике, — и он прав, потому что тост уходит, а крутилка нет.
+    txt('ppLoadMore','');
+    toast('⚠️ '+(e.message||'Не удалось догрузить'));
+  } finally {
+    PP_LOADING = false;
+    renderPpLoadMore();
+  }
+}
+function _ppFiltered() {
+  let list = _proxyPoolData;
+  if (PP_FILTER==='alive') list = list.filter(p=>p.is_alive===true);
+  else if (PP_FILTER==='dead') list = list.filter(p=>p.is_alive===false);
+  else if (PP_FILTER==='backup') list = list.filter(p=>p.is_backup);
+  const q = PP_SEARCH.trim().toLowerCase();
+  if (q) list = list.filter(p =>
+    String(p.label||'').toLowerCase().indexOf(q) !== -1 ||
+    String(p.proxy_url||'').toLowerCase().indexOf(q) !== -1);
+  return list;
+}
+function onPpSearch(v) {
+  PP_SEARCH = v || '';
+  clearTimeout(_ppSearchT);
+  _ppSearchT = setTimeout(() => { renderProxyPoolList(_ppFiltered()); renderPpLoadMore(); }, 200);
+}
+// Остаток — честной строкой. Поиск и срез идут по загруженному, и об этом
+// сказано прямо: иначе «ничего не найдено» читалось бы как «такого прокси нет».
+function renderPpLoadMore() {
+  const box = document.getElementById('ppLoadMore');
+  if (!box) return;
+  const loaded = _proxyPoolData.length;
+  if (loaded >= PP_TOTAL || !PP_TOTAL) { box.innerHTML=''; return; }
+  const narrowed = (PP_FILTER !== 'all') || !!PP_SEARCH.trim();
+  box.innerHTML = `<button class="btn btn-s" style="width:100%;font-size:13px;padding:10px" onclick="loadMoreProxies()">Загрузить ещё · показано ${num(loaded)} из ${num(PP_TOTAL)}</button>`
+    + (narrowed ? `<div class="lst-more-note">Поиск и фильтр идут по загруженным ${num(loaded)} из ${num(PP_TOTAL)} — догрузите остальные, если нужного нет.</div>` : '');
 }
 function renderProxyPoolBars(items) {
   const el = document.getElementById('proxyPoolBars');
@@ -13367,7 +13465,17 @@ function renderProxyPoolBars(items) {
 }
 function renderProxyPoolList(items) {
   const el = document.getElementById('proxyPoolList');
-  if (!items.length) { el.innerHTML=empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить',fn:'openProxyModal()'}); return; }
+  if (!items.length) {
+    // «Нет прокси» под активным поиском — неправда: прокси есть, просто ни один
+    // не подошёл. Предложение «добавьте» здесь тоже не то, что нужно человеку.
+    const narrowed = (PP_FILTER !== 'all') || !!PP_SEARCH.trim();
+    el.innerHTML = narrowed
+      ? empty('🔍','Ничего не подошло',
+              `Под срез и поиск не попал ни один из загруженных ${num(_proxyPoolData.length)} прокси.`,
+              {label:'Сбросить', fn:'resetPpFilters()'})
+      : empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси',{label:'➕ Добавить',fn:'openProxyModal()'});
+    return;
+  }
   el.innerHTML = items.map(p=>{
     const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
     const type = (p.proxy_type||'socks5').toUpperCase();
@@ -13389,14 +13497,22 @@ function renderProxyPoolList(items) {
     </div>`;
   }).join('');
 }
+function resetPpFilters() {
+  PP_SEARCH = '';
+  const inp = document.getElementById('ppSearch'); if (inp) inp.value = '';
+  const seg = document.querySelectorAll('#proxyPoolSeg .seg-opt');
+  seg.forEach(o=>o.classList.remove('on'));
+  if (seg.length) seg[0].classList.add('on');
+  PP_FILTER = 'all';
+  renderProxyPoolList(_ppFiltered());
+  renderPpLoadMore();
+}
 function proxyPoolFilter(filter, el) {
   document.querySelectorAll('#proxyPoolSeg .seg-opt').forEach(o=>o.classList.remove('on'));
   if(el) el.classList.add('on');
-  let filtered = _proxyPoolData;
-  if (filter==='alive') filtered = filtered.filter(p=>p.is_alive===true);
-  else if (filter==='dead') filtered = filtered.filter(p=>p.is_alive===false);
-  else if (filter==='backup') filtered = filtered.filter(p=>p.is_backup);
-  renderProxyPoolList(filtered);
+  PP_FILTER = filter;
+  renderProxyPoolList(_ppFiltered());
+  renderPpLoadMore();
 }
 async function proxyPoolCheckAll() {
   toast('🔄 Проверяю все прокси…');
@@ -13648,13 +13764,13 @@ function renderAutoregProHistory(items) {
 }
 async function loadAutoregProProxyList() {
   try {
-    const d = await api('/api/miniapp/proxies');
+    const d = await api('/api/miniapp/proxies?limit='+PROXY_PICK_LIMIT+'&offset=0');
     const sel = document.getElementById('arp-proxy');
     if (!sel) return;
     sel.innerHTML = '<option value="">Без прокси</option>' + (d.proxies||[]).map(p=>{
       const host = (p.proxy_url||'').split('@').pop();
       return `<option value="${p.id}">${esc(p.label||host)}</option>`;
-    }).join('');
+    }).join('') + _proxyTruncOption(d, (d.proxies||[]).length);
   } catch(e) {
     const sel = document.getElementById('arp-proxy');
     if (sel) sel.innerHTML = '<option value="">⚠️ Прокси не загрузились — повторите открытие</option>';
