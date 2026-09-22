@@ -10598,8 +10598,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 WHERE account_id=$1 AND performed_at > NOW() - INTERVAL '7 days'""",
             plan["account_id"])
         from services import warmup_status as _ws
+        from services import account_warmer as _aw
 
         pd = dict(plan)
+        # Круг каналов аккаунта: сколько в обороте и сколько он нашёл сам.
+        # Без этого расширение круга — невидимая механика: владелец не сможет
+        # ни подтвердить, что она работает, ни заметить, что она встала.
+        _found = await _safe_fetch(
+            pool,
+            """SELECT channel_ref FROM account_warmup_interests
+                WHERE account_id=$1
+                ORDER BY COALESCE(last_seen_at, found_at) DESC
+                LIMIT 12""",
+            pd["account_id"])
+        _found_refs = [r["channel_ref"] for r in (_found or [])]
         return _json_resp({
             "ok": True,
             "plan": {
@@ -10608,6 +10620,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "health": _ws.classify(pd),
                 "last_action_at": pd["last_action_at"].isoformat() if pd["last_action_at"] else None,
                 "skip_label": _ws.skip_label(pd.get("last_skip_reason")),
+            },
+            "circle": {
+                "size": _aw.channel_pool_size(pd["current_day"]),
+                "found": len(_found_refs),
+                "examples": _found_refs[:6],
             },
             "week": {"ok": int(agg["ok"] or 0) if agg else 0,
                      "fail": int(agg["fail"] or 0) if agg else 0},

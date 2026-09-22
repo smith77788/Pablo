@@ -46,9 +46,18 @@ def test_local_night_skip_wired_in_both_paths():
     assert 'geo_tempo.is_local_night(r["geo_country"])' in SRC
     # путь мультиаккаунтной сессии — по-аккаунтный пропуск
     assert "_gt.is_local_night(_acc_geo)" in SRC
-    # объём действий считается по-аккаунтно
-    assert "range(_acc_actions)" in SRC
+    # объём действий считается по-аккаунтно: множитель локального времени
+    # применяется к БАЗЕ каждого аккаунта, а не один общий на всю сессию
     assert "actions_per_acc_base" in SRC
+    assert (
+        "int(actions_per_acc_base * _time_of_day_multiplier(_acc_geo, account_id=acc_id))"
+        in SRC
+    )
+    # и именно этот по-аккаунтный объём задаёт цикл действий
+    # (шагов в цикле больше: читающие идут сверх бюджета — см.
+    # tests/test_warmup_action_parity.py, — но бюджет по-прежнему _acc_actions)
+    assert "_acc_steps = _acc_actions" in SRC
+    assert "range(_acc_steps)" in SRC
 
 
 def test_session_geo_fetched_without_extra_roundtrip():

@@ -718,26 +718,23 @@ async def cb_warmup_run_one(
 
 # ── Warmup plan action log ─────────────────────────────────────────────────────
 
+# Подписи берутся из реестра действий (services/account_warmer._ACTION_SPECS) —
+# единственного источника правды. Своя копия здесь была третьей по счёту (ещё
+# одна в мини-аппе и одна в самом прогреве) и уже отставала: новые действия
+# показывались в журнале сырыми ключами.
 _ACTION_LABELS = {
-    "read_channel": "📖 Читал канал",
-    "join_channel": "🔔 Вступил в канал",
-    "send_reaction": "❤️ Поставил реакцию",
-    "search": "🔍 Поиск по слову",
-    "view_profile": "👁 Смотрел профиль",
-    "open_chat": "💬 Открыл чат",
-    "dm_bot": "🤖 Написал боту /start",
-    "mark_read": "✅ Отметил прочитанным",
-    "update_presence": "🟢 Онлайн-присутствие",
-    "browse_dialogs": "📱 Проверил диалоги",
-    "forward_to_saved": "📌 Сохранил пост",
-    "vote_poll": "📊 Проголосовал в опросе",
-    "send_comment": "💬 Оставил комментарий",
-    "own_channel_read": "📡 Читал свой канал",
-    "smart_bot_start": "🤖 /start своему боту",
-    "smart_bot_help": "🤖 /help своему боту",
-    "own_bot_start": "🤖 Запустил своего бота",
+    # исторические записи, которых в реестре действий уже нет
     "read_messages": "📨 Читал сообщения",
+    "smart_bot_cmd": "🤖 Команда боту",
 }
+
+
+def _action_label(action: str) -> str:
+    from services import account_warmer
+
+    if action in account_warmer.registered_actions():
+        return account_warmer.action_label(action)
+    return _ACTION_LABELS.get(action, action)
 
 
 @router.callback_query(WarmupCb.filter(F.action == "plan_log"))
@@ -806,7 +803,7 @@ async def cb_warmup_plan_log(
             fail_cnt = len(actions) - ok_cnt
             lines.append(f"<b>📅 {day_key}</b>  ✅{ok_cnt} ❌{fail_cnt}")
             for a in actions[:8]:
-                act_label = _ACTION_LABELS.get(a["action_type"], a["action_type"])
+                act_label = _action_label(a["action_type"])
                 target = html.escape(a.get("target") or "")[:40]
                 if a["success"]:
                     status = "✅"
@@ -1473,7 +1470,7 @@ async def cb_wu_sess_detail(
     if logs:
         lines.append(f"<b>Последние действия</b> (✅{ok_count} ❌{fail_count}):")
         for l in logs[:10]:
-            act_label = _ACTION_LABELS.get(l["action_type"], l["action_type"])
+            act_label = _action_label(l["action_type"])
             target = html.escape((l["target"] or "")[:35])
             status = "✅" if l["success"] else "❌"
             target_str = f" → <code>{target}</code>" if target else ""

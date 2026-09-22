@@ -30,6 +30,7 @@ import asyncpg
 from database import db
 from services.logger import log_exc_swallow
 from services import infra_memory
+from services import warmup_actions as _wa
 
 log = logging.getLogger(__name__)
 
@@ -275,7 +276,13 @@ _COMMENT_TEXTS = [
 
 _BOT_COMMANDS = ["/start", "/help", "/menu", "/info"]
 
-# Действия по дням разогрева — прогрессивная нагрузка
+# Действия по дням разогрева — прогрессивная нагрузка.
+#
+# Читающие действия (см. services/warmup_actions.py) стоят уже в первом дне:
+# они не расходуют ни одной пишущей квоты, а именно их не хватало — раньше
+# свежему аккаунту после прогрессивного гейта оставались ровно три действия
+# (presence, диалоги, чтение канала), и он изо дня в день повторял этот
+# треугольник. Пишущие действия по-прежнему открываются постепенно.
 _WARMUP_SCHEDULE: dict[str, list[str]] = {
     "days_1_3": [
         "read_channel",
@@ -285,6 +292,14 @@ _WARMUP_SCHEDULE: dict[str, list[str]] = {
         "update_presence",
         "browse_dialogs",
         "check_notifications",
+        # читающие — безопасны с первого дня
+        "deep_scroll",
+        "view_posts",
+        "open_media",
+        "read_saved",
+        "open_folders",
+        "top_peers",
+        "check_stickers",
     ],
     "days_4_7": [
         "read_channel",
@@ -296,6 +311,18 @@ _WARMUP_SCHEDULE: dict[str, list[str]] = {
         "forward_to_saved",
         "story_view",
         "check_notifications",
+        "deep_scroll",
+        "view_posts",
+        "open_media",
+        "read_saved",
+        "open_folders",
+        "top_peers",
+        "check_stickers",
+        "read_comments",
+        "open_link",
+        "search_in_channel",
+        "channel_stories",
+        "settings_peek",
     ],
     "days_8_14": [
         "read_channel",
@@ -307,6 +334,19 @@ _WARMUP_SCHEDULE: dict[str, list[str]] = {
         "own_channel_read",
         "mark_read",
         "story_view",
+        "deep_scroll",
+        "view_posts",
+        "open_media",
+        "read_saved",
+        "open_folders",
+        "top_peers",
+        "check_stickers",
+        "read_comments",
+        "open_link",
+        "search_in_channel",
+        "channel_stories",
+        "settings_peek",
+        "explore_similar",
     ],
     "days_15_plus": [
         "read_channel",
@@ -322,43 +362,80 @@ _WARMUP_SCHEDULE: dict[str, list[str]] = {
         "own_channel_read",
         "own_bot_start",
         "story_view",
+        "deep_scroll",
+        "view_posts",
+        "open_media",
+        "read_saved",
+        "open_folders",
+        "top_peers",
+        "check_stickers",
+        "read_comments",
+        "open_link",
+        "search_in_channel",
+        "channel_stories",
+        "settings_peek",
+        "explore_similar",
     ],
 }
 
-# Профильные веса: определяют «характер» аккаунта при выборе действий
+# Профильные веса: определяют «характер» аккаунта при выборе действий.
+#
+# Веса заданы только для действий, которые составляют ХАРАКТЕР профиля;
+# остальным `_profile_weighted_action` даёт базовый вес 0.03. С приходом
+# читающих действий это перестало быть мелочью: их полтора десятка, и в сумме
+# фон получается заметным — ровно то, что нужно, чтобы у аккаунта был не
+# «скрипт из трёх команд», а поведение с длинным хвостом мелочей. Поэтому
+# профильные действия перевешены явно, чтобы фон не съел характер.
 _PROFILE_WEIGHTS: dict[str, dict[str, float]] = {
     "reader": {
         "read_channel": 0.40,
+        "deep_scroll": 0.30,
+        "view_posts": 0.25,
         "mark_read": 0.25,
+        "open_media": 0.15,
         "browse_dialogs": 0.15,
+        "read_comments": 0.12,
         "view_profile": 0.12,
         "send_reaction": 0.08,
     },
     "commenter": {
         "read_channel": 0.25,
         "send_comment": 0.30,
+        "read_comments": 0.25,
         "send_reaction": 0.20,
         "mark_read": 0.15,
+        "view_posts": 0.12,
         "vote_poll": 0.10,
     },
     "reactor": {
         "send_reaction": 0.45,
         "read_channel": 0.30,
+        "view_posts": 0.20,
+        "open_media": 0.18,
         "forward_to_saved": 0.15,
+        "channel_stories": 0.12,
         "vote_poll": 0.10,
     },
     "lurker": {
         "browse_dialogs": 0.40,
         "mark_read": 0.35,
+        "deep_scroll": 0.25,
+        "view_posts": 0.20,
         "read_channel": 0.15,
+        "read_saved": 0.12,
         "check_notifications": 0.10,
     },
     "mixed": {
         "read_channel": 0.25,
         "send_reaction": 0.20,
         "mark_read": 0.20,
+        "deep_scroll": 0.18,
+        "view_posts": 0.16,
         "browse_dialogs": 0.15,
+        "open_media": 0.12,
         "view_profile": 0.10,
+        "read_comments": 0.10,
+        "explore_similar": 0.08,
         "forward_to_saved": 0.07,
         "vote_poll": 0.03,
     },
@@ -448,6 +525,110 @@ async def get_account_niche_channels(pool: asyncpg.Pool, account_id: int) -> lis
     return _WARMUP_PUBLIC_CHANNELS
 
 
+# Сколько найденных каналов храним на аккаунт. Без потолка список рос бы
+# бесконечно (поиск и «похожие каналы» приносят десятки ссылок за день), а
+# интересы человека всё-таки конечны.
+_INTEREST_LIMIT = 60
+
+# Насколько широк круг каналов аккаунта. Раньше было жёстко 8 — навсегда, для
+# любого аккаунта и любого дня. Живой человек за месяц подписывается на большее
+# число каналов, чем за первую неделю, поэтому круг растёт вместе с прогревом.
+_INTEREST_BASE = 8
+_INTEREST_MAX = 28
+
+
+def channel_pool_size(warmup_day: int | None) -> int:
+    """Сколько каналов держит в обороте аккаунт на данном дне прогрева."""
+    try:
+        day = max(0, int(warmup_day or 0))
+    except (TypeError, ValueError):
+        day = 0
+    return min(_INTEREST_MAX, _INTEREST_BASE + day)
+
+
+async def remember_interests(
+    pool: asyncpg.Pool, account_id: int, refs: list[str], source: str = "discovery"
+) -> int:
+    """Запомнить каналы, которые аккаунт САМ нашёл в ходе прогрева.
+
+    Из-за чего это вообще нужно: пул каналов прогрева — двадцать один @канал,
+    зашитый в код, один на весь флот. Сколько бы аккаунтов ни грелось, все они
+    ходят по одним и тем же адресам — это кластеризует когорту ровно так же,
+    как совпадающий граф вступлений, от которого мы уже уходили.
+
+    Найденное в «похожих каналах» и в поиске у каждого аккаунта своё, потому
+    что зависит от того, что он читал. Список личный, растёт сам, живёт в базе
+    (в памяти процесса ему нельзя: реплик может быть больше одной).
+    """
+    refs = [r for r in dict.fromkeys(refs or []) if r]
+    if not refs:
+        return 0
+    try:
+        await pool.executemany(
+            """INSERT INTO account_warmup_interests(account_id, channel_ref, source)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (account_id, channel_ref) DO UPDATE
+                   SET seen_count = account_warmup_interests.seen_count + 1,
+                       last_seen_at = NOW()""",
+            [(account_id, r, source) for r in refs[:_INTEREST_LIMIT]],
+        )
+        # Держим потолок: лишнее вытесняется по давности находки.
+        await pool.execute(
+            """DELETE FROM account_warmup_interests
+               WHERE account_id = $1
+                 AND channel_ref NOT IN (
+                     SELECT channel_ref FROM account_warmup_interests
+                     WHERE account_id = $1
+                     ORDER BY COALESCE(last_seen_at, found_at) DESC
+                     LIMIT $2)""",
+            account_id,
+            _INTEREST_LIMIT,
+        )
+        return len(refs)
+    except Exception as e:
+        # Прогрев не должен падать из-за журнала интересов.
+        log.debug("warmup: interests save acc=%s: %s", account_id, e)
+        return 0
+
+
+async def get_discovered_channels(pool: asyncpg.Pool, account_id: int) -> list[str]:
+    """Каналы, найденные самим аккаунтом (свежие — первыми)."""
+    try:
+        rows = await pool.fetch(
+            """SELECT channel_ref FROM account_warmup_interests
+               WHERE account_id = $1
+               ORDER BY COALESCE(last_seen_at, found_at) DESC
+               LIMIT $2""",
+            account_id,
+            _INTEREST_LIMIT,
+        )
+        return [r["channel_ref"] for r in rows if r["channel_ref"]]
+    except Exception as e:
+        log.debug("warmup: interests read acc=%s: %s", account_id, e)
+        return []
+
+
+async def warmup_channel_pool(
+    pool: asyncpg.Pool, account_id: int, warmup_day: int | None
+) -> list[str]:
+    """Круг каналов аккаунта: базовый (ниша/общий) + найденное им самим.
+
+    Найденное идёт ПЕРВЫМ и занимает до половины круга: иначе оно навсегда
+    осталось бы хвостом за двадцатью зашитыми каналами и не использовалось бы.
+    """
+    base = await get_account_niche_channels(pool, account_id)
+    if not base:
+        base = list(_WARMUP_PUBLIC_CHANNELS)
+    size = channel_pool_size(warmup_day)
+    base = _account_channels(account_id, base, k=min(size, len(base)))
+    found = [r for r in await get_discovered_channels(pool, account_id) if r not in base]
+    if not found:
+        return base
+    take = max(1, size // 2)
+    mixed = found[:take] + base
+    return list(dict.fromkeys(mixed))[:size]
+
+
 async def create_warmup_plan(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -528,7 +709,30 @@ async def get_active_plans(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-_WARM_SAFE_ACTIONS = ("update_presence", "browse_dialogs", "read_channel")
+# Действия, разрешённые самому свежему/самому «больному» аккаунту (уровень 0).
+#
+# Их было три, и этого мало не из-за осторожности, а по недосмотру: в наборе
+# просто не было безопасных действий, кроме этих трёх. Всё, что добавлено ниже,
+# НИЧЕГО НЕ ПИШЕТ в Telegram — это те же запросы, что шлёт официальный клиент,
+# когда человек листает ленту, открывает фото, заходит в Избранное или папки.
+# Ban-риска у них нет по построению, а разнообразие они дают именно там, где
+# оно нужнее всего: на первых днях, когда пишущее делать ещё нельзя.
+_WARM_SAFE_ACTIONS = (
+    "update_presence",
+    "browse_dialogs",
+    "read_channel",
+    "mark_read",
+    "view_profile",
+    "open_chat",
+    "check_notifications",
+    "deep_scroll",
+    "view_posts",
+    "open_media",
+    "read_saved",
+    "open_folders",
+    "top_peers",
+    "check_stickers",
+)
 _WARM_RISKY_L1 = ("send_comment", "send_reaction", "forward_to_saved")
 
 
@@ -602,16 +806,9 @@ def _get_actions_for_day(day: int) -> list[str]:
     return _WARMUP_SCHEDULE["days_15_plus"]
 
 
-_FATAL_ERRORS = frozenset(
-    {
-        "UserDeactivatedBanError",
-        "UserDeactivatedError",
-        "AuthKeyUnregisteredError",
-        "PhoneNumberBannedError",
-        "SessionRevokedError",
-        "SessionExpiredError",
-    }
-)
+# Единый источник правды — services/warmup_actions.FATAL_ERRORS: примитивы
+# прогрева живут в обоих модулях и должны считать «аккаунт мёртв» одинаково.
+_FATAL_ERRORS = _wa.FATAL_ERRORS
 
 # Restriction signals: account is rate-limited/spam-flagged → must STOP warming it,
 # not keep hammering. Distinct from fatal (ban) — account is alive but throttled.
@@ -678,6 +875,43 @@ def _actions_for_day_count(day: int, target_daily: int) -> int:
     if day <= 9:
         return max(4, (target_daily * 3) // 4)
     return target_daily
+
+def _reading_bonus(day: int, target_daily: int) -> int:
+    """Сколько ЧИТАЮЩИХ действий аккаунт делает СВЕРХ дневного бюджета.
+
+    Дневной бюджет (`_actions_for_day_count`) — это бюджет РИСКА: он существует
+    потому, что среди действий есть пишущие, и именно их число нельзя
+    наращивать. Читающие действия ничего не пишут, никакой квоты не расходуют и
+    в этот бюджет попадать не обязаны.
+
+    Без такой развилки «больше разнообразия» означало бы ровно те же 5–12
+    действий в день, просто выбранных из более длинного списка: флот смотрел бы
+    не больше каналов и постов, а столько же. Здесь добавляется именно объём —
+    и только там, где он бесплатен.
+
+    Растёт вместе с прогревом: свежий аккаунт, у которого вообще мало трафика,
+    не должен внезапно прочитывать по сотне постов в сутки.
+    """
+    try:
+        day = max(0, int(day or 0))
+        target_daily = max(1, int(target_daily or 1))
+    except (TypeError, ValueError):
+        day, target_daily = 0, 1
+    if day <= 1:
+        return max(2, target_daily // 2)
+    if day <= 4:
+        return max(3, target_daily)
+    return min(16, max(4, (target_daily * 3) // 2))
+
+
+def _reading_only(actions: list[str]) -> list[str]:
+    """Оставить только действия, которые ничего не пишут в Telegram."""
+    return [
+        a
+        for a in actions
+        if a in _ACTION_SPECS and not _ACTION_SPECS[a].writes
+    ]
+
 
 def _time_of_day_multiplier(geo_country: str | None = None, account_id=None) -> float:
     """Множитель темпа по ЛОКАЛЬНОМУ времени аккаунта (гео его прокси).
@@ -845,12 +1079,25 @@ async def _perform_join_channel(client, channel_ref: str) -> bool:
         return False
 
 
-async def _perform_search(client, query: str) -> bool:
-    """Поиск в Telegram."""
+async def _perform_search(client, query: str, found: list | None = None) -> bool:
+    """Поиск в Telegram.
+
+    Выдача больше не выбрасывается: найденные каналы уходят в личный список
+    интересов аккаунта. Человек, который ищет и никогда не открывает найденное,
+    ведёт себя страннее того, кто не ищет вовсе.
+    """
     try:
         from telethon.tl.functions.contacts import SearchRequest
 
-        await client(SearchRequest(q=query, limit=5))
+        res = await client(SearchRequest(q=query, limit=5))
+        _wa._collect(
+            found,
+            [
+                getattr(c, "username", "")
+                for c in list(getattr(res, "chats", None) or [])
+                if getattr(c, "broadcast", False) or getattr(c, "megagroup", False)
+            ],
+        )
         await asyncio.sleep(random.uniform(3, 7))
         return True
     except Exception as e:
@@ -1102,6 +1349,222 @@ async def _perform_check_notifications(client) -> bool:
             raise
         log_exc_swallow(log, "warmup check_notifications")
         return False
+
+
+# ── единая таблица действий прогрева ─────────────────────────────────────────
+#
+# Раньше диспетчеров было ДВА: один в пути планов, второй в пути сессий, оба
+# написаны руками цепочкой elif. Они разъехались: путь сессий не умел
+# view_profile, open_chat, join_channel, search, dm_bot, story_view и
+# check_notifications — и, что хуже, заканчивался `else: success = True`, то
+# есть считал неизвестное действие ВЫПОЛНЕННЫМ. Больше половины «прогрева» в
+# этом пути была отчётом о действиях, которых не было.
+#
+# Теперь таблица одна, обе ветки зовут perform_action(), а неизвестное действие
+# честно проваливается и пишет ошибку в лог. Паритет стережёт
+# tests/test_warmup_action_parity.py.
+
+
+@dataclass(frozen=True)
+class ActionSpec:
+    """Описание одного действия прогрева.
+
+    label     — как действие называется в журнале (бот и мини-апп);
+    progress  — короткая строка для прогресс-коллбэка;
+    target    — откуда берётся цель: channel / own_channel / own_bot / none;
+    timeout   — потолок ожидания; без него зависший вызов съедал весь день;
+    writes    — пишет ли действие что-то в Telegram (расходует ли квоту);
+    discovers — приносит ли новые каналы в личный список интересов;
+    pre_delay — пауза перед действием (человек сначала смотрит, потом жмёт).
+    """
+
+    label: str
+    progress: str
+    target: str
+    timeout: float
+    writes: bool
+    discovers: bool = False
+    pre_delay: tuple[float, float] | None = None
+
+
+_ACTION_SPECS: dict[str, ActionSpec] = {
+    # ── исторический набор ───────────────────────────────────────────────────
+    "read_channel": ActionSpec("📖 Читал канал", "📖 читаю канал", "channel", 60, False),
+    "view_profile": ActionSpec("👁 Смотрел профиль", "👁 смотрю профиль", "channel", 60, False),
+    "open_chat": ActionSpec("💬 Открыл чат", "💬 открываю чат", "channel", 60, False),
+    "mark_read": ActionSpec("✅ Отметил прочитанным", "✅ отмечаю прочитанным", "channel", 60, False),
+    "update_presence": ActionSpec("🟢 Онлайн-присутствие", "🟢 онлайн-присутствие", "none", 60, False),
+    "browse_dialogs": ActionSpec("📱 Проверил диалоги", "📱 проверяю диалоги", "none", 60, False),
+    "check_notifications": ActionSpec("🔔 Проверял уведомления", "🔔 проверяю уведомления", "none", 20, False),
+    "story_view": ActionSpec("📸 Смотрел сторис", "📸 просматриваю истории", "none", 30, False),
+    "search": ActionSpec("🔍 Поиск по слову", "🔍 поиск", "query", 60, False, discovers=True),
+    "dm_bot": ActionSpec("🤖 Написал боту /start", "🤖 пишу боту", "none", 60, True),
+    "join_channel": ActionSpec("🔔 Вступил в канал", "🔔 вступаю в канал", "channel", 60, True),
+    "send_reaction": ActionSpec(
+        "❤️ Поставил реакцию", "❤️ реакция на пост", "channel", 60, True,
+        pre_delay=(2.0, 8.0),
+    ),
+    "send_comment": ActionSpec(
+        "💬 Оставил комментарий", "💬 оставляю комментарий", "channel", 90, True,
+        pre_delay=(3.0, 12.0),
+    ),
+    "forward_to_saved": ActionSpec("📌 Сохранил пост", "📌 сохраняю пост", "channel", 60, True),
+    "vote_poll": ActionSpec("📊 Проголосовал в опросе", "📊 голосую в опросе", "channel", 60, True),
+    "own_channel_read": ActionSpec("📡 Читал свой канал", "📡 читаю свой канал", "own_channel", 60, False),
+    "smart_bot_start": ActionSpec("🤖 /start своему боту", "🤖 /start своему боту", "own_bot", 60, True),
+    "own_bot_start": ActionSpec("🤖 Запустил своего бота", "🤖 запуск своего бота", "own_bot", 60, True),
+    "smart_bot_help": ActionSpec("🤖 /help своему боту", "🤖 /help своему боту", "own_bot", 60, True),
+    # ── читающие действия (services/warmup_actions.py) ───────────────────────
+    "deep_scroll": ActionSpec("📜 Листал ленту вглубь", "📜 листаю ленту", "channel", 180, False),
+    "view_posts": ActionSpec("👀 Просмотрел посты", "👀 просматриваю посты", "channel", 90, False),
+    "read_comments": ActionSpec("🧵 Читал комментарии", "🧵 читаю комментарии", "channel", 120, False),
+    "open_media": ActionSpec("🖼 Открыл фото из поста", "🖼 открываю фото", "channel", 120, False),
+    "open_link": ActionSpec("🔗 Перешёл по ссылке", "🔗 открываю ссылку", "channel", 90, False, discovers=True),
+    "search_in_channel": ActionSpec("🔎 Искал внутри канала", "🔎 ищу в канале", "channel", 90, False),
+    "explore_similar": ActionSpec("🧭 Смотрел похожие каналы", "🧭 смотрю похожие каналы", "channel", 90, False, discovers=True),
+    "channel_stories": ActionSpec("📸 Смотрел истории канала", "📸 истории канала", "channel", 90, False),
+    "read_saved": ActionSpec("⭐️ Заходил в Избранное", "⭐️ открываю Избранное", "none", 60, False),
+    "check_stickers": ActionSpec("🎨 Смотрел стикеры", "🎨 смотрю стикеры", "none", 60, False),
+    "top_peers": ActionSpec("📇 Обновил частые контакты", "📇 частые контакты", "none", 45, False),
+    "open_folders": ActionSpec("🗂 Открывал папки", "🗂 открываю папки", "none", 45, False),
+    "settings_peek": ActionSpec("⚙️ Заглянул в настройки", "⚙️ смотрю настройки", "none", 45, False),
+}
+
+
+def _handler_table() -> dict:
+    """name → корутина с единой сигнатурой (client, target, found, account_id).
+
+    Собирается функцией, а не модульным словарём: держать словарь функций на
+    уровне модуля — это изменяемое глобальное состояние (ратчет
+    test_no_new_mutable_globals), и таблица всё равно нужна только в момент
+    исполнения действия.
+    """
+    return {
+        "read_channel": lambda c, t, f, a: _perform_read_channel(c, t),
+        "view_profile": lambda c, t, f, a: _perform_view_profile(c, t),
+        "open_chat": lambda c, t, f, a: _perform_open_chat(c, t),
+        "mark_read": lambda c, t, f, a: _perform_mark_read(c, t),
+        "update_presence": lambda c, t, f, a: _perform_update_presence(c),
+        "browse_dialogs": lambda c, t, f, a: _perform_browse_dialogs(c),
+        "check_notifications": lambda c, t, f, a: _perform_check_notifications(c),
+        "story_view": lambda c, t, f, a: _perform_story_view(c),
+        "search": lambda c, t, f, a: _perform_search(c, t, found=f),
+        "dm_bot": lambda c, t, f, a: _perform_dm_bot(c),
+        "join_channel": lambda c, t, f, a: _perform_join_channel(c, t),
+        "send_reaction": lambda c, t, f, a: _perform_send_reaction(c, t),
+        "send_comment": lambda c, t, f, a: _perform_send_comment(c, t, a),
+        "forward_to_saved": lambda c, t, f, a: _perform_forward_to_saved(c, t),
+        "vote_poll": lambda c, t, f, a: _perform_vote_poll(c, t),
+        "own_channel_read": lambda c, t, f, a: _perform_own_channel_read(c, t),
+        "smart_bot_start": lambda c, t, f, a: _perform_smart_bot_cmd(c, t, "/start"),
+        "own_bot_start": lambda c, t, f, a: _perform_smart_bot_cmd(c, t, "/start"),
+        "smart_bot_help": lambda c, t, f, a: _perform_smart_bot_cmd(c, t, "/help"),
+        "deep_scroll": lambda c, t, f, a: _wa.deep_scroll(c, t, f),
+        "view_posts": lambda c, t, f, a: _wa.view_posts(c, t, f),
+        "read_comments": lambda c, t, f, a: _wa.read_comments(c, t, f),
+        "open_media": lambda c, t, f, a: _wa.open_media(c, t, f),
+        "open_link": lambda c, t, f, a: _wa.open_link(c, t, f),
+        "search_in_channel": lambda c, t, f, a: _wa.search_in_channel(c, t, f),
+        "explore_similar": lambda c, t, f, a: _wa.explore_similar(c, t, f),
+        "channel_stories": lambda c, t, f, a: _wa.channel_stories(c, t, f),
+        "read_saved": lambda c, t, f, a: _wa.read_saved(c, t, f),
+        "check_stickers": lambda c, t, f, a: _wa.check_stickers(c, t, f),
+        "top_peers": lambda c, t, f, a: _wa.top_peers(c, t, f),
+        "open_folders": lambda c, t, f, a: _wa.open_folders(c, t, f),
+        "settings_peek": lambda c, t, f, a: _wa.settings_peek(c, t, f),
+    }
+
+
+def action_label(action: str) -> str:
+    """Человеческое имя действия для журнала. Единственный источник — реестр."""
+    spec = _ACTION_SPECS.get(action)
+    return spec.label if spec else action
+
+
+def action_progress(action: str) -> str:
+    spec = _ACTION_SPECS.get(action)
+    return spec.progress if spec else action
+
+
+def registered_actions() -> tuple[str, ...]:
+    return tuple(_ACTION_SPECS)
+
+
+def _resolve_target(
+    action: str,
+    fallback: str,
+    own_channels: list | None,
+    own_bots: list | None,
+) -> str:
+    """Куда направить действие. Вынесено из обеих веток: там это было двумя
+    копиями, и копии разъехались."""
+    spec = _ACTION_SPECS.get(action)
+    kind = spec.target if spec else "channel"
+    if kind == "query":
+        return random.choice(_WARMUP_SEARCH_QUERIES)
+    if kind == "none":
+        return {
+            "story_view": "stories",
+            "check_notifications": "notifications",
+            "dm_bot": "dm_bot",
+            "read_saved": "saved",
+            "check_stickers": "stickers",
+            "top_peers": "top_peers",
+            "open_folders": "folders",
+            "settings_peek": "settings",
+        }.get(action, "self")
+    if kind == "own_channel":
+        for ch in own_channels or []:
+            if ch.get("username"):
+                return f"@{ch['username']}"
+            if ch.get("channel_id"):
+                return str(ch["channel_id"])
+        return fallback
+    if kind == "own_bot":
+        bots = [b for b in (own_bots or []) if b.get("username")]
+        if bots:
+            return f"@{random.choice(bots)['username']}"
+        return random.choice(_WARMUP_BOTS)
+    return fallback
+
+
+async def perform_action(
+    action: str,
+    client,
+    *,
+    target: str = "",
+    own_channels: list | None = None,
+    own_bots: list | None = None,
+    account_id: int | None = None,
+    found: list | None = None,
+) -> tuple[bool, str]:
+    """Выполнить одно действие прогрева. Возвращает (успех, фактическая цель).
+
+    Единственная точка исполнения для обеих веток прогрева. Исключения НЕ
+    гасятся: фатальные/ограничительные ошибки и FloodWait разбирает вызывающий,
+    у него для этого есть контекст плана или сессии.
+    """
+    spec = _ACTION_SPECS.get(action)
+    if spec is None:
+        # Молча вернуть успех здесь — тот самый баг, из-за которого прогрев
+        # рапортовал о действиях, которых не совершал. Только честный провал.
+        log.error("warmup: неизвестное действие %r — пропуск (acc=%s)", action, account_id)
+        return False, target
+    eff_target = _resolve_target(action, target, own_channels, own_bots)
+    if spec.target == "channel" and not eff_target:
+        return False, eff_target
+    handler = _handler_table().get(action)
+    if handler is None:
+        log.error("warmup: у действия %r нет исполнителя — пропуск", action)
+        return False, eff_target
+    if spec.pre_delay:
+        await asyncio.sleep(random.uniform(*spec.pre_delay))
+    ok = await asyncio.wait_for(
+        handler(client, eff_target, found, account_id), timeout=spec.timeout
+    )
+    if spec.target == "query":
+        eff_target = f"search:{eff_target}"
+    return bool(ok), eff_target
 
 
 async def _log_warmup_action(
@@ -1361,6 +1824,10 @@ async def _run_daily_warmup_impl(
     # внутри try → UnboundLocalError вместо честного обновления плана.
     actions_ok = 0
     actions_fail = 0
+    # Тоже ДО try: список найденных каналов читается в finally, а исключение в
+    # окне подготовки (niche/health/_make_client) случается раньше, чем до него
+    # дошло бы исполнение внутри try.
+    _found: list[str] = []
     # ВЕСЬ пост-захватный путь под общим try/finally (release в finally ниже):
     # раньше окно от захвата до client.connect() (niche/health/_make_client) НЕ
     # освобождало аккаунт при исключении — он «зомби» в памяти до рестарта, и
@@ -1405,37 +1872,13 @@ async def _run_daily_warmup_impl(
         resources = await _get_warmup_resources(pool, owner_id)
         own_bots = resources["bots"]
         own_channels = resources["channels"]
-        # Нишево-осведомлённый список каналов: через account_niche_profiles
-        channels = await get_account_niche_channels(pool, account_id)
+        # Круг каналов аккаунта: ниша/общий пул (стабильный пер-аккаунтный
+        # набор — одинаковый граф вступлений у всего флота есть сигнатура
+        # ботнета) плюс то, что аккаунт нашёл сам в «похожих каналах» и в
+        # поиске. Круг расширяется по мере прогрева.
+        channels = await warmup_channel_pool(pool, account_id, current_day)
         if not channels:
             channels = list(_WARMUP_PUBLIC_CHANNELS)
-        # Стабильный пер-аккаунтный порядок/набор вместо глобального shuffle:
-        # одинаковый граф вступлений у всего флота — сигнатура ботнета.
-        channels = _account_channels(account_id, channels, k=len(channels))
-
-        # Описания действий для прогресс-коллбэка
-        _action_descriptions = {
-            "read_channel": "📖 читаю канал",
-            "join_channel": "🔔 вступаю в канал",
-            "send_reaction": "❤️ реакция на пост",
-            "search": "🔍 поиск",
-            "view_profile": "👁 смотрю профиль",
-            "open_chat": "💬 открываю чат",
-            "dm_bot": "🤖 пишу боту",
-            "mark_read": "✅ отмечаю прочитанным",
-            "update_presence": "🟢 онлайн-присутствие",
-            "browse_dialogs": "📱 проверяю диалоги",
-            "forward_to_saved": "📌 сохраняю пост",
-            "vote_poll": "📊 голосую в опросе",
-            "send_comment": "💬 оставляю комментарий",
-            "own_channel_read": "📡 читаю свой канал",
-            "smart_bot_start": "🤖 /start своему боту",
-            "smart_bot_help": "🤖 /help своему боту",
-            "own_bot_start": "🤖 запуск своего бота",
-            "story_view": "📸 просматриваю истории",
-            "check_notifications": "🔔 проверяю уведомления",
-        }
-
         # Рампа объёма действий: свежий аккаунт (день 0-1) делает мало действий,
         # объём растёт с возрастом. Это ключевая защита от бана.
         day_actions_n = _actions_for_day_count(current_day, daily_actions)
@@ -1444,134 +1887,40 @@ async def _run_daily_warmup_impl(
         if _tod_mult != 1.0:
             day_actions_n = max(1, int(day_actions_n * _tod_mult))
 
+        # Дневной бюджет выше — это бюджет РИСКА: он ограничивает пишущие
+        # действия. Читающие ничего не пишут, поэтому идут сверх него: иначе
+        # «шире репертуар» означало бы те же 5–12 действий в день, только из
+        # более длинного списка, и флот не смотрел бы ни одним каналом и постом
+        # больше.
+        _read_only = _reading_only(available_actions)
+        read_bonus = _reading_bonus(current_day, daily_actions) if _read_only else 0
+        if _tod_mult != 1.0 and read_bonus:
+            read_bonus = max(1, int(read_bonus * _tod_mult))
+        total_steps = day_actions_n + read_bonus
+
         await asyncio.wait_for(client.connect(), timeout=15)
 
-        for i in range(day_actions_n):
-            # Профильно-взвешенный выбор действия
-            action = _profile_weighted_action(acc_profile, available_actions)
+        for i in range(total_steps):
+            # Профильно-взвешенный выбор действия. Шаги сверх дневного бюджета
+            # выбираются ТОЛЬКО из читающих.
+            action = _profile_weighted_action(
+                acc_profile, available_actions if i < day_actions_n else _read_only
+            )
             target = channels[i % len(channels)]
             success = False
             error = None
             t0_action = time.monotonic()
 
             try:
-                if action in ("update_presence", "browse_dialogs"):
-                    target = "self"
-                    success = False
-                    if action == "update_presence":
-                        success = await asyncio.wait_for(
-                            _perform_update_presence(client), timeout=60
-                        )
-                    else:
-                        success = await asyncio.wait_for(
-                            _perform_browse_dialogs(client), timeout=60
-                        )
-
-                elif action == "mark_read":
-                    target = channels[i % len(channels)]
-                    success = await asyncio.wait_for(
-                        _perform_mark_read(client, target), timeout=60
-                    )
-
-                elif action == "forward_to_saved":
-                    target = channels[i % len(channels)]
-                    success = await asyncio.wait_for(
-                        _perform_forward_to_saved(client, target), timeout=60
-                    )
-
-                elif action == "vote_poll":
-                    target = channels[i % len(channels)]
-                    success = await asyncio.wait_for(
-                        _perform_vote_poll(client, target), timeout=60
-                    )
-
-                elif action == "send_comment":
-                    target = channels[i % len(channels)]
-                    await asyncio.sleep(random.uniform(2.0, 8.0))
-                    await asyncio.sleep(random.uniform(1.0, 4.0))
-                    success = await asyncio.wait_for(
-                        _perform_send_comment(client, target, account_id), timeout=90
-                    )
-
-                elif action == "own_channel_read":
-                    if own_channels:
-                        ch = random.choice(own_channels)
-                        target = (
-                            f"@{ch['username']}"
-                            if ch.get("username")
-                            else str(ch["channel_id"])
-                        )
-                    else:
-                        target = channels[i % len(channels)]
-                    success = await asyncio.wait_for(
-                        _perform_own_channel_read(client, target), timeout=60
-                    )
-
-                elif action in ("smart_bot_start", "own_bot_start"):
-                    if own_bots:
-                        bot = random.choice(own_bots)
-                        target = f"@{bot['username']}"
-                    else:
-                        target = random.choice(_WARMUP_BOTS)
-                    success = await asyncio.wait_for(
-                        _perform_smart_bot_cmd(client, target, "/start"), timeout=60
-                    )
-
-                elif action == "smart_bot_help":
-                    if own_bots:
-                        bot = random.choice(own_bots)
-                        target = f"@{bot['username']}"
-                    else:
-                        target = random.choice(_WARMUP_BOTS)
-                    success = await asyncio.wait_for(
-                        _perform_smart_bot_cmd(client, target, "/help"), timeout=60
-                    )
-
-                elif action == "read_channel":
-                    success = await asyncio.wait_for(
-                        _perform_read_channel(client, target), timeout=60
-                    )
-                elif action == "join_channel":
-                    success = await asyncio.wait_for(
-                        _perform_join_channel(client, target), timeout=60
-                    )
-                elif action == "search":
-                    query = random.choice(_WARMUP_SEARCH_QUERIES)
-                    success = await asyncio.wait_for(
-                        _perform_search(client, query), timeout=60
-                    )
-                    target = f"search:{query}"
-                elif action == "view_profile":
-                    success = await asyncio.wait_for(
-                        _perform_view_profile(client, target), timeout=60
-                    )
-                elif action == "open_chat":
-                    success = await asyncio.wait_for(
-                        _perform_open_chat(client, target), timeout=60
-                    )
-                elif action == "send_reaction":
-                    await asyncio.sleep(random.uniform(2.0, 8.0))
-                    success = await asyncio.wait_for(
-                        _perform_send_reaction(client, target), timeout=60
-                    )
-                elif action == "dm_bot":
-                    success = await asyncio.wait_for(
-                        _perform_dm_bot(client), timeout=60
-                    )
-                    target = "dm_bot"
-                elif action == "story_view":
-                    target = "stories"
-                    success = await asyncio.wait_for(
-                        _perform_story_view(client), timeout=30
-                    )
-                elif action == "check_notifications":
-                    target = "notifications"
-                    success = await asyncio.wait_for(
-                        _perform_check_notifications(client), timeout=20
-                    )
-                else:
-                    await asyncio.sleep(random.uniform(2, 7))
-                    success = True
+                success, target = await perform_action(
+                    action,
+                    client,
+                    target=target,
+                    own_channels=own_channels,
+                    own_bots=own_bots,
+                    account_id=account_id,
+                    found=_found,
+                )
             except asyncio.TimeoutError:
                 error = "timeout"
                 success = False
@@ -1705,15 +2054,15 @@ async def _run_daily_warmup_impl(
 
             # Прогресс-коллбэк после каждого действия
             if update_callback is not None:
-                step_desc = _action_descriptions.get(action, action)
+                step_desc = action_progress(action)
                 status_icon = "✅" if success else "❌"
                 try:
-                    update_callback(i + 1, day_actions_n, f"{status_icon} {step_desc}")
+                    update_callback(i + 1, total_steps, f"{status_icon} {step_desc}")
                 except Exception as cb_exc:
                     log.debug("warmup update_callback error: %s", cb_exc)
 
             # Адаптивная пауза: учитываем серию ошибок
-            if i < day_actions_n - 1:
+            if i < total_steps - 1:
                 if consecutive_fails >= 3:
                     base_pause = random.uniform(120, 300)
                     log.info(
@@ -1754,6 +2103,11 @@ async def _run_daily_warmup_impl(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "сбой disconnect при разогреве аккаунта")
+        # Найденные за прогон каналы — в личный список интересов. Пишем в
+        # finally: прогон мог оборваться на FloodWait, но найденное до этого
+        # момента уже настоящее и терять его незачем.
+        if _found:
+            await remember_interests(pool, account_id, _found)
         # Освобождаем claim аккаунта, чтобы op_worker мог снова его использовать
         try:
             from services import op_worker as _opw
@@ -1947,14 +2301,19 @@ async def _run_warmup_session_impl(
             "completed": False,
         }
 
+    # Своя инфраструктура владельца нужна в любом случае: действиям вида
+    # «читаю свой канал» / «/start своему боту» она задаёт цель. Раньше её
+    # читали только когда не было явных целей, и в сессиях с явным списком
+    # каналов эти действия уходили в чужой канал.
+    _resources = await _get_warmup_resources(pool, owner_id)
+    _own_channels = _resources["channels"]
+    _own_bots = _resources["bots"]
+
     # Если нет явных целей — загружаем из собственной инфраструктуры
     targets: list[str] = list(target_refs) if target_refs else []
     if not targets:
-        resources = await _get_warmup_resources(pool, owner_id)
-        targets = [
-            f"@{c['username']}" for c in resources["channels"] if c.get("username")
-        ]
-        targets += [f"@{b['username']}" for b in resources["bots"] if b.get("username")]
+        targets = [f"@{c['username']}" for c in _own_channels if c.get("username")]
+        targets += [f"@{b['username']}" for b in _own_bots if b.get("username")]
     if not targets:
         targets = list(_WARMUP_PUBLIC_CHANNELS)
 
@@ -2039,7 +2398,20 @@ async def _run_warmup_session_impl(
         # Пер-аккаунтный набор целей: раньше все аккаунты сессии работали по
         # одному и тому же списку (а фолбэк был вообще _WARMUP_PUBLIC_CHANNELS[:8]
         # для всего флота) — совпадающий граф вступлений кластеризует когорту.
-        _acc_targets = _account_channels(acc_id, targets, k=min(8, len(targets))) if targets else []
+        _acc_targets = (
+            _account_channels(
+                acc_id, targets, k=min(channel_pool_size(current_day), len(targets))
+            )
+            if targets
+            else []
+        )
+        # Плюс то, что аккаунт нашёл сам (см. remember_interests): круг каналов
+        # у каждого аккаунта свой и со временем растёт.
+        for _disc in await get_discovered_channels(pool, acc_id):
+            if _disc not in _acc_targets:
+                _acc_targets.append(_disc)
+        _acc_targets = _acc_targets[: channel_pool_size(current_day)]
+        _found: list[str] = []
         _acc_actions = max(
             1,
             int(actions_per_acc_base * _time_of_day_multiplier(_acc_geo, account_id=acc_id)),
@@ -2083,55 +2455,61 @@ async def _run_warmup_session_impl(
             warmup_day=current_day,
         )
 
+        # Читающие действия — сверх дневного бюджета: бюджет ограничивает риск,
+        # а у читающих его нет (см. _reading_bonus).
+        _read_only = _reading_only(available_actions)
+        _acc_steps = _acc_actions + (
+            _reading_bonus(current_day, _acc_actions) if _read_only else 0
+        )
+
         try:
             await asyncio.wait_for(client.connect(), timeout=15)
 
-            for i in range(_acc_actions):
-                action = random.choice(available_actions)
+            for i in range(_acc_steps):
+                action = random.choice(
+                    available_actions if i < _acc_actions else _read_only
+                )
                 target = _acc_targets[i % len(_acc_targets)] if _acc_targets else ""
                 success = False
                 error_str: Optional[str] = None
                 t0 = time.monotonic()
 
-                # Human-like delays: имитация чтения, typing, пауз
-                _human_delay = random.uniform(1.0, 4.0)
-                if action in ("read_channel", "browse_dialogs"):
-                    _human_delay = random.uniform(3.0, 12.0)  # чтение — дольше
-                elif action in ("send_comment", "send_reaction"):
-                    _human_delay = random.uniform(0.5, 2.0)  # реакция — быстрее
+                # Human-like delays: имитация чтения, typing, пауз.
+                # Читающие действия занимают больше времени, чем клик по
+                # реакции — это и есть разница между «смотрю» и «жму».
+                _spec = _ACTION_SPECS.get(action)
+                if _spec is not None and _spec.writes:
+                    _human_delay = random.uniform(0.5, 2.0)
+                elif action in (
+                    "read_channel",
+                    "browse_dialogs",
+                    "deep_scroll",
+                    "view_posts",
+                    "read_comments",
+                    "open_media",
+                    "open_chat",
+                ):
+                    _human_delay = random.uniform(3.0, 12.0)
+                else:
+                    _human_delay = random.uniform(1.0, 4.0)
                 await asyncio.sleep(_human_delay)
 
                 try:
-                    if action in ("update_presence", "browse_dialogs"):
-                        target = "self"
-                        success = await (
-                            _perform_update_presence(client)
-                            if action == "update_presence"
-                            else _perform_browse_dialogs(client)
-                        )
-                    elif action == "read_channel" and target:
-                        success = await _perform_read_channel(client, target)
-                    elif action == "send_reaction" and target:
-                        await asyncio.sleep(random.uniform(2.0, 8.0))
-                        success = await _perform_send_reaction(client, target)
-                    elif action == "mark_read" and target:
-                        success = await _perform_mark_read(client, target)
-                    elif action == "send_comment" and target:
-                        await asyncio.sleep(random.uniform(2.0, 8.0))
-                        await asyncio.sleep(random.uniform(1.0, 4.0))
-                        success = await _perform_send_comment(client, target, acc_id)
-                    elif action == "forward_to_saved" and target:
-                        success = await _perform_forward_to_saved(client, target)
-                    elif action == "vote_poll" and target:
-                        success = await _perform_vote_poll(client, target)
-                    elif action == "own_channel_read" and target:
-                        success = await _perform_own_channel_read(client, target)
-                    elif action in ("smart_bot_start", "own_bot_start") and target:
-                        success = await _perform_smart_bot_cmd(client, target, "/start")
-                    elif action == "smart_bot_help" and target:
-                        success = await _perform_smart_bot_cmd(client, target, "/help")
-                    else:
-                        success = True
+                    # Одна таблица действий на оба пути прогрева. Раньше здесь
+                    # была вторая, урезанная копия: половина объявленных
+                    # действий (view_profile, open_chat, join_channel, search,
+                    # dm_bot, story_view, check_notifications) сюда не доехала,
+                    # а ветка `else` засчитывала их как ВЫПОЛНЕННЫЕ. Отчёт
+                    # показывал прогрев, которого не было.
+                    success, target = await perform_action(
+                        action,
+                        client,
+                        target=target,
+                        own_channels=_own_channels,
+                        own_bots=_own_bots,
+                        account_id=acc_id,
+                        found=_found,
+                    )
 
                     dur_s = time.monotonic() - t0
                     try:
@@ -2247,6 +2625,9 @@ async def _run_warmup_session_impl(
                 await asyncio.wait_for(client.disconnect(), timeout=5)
             except Exception:
                 log_exc_swallow(log, "warmup_session: client disconnect failed")
+            # Найденные за прогон каналы — в личный список интересов аккаунта.
+            if _found:
+                await remember_interests(pool, acc_id, _found)
             # Освобождаем claim аккаунта
             if _claimed:
                 try:

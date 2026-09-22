@@ -19320,6 +19320,9 @@ async function rehabAct(accId, action) {
 // Журнал прогрева: показывает, что аккаунт делал на самом деле. Раньше эти
 // записи копились в базе и не были видны нигде — на вопрос «он греется?»
 // ответить было нечем.
+// Список обязан покрывать ВСЕ действия реестра (services/account_warmer.
+// _ACTION_SPECS) — иначе журнал показывает сырой ключ вида `deep_scroll`.
+// Стережёт tests/test_warmup_action_parity.py.
 const WLOG_ACTION = {
   read_channel:'Читал канал', view_profile:'Смотрел профиль', open_chat:'Открывал чат',
   send_reaction:'Ставил реакцию', dm_bot:'Писал боту', join_channel:'Вступал в канал',
@@ -19327,14 +19330,24 @@ const WLOG_ACTION = {
   browse_dialogs:'Листал диалоги', forward_to_saved:'Пересылал в избранное',
   vote_poll:'Голосовал в опросе', send_comment:'Комментировал',
   smart_bot_cmd:'Команда боту', own_channel_read:'Читал свой канал',
-  story_view:'Смотрел сторис', check_notifications:'Проверял уведомления'};
+  story_view:'Смотрел сторис', check_notifications:'Проверял уведомления',
+  smart_bot_start:'/start своему боту', smart_bot_help:'/help своему боту',
+  own_bot_start:'Запускал своего бота',
+  // читающие действия — ничего не пишут в Telegram
+  deep_scroll:'Листал ленту вглубь', view_posts:'Просматривал посты',
+  read_comments:'Читал комментарии', open_media:'Открывал фото из поста',
+  open_link:'Переходил по ссылке', search_in_channel:'Искал внутри канала',
+  explore_similar:'Смотрел похожие каналы', channel_stories:'Смотрел истории канала',
+  read_saved:'Заходил в Избранное', check_stickers:'Смотрел стикеры',
+  top_peers:'Обновлял частые контакты', open_folders:'Открывал папки',
+  settings_peek:'Заглядывал в настройки'};
 async function openWarmupLog(planId) {
   push('s-warmuplog');
   txt('wlogHead','');
   txt('wlogList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/warmup/'+planId+'/log');
-    const p = d.plan||{}, h = p.health||{}, w = d.week||{};
+    const p = d.plan||{}, h = p.health||{}, w = d.week||{}, c = d.circle||{};
     const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
     txt('wlogHead',`
       <div style="background:var(--bg2);border-left:3px solid ${col};border-radius:8px;padding:11px 13px">
@@ -19342,6 +19355,7 @@ async function openWarmupLog(planId) {
         ${h.hint?`<div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.4">${esc(h.hint)}</div>`:''}
         <div style="font-size:12px;margin-top:7px">За 7 дней: <b style="color:var(--green)">${w.ok||0}</b> успешных · <b style="color:${(w.fail||0)?'var(--red,#ef4444)':'var(--hint)'}">${w.fail||0}</b> неудачных</div>
         ${p.last_action_at?`<div style="font-size:11px;color:var(--hint);margin-top:3px">Последнее действие: ${esc(ago(p.last_action_at))}</div>`:'<div style="font-size:11px;color:var(--hint);margin-top:3px">Действий ещё не было</div>'}
+        ${c.size?`<div style="font-size:11px;color:var(--hint);margin-top:5px;line-height:1.4">Круг каналов: <b>${c.size}</b>${c.found?` · нашёл сам: <b>${c.found}</b>`:''}${(c.examples&&c.examples.length)?`<br>${esc(c.examples.join(', '))}`:''}</div>`:''}
       </div>`);
     const acts = d.actions||[];
     if (!acts.length) { txt('wlogList', empty('🌱','Действий пока нет','План ещё ни разу не отработал день')); return; }
