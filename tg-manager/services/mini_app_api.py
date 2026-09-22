@@ -3141,6 +3141,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if status_filter not in OPERATION_STATUSES:
                 return _err(
                     "Неизвестный статус операции: " + status_filter, 400)
+        # Фильтр по типу операции. Экран массовой публикации раньше просил общую
+        # страницу очереди (30 строк) и отбирал mass_publish уже у себя: стоило
+        # владельцу запустить тридцать инвайтов после последней публикации — и
+        # экран уверенно писал «Нет операций публикации», хотя публикации были.
+        # Молча проигнорированный фильтр читается как сломанный, поэтому мусор
+        # отклоняем, а не глотаем.
+        op_type_filter = (request.query.get("op_type") or "").strip()
+        if op_type_filter:
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", op_type_filter):
+                return _err("Неизвестный тип операции: " + op_type_filter[:40], 400)
         # err_cnt — число упавших под-элементов (каналов) для показа кнопки
         # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
         _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
@@ -3169,9 +3179,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # «фильтр не дошёл до запроса».
         counts: dict = {}
         try:
-            for r in await pool.fetch(
+            if op_type_filter:
+                _cnt_rows = await pool.fetch(
                     """SELECT status, COUNT(*) AS n FROM operation_queue
-                       WHERE owner_id=$1 GROUP BY status""", uid):
+                       WHERE owner_id=$1 AND op_type=$2 GROUP BY status""",
+                    uid, op_type_filter)
+            else:
+                _cnt_rows = await pool.fetch(
+                    """SELECT status, COUNT(*) AS n FROM operation_queue
+                       WHERE owner_id=$1 GROUP BY status""", uid)
+            for r in _cnt_rows:
                 counts[str(r["status"])] = int(r["n"] or 0)
         except Exception:
             log.debug("operations: счётчики по статусам недоступны uid=%s", uid)
@@ -3179,28 +3196,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           COALESCE(oq.error_msg, oq.result->>'reason') AS error_msg,
                           oq.created_at, oq.started_at, oq.finished_at,
                           oq.scheduled_for, {_err_sub}"""
+        _where = "oq.owner_id=$1"
+        _wargs: list = [uid]
         if status_filter:
-            rows = await _safe_fetch(pool,
-                f"""SELECT {_cols}
-                   FROM operation_queue oq WHERE oq.owner_id=$1 AND oq.status=$2
-                   ORDER BY oq.created_at DESC LIMIT $3 OFFSET $4""",
-                uid, status_filter, limit, offset)
-            total = await _safe_count(pool,
-                "SELECT COUNT(*) FROM operation_queue oq "
-                "WHERE oq.owner_id=$1 AND oq.status=$2",
-                uid, status_filter)
-        else:
-            rows = await _safe_fetch(pool,
-                f"""SELECT {_cols}
-                   FROM operation_queue oq WHERE oq.owner_id=$1
-                   ORDER BY oq.created_at DESC LIMIT $2 OFFSET $3""",
-                uid, limit, offset)
-            total = await _safe_count(pool,
-                "SELECT COUNT(*) FROM operation_queue oq WHERE oq.owner_id=$1", uid)
+            _wargs.append(status_filter)
+            _where += f" AND oq.status=${len(_wargs)}"
+        if op_type_filter:
+            _wargs.append(op_type_filter)
+            _where += f" AND oq.op_type=${len(_wargs)}"
+        rows = await _safe_fetch(pool,
+            f"""SELECT {_cols}
+               FROM operation_queue oq WHERE {_where}
+               ORDER BY oq.created_at DESC
+               LIMIT ${len(_wargs) + 1} OFFSET ${len(_wargs) + 2}""",
+            *_wargs, limit, offset)
+        total = await _safe_count(pool,
+            f"SELECT COUNT(*) FROM operation_queue oq WHERE {_where}", *_wargs)
         return _json_resp({
             "operations": rows,
             "total": int(total or 0),
             "counts": counts,
+            "op_type": op_type_filter or None,
             "page": {"offset": offset, "limit": limit,
                      "has_more": (offset + len(rows or [])) < int(total or 0)},
         })
@@ -13880,6 +13896,47 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Mass Publish ─────────────────────────────────────────────────────────
 
+    async def mass_publish_targets(request: web.Request) -> web.Response:
+        """Сколько каналов реально получат массовую публикацию — и какие именно.
+
+        Экран обещал «опубликовать во ВСЕ каналы» и спрашивал подтверждение, ни
+        разу не назвав число: человек жал необратимую кнопку, не зная, три у него
+        канала или триста. Считаем ровно тем же запросом, что и mass_publish
+        ниже (managed_channels по owner_id), иначе подпись под кнопкой обещала бы
+        один набор, а публикация ушла бы в другой: список /channels шире — он
+        добавляет каналы экосистем и рабочих пространств, которых массовая
+        публикация не касается.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sample_limit = min(validate_integer(request.query.get("sample", "12"),
+                                                min_val=0, max_val=100) or 0, 100)
+        except (ValueError, TypeError):
+            sample_limit = 12
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
+        sample = []
+        if sample_limit:
+            # Порядок детерминированный: «тест на N каналов» должен брать тот же
+            # первый N, что человек увидел в подтверждении, а не случайную
+            # выборку от запроса к запросу.
+            rows = await _safe_fetch(pool,
+                """SELECT channel_id, username, title,
+                          COALESCE(members_count, 0) AS member_count
+                   FROM managed_channels WHERE owner_id=$1
+                   ORDER BY added_at DESC NULLS LAST, channel_id DESC
+                   LIMIT $2""", uid, sample_limit)
+            for r in (rows or []):
+                sample.append({
+                    "channel_id": int(r["channel_id"]) if r["channel_id"] is not None else None,
+                    "username": r["username"],
+                    "title": r["title"],
+                    "member_count": int(r["member_count"] or 0),
+                })
+        return _json_resp({"ok": True, "total": int(total or 0), "sample": sample})
+
     async def mass_publish(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -16946,6 +17003,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/template", create_template)
     app.router.add_delete("/api/miniapp/template/{tpl_id}", delete_template)
     # Mass Publish
+    app.router.add_get("/api/miniapp/mass_publish/targets", mass_publish_targets)
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
     app.router.add_post("/api/miniapp/schedule_post", schedule_post)
     # Proxies

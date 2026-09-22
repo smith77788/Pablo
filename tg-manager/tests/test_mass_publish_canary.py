@@ -47,9 +47,20 @@ def test_send_uses_canary_and_confirms_full_blast():
     m = re.search(r"async function sendMassPublish\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
     assert m, "sendMassPublish не найдена"
     body = m.group(1)
-    # канарейка: берём первые N каналов и шлём channel_ids
+    # Канарейка: берём первые N каналов и шлём channel_ids.
+    #
+    # «Первые N» переехали с клиента на сервер: раньше фронт тянул список
+    # /channels и резал его `slice(0, canary)`, но этот список ШИРЕ набора
+    # публикации — он добавляет каналы экосистем и рабочих пространств, которых
+    # mass_publish не касается, так что «тест» проверял не тот набор. Теперь
+    # адресатов отдаёт /mass_publish/targets, считающий их тем же запросом, что
+    # и сама публикация, с детерминированным порядком и LIMIT sample. Защита та
+    # же: ровно N каналов уходят как channel_ids.
     assert "mpCanary" in body
-    assert "slice(0, canary)" in body
+    assert "mass_publish/targets?sample='+canary" in body, (
+        "канарейка обязана просить ровно N каналов из набора публикации")
+    assert "sample.map(c=>c.channel_id)" in body, (
+        "из ответа берутся именно id каналов-адресатов")
     assert "payload.channel_ids = channel_ids" in body
     # полная публикация во все — только после подтверждения (необратимо)
     assert "askConfirm(" in body

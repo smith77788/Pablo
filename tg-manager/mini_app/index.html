@@ -3826,6 +3826,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div class="sec">Опубликовать сразу во все каналы</div>
     <div class="lst" style="padding:14px">
+      <!-- Экран обещал «во ВСЕ каналы» и спрашивал подтверждение, ни разу не
+           назвав число: человек жал необратимую кнопку, не зная, три у него
+           канала или триста. Теперь адресаты названы до нажатия. -->
+      <div id="mpTargets" style="margin-bottom:12px;font-size:12.5px;color:var(--hint);line-height:1.45"></div>
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
         <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
@@ -3842,8 +3846,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
       <div class="field">
         <label>🐤 Сначала тест на N каналов</label>
-        <input type="number" id="mpCanary" min="0" max="5000" value="0" placeholder="0 = сразу во все">
+        <input type="number" id="mpCanary" min="0" max="5000" value="0" placeholder="0 = сразу во все" oninput="onMpCanaryInput()">
         <div class="field-note">Безопасно: опубликуйте в несколько каналов, проверьте результат в «Очереди операций», затем — во все. Публикацию нельзя отменить после старта.</div>
+        <div class="field-note" id="mpCanaryNote" style="display:none"></div>
       </div>
       <div class="field">
         <label>📅 Запланировать (необязательно)</label>
@@ -12817,17 +12822,106 @@ async function saveTpl() {
 }
 
 // ── Mass Publish ───────────────────────────────────────
+// Сколько каналов реально получат пост. null = ещё не знаем (или узнать не
+// удалось) — тогда кнопка и подтверждение обязаны сказать это вслух, а не
+// молчать: публикация необратима.
+let MP_TOTAL = null;
+let MP_SAMPLE = [];
+
 function openMassPub() {
   document.getElementById('mpText').value='';
   document.getElementById('mpLen').textContent='0';
   { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
   { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
+  { const _n=document.getElementById('mpCanaryNote'); if(_n) _n.style.display='none'; }
   document.getElementById('mpErr').style.display='none';
   document.getElementById('mpBtn').disabled=false;
-  document.getElementById('mpBtn').textContent='📡 Опубликовать во все каналы';
   push('s-masspub');
+  loadMpTargets();
   loadMpOps();
 }
+
+// Имя канала для человека: @username, иначе заголовок, иначе id.
+function _mpChName(c) {
+  if (!c) return '';
+  if (c.username) return '@'+c.username;
+  if (c.title) return c.title;
+  return 'канал #'+c.channel_id;
+}
+
+// Перечислить адресатов словами, не вываливая двести строк в диалог.
+function _mpChList(list, cap) {
+  const lim = cap || 5;
+  const names = list.slice(0, lim).map(_mpChName);
+  const rest = list.length - names.length;
+  return names.join(', ') + (rest > 0 ? ' и ещё '+rest : '');
+}
+
+async function loadMpTargets() {
+  MP_TOTAL = null; MP_SAMPLE = [];
+  txt('mpTargets', '<span style="opacity:.7">Считаю, сколько каналов получат пост…</span>');
+  renderMpBtn();
+  try {
+    const d = await api('/api/miniapp/mass_publish/targets?sample=12');
+    MP_TOTAL = Number(d.total || 0);
+    MP_SAMPLE = d.sample || [];
+    if (!MP_TOTAL) {
+      txt('mpTargets', empty('📡','Публиковать некуда','Ни одного канала, принадлежащего вам, не найдено',
+          {label:'📡 Фабрика каналов', fn:'openChannelFactory()'}));
+    } else {
+      const who = MP_SAMPLE.length ? '<br><span style="opacity:.7">'+esc(_mpChList(MP_SAMPLE, 4))+'</span>' : '';
+      txt('mpTargets', '📡 Пост получат <b>'+String(MP_TOTAL)+'</b> '+plural(MP_TOTAL,'канал','канала','каналов')+who);
+    }
+  } catch(e) {
+    // Не тупик: публиковать по-прежнему можно, но подтверждение честно скажет,
+    // что число адресатов неизвестно.
+    txt('mpTargets', errHtml('Не удалось узнать число каналов: '+(e.message||''), 'loadMpTargets()'));
+  }
+  renderMpCanaryNote();
+  renderMpBtn();
+}
+
+// Подпись кнопки = то, что случится по нажатию. Раньше она обещала «во все
+// каналы», не называя их числа.
+function renderMpBtn() {
+  const btn = document.getElementById('mpBtn');
+  if (!btn) return;
+  const canary = Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0);
+  if (MP_TOTAL === 0) {
+    // Ноль каналов — это знание, а не незнание: кнопка не должна обещать
+    // публикацию, которой не во что уйти.
+    btn.textContent = '📡 Нет каналов для публикации';
+  } else if (canary > 0) {
+    const n = (MP_TOTAL != null) ? Math.min(canary, MP_TOTAL) : canary;
+    btn.textContent = '🐤 Тест: опубликовать в '+String(n)+' '+plural(n,'канал','канала','каналов');
+  } else if (MP_TOTAL != null && MP_TOTAL > 0) {
+    btn.textContent = '📡 Опубликовать в '+String(MP_TOTAL)+' '+plural(MP_TOTAL,'канал','канала','каналов');
+  } else {
+    btn.textContent = '📡 Опубликовать во все каналы';
+  }
+}
+
+// «Тест на N каналов» при N ≥ всего каналов — это не тест, а полная публикация
+// под видом канарейки. Раньше она так и уходила, а тост рапортовал «🐤 Тест».
+function renderMpCanaryNote() {
+  const el = document.getElementById('mpCanaryNote');
+  if (!el) return;
+  const canary = Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0);
+  if (!canary || MP_TOTAL == null || MP_TOTAL === 0) { el.style.display='none'; return; }
+  if (canary >= MP_TOTAL) {
+    el.style.display='block';
+    el.style.color='var(--orange)';
+    el.textContent = '⚠️ У вас '+String(MP_TOTAL)+' '+plural(MP_TOTAL,'канал','канала','каналов')
+      + ' — тест на '+num(canary)+' это публикация во все. Уменьшите число или поставьте 0.';
+  } else {
+    el.style.display='block';
+    el.style.color='';
+    el.textContent = 'Пост уйдёт в первые '+String(canary)+' '+plural(canary,'канал','канала','каналов')
+      + ' из '+String(MP_TOTAL)+'. Остальные '+String(MP_TOTAL-canary)+' не затронуты.';
+  }
+}
+
+function onMpCanaryInput() { renderMpCanaryNote(); renderMpBtn(); }
 
 document.getElementById('mpText').addEventListener('input', function(){
   document.getElementById('mpLen').textContent = this.value.length;
@@ -12835,9 +12929,14 @@ document.getElementById('mpText').addEventListener('input', function(){
 
 async function loadMpOps() {
   try {
-    const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>o.op_type==='mass_publish').slice(0,5);
-    if (!ops.length) { txt('mpOpsList', empty('📡','Нет операций публикации')); return; }
+    // Раньше брали общую страницу очереди (30 строк) и отбирали публикации уже
+    // здесь: стоило запустить тридцать инвайтов после последней публикации — и
+    // экран писал «Нет операций публикации», хотя они были. Фильтр по типу
+    // теперь считает сервер, так что пустой ответ действительно значит «нет».
+    const d = await api('/api/miniapp/operations?op_type=mass_publish&limit=5&offset=0');
+    const ops = d.operations||[];
+    const opsTotal = (d.total != null) ? d.total : ops.length;
+    if (!ops.length) { txt('mpOpsList', empty('📡','Нет операций публикации','Здесь появятся ваши массовые публикации')); return; }
     txt('mpOpsList', ops.map(o=>{
       const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
       const [bc,bl]=stb(o.status);
@@ -12852,8 +12951,14 @@ async function loadMpOps() {
         </div>
         ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
       </div>`;
-    }).join(''));
-  } catch(e) { txt('mpOpsList',''); }
+    }).join('') + (opsTotal > ops.length
+      ? `<div class="li tap" onclick="openOps()"><div class="li-body"><div class="li-name">Вся история публикаций — ${opsTotal}</div></div><span class="chev">›</span></div>`
+      : ''));
+  } catch(e) {
+    // Молча обнулять список нельзя: пустая область читается как «публикаций
+    // нет», хотя на деле не удалось их прочитать.
+    txt('mpOpsList', errHtml('Не удалось загрузить операции публикации: '+(e.message||''), 'loadMpOps()'));
+  }
 }
 
 async function sendMassPublish() {
@@ -12863,6 +12968,10 @@ async function sendMassPublish() {
   const errEl = document.getElementById('mpErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  if (MP_TOTAL === 0) {
+    errEl.textContent='Публиковать некуда: ни одного вашего канала не найдено. Создайте канал в «Фабрике каналов» или импортируйте существующие.';
+    errEl.style.display='block'; return;
+  }
   // Расписание: datetime-local — локальное время; в UTC ISO для бэка. Должно быть
   // в будущем.
   let scheduled_for = null;
@@ -12874,17 +12983,45 @@ async function sendMassPublish() {
     scheduled_for = _d.toISOString();
   }
   // Канарейка: публикуем в первые N каналов (backend поддерживает channel_ids).
-  // Полная публикация во ВСЕ каналы необратима → подтверждение.
+  // Полная публикация во ВСЕ каналы необратима → подтверждение, которое обязано
+  // назвать число адресатов. Раньше оно спрашивало «во ВСЕ ваши каналы?», и
+  // человек подтверждал, не зная, три их или триста.
   let channel_ids = null;
   if (canary > 0) {
+    let targets;
     try {
-      const cd = await api('/api/miniapp/channels');
-      const ids = (cd.channels||[]).map(c=>c.channel_id).filter(x=>x!=null).slice(0, canary);
-      if (!ids.length) { errEl.textContent='Нет каналов для теста'; errEl.style.display='block'; return; }
-      channel_ids = ids;
+      // Берём адресатов ровно из того набора, в который уйдёт полная публикация.
+      // Раньше тест брал их из /channels — списка шире: он добавляет каналы
+      // экосистем и рабочих пространств, которых массовая публикация не
+      // касается, так что «тест» проверял не тот набор.
+      targets = await api('/api/miniapp/mass_publish/targets?sample='+canary);
     } catch(e) { errEl.textContent='Не удалось загрузить каналы: '+(e.message||''); errEl.style.display='block'; return; }
-  } else if (!scheduled_for) {
-    if (!(await askConfirm('Опубликовать во ВСЕ ваши каналы? После старта публикацию нельзя отменить. Совет: сначала протестируйте на нескольких.'))) return;
+    MP_TOTAL = Number(targets.total||0);
+    const sample = targets.sample||[];
+    const ids = sample.map(c=>c.channel_id).filter(x=>x!=null);
+    if (!ids.length) { errEl.textContent='Нет каналов для теста'; errEl.style.display='block'; return; }
+    if (canary >= MP_TOTAL) {
+      // Полная публикация под видом канарейки: раньше она так и уходила, а тост
+      // рапортовал «🐤 Тест-публикация».
+      errEl.textContent = 'У вас '+MP_TOTAL+' '+plural(MP_TOTAL,'канал','канала','каналов')
+        + ', а тест запрошен на '+canary+' — это публикация во все. Уменьшите число или поставьте 0.';
+      errEl.style.display='block';
+      renderMpCanaryNote();
+      return;
+    }
+    if (!(await askConfirm('Тест-публикация в '+ids.length+' '+plural(ids.length,'канал','канала','каналов')+':\n\n'
+        + _mpChList(sample, 6) + '\n\nОстальные '+(MP_TOTAL-ids.length)+' не затронуты. Отменить публикацию после старта нельзя.'))) return;
+    channel_ids = ids;
+  } else {
+    const whereTo = (MP_TOTAL != null && MP_TOTAL > 0)
+      ? 'во все ваши каналы — их '+MP_TOTAL
+      : 'во ВСЕ ваши каналы (узнать их число не удалось)';
+    const when = scheduled_for
+      ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru')+'. До этого момента операцию можно отменить в «Очереди операций».'
+      : '\n\nПосле старта публикацию нельзя отменить. Совет: сначала протестируйте на нескольких.';
+    // Отложенная публикация раньше уходила вообще без подтверждения: достаточно
+    // было заполнить дату — и пост уезжал во все каналы с одного нажатия.
+    if (!(await askConfirm('Опубликовать '+whereTo+'?'+when))) return;
   }
   const btn = document.getElementById('mpBtn');
   btn.disabled=true; btn.textContent='⏳ Добавление в очередь...';
@@ -12898,12 +13035,14 @@ async function sendMassPublish() {
     { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
     tg.HapticFeedback?.notificationOccurred('success');
     const _when = scheduled_for ? (' на '+new Date(scheduled_for).toLocaleString('ru')) : '';
-    toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+num(d.total)+' каналов · op #'+d.op_id);
+    toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+d.total+' '+plural(d.total,'канал','канала','каналов')+' · операция #'+d.op_id);
+    { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
+    renderMpCanaryNote();
     loadMpOps();
   } catch(e) {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
     tg.HapticFeedback?.notificationOccurred('error');
-  } finally { btn.disabled=false; btn.textContent='📡 Опубликовать во все каналы'; }
+  } finally { btn.disabled=false; renderMpBtn(); }
 }
 
 // ── Proxies ────────────────────────────────────────────
@@ -22707,6 +22846,14 @@ function num(v) {
   if (v>=1e6) return (v/1e6).toFixed(1)+'M';
   if (v>=1e3) return (v/1e3).toFixed(1)+'K';
   return String(v);
+}
+// Русское склонение по числу: «1 канал», «2 канала», «5 каналов».
+function plural(n, one, few, many) {
+  n = Math.abs(Math.trunc(Number(n) || 0));
+  const d = n % 10, h = n % 100;
+  if (d === 1 && h !== 11) return one;
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return few;
+  return many;
 }
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
