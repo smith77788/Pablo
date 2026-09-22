@@ -2001,6 +2001,48 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     return {str(r["target"]) for r in (rows or []) if r["target"]}
 
 
+async def settled_targets(pool: asyncpg.Pool, op_id: int) -> dict[str, str]:
+    """Цели, по которым вопрос уже ЗАКРЫТ, и чем именно: {цель: 'ok' | 'skip'}.
+
+    Пара к `completed_targets`, но для рассылок в личные сообщения, где
+    «сделано» — это два разных исхода. `ok` — сообщение доставлено. `skip` —
+    получатель недостижим навсегда: закрытые ЛС, чёрный список, удалённый
+    аккаунт. Повторять ни то, ни другое нельзя, но по разным причинам: первое
+    даст человеку ВТОРОЕ одинаковое сообщение (самая заметная спам-сигнатура,
+    от которой операция уже защищается внутри одного прогона, схлопывая дубли
+    в списке), второе — ещё одну неудачную попытку контакта, а их череда сама
+    по себе ведёт к PeerFlood. Ровно так же отбирает получателей dm_engine для
+    кампаний: `dm_campaign_log` со статусами sent/blocked/skip.
+
+    Когда у цели есть обе записи (упала на одном аккаунте, прошла на другом),
+    выигрывает 'ok': вопрос закрыт успехом.
+
+    Пустой словарь на первом прогоне, поэтому вызов безопасен и там, где
+    повтора не было. Никогда не бросает: не прочитали журнал — работаем как
+    раньше.
+    """
+    rows = await _safe_fetch(
+        pool,
+        "SELECT DISTINCT ON (target) target, status FROM operation_log "
+        " WHERE op_id=$1 AND status IN ('ok','skip') AND target IS NOT NULL "
+        " ORDER BY target, (status='ok') DESC",
+        op_id,
+        log_ctx=f"[settled_targets op={op_id}]",
+    )
+    # Разбор строк — защищённый: обещание «никогда не бросает» обязано держаться
+    # и на неожиданной форме строки, иначе сбой чтения журнала уронит саму
+    # рассылку, ради которой журнал и читается.
+    out: dict[str, str] = {}
+    for r in (rows or []):
+        try:
+            target, status = r["target"], r["status"]
+        except (KeyError, TypeError, IndexError):
+            continue
+        if target:
+            out[str(target)] = str(status)
+    return out
+
+
 async def completed_account_targets(
     pool: asyncpg.Pool, op_id: int, action: str
 ) -> set[tuple[int, str]]:
@@ -8414,6 +8456,21 @@ async def _exec_bulk_dm_adhoc(
         acc_idx = 0
         sent_by_acc: dict[int, int] = {}
 
+        # Повтор операции (автоматический после сетевого сбоя, сброс зависшей,
+        # ручной) поднимает исполнителя заново с done_items=0 и ведёт его по
+        # ВСЕМУ списку получателей сначала. Пер-целевой журнал у этой рассылки
+        # уже был, но никто его не читал — и человек, которому сообщение уже
+        # ушло, получал ВТОРОЕ такое же. Это та самая спам-сигнатура, от которой
+        # операция защищается внутри одного прогона, схлопывая дубли в списке:
+        # на оси повтора защиты просто не было.
+        _settled = {
+            str(k).lstrip("@").strip().lower(): v
+            for k, v in (await settled_targets(pool, op_id)).items()
+        }
+        if _settled:
+            log.info("bulk_dm_adhoc op=%d: повтор — по %d получателям вопрос уже закрыт",
+                     op_id, len(_settled))
+
         async def _log_step(step: int, target: str, status: str, message: str) -> None:
             """Построчный аудит в «📋 Лог» операции.
 
@@ -8435,6 +8492,21 @@ async def _exec_bulk_dm_adhoc(
                     "fail": err_count,
                     "summary": f"Отменено. Отправлено: {ok_count}/{total}",
                 }
+
+            _prev = _settled.get(str(username).lstrip("@").strip().lower())
+            if _prev:
+                # Считаем тем же исходом, что и в прошлый раз: работа сделана, и
+                # счётчик не должен проседать только потому, что сделал её
+                # прошлый прогон.
+                if _prev == "ok":
+                    ok_count += 1
+                else:
+                    skip_count += 1
+                await _safe_execute(
+                        pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
 
             if not active_accounts:
                 err_count += 1
@@ -14515,15 +14587,48 @@ async def _exec_self_promo_blast(
 
     ok_count = 0
     fail_count = 0
+    skip_count = 0
+    cancelled = False
     # Group by bot_token to use the correct bot for each user
     token_cache: dict[int, Bot] = {}
 
+    # Повтор операции (автоматический после сбоя, сброс зависшей, ручной)
+    # поднимает исполнителя заново с done_items=0 и ведёт по ВСЕМУ списку
+    # подписчиков сначала. Без журнала целей человек получал промо-сообщение
+    # второй раз — при том что оно и с первого раза на грани терпения, а
+    # повторная отправка тому, кто уже заблокировал бота, вдобавок копит отказы.
+    async def _log_user(step: int, key: str, status: str, msg: str = "") -> None:
+        await _safe_execute(
+            pool,
+            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+            "VALUES($1,$2,$3,$4,$5)",
+            op_id, step, key, status, (msg or None),
+            log_ctx=f"[self_promo_log op={op_id}]",
+        )
+
+    _settled = await settled_targets(pool, op_id)
+    if _settled:
+        log.info("self_promo_blast op=%d: повтор — по %d подписчикам вопрос уже закрыт",
+                 op_id, len(_settled))
+
     for idx, row in enumerate(users):
         if await _is_cancelled(pool, op_id):
+            cancelled = True
             break
         user_id = row["user_id"]
         bot_id = row["bot_id"]
         token = row["token"]
+        _key = f"{bot_id}:{user_id}"
+
+        _prev = _settled.get(_key)
+        if _prev:
+            if _prev == "ok":
+                ok_count += 1
+            else:
+                skip_count += 1
+            await _safe_execute(
+                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
 
         try:
             if bot_id not in token_cache:
@@ -14540,6 +14645,7 @@ async def _exec_self_promo_blast(
             _b = token_cache[bot_id]
             await _b.send_message(user_id, message_text, parse_mode="HTML")
             ok_count += 1
+            await _log_user(idx, _key, "ok")
         except Exception as exc:
             exc_s = str(exc).lower()
             if "blocked" in exc_s or "deactivated" in exc_s or "not found" in exc_s:
@@ -14550,7 +14656,13 @@ async def _exec_self_promo_blast(
                     )
                 except Exception as e:
                     log_exc_swallow(log, f"self_promo_blast: deactivate bot_user failed for user={user_id} bot={bot_id}: {e}")
-            fail_count += 1
+                # Получатель недостижим НАВСЕГДА (заблокировал бота, удалён).
+                # Это не наш сбой и не повод пытаться снова на повторе.
+                skip_count += 1
+                await _log_user(idx, _key, "skip", str(exc)[:200])
+            else:
+                fail_count += 1
+                await _log_user(idx, _key, "error", str(exc)[:200])
 
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -14570,12 +14682,18 @@ async def _exec_self_promo_blast(
         "WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
         int(template_id), owner_id,
     )
+    # Отмена возвращалась как «done»: операция выходила из цикла по break и
+    # рапортовала успех, хотя владелец её остановил.
+    _skip_note = f" 🔒 {skip_count}" if skip_count else ""
     return {
-        "status": "done",
+        "status": "cancelled" if cancelled else "done",
         "ok": ok_count,
         "fail": fail_count,
+        "skipped": skip_count,
         "total": total,
-        "summary": f"📢 Self-promo рассылка: ✅ {ok_count}/{total}" + (f" ❌ {fail_count}" if fail_count else ""),
+        "summary": (("🛑 Остановлено. " if cancelled else "📢 Self-promo рассылка: ")
+                    + f"✅ {ok_count}/{total}"
+                    + (f" ❌ {fail_count}" if fail_count else "") + _skip_note),
     }
 
 
