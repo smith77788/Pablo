@@ -2350,12 +2350,12 @@ GEO_PRESETS: dict[str, dict] = {
         "count": len(TIER1_GLOBAL),
     },
     "dach": {
-        "label": "🇩🇪 DACH (DE+AT+CH)",
+        "label": "🇩🇪 DACH — Германия, Австрия, Швейцария",
         "cities": DACH_CITIES,
         "count": len(DACH_CITIES),
     },
     "latam": {
-        "label": "🌐 LATAM",
+        "label": "🌐 Латинская Америка",
         "cities": LATAM_CITIES,
         "count": len(LATAM_CITIES),
     },

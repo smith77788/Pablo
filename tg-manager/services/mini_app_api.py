@@ -6431,7 +6431,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (TypeError, ValueError):
             _rmin = 0
         try:
-            label = f"Quick Post в {len(channel_ids)} каналов"
+            label = f"Быстрый пост · каналов: {len(channel_ids)}"
             _pd = {"text": text, "channel_ids": channel_ids}
             if _rmin > 0:
                 _pd["repeat_interval_min"] = _rmin
@@ -9370,7 +9370,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         max_invites = _clamp(body.get("max_invites"), 0, 100000, 0) if body.get("max_invites") is not None else 0
         per_account_limit = _clamp(body.get("per_account_limit"), 0, 10000, 0) if body.get("per_account_limit") is not None else 0
         try:
-            label = f"Mass Invite → {group}"
+            label = f"Массовый инвайт → {group}"
             params = {"group": group, "source": source, "pace": pace, "batch_size": batch_size}
             # Безопасный режим: governor уровня чата (частота/паузы/стоп на
             # мёртвом чате). Флаг независим от способа добавления.
@@ -11589,7 +11589,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("bad body", 400)
         if not channel:
             return _err("channel обязателен", 400)
-        label = f"Ad Intel scan @{channel}"
+        label = f"Разведка рекламы @{channel}"
         try:
             op_id = await _obus.submit(
                 pool, uid, "ad_intel_scan", {"channel": channel},
@@ -13378,7 +13378,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op_params = {"text": text, "segment": segment, "lang": lang}
         if _buttons:
             op_params["buttons"] = _buttons
-        label = f"Network Broadcast: {text[:40]}{'…' if len(text) > 40 else ''}"
+        label = f"Рассылка по сети: {text[:40]}{'…' if len(text) > 40 else ''}"
         try:
             op_id = await _obus.submit(
                 pool, uid, "network_broadcast", op_params,
@@ -15828,7 +15828,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "source_bot_id": int(source_bot_id),
                     "target_bot_id": int(target_bot_id),
                     "fields": fields,
-                }, total_items=1, label=f"Clone: @{src_name} → @{tgt_name}")
+                }, total_items=1, label=f"Клонирование: @{src_name} → @{tgt_name}")
             return _json_resp({"op_id": op_id, "ok": True})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -16257,7 +16257,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Шаблон не найден или неактивен", 404)
             op_id = await _obus.submit(
                 pool, uid, "self_promo_blast", {"template_id": tpl_id},
-                total_items=1, label=f"Self-promo: {tpl['title'] or tpl_id}")
+                total_items=1, label=f"Self Promo: {tpl['title'] or tpl_id}")
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
