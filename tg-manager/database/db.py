@@ -896,10 +896,34 @@ async def add_bot(
     from services.token_vault import encrypt_token as _enc_tok
 
     existing = await pool.fetchrow(
-        "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id
+        "SELECT added_by, is_active FROM managed_bots WHERE bot_id=$1", bot_id
     )
     if existing is not None:
-        return False if existing["added_by"] == added_by else "taken"
+        if existing["added_by"] == added_by:
+            if existing["is_active"]:
+                return False  # уже добавлен и работает
+            # Своя выключенная строка: бот был убран из списка или отключён
+            # после мёртвого токена. Раньше здесь тоже отвечали «уже добавлен»,
+            # и бот было не вернуть в принципе — тупик на ровном месте.
+            # Поднимаем ту же строку: аудитория, воронки и история на месте.
+            await pool.execute(
+                """UPDATE managed_bots
+                      SET token=$3,
+                          username=COALESCE(NULLIF($4,''), username),
+                          first_name=COALESCE(NULLIF($5,''), first_name),
+                          is_active=TRUE,
+                          fail_streak=0, last_error=NULL, dead_notified_at=NULL
+                    WHERE bot_id=$1 AND added_by=$2""",
+                bot_id, added_by, _enc_tok(token), username or "", first_name or "")
+            return True
+        if existing["is_active"]:
+            return "taken"
+        # Прежний владелец бота у себя убрал, а токен есть у нового. Строку
+        # отдаём новому владельцу ЧИСТОЙ: аудитория и история прежнего к боту
+        # больше не относятся, и достаться новому хозяину не должны. Здесь
+        # каскад срабатывает намеренно — это единственное место, где данные
+        # действительно стираются.
+        await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", bot_id)
 
     try:
         await pool.execute(
@@ -949,7 +973,13 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                SELECT bot_id, COUNT(*) AS ar_cnt
                FROM auto_replies WHERE is_active=TRUE GROUP BY bot_id
            ) ar ON ar.bot_id = m.bot_id
-           WHERE m.added_by=$1
+           -- Скобки обязательны. AND связывает крепче OR, поэтому без них
+           -- условие читалось как «свои ИЛИ экосистемные ИЛИ (по workspace И
+           -- активные)»: на СВОИ боты фильтр is_active не действовал вовсе.
+           -- Из-за этого удалённый в Mini App бот (там удаление — это
+           -- is_active=FALSE) продолжал висеть в списке бота, и «пауза» тоже
+           -- ничего не меняла.
+           WHERE (m.added_by=$1
               OR m.bot_id IN (
                   SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
                   JOIN ecosystems e ON e.id=eb.ecosystem_id
@@ -961,7 +991,7 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                   JOIN workspaces w ON w.owner_id=b.added_by
                   JOIN workspace_members wm ON wm.workspace_id=w.id
                   WHERE wm.user_id=$1
-              )
+              ))
            AND m.is_active=TRUE
            ORDER BY m.added_at DESC""",
         added_by,
@@ -997,12 +1027,29 @@ async def get_bot(
 
 
 async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
+    """Убрать бота у владельца. Строка остаётся, аудитория не теряется.
+
+    Раньше это был DELETE, а на managed_bots(bot_id) висит десяток таблиц с
+    ON DELETE CASCADE: bot_users, funnels, auto_replies, broadcasts, статистика.
+    То есть «убрать бота из списка» стирало всю его базу подписчиков и историю
+    — безвозвратно, потому что удалённую строку неоткуда взять. Продукт уже
+    признал эту цену слишком высокой: ради неё появилась replace_bot_token, а
+    Mini App удаляет бота именно снятием is_active.
+
+    Теперь обе двери ведут в одно место: бот пропадает из списков (все они
+    фильтруют is_active), а данные остаются. Вернуть бота — добавить его
+    заново тем же токеном, add_bot поднимет ту же строку.
+
+    Данные стираются только тогда, когда бота действительно забирает ДРУГОЙ
+    владелец: это делает add_bot, и там иначе нельзя — чужая аудитория не
+    должна достаться новому хозяину.
+    """
     result = await pool.execute(
-        "DELETE FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1 AND added_by=$2",
         bot_id,
         added_by,
     )
-    return result == "DELETE 1"
+    return result == "UPDATE 1"
 
 
 async def save_bot_note(
