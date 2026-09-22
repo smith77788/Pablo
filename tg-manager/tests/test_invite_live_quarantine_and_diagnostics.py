@@ -147,35 +147,71 @@ def test_rebalance_and_requarantine_release_admin_seat_for_departed_accounts():
     i = body.index("_before_ids = {int(x[\"id\"]) for x in accounts}")
     seg = body[i:i + 2500]
     assert "_left_ids = _before_ids - _kept_ids" in seg
-    assert "_release_admin_seat(_lid)" in seg
+    assert "_release_admin_seats_batch(_left_ids)" in seg
     # порядок: сначала считаем ушедших, потом чистим retired/budget по оставшимся
-    assert seg.index("_release_admin_seat(_lid)") < seg.index("retired = {a for a in retired if a in _kept_ids}")
+    assert (seg.index("_release_admin_seats_batch(_left_ids)")
+            < seg.index("retired = {a for a in retired if a in _kept_ids}"))
 
 
-def test_departed_seat_releases_run_concurrently_not_sequentially():
-    """Регресс на реальный «зависла на 2/77» с живого прогона (владелец кликал
-    «Перезапустить» несколько раз — несколько операций делили один и тот же,
-    богатый на admin-промоуты, флот; каждый 20с-цикл ребаланса мог разом
-    вывести из accounts десяток+ аккаунтов). Первая версия фикса освобождала
-    место КАЖДОМУ уходящему аккаунту ПО ОЧЕРЕДИ — вызов сетевой (демоут в
-    Telegram, потолок 30с внутри _release_admin_seat), и это стояло ПРЯМО
-    внутри главного цикла инвайта, блокируя набор следующего батча. Десяток
-    аккаунтов разом — уже 5+ минут простоя ради одной лишь уборки: снаружи это
-    и есть «операция зависла», хотя формально она жива и рано или поздно
-    продолжит. Параллельно — тот же потолок в 30с НЕЗАВИСИМО от того, сколько
-    аккаунтов ушло разом."""
+def test_departed_seats_are_released_one_connection_not_sequentially_or_concurrently():
+    """Регресс на два последовательных живых бага на одном и том же месте.
+
+    Баг №1 («зависла на 2/77», первый живой прогон): место КАЖДОМУ уходящему
+    аккаунту освобождалось ПО ОЧЕРЕДИ — сетевой демоут с потолком 30с, и это
+    стояло ПРЯМО внутри главного цикла инвайта. Ребаланс раз в 20с мог разом
+    вывести из accounts десяток+ аккаунтов (несколько операций владельца
+    делили один богатый на admin-промоуты флот) — 5+ минут простоя ради
+    одной лишь уборки читались как «зависла».
+
+    Баг №2 (первая версия фикса бага №1, «зависла на 2/77» СНОВА уже после
+    прошлого деплоя): переход на asyncio.gather исправил простой, но открыл
+    ХУЖЕ — N параллельных demote_from_admin на РАЗНЫХ аккаунтах на самом деле
+    все идут через ОДНУ И ТУ ЖЕ сессию промоутера (_promoter один на всю
+    операцию). N параллельных connect() на одном auth-key — прямой путь к
+    AUTH_KEY_DUPLICATED, именно того, от чего мьютекс сессии в connect_client
+    защищает везде в продукте, но demote_from_admin коннектится напрямую, в
+    обход мьютекса (см. docstring account_manager.demote_from_admin_batch).
+
+    Правильное решение — ни то, ни другое: ОДНО подключение промоутера на
+    весь пакет уходящих аккаунтов, внутри — быстрые EditAdminRequest подряд.
+    Ни гонки за сессию, ни N связей поднимать не нужно."""
     body = _exec_body()
     i = body.index("_left_ids = _before_ids - _kept_ids")
     j = body.index("retired = {a for a in retired if a in _kept_ids}", i)
     seg = body[i:j]
-    assert "asyncio.gather(" in seg, (
-        "освобождение мест ушедших аккаунтов обязано идти параллельно "
-        "(asyncio.gather), а не последовательным await в цикле — иначе "
-        "десяток+ аккаунтов, ушедших за один ребаланс, стопорят весь прогон "
-        "на несколько минут внутри главного цикла инвайта"
+    assert "_release_admin_seats_batch(_left_ids)" in seg
+    assert "asyncio.gather(" not in seg, (
+        "параллельные demote_from_admin на РАЗНЫХ аккаунтах здесь всё равно "
+        "идут через ОДНУ сессию промоутера — AUTH_KEY_DUPLICATED"
     )
     assert "for _lid in _left_ids:" not in seg, (
         "не должно быть последовательного `for ... await _release_admin_seat` "
-        "(с двоеточием — цикл-оператор, не генератор внутри gather) — это и "
-        "есть регрессия"
+        "(с двоеточием — цикл-оператор) — это баг №1 (многоминутный простой)"
+    )
+
+
+def test_batch_demote_connects_once_for_the_whole_batch():
+    """account_manager.demote_from_admin_batch обязан коннектиться РОВНО один
+    раз на весь список user_ids, а не по разу на каждого — иначе сама
+    батч-функция воспроизводит баг №1 (N последовательных connect+40-100мс
+    хендшейков подряд) внутри одного вызова."""
+    src = (ROOT / "services" / "account_manager.py").read_text(encoding="utf-8")
+    i = src.index("async def demote_from_admin_batch")
+    j = src.index("\n\nasync def ", i)
+    full_body = src[i:j]
+    # код — после закрывающих кавычек докстринга (сам докстринг ОБЪЯСНЯЕТ
+    # проблему словами "client.connect()" — наивный count() по всей функции
+    # засчитал бы и это как второй вызов)
+    code = full_body[full_body.index('"""', full_body.index('"""') + 3) + 3:]
+    assert code.count("client.connect()") == 1, (
+        "demote_from_admin_batch должен подключаться один раз на пакет, "
+        f"нашли client.connect() {code.count('client.connect()')} раз(а) в коде"
+    )
+    assert "for uid in user_ids:" in code
+    # Недостаточно, что connect() встречается один раз ТЕКСТОМ — он мог бы
+    # переехать ВНУТРЬ цикла (по-прежнему один литерал в исходнике, но N
+    # реальных подключений в рантайме). Граница обязана быть ДО начала цикла.
+    assert code.index("client.connect()") < code.index("for uid in user_ids:"), (
+        "connect() обязан идти ДО цикла по user_ids, а не внутри него — "
+        "иначе в рантайме будет N подключений при одном литерале в исходнике"
     )

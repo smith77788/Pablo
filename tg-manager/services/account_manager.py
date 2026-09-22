@@ -5051,6 +5051,83 @@ async def demote_from_admin(
             log_exc_swallow(log, "Сбой в demote_from_admin")
 
 
+async def demote_from_admin_batch(
+    session_string: str,
+    channel_id: int | str,
+    user_ids: list[int],
+    _acc: dict | None = None,
+    access_hash: int = 0,
+) -> dict[int, bool]:
+    """Снять права админа у НЕСКОЛЬКИХ пользователей ОДНИМ подключением.
+
+    Зачем это отдельная функция, а не просто N вызовов demote_from_admin.
+    demote_from_admin (как и promote_to_admin_ex рядом) коннектится напрямую
+    (_make_client + client.connect()), БЕЗ мьютекса сессии из connect_client —
+    и это осознанно: вызывающая сторона (op_worker._exec_mass_invite) держит
+    ВСЕГДА ровно один промоутер на операцию и вызывала promote/demote строго
+    ПОСЛЕДОВАТЕЛЬНО, поэтому отдельный мьютекс был не нужен.
+
+    На живом прогоне это допущение сломал ребаланс флота: он может разом
+    вывести из круга десяток+ аккаунтов, и наивный параллельный запуск
+    demote_from_admin на каждого (services/op_worker.py, ротация мест админа)
+    открыл бы НЕСКОЛЬКО одновременных подключений на ОДНОЙ И ТОЙ ЖЕ сессии
+    промоутера — то есть ровно AUTH_KEY_DUPLICATED, от которого мьютекс в
+    connect_client в принципе и защищает. Здесь вместо параллельных
+    подключений — одно подключение на весь пакет: коннект (и разогрев кеша
+    участников) один раз, дальше только быстрые EditAdminRequest подряд —
+    ни гонки за сессию, ни N связей поднимать не нужно.
+
+    Возвращает {user_id: успех}. Best-effort как и demote_from_admin: сбой на
+    одном user_id не прерывает остальных."""
+    from telethon.tl.functions.channels import EditAdminRequest
+    from telethon.tl.types import ChatAdminRights, PeerUser
+
+    out: dict[int, bool] = {int(u): False for u in user_ids}
+    if not user_ids:
+        return out
+    rights = ChatAdminRights(
+        post_messages=False, edit_messages=False, delete_messages=False,
+        ban_users=False, invite_users=False, pin_messages=False, add_admins=False,
+        manage_call=False, other=False, change_info=False, anonymous=False,
+        manage_topics=False,
+    )
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        channel = await _resolve_channel_peer(client, channel_id, access_hash)
+        _warmed = False
+        for uid in user_ids:
+            try:
+                try:
+                    input_user = await client.get_input_entity(PeerUser(user_id=uid))
+                except (ValueError, TypeError):
+                    if not _warmed:
+                        try:
+                            await asyncio.wait_for(
+                                client.get_participants(channel, limit=_PROMOTE_WARM_LIMIT),
+                                timeout=60)
+                        except Exception:
+                            log_exc_swallow(log, "demote_from_admin_batch: participant warm failed")
+                        _warmed = True
+                    input_user = await client.get_input_entity(PeerUser(user_id=uid))
+                await client(EditAdminRequest(
+                    channel=channel, user_id=input_user, admin_rights=rights, rank=""))
+                out[int(uid)] = True
+            except Exception as e:
+                log.warning("demote_from_admin_batch error user=%s chan=%s: %s",
+                            uid, channel_id, e)
+        log.info("demote_from_admin_batch: %d/%d demoted in channel %s",
+                 sum(1 for v in out.values() if v), len(user_ids), channel_id)
+    except Exception as e:
+        log.warning("demote_from_admin_batch connect error chan=%s: %s", channel_id, e)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в demote_from_admin_batch")
+    return out
+
+
 
 async def promote_to_admin(*args, **kwargs) -> bool:
     """Прежний контракт: только «получилось или нет».

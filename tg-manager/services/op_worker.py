@@ -12303,6 +12303,46 @@ async def _exec_mass_invite(
                       op_id, acc_id, _de)
         _admin_seats.discard(acc_id)
 
+    async def _release_admin_seats_batch(acc_ids) -> None:
+        """То же самое, но для ПАЧКИ аккаунтов сразу (ребаланс флота может
+        разом вывести из круга десяток+) — ОДНИМ подключением промоутера, а
+        не параллельными.
+
+        Раньше здесь стоял asyncio.gather(*(_release_admin_seat(id) for id in
+        acc_ids)) — параллельно, но КАЖДЫЙ demote_from_admin коннектится
+        напрямую (без мьютекса сессии, см. docstring
+        account_manager.demote_from_admin_batch), а ВСЕ они используют ОДНУ И
+        ТУ ЖЕ сессию промоутера. N параллельных connect() на одном auth-key —
+        AUTH_KEY_DUPLICATED, ровно то, от чего мьютекс в connect_client
+        защищает везде в продукте. На живом прогоне это и дало «зависла на
+        2/77»: гейт живого риск-пульса/ребаланса выше уводит счёт аккаунтов
+        куда-то в сторону долгого выяснения отношений сессии с Telegram вместо
+        быстрого освобождения места. demote_from_admin_batch коннектится ОДИН
+        раз на весь пакет — ни гонки за сессию, ни лишних connect()."""
+        nonlocal _admin_seats_freed
+        ids = [int(a) for a in acc_ids if int(a) in _admin_seats]
+        if not ids or _promoter is None:
+            for a in acc_ids:
+                _admin_seats.discard(int(a))
+            return
+        targets: dict[int, int] = {}  # acc_id -> tg_user_id
+        for a in ids:
+            _u = _acc_uid.get(a)
+            if _u:
+                targets[a] = int(_u)
+        if targets:
+            try:
+                res = await asyncio.wait_for(
+                    account_manager.demote_from_admin_batch(
+                        _promoter["session_str"], group, list(targets.values()),
+                        _acc=dict(_promoter)),
+                    timeout=60)
+                _admin_seats_freed += sum(1 for v in res.values() if v)
+            except Exception as _de:
+                log.debug("mass_invite op=%d: demote_from_admin_batch failed: %s", op_id, _de)
+        for a in acc_ids:
+            _admin_seats.discard(int(a))
+
     # ── Очередь-планировщик ──────────────────────────────────────────────────
     # Раньше аудитория НАРЕЗАЛАСЬ по аккаунтам заранее (_chunks). Цену платил
     # пользователь, причём дважды:
@@ -12666,17 +12706,17 @@ async def _exec_mass_invite(
                 # место админа впустую до конца прогона, хотя реально им уже не
                 # пользуется.
                 #
-                # ПАРАЛЛЕЛЬНО, а не по очереди: это идёт КАЖДЫЕ 20с прямо внутри
-                # главного цикла инвайта, блокируя набор следующего батча. Каждый
-                # демоут — сетевой вызов с потолком 30с (asyncio.wait_for внутри
-                # _release_admin_seat); при честном дележе с другой операцией
-                # владельца ЗА РАЗ может уйти десяток+ аккаунтов — последовательно
-                # это уже 5+ минут простоя ради одной лишь уборки, и прогон
-                # выглядел бы «зависшим». Параллельно — тот же потолок в 30с
-                # независимо от того, сколько аккаунтов ушло разом.
-                await asyncio.gather(
-                    *(_release_admin_seat(_lid) for _lid in _left_ids),
-                    return_exceptions=True)
+                # ОДНИМ ПАКЕТОМ (_release_admin_seats_batch), НЕ по одному и НЕ
+                # параллельно: это идёт каждые 20с прямо внутри главного цикла
+                # инвайта. Последовательно по одному — при честном дележе с
+                # другой операцией владельца ЗА РАЗ может уйти десяток+
+                # аккаунтов, и потолок 30с на каждый превращается в 5+ минут
+                # простоя (жалоба с живого прогона: «зависла на 2/77»).
+                # Параллельно (было пробовано здесь же) — того хуже: ВСЕ
+                # demote идут через сессию ОДНОГО промоутера, и N параллельных
+                # connect() на одном auth-key — AUTH_KEY_DUPLICATED. Пакетный
+                # вызов коннектится один раз на всех — быстро и безопасно.
+                await _release_admin_seats_batch(_left_ids)
                 retired = {a for a in retired if a in _kept_ids}
                 budget = {k: v for k, v in budget.items() if k in _kept_ids}
 
