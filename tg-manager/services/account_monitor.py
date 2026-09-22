@@ -58,6 +58,10 @@ async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
             f"Рекомендуется иметь минимум {_MIN_ACCOUNTS} активных аккаунта "
             f"для корректной работы сервиса.\n\n"
             f"Добавьте аккаунты в разделе <b>Аккаунты</b>.",
+            # Без ключа все уведомления типа "flood_warning" у владельца делят
+            # один слот раз в минуту: сводка по ротации trust выбросила бы это
+            # сообщение, и наоборот.
+            dedup_key="low_accounts",
         )
         log.info(
             "account_monitor: alerted owner=%s (active=%s)", owner_id, active_count
@@ -101,6 +105,10 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
             f"• Не запускайте операции через эти аккаунты 48ч\n"
             f"• Откройте Health Dashboard → 💡 Рекомендации\n"
             f"• Проверьте аккаунты вручную в Telegram",
+            # Свой ключ: тип "restriction" у владельца общий с деактивацией
+            # аккаунта и с предупреждениями теневого бана — без ключа доходило
+            # бы только одно из них.
+            dedup_key="low_trust",
         )
         # Mark as alerted (best-effort)
         try:
@@ -215,6 +223,9 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
                 f"Тип: {row['op_type']}\n"
                 f"Операция выполнялась более {_STALE_RUNNING_HOURS}ч без завершения.\n"
                 f"Статус изменён на failed. Перезапустите из раздела Operations → Отчёты.",
+                # Зависших операций у владельца бывает несколько сразу: без
+                # ключа он узнал бы ровно про одну.
+                dedup_key=f"op_stuck:{row['id']}",
             )
             log.warning("account_monitor: marked stuck op id=%d as failed", row["id"])
     except Exception as exc:
@@ -435,6 +446,11 @@ async def check_owner_now(pool: asyncpg.Pool, bot: Bot, owner_id: int) -> None:
             f"(получен PeerFlood или бан).\n"
             f"Активных аккаунтов осталось: <b>{cnt}</b>.\n\n"
             f"Добавьте новые аккаунты в разделе <b>Аккаунты</b>.",
+            # Эту проверку зовут сразу ПОСЛЕ деактивации аккаунта, то есть
+            # подряд по нескольким аккаунтам. Без ключа сообщение делило слот с
+            # низким trust и предупреждениями теневого бана, и владелец узнавал
+            # о выбывшем аккаунте не всегда.
+            dedup_key="account_deactivated",
         )
 
 

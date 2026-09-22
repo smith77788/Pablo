@@ -172,7 +172,12 @@ async def _check_search_visibility(pool: asyncpg.Pool, bot: Bot) -> None:
             bot_id=bot_id,
         )
         try:
-            await notify_if_enabled(pool, bot, owner_id, "restriction", message)
+            # Ключ обязателен: без него ВСЕ уведомления типа "restriction" у
+            # этого владельца делят один слот раз в минуту, и предупреждения по
+            # остальным ботам молча выбрасываются. Свой кулдаун у события уже
+            # есть (_is_on_cooldown выше) — он и решает, говорить ли.
+            await notify_if_enabled(pool, bot, owner_id, "restriction", message,
+                                    dedup_key=f"{event_type}:bot:{bot_id}")
             await _mark_alerted(pool, owner_id, event_type, bot_id)
         except Exception as exc:
             log.warning(
@@ -216,7 +221,11 @@ async def _check_account_restrictions(pool: asyncpg.Pool, bot: Bot) -> None:
             account_id=account_id,
         )
         try:
-            await notify_if_enabled(pool, bot, owner_id, "restriction", message)
+            # Аккаунты с высоким риском лимитов приходят ПАЧКОЙ: цикл идёт по
+            # всем аккаунтам владельца. Без ключа владелец узнавал ровно про
+            # один из них, а про остальные — никогда.
+            await notify_if_enabled(pool, bot, owner_id, "restriction", message,
+                                    dedup_key=f"{event_type}:acc:{account_id}")
             await _mark_alerted(pool, owner_id, event_type, account_id)
         except Exception as exc:
             log.warning(

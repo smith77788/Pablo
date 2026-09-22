@@ -232,6 +232,10 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
                         f"🟡 Низкий trust ({_ROTATE_CRITICAL_THRESHOLD}–{_ROTATE_LOW_THRESHOLD}) → {_ROTATE_LOW_HOURS}ч кулдаун: <b>{owner_low}</b>\n\n"
                         "Аккаунты не будут использоваться для операций до окончания кулдауна.\n"
                         "Trust score восстановится со временем при отсутствии операций.",
+                        # Свой ключ: иначе сводка по ротации делит слот с
+                        # предупреждением «мало активных аккаунтов», и одно из
+                        # двух владелец не увидит.
+                        dedup_key="trust_rotation",
                     )
                 except Exception:
                     log_exc_swallow(
