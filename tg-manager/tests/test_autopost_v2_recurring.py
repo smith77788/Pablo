@@ -27,7 +27,11 @@ def test_op_worker_reschedules_on_done():
     # Раньше гейт был `_final_status == "done"`, и один сбойный канал в серии
     # НАВСЕГДА обрывал автопостинг: итерация закрывалась не «done», следующая
     # не ставилась, и владелец узнавал об этом только по тишине в канале.
-    assert "op_status.is_productive(_final_status) and op_type in _RECURRING_OK_OPS" in src
+    # Результативность прогона теперь ЕДЕТ В ПОМОЩНИКА параметром: он решает,
+    # продлевать ли расписание после неудачного круга (см.
+    # tests/test_recurring_schedule_survives_a_bad_round.py).
+    assert "productive=op_status.is_productive(_final_status)" in src
+    assert "op_type not in _RECURRING_OK_OPS" in src
     assert "repeat_interval_min" in src
     # Реально ставит новый op со сдвигом времени — ЧЕРЕЗ ШИНУ.
     # Раньше здесь стоял прямой INSERT с `make_interval(mins => $6)`, и это
@@ -36,7 +40,7 @@ def test_op_worker_reschedules_on_done():
     # на платном плане продолжал крутиться после отмены подписки. Проверяем
     # смысл (следующий круг ставится со сдвигом на repeat_interval_min), а не
     # конкретный SQL: механизм теперь общий для всего продукта.
-    seg = src[src.index("op_type in _RECURRING_OK_OPS"):][:4000]
+    seg = src[src.index("async def _reschedule_recurring"):][:8000]
     assert "submit(" in seg, "переочередь идёт мимо operation_bus"
     assert "timedelta(minutes=_rmin)" in seg, "следующий круг ставится без сдвига времени"
     # repeat_count декрементится (ограничение числа повторов)

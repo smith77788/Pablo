@@ -40,16 +40,20 @@ def test_recurring_reschedule_goes_through_the_bus():
         "исполнитель снова ставит операцию мимо шины — расписание обходит "
         "предохранитель Ban Weather и гейт тарифа"
     )
-    idx = src.index("op_type in _RECURRING_OK_OPS")
-    seg = src[idx:idx + 4000]
+    # Якорь — сам помощник продления: раньше блок стоял прямо в _run_op_task,
+    # и условие читалось как «op_type in _RECURRING_OK_OPS».
+    idx = src.index("async def _reschedule_recurring")
+    seg = src[idx:idx + 8000]
     assert "submit(" in seg, "переочередь рекуррентной операции не идёт через шину"
 
 
 def test_recurring_reschedule_handles_a_refusal_from_the_bus():
     """Отказ шины — это ответ, а не сбой: круг пропускаем и говорим владельцу."""
     src = _op_worker_src()
-    idx = src.index("op_type in _RECURRING_OK_OPS")
-    seg = src[idx:idx + 4000]
+    # Якорь — сам помощник продления: раньше блок стоял прямо в _run_op_task,
+    # и условие читалось как «op_type in _RECURRING_OK_OPS».
+    idx = src.index("async def _reschedule_recurring")
+    seg = src[idx:idx + 8000]
     assert "ImmunityBlockedError" in seg, (
         "отказ предохранителя не разобран отдельно — уйдёт в общий except как "
         "«reschedule failed», и владелец узнает об оборванном расписании по "
@@ -64,8 +68,10 @@ def test_recurring_reschedule_handles_a_refusal_from_the_bus():
 def test_repeat_marker_is_not_appended_forever():
     """Метка повтора ставится один раз, а не копится кругами («Пост ↻↻↻↻»)."""
     src = _op_worker_src()
-    idx = src.index("op_type in _RECURRING_OK_OPS")
-    seg = src[idx:idx + 4000]
+    # Якорь — сам помощник продления: раньше блок стоял прямо в _run_op_task,
+    # и условие читалось как «op_type in _RECURRING_OK_OPS».
+    idx = src.index("async def _reschedule_recurring")
+    seg = src[idx:idx + 8000]
     assert 'endswith(" ↻")' in seg
 
 

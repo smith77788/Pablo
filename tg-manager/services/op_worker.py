@@ -35,6 +35,14 @@ _RECURRING_OK_OPS = frozenset({
     "network_broadcast", "run_broadcast", "group_announce", "pin_last_post",
 })
 
+# Сколько неудачных кругов подряд расписание переживает, прежде чем остановиться
+# совсем. Ноль — прежнее поведение (первый же провал обрывал автопостинг молча).
+_RECURRING_MAX_FAIL_STREAK = 3
+# Счётчик неудач подряд едет в params следующего круга: отдельной колонки для
+# него нет, а params и так копируются из круга в круг. Ключ служебный, поэтому
+# с подчёркиванием — исполнители его не читают.
+_RECURRING_STREAK_KEY = "_recurring_fail_streak"
+
 
 # ── Safe DB helpers ──────────────────────────────────────────────────────────
 # All DB calls in the worker must be wrapped to prevent a single query failure
@@ -2430,6 +2438,136 @@ async def _notify_recurring_stopped(
         log_exc_swallow(log, f"op_worker: уведомление об остановке расписания op#{op_id}")
 
 
+async def _reschedule_recurring(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str,
+    params: dict, *, productive: bool, why: str = "",
+) -> None:
+    """Поставить следующий круг повторяющейся операции — и не оборвать расписание молча.
+
+    ЧТО ЛОМАЛОСЬ. Продление стояло под условием «прогон был продуктивным», и
+    один-единственный неудачный круг убивал расписание НАВСЕГДА. Автопостинг,
+    заведённый на месяц, умирал от любой случайности: сеть моргнула, весь флот
+    на полчаса ушёл в карантин, Telegram ответил ошибкой на все цели сразу.
+    Операция честно помечалась 'failed' — и следующий круг просто не ставился.
+
+    Хуже всего, что владелец об этом не узнавал. Про две другие причины обрыва
+    (предохранитель, тариф) ему говорят отдельным сообщением; про «круг не
+    удался» не говорили ничего, и отказ выглядел так: канал перестал
+    наполняться, а через неделю владелец случайно это замечает. Ровно тот же
+    разрыв уже закрывали для 'partial' — один сбойный канал в серии не должен
+    обрывать серию; для 'failed' остановились на полпути.
+
+    ЧТО ТЕПЕРЬ. Неудачный круг расписание переживает: следующий ставится как
+    обычно. Бесконечно это длиться не может — считаем неудачи ПОДРЯД, и на
+    _RECURRING_MAX_FAIL_STREAK расписание останавливается с объяснением.
+    Успешный круг обнуляет счётчик.
+
+    Почему это безопасно для флота: следующий круг ставится через шину, то есть
+    проходит и предохранитель Ban Weather, и гейт тарифа. Если тип операции
+    прямо сейчас выжигает аккаунты, круг не встанет — шина не пустит, и
+    владелец получит объяснение. Повтор после провала не обходит ни одну защиту,
+    он лишь перестаёт быть смертельным для расписания.
+
+    repeat_count на неудачном круге НЕ тратится: «опубликовать 5 раз» означает
+    пять публикаций, а не пять попыток. Бесконечности это не создаёт — серию
+    неудач ограничивает счётчик подряд.
+
+    Отмена владельцем сюда не приходит: её вызывающий отсекает до вызова.
+    Best-effort: не бросает, завершение операции от продления не зависит.
+    """
+    if op_type not in _RECURRING_OK_OPS:
+        return
+    try:
+        _rmin = int(params.get("repeat_interval_min") or 0)
+    except (TypeError, ValueError):
+        _rmin = 0
+    if _rmin <= 0:
+        return
+
+    try:
+        streak = int(params.get(_RECURRING_STREAK_KEY) or 0)
+    except (TypeError, ValueError):
+        streak = 0
+    streak = 0 if productive else streak + 1
+
+    if streak >= _RECURRING_MAX_FAIL_STREAK:
+        log.warning(
+            "autopost v2: op=%d — %d неудачных кругов подряд, расписание остановлено",
+            op_id, streak,
+        )
+        await _notify_recurring_stopped(
+            pool, bot, owner_id, op_id, op_type,
+            f"{streak} неудачных запуска подряд"
+            + (f" ({why})" if why else ""),
+        )
+        return
+
+    _next_params = dict(params)
+    if streak:
+        _next_params[_RECURRING_STREAK_KEY] = streak
+    else:
+        _next_params.pop(_RECURRING_STREAK_KEY, None)
+
+    if productive:
+        _rcount = params.get("repeat_count")
+        if _rcount is not None:
+            try:
+                _rc = int(_rcount) - 1
+            except (TypeError, ValueError):
+                _rc = 0
+            _next_params["repeat_count"] = _rc
+            if _rc <= 0:
+                return
+
+    # Следующий круг ставится ЧЕРЕЗ ШИНУ, а не прямым INSERT. Прямая запись
+    # обходила предохранитель Ban Weather: если этот тип операции прямо сейчас
+    # массово убивает аккаунты владельца, расписание всё равно заводило новый
+    # круг — расписание оказывалось сильнее защиты, ради которой предохранитель
+    # и существует. Обходился и гейт тарифа: автопостинг, заведённый на платном
+    # плане, продолжал работать вечно после отмены подписки.
+    from services import operation_bus as _obus_r
+    import datetime as _dt_r
+
+    _row = await _safe_fetchrow(
+        pool, "SELECT label, total_items FROM operation_queue WHERE id=$1",
+        op_id, log_ctx=f"[recurring_label op={op_id}]")
+    _base_label = (_row["label"] if _row else None) or op_type
+    # Метку повтора ставим один раз: без этой проверки она копилась кругами
+    # («Пост ↻↻↻↻») и к сотому запуску вытесняла из очереди само название.
+    _next_label = _base_label if _base_label.endswith(" ↻") else _base_label + " ↻"
+    try:
+        _next_id = await _obus_r.submit(
+            pool, owner_id, op_type, _next_params,
+            total_items=(_row["total_items"] if _row else 0),
+            scheduled_for=_dt_r.datetime.now(_dt_r.timezone.utc)
+            + _dt_r.timedelta(minutes=_rmin),
+            label=_next_label,
+        )
+        log.info(
+            "autopost v2: op=%d → следующий круг op=%d через %d мин (неудач подряд: %d)",
+            op_id, _next_id, _rmin, streak,
+        )
+    except _obus_r.ImmunityBlockedError as _ie:
+        # Не сбой: предохранитель намеренно не пускает этот тип операции. Круг
+        # пропущен, расписание оборвано — владелец должен узнать об этом, а не
+        # по тишине в канале.
+        log.warning(
+            "autopost v2: op=%d — следующий круг НЕ поставлен, предохранитель: %s",
+            op_id, _ie,
+        )
+        await _notify_recurring_stopped(
+            pool, bot, owner_id, op_id, op_type,
+            f"предохранитель приостановил этот тип операций: {_ie}")
+    except _obus_r.PlanRequiredError as _pe:
+        log.warning(
+            "autopost v2: op=%d — следующий круг НЕ поставлен, тариф: %s", op_id, _pe)
+        await _notify_recurring_stopped(
+            pool, bot, owner_id, op_id, op_type,
+            "у подписки больше нет доступа к этому типу операций")
+    except Exception as _e:
+        log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
+
+
 async def _run_op_task_guarded(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     """Точка входа поллера: реестр активных операций освобождается ВСЕГДА.
 
@@ -2854,77 +2992,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # серии навсегда обрывал автопостинг — операция закрывалась не
             # «done», следующий запуск не ставился, и владелец узнавал об этом
             # только по тишине в канале.
-            if op_status.is_productive(_final_status) and op_type in _RECURRING_OK_OPS:
-                try:
-                    _rmin = int(params.get("repeat_interval_min") or 0)
-                except (TypeError, ValueError):
-                    _rmin = 0
-                if _rmin > 0:
-                    _rcount = params.get("repeat_count")
-                    _go = True
-                    _next_params = dict(params)
-                    if _rcount is not None:
-                        try:
-                            _rc = int(_rcount) - 1
-                        except (TypeError, ValueError):
-                            _rc = 0
-                        _next_params["repeat_count"] = _rc
-                        _go = _rc > 0
-                    if _go:
-                        # Следующий круг ставится ЧЕРЕЗ ШИНУ, а не прямым INSERT.
-                        # Прямая запись обходила предохранитель Ban Weather: если
-                        # этот тип операции прямо сейчас массово убивает аккаунты
-                        # владельца, расписание всё равно заводило новый круг —
-                        # расписание оказывалось сильнее защиты, ради которой
-                        # предохранитель и существует. Обходился и гейт тарифа:
-                        # автопостинг, заведённый на платном плане, продолжал
-                        # работать вечно после отмены подписки.
-                        from services import operation_bus as _obus_r
-                        import datetime as _dt_r
-
-                        _row = await _safe_fetchrow(
-                            pool,
-                            "SELECT label, total_items FROM operation_queue WHERE id=$1",
-                            op_id, log_ctx=f"[recurring_label op={op_id}]")
-                        _base_label = (_row["label"] if _row else None) or op_type
-                        # Метку повтора ставим один раз: без этой проверки она
-                        # копилась кругами («Пост ↻↻↻↻») и к сотому запуску
-                        # вытесняла из очереди само название.
-                        _next_label = _base_label if _base_label.endswith(" ↻") else _base_label + " ↻"
-                        try:
-                            _next_id = await _obus_r.submit(
-                                pool, owner_id, op_type, _next_params,
-                                total_items=(_row["total_items"] if _row else 0),
-                                scheduled_for=_dt_r.datetime.now(_dt_r.timezone.utc)
-                                + _dt_r.timedelta(minutes=_rmin),
-                                label=_next_label,
-                            )
-                            log.info(
-                                "autopost v2: op=%d → следующий круг op=%d через %d мин",
-                                op_id, _next_id, _rmin,
-                            )
-                        except _obus_r.ImmunityBlockedError as _ie:
-                            # Не сбой: предохранитель намеренно не пускает этот
-                            # тип операции. Круг пропущен, расписание оборвано —
-                            # владелец должен узнать об этом, а не по тишине в
-                            # канале.
-                            log.warning(
-                                "autopost v2: op=%d — следующий круг НЕ поставлен, "
-                                "предохранитель: %s", op_id, _ie,
-                            )
-                            await _notify_recurring_stopped(
-                                pool, bot, owner_id, op_id, op_type,
-                                f"предохранитель приостановил этот тип операций: {_ie}")
-                        except _obus_r.PlanRequiredError as _pe:
-                            log.warning(
-                                "autopost v2: op=%d — следующий круг НЕ поставлен, "
-                                "тариф: %s", op_id, _pe,
-                            )
-                            await _notify_recurring_stopped(
-                                pool, bot, owner_id, op_id, op_type,
-                                "у подписки больше нет доступа к этому типу операций")
-                        except Exception as _e:
-                            log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
+            if _final_status != op_status.CANCELLED:
+                await _reschedule_recurring(
+                    pool, bot, op_id, owner_id, op_type, params,
+                    productive=op_status.is_productive(_final_status),
+                    why=(result.get("reason") or result.get("summary") or "")[:200],
+                )
             # Audit trail: write operation completion to operation_audit.
             # Outcome согласован с финальным статусом — провал не пишется как success.
             _audit_outcome = {
@@ -3169,6 +3242,15 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     f"💡 Используйте кнопку «Повторить» или проверьте аккаунты.",
                     reply_markup=kb.as_markup(),
                     dedup_key=f"fail:{op_id}",
+                )
+
+                # Расписание переживает и аварийный исход. Сюда попадают только
+                # исчерпавшие повторы (retry уже сказал «нет»), а раньше этот
+                # путь вообще не знал про продление: операция с расписанием,
+                # упавшая с исключением, обрывала автопостинг молча и навсегда.
+                await _reschedule_recurring(
+                    pool, bot, op_id, owner_id, op_type, params,
+                    productive=False, why=str(e)[:200],
                 )
 
         finally:

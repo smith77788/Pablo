@@ -128,7 +128,7 @@ def test_partial_has_its_own_icon_and_label():
 
 def test_worker_uses_classifier_not_handwritten_branches():
     ow = _read("services/op_worker.py")
-    body = ow[ow.index("async def _run_op_task"):ow.index("async def _exec_bulk_bot_edit")]
+    body = ow[ow.index("async def _run_op_task("):ow.index("async def _exec_bulk_bot_edit")]
     assert "op_status.classify_final(" in body, (
         "финальный статус обязан считаться моделью состояний, а не ветвлением на месте"
     )
@@ -139,7 +139,7 @@ def test_worker_uses_classifier_not_handwritten_branches():
 def test_worker_terminal_guards_know_about_partial():
     """Запоздавший апдейт не должен переписывать УЖЕ завершённую операцию."""
     ow = _read("services/op_worker.py")
-    body = ow[ow.index("async def _run_op_task"):ow.index("async def _exec_bulk_bot_edit")]
+    body = ow[ow.index("async def _run_op_task("):ow.index("async def _exec_bulk_bot_edit")]
     assert "NOT IN ('done','failed','cancelled')" not in body, (
         "рукописный список терминальных статусов забывает partial — "
         "используйте op_status.sql_terminal_list()"
@@ -153,7 +153,7 @@ def test_worker_result_status_matches_queue_status():
     Разъехавшись, они показывали разный исход одной и той же операции.
     """
     ow = _read("services/op_worker.py")
-    body = ow[ow.index("async def _run_op_task"):ow.index("async def _exec_bulk_bot_edit")]
+    body = ow[ow.index("async def _run_op_task("):ow.index("async def _exec_bulk_bot_edit")]
     assert 'result["status"] = _final_status' in body
 
 
@@ -164,21 +164,29 @@ def test_partial_does_not_open_circuit_breaker():
     считая партиал сбоем, предохранитель останавливал бы ровно их.
     """
     ow = _read("services/op_worker.py")
-    body = ow[ow.index("async def _run_op_task"):ow.index("async def _exec_bulk_bot_edit")]
+    body = ow[ow.index("async def _run_op_task("):ow.index("async def _exec_bulk_bot_edit")]
     assert "_circuit_breaker_record(owner_id, op_status.is_productive(_final_status))" in body
 
 
 def test_partial_keeps_recurring_schedule_alive():
     """Один сбойный канал в серии не должен навсегда обрывать автопостинг."""
+    from services import op_status as _os
+
+    # Результативность прогона едет в продление параметром, а не гейтит его
+    # на месте: неудачный круг расписание тоже переживает, но ограниченное
+    # число раз (tests/test_recurring_schedule_survives_a_bad_round.py).
     ow = _read("services/op_worker.py")
-    body = ow[ow.index("async def _run_op_task"):ow.index("async def _exec_bulk_bot_edit")]
-    assert "if op_status.is_productive(_final_status) and op_type in _RECURRING_OK_OPS:" in body
+    body = ow[ow.index("async def _run_op_task("):ow.index("async def _exec_bulk_bot_edit")]
+    assert "_reschedule_recurring(" in body, "продление вообще не вызывается"
+    assert "productive=op_status.is_productive(_final_status)" in body
+    # Смысл, который эта проверка охраняет: partial — результативный исход.
+    assert _os.is_productive(_os.PARTIAL)
 
 
 def test_partial_fills_error_msg():
     """«Завершена частично» без причины — тупик: экран показывает статус и молчит."""
     ow = _read("services/op_worker.py")
-    body = ow[ow.index("async def _run_op_task"):ow.index("async def _exec_bulk_bot_edit")]
+    body = ow[ow.index("async def _run_op_task("):ow.index("async def _exec_bulk_bot_edit")]
     assert 'if _final_status in ("failed", op_status.PARTIAL):' in body
 
 
