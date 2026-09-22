@@ -53,7 +53,11 @@ async function loadInviteRetention() {
       <div class="kpi-chip"><div class="kpi-chip-val">${num(d.joined)}</div><div class="kpi-chip-lbl">вступили</div></div>
       <div class="kpi-chip"><div class="kpi-chip-val" style="color:var(--red)">${num(d.left)}</div><div class="kpi-chip-lbl">ушли</div></div>
     </div><div style="font-size:11px;color:var(--hint);padding:4px 2px">Отток считается по чатам под модерацией бота.</div>`;
-  } catch(e) {}
+  } catch(e) {
+    // Пустой блок читался как «ретеншена нет», хотя цифры просто не доехали.
+    const el = document.getElementById('invRetention');
+    if (el) el.innerHTML = errHtml(e.message, 'loadInviteRetention()');
+  }
 }
 
 async function loadInviteAnalytics() {
@@ -277,7 +281,11 @@ async function loadInviteParseRuns() {
     const cur = INV_PARSE_RUN ? String(INV_PARSE_RUN) : '';
     sel.innerHTML = '<option value="">— вся аудитория парсера —</option>' +
       runs.map(r=>`<option value="${r.id}"${String(r.id)===cur?' selected':''}>${esc(r.source||('запуск #'+r.id))} (${num(r.total_saved)})</option>`).join('');
-  } catch(e) {}
+  } catch(e) {
+    // Одинокий пункт «вся аудитория» неотличим от «запусков парсера нет».
+    sel.innerHTML = '<option value="">— вся аудитория парсера —</option>'
+      + '<option value="" disabled>⚠️ Запуски парсера не загрузились</option>';
+  }
 }
 
 function selectInviteParseRun() {
@@ -290,18 +298,23 @@ async function loadInviteSegments() {
   const sel = document.getElementById('massInviteSegment');
   if (!sel || sel.dataset.loaded) return;
   let html = '<option value="">— весь список контактов —</option>';
+  // Сегменты собираются из ДВУХ источников. Молчаливый провал любого из них
+  // просто убирал часть пунктов: человек видел короткий список и делал вывод,
+  // что сегментов у него столько, — и слал инвайт не по той аудитории.
+  let lost = false;
   try {
     const o = await api('/api/miniapp/invite/segment_options');
     if (o && o.favorites) html += `<option value="fav">⭐ Избранные (${o.favorites})</option>`;
     (o && o.tags || []).forEach(t => {
       html += `<option value="tag:${esc(t.tag)}">🏷 ${esc(t.tag)} (${t.count})</option>`;
     });
-  } catch(e) {}
+  } catch(e) { lost = true; }
   try {
     const d = await api('/api/miniapp/uch/segments');
     const segs = d.segments||d||[];
     html += (Array.isArray(segs)?segs:[]).map(s=>`<option value="${s.id}">${esc(s.name)}${s.count!=null?` (${s.count})`:''}</option>`).join('');
-  } catch(e) {}
+  } catch(e) { lost = true; }
+  if (lost) html += '<option value="" disabled>⚠️ Часть сегментов не загрузилась</option>';
   sel.innerHTML = html;
   sel.dataset.loaded = '1';
 }
@@ -479,7 +492,15 @@ async function submitMassInvite() {
         const chk = await api('/api/miniapp/invite/parse_list', {method:'POST', body:JSON.stringify({import_list: imp})});
         if (!chk.total) { errEl.textContent='В списке не распознано ни одной цели — проверьте формат (номер с «+» или 11+ цифр, @username или ID).'; return; }
         INV_IMPORT_OK = chk.total;
-      } catch(e) {}
+      } catch(e) {
+        // Комментарий выше обещает «не даём стартовать по нераспознанному
+        // списку», но пустой catch давал стартовать именно по нему: проверка
+        // упала — и запуск шёл дальше, как будто список разобран. Не смогли
+        // проверить — не запускаем.
+        errEl.textContent = 'Не удалось проверить список: ' + (e.message||'ошибка связи')
+          + '. Запуск не начат — повторите.';
+        return;
+      }
     }
   }
   const checked = [...document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]:checked')].map(c=>parseInt(c.value));

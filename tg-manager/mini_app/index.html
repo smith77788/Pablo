@@ -1357,6 +1357,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <span>✏️ Собеседник изменил сообщение</span>
       <input type="checkbox" id="vsetEdit" onchange="saveVaultSettings()">
     </label>
+    <div id="vsetErr"></div>
     <div style="font-size:12px;color:var(--hint);margin-top:8px">Уведомления приходят в этот бот, когда собеседник удаляет или редактирует своё сообщение.</div>
   </div>
 </div>
@@ -8166,7 +8167,7 @@ function openContactsHot() {
 }
 async function dismissPulse(id) {
   try { await api('/api/miniapp/organism/dismiss', {method:'POST', body:JSON.stringify({id})}); loadOrganismPulse(); }
-  catch(e){}
+  catch(e){ toast('⚠️ Не удалось скрыть: ' + (e.message||'ошибка связи')); }
 }
 
 // ── Copilot: контекстные подсказки «Что делать дальше» ──────────────
@@ -9996,7 +9997,13 @@ async function purgeDeadAccounts() {
   try {
     const st = await api('/api/miniapp/accounts?filter=dead&limit=1');
     cnt = (st.stats && st.stats.dead!=null) ? st.stats.dead : (st.filtered_total||0);
-  } catch(e) {}
+  } catch(e) {
+    // Не удалось СПРОСИТЬ — значит мы не знаем ответа. Раньше здесь оставался
+    // cnt=0, и приложение утверждало «Мёртвых аккаунтов нет 👍»: упавший запрос
+    // выдавался за проверенный факт, и владелец переставал чистить парк.
+    toast('⚠️ Не удалось проверить: ' + (e.message||'ошибка связи'));
+    return;
+  }
   if (!cnt) { toast('Мёртвых аккаунтов нет 👍'); return; }
   if (!await askConfirm(`🗑 Удалить ${cnt} невоскрешаемых аккаунтов (бан / деактивация / отозванная сессия)?\n\nБезвозвратно. Конфликтные (два IP, «Кулдаун») НЕ входят — их лечит перезалив.`)) return;
   try {
@@ -12836,7 +12843,11 @@ async function openAccImportModal() {
       o.textContent=(p.label?p.label+' · ':'')+(host||('#'+p.id));
       sel.appendChild(o);
     });
-  } catch(_) {}
+  } catch(e) {
+    // Пустая выпадашка неотличима от «прокси нет»: владелец завёл бы аккаунты
+    // напрямую, хотя прокси у него есть. Говорим, что это сбой загрузки.
+    sel.innerHTML = '<option value="">⚠️ Прокси не загрузились — закройте и откройте окно</option>';
+  }
   accSetLoginMethod('string');
   document.getElementById('accImportMbg').classList.add('show');
   tg.HapticFeedback?.impactOccurred('medium');
@@ -13643,7 +13654,10 @@ async function loadAutoregProProxyList() {
       const host = (p.proxy_url||'').split('@').pop();
       return `<option value="${p.id}">${esc(p.label||host)}</option>`;
     }).join('');
-  } catch(_) {}
+  } catch(e) {
+    const sel = document.getElementById('arp-proxy');
+    if (sel) sel.innerHTML = '<option value="">⚠️ Прокси не загрузились — повторите открытие</option>';
+  }
 }
 function openAutoregProModal() {
   document.getElementById('arp-count').value='10';
@@ -15499,17 +15513,42 @@ async function openVaultRecent(kind) {
 }
 
 async function openVaultSettings() {
+  // Тумблеры остаются ЗАБЛОКИРОВАНЫ, пока не пришло состояние с сервера. Иначе
+  // упавший запрос оставлял оба в «выключено», а любое касание вызывало
+  // saveVaultSettings(), который пишет ОБА значения разом — то есть выключал на
+  // сервере то, что там было включено. Провал чтения превращался в неверную
+  // запись, молча.
+  const del = document.getElementById('vsetDel');
+  const edit = document.getElementById('vsetEdit');
+  const err = document.getElementById('vsetErr');
+  del.disabled = edit.disabled = true;
+  del.dataset.loaded = edit.dataset.loaded = '';
+  if (err) err.innerHTML = '';
+  showModal('mo-vault-settings');
   try {
     const st = await api('/api/miniapp/vault/status');
-    document.getElementById('vsetDel').checked = !!st.notify_deleted;
-    document.getElementById('vsetEdit').checked = !!st.notify_edited;
-  } catch(e) {}
-  showModal('mo-vault-settings');
+    del.checked = !!st.notify_deleted;
+    edit.checked = !!st.notify_edited;
+    del.disabled = edit.disabled = false;
+    del.dataset.loaded = edit.dataset.loaded = '1';
+  } catch(e) {
+    if (err) err.innerHTML =
+      '<div style="font-size:12px;color:var(--red);padding:6px 0">⚠️ Не удалось загрузить настройки: '
+      + esc(e.message||'ошибка связи')
+      + '. Переключатели отключены, чтобы не затереть то, что стоит на сервере.'
+      + '</div><button class="btn btn-s" style="font-size:12px" onclick="openVaultSettings()">Повторить</button>';
+  }
 }
 
 async function saveVaultSettings() {
-  const notify_deleted = document.getElementById('vsetDel').checked;
-  const notify_edited = document.getElementById('vsetEdit').checked;
+  const del = document.getElementById('vsetDel');
+  const edit = document.getElementById('vsetEdit');
+  if (!del.dataset.loaded || !edit.dataset.loaded) {
+    toast('⚠️ Настройки ещё не загрузились — сохранение затёрло бы серверные');
+    return;
+  }
+  const notify_deleted = del.checked;
+  const notify_edited = edit.checked;
   try {
     await api('/api/miniapp/vault/settings', {method:'POST', body: JSON.stringify({notify_deleted, notify_edited})});
     toast('✅ Сохранено');
@@ -15679,7 +15718,11 @@ async function loadContactStats() {
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_username||0)}</div><div class="kpi-lbl">Username</div></div>
       <div class="kpi-card" style="min-width:60px;text-align:center" title="Двусторонняя связь: аккаунт и собеседник добавили друг друга в контакты"><div class="kpi-val">${num(d.mutual||0)}</div><div class="kpi-lbl">↔ Взаимные</div></div>
     `);
-  } catch(_) {}
+  } catch(e) {
+    // Нули вместо цифр — это утверждение, которого мы не проверяли. Пустая
+    // полоса — тоже: непонятно, считается она или сломалась.
+    txt('contactsKpi', errHtml(e.message, 'loadContactStats()'));
+  }
 }
 
 let CURRENT_CONTACT_ID = null;
@@ -16990,7 +17033,11 @@ async function openBotFactory() {
     const sel = document.getElementById('bfEcosystem');
     sel.innerHTML = '<option value="">Не привязывать</option>' +
       (ecos.ecosystems||[]).map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
-  } catch(_) {}
+  } catch(e) {
+    const sel = document.getElementById('bfEcosystem');
+    if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
+      + '<option value="" disabled>⚠️ Экосистемы не загрузились</option>';
+  }
   // Load stats and recent
   try {
     const d = await api('/api/miniapp/bot_factory');
@@ -20331,14 +20378,23 @@ async function openGpCreateModal() {
         <span style="color:${a.is_active?'var(--green)':'var(--red)'};font-size:11px">${a.is_active?'🟢':'🔴'}</span>
       </label>`
     ).join('') || '<div style="color:var(--hint);font-size:13px">Нет аккаунтов</div>';
-  } catch(_) {}
+  } catch(e) {
+    // «Нет аккаунтов» и «не смогли спросить» — разные вещи. Раньше сбой рисовал
+    // пустоту, и владелец видел ровно то же, что при пустом парке.
+    const list = document.getElementById('gpAccountsList');
+    if (list) list.innerHTML = errHtml(e.message, 'openGpCreateModal()');
+  }
   // Load ecosystems
   try {
     const ecos = await api('/api/miniapp/ecosystems');
     const sel = document.getElementById('gpEcosystem');
     sel.innerHTML = '<option value="">Не привязывать</option>' +
       (ecos.ecosystems||[]).map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
-  } catch(_) {}
+  } catch(e) {
+    const sel = document.getElementById('gpEcosystem');
+    if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
+      + '<option value="" disabled>⚠️ Экосистемы не загрузились</option>';
+  }
 }
 
 function gpGeoToggle() {
@@ -20392,7 +20448,13 @@ async function loadGpGeoPresets() {
     sel.innerHTML = '<option value="">— выберите пресет или свои города —</option>'
       + (d.presets||[]).map(p=>`<option value="${esc(p.key)}">${esc(p.label)} (${p.count})</option>`).join('')
       + custom;
-  } catch(_) {}
+  } catch(e) {
+    // Свой список городов остаётся доступен — работа не встаёт, но видно, что
+    // пресетов нет не потому, что их не существует.
+    const sel = document.getElementById('gpGeoPreset');
+    if (sel) sel.innerHTML = '<option value="">⚠️ Пресеты не загрузились</option>'
+      + '<option value="__custom">✍️ Свой список городов</option>';
+  }
 }
 async function submitGpCreate() {
   const assetType = document.getElementById('gpAssetType').value;
@@ -21536,7 +21598,10 @@ async function openMeshModal() {
       opt.textContent = (a.first_name||a.phone)+' ('+(a.phone||'')+')'
       el.appendChild(opt);
     });
-  } catch(e) {}
+  } catch(e) {
+    el.innerHTML = '<option value="">— без аккаунта —</option>'
+      + '<option value="" disabled>⚠️ Аккаунты не загрузились</option>';
+  }
   showModal('mo-mesh');
 }
 async function submitMeshCreate() {
@@ -22927,7 +22992,11 @@ async function loadCrosspost() {
       <div class="row-body"><div class="row-name" style="font-size:13px">${esc(String(l.source_title))} → ${esc(String(l.target_title))}</div>
       <div class="row-val">переслано ${num(l.forwarded_total||0)}${l.last_run_at?' · '+ago(l.last_run_at):' · ещё не запускалось'}</div></div>
     </div>`).join('');
-  } catch(e) {}
+  } catch(e) {
+    // Пустой блок читался как «правил нет» — а правила могли быть, просто
+    // запрос не дошёл. Ошибка с кнопкой «Повторить» отличает одно от другого.
+    el.innerHTML = errHtml(e.message, 'loadCrosspost()');
+  }
 }
 async function runCrosspost() {
   try {
