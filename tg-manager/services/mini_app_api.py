@@ -3064,23 +3064,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
         _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
                     "WHERE ol.op_id=oq.id AND ol.status='error') AS err_cnt")
+        # Страница и честные счётчики. Раньше запрос был жёстко LIMIT 30 без
+        # offset и без общего числа: истории дальше тридцати операций просто не
+        # существовало, а плитки на экране («Всего», «Готово», «Ошибки»)
+        # считались по этим тридцати строкам — у человека с двумя сотнями
+        # операций экран уверенно показывал «Всего 30». Значения по умолчанию
+        # прежние, так что старый вызов без параметров ведёт себя как раньше.
+        try:
+            limit = min(
+                validate_integer(request.query.get("limit", "30"),
+                                 min_val=1, max_val=200) or 30, 200)
+        except (ValueError, TypeError):
+            limit = 30
+        try:
+            offset = max(
+                validate_integer(request.query.get("offset", "0"),
+                                 min_val=0) or 0, 0)
+        except (ValueError, TypeError):
+            offset = 0
+        # Счётчики — по ВСЕЙ очереди владельца, одним проходом, а не по странице.
+        # Считаем ДО выборки строк: гейт на фильтр статуса смотрит на последний
+        # запрос к operation_queue, и агрегат, вставший после, читался бы там как
+        # «фильтр не дошёл до запроса».
+        counts: dict = {}
+        try:
+            for r in await pool.fetch(
+                    """SELECT status, COUNT(*) AS n FROM operation_queue
+                       WHERE owner_id=$1 GROUP BY status""", uid):
+                counts[str(r["status"])] = int(r["n"] or 0)
+        except Exception:
+            log.debug("operations: счётчики по статусам недоступны uid=%s", uid)
+        _cols = f"""oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
+                          COALESCE(oq.error_msg, oq.result->>'reason') AS error_msg,
+                          oq.created_at, oq.started_at, oq.finished_at,
+                          oq.scheduled_for, {_err_sub}"""
         if status_filter:
             rows = await _safe_fetch(pool,
-                f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
-                          COALESCE(oq.error_msg, oq.result->>'reason') AS error_msg,
-                          oq.created_at, oq.started_at, oq.finished_at,
-                          oq.scheduled_for, {_err_sub}
+                f"""SELECT {_cols}
                    FROM operation_queue oq WHERE oq.owner_id=$1 AND oq.status=$2
-                   ORDER BY oq.created_at DESC LIMIT 30""", uid, status_filter)
+                   ORDER BY oq.created_at DESC LIMIT $3 OFFSET $4""",
+                uid, status_filter, limit, offset)
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM operation_queue oq "
+                "WHERE oq.owner_id=$1 AND oq.status=$2",
+                uid, status_filter)
         else:
             rows = await _safe_fetch(pool,
-                f"""SELECT oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
-                          COALESCE(oq.error_msg, oq.result->>'reason') AS error_msg,
-                          oq.created_at, oq.started_at, oq.finished_at,
-                          oq.scheduled_for, {_err_sub}
+                f"""SELECT {_cols}
                    FROM operation_queue oq WHERE oq.owner_id=$1
-                   ORDER BY oq.created_at DESC LIMIT 30""", uid)
-        return _json_resp({"operations": rows})
+                   ORDER BY oq.created_at DESC LIMIT $2 OFFSET $3""",
+                uid, limit, offset)
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM operation_queue oq WHERE oq.owner_id=$1", uid)
+        return _json_resp({
+            "operations": rows,
+            "total": int(total or 0),
+            "counts": counts,
+            "page": {"offset": offset, "limit": limit,
+                     "has_more": (offset + len(rows or [])) < int(total or 0)},
+        })
 
     async def operation_status(request: web.Request) -> web.Response:
         """Статус одной операции (для инлайн-опроса результата после enqueue)."""

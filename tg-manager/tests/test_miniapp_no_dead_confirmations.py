@@ -29,6 +29,38 @@ import re
 from tests.miniapp_source import miniapp_source, screen_files
 
 
+def _braced(src: str, anchor: str) -> str:
+    """Кусок от `anchor` до закрывающей его фигурной скобки — по РЕАЛЬНОЙ границе.
+
+    Срез фиксированной длины (`src[i:i + 1400]`) держится ровно до следующей
+    правки: код подрос — окно промахнулось — проверка внутри него замолчала.
+    Считаем скобки, пропуская строки и `//`-комментарии, поэтому границей
+    служит сама структура, а не подобранное когда-то число.
+    """
+    i = src.index(anchor)
+    j = src.index("{", i)
+    depth, k, n = 0, j, len(src)
+    while k < n:
+        c = src[k]
+        if c in "'\"`":
+            q, k = c, k + 1
+            while k < n and src[k] != q:
+                k += 2 if src[k] == "\\" else 1
+        elif c == "/" and k + 1 < n and src[k + 1] == "/":
+            k = src.find("\n", k)
+            if k == -1:
+                break
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return src[i:k + 1]
+        k += 1
+    raise AssertionError(f"не нашли закрывающую скобку для {anchor!r}")
+
+
+
 def test_no_confirm_swallowed_by_nullish_coalescing():
     """`showConfirm(...) ?? действие` — действие уходит всегда, мимо ответа."""
     src = miniapp_source()
@@ -73,3 +105,27 @@ def test_row_deletes_ask_first():
         assert cut != -1, f"{fn}: не нашли вызов api"
         assert "askConfirm" in head[:cut], (
             f"{fn} удаляет без подтверждения — одно касание 🗑 и объекта нет")
+
+
+def test_fallback_tg_stub_answers_the_confirm():
+    """Запасной `tg` без SDK обязан ОТВЕЧАТЬ на подтверждение.
+
+    Когда telegram-web-app.js не загрузился, приложение работает на запасном
+    объекте `tg`. В нём стояло `showConfirm() {}` — метод есть, колбэк не зовётся
+    никогда. askConfirm проверяет ровно «метод есть?» и уходит ждать ответа,
+    поэтому его промис висел вечно: диалог не показывался, действие не
+    происходило, ошибки не было. Ни одно удаление в этом режиме не работало.
+    """
+    stub = _braced(miniapp_source(),
+                   "const tg = (window.Telegram && window.Telegram.WebApp) ||")
+    m = re.search(r"showConfirm\s*\(([^)]*)\)\s*\{", stub)
+    assert m, "в запасном `tg` нет showConfirm — askConfirm не найдёт метод"
+    args = [a.strip() for a in m.group(1).split(",") if a.strip()]
+    assert len(args) >= 2, (
+        "заглушка showConfirm обязана принимать колбэк вторым аргументом, "
+        f"а принимает {m.group(1)!r}")
+    cb = args[1]
+    body = _braced(stub[m.start():], m.group(0)[:-1])
+    assert re.search(rf"\b{re.escape(cb)}\s*\(", body), (
+        "заглушка showConfirm не зовёт колбэк — askConfirm повиснет навсегда: "
+        "промис не разрешится, диалога не будет, действие не произойдёт")

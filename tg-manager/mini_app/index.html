@@ -3449,6 +3449,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" style="width:100%;font-size:12px;padding:8px 4px" onclick="retryAllFailed()" title="Повторить все недоведённые операции">↺ Перезапустить недоведённые</button>
     </div>
     <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <!-- История дальше страницы. Запрос был жёстко LIMIT 30 без offset: всё,
+         что случилось раньше тридцати последних операций, до интерфейса не
+         доходило вовсе. -->
+    <div class="lst-more" id="opsLoadMore"></div>
   </div>
 </div>
 
@@ -6840,7 +6844,19 @@ const tg = (window.Telegram && window.Telegram.WebApp) || {
   HapticFeedback: { impactOccurred() {}, notificationOccurred() {}, selectionChanged() {} },
   MainButton: { show() {}, hide() {}, setText() {}, onClick() {} },
   BackButton: { show() {}, hide() {}, onClick() {} },
-  openTelegramLink() {}, openLink() {}, showAlert() {}, showConfirm() {},
+  openTelegramLink() {}, openLink() {},
+  // Заглушки диалогов обязаны ОТВЕЧАТЬ. Пустой showConfirm() ломал askConfirm
+  // насмерть: тот проверяет «метод есть?» и ждёт колбэк, которого пустышка
+  // никогда не звала, — промис висел вечно. Наружу это выглядело так, что
+  // подтверждение не появилось и действие не произошло, молча и без ошибки.
+  // Путь редкий (SDK Telegram не загрузился), но именно в нём человек и жмёт
+  // кнопки, пытаясь понять, что не так.
+  showAlert(msg, cb) { try { window.alert(msg); } catch (_) {} if (cb) cb(); },
+  showConfirm(msg, cb) {
+    let ok = false;
+    try { ok = window.confirm(msg); } catch (_) { ok = false; }
+    if (cb) cb(ok);
+  },
 };
 try { tg.ready(); tg.expand(); } catch (_) {}
 // Системная полоса Telegram над приложением и фон под ним красятся в наш цвет.
@@ -7197,7 +7213,7 @@ function openSSE() {
   // исчезала из прогресса; итог приходил только в чат бота. Теперь итог виден
   // там же, где операция запускалась, и ведёт в детали одним тапом.
   SSE.addEventListener('op_complete', e => {
-    try { showOpComplete(JSON.parse(e.data)); } catch(_) {}
+    try { queueOpComplete(JSON.parse(e.data)); } catch(_) {}
   });
   SSE.onopen = () => {
     _sseRetry = 0;
@@ -7255,6 +7271,62 @@ function _opNextBtn(op) {
   const n = _OP_NEXT[op && op.op_type];
   if (!n || typeof window[n.fn] !== 'function') return '';
   return `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();${n.fn}()">${n.label}</button>`;
+}
+// Пачка итогов при переподключении.
+// Счётчик показанных итогов живёт в ПОДКЛЮЧЕНИИ SSE, а не у пользователя: на
+// каждом новом подключении сервер заново присылает всё, что завершилось за
+// последние полчаса, — до двадцати событий одним куском. Каждое переписывало
+// плашку и сбрасывало её таймер, поэтому из пяти операций человек видел итог
+// ровно одной, последней, а остальные четыре пролетали за доли секунды. И пять
+// вибраций подряд. Собираем пачку и показываем её одной честной сводкой.
+let _opDoneBatch = [];
+let _opDoneBatchT = null;
+function queueOpComplete(op) {
+  if (!op || !op.id) return;
+  // Один и тот же итог мог прийти дважды (переподключение во время пачки).
+  if (_opDoneBatch.some(x => x.id === op.id)) return;
+  _opDoneBatch.push(op);
+  clearTimeout(_opDoneBatchT);
+  // Пачка приходит одним куском, поэтому ждать долго не нужно: задержка
+  // заметна только на одиночном итоге, и она невелика.
+  _opDoneBatchT = setTimeout(_flushOpComplete, 400);
+}
+function _flushOpComplete() {
+  const batch = _opDoneBatch;
+  _opDoneBatch = [];
+  if (!batch.length) return;
+  if (batch.length === 1) { showOpComplete(batch[0]); return; }
+  showOpCompleteBatch(batch);
+}
+function showOpCompleteBatch(list) {
+  const el = document.getElementById('opDone');
+  if (!el) return;
+  const ok = list.filter(o => o.status === 'done').length;
+  const bad = list.length - ok;
+  const head = `${bad ? '⚠️' : '✅'} Завершились операции: ${list.length}`;
+  const parts = [];
+  if (ok) parts.push(`${ok} успешно`);
+  if (bad) parts.push(`${bad} с ошибкой`);
+  // Показываем, ЧТО именно завершилось: сводка без имён не даёт узнать свою
+  // операцию среди чужих.
+  const names = list.slice(0, 3)
+    .map(o => (o.label || o.op_type || 'операция')).join(', ');
+  const tail = list.length > 3 ? ` и ещё ${list.length - 3}` : '';
+  el.innerHTML = `<span class="od-x" onclick="event.stopPropagation();hideOpDone()">×</span>
+    <div class="od-title">${esc(head)}</div>
+    <div class="od-sum">${esc(parts.join(' · '))}\n${esc(names + tail)}</div>
+    <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();openOps()">Открыть операции</button>
+    </div>`;
+  el.onclick = () => { hideOpDone(); openOps(); };
+  el.classList.add('show');
+  clearTimeout(_opDoneTimer);
+  // Читать тут больше, чем в одиночной плашке, — и держим дольше.
+  _opDoneTimer = setTimeout(hideOpDone, 20000);
+  try {
+    const h = tg && tg.HapticFeedback;
+    if (h) h.notificationOccurred(bad ? 'error' : 'success');   // одна, а не по штуке на операцию
+  } catch(_) {}
 }
 function showOpComplete(op) {
   const el = document.getElementById('opDone');
@@ -11257,28 +11329,94 @@ function closeOpCreateAnd(fn) {
   else toast('Модуль недоступен');
 }
 
-async function loadOps() {
-  const url = OPS_FILTER ? '/api/miniapp/operations?status='+OPS_FILTER : '/api/miniapp/operations';
+// Страница истории операций. Список был жёстко ограничен тридцатью последними,
+// без «загрузить ещё»: всё, что случилось раньше, до интерфейса не доходило.
+// Хуже того, плитки сверху считались ПО ЭТИМ ТРИДЦАТИ строкам — у человека с
+// двумя сотнями операций экран уверенно показывал «Всего 30», «Ошибки 2», и обе
+// цифры были выдуманы размером страницы. Теперь счётчики приходят с сервера по
+// всей очереди, а страница честно говорит, сколько из скольких показано.
+const OPS_PAGE = 30;
+let OPS_ROWS = [];
+let OPS_TOTAL = 0;
+let OPS_OFFSET = 0;
+let OPS_LOADING = false;
+
+const OPS_MAX = 200;            // потолок одной выдачи на сервере
+function _opsQuery(offset, limit) {
+  const p = new URLSearchParams();
+  if (OPS_FILTER) p.set('status', OPS_FILTER);
+  p.set('limit', Math.min(limit || OPS_PAGE, OPS_MAX)); p.set('offset', offset);
+  return '/api/miniapp/operations?' + p.toString();
+}
+function renderOpsLoadMore() {
+  const box = document.getElementById('opsLoadMore');
+  if (!box) return;
+  if (!OPS_ROWS.length || OPS_ROWS.length >= OPS_TOTAL) { box.innerHTML=''; return; }
+  box.innerHTML = `<button class="btn btn-s" onclick="loadMoreOps()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${num(OPS_ROWS.length)} из ${num(OPS_TOTAL)}</button>`;
+}
+async function loadMoreOps() {
+  if (OPS_LOADING || OPS_ROWS.length >= OPS_TOTAL) return;
+  OPS_LOADING = true;
+  const box = document.getElementById('opsLoadMore');
+  if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
   try {
-    const d = await api(url);
-    const ops = d.operations||[];
-    // KPI cards
-    const running = ops.filter(o=>o.status==='running').length;
-    const pending = ops.filter(o=>o.status==='pending').length;
-    // Приостановленные считаем отдельно: после «Пауза» они уходят из «Ожидают»,
-    // и без своей плитки выглядело так, будто очередь просто испарилась.
-    const paused = ops.filter(o=>o.status==='paused').length;
-    const failed = ops.filter(o=>o.status==='failed').length;
-    const done = ops.filter(o=>o.status==='done').length;
+    const d = await api(_opsQuery(OPS_OFFSET, OPS_PAGE));
+    const more = d.operations||[];
+    if (!more.length) { OPS_TOTAL = OPS_ROWS.length; }
+    else {
+      const known = new Set(OPS_ROWS.map(o=>String(o.id)));
+      more.forEach(o => { if (!known.has(String(o.id))) OPS_ROWS.push(o); });
+      OPS_OFFSET += more.length;
+      if (d.total != null) OPS_TOTAL = d.total;
+    }
+    renderOps();
+  } catch(e) {
+    toast('⚠️ '+((e.message||'Ошибка').substring(0,60)));
+    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreOps()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+  } finally { OPS_LOADING = false; }
+}
+
+async function loadOps() {
+  try {
+    // Обновление после действия (отмена, пауза, повтор) не должно съедать уже
+    // подгруженную историю: человек раскрыл девяносто операций, отменил одну —
+    // и список схлопывался обратно к тридцати. Перечитываем столько же, сколько
+    // было на экране.
+    const want = Math.min(Math.max(OPS_PAGE, OPS_ROWS.length), OPS_MAX);
+    const d = await api(_opsQuery(0, want));
+    OPS_ROWS = d.operations||[];
+    OPS_OFFSET = OPS_ROWS.length;
+    OPS_TOTAL = (d.total != null ? d.total : OPS_ROWS.length);
+    // Счётчики — по всей очереди владельца. Если сервер их не прислал (старый
+    // деплой), считаем по загруженному и НЕ выдаём это за общее число.
+    // Пустой объект счётчиков = агрегат на сервере не отработал. Считать его
+    // за «всего 0» нельзя: на экране в этот момент лежат строки.
+    const c = (d.counts && Object.keys(d.counts).length) ? d.counts : null;
+    const cnt = k => c ? (c[k]||0) : OPS_ROWS.filter(o=>o.status===k).length;
+    const running = cnt('running'), pending = cnt('pending'), paused = cnt('paused');
+    const failed  = cnt('failed'),  done    = cnt('done');
+    const all = c ? Object.values(c).reduce((a,b)=>a+b,0) : OPS_ROWS.length;
     txt('opsKpi',`
-      <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val">${num(ops.length)}</div><div class="kpi-lbl">Всего</div></div>
+      <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val">${num(all)}</div><div class="kpi-lbl">${c?'Всего':'Показано'}</div></div>
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--green)">${num(done)}</div><div class="kpi-lbl">Готово</div></div>
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--blue)">${num(running)}</div><div class="kpi-lbl">Работают</div></div>
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val">${num(pending)}</div><div class="kpi-lbl">Ожидают</div></div>
       ${paused?`<div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--orange)">${num(paused)}</div><div class="kpi-lbl">Пауза</div></div>`:''}
       <div class="kpi-card" style="min-width:70px;text-align:center"><div class="kpi-val" style="color:var(--red)">${num(failed)}</div><div class="kpi-lbl">Ошибки</div></div>
     `);
-    if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?('По фильтру «'+OPS_STATUS_RU(OPS_FILTER)+'»'):''))); return; }
+    renderOps();
+  } catch(e) { txt('opsList', errHtml(e.message,'loadOps()')); }
+}
+
+function renderOps() {
+  const ops = OPS_ROWS;
+  if (!ops.length) {
+    txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?('По фильтру «'+OPS_STATUS_RU(OPS_FILTER)+'»'):''))); 
+    renderOpsLoadMore();
+    return;
+  }
+  renderOpsLoadMore();
+  {
     txt('opsList', ops.map(o=>{
       const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
       // done не может превышать total — защита от «34/17» у старых операций.
@@ -11305,7 +11443,7 @@ async function loadOps() {
         ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(o.error_msg.substring(0,80))}</div>`:''}
       </div>`;
     }).join(''));
-  } catch(e) { txt('opsList', errHtml(e.message,'loadOps()')); }
+  }
 }
 
 async function openOpDetail(opId) {
@@ -11543,6 +11681,10 @@ function filterOps(status, btn) {
   OPS_FILTER=status;
   document.querySelectorAll('#ops-seg .seg-opt').forEach(x=>x.classList.remove('on'));
   btn.classList.add('on');
+  // Новый срез — новая страница: иначе остаток считался бы от прошлого фильтра.
+  OPS_ROWS = []; OPS_OFFSET = 0; OPS_TOTAL = 0;
+  const box = document.getElementById('opsLoadMore'); if (box) box.innerHTML = '';
+  txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>');
   loadOps();
 }
 
