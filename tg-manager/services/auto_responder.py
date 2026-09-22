@@ -433,6 +433,25 @@ async def _process_bot(
     token: str,
     main_bot=None,
 ) -> None:
+    # ── ЯДОВИТЫЙ АПДЕЙТ ──────────────────────────────────────────────────────
+    # Разбор одного апдейта — длинный путь: авто-ответы, правила автоматизации,
+    # воронки, эксперименты, релей оператору. Любое исключение на этом пути
+    # раньше улетало в общий `except` внизу, а вместе с ним терялся и сдвиг
+    # оффсета — он стоял ПОСЛЕ цикла. Telegram отдаёт апдейты от сохранённого
+    # оффсета, значит следующий цикл (через 10 секунд) приносил ТОТ ЖЕ пакет,
+    # бот снова падал на том же сообщении и снова ничего не сдвигал.
+    #
+    # Бот застревал так на сутки — пока Telegram сам не выкинет апдейт из
+    # очереди, — и всё это время каждые 10 секунд заново слал авто-ответы,
+    # заново запускал воронки и заново пересылал оператору уже обработанные
+    # сообщения. Одно кривое сообщение превращало бота в спамер.
+    #
+    # Поэтому оффсет сдвигается В ЛЮБОМ случае, в finally. `max_update_id`
+    # растёт в начале каждой итерации, то есть на момент падения он равен
+    # ровно тому апдейту, на котором мы споткнулись: отравленный пропускается,
+    # остальной хвост пакета вернётся следующим циклом.
+    offset = 0
+    max_update_id = 0
     try:
         offset = await db.get_update_offset(pool, bot_id)
         if offset == 0:
@@ -1297,11 +1316,20 @@ async def _process_bot(
                 except Exception as _relay_err:
                     log.warning("auto_responder: relay forward failed bot=%d: %s", bot_id, _relay_err)
 
-        if max_update_id > offset:
-            await db.set_update_offset(pool, bot_id, max_update_id)
-
     except Exception:
         log.exception("Auto-responder error for bot %d", bot_id)
+    finally:
+        if max_update_id > offset:
+            try:
+                await db.set_update_offset(pool, bot_id, max_update_id)
+            except Exception:
+                # Не сдвинули — следующий цикл разберёт пакет заново. Это
+                # повтор, а не потеря, и молчать о нём нельзя.
+                log.warning(
+                    "auto_responder: bot=%d не сохранён оффсет %d — пакет "
+                    "будет разобран повторно", bot_id, max_update_id,
+                    exc_info=True,
+                )
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
