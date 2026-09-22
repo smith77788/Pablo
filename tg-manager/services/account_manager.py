@@ -16,6 +16,7 @@ import hashlib
 import importlib
 import inspect
 import threading
+import weakref
 from datetime import datetime, timezone, timedelta
 import logging
 import random
@@ -173,10 +174,30 @@ _AUTH_DUP_BACKOFF = (5.0,)
 # независимо от подсистемы и от наличия account_id. Потокобезопасен (threading.Lock),
 # т.к. подключения идут из разных event-loop (бот и aiohttp-веб).
 _session_inuse_lock = threading.Lock()
-_session_inuse: dict[str, float] = {}   # session_key -> момент захвата (для авто-сброса)
+# session_key -> (момент захвата, слабая ссылка на держащего клиента | None)
+_session_inuse: dict[str, tuple[float, "weakref.ref | None"]] = {}
 # Если release потерялся (краш таски/утечка) — авто-освобождение, чтобы сессия не
-# залипла навсегда. Больше самого долгого удержания коннекта на операцию.
+# залипла навсегда.
+#
+# ВАЖНО: срок сам по себе решать не может. Раньше запись считалась протухшей
+# просто по возрасту, и обещание «больше самого долгого удержания коннекта на
+# операцию» было неправдой: прогрев аккаунта держит ОДНОГО клиента от создания
+# до отключения через весь цикл действий, а там есть паузы до 1800 секунд
+# (`account_warmer`, adaptive pause). То есть через пять минут работающего
+# прогрева мьютекс отпускал сессию, и следующая подсистема открывала ВТОРОЙ
+# живой коннект на той же сессии — ровно то, ради чего мьютекс и существует.
+# Telegram на это отвечает AUTH_KEY_DUPLICATED и отзывает ключ навсегда.
+#
+# Поэтому срок применяется только к записи, за которой НЕТ живого коннекта.
+# Пока держащий клиент жив и подключён, сессия занята сколько угодно долго:
+# занятость проходит (SessionBusyError — транзиентный скип), отозванный ключ
+# не проходит никогда.
 _SESSION_INUSE_STALE_S = 300.0
+# Запись, к которой держатель так и не привязался (клиент не поддерживает
+# слабые ссылки, либо коннект завис между захватом и привязкой). Отпускаем
+# сильно позже: залипшая на час сессия — беда поправимая, отозванный ключ —
+# нет.
+_SESSION_INUSE_BLIND_STALE_S = 3600.0
 # Сколько операция ждёт освобождения сессии другим коннектом, прежде чем сдаться
 # (транзиентный скип, НЕ смерть). Диагностика/валидация ждут 0 — падают сразу.
 _SESSION_ACQUIRE_WAIT_S = 25.0
@@ -245,11 +266,14 @@ def _wrap_client_session_mutex(client, session_key: str):
             r = _orig_connect(*a, **k)
             if inspect.isawaitable(r):
                 r = await r
+            # Коннект состоялся — теперь у записи есть живой держатель, и
+            # занятость определяется им, а не сроком.
+            _note_session_holder(session_key, client)
             return r
         except BaseException:
             if _st["held"]:
                 _st["held"] = False
-                _release_session(session_key)
+                _release_session(session_key, client)
             raise
 
     async def _disconnect(*a, **k):
@@ -262,7 +286,7 @@ def _wrap_client_session_mutex(client, session_key: str):
         finally:
             if _st["held"]:
                 _st["held"] = False
-                _release_session(session_key)
+                _release_session(session_key, client)
 
     try:
         client.connect = _connect  # type: ignore[assignment]
@@ -272,22 +296,100 @@ def _wrap_client_session_mutex(client, session_key: str):
     return client
 
 
+def _client_is_connected(client) -> bool:
+    """Держит ли этот клиент живой коннект прямо сейчас.
+
+    Сомнение трактуем как «держит»: отобрать сессию у живого коннекта дороже,
+    чем подождать. Исключение — клиент без самого признака: у него спросить
+    нечего.
+    """
+    try:
+        probe = getattr(client, "is_connected", None)
+        if probe is None:
+            return False
+        state = probe()
+        if inspect.isawaitable(state):
+            # Спросить по-настоящему отсюда нельзя (мы под threading-локом и вне
+            # его event-loop). Считаем занятым.
+            try:
+                state.close()  # type: ignore[union-attr]
+            except Exception:
+                pass
+            return True
+        return bool(state)
+    except Exception:
+        return True
+
+
 def _try_acquire_session(key: str) -> bool:
     if not key:
         return True
     now = time.time()
     with _session_inuse_lock:
         held = _session_inuse.get(key)
-        if held is not None and (now - held) < _SESSION_INUSE_STALE_S:
-            return False
-        _session_inuse[key] = now
+        if held is not None:
+            ts, ref = held
+            holder = None
+            if ref is not None:
+                try:
+                    holder = ref()
+                except Exception:
+                    holder = None
+            if holder is not None and _client_is_connected(holder):
+                # Живой коннект — не отнимаем, сколько бы он ни держал.
+                return False
+            limit = (_SESSION_INUSE_STALE_S if ref is not None
+                     else _SESSION_INUSE_BLIND_STALE_S)
+            if (now - ts) < limit:
+                return False
+        _session_inuse[key] = (now, None)
         return True
 
 
-def _release_session(key: str) -> None:
+def _note_session_holder(key: str, client) -> None:
+    """Запомнить, КТО держит сессию: по нему и определяется занятость.
+
+    Без этого остаётся только возраст записи, а он про занятость не говорит
+    ничего.
+    """
+    if not key or client is None:
+        return
+    try:
+        ref = weakref.ref(client)
+    except TypeError:
+        return  # объект без слабых ссылок — запись остаётся «слепой»
+    with _session_inuse_lock:
+        held = _session_inuse.get(key)
+        if held is None:
+            return
+        _session_inuse[key] = (held[0], ref)
+
+
+def _release_session(key: str, client=None) -> None:
+    """Освободить сессию. `client` — тот, кто её держал.
+
+    Держателя передаём не для порядка: освобождение бывает ЗАПОЗДАЛЫМ. Клиент,
+    чью запись уже подобрали как протухшую, всё равно когда-нибудь отключится и
+    позовёт release — и снял бы замок с сессии, которую к тому моменту держит
+    уже другой живой коннект. Второй коннект поверх него — это
+    AUTH_KEY_DUPLICATED. Поэтому снимаем замок, только если он ещё наш.
+    """
     if not key:
         return
     with _session_inuse_lock:
+        held = _session_inuse.get(key)
+        if held is None:
+            return
+        if client is not None:
+            ref = held[1]
+            owner = None
+            if ref is not None:
+                try:
+                    owner = ref()
+                except Exception:
+                    owner = None
+            if owner is not None and owner is not client:
+                return  # записью владеет уже другой коннект
         _session_inuse.pop(key, None)
 
 
@@ -308,7 +410,7 @@ def _bind_session_release(client, key: str) -> None:
     def _do_release():
         if not _state["released"]:
             _state["released"] = True
-            _release_session(key)
+            _release_session(key, client)
 
     if _orig is None:
         _do_release()
@@ -1481,6 +1583,7 @@ async def connect_client(session_string: str = "", device: dict | None = None,
                               _force_direct=_force_direct_retry, _mutex_managed=True)
         try:
             await _connect_and_track(client, device, action_type)
+            _note_session_holder(_skey, client)
             _bind_session_release(client, _skey)
             return client
         except AuthKeyDuplicatedError as e:
@@ -1529,6 +1632,7 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             client = _make_client(session_string, device, low_risk=low_risk,
                                   _no_pool=True, _force_direct=True, _mutex_managed=True)
             await _connect_and_track(client, device, action_type)
+            _note_session_holder(_skey, client)
             _bind_session_release(client, _skey)
             return client
       # Теоретически недостижимо (цикл либо возвращает, либо пробрасывает).
