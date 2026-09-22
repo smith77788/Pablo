@@ -476,14 +476,20 @@ async def execute_pending_posts(pool: asyncpg.Pool, bot: Bot) -> int:
     Работает только для кампаний со статусом 'active'.
     Возвращает количество опубликованных постов.
     """
-    # Берём pending посты активных кампаний
+    # Берём pending посты активных кампаний. LEFT JOIN на аккаунт — только
+    # чтобы отсеять посты, чей аккаунт СЕЙЧАС занят операцией (не тратить
+    # захват впустую); COALESCE(a.in_operation, FALSE) = FALSE пропускает и
+    # посты без назначенного аккаунта (LEFT JOIN не находит строку → NULL) —
+    # у них своя проверка ниже, в _publish_post.
     posts = await pool.fetch(
         """SELECT np.*, nc.status AS campaign_status
            FROM narrative_posts np
            JOIN narrative_campaigns nc ON nc.id = np.campaign_id
+           LEFT JOIN tg_accounts a ON a.id = np.acc_id
            WHERE np.status = 'pending'
              AND np.scheduled_at <= NOW()
              AND nc.status = 'active'
+             AND COALESCE(a.in_operation, FALSE) = FALSE
            ORDER BY np.scheduled_at
            LIMIT 50""",
     )
@@ -518,7 +524,29 @@ async def _execute_with_session(pool: asyncpg.Pool, posts: list) -> int:
             )
             continue
 
-        success, error = await _publish_post(pool, post_dict)
+        # Живая сессия аккаунта — тот же ресурс, что и у операций/прогрева.
+        # Без атомарного захвата фоновая публикация могла бы коннектиться к
+        # аккаунту РОВНО тогда, когда его держит операция (например, массовый
+        # инвайт) — два коннекта на одном auth-key = AUTH_KEY_DUPLICATED.
+        from services import op_worker
+        _claimed = bool(acc_id) and await op_worker.try_claim_account(int(acc_id))
+        if acc_id and not _claimed:
+            await pool.execute(
+                """UPDATE narrative_posts
+                   SET scheduled_at = NOW() + interval '10 minutes'
+                   WHERE id=$1 AND status='pending'""",
+                post_dict["id"],
+            )
+            log.info(
+                "narrative_engine: пост %d отложен на 10м — аккаунт %d занят "
+                "другой сессией", post_dict["id"], acc_id,
+            )
+            continue
+        try:
+            success, error = await _publish_post(pool, post_dict)
+        finally:
+            if _claimed:
+                await op_worker.release_accounts([int(acc_id)])
 
         if success:
             await pool.execute(

@@ -27,6 +27,15 @@ _CONNECTING_MONITORS = [
     "services/account_manager.py",   # run_session_health_monitor
     "services/account_warmer.py",
     "services/ghost_engine.py",      # фоновый «шум» — тоже живая сессия
+    # Список был неполным: main.py запускает как create_task ещё несколько
+    # независимых циклов, коннектящих аккаунты в обход мьютекса connect_client
+    # (_make_client()+client.connect() напрямую) — найдено при разборе жалобы
+    # «живой аккаунт не берётся в работу, показывает сессия/сеть» (мас-инвайт
+    # ловил SessionBusyError от гонки с этими же циклами за ту же сессию).
+    "services/showcase_layer.py",    # release_wave/_post_wave — волны витрины
+    "services/drift_detector.py",    # get_full_channel_info — дрейф карточки канала
+    "services/narrative_engine.py",  # post_to_channel — публикация нарратив-постов
+    "services/ranking_checker.py",   # search_in_telegram — проверка позиций в поиске
 ]
 
 # Захват перед коннектом: is_account_in_use (снимок) ИЛИ атомарный try_claim_account

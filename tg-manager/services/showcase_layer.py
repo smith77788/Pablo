@@ -321,18 +321,34 @@ async def _release_one(pool, sc: dict) -> bool:
         return False
 
     acc = await pool.fetchrow(
-        "SELECT * FROM tg_accounts WHERE id=$1 AND is_active AND session_str IS NOT NULL",
+        "SELECT * FROM tg_accounts WHERE id=$1 AND is_active AND session_str IS NOT NULL "
+        "AND COALESCE(in_operation, FALSE) = FALSE",
         int(sc.get("creator_account_id") or 0),
     )
     if not acc:
-        log.info("showcase_layer: витрина %s — аккаунт-создатель недоступен, "
+        log.info("showcase_layer: витрина %s — аккаунт-создатель недоступен или занят, "
                  "волна пропущена", sc["id"])
         return False
 
-    res = await release_wave(
-        pool, int(sc["id"]), int(ch["members"]), dict(acc),
-        int(ch["channel_id"]), int(ch["access_hash"] or 0),
-    )
+    # Аккаунт-создатель — та же живая сессия, что и у операций/прогрева/призрака.
+    # Без атомарного захвата фоновый цикл волн мог бы коннектиться к ней РОВНО
+    # тогда, когда её же держит операция (например, массовый инвайт в ту же
+    # мать) — два коннекта на одном auth-key = AUTH_KEY_DUPLICATED. Фильтр
+    # in_operation в SQL выше не закрывает гонку (TOCTOU), только атомарный
+    # try_claim_account это делает.
+    from services import op_worker
+    acc_id = int(acc["id"])
+    if not await op_worker.try_claim_account(acc_id):
+        log.info("showcase_layer: витрина %s — аккаунт-создатель занят другой "
+                 "сессией, волна пропущена", sc["id"])
+        return False
+    try:
+        res = await release_wave(
+            pool, int(sc["id"]), int(ch["members"]), dict(acc),
+            int(ch["channel_id"]), int(ch["access_hash"] or 0),
+        )
+    finally:
+        await op_worker.release_accounts([acc_id])
     if res.get("ok"):
         log.info("showcase_layer: витрина %s — открыто мест: %s",
                  sc["id"], res.get("size"))

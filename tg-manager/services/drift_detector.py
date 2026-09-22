@@ -168,164 +168,177 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
 
     for (owner_id, acc_id), channels in groups.items():
         acc = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE id=$1 AND is_active=true AND session_str IS NOT NULL",
+            "SELECT * FROM tg_accounts WHERE id=$1 AND is_active=true AND session_str IS NOT NULL "
+            "AND COALESCE(in_operation, FALSE) = FALSE",
             acc_id,
         )
         if not acc:
             continue
         acc_dict = dict(acc)
 
-        for ch in channels[:_BATCH_SIZE]:
-            try:
-                info = await account_manager.get_full_channel_info(
-                    acc_dict["session_str"], ch["channel_id"], _acc=acc_dict
-                )
-            except Exception as e:
-                log.warning(
-                    "drift_detector get_full_channel_info error for channel %s: %s",
-                    ch["channel_id"],
-                    e,
-                )
-                info = None
+        # Живая сессия аккаунта — тот же живой ресурс, что и у операций/прогрева.
+        # Без атомарного захвата цикл дрейфа мог бы коннектиться к аккаунту
+        # РОВНО тогда, когда его держит операция — два коннекта на одном
+        # auth-key = AUTH_KEY_DUPLICATED. Фильтр in_operation в SQL выше не
+        # закрывает гонку (TOCTOU), только try_claim_account это делает.
+        from services import op_worker
+        if not await op_worker.try_claim_account(int(acc_id)):
+            continue
 
-            # Always update last_drift_check
-            await pool.execute(
-                "UPDATE managed_channels SET last_drift_check=now() WHERE id=$1",
-                ch["id"],
-            )
+        try:
+            for ch in channels[:_BATCH_SIZE]:
+                try:
+                    info = await account_manager.get_full_channel_info(
+                        acc_dict["session_str"], ch["channel_id"], _acc=acc_dict
+                    )
+                except Exception as e:
+                    log.warning(
+                        "drift_detector get_full_channel_info error for channel %s: %s",
+                        ch["channel_id"],
+                        e,
+                    )
+                    info = None
 
-            if not info:
-                await asyncio.sleep(1.0)
-                continue
-
-            new_title = (info.get("title") or "").strip()
-            new_username = (info.get("username") or "").strip()
-            new_about = (info.get("about") or "").strip()
-
-            old_title = (ch["title"] or "").strip()
-            old_username = (ch["username"] or "").strip()
-            old_about = (ch["about"] or "").strip()
-
-            # Карточка приводится к текущему состоянию Telegram НА КАЖДОМ удачном
-            # опросе, а не только когда сработал дрейф. Раньше запись жила внутри
-            # `if changes:` и требовала, чтобы старое значение было непустым:
-            # канал, переименованный не через Infragram, оставался в списке под
-            # прежним именем, снятая ссылка висела вечно, а members_count не писал
-            # никто вообще — отсюда «0 участников» у всех каналов.
-            #
-            # Ноль участников от Telegram означает «не сказали», а не «никого нет»,
-            # поэтому известное число нулём не затирается. Пустой username, наоборот,
-            # затирает: ссылку могли снять, и это правда.
-            await pool.execute(
-                "UPDATE managed_channels SET "
-                "  title         = COALESCE($2, title), "
-                "  username      = $3, "
-                "  members_count = COALESCE($4, members_count) "
-                "WHERE id=$1",
-                ch["id"],
-                new_title or None,
-                new_username,
-                int(info.get("members_count") or 0) or None,
-            )
-
-            changes: dict = {}
-            if old_title and new_title and new_title != old_title:
-                changes["title"] = {"old": old_title, "new": new_title}
-            if old_username and new_username and new_username != old_username:
-                changes["username"] = {"old": old_username, "new": new_username}
-            if old_about and new_about and new_about != old_about:
-                changes["about"] = {
-                    "old": old_about[:200],
-                    "new": new_about[:200],
-                }
-
-            if changes:
-                log.info(
-                    "drift_detector: channel %d changed — %s",
-                    ch["channel_id"],
-                    list(changes),
-                )
-
-                # Compare with templates
-                tpl_result = await _compare_with_templates(pool, owner_id, changes)
-                verdict = tpl_result["verdict"]
-                if verdict == "template_match":
-                    severity = "info"
-                elif verdict == "partial_match":
-                    severity = "warning"
-                else:
-                    severity = "warning" if len(changes) > 1 else "info"
-
+                # Always update last_drift_check
                 await pool.execute(
-                    "INSERT INTO restriction_events"
-                    "(owner_id, event_type, severity, details) "
-                    "VALUES ($1, 'drift_detected', $2, $3)",
-                    owner_id,
-                    severity,
-                    json.dumps(
-                        {
-                            "channel_id": ch["channel_id"],
-                            "channel_title": old_title or new_title,
-                            "changes": changes,
-                            "template_verdict": verdict,
-                            "matched_templates": [
-                                {"name": m["template_name"], "ratio": m["ratio"]}
-                                for m in tpl_result["matched_templates"]
-                            ],
-                        },
-                        ensure_ascii=False,
-                    ),
-                )
-                # title/username уже записаны выше — здесь остаётся описание.
-                await pool.execute(
-                    "UPDATE managed_channels SET about=$2 WHERE id=$1",
-                    ch["id"], new_about,
-                )
-                # Notify owner
-                ch_name = old_title or new_title or f"#{ch['channel_id']}"
-                change_lines = []
-                for field, diff in changes.items():
-                    change_lines.append(
-                        f"  <b>{field}</b>: «{diff['old']}» → «{diff['new']}»"
-                    )
-
-                # Template verdict header
-                if verdict == "template_match":
-                    header = "✅ <b>Дрейф канала (по шаблону)</b>"
-                    tpl_note = (
-                        "\n\n🟢 Изменения соответствуют шаблону «"
-                        + tpl_result["matched_templates"][0]["name"]
-                        + "» — <i>ожидаемо</i>"
-                    )
-                elif verdict == "partial_match":
-                    header = "⚠️ <b>Дрейф канала (частичное совпадение)</b>"
-                    tpl_names = ", ".join(
-                        f"«{m['template_name']}»"
-                        for m in tpl_result["matched_templates"]
-                    )
-                    tpl_note = f"\n\n🟡 Частично совпадает с шаблонами: {tpl_names}"
-                elif verdict == "unexpected":
-                    header = "🔴 <b>Неожиданный дрейф канала</b>"
-                    tpl_note = (
-                        "\n\n🔴 Не соответствует ни одному шаблону — <i>проверьте!</i>"
-                    )
-                else:
-                    header = "⚠️ <b>Дрейф канала</b>"
-                    tpl_note = ""
-
-                msg = (
-                    f"{header}\n\n"
-                    f"<b>{ch_name}</b> изменился:\n"
-                    + "\n".join(change_lines)
-                    + tpl_note
-                )
-                await db.notify_if_enabled(pool, bot, owner_id, "restriction", msg)
-            elif not old_about and new_about:
-                # First-time about capture — just store it silently
-                await pool.execute(
-                    "UPDATE managed_channels SET about=$2 WHERE id=$1",
+                    "UPDATE managed_channels SET last_drift_check=now() WHERE id=$1",
                     ch["id"],
-                    new_about,
                 )
 
-            await asyncio.sleep(_PAUSE_BETWEEN)
+                if not info:
+                    await asyncio.sleep(1.0)
+                    continue
+
+                new_title = (info.get("title") or "").strip()
+                new_username = (info.get("username") or "").strip()
+                new_about = (info.get("about") or "").strip()
+
+                old_title = (ch["title"] or "").strip()
+                old_username = (ch["username"] or "").strip()
+                old_about = (ch["about"] or "").strip()
+
+                # Карточка приводится к текущему состоянию Telegram НА КАЖДОМ удачном
+                # опросе, а не только когда сработал дрейф. Раньше запись жила внутри
+                # `if changes:` и требовала, чтобы старое значение было непустым:
+                # канал, переименованный не через Infragram, оставался в списке под
+                # прежним именем, снятая ссылка висела вечно, а members_count не писал
+                # никто вообще — отсюда «0 участников» у всех каналов.
+                #
+                # Ноль участников от Telegram означает «не сказали», а не «никого нет»,
+                # поэтому известное число нулём не затирается. Пустой username, наоборот,
+                # затирает: ссылку могли снять, и это правда.
+                await pool.execute(
+                    "UPDATE managed_channels SET "
+                    "  title         = COALESCE($2, title), "
+                    "  username      = $3, "
+                    "  members_count = COALESCE($4, members_count) "
+                    "WHERE id=$1",
+                    ch["id"],
+                    new_title or None,
+                    new_username,
+                    int(info.get("members_count") or 0) or None,
+                )
+
+                changes: dict = {}
+                if old_title and new_title and new_title != old_title:
+                    changes["title"] = {"old": old_title, "new": new_title}
+                if old_username and new_username and new_username != old_username:
+                    changes["username"] = {"old": old_username, "new": new_username}
+                if old_about and new_about and new_about != old_about:
+                    changes["about"] = {
+                        "old": old_about[:200],
+                        "new": new_about[:200],
+                    }
+
+                if changes:
+                    log.info(
+                        "drift_detector: channel %d changed — %s",
+                        ch["channel_id"],
+                        list(changes),
+                    )
+
+                    # Compare with templates
+                    tpl_result = await _compare_with_templates(pool, owner_id, changes)
+                    verdict = tpl_result["verdict"]
+                    if verdict == "template_match":
+                        severity = "info"
+                    elif verdict == "partial_match":
+                        severity = "warning"
+                    else:
+                        severity = "warning" if len(changes) > 1 else "info"
+
+                    await pool.execute(
+                        "INSERT INTO restriction_events"
+                        "(owner_id, event_type, severity, details) "
+                        "VALUES ($1, 'drift_detected', $2, $3)",
+                        owner_id,
+                        severity,
+                        json.dumps(
+                            {
+                                "channel_id": ch["channel_id"],
+                                "channel_title": old_title or new_title,
+                                "changes": changes,
+                                "template_verdict": verdict,
+                                "matched_templates": [
+                                    {"name": m["template_name"], "ratio": m["ratio"]}
+                                    for m in tpl_result["matched_templates"]
+                                ],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                    # title/username уже записаны выше — здесь остаётся описание.
+                    await pool.execute(
+                        "UPDATE managed_channels SET about=$2 WHERE id=$1",
+                        ch["id"], new_about,
+                    )
+                    # Notify owner
+                    ch_name = old_title or new_title or f"#{ch['channel_id']}"
+                    change_lines = []
+                    for field, diff in changes.items():
+                        change_lines.append(
+                            f"  <b>{field}</b>: «{diff['old']}» → «{diff['new']}»"
+                        )
+
+                    # Template verdict header
+                    if verdict == "template_match":
+                        header = "✅ <b>Дрейф канала (по шаблону)</b>"
+                        tpl_note = (
+                            "\n\n🟢 Изменения соответствуют шаблону «"
+                            + tpl_result["matched_templates"][0]["name"]
+                            + "» — <i>ожидаемо</i>"
+                        )
+                    elif verdict == "partial_match":
+                        header = "⚠️ <b>Дрейф канала (частичное совпадение)</b>"
+                        tpl_names = ", ".join(
+                            f"«{m['template_name']}»"
+                            for m in tpl_result["matched_templates"]
+                        )
+                        tpl_note = f"\n\n🟡 Частично совпадает с шаблонами: {tpl_names}"
+                    elif verdict == "unexpected":
+                        header = "🔴 <b>Неожиданный дрейф канала</b>"
+                        tpl_note = (
+                            "\n\n🔴 Не соответствует ни одному шаблону — <i>проверьте!</i>"
+                        )
+                    else:
+                        header = "⚠️ <b>Дрейф канала</b>"
+                        tpl_note = ""
+
+                    msg = (
+                        f"{header}\n\n"
+                        f"<b>{ch_name}</b> изменился:\n"
+                        + "\n".join(change_lines)
+                        + tpl_note
+                    )
+                    await db.notify_if_enabled(pool, bot, owner_id, "restriction", msg)
+                elif not old_about and new_about:
+                    # First-time about capture — just store it silently
+                    await pool.execute(
+                        "UPDATE managed_channels SET about=$2 WHERE id=$1",
+                        ch["id"],
+                        new_about,
+                    )
+
+                await asyncio.sleep(_PAUSE_BETWEEN)
+        finally:
+            await op_worker.release_accounts([int(acc_id)])

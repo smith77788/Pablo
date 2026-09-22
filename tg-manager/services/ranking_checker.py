@@ -33,10 +33,18 @@ _INTER_SEARCH_DELAY = 5  # seconds between searches (rate limit)
 async def _get_all_active_accounts(
     pool: asyncpg.Pool,
     owner_id: int,
-) -> list[asyncpg.Record]:
-    """Return trusted active accounts ordered by trust_score DESC."""
+) -> list[dict]:
+    """Return trusted active accounts ordered by trust_score DESC.
 
-    return await db.get_trusted_accounts(pool, owner_id)
+    db.get_trusted_accounts — общая функция (используется не только здесь),
+    поэтому фильтр по занятости накладываем тут, а не в ней: условие
+    COALESCE(in_operation, FALSE) = FALSE отсеивает аккаунты, которых СЕЙЧАС
+    держит операция — не тратим захват впустую. try_claim_account в вызывающем
+    коде ниже — окончательный барьер (TOCTOU: аккаунт мог заняться уже после
+    этой выборки).
+    """
+    rows = await db.get_trusted_accounts(pool, owner_id)
+    return [dict(r) for r in rows if not (dict(r).get("in_operation") or False)]
 
 
 # ── On-demand check (called from ranking.py handler) ──────────────────────
@@ -229,76 +237,88 @@ async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
         ui_written = False
 
         for account in accounts:
+            from services import op_worker
+            acc_id = int(account["id"])
+            # Живая сессия аккаунта — тот же ресурс, что и у операций/прогрева.
+            # Без атомарного захвата фоновая проверка позиций могла бы
+            # коннектиться к аккаунту РОВНО тогда, когда его держит операция —
+            # два коннекта на одном auth-key = AUTH_KEY_DUPLICATED.
+            if not await op_worker.try_claim_account(acc_id):
+                log.debug("ranking_checker: account %s busy, skipping this round", acc_id)
+                continue
             try:
-                search_results = await search_in_telegram(
-                    account["session_str"], kw["keyword"], _acc=dict(account)
-                )
+                try:
+                    search_results = await search_in_telegram(
+                        account["session_str"], kw["keyword"], _acc=dict(account)
+                    )
 
-                position: int | None = None
-                for r in search_results:
-                    if (
-                        r.get("is_bot")
-                        and canonicalize(r.get("username", "")) == entity_id
-                    ):
-                        position = r["position"]
-                        break
+                    position: int | None = None
+                    for r in search_results:
+                        if (
+                            r.get("is_bot")
+                            and canonicalize(r.get("username", "")) == entity_id
+                        ):
+                            position = r["position"]
+                            break
 
-                # Observability pipeline — each account is an independent observation
-                await process_search_result(
-                    pool=pool,
-                    run_id=run_id,
-                    keyword_id=kw["id"],
-                    account_id=account["id"],
-                    keyword=kw["keyword"],
-                    entity_id=entity_id,
-                    results=search_results,
-                    truncated=len(search_results) >= 20,
-                )
+                    # Observability pipeline — each account is an independent observation
+                    await process_search_result(
+                        pool=pool,
+                        run_id=run_id,
+                        keyword_id=kw["id"],
+                        account_id=account["id"],
+                        keyword=kw["keyword"],
+                        entity_id=entity_id,
+                        results=search_results,
+                        truncated=len(search_results) >= 20,
+                    )
 
-                await db.update_tg_account_used(pool, account["id"], kw["owner_id"])
-                log.debug(
-                    "ranking_checker: kw=%r bot=%r position=%s account=%s",
-                    kw["keyword"],
-                    bot_username,
-                    position,
-                    account["id"],
-                )
-
-                # Use first successful account for the UI history entry
-                if not ui_written:
-                    ui_position = position
-                    ui_written = True
-
-                await asyncio.sleep(_INTER_SEARCH_DELAY)
-
-            except Exception as exc:
-                from telethon.errors import FloodWaitError
-
-                if isinstance(exc, FloodWaitError):
-                    wait = min(exc.seconds + 5, 120)
-                    log.warning(
-                        "ranking_checker FloodWait %ds kw=%r account=%s — sleeping",
-                        wait,
+                    await db.update_tg_account_used(pool, account["id"], kw["owner_id"])
+                    log.debug(
+                        "ranking_checker: kw=%r bot=%r position=%s account=%s",
                         kw["keyword"],
+                        bot_username,
+                        position,
                         account["id"],
                     )
-                    from database import db as _db
 
-                    await _db.record_flood_event(
-                        pool,
-                        account["id"],
-                        operation="ranking_check",
-                        flood_seconds=exc.seconds if hasattr(exc, "seconds") else 0,
-                    )
-                    await asyncio.sleep(wait)
-                else:
-                    log.warning(
-                        "ranking_checker: error for kw=%r (id=%s) account=%s: %s",
-                        kw["keyword"],
-                        kw["id"],
-                        account["id"],
-                        exc,
-                    )
+                    # Use first successful account for the UI history entry
+                    if not ui_written:
+                        ui_position = position
+                        ui_written = True
+
+                    await asyncio.sleep(_INTER_SEARCH_DELAY)
+
+                except Exception as exc:
+                    from telethon.errors import FloodWaitError
+
+                    if isinstance(exc, FloodWaitError):
+                        wait = min(exc.seconds + 5, 120)
+                        log.warning(
+                            "ranking_checker FloodWait %ds kw=%r account=%s — sleeping",
+                            wait,
+                            kw["keyword"],
+                            account["id"],
+                        )
+                        from database import db as _db
+
+                        await _db.record_flood_event(
+                            pool,
+                            account["id"],
+                            operation="ranking_check",
+                            flood_seconds=exc.seconds if hasattr(exc, "seconds") else 0,
+                        )
+                        await asyncio.sleep(wait)
+                    else:
+                        log.warning(
+                            "ranking_checker: error for kw=%r (id=%s) account=%s: %s",
+                            kw["keyword"],
+                            kw["id"],
+                            account["id"],
+                            exc,
+                        )
+            finally:
+                await op_worker.release_accounts([acc_id])
 
         if ui_written:
             await pool.execute(
