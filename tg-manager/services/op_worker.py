@@ -14887,6 +14887,134 @@ async def _exec_delete_contacts(
     }
 
 
+# Как часто операция сверяется с ходом рассылки. Рассылка пишет прогресс в
+# broadcasts каждые 50 отправок, так что чаще смысла нет, а реже — отмена
+# отвечала бы слишком долго.
+_BROADCAST_POLL_S = 5.0
+# Сколько пустых сверок терпим, если задача рассылки исчезла из памяти, а статус
+# в БД не терминальный (задача упала с исключением). После этого пробуем поднять
+# её один раз — журнал доставок не даст задвоить уже отправленное.
+_BROADCAST_ORPHAN_POLLS = 3
+_BROADCAST_FINAL = ("done", "partial", "failed", "blocked", "cancelled")
+
+
+async def _await_broadcast(
+    pool: asyncpg.Pool, op_id: int, bot_id: int, broadcast_id: int, total: int,
+    token: str, text: str, user_ids: list, buttons, silent: bool,
+) -> dict:
+    """Сопроводить рассылку до конца, отражая её ход в операции.
+
+    ПОЧЕМУ ЭТО ЗДЕСЬ. Раньше исполнитель делал ровно три вещи: запускал фоновую
+    задачу, писал `done_items = total` и возвращал `done`. То есть операция
+    рапортовала «2000/2000, готово» в ту же секунду, когда не было отправлено
+    ещё ни одного сообщения. Отсюда три следствия, и все видел владелец:
+
+      * счётчик врал — прогресс операции не имел отношения к доставке, а
+        `_progress_monitor` рассылал по нему бодрые отчёты;
+      * отменить рассылку через операцию было нельзя: к моменту нажатия
+        «Отменить» операция уже терминальна, а задача отправки живёт отдельно и
+        про отмену не знает — сообщения продолжали уходить;
+      * оборвавшаяся рассылка числилась успешной: операция в `done`, поэтому ни
+        сторож зависших, ни повтор её не касались, и половина аудитории молча
+        оставалась без сообщения.
+
+    Теперь операция живёт ровно столько, сколько идёт рассылка: `done_items`
+    показывает реально обработанных получателей, отмена операции останавливает
+    отправку, а итог операции — настоящий итог рассылки (`done` / `partial` /
+    `failed` / `cancelled`). Аккаунтов флота эта операция не держит (работа идёт
+    через токен бота), поэтому длительность никому не стоит ресурса.
+    """
+    from services import broadcaster
+    from database import db as _db
+
+    orphan_polls = 0
+    restarted = False
+
+    while True:
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT status, sent_count, failed_count FROM broadcasts WHERE id=$1",
+            broadcast_id, log_ctx=f"[await_broadcast op={op_id}]",
+        )
+        sent = int((row or {}).get("sent_count") or 0)
+        failed = int((row or {}).get("failed_count") or 0)
+        status = str((row or {}).get("status") or "")
+        done_items = min(sent + failed, total) if total else sent + failed
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+            done_items, op_id, log_ctx=f"[await_broadcast_progress op={op_id}]",
+        )
+
+        if await _is_cancelled(pool, op_id):
+            broadcaster.cancel(broadcast_id)
+            try:
+                await _db.update_broadcast(pool, broadcast_id, sent, failed, "cancelled")
+            except Exception:
+                log_exc_swallow(log, f"await_broadcast cancel mark op={op_id}")
+            return {
+                "status": "cancelled",
+                "broadcast_id": broadcast_id,
+                "ok": sent, "sent": sent, "failed": failed, "total": total,
+                "summary": f"🛑 Рассылка остановлена: отправлено {sent} из {total}",
+            }
+
+        if status in _BROADCAST_FINAL:
+            if status == "done":
+                op_status_out = "done"
+                summary = f"📢 Рассылка завершена: доставлено {sent} из {total}"
+            elif status == "partial":
+                op_status_out = "partial"
+                summary = (f"📢 Рассылка завершена частично: доставлено {sent}, "
+                           f"не доставлено {failed} из {total}")
+            elif status == "cancelled":
+                op_status_out = "cancelled"
+                summary = f"🛑 Рассылка остановлена: отправлено {sent} из {total}"
+            else:
+                op_status_out = "failed"
+                summary = (f"⚠️ Рассылка не выполнена ({status}): доставлено {sent} "
+                           f"из {total}")
+            return {
+                "status": op_status_out,
+                "broadcast_id": broadcast_id,
+                "ok": sent, "sent": sent, "failed": failed, "total": total,
+                "summary": summary,
+            }
+
+        if row is None:
+            # Строки рассылки нет — сопровождать нечего, и ждать вечно нельзя.
+            return {
+                "status": "failed",
+                "broadcast_id": broadcast_id,
+                "summary": "⚠️ Запись рассылки не найдена — сопровождение прервано",
+            }
+
+        if not broadcaster.is_running(broadcast_id):
+            orphan_polls += 1
+            if orphan_polls >= _BROADCAST_ORPHAN_POLLS:
+                if restarted:
+                    return {
+                        "status": "partial" if sent else "failed",
+                        "broadcast_id": broadcast_id,
+                        "ok": sent, "sent": sent, "failed": failed, "total": total,
+                        "summary": (f"⚠️ Рассылка оборвалась: доставлено {sent} из "
+                                    f"{total}. Повторная отправка пропустит уже "
+                                    f"доставленных."),
+                    }
+                log.warning(
+                    "run_broadcast op=%s: задача рассылки %s исчезла на статусе %r "
+                    "— поднимаю повторно (журнал доставок не даст задвоить)",
+                    op_id, broadcast_id, status,
+                )
+                restarted = True
+                orphan_polls = 0
+                broadcaster.start(pool, None, broadcast_id, token, bot_id, text,
+                                  None, user_ids, buttons, silent=silent)
+        else:
+            orphan_polls = 0
+
+        await asyncio.sleep(_BROADCAST_POLL_S)
+
+
 async def _exec_run_broadcast(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -14943,7 +15071,28 @@ async def _exec_run_broadcast(
     # Create/reuse broadcast record
     if not broadcast_id:
         from database import db as _db
-        broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id, buttons=buttons, silent=silent)
+        # target_user_ids обязателен, когда аудитория — ПОДМНОЖЕСТВО (сегмент
+        # или явный список недоставленных): resume после рестарта читает именно
+        # его, и без него прерванная сегментная рассылка догонялась бы ВСЕЙ
+        # аудиторией бота. Ниже по коду этот же список сохранялся, но только на
+        # ветке с уже готовым broadcast_id — на ветке создания его не было.
+        _subset = user_ids if (_seg_sql or (isinstance(explicit_ids, list) and explicit_ids)) else None
+        broadcast_id = await _db.create_broadcast(
+            pool, int(bot_id), text, total, owner_id,
+            target_user_ids=_subset, buttons=buttons, silent=silent)
+        # Созданный broadcast_id СРАЗУ уходит в params операции. Без этого любой
+        # повторный прогон (таймаут, воскрешение после рестарта, ручной повтор)
+        # читал params без broadcast_id, заводил ВТОРУЮ рассылку и отправлял её
+        # всей аудитории заново — журнал доставок первой рассылки второй не
+        # указ, он ведётся по её собственному id.
+        params["broadcast_id"] = int(broadcast_id)
+        await _safe_execute(
+            pool,
+            "UPDATE operation_queue SET params = COALESCE(params, '{}'::jsonb) || $1::jsonb "
+            "WHERE id=$2",
+            json.dumps({"broadcast_id": int(broadcast_id)}), op_id,
+            log_ctx=f"[run_broadcast_pin op={op_id}]",
+        )
     elif _seg_sql:
         # Сегментная рассылка: сохраняем целевой список, иначе resume после
         # рестарта отправит всей аудитории бота.
@@ -14954,16 +15103,19 @@ async def _exec_run_broadcast(
         except Exception:
             log.warning("run_broadcast: не удалось сохранить target_user_ids для сегмента op=%s", op_id)
 
-    broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, buttons, silent=silent)
-    await _safe_execute(
-            pool,"UPDATE operation_queue SET done_items=$1 WHERE id=$2", total, op_id)
+    # Повторный прогон этой же операции (таймаут, воскрешение после рестарта)
+    # НЕ должен запускать вторую задачу на тот же broadcast_id: два цикла
+    # отправки по одной аудитории гонятся за журнал доставок, и часть
+    # подписчиков получает сообщение дважды.
+    if broadcaster.is_running(broadcast_id):
+        log.info("run_broadcast op=%s: рассылка %s уже идёт — подключаюсь к ней",
+                 op_id, broadcast_id)
+    else:
+        broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id),
+                          text, None, user_ids, buttons, silent=silent)
 
-    return {
-        "status": "done",
-        "broadcast_id": broadcast_id,
-        "total": total,
-        "summary": f"📢 Рассылка запущена: {total} получателей",
-    }
+    return await _await_broadcast(pool, op_id, int(bot_id), broadcast_id, total,
+                                  bot_row["token"], text, user_ids, buttons, silent)
 
 
 async def _exec_clone_adapt(
