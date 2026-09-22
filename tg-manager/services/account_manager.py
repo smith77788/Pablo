@@ -3248,6 +3248,10 @@ async def check_account_status_full(
     client = _make_client(session_string, _acc, _mutex_managed=True)  # мьютекс держим сами (выше)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        # Записываем держателя: по нему мьютекс и понимает, что сессия занята.
+        # Без этого запись остаётся «слепой» и на аварии, съевшей release,
+        # освобождалась бы только по долгому запасному сроку.
+        _note_session_holder(_skey, client)
         me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         if me is None:
             return {
@@ -3451,7 +3455,7 @@ async def check_account_status_full(
                 await client.disconnect()
         except Exception:
             log_exc_swallow(log, "check_account_status_full: disconnect")
-        _release_session(_skey)
+        _release_session(_skey, client)
 
 
 # ── Session Health Monitor (мониторинг сессий) ──────────────────────────────

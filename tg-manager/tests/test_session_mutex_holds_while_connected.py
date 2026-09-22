@@ -200,3 +200,19 @@ def test_release_without_a_holder_still_works():
     am._try_acquire_session(KEY)
     am._release_session(KEY)
     assert am._try_acquire_session(KEY) is True
+
+def test_the_self_managed_check_registers_its_holder():
+    """Проверка статуса берёт мьютекс сама — держателя обязана записать тоже.
+
+    Иначе её запись «слепая»: на аварии, съевшей release, аккаунт залипнет не
+    на пять минут, а на час.
+    """
+    import inspect
+
+    src = inspect.getsource(am.check_account_status_full)
+    assert "_note_session_holder" in src, (
+        "коннект проверки статуса не регистрирует держателя мьютекса"
+    )
+    assert "_release_session(_skey, client)" in src, (
+        "освобождение неименное — опоздавший release снимет чужой замок"
+    )
