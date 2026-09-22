@@ -8347,6 +8347,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("dm_adhoc_send uid=%d", uid)
             return _err(str(exc), 500)
 
+    async def mass_targets(request: web.Request) -> web.Response:
+        """Сколько адресатов получит массовое действие — ДО нажатия.
+
+        Подтверждения этих действий спрашивали «во ВСЕ каналы этого аккаунта?»,
+        «во ВСЕ группы?», «всем пользователям?» — и ни одно не называло числа.
+        Масштаб становился известен только из тоста ПОСЛЕ запуска, когда посты
+        уже ушли в Telegram, а сообщения — живым людям. Каждый запрос ниже
+        скопирован с того места, где действие выбирает себе цели: иначе
+        подтверждение обещало бы один набор, а ушло бы в другой.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        kind = (request.query.get("op") or "").strip()
+
+        if kind == "bulk_post_chans":
+            # Тот же набор, что channels_bulk_post без channel_ids.
+            acc_id = validate_integer(request.query.get("acc_id"), min_val=1)
+            if not acc_id:
+                return _err("Выберите аккаунт", 400)
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
+                uid, int(acc_id))
+            rows = await _safe_fetch(pool,
+                "SELECT channel_id, username, title FROM managed_channels "
+                "WHERE owner_id=$1 AND acc_id=$2 "
+                "ORDER BY members_count DESC NULLS LAST, channel_id DESC LIMIT 8",
+                uid, int(acc_id))
+        elif kind == "group_announce":
+            # Тот же набор и та же таксономия типов, что в groups_announce.
+            acc_id = validate_integer(request.query.get("acc_id"), min_val=1)
+            if not acc_id:
+                return _err("Выберите аккаунт", 400)
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 "
+                "AND type IN ('megagroup','supergroup','group','chat')",
+                uid, int(acc_id))
+            rows = await _safe_fetch(pool,
+                "SELECT channel_id, username, title FROM managed_channels "
+                "WHERE owner_id=$1 AND acc_id=$2 "
+                "AND type IN ('megagroup','supergroup','group','chat') "
+                "ORDER BY members_count DESC NULLS LAST, channel_id DESC LIMIT 8",
+                uid, int(acc_id))
+        elif kind == "admin_broadcast":
+            # Тот же набор, что admin_broadcast: живым людям, кроме забаненных.
+            if not _is_admin(uid):
+                return _err("Forbidden", 403)
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM platform_users "
+                "WHERE COALESCE(is_banned, false) = false")
+            rows = []
+        else:
+            return _err("Неизвестное массовое действие: " + kind[:40], 400)
+
+        sample = [{"channel_id": int(r["channel_id"]) if r["channel_id"] is not None else None,
+                   "username": r["username"], "title": r["title"]}
+                  for r in (rows or [])]
+        return _json_resp({"ok": True, "op": kind, "total": int(total or 0), "sample": sample})
+
     async def channels_bulk_post(request: web.Request) -> web.Response:
         """Пост во все (или выбранные) каналы одного аккаунта (паритет с ботом)."""
         uid = _get_uid(request)
@@ -16885,6 +16944,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
     app.router.add_post("/api/miniapp/channels/reclassify", channels_reclassify)
+    app.router.add_get("/api/miniapp/mass_targets", mass_targets)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)

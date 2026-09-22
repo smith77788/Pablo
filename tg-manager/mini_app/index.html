@@ -12841,6 +12841,24 @@ function openMassPub() {
   loadMpOps();
 }
 
+// Масштаб массового действия ДО нажатия. Возвращает {total, sample} либо null,
+// если узнать не удалось — тогда подтверждение обязано сказать это вслух, а не
+// молчать: эти действия необратимы, а часть из них бьёт по живым людям.
+async function massTargets(op, accId) {
+  try {
+    let u = '/api/miniapp/mass_targets?op=' + encodeURIComponent(op);
+    if (accId) u += '&acc_id=' + encodeURIComponent(accId);
+    const d = await api(u);
+    return {total: Number(d.total||0), sample: d.sample||[]};
+  } catch(e) { return null; }
+}
+
+// Строка «— их N» или честное «число узнать не удалось».
+function massScale(t, one, few, many) {
+  if (!t) return ' (узнать их число не удалось)';
+  return ' — их ' + t.total + ' ' + plural(t.total, one, few, many);
+}
+
 // Имя канала для человека: @username, иначе заголовок, иначе id.
 function _mpChName(c) {
   if (!c) return '';
@@ -17099,7 +17117,20 @@ async function uchClExclude(excluded) {
 async function uchClDelete() {
   const f = _uchClFilter();
   if (!f.country && !f.tag) { toast('Задайте страну или тег'); return; }
-  if (!await askConfirm('Удалить БЕЗВОЗВРАТНО все контакты под фильтр? Сначала лучше сделать предпросмотр.')) return;
+  // Предпросмотр был советом («сначала лучше сделать предпросмотр»), а не
+  // частью действия: удалить безвозвратно можно было, ни разу не увидев, сколько
+  // контактов попадёт. Теперь считаем сами и называем число в подтверждении.
+  let uchN = null;
+  try {
+    const pv = await api('/api/miniapp/uch/filter/preview', { method: 'POST', body: JSON.stringify(f) });
+    uchN = Number(pv.count || 0);
+    document.getElementById('uchClCount').textContent = 'Под фильтр попадает: ' + uchN + ' контактов';
+  } catch (e) { uchN = null; }
+  if (uchN === 0) { toast('Под фильтр не попадает ни одного контакта'); return; }
+  const uchScale = (uchN === null)
+    ? 'все контакты под фильтр (узнать их число не удалось)'
+    : uchN + ' ' + plural(uchN, 'контакт', 'контакта', 'контактов') + ' под фильтр';
+  if (!await askConfirm('Удалить БЕЗВОЗВРАТНО ' + uchScale + '?\n\nВосстановить их будет нечем.')) return;
   try {
     const d = await api('/api/miniapp/uch/filter/delete', { method: 'POST', body: JSON.stringify({ ...f, confirm: true }) });
     toast('Удалено: ' + (d.deleted || 0));
@@ -21176,7 +21207,17 @@ async function submitBulkPostChans() {
   const text = (document.getElementById('bpText')?.value || '').trim();
   if (!accId) { errEl.textContent = 'Выберите аккаунт'; return; }
   if (!text) { errEl.textContent = 'Введите текст поста'; return; }
-  if (!await askConfirm('Опубликовать во ВСЕ каналы этого аккаунта?\n\nПосты появятся в Telegram — массово отменить нельзя.')) return;
+  // Масштаб называем ДО нажатия: раньше число каналов приходило только в тосте,
+  // когда посты уже ушли в Telegram.
+  const bpT = await massTargets('bulk_post_chans', accId);
+  if (bpT && bpT.total === 0) {
+    errEl.textContent = 'У этого аккаунта нет каналов — сначала импортируйте их';
+    return;
+  }
+  const bpWho = (bpT && bpT.sample.length) ? '\n\n' + _mpChList(bpT.sample, 5) : '';
+  if (!await askConfirm('Опубликовать во все каналы этого аккаунта'
+      + massScale(bpT, 'канал', 'канала', 'каналов') + '?' + bpWho
+      + '\n\nПосты появятся в Telegram — массово отменить нельзя.')) return;
   try {
     const r = await api('/api/miniapp/channels/bulk_post', {method:'POST', body:JSON.stringify({
       acc_id: +accId, text,
@@ -21265,7 +21306,17 @@ async function submitGroupAnnounce() {
   const text = (document.getElementById('gaText')?.value || '').trim();
   if (!accId) { errEl.textContent = 'Выберите аккаунт'; return; }
   if (!text) { errEl.textContent = 'Введите текст объявления'; return; }
-  if (!await askConfirm('Разослать объявление во ВСЕ группы этого аккаунта?\n\nСообщения уйдут реальным людям — отменить отправку нельзя.')) return;
+  // Сообщения уйдут живым людям — число групп человек обязан видеть ДО нажатия,
+  // а не узнавать из тоста после запуска.
+  const gaT = await massTargets('group_announce', accId);
+  if (gaT && gaT.total === 0) {
+    errEl.textContent = 'У этого аккаунта нет групп — сначала импортируйте их';
+    return;
+  }
+  const gaWho = (gaT && gaT.sample.length) ? '\n\n' + _mpChList(gaT.sample, 5) : '';
+  if (!await askConfirm('Разослать объявление во все группы этого аккаунта'
+      + massScale(gaT, 'группа', 'группы', 'групп') + '?' + gaWho
+      + '\n\nСообщения уйдут реальным людям — отменить отправку нельзя.')) return;
   try {
     const r = await api('/api/miniapp/groups/announce', {method:'POST', body:JSON.stringify({
       acc_id: +accId, text,
@@ -23323,7 +23374,11 @@ async function openAdminBroadcast() {
 async function submitAdminBroadcast() {
   const text = document.getElementById('adm-bc-text')?.value?.trim();
   if (!text) { toast('Введите текст'); return; }
-  if (!await askConfirm('Разослать сообщение всем пользователям?')) return;
+  const abT = await massTargets('admin_broadcast');
+  if (abT && abT.total === 0) { toast('Некому рассылать: активных пользователей нет'); return; }
+  if (!await askConfirm('Разослать сообщение всем пользователям платформы'
+      + massScale(abT, 'человек', 'человека', 'человек') + '?'
+      + '\n\nСообщения уйдут живым людям — отменить отправку нельзя.')) return;
   try {
     const r = await api('/api/miniapp/admin/broadcast', {method:'POST', body:JSON.stringify({text})});
     toast('✅ Отправлено: ' + (r.sent||0) + ' юзерам');
