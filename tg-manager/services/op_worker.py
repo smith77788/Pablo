@@ -369,6 +369,7 @@ async def _explain_circuit_pause(
         f"— операции стартуют сами, когда пауза закончится.\n\n"
         f"Пока идёт пауза, проверьте состояние аккаунтов и прокси: обычно "
         f"причина там.",
+        dedup_key=f"circuit:{owner_id}",
     )
 
 
@@ -405,7 +406,8 @@ _DEFER_NOTIFY_MIN_S = _int_env("OP_DEFER_NOTIFY_MIN_SEC", 30 * 60, 60, 24 * 3600
 
 
 async def _notify_owner_about_op(
-    pool: "asyncpg.Pool", bot, owner_id: int | None, text: str
+    pool: "asyncpg.Pool", bot, owner_id: int | None, text: str,
+    dedup_key: str | None = None,
 ) -> None:
     """Сказать владельцу о судьбе его операции. Никогда не бросает.
 
@@ -418,7 +420,8 @@ async def _notify_owner_about_op(
     if not bot or not owner_id:
         return
     try:
-        await db.notify_if_enabled(pool, bot, owner_id, "op_complete", text)
+        await db.notify_if_enabled(pool, bot, owner_id, "op_complete", text,
+                                   dedup_key=dedup_key)
     except Exception:
         log_exc_swallow(log, f"op_worker: уведомление владельцу {owner_id} не ушло")
 
@@ -482,6 +485,7 @@ async def _requeue_op_no_accounts(
                 f"{int(waited.total_seconds() // 60)} мин были заняты другими "
                 f"операциями.\n\nЗапустите её снова, когда очередь разгрузится, "
                 f"или добавьте аккаунтов.",
+                dedup_key=f"no-accounts:{op_id}",
             )
             return
     await _safe_execute(
@@ -579,6 +583,7 @@ async def _defer_op_for_flood(
             f"паузу.\n\nОна продолжится сама, отменять и запускать заново не "
             f"нужно — повторный запуск только добавит ограничений."
             + (f"\n\n<i>{reason[:200]}</i>" if reason else ""),
+            dedup_key=f"flood-defer:{op_id}",
         )
 
 
@@ -1258,6 +1263,7 @@ async def _maybe_requeue(
             f"Она возобновится сама, отменять и запускать заново не нужно — "
             f"повторный запуск только добавит ограничений."
             + (f"\n\n<i>{str(exc)[:200]}</i>" if str(exc) else ""),
+            dedup_key=f"retry:{op_id}:{retry_count}",
         )
     return True
 
@@ -1527,6 +1533,7 @@ async def _progress_monitor(
                             pool, bot, owner_id, "op_complete",
                             f"⏳ <b>Операция #{op_id}</b> — в процессе…\n"
                             f"<code>{op_type}</code>",
+                            dedup_key=f"progress:{op_id}",
                         )
                     continue
                 _ticks_without_total = 0
@@ -1553,6 +1560,7 @@ async def _progress_monitor(
                         f"⏳ <b>Операция #{op_id}</b> — {pct}%\n"
                         f"[{bar}] {done}/{total}\n"
                         f"<code>{op_type}</code> {speed_text} {eta_text}",
+                        dedup_key=f"progress:{op_id}",
                     )
                 
                 # Milestone notifications (25/50/75%)
@@ -1579,6 +1587,7 @@ async def _progress_monitor(
                         f"[{bar}] {done}/{total}\n"
                         f"<code>{op_type}</code> {eta_text}",
                         reply_markup=kb.as_markup(),
+                        dedup_key=f"milestone:{op_id}:{milestone}",
                     )
             except asyncio.CancelledError:
                 raise
@@ -2415,6 +2424,7 @@ async def _notify_recurring_stopped(
             f"⏹ <b>Повтор операции #{op_id}</b> (<code>{op_type}</code>) остановлен: {why}.\n\n"
             f"Следующий запуск по расписанию не поставлен. "
             f"Запустите операцию заново, когда ограничение снимется.",
+            dedup_key=f"recurring-stop:{op_id}",
         )
     except Exception:
         log_exc_swallow(log, f"op_worker: уведомление об остановке расписания op#{op_id}")
@@ -2518,6 +2528,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     "op_complete",
                     f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>{_pred_line}",
                     reply_markup=start_kb.as_markup(),
+                    dedup_key=f"start:{op_id}",
                 )
             except Exception:
                 log_exc_swallow(
@@ -2965,6 +2976,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 "op_complete",
                 _notify_header + _summary_notify,
                 reply_markup=kb.as_markup(),
+                dedup_key=f"done:{op_id}",
             )
             # Фиксируем исход в Infrastructure Memory для всех аккаунтов из params
             try:
@@ -3107,6 +3119,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     f"<code>{str(e)[:200]}</code>{retry_info}\n\n"
                     f"💡 Используйте кнопку «Повторить» или проверьте аккаунты.",
                     reply_markup=kb.as_markup(),
+                    dedup_key=f"fail:{op_id}",
                 )
 
         finally:
@@ -5431,6 +5444,7 @@ async def _exec_global_presence_channel(
                         "op_complete",
                         f"🌍 <b>Создание каналов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                         f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                        dedup_key=f"progress:{op_id}",
                     )
                 except Exception:
                     log_exc_swallow(
@@ -6175,6 +6189,7 @@ async def _exec_global_presence_bot(
                         "op_complete",
                         f"🤖 <b>Создание ботов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                         f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                        dedup_key=f"progress:{op_id}",
                     )
                 except Exception:
                     log_exc_swallow(
@@ -6806,6 +6821,7 @@ async def _exec_bulk_create_channels(
                         "op_complete",
                         f"📡 <b>Массовое создание каналов #{op_id}:</b> {created_count + failed_count}/{count}\n"
                         f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                        dedup_key=f"progress:{op_id}",
                     )
                 except Exception:
                     log_exc_swallow(
