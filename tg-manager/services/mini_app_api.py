@@ -565,7 +565,7 @@ def _proxy_display_host(raw: str) -> str:
 # на регулярках, и она пропускала канонический IPv6 (`[::ffff:127.0.0.1]`, ULA,
 # link-local): два гарда с разной строгостью хуже одного, потому что усиливают
 # всегда не тот.
-from services.security import is_safe_public_url  # noqa: E402,F401
+from services.security import is_safe_public_url, resolve_url_is_public  # noqa: E402,F401
 
 
 _SCHEDULE_REPEAT_MIN = {"none": 0, "daily": 1440, "weekly": 10080}
@@ -3780,8 +3780,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("bad request", 400)
         photo_url = (body.get("photo_url") or "").strip()
-        if not is_safe_public_url(photo_url):
-            return _err("Нужен публичный https URL картинки", 400)
+        # Здесь сервер скачивает по URL СРАЗУ (несколькими строками ниже),
+        # поэтому нужен авторитетный гард с резолвом DNS, а не синтаксический.
+        # is_safe_public_url по своей же документации ловит только литеральные
+        # внутренние адреса: имя, которое резолвится в 169.254.169.254 или
+        # 127.0.0.1, он пропускает — а это и есть SSRF на metadata-эндпоинт.
+        if not await resolve_url_is_public(photo_url):
+            return _err("Нужен публичный https URL картинки (внутренние адреса запрещены)", 400)
         try:
             async with _aio.ClientSession() as sess:
                 # Скачиваем с потолком размера (5 МБ) и таймаутом.
