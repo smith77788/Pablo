@@ -195,7 +195,10 @@ async function openMassInvite() {
   if (accsWrapEl) accsWrapEl.innerHTML =
     '<div style="font-size:12px;color:var(--hint)" id="massInviteAccsLoad">Загрузка аккаунтов…</div>';
   const [opsD, accsD] = await Promise.allSettled([
-    api('/api/miniapp/operations'),
+    // Раньше просили общую страницу очереди и отбирали инвайты уже здесь: стоило
+    // тридцати другим операциям вытеснить последний инвайт — и экран писал «нет
+    // истории инвайтов», хотя она была. Фильтр по типу считает сервер.
+    api('/api/miniapp/operations?op_type=mass_invite&limit=10&offset=0'),
     api('/api/miniapp/accounts'),
   ]);
   // Render account checkboxes
@@ -227,8 +230,9 @@ async function openMassInvite() {
   }
   // Render history
   if (opsD.status==='fulfilled') {
-    const ops = (opsD.value.operations||[]).filter(o=>o.op_type==='mass_invite').slice(0,10);
-    if (!ops.length) { txt('massInviteHistory', empty('📨','Нет истории инвайтов','')); return; }
+    const ops = opsD.value.operations||[];
+    if (!ops.length) { txt('massInviteHistory', empty('📨','Нет истории инвайтов',
+      'Здесь появятся ваши запуски: сколько приглашено, кто отказал и почему')); return; }
     txt('massInviteHistory', ops.map(o=>{
       const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
       const [bc,bl]=stb(o.status);
@@ -559,8 +563,22 @@ async function submitMassInvite() {
   const _paceLbl = {auto:'🤖 авто (по состоянию флота)', slow:'🐢 медленно', normal:'⚖️ обычный', fast:'⚡ быстро'}[body.pace] || body.pace;
   const _warn = _pa ? '' : '\n\n⚠️ Лимит на аккаунт не задан — риск бана выше. Задайте его в «⚙️ Лимиты».';
   const _opWarn = _onePass ? '\n\n🚀 Режим «один проход»: аккаунты работают до потолка ёмкости (≈50/аккаунт) по живым сигналам флуда, без предсказанного суточного лимита. Это ЗАМЕТНО выше риск бана — используйте на прогретых аккаунтах с прокси.' : '';
-  const _tgtLine = (source==='import_list' && INV_IMPORT_OK) ? '\nЦелей в списке: '+INV_IMPORT_OK+'.' : '';
-  if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_tgtLine+_warn+_opWarn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
+  // Самая баноопасная операция продукта спрашивала согласие, называя темп, но
+  // не масштаб: сколько человек пригласят и сколькими аккаунтами. Для списка из
+  // файла число было, для остальных источников — нет, хотя INV_AUDIENCE к этому
+  // моменту уже посчитан и показан на экране.
+  const _tgtLine = (source==='import_list')
+    ? (INV_IMPORT_OK ? '\nЦелей в списке: '+INV_IMPORT_OK+'.' : '')
+    : (INV_AUDIENCE ? '\nПригласят: до '+INV_AUDIENCE+' '+plural(INV_AUDIENCE,'человека','человек','человек')+'.' : '');
+  // Кем приглашают: отмеченные аккаунты либо весь подходящий флот. Аккаунты под
+  // риск-пульсом исполнитель пропустит — это видно на экране, но в момент
+  // согласия человек смотрит в диалог, а не в список.
+  const _allBoxes = document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]');
+  const _accN = checked.length || _allBoxes.length;
+  const _accLine = _accN
+    ? '\nАккаунтов-инвайтеров: '+_accN+(checked.length ? ' (отмечены вами)' : ' — весь подходящий флот')+'.'
+    : '';
+  if (!(await askConfirm('Запустить массовый инвайт в «'+group+'»?\nТемп: '+_paceLbl+'.'+_tgtLine+_accLine+_warn+_opWarn+'\n\nСовет: начните с малого лимита на аккаунт, проверьте результат в истории, затем масштабируйте.'))) return;
   const btn = document.getElementById('massInviteBtn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
