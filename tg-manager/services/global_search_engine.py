@@ -41,11 +41,48 @@ def _title(entity) -> str:
     return name or (getattr(entity, "username", "") or "")
 
 
+async def _note_flood(pool, _acc: dict | None, seconds: int) -> None:
+    """Флуд при поиске обязан попасть в общий пульс здоровья аккаунта.
+
+    Без этого для остальных подсистем аккаунт остаётся «спокойным»: выбор
+    аккаунта под следующую операцию берёт его снова и уводит под действующее
+    ограничение Telegram — а следующий FloodWait будет длиннее предыдущего.
+    """
+    acc_id = (_acc or {}).get("id")
+    if not acc_id:
+        return
+    try:
+        from services import flood_engine as _fe
+
+        await _fe.record_flood(pool, int(acc_id), int(seconds), "search")
+    except Exception:
+        log.warning("global_search: FloodWait не записан в пульс здоровья",
+                    exc_info=True)
+
+
+def _ru_error(msg: str) -> tuple[str, str]:
+    """Сырая ошибка Telegram → (код, текст по-русски).
+
+    Текст отсюда уходит владельцу напрямую: бот показывает его как
+    «⚠️ {error}», мини-апп — телом ответа. Раньше сюда уезжало
+    «FloodWait 300s» и сырой текст telethon по-английски. Классификацию не
+    заводим свою — берём общую из account_console, чтобы бот, консоль и поиск
+    объясняли одну и ту же ошибку одинаково.
+    """
+    try:
+        from services.account_console import classify_error
+
+        return classify_error(msg)
+    except Exception:
+        return ("error", f"⚠️ Ошибка: {(msg or 'неизвестная')[:120]}")
+
+
 async def search_public(
     session_string: str,
     query: str,
     limit: int = 20,
     _acc: dict | None = None,
+    pool=None,
 ) -> dict:
     """Глобальный поиск публичных сущностей по строке *query*.
 
@@ -69,7 +106,11 @@ async def search_public(
                 client(SearchRequest(q=query, limit=limit)), timeout=25.0
             )
         except FloodWaitError as e:
-            return {"ok": False, "error": f"FloodWait {e.seconds}s", "flood_wait": e.seconds, "results": []}
+            _secs = int(getattr(e, "seconds", 0) or 0)
+            await _note_flood(pool, _acc, _secs)
+            _code, _text = _ru_error(str(e))
+            return {"ok": False, "error": _text, "error_code": _code,
+                    "flood_wait": _secs, "results": []}
 
         # contacts.Found: .chats (каналы/группы) + .users (люди/боты).
         # .results/.my_results — Peer'ы (порядок релевантности); сохраняем порядок.
@@ -99,10 +140,23 @@ async def search_public(
 
         return {"ok": True, "results": results[:limit], "query": query}
     except asyncio.TimeoutError:
-        return {"ok": False, "error": "таймаут подключения/поиска", "results": []}
+        return {"ok": False, "error": "⌛ Аккаунт не ответил вовремя — проверьте прокси и сессию.",
+                "error_code": "timeout", "results": []}
     except Exception as e:  # noqa: BLE001 — единичная операция, ошибку отдаём наверх
+        # Сюда падает и FloodWait с фазы connect: он поднимается ДО внутреннего
+        # try, и раньше уезжал владельцу сырым английским текстом, а в пульс
+        # здоровья не попадал вовсе.
         log.warning("global_search failed q=%r: %s", query, e)
-        return {"ok": False, "error": str(e)[:160], "results": []}
+        _code, _text = _ru_error(str(e))
+        _out = {"ok": False, "error": _text, "error_code": _code, "results": []}
+        if _code == "flood":
+            from services import parser as _parser
+
+            _secs = _parser.flood_seconds(e) or 0
+            if _secs:
+                await _note_flood(pool, _acc, _secs)
+                _out["flood_wait"] = _secs
+        return _out
     finally:
         try:
             await client.disconnect()

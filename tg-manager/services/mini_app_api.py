@@ -4766,7 +4766,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import global_search_engine as gse
             res = await asyncio.wait_for(
-                gse.search_public(acc["session_str"], query, limit, _acc=dict(acc)),
+                gse.search_public(acc["session_str"], query, limit, _acc=dict(acc), pool=pool),
                 timeout=40,
             )
             if res.get("ok"):

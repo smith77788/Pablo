@@ -96,7 +96,7 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
 
     try:
         res = await asyncio.wait_for(
-            gse.search_public(acc["session_str"], query, 20, _acc=dict(acc)),
+            gse.search_public(acc["session_str"], query, 20, _acc=dict(acc), pool=pool),
             timeout=40,
         )
     except asyncio.TimeoutError:
