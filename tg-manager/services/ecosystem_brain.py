@@ -216,6 +216,46 @@ async def list_ecosystems(
     )
 
 
+# Где лежит объект каждого рода и какая колонка хранит его владельца. Нужно,
+# чтобы в экосистему нельзя было записать ЧУЖОЙ объект.
+_MEMBER_OWNERSHIP = {
+    "account": ("tg_accounts", "id", "owner_id"),
+    "bot": ("managed_bots", "bot_id", "added_by"),
+    "channel": ("managed_channels", "channel_id", "owner_id"),
+    "group": ("managed_channels", "channel_id", "owner_id"),
+}
+
+
+async def object_belongs_to_someone_else(
+    pool: asyncpg.Pool, owner_id: int, object_type: str, object_id: int
+) -> bool:
+    """Существует ли объект и принадлежит ли он не этому владельцу.
+
+    Проверка именно «не чужое», а не «точно моё». Объекты часто добавляются в
+    экосистему в тот же момент, когда создаются, и строка о них может ещё не
+    лежать в базе — такой случай пропускаем. А вот существующий объект чужого
+    владельца — это попытка присвоения, и её мы отбиваем.
+
+    Зачем. Доступ к каналам, ботам и аккаунтам выдаётся в том числе «через
+    экосистему»: объект виден, если он в экосистеме, которой владеет
+    спрашивающий ИЛИ в которой лежит хоть один его объект. Значит, дописав
+    чужой id в СВОЮ экосистему, посторонний получал чужой канал в свой список
+    — а для ботов это ещё и расшифрованный токен.
+    """
+    spec = _MEMBER_OWNERSHIP.get((object_type or "").strip().lower())
+    if not spec:
+        return False
+    table, id_col, owner_col = spec
+    row = await pool.fetchrow(
+        f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {id_col}=$1) AS found, "
+        f"       EXISTS(SELECT 1 FROM {table} WHERE {id_col}=$1 AND {owner_col}=$2) AS mine",
+        int(object_id), int(owner_id),
+    )
+    if not row:
+        return False
+    return bool(row["found"]) and not bool(row["mine"])
+
+
 async def add_member(
     pool: asyncpg.Pool,
     ecosystem_id: int,
@@ -224,7 +264,22 @@ async def add_member(
     object_id: int,
     role: str = "member",
 ) -> bool:
-    """Добавляет объект в экосистему. True если добавлен, False если уже был."""
+    """Добавляет объект в экосистему. True если добавлен, False если уже был.
+
+    Чужой объект не добавляется никогда: экосистема раздаёт доступ, и запись в
+    неё чужого id — это способ выдать себе права на чужое.
+    """
+    try:
+        if await object_belongs_to_someone_else(pool, owner_id, object_type, object_id):
+            log.warning(
+                "ecosystem: попытка добавить чужой объект в экосистему "
+                "eco=%s owner=%s %s#%s", ecosystem_id, owner_id, object_type, object_id,
+            )
+            return False
+    except Exception as e:
+        # Не смогли проверить — не добавляем: это гейт доступа, а не удобство.
+        log.warning("ecosystem: проверка владения не удалась eco=%s: %s", ecosystem_id, e)
+        return False
     try:
         await pool.execute(
             """INSERT INTO ecosystem_members (ecosystem_id, owner_id, object_type, object_id, role)

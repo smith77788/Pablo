@@ -2081,6 +2081,20 @@ async def cb_ecopick_add(
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
 
+    # object_id приходит в callback_data, то есть полностью со стороны клиента.
+    # Чужой объект в своей экосистеме — это выданный себе доступ к чужому
+    # (списки каналов и ботов пускают «через экосистему»), поэтому отказ
+    # объясняем прямо, а не прячем за «уже в экосистеме».
+    if await _eb.object_belongs_to_someone_else(
+        pool, callback.from_user.id, object_type, object_id
+    ):
+        await callback.answer(
+            "Этот объект принадлежит другому владельцу — добавить его в свою "
+            "экосистему нельзя.",
+            show_alert=True,
+        )
+        return
+
     added = await _eb.add_member(
         pool, eco_id, callback.from_user.id, object_type, object_id
     )
