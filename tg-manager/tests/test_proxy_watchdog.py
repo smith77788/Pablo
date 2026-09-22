@@ -105,7 +105,7 @@ def _run(pool, monkeypatch, alive):
     monkeypatch.setattr(W, "check_proxy_alive", _fake)
     sent = []
 
-    async def _fake_notify(pool_, bot_, owner_id, text):
+    async def _fake_notify(pool_, bot_, owner_id, proxy_id, text):
         sent.append((owner_id, text))
         return True
 
@@ -184,3 +184,39 @@ def test_sweep_is_bounded_in_concurrency():
     assert 1 <= W.CONCURRENCY <= 32
     src = (_ROOT / "services" / "proxy_watchdog.py").read_text(encoding="utf-8")
     assert "Semaphore" in src
+
+
+# ── Глушение уведомлений: один мёртвый прокси не должен прятать остальные ────
+
+
+def test_each_dead_proxy_gets_its_own_notification_slot(monkeypatch):
+    """Падает обычно весь пул сразу — и владелец должен узнать про каждый.
+
+    notify_if_enabled глушит повторы по тройке (владелец, тип, ключ) раз в
+    минуту и молча отбрасывает остальное. Без ключа все мёртвые прокси
+    владельца делили ОДИН слот (и делили его ещё и с сообщениями движка
+    операций): доходило сообщение про один прокси, а про остальные владелец не
+    узнавал уже никогда — dead_notified_at им проставлен, и сторож считает их
+    отработанными.
+    """
+    import services.proxy_watchdog as W
+
+    from database import db as _db
+
+    keys = []
+
+    async def _spy(pool_, bot_, uid, pref, text, reply_markup=None, *, dedup_key=None):
+        keys.append(dedup_key)
+
+    monkeypatch.setattr(_db, "notify_if_enabled", _spy)
+
+    asyncio.run(W._notify(None, None, 777, 11, "мёртв"))
+    asyncio.run(W._notify(None, None, 777, 12, "мёртв"))
+
+    assert all(k for k in keys), "уведомление о мёртвом прокси идёт без ключа"
+    assert len(set(keys)) == 2, (
+        "два разных прокси делят один слот — про второй владелец не узнает"
+    )
+    assert all("11" in k or "12" in k for k in keys), (
+        "ключ обязан различать прокси, а не только род события"
+    )

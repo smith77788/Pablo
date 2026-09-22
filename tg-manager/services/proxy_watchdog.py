@@ -104,11 +104,21 @@ async def check_proxy_alive(proxy_url: str, timeout_s: float = 10.0) -> dict:
         return {"alive": False, "latency_ms": None}
 
 
-async def _notify(pool, bot, owner_id: int, text: str) -> bool:
+async def _notify(pool, bot, owner_id: int, proxy_id: int, text: str) -> bool:
     try:
         from database import db as _db
 
-        await _db.notify_if_enabled(pool, bot, owner_id, "op_complete", text)
+        # dedup_key на КАЖДЫЙ прокси. notify_if_enabled глушит повторы по тройке
+        # (владелец, тип, ключ) раз в минуту и молча отбрасывает остальное. Без
+        # ключа все мёртвые прокси владельца делили один слот с сообщениями
+        # движка операций: когда падает целый пул (а падает он обычно целиком —
+        # у провайдера или датацентра), владелец узнавал ровно про ОДИН прокси.
+        # Про остальные он не узнавал уже никогда: dead_notified_at им
+        # проставлен, и сторож считает их отработанными.
+        await _db.notify_if_enabled(
+            pool, bot, owner_id, "op_complete", text,
+            dedup_key=f"proxy_dead:{proxy_id}",
+        )
         return True
     except Exception:
         log.debug("proxy_watchdog: уведомление не отправлено owner=%s", owner_id)
@@ -178,7 +188,7 @@ async def check_once(pool, bot) -> dict:
             from services.proxy_hygiene import proxy_display
 
             label = proxy_display(r["proxy_url"], r["label"])
-            if await _notify(pool, bot, r["owner_id"],
+            if await _notify(pool, bot, r["owner_id"], r["id"],
                              build_alert(label, r["assigned"], d["streak"])):
                 alerted += 1
 
