@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _H = (_ROOT / "bot" / "handlers" / "business_vault.py").read_text(encoding="utf-8")
@@ -61,21 +62,42 @@ def test_ui_parses_kind_and_param():
     assert "runPulseAction({kind: _screen, param: _param})" in _UI
 
 
+def _run_pulse_action() -> str:
+    """Тело runPulseAction целиком, по балансу фигурных скобок.
+
+    Раньше здесь стоял срез `[:1200]` от первого вхождения «function
+    runPulseAction» — а первой в файле идёт runPulseActionById, так что окно
+    должно было покрыть обе функции. Дописанный в код комментарий сдвинул
+    ветку vault за границу окна, и три проверки покраснели на ЗДОРОВОМ коде:
+    ровно то, что запрещает храповик test_no_silently_disabled_guards. Границы
+    берём по структуре, а не по числу символов.
+    """
+    m = re.search(r"^function runPulseAction\(", _UI, re.M)
+    assert m, "runPulseAction не найдена"
+    i = _UI.index("{", m.end() - 1)
+    depth = 0
+    for j in range(i, len(_UI)):
+        if _UI[j] == "{":
+            depth += 1
+        elif _UI[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return _UI[i:j + 1]
+    raise AssertionError("не закрылось тело runPulseAction")
+
+
 def test_ui_opens_the_chat_for_vault_with_param():
-    seg = _UI[_UI.index("function runPulseAction"):]
-    seg = seg[:1200]
+    seg = _run_pulse_action()
     assert "openVaultChat(Number(cid))" in seg
 
 
 def test_ui_validates_the_param_is_numeric():
     """Параметр приходит из ссылки — в openVaultChat он попадать как есть не должен."""
-    seg = _UI[_UI.index("function runPulseAction"):]
-    seg = seg[:1200]
+    seg = _run_pulse_action()
     assert "test(String(cid))" in seg
 
 
 def test_plain_kind_without_param_still_works():
     """Старые ссылки вида #vault обязаны продолжать работать."""
-    seg = _UI[_UI.index("function runPulseAction"):]
-    seg = seg[:1200]
+    seg = _run_pulse_action()
     assert "return openVault();" in seg

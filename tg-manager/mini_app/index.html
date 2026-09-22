@@ -8189,7 +8189,8 @@ function runPulseAction(a) {
   if (k==='vault') {
     // С параметром ведём прямо в чат: приходить из уведомления «клиент удалил
     // сообщение» в общий список и искать его там — лишняя работа.
-    if (prm && /^-?\d+$/.test(String(prm))) { openVault(); return openVaultChat(Number(prm)); }
+    const cid = prm;
+    if (cid && /^-?\d+$/.test(String(cid))) { openVault(); return openVaultChat(Number(cid)); }
     return openVault();
   }
   if (k==='governor' || k==='invite') return openMassInvite();

@@ -17,7 +17,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 NA = (ROOT / "services" / "next_actions.py").read_text(encoding="utf-8")
 API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
-HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Весь мини-апп, а не только index.html: экраны вынесены в mini_app/screens/*.js,
+# и цель подсказки может жить там. Гейт «цель существует во фронте» это
+# проглядел — openMassInvite переехала в screens/invite.js, а проверка
+# продолжала проходить лишь потому, что в index.html случайно попадалась
+# подстрока «openMassInvite=» из сравнения `typeof openMassInvite==='function'`.
+# Стоило этому сравнению уйти — и стало видно, что гейт давно ничего не сторожит.
+from tests.miniapp_source import miniapp_source  # noqa: E402
+
+HTML = miniapp_source()
 
 
 def _suggestions():

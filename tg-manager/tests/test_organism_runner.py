@@ -128,8 +128,13 @@ def test_miniapp_deeplink_strips_telegram_hash_params():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     html = open(os.path.join(root, "mini_app", "index.html"), encoding="utf-8").read()
     assert "!p.startsWith('tgWebApp')" in html
-    # operation ведёт к конкретной операции: op_id проброшен и подсвечивается
-    assert "openMassOps(a.param)" in html
+    # operation ведёт к конкретной операции: op_id проброшен и подсвечивается.
+    # Читать только a.param было мало: нудж бота кладёт номер в ссылку как
+    # «operation:<id>», а карточка Пульса отдаёт словарь бэкенда с ключом op_id,
+    # и из приложения тот же самый сбой вёл в общий список без номера. Оба имени
+    # разворачивает _pulseParam.
+    assert "openMassOps(prm)" in html
+    assert "a.param" in html and "a.op_id" in html
     assert "function openMassOps(focusId)" in html
     assert "massop-${r.id}" in html
     assert "getElementById('massop-' + focusId)" in html
