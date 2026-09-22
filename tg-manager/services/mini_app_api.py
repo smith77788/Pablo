@@ -15,7 +15,8 @@ import asyncpg
 from aiohttp import web
 
 from services import operation_bus as _obus
-from services.mini_app_auth import validate_init_data, make_token, parse_token
+from services.mini_app_auth import (validate_init_data, make_token, parse_token,
+                                    signing_secret_ok)
 from services.secret_masking import redact_secrets
 from services.security import (
     check_rate_limit,
@@ -461,6 +462,21 @@ def _cached_user(ttl: int = _CACHE_TTL):
             return result
         return wrapped
     return wrapper
+
+
+# Показывается вместо входа, когда на сервере нет ключа подписи. Продолжать
+# при пустом BOT_TOKEN нельзя: ключ подписи вывелся бы из пустой строки, то
+# есть стал бы общеизвестным, и вход подделал бы кто угодно (см.
+# services/mini_app_auth.signing_secret_ok).
+#
+# Статус 403, а не 5xx: на 502/503 фронт показывает «сервис временно
+# недоступен» и прячет настоящую причину (tests/test_miniapp_no_gateway_status).
+# И не 401: на него фронт уходит в повторный вход по кругу, а тут повтор не
+# поможет — нужно поправить переменную окружения.
+_NO_SIGNING_SECRET = (
+    "Вход недоступен: на сервере не задан BOT_TOKEN. "
+    "Укажите его в переменных окружения и перезапустите приложение."
+)
 
 
 def _bot_token() -> str:
@@ -1319,6 +1335,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not init_data:
             return _err("Missing initData")
         bot_token = _bot_token()
+        if not signing_secret_ok(bot_token):
+            return _err(_NO_SIGNING_SECRET, 403)
         user = validate_init_data(init_data, bot_token)
         if not user:
             return _err("Invalid Telegram initData", 401)
@@ -1339,6 +1357,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not code:
             return _err("Введите код связывания")
         label = validate_string(body.get("label"), max_len=80) or ""
+        if not signing_secret_ok(_bot_token()):
+            return _err(_NO_SIGNING_SECRET, 403)
         redeemed = await device_pairing.redeem_code(pool, code, label=label)
         if not redeemed:
             return _err("Код неверный или истёк — возьмите новый в боте", 401)
@@ -1360,6 +1380,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not dev:
             return _err("Missing device_token")
         bot_token = _bot_token()
+        if not signing_secret_ok(bot_token):
+            return _err(_NO_SIGNING_SECRET, 403)
         uid = device_pairing.parse_device_token(dev, bot_token)
         if not uid:
             return _err("Устройство не привязано — свяжите заново", 401)

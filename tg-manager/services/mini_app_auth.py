@@ -1,18 +1,63 @@
 """Telegram Mini App — initData validation and session tokens."""
 from __future__ import annotations
 
+import functools
 import hashlib
 import hmac
 import json
+import logging
 import time
 import urllib.parse
 from typing import Optional
+
+log = logging.getLogger(__name__)
+
+# Ниже этой длины строка заведомо не токен бота (настоящий — около 46 символов:
+# "1234567890:AA...").
+_MIN_SIGNING_SECRET = 16
+
+
+@functools.lru_cache(maxsize=1)
+def _complain_no_secret() -> None:
+    """Пожаловаться один раз за процесс — иначе зальём лог на каждом запросе."""
+    log.error(
+        "mini_app_auth: BOT_TOKEN не задан (или не похож на токен) — вход в "
+        "мини-апп отключён. Подпись сессий выводится из токена бота; из пустой "
+        "строки получается общеизвестный ключ, и тогда сессию подделывает кто "
+        "угодно от имени любого владельца. Задайте BOT_TOKEN (или "
+        "MANAGER_BOT_TOKEN) и перезапустите."
+    )
+
+
+def signing_secret_ok(secret: Optional[str]) -> bool:
+    """Годится ли строка как ключ подписи входа.
+
+    Ключ выводится из токена бота: sha256(token). Пустая строка — тоже «ключ»,
+    только общеизвестный: sha256(b"") — константа, подпись с ней подделывается
+    за секунду. Дальше это полный обход входа: злоумышленник подписывает токен
+    с ЛЮБЫМ user_id и работает от имени любого владельца — его аккаунты, строки
+    сессий, операции, платежи. Хуже всего, что снаружи всё выглядит рабочим:
+    мини-апп открывается, вход «проходит».
+
+    Пустой токен — не теория. Веб-роль (INFRAGRAM_ROLE=web) поднимается
+    отдельным процессом, переменную легко не донести до неё при редеплое или
+    переименовании, и os.getenv молча вернёт "".
+
+    Поэтому пустой (или явно не похожий на токен) секрет — отказ, а не тихая
+    работа с нулевым ключом.
+    """
+    if not secret or len(secret.strip()) < _MIN_SIGNING_SECRET:
+        _complain_no_secret()
+        return False
+    return True
 
 
 def validate_init_data(init_data: str, bot_token: str) -> Optional[dict]:
     """Validate Telegram Mini App initData using HMAC-SHA256.
     Returns user dict on success, None on failure.
     """
+    if not signing_secret_ok(bot_token):
+        return None
     try:
         parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
         hash_value = parsed.pop("hash", None)
@@ -38,6 +83,10 @@ def validate_init_data(init_data: str, bot_token: str) -> Optional[dict]:
 
 def make_token(user_id: int, bot_token: str) -> str:
     """Generate a 2-hour session token."""
+    if not signing_secret_ok(bot_token):
+        # Выдать токен, подписанный общеизвестным ключом, хуже чем не выдать
+        # ничего: он выглядит настоящим и открывает вход кому угодно.
+        raise ValueError("нет ключа подписи: BOT_TOKEN не задан")
     ts = int(time.time())
     payload = f"{user_id}:{ts}"
     secret = hashlib.sha256(bot_token.encode()).digest()
@@ -47,6 +96,8 @@ def make_token(user_id: int, bot_token: str) -> str:
 
 def parse_token(token: str, bot_token: str, max_age: int = 7200) -> Optional[int]:
     """Validate a session token, return user_id or None."""
+    if not signing_secret_ok(bot_token):
+        return None
     try:
         parts = token.split(":")
         if len(parts) != 3:

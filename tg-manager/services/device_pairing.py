@@ -24,6 +24,8 @@ import logging
 import secrets
 import time
 
+from services.mini_app_auth import signing_secret_ok
+
 log = logging.getLogger(__name__)
 
 # Код связывания: без похожих символов (нет 0/O, 1/I/L) — вводится с телефона.
@@ -59,6 +61,11 @@ def make_device_token(owner_id: int, secret: str, *,
     Формат: dev:{owner_id}:{ts}:{nonce}:{sig}. nonce делает каждый токен
     уникальным (разные устройства → разные отпечатки, независимый отзыв).
     """
+    if not signing_secret_ok(secret):
+        # Токен устройства живёт месяц. Подписанный общеизвестным ключом (из
+        # пустого BOT_TOKEN), он на месяц открывает вход от имени любого
+        # владельца — лучше не выдавать вовсе.
+        raise ValueError("нет ключа подписи: BOT_TOKEN не задан")
     ts = int(time.time()) if ts is None else int(ts)
     nonce = nonce or secrets.token_hex(8)
     payload = f"{owner_id}:{ts}:{nonce}"
@@ -70,6 +77,8 @@ def parse_device_token(token: str, secret: str, *,
                        max_age_days: int = DEVICE_TTL_DAYS,
                        now: float | None = None) -> int | None:
     """Проверить токен устройства → owner_id или None (подпись/срок/формат)."""
+    if not signing_secret_ok(secret):
+        return None
     try:
         parts = (token or "").split(":")
         if len(parts) != 5 or parts[0] != _TOKEN_PREFIX:
@@ -93,6 +102,8 @@ def token_fingerprint(token: str) -> str:
 
 
 def _sign(payload: str, secret: str) -> str:
+    # `secret or ""` оставлен намеренно: годность ключа проверяют вызывающие
+    # (signing_secret_ok), сюда пустая строка уже не доходит.
     key = hashlib.sha256((secret or "").encode()).digest()
     return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()[:32]
 
