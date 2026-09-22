@@ -14064,7 +14064,12 @@ async def _exec_compliance_scan(
     if flagged_lines:
         head += "\n\n" + "\n".join(flagged_lines[:20])
         head += "\n\nℹ️ Досье в журнале операции. Жалобу подавайте адресно (раздел Strike)."
-    return {"status": "done", "flagged": flagged, "clean": clean_count,
+    # Успешная единица здесь — ПРОВЕРЕННАЯ цель, и найденное нарушение тоже
+    # проверка: досье собрано, работа сделана. Без `ok` скан, наткнувшийся на
+    # пару недоступных целей, закрывался полным провалом вместе со всеми
+    # собранными досье и вдобавок шёл в предохранитель как сбой.
+    return {"status": "done", "ok": flagged + clean_count,
+            "flagged": flagged, "clean": clean_count,
             "failed": err_count, "summary": head}
 
 
@@ -15093,7 +15098,13 @@ async def _exec_leave_all_chats(
         await release_accounts([account_id])
 
     return {
+        # `ok` обязателен: итог операции считается по СЧЁТЧИКАМ
+        # (op_status.classify_final), а не по слову исполнителя. Без него
+        # прогон, где часть целей взята, а часть нет, приходил как
+        # ok=0 / failed>0 и закрывался ПОЛНЫМ провалом, да ещё и шёл в
+        # предохранитель как сбой.
         "status": "done",
+        "ok": left,
         "left": left,
         "failed": failed,
         "summary": f"🚪 Выход из чатов: ✅ {left} успешно" + (f" ❌ {failed}" if failed else ""),
@@ -15144,7 +15155,13 @@ async def _exec_read_all_dialogs(
         await release_accounts([account_id])
 
     return {
+        # `ok` обязателен: итог операции считается по СЧЁТЧИКАМ
+        # (op_status.classify_final), а не по слову исполнителя. Без него
+        # прогон, где часть целей взята, а часть нет, приходил как
+        # ok=0 / failed>0 и закрывался ПОЛНЫМ провалом, да ещё и шёл в
+        # предохранитель как сбой.
         "status": "done",
+        "ok": read,
         "read": read,
         "failed": failed,
         "summary": f"📖 Прочитано диалогов: ✅ {read}" + (f" ❌ {failed}" if failed else ""),
@@ -15194,7 +15211,13 @@ async def _exec_delete_private_dialogs(
         await release_accounts([account_id])
 
     return {
+        # `ok` обязателен: итог операции считается по СЧЁТЧИКАМ
+        # (op_status.classify_final), а не по слову исполнителя. Без него
+        # прогон, где часть целей взята, а часть нет, приходил как
+        # ok=0 / failed>0 и закрывался ПОЛНЫМ провалом, да ещё и шёл в
+        # предохранитель как сбой.
         "status": "done",
+        "ok": deleted,
         "deleted": deleted,
         "failed": failed,
         "summary": f"🗑 Удалено личных диалогов: ✅ {deleted}" + (f" ❌ {failed}" if failed else ""),
