@@ -102,17 +102,35 @@ async def _start_one(pool, bot, acc_id: int) -> bool:
             raise RuntimeError("нет сессии")
 
         client = _make_client(acc["session_str"], acc)
-        await asyncio.wait_for(client.connect(), timeout=15)
-        if not await client.is_user_authorized():
-            raise RuntimeError("сессия не авторизована")
+        # Всё после connect() и до записи в _listening обязано быть под защитой:
+        # до этой записи на клиента нет ни одной ссылки, и _stop_one его потом
+        # не найдёт. Неавторизованная сессия — не редкость, а основная причина
+        # попасть сюда, и каждый такой промах оставлял бы ЖИВОЙ коннект к
+        # Telegram на аккаунте, который слушателю не достался.
+        #
+        # Цена — не память: этот коннект держит процессный мьютекс сессии, то
+        # есть блокирует аккаунт для остальных подсистем, а второй коннект на
+        # той же сессии — это AUTH_KEY_DUPLICATED и отозванный ключ.
+        try:
+            await asyncio.wait_for(client.connect(), timeout=15)
+            if not await client.is_user_authorized():
+                raise RuntimeError("сессия не авторизована")
 
-        from telethon import events
+            from telethon import events
 
-        owner_id = int(acc["owner_id"])
-        client.add_event_handler(
-            lambda e, _p=pool, _b=bot, _o=owner_id: _on_incoming_message(_p, _b, _o, e),
-            events.NewMessage(incoming=True),
-        )
+            owner_id = int(acc["owner_id"])
+            client.add_event_handler(
+                lambda e, _p=pool, _b=bot, _o=owner_id: _on_incoming_message(_p, _b, _o, e),
+                events.NewMessage(incoming=True),
+            )
+        except BaseException:
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=5)
+            except Exception:
+                log_exc_swallow(
+                    log, f"audience_listener: disconnect acc={acc_id} после сбоя")
+            raise
+
         _listening[acc_id] = client
         log.info("audience_listener: acc=%d подключён (owner=%d)", acc_id, owner_id)
         return True

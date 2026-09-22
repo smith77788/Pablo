@@ -434,8 +434,20 @@ async def _get_telethon_client(
     acc = next((a for a in candidates if a.get("session_str")), None)
     if not acc:
         return None, None
-    client = _make_client(acc["session_str"])
-    await asyncio.wait_for(client.connect(), timeout=15)
+    # Словарь аккаунта передаём ЦЕЛИКОМ: транспорт выбирается по его полям
+    # (proxy_id, cf_relay_url, id). Без него клиент уходил напрямую с host-IP,
+    # пока остальные подсистемы того же аккаунта шли через назначенный прокси, —
+    # одна сессия с двух адресов даёт AUTH_KEY_DUPLICATED.
+    client = _make_client(acc["session_str"], acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+    except BaseException:
+        # Вызывающий получает None и отключать ему нечего — значит закрываем здесь.
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "registration_checker: disconnect после сбоя коннекта")
+        raise
     return client, acc
 
 
