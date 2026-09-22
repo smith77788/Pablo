@@ -8803,9 +8803,14 @@ function renderBots() {
     const h = b.health || {};
     const badge = (active && h.label && h.state && h.state!=='ok')
       ? `<span class="badge b-gy" style="margin-top:4px;display:inline-flex;background:var(--bg2);color:${h.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(h.label)}</span>`
-      : `<span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>`;
+      : `<span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'⏸ Убран из работы'}</span>`;
+    // Кнопка на карточке была 🗑 и обещала удаление, которого в продукте нет:
+    // и она, и «⏸ Выключить» на экране бота снимают ОДИН И ТОТ ЖЕ is_active.
+    // Корзина на уже выключенном боте вообще не делала ничего видимого —
+    // «удаляла» второй раз то, что уже убрано. Один выключатель, два
+    // направления, честная подпись.
     return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
-      <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
+      <div class="bot-card-del" title="${active?'Убрать из работы':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${esc(name)}',${!!active})">${active?'⏻':'▶️'}</div>
       <div class="bot-card-ava" style="background:${grad}">${initials}</div>
       <div class="bot-card-name">${esc(name)}</div>
       ${handleHtml}
@@ -8954,12 +8959,26 @@ async function openBot(botId) {
   }
 }
 
-async function removeBotConfirm(botId, name) {
-  if (!await askConfirm(`Отключить бота ${name}? Бот будет деактивирован.`)) return;
+// Убрать бота из работы или вернуть обратно. Раньше это были ДВА разных
+// действия с разными словами — «🗑 Убрать» и «⏸ Выключить», — а по факту оба
+// снимали один флаг is_active. Корзина обещала удаление, которого продукт не
+// делает: подписчики, воронки и история остаются на месте, бот просто уходит
+// из работы и из списка в боте. Обещать удаление того, что не удаляется,
+// нельзя, поэтому действие одно и подпись у него правдивая.
+async function botPowerConfirm(botId, name, isActive) {
+  if (isActive) {
+    if (!await askConfirm(`Убрать бота ${name} из работы?\n\nОн перестанет забирать обновления и пропадёт из списка в боте. Подписчики, воронки и история сохранятся — вернуть можно здесь же кнопкой «Вернуть в работу».`)) return;
+  }
   try {
-    await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
-    toast('🗑 Бот деактивирован');
+    if (isActive) {
+      await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
+      toast('⏸ Бот убран из работы — данные сохранены');
+    } else {
+      await api('/api/miniapp/bot/'+botId+'/toggle', {method:'PUT'});
+      toast('🟢 Бот вернулся в работу');
+    }
     loadBots();
+    if (document.getElementById('s-botdetail')?.classList.contains('show')) openBot(botId);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
@@ -9055,9 +9074,8 @@ function buildBotDetail(d) {
       <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${num(d.auto_replies)}</div><div class="kpi-lbl">Авто-отв.</div></div>
     </div>
     <div style="display:flex;gap:8px;padding:4px 0 4px">
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="toggleBotActive(${bid},this)">${b.is_active?'⏸ Выключить':'▶️ Включить'}</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px${b.is_active?';color:var(--red)':''}" onclick="botPowerConfirm(${bid},'${bn}',${!!b.is_active})">${b.is_active?'⏸ Убрать из работы':'▶️ Вернуть в работу'}</button>
       <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px;color:var(--red)" onclick="removeBotConfirm(${bid},'${bn}')">🗑 Убрать</button>
     </div>
     ${mgmtSections.map(s=>`
       <div class="sec">${s.title}</div>
@@ -11749,23 +11767,6 @@ async function loadAnalytics() {
 }
 
 // ── Bot toggle ─────────────────────────────────────────
-async function toggleBotActive(botId, el) {
-  const wasOn = el.classList.contains('on');
-  el.classList.toggle('on',!wasOn); el.classList.toggle('off',wasOn);
-  try {
-    const d = await api('/api/miniapp/bot/'+botId+'/toggle', {method:'PUT'});
-    toast(d.is_active?'🟢 Бот включён':'⭕ Бот выключен');
-    // Update BOTS cache
-    const b = BOTS.find(x=>x.bot_id==botId);
-    if (b) b.is_active = d.is_active;
-    // Если открыт экран деталей бота — обновим его (кнопка/бейдж статуса).
-    if (document.getElementById('s-botdetail')?.classList.contains('show')) openBot(botId);
-  } catch(e) {
-    el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn);
-    toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
-  }
-}
-
 // ── Настройки профиля бота (имя/описание) ──────────────
 let BP_BOT_ID = null;
 function openBotProfile(botId) {
