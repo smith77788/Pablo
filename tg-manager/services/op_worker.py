@@ -1123,7 +1123,8 @@ async def _deactivate_dead_session(
 
 
 async def _maybe_requeue(
-    pool: asyncpg.Pool, op_id: int, exc: Exception, params: dict, op_type: str
+    pool: asyncpg.Pool, op_id: int, exc: Exception, params: dict, op_type: str,
+    bot=None, owner_id: int | None = None,
 ) -> bool:
     """
     Если ошибка ретраевая и retry_count < max_retries — сбросить операцию в pending.
@@ -1235,6 +1236,29 @@ async def _maybe_requeue(
         max_retries,
         backoff,
     )
+    # Долгая пауза без объяснения выглядит как зависшая операция: в очереди
+    # «ожидает» и ни слова о причине. А паузы здесь бывают в СУТКИ — FloodWait
+    # ждётся ровно столько, сколько попросил Telegram (до 24 часов), PeerFlood
+    # откладывает на 48. Тот же класс молчания, что уже закрыт у отложенного
+    # возврата в очередь (_defer_op_for_flood): и тот, и этот путь делают
+    # `return` до общего блока финальных уведомлений, поэтому владелец не
+    # получал ничего. Молчание обходится дороже сообщения — владелец начинает
+    # отменять и запускать заново, добирая новых ограничений.
+    if backoff >= _DEFER_NOTIFY_MIN_S:
+        _hours, _mins = divmod(int(backoff) // 60, 60)
+        _when = f"{_hours} ч {_mins} мин" if _hours else f"{_mins} мин"
+        _why = {
+            "peer_flood": "Telegram пометил аккаунт за рассылку",
+            "flood": "Telegram попросил паузу",
+        }.get(kind, "временная ошибка")
+        await _notify_owner_about_op(
+            pool, bot, owner_id,
+            f"⏸ <b>Операция #{op_id}</b> продолжится через {_when} "
+            f"(попытка {retry_count} из {max_retries}): {_why}.\n\n"
+            f"Она возобновится сама, отменять и запускать заново не нужно — "
+            f"повторный запуск только добавит ограничений."
+            + (f"\n\n<i>{str(exc)[:200]}</i>" if str(exc) else ""),
+        )
     return True
 
 
@@ -2992,7 +3016,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             except Exception as e2:
                 log_exc_swallow(log, f"infra_memory record_account_op (error) failed for op {op_id}: {e2}")
             # Попытаться поставить на повтор перед тем как помечать как failed
-            requeued = await _maybe_requeue(pool, op_id, e, params, op_type)
+            requeued = await _maybe_requeue(pool, op_id, e, params, op_type,
+                                            bot=bot, owner_id=owner_id)
             if not requeued:
                 _fail_res = await _safe_execute(
                     pool,

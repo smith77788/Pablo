@@ -135,3 +135,85 @@ async def test_no_bot_no_crash():
 
     await op_worker._notify_owner_about_op(_Pool(), None, 555, "текст")
     await op_worker._notify_owner_about_op(_Pool(), _Bot(), None, "текст")
+
+
+# ── Четвёртый молчавший путь: повтор по ошибке исполнителя ──────────────────
+#
+# `_maybe_requeue` делает такой же ранний `return`, как и пути выше, и паузы у
+# него бывают в СУТКИ: FloodWait ждётся ровно столько, сколько попросил Telegram
+# (до 24 часов), PeerFlood откладывает на 48. Всё это время операция стояла в
+# очереди как «ожидает» без единого слова о причине — то есть выглядела
+# зависшей, и владелец шёл её отменять и запускать заново.
+
+class _RetryPool:
+    def __init__(self, retry_count=0, max_retries=3):
+        self.row = {"retry_count": retry_count, "max_retries": max_retries}
+
+    async def fetchrow(self, query, *args):
+        return self.row
+
+    async def execute(self, query, *args):
+        return "UPDATE 1"
+
+
+def _as_kind(monkeypatch, kind):
+    from services import op_worker
+
+    monkeypatch.setattr(op_worker, "_classify_op_error", lambda _e: kind)
+
+
+@pytest.mark.asyncio
+async def test_peer_flood_retry_is_explained(sent, monkeypatch):
+    from services import op_worker
+
+    _as_kind(monkeypatch, "peer_flood")
+    ok = await op_worker._maybe_requeue(
+        _RetryPool(), 9, Exception("PEER_FLOOD"), {}, "bulk_dm_adhoc",
+        bot=_Bot(), owner_id=555)
+    assert ok
+    assert sent, (
+        "пауза на 48 часов без объяснения выглядит как зависшая операция — "
+        "владелец отменит её и запустит заново, добрав новых ограничений"
+    )
+    assert "48 ч" in sent[0][1]
+    assert "1 из 3" in sent[0][1], "владелец должен видеть, какая это попытка"
+
+
+@pytest.mark.asyncio
+async def test_long_flood_retry_is_explained(sent, monkeypatch):
+    from services import op_worker
+
+    _as_kind(monkeypatch, "flood")
+    monkeypatch.setattr(op_worker, "extract_flood_wait", lambda *_a: 7200)
+    ok = await op_worker._maybe_requeue(
+        _RetryPool(), 9, Exception("FLOOD_WAIT_7200"), {}, "mass_invite",
+        bot=_Bot(), owner_id=555)
+    assert ok
+    assert sent and "2 ч" in sent[0][1]
+
+
+@pytest.mark.asyncio
+async def test_short_retry_stays_quiet(sent, monkeypatch):
+    """Обычный сетевой сбой — пауза в секунды. Сообщать не о чем."""
+    from services import op_worker
+
+    _as_kind(monkeypatch, "network")
+    monkeypatch.setattr(op_worker, "extract_flood_wait", lambda *_a: 0)
+    ok = await op_worker._maybe_requeue(
+        _RetryPool(), 9, Exception("connection reset"), {}, "mass_publish",
+        bot=_Bot(), owner_id=555)
+    assert ok
+    assert not sent, "короткая техническая пауза не повод писать владельцу"
+
+
+@pytest.mark.asyncio
+async def test_exhausted_retries_say_nothing_here(sent, monkeypatch):
+    """Исчерпанный бюджет повторов — это финал, о нём говорит общий блок итогов."""
+    from services import op_worker
+
+    _as_kind(monkeypatch, "peer_flood")
+    ok = await op_worker._maybe_requeue(
+        _RetryPool(retry_count=3), 9, Exception("PEER_FLOOD"), {}, "bulk_dm_adhoc",
+        bot=_Bot(), owner_id=555)
+    assert ok is False
+    assert not sent
