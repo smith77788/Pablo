@@ -146,6 +146,14 @@ except (ImportError, ModuleNotFoundError):
     _asyncpg.Connection = _Any
     _asyncpg.create_pool = _Any
     _asyncpg.connect = _Any
+    # Классы ошибок Postgres. Без них `except asyncpg.UniqueViolationError`
+    # в коде продукта падает AttributeError прямо в обработчике, и тест видит
+    # не поведение продукта, а дырку в заглушке. Наследуем от Exception, чтобы
+    # такой except работал и его можно было возбудить из теста.
+    for _exc_name in ("PostgresError", "UniqueViolationError",
+                      "ForeignKeyViolationError", "UndefinedColumnError",
+                      "UndefinedTableError"):
+        setattr(_asyncpg, _exc_name, type(_exc_name, (Exception,), {}))
     sys.modules.setdefault("asyncpg", _asyncpg)
     _asyncpg_proto = types.ModuleType("asyncpg.protocol")
     _asyncpg_proto.__path__ = []
