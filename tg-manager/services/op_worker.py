@@ -7425,6 +7425,67 @@ async def _exec_strike(
     }
 
 
+# Разбег между стартами ботов сетевой рассылки: одновременный залп по Telegram
+# с десятков токенов — верный способ собрать 429 на всех сразу.
+_NB_BOT_START_DELAY_S = 2.0
+
+
+async def _nb_launch(
+    pool: asyncpg.Pool, op_id: int, owner_id: int, bot_id: int, token: str,
+    text: str, ids: list, buttons, *, subset: bool, order: int,
+    params: dict, launched_bc_ids: list, already: set,
+) -> bool:
+    """Завести и запустить рассылку одного бота сетевой рассылки.
+
+    Возвращает True, если по этому боту рассылка идёт (заведена сейчас или уже
+    была заведена прошлым прогоном) — вызывающий засчитывает бота в прогресс.
+
+    Тело было выписано в четырёх ветках сегментов слово в слово, и обе ошибки,
+    которые здесь чинятся, жили сразу во всех четырёх копиях.
+
+    `subset` — аудитория этого запуска является ПОДМНОЖЕСТВОМ аудитории бота
+    (язык, холодные, потерянные, уникальные). Такой список обязан лечь в
+    `target_user_ids`: именно его читает возобновление после рестарта, и без
+    него прерванная рассылка по «потерянным за 30 дней» догонялась бы по ВСЕЙ
+    аудитории бота. Для полной аудитории, наоборот, оставляем NULL — иначе
+    состав подписчиков замораживается на момент запуска.
+    """
+    from services import broadcaster
+
+    bot_id = int(bot_id)
+    if bot_id in already:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+            op_id, log_ctx=f"[nb_skip op={op_id}]",
+        )
+        return True
+
+    bc_id = await db.create_broadcast(
+        pool, bot_id, text, len(ids), owner_id,
+        target_user_ids=(list(ids) if subset else None), buttons=buttons,
+    )
+    if not bc_id:
+        return False
+    broadcaster.start(
+        pool, None, bc_id, token, bot_id, text, None, ids, buttons,
+        start_delay=order * _NB_BOT_START_DELAY_S,
+    )
+    launched_bc_ids.append(int(bc_id))
+    already.add(bot_id)
+    _bots = [int(x) for x in (params.get("launched_bot_ids") or [])] + [bot_id]
+    _bcs = [int(x) for x in (params.get("launched_bc_ids") or [])] + [int(bc_id)]
+    params["launched_bot_ids"] = _bots
+    params["launched_bc_ids"] = _bcs
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET done_items=done_items+1, "
+        "params = COALESCE(params, '{}'::jsonb) || $1::jsonb WHERE id=$2",
+        json.dumps({"launched_bot_ids": _bots, "launched_bc_ids": _bcs}),
+        op_id, log_ctx=f"[nb_launch op={op_id}]",
+    )
+    return True
+
+
 async def _exec_network_broadcast(
     pool: asyncpg.Pool, bot: "Bot", op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -7465,8 +7526,20 @@ async def _exec_network_broadcast(
 
     total_started = 0
     total_users = 0
-    launched_bc_ids: list[int] = []
-    _BOT_START_DELAY_S = 2.0
+    # Что УЖЕ заведено предыдущим прогоном этой же операции. Операция может быть
+    # повторена (упал воркер на середине списка ботов, таймаут, ручной повтор), а
+    # раньше повтор заводил по каждому боту НОВУЮ рассылку с новым id: журнал
+    # доставок ведётся по id рассылки, поэтому вся аудитория уже обработанных
+    # ботов получала сообщение второй раз. Теперь запущенные боты записываются в
+    # params по ходу дела и на повторе пропускаются.
+    try:
+        _nb_already = {int(x) for x in (params.get("launched_bot_ids") or [])}
+    except (TypeError, ValueError):
+        _nb_already = set()
+    try:
+        launched_bc_ids: list[int] = [int(x) for x in (params.get("launched_bc_ids") or [])]
+    except (TypeError, ValueError):
+        launched_bc_ids = []
 
     await _safe_execute(
             pool,
@@ -7495,23 +7568,16 @@ async def _exec_network_broadcast(
             ids = [r["user_id"] for r in rows]
             if not ids:
                 continue
-            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id, buttons=_bc_buttons)
-            if not bc_id:
+            # Единица прогресса — ЗАПУЩЕННЫЕ БОТЫ (total_items=len(bots)), а не
+            # получатели: прибавка len(ids) переполняла done_items выше total_items.
+            if not await _nb_launch(
+                pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
+                _bc_buttons, subset=False, order=total_started,
+                params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+            ):
                 continue
-            broadcaster.start(
-                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, _bc_buttons,
-                start_delay=total_started * _BOT_START_DELAY_S,
-            )
-            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
-            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
-            # incrementing by len(ids) here overflowed done_items past total_items.
-            await _safe_execute(
-                    pool,
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
-                op_id,
-            )
 
     elif segment == "unique":
         users = await db.get_unique_network_users(pool, owner_id)
@@ -7529,23 +7595,16 @@ async def _exec_network_broadcast(
                     "ok": total_started,
                     "summary": f"Отменено. Запущено {total_started} ботов",
                 }
-            bc_id = await db.create_broadcast(pool, bid, text, len(ids), owner_id, buttons=_bc_buttons)
-            if not bc_id:
+            # Единица прогресса — ЗАПУЩЕННЫЕ БОТЫ (total_items=len(bots)), а не
+            # получатели: прибавка len(ids) переполняла done_items выше total_items.
+            if not await _nb_launch(
+                pool, op_id, owner_id, bid, token_map[bid], text, ids,
+                _bc_buttons, subset=True, order=total_started,
+                params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+            ):
                 continue
-            broadcaster.start(
-                pool, None, bc_id, token_map[bid], bid, text, None, ids, _bc_buttons,
-                start_delay=total_started * _BOT_START_DELAY_S,
-            )
-            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
-            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
-            # incrementing by len(ids) here overflowed done_items past total_items.
-            await _safe_execute(
-                    pool,
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
-                op_id,
-            )
 
     elif segment in ("cold_all", "lost_all"):
         days_from = 30 if segment == "lost_all" else 7
@@ -7562,23 +7621,16 @@ async def _exec_network_broadcast(
             ids = await db.get_inactive_user_ids(pool, b["bot_id"], days_from, days_to)
             if not ids:
                 continue
-            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id, buttons=_bc_buttons)
-            if not bc_id:
+            # Единица прогресса — ЗАПУЩЕННЫЕ БОТЫ (total_items=len(bots)), а не
+            # получатели: прибавка len(ids) переполняла done_items выше total_items.
+            if not await _nb_launch(
+                pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
+                _bc_buttons, subset=True, order=total_started,
+                params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+            ):
                 continue
-            broadcaster.start(
-                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, _bc_buttons,
-                start_delay=total_started * _BOT_START_DELAY_S,
-            )
-            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
-            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
-            # incrementing by len(ids) here overflowed done_items past total_items.
-            await _safe_execute(
-                    pool,
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
-                op_id,
-            )
 
     elif segment == "lang":
         for b in bots:
@@ -7601,23 +7653,16 @@ async def _exec_network_broadcast(
             ids = [r["user_id"] for r in rows]
             if not ids:
                 continue
-            bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id, buttons=_bc_buttons)
-            if not bc_id:
+            # Единица прогресса — ЗАПУЩЕННЫЕ БОТЫ (total_items=len(bots)), а не
+            # получатели: прибавка len(ids) переполняла done_items выше total_items.
+            if not await _nb_launch(
+                pool, op_id, owner_id, b["bot_id"], b["token"], text, ids,
+                _bc_buttons, subset=True, order=total_started,
+                params=params, launched_bc_ids=launched_bc_ids, already=_nb_already,
+            ):
                 continue
-            broadcaster.start(
-                pool, None, bc_id, b["token"], b["bot_id"], text, None, ids, _bc_buttons,
-                start_delay=total_started * _BOT_START_DELAY_S,
-            )
-            launched_bc_ids.append(bc_id)
             total_started += 1
             total_users += len(ids)
-            # Progress unit is "bots launched" (total_items=len(bots)), NOT users —
-            # incrementing by len(ids) here overflowed done_items past total_items.
-            await _safe_execute(
-                    pool,
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
-                op_id,
-            )
 
     if total_started == 0:
         return {
