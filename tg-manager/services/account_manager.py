@@ -8045,14 +8045,33 @@ async def transfer_bot_via_botfather(
 
 
 async def validate_session_import(session_str: str, proxy_url: str | None = None) -> dict:
+    """Проверить импортируемую сессию: жива ли она и чья она.
+
+    Проверяем ТЕМ ЖЕ выходом, каким аккаунт будет работать дальше: `proxy_url`
+    прежде принимался и молча игнорировался, то есть проверка уходила напрямую
+    с host-IP, а операции — через прокси. Один и тот же ключ сессии с двух
+    адресов — это AUTH_KEY_DUPLICATED, после которого Telegram отзывает его
+    насовсем. Строки аккаунта тут ещё нет, поэтому релея и назначенного прокси
+    у сессии нет по-настоящему: пишем это явно, чтобы `_make_client` не добирал
+    транспорт чужого аккаунта.
+    """
+    client = None
     try:
-        client = _make_client(session_str)
+        device = {"proxy_url": proxy_url or "", "proxy_id": None, "cf_relay_url": ""}
+        client = _make_client(session_str, device)
         await asyncio.wait_for(client.connect(), timeout=15)
         me = await client.get_me()
-        await client.disconnect()
         return {"valid": True, "phone": me.phone or "", "user_id": me.id}
     except Exception as e:
         return {"valid": False, "error": str(e)[:200]}
+    finally:
+        # Раньше отключение стояло только на успешном пути: сорвался get_me —
+        # и подключённый клиент оставался висеть, держа мьютекс сессии.
+        if client is not None:
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=5)
+            except Exception:
+                log_exc_swallow(log, "validate_session_import: disconnect")
 
 
 def detect_session_format(data: str) -> str:

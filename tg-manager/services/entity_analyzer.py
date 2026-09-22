@@ -130,6 +130,15 @@ def _bar(val: float, max_val: float, width: int = 8) -> str:
 
 # ── Core analysis ─────────────────────────────────────────────────────────────
 
+async def _close_quietly(client) -> None:
+    """Закрыть клиента, чей коннект не пригодился. Отключение может подвиснуть —
+    ждём ограниченно, иначе разбор одного канала встанет на висящем сокете."""
+    try:
+        await asyncio.wait_for(client.disconnect(), timeout=5)
+    except Exception:
+        log_exc_swallow(log, "entity_analyzer: disconnect после неудачного коннекта")
+
+
 async def _get_client(pool: asyncpg.Pool, owner_id: int):
     """Return first connected client from account pool (resilient: tries all)."""
     from services import resource_selector
@@ -139,16 +148,23 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
     for acc in candidates:
         if not acc.get("session_str"):
             continue
-        client = _make_client(acc["session_str"])
+        # Словарь аккаунта передаём ЦЕЛИКОМ: транспорт выбирается по его полям
+        # (proxy_id, cf_relay_url, id, ipv6_subnet). Без него клиент уходил
+        # НАПРЯМУЮ с host-IP, пока остальные подсистемы того же аккаунта шли
+        # через назначенный прокси/релей, — одна сессия с двух адресов даёт
+        # AUTH_KEY_DUPLICATED, после которого Telegram отзывает ключ.
+        client = _make_client(acc["session_str"], acc)
         try:
             await asyncio.wait_for(client.connect(), timeout=12)
             return client
         except Exception:
             log_exc_swallow(log, "connect to Telegram client")
-            try:
-                await client.disconnect()
-            except Exception:
-                log_exc_swallow(log, "disconnect client after failed connect")
+            await _close_quietly(client)
+        except BaseException:
+            # Отмена внешним таймаутом мимо `except Exception` проходит насквозь,
+            # а ссылки на подключённого клиента ни у кого нет — закрываем здесь.
+            await _close_quietly(client)
+            raise
     return None
 
 
