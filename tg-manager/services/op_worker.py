@@ -2001,6 +2001,40 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     return {str(r["target"]) for r in (rows or []) if r["target"]}
 
 
+async def completed_steps(pool: asyncpg.Pool, op_id: int) -> set[int]:
+    """Номера шагов операции, уже отработанных УСПЕШНО (operation_log.step_num).
+
+    Третий ключ идемпотентности — для операций, где у цели НЕТ устойчивого
+    имени. Массовое создание каналов даёт всем элементам пакета одно и то же
+    название (режим «одно имя на все»), а в SEO-режиме имена генерируются,
+    поэтому `completed_targets` там либо пропустил бы весь пакет после первого
+    элемента, либо не совпал бы ни с чем. Номер шага — позиция в пакете —
+    устойчив по построению: цикл всегда идёт range(count) в том же порядке и с
+    теми же params.
+
+    Зачем это нужно. Создание необратимо. Повтор операции (сброс зависшей,
+    таймаут, сетевой сбой) начинает пакет заново и создаёт ВТОРОЙ комплект
+    каналов: лишние ресурсы в аккаунте, сожжённый дневной лимит создания и
+    прямой риск бана — Telegram смотрит на темп создания.
+
+    Пустое множество на первом прогоне. Никогда не бросает.
+    """
+    rows = await _safe_fetch(
+        pool,
+        "SELECT DISTINCT step_num FROM operation_log "
+        " WHERE op_id=$1 AND status='ok' AND step_num IS NOT NULL",
+        op_id,
+        log_ctx=f"[completed_steps op={op_id}]",
+    )
+    out: set[int] = set()
+    for r in (rows or []):
+        try:
+            out.add(int(r["step_num"]))
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+    return out
+
+
 async def settled_targets(pool: asyncpg.Pool, op_id: int) -> dict[str, str]:
     """Цели, по которым вопрос уже ЗАКРЫТ, и чем именно: {цель: 'ok' | 'skip'}.
 
@@ -4879,6 +4913,7 @@ async def _exec_global_presence_channel(
                 )
                 return {
                     "status": "cancelled",
+                    "ok": created_count,
                     "created": created_count,
                     "failed": failed_count,
                     "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
@@ -5416,6 +5451,7 @@ async def _exec_global_presence_channel(
         _unit = "групп" if plan_is_group else "активов"
         return {
             "status": "done",
+            "ok": created_count,
             "created": created_count,
             "failed": failed_count,
             "plan_id": plan_id,
@@ -5917,6 +5953,7 @@ async def _exec_global_presence_bot(
                 )
                 return {
                     "status": "cancelled",
+                    "ok": created_count,
                     "created": created_count,
                     "failed": failed_count,
                     "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
@@ -6135,6 +6172,7 @@ async def _exec_global_presence_bot(
         )
         return {
             "status": "done",
+            "ok": created_count,
             "created": created_count,
             "failed": failed_count,
             "plan_id": plan_id,
@@ -6199,6 +6237,13 @@ async def _exec_bulk_create_channels_multi(
     created_count = 0
     failed_count = 0
     global_idx = 1
+    # Создание необратимо, поэтому повтор обязан знать, что уже сделано. Ключ —
+    # номер шага, а не название: в режиме «одно имя на все» названия совпадают
+    # у всего пакета, а в SEO-режиме генерируются.
+    _done_steps = await completed_steps(pool, op_id)
+    if _done_steps:
+        log.info("bulk_create_channels_multi op=%d: повтор — %d ресурсов уже созданы",
+                 op_id, len(_done_steps))
 
     # SEO-массив: имена и @юзернеймы перестановкой ключей (не «Канал #1»).
     # name_mode == "keywords" → title_base трактуется как набор ключевых слов;
@@ -6232,10 +6277,19 @@ async def _exec_bulk_create_channels_multi(
             if await _is_cancelled(pool, op_id):
                 return {
                     "status": "cancelled",
+                    "ok": created_count,
                     "created": created_count,
                     "failed": failed_count,
                     "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
                 }
+
+            if (task_i + 1) in _done_steps:
+                created_count += 1
+                global_idx += 1
+                await _safe_execute(
+                        pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
 
             if not active_accounts:
                 failed_count += total_ops - task_i
@@ -6429,6 +6483,7 @@ async def _exec_bulk_create_channels_multi(
 
     return {
         "status": "done",
+        "ok": created_count,
         "created": created_count,
         "failed": failed_count,
         "summary": (f"Создано каналов: {created_count}, ошибок: {failed_count}"
@@ -6554,17 +6609,33 @@ async def _exec_bulk_create_channels(
             }
         created_count = 0
         failed_count = 0
+        # Потолок пакета в очереди: без него прогресс операции рос от нуля к
+        # нулю («7/0»), и недобор по прогрессу не распознавался вовсе.
+        await _safe_execute(
+                pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", count, op_id)
+        # Повтор не должен создавать второй комплект каналов (см. completed_steps).
+        _done_steps = await completed_steps(pool, op_id)
+        if _done_steps:
+            log.info("bulk_create_channels op=%d: повтор — %d каналов уже созданы",
+                     op_id, len(_done_steps))
 
         for i in range(count):
             if await _is_cancelled(pool, op_id):
                 return {
                     "status": "cancelled",
+                    "ok": created_count,
                     "created": created_count,
                     "failed": failed_count,
                     "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
                 }
 
             num = i + 1
+            if num in _done_steps:
+                created_count += 1
+                await _safe_execute(
+                        pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             # Single-item creation (Factory) uses the title verbatim; only bulk runs
             # get a "#N" suffix to keep names unique.
             title = prefix if count == 1 else f"{prefix} #{num}"
@@ -6720,6 +6791,7 @@ async def _exec_bulk_create_channels(
         _unit = "групп" if is_group else "каналов"
         return {
             "status": "done",
+            "ok": created_count,
             "created": created_count,
             "failed": failed_count,
             "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
