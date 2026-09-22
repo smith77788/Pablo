@@ -59,7 +59,13 @@ def test_endpoints_routes_and_ui_wired():
     api = _read("services/mini_app_api.py")
     # delete_proxy теперь с guard'ом изоляции (проверка назначения + 409)
     seg = api[api.index("async def delete_proxy"):api.index("async def proxy_cleanup_dead")]
-    assert "proxy_hygiene.can_delete_safely" in seg and "AUTH_KEY_DUPLICATED" in seg
+    assert "proxy_hygiene.delete_proxy_safely" in seg, (
+        "ручка удаления обходит общую проверку назначения"
+    )
+    assert "delete_refusal_text" in seg, "отказ должен быть тот же, что в боте"
+    assert "AUTH_KEY_DUPLICATED" in _read("services/proxy_hygiene.py"), (
+        "из отказа пропала причина, по которой удалять назначенный прокси нельзя"
+    )
     assert "async def proxy_cleanup_dead" in api and "async def proxy_export" in api
     # cleanup удаляет только НЕназначенные мёртвые (NOT EXISTS по tg_accounts)
     cseg = api[api.index("async def proxy_cleanup_dead"):api.index("async def proxy_export")]

@@ -26,7 +26,8 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.utils.event_status import mark_handled_error
 from database import db
 from services.logger import log_exc_swallow
-from services.proxy_hygiene import proxy_display, proxy_plain_url
+from services.proxy_hygiene import (delete_proxy_safely, delete_refusal_text,
+                                    proxy_display, proxy_plain_url)
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
@@ -822,11 +823,11 @@ async def cb_proxy_delete(
     await safe_answer(callback)
 
     try:
-        await pool.execute(
-            "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2",
-            proxy_id,
-            user_id,
-        )
+        # Через общую дверь: удалить назначенный прокси = молча обнулить
+        # proxy_id аккаунтов (FK ON DELETE SET NULL) — они уйдут напрямую со
+        # своего IP и получат AUTH_KEY_DUPLICATED. В мини-аппе эта проверка
+        # была, здесь её не было.
+        res = await delete_proxy_safely(pool, user_id, proxy_id)
     except Exception as exc:
         mark_handled_error(f"proxy_delete execute: {exc}")
         await callback.message.edit_text(
@@ -837,6 +838,14 @@ async def cb_proxy_delete(
         return
 
     label = html.escape(proxy_display(row["proxy_url"], row["label"]))
+    if not res.get("ok"):
+        await callback.message.edit_text(
+            f"⚠️ Прокси <code>{label}</code> не удалён.\n\n"
+            + html.escape(delete_refusal_text(res)),
+            parse_mode="HTML",
+            reply_markup=_menu_kb().as_markup(),
+        )
+        return
     await callback.message.edit_text(
         f"🗑 Прокси <code>{label}</code> удалён.",
         parse_mode="HTML",

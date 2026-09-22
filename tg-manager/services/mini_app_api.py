@@ -14027,22 +14027,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Invalid proxy_id", 400)
         try:
             from services import proxy_hygiene
-            # Гард изоляции: FK tg_accounts.proxy_id = ON DELETE SET NULL. Удалить
-            # назначенный прокси = молча обнулить proxy_id аккаунтов → они уйдут
-            # напрямую с домашнего IP → AUTH_KEY_DUPLICATED. Не даём — сначала detach.
-            assigned = await _safe_fetchval(pool,
-                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND proxy_id=$2",
-                uid, proxy_id) or 0
-            if not proxy_hygiene.can_delete_safely(assigned):
-                return _err(
-                    f"Прокси назначен {assigned} аккаунт(ам). Сначала снимите назначение "
-                    f"(«Снять прокси»), иначе аккаунты уйдут напрямую и рискуют "
-                    f"AUTH_KEY_DUPLICATED.", 409)
-            await pool.execute(
-                "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, uid)
+            # Гард изоляции живёт в одной двери на весь продукт: FK
+            # tg_accounts.proxy_id = ON DELETE SET NULL, и удалить назначенный
+            # прокси значит молча обнулить proxy_id аккаунтов — они уйдут
+            # напрямую со своего IP и получат AUTH_KEY_DUPLICATED.
+            res = await proxy_hygiene.delete_proxy_safely(pool, uid, proxy_id)
+            if not res.get("ok"):
+                code = 409 if res.get("reason") == "assigned" else 404
+                return _err(proxy_hygiene.delete_refusal_text(res), code)
             return _json_resp({"ok": True})
         except Exception:
-            return _err("Failed to delete proxy", 500)
+            log.exception("delete_proxy uid=%s proxy_id=%s", uid, proxy_id)
+            return _err("Не удалось удалить прокси", 500)
 
     async def proxy_cleanup_dead(request: web.Request) -> web.Response:
         """Массово удалить подтверждённо-мёртвые (is_alive IS FALSE) НЕназначенные

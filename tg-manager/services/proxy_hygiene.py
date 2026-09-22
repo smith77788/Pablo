@@ -6,8 +6,12 @@
 (2) массово вычистить подтверждённо-мёртвые НЕназначенные прокси; (3) выгрузить
 список для аудита без утечки кредов.
 
-Здесь — только чистые решающие функции (тестируются без БД). Сами запросы/эффект
-— в mini_app_api (delete_proxy guard, proxy_cleanup_dead, proxy_export).
+Здесь — решающие функции (тестируются без БД) и запросы, которые обязаны
+применять их правило: `delete_proxy_safely` — единственная дверь для удаления
+одного прокси, `cleanup_dead_proxies` — для массовой вычистки, `export_proxies`
+— для выгрузки. Инлайнить свой `DELETE FROM user_proxies` в хендлерах нельзя:
+именно так в боте и появилось удаление назначенного прокси без проверки, пока
+в мини-аппе проверка была.
 """
 from __future__ import annotations
 
@@ -85,6 +89,60 @@ def proxy_display(proxy_url, label=None) -> str:
     return mask_proxy_url(plain)[:60]
 
 
+async def delete_proxy_safely(pool, owner_id: int, proxy_id: int) -> dict:
+    """Удалить один прокси владельца — только если он никому не назначен.
+
+    Единственная дверь для удаления прокси. Проверка и удаление — один запрос,
+    поэтому между ними нельзя успеть назначить прокси аккаунту.
+
+    Возвращает {"ok", "reason", "assigned"}; reason: "" | "assigned" |
+    "not_found".
+    """
+    try:
+        pid, oid = int(proxy_id), int(owner_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "not_found", "assigned": 0}
+
+    res = await pool.execute(
+        "DELETE FROM user_proxies "
+        " WHERE id=$1 AND owner_id=$2 "
+        "   AND NOT EXISTS (SELECT 1 FROM tg_accounts a WHERE a.proxy_id=user_proxies.id)",
+        pid, oid)
+    deleted = 0
+    try:
+        txt = str(res or "")
+        if txt.upper().startswith("DELETE"):
+            deleted = int(txt.rsplit(" ", 1)[-1])
+    except (TypeError, ValueError):
+        deleted = 0
+    if deleted:
+        return {"ok": True, "reason": "", "assigned": 0}
+
+    # Ничего не удалилось — объясняем почему. Считаем назначения БЕЗ фильтра по
+    # владельцу: чужая привязка тоже делает удаление опасным.
+    assigned = 0
+    try:
+        assigned = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE proxy_id=$1", pid) or 0)
+    except Exception:
+        assigned = 0
+    if not can_delete_safely(assigned):
+        return {"ok": False, "reason": "assigned", "assigned": assigned}
+    return {"ok": False, "reason": "not_found", "assigned": 0}
+
+
+def delete_refusal_text(result: dict) -> str:
+    """Одинаковый отказ во всех интерфейсах — бот и мини-апп говорят одно и то же."""
+    if (result or {}).get("reason") == "assigned":
+        n = int((result or {}).get("assigned") or 0)
+        return (
+            f"Прокси назначен {n} аккаунт(ам). Сначала снимите назначение "
+            f"(«Снять прокси»), иначе аккаунты уйдут напрямую со своего IP и "
+            f"рискуют AUTH_KEY_DUPLICATED."
+        )
+    return "Прокси не найден."
+
+
 async def cleanup_dead_proxies(pool, owner_id: int) -> dict:
     """Очистка мёртвых прокси: безопасное удаление подтверждённо-мёртвых НЕназначенных.
 
@@ -122,7 +180,14 @@ async def cleanup_dead_proxies(pool, owner_id: int) -> dict:
             continue
         try:
             await pool.execute(
-                "DELETE FROM user_proxies WHERE id = $1 AND owner_id = $2",
+                # Проверка назначения — в самом DELETE. Отдельным запросом её
+                # обходит гонка: между «не назначен» и удалением прокси успеют
+                # назначить аккаунту, и он уйдёт напрямую. И считаем ЛЮБЫЕ
+                # привязки, а не только активных аккаунтов: отключённый аккаунт
+                # ещё оживят, и прокси ему понадобится.
+                "DELETE FROM user_proxies WHERE id = $1 AND owner_id = $2 "
+                "  AND NOT EXISTS (SELECT 1 FROM tg_accounts a "
+                "                  WHERE a.proxy_id = user_proxies.id)",
                 row["id"], owner_id,
             )
             result["removed_ids"].append(row["id"])

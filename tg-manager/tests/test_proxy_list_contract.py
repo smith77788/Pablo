@@ -91,5 +91,10 @@ def test_both_proxy_lists_pass_the_count_into_delete():
 
 
 def test_server_side_guard_is_still_in_place():
-    """Предупреждение во фронте не заменяет серверный гард."""
-    assert "can_delete_safely" in _API
+    """Предупреждение во фронте не заменяет серверный гард.
+
+    Гард переехал в одну дверь на весь продукт (proxy_hygiene.delete_proxy_safely):
+    в боте у той же кнопки проверки не было вовсе, пока каждый интерфейс носил
+    свою копию.
+    """
+    assert "delete_proxy_safely" in _API
