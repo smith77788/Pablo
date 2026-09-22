@@ -79,6 +79,17 @@ _HAND_ROLLED = re.compile(r"api\.telegram\.org/(?:file/)?bot\{|Bot\(token=")
 
 
 def _functions():
+    """Обходит все def/async def в services/bot/database и отдаёт их тело.
+
+    Тело берём НЕ через ast.get_source_segment(src, n): та функция заново
+    разбивает src на строки (_splitlines_no_ff) на КАЖДЫЙ вызов, то есть на
+    КАЖДУЮ функцию файла — а mini_app_api.py вырос до ~22К строк / ~700
+    функций. Это O(функций × размера_файла): на живом прогоне именно здесь
+    тест разросся с секунд до нескольких минут и тянул за собой весь
+    сьют. Разбиваем на строки ОДИН раз на файл и режем по lineno/end_lineno
+    напрямую — регэксп-проверкам ниже точность до колонки на первой/последней
+    строке не нужна, важно только само тело функции.
+    """
     for sub in ("services", "bot", "database"):
         for dirpath, _dirs, files in os.walk(ROOT / sub):
             if "__pycache__" in dirpath:
@@ -92,10 +103,12 @@ def _functions():
                     tree = ast.parse(src)
                 except SyntaxError:
                     continue
+                lines = src.splitlines()
                 for n in ast.walk(tree):
                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        yield path.relative_to(ROOT).as_posix(), n.lineno, n.name, \
-                            (ast.get_source_segment(src, n) or "")
+                        end = getattr(n, "end_lineno", None) or n.lineno
+                        body = "\n".join(lines[n.lineno - 1:end])
+                        yield path.relative_to(ROOT).as_posix(), n.lineno, n.name, body
 
 
 def test_detector_sees_token_readers():
