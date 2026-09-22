@@ -516,9 +516,31 @@ async def send_message(
     return False, None
 
 
+# Категории, означающие, что ПОЛУЧАТЕЛЬ действительно недоступен: он
+# заблокировал бота, удалил аккаунт или никогда не начинал диалог. Только на
+# них подписчика можно выводить из аудитории (is_active=FALSE). Всё остальное —
+# либо наша вина (кривой текст рассылки), либо недоступность Telegram, и живой
+# подписчик за это выбывать не должен.
+RECIPIENT_GONE = frozenset({"blocked", "deactivated", "not_started"})
+
+
+def recipient_is_gone(category: str) -> bool:
+    """Можно ли по этой категории выводить подписчика из аудитории."""
+    return category in RECIPIENT_GONE
+
+
 def classify_send_error(error_code: int, description: str) -> str:
     """Категория ошибки доставки для понятной статистики рассылки.
-    Возвращает: 'flood'|'blocked'|'deactivated'|'not_started'|'other'."""
+
+    Возвращает: 'flood' | 'blocked' | 'deactivated' | 'not_started' |
+    'unauthorized' | 'unavailable' | 'bad_request' | 'other'.
+
+    Три последние категории раньше сливались в 'other', и рассылка не могла
+    отличить мёртвого подписчика от собственной сломанной разметки или от
+    недоступного Telegram. Цена различия высокая: по 'other' подписчиков
+    помечали неактивными, то есть одна незакрытая HTML-скобка в тексте
+    выносила из аудитории ВСЕХ, кому её отправили.
+    """
     d = (description or "").lower()
     if error_code == 429:
         return "flood"
@@ -528,6 +550,17 @@ def classify_send_error(error_code: int, description: str) -> str:
         return "deactivated"
     if "chat not found" in d or "user not found" in d or "can't initiate" in d or "bot can't initiate" in d:
         return "not_started"
+    # Токен отозван/подменён: дальше бессмысленно бить по всей аудитории.
+    if error_code == 401 or "unauthorized" in d:
+        return "unauthorized"
+    # Сеть/шлюз/Telegram лежит. error_code == 0 ставит _call, когда до Telegram
+    # вообще не достучались.
+    if error_code in (0, 500, 502, 503, 504) or "network error" in d:
+        return "unavailable"
+    # 400 с любым другим текстом — это МЫ прислали что-то не то (разметка,
+    # длина, битый file_id). Получатель тут ни при чём.
+    if error_code == 400:
+        return "bad_request"
     return "other"
 
 
@@ -538,9 +571,12 @@ async def send_message_classified(
     text: str,
     buttons: list[dict] | None = None,
     reply_markup: dict | None = None,
+    disable_notification: bool = False,
 ) -> tuple[bool, int | None, str]:
     """Как send_message, но возвращает ещё категорию ошибки: (ok, retry_after, category)."""
     params: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if disable_notification:
+        params["disable_notification"] = True
     if reply_markup is not None:
         params["reply_markup"] = reply_markup
     elif buttons:
@@ -584,6 +620,39 @@ async def send_photo(
         retry = retry_after_of(data) or 5
         return False, retry
     return False, None
+
+
+async def send_photo_classified(
+    session: aiohttp.ClientSession,
+    token: str,
+    chat_id: int,
+    photo: str,
+    caption: str = "",
+    buttons: list[dict] | None = None,
+    disable_notification: bool = False,
+) -> tuple[bool, int | None, str]:
+    """Как send_photo, но с категорией ошибки: (ok, retry_after, category).
+
+    Нужен рассылке наравне с текстовым вариантом: без категории она не может
+    отличить заблокировавшего бота подписчика от недоступного Telegram.
+    """
+    params: dict = {"chat_id": chat_id, "photo": photo}
+    if disable_notification:
+        params["disable_notification"] = True
+    if caption:
+        params["caption"] = caption
+        params["parse_mode"] = "HTML"
+    kb = _build_inline_keyboard(buttons)
+    if kb:
+        params["reply_markup"] = kb
+    data = await _call(session, token, "sendPhoto", **params)
+    if data.get("ok"):
+        return True, None, ""
+    error_code = data.get("error_code", 0)
+    cat = classify_send_error(error_code, data.get("description", ""))
+    if error_code == 429:
+        return False, retry_after_of(data) or 5, cat
+    return False, None, cat
 
 
 # ── Batch operations ──────────────────────────────────────────────────────

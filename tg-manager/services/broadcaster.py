@@ -306,6 +306,23 @@ async def run(
                 broadcast_id, len(batch), _e,
             )
 
+    # Причины недоставки: по ним видно, что «829 ошибок» — это заблокировавшие
+    # бота, а не поломка.
+    _err_cats: dict[str, int] = {}
+    _aborted_reason = ""
+    # Кого выводить из аудитории, решает bot_api.recipient_is_gone: ТОЛЬКО
+    # заблокировавший бота, удалённый аккаунт и не начинавший диалог.
+    #
+    # Раньше здесь стоял безусловный mark_user_inactive на любую неудачу без
+    # retry_after, то есть is_active=FALSE прилетал и за сетевой сбой, и за 5xx
+    # Telegram, и за нашу же кривую HTML-разметку в тексте. Одна незакрытая
+    # скобка в рассылке — 400 на каждого получателя — и вся аудитория бота
+    # выходила из строя разом, молча и без возможности понять почему.
+    async def _drop_if_gone(uid: int, category: str) -> None:
+        _err_cats[category or "other"] = _err_cats.get(category or "other", 0) + 1
+        if bot_api.recipient_is_gone(category):
+            await db.mark_user_inactive(pool, bot_id, uid)
+
     # _loop_exc captures any exception (including CancelledError) so we can
     # always mark the broadcast final status in DB before propagating.
     _loop_exc: BaseException | None = None
@@ -322,11 +339,11 @@ async def run(
                 user_text = _render_for_user(text, ui, bot_name)
 
             if photo_file_id:
-                success, retry_after = await bot_api.send_photo(
+                success, retry_after, cat = await bot_api.send_photo_classified(
                     session, token, uid, photo_file_id, user_text, buttons=buttons, disable_notification=silent
                 )
             else:
-                success, retry_after = await bot_api.send_message(
+                success, retry_after, cat = await bot_api.send_message_classified(
                     session, token, uid, user_text, buttons=buttons, disable_notification=silent
                 )
             if success:
@@ -366,11 +383,11 @@ async def run(
                         broadcast_id, retry_after,
                     )
                     if photo_file_id:
-                        ok, _ = await bot_api.send_photo(
+                        ok, _, cat = await bot_api.send_photo_classified(
                             session, token, uid, photo_file_id, user_text, buttons=buttons, disable_notification=silent
                         )
                     else:
-                        ok, _ = await bot_api.send_message(
+                        ok, _, cat = await bot_api.send_message_classified(
                             session, token, uid, user_text, buttons=buttons, disable_notification=silent
                         )
                     if ok:
@@ -381,9 +398,21 @@ async def run(
                         if len(_delivery_buffer) >= _DELIVERY_FLUSH_INTERVAL:
                             await _flush_delivery_buffer()
                     else:
-                        await db.mark_user_inactive(pool, bot_id, uid)
+                        await _drop_if_gone(uid, cat)
                 else:
-                    await db.mark_user_inactive(pool, bot_id, uid)
+                    await _drop_if_gone(uid, cat)
+
+                # Токен отозван — дальше вся аудитория получит ровно ту же
+                # ошибку. Раньше рассылка честно добивала все 10 000 вызовов и
+                # заканчивалась «0 отправлено / 10 000 ошибок» без причины.
+                if cat == "unauthorized":
+                    logger.error(
+                        "Broadcast %d: токен бота отозван (401) — останавливаем "
+                        "рассылку после %d отправленных",
+                        broadcast_id, sent,
+                    )
+                    _aborted_reason = "токен бота отозван"
+                    break
 
             # Respect per-chat type rate limits.
             # Groups/channels: 20 msg/min max → 3s between sends to same chat.
@@ -427,13 +456,19 @@ async def run(
 
     if _loop_exc is not None:
         raise _loop_exc
+    # Разбивка причин: без неё «0 отправлено / 10 000 ошибок» неотличимо от
+    # заблокировавшей бота аудитории, хотя это может быть отозванный токен или
+    # наша же разметка в тексте.
+    _reasons = ", ".join(f"{k}={v}" for k, v in sorted(_err_cats.items())) or "нет"
     logger.info(
-        "Broadcast %d %s: sent=%d failed=%d total=%d",
+        "Broadcast %d %s: sent=%d failed=%d total=%d; причины: %s%s",
         broadcast_id,
         final_status,
         sent,
         failed,
         total,
+        _reasons,
+        f"; прервано: {_aborted_reason}" if _aborted_reason else "",
     )
 
 
