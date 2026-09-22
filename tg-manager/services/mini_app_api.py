@@ -2219,15 +2219,74 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            """SELECT b.id, b.bot_id, mb.username AS bot_username,
-                      b.message_text, b.status, b.sent_count, b.failed_count,
-                      b.total_users, b.created_at
-               FROM broadcasts b
-               JOIN managed_bots mb ON mb.bot_id=b.bot_id
-               WHERE b.created_by=$1
-               ORDER BY b.created_at DESC LIMIT 30""", uid)
-        return _json_resp({"broadcasts": rows})
+        # История была обрезана тридцатью без признака обрезки: тридцать первая
+        # рассылка просто не существовала для владельца, и понять это было
+        # неоткуда. Плюс срез по статусу — неудачные рассылки ищут именно так.
+        try:
+            limit = min(validate_integer(request.query.get("limit", "30"),
+                                         min_val=1, max_val=200) or 30, 200)
+        except (ValueError, TypeError):
+            limit = 30
+        try:
+            offset = max(validate_integer(request.query.get("offset", "0"),
+                                          min_val=0, max_val=100000) or 0, 0)
+        except (ValueError, TypeError):
+            offset = 0
+        status = (request.query.get("status") or "").strip().lower()
+
+        counts: dict = {}
+        try:
+            agg = await pool.fetch(
+                "SELECT status, COUNT(*) AS n, "
+                "       COALESCE(SUM(sent_count), 0)   AS sent, "
+                "       COALESCE(SUM(failed_count), 0) AS failed "
+                "FROM broadcasts WHERE created_by=$1 GROUP BY status", uid)
+            sent_all = failed_all = 0
+            for r in agg:
+                counts[(r["status"] or "").lower() or "unknown"] = int(r["n"] or 0)
+                sent_all += int(r["sent"] or 0)
+                failed_all += int(r["failed"] or 0)
+            # Доставляемость по ВСЕЙ истории: экран расписания считал её по
+            # странице в тридцать строк и показывал как общий процент.
+            totals = {"sent": sent_all, "failed": failed_all}
+        except Exception as exc:
+            log.warning("broadcasts uid=%d: агрегат недоступен: %s", uid, exc)
+            totals = {}
+        total = sum(counts.values()) if counts else await _safe_count(
+            pool, "SELECT COUNT(*) FROM broadcasts WHERE created_by=$1", uid)
+        # Неизвестный статус не отбрасываем молча: если его нет среди
+        # существующих, список по нему пуст, и это честный ответ.
+        if status and status not in counts:
+            status = ""
+
+        cols = """b.id, b.bot_id, mb.username AS bot_username,
+                  b.message_text, b.status, b.sent_count, b.failed_count,
+                  b.total_users, b.created_at"""
+        if status:
+            rows = await _safe_fetch(pool,
+                f"""SELECT {cols} FROM broadcasts b
+                    JOIN managed_bots mb ON mb.bot_id=b.bot_id
+                    WHERE b.created_by=$1 AND lower(b.status)=$2
+                    ORDER BY b.created_at DESC LIMIT $3 OFFSET $4""",
+                uid, status, limit, offset)
+            shown_total = counts.get(status, len(rows) + offset)
+        else:
+            rows = await _safe_fetch(pool,
+                f"""SELECT {cols} FROM broadcasts b
+                    JOIN managed_bots mb ON mb.bot_id=b.bot_id
+                    WHERE b.created_by=$1
+                    ORDER BY b.created_at DESC LIMIT $2 OFFSET $3""",
+                uid, limit, offset)
+            shown_total = total
+        return _json_resp({
+            "broadcasts": rows,
+            "total": total,
+            "counts": counts,
+            "totals": totals,
+            "status": status,
+            "page": {"offset": offset, "limit": limit,
+                     "has_more": offset + len(rows) < shown_total},
+        })
 
     async def broadcast_schedule(request: web.Request) -> web.Response:
         """Рассылка с расписанием: POST /api/miniapp/broadcast/schedule"""

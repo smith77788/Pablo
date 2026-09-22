@@ -1485,8 +1485,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
       <button class="btn btn-s" onclick="openExperiments()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
     </div>
-    <div class="sec-row"><div class="sec">Рассылки по ботам</div></div>
+    <div class="sec-row"><div class="sec" id="bcastSec">Рассылки по ботам</div></div>
+    <div id="bcastChips" class="lf-chips"></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="lst-more" id="bcastMore"></div>
     <div class="sec-row" style="margin-top:4px"><div class="sec">DM-кампании</div><span class="sec-btn" onclick="openCmpModal()">+ Создать</span></div>
     <div class="lst" id="cmpList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:4px"><div class="sec">Воронки</div></div>
@@ -1510,6 +1512,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="sec">Запланированные рассылки</div>
     <div class="lst" id="bcSchedList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="bcSchedNote"></div>
     <div class="sec" style="margin-top:12px">A/B Тесты</div>
     <div class="lst" id="bcAbList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:12px">Аналитика рассылок</div>
@@ -10972,27 +10975,115 @@ function chGrowthHtml(g) {
 }
 
 // ── Broadcasts ─────────────────────────────────────────
+// История рассылок показывала тридцать строк и молчала об остальных: тридцать
+// первая рассылка для владельца просто не существовала. Теперь видно, сколько
+// их всего, есть срез по статусу (неудачные ищут именно так) и догрузка.
+const BCAST_PAGE = 30;
+let BCAST_ROWS = [], BCAST_TOTAL = 0, BCAST_COUNTS = {}, BCAST_FILTER = '', BCAST_LOADING = false;
+function _bcastQuery(offset, limit) {
+  let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
+  if (BCAST_FILTER) u += '&status=' + encodeURIComponent(BCAST_FILTER);
+  return u;
+}
+function _bcastShownTotal() {
+  if (!BCAST_FILTER) return BCAST_TOTAL;
+  const c = BCAST_COUNTS || {};
+  return (c[BCAST_FILTER] != null) ? c[BCAST_FILTER] : BCAST_ROWS.length;
+}
 async function loadBroadcasts() {
   try {
+    // Действие в строке не должно схлопывать догруженную историю до страницы.
+    const want = Math.min(Math.max(BCAST_PAGE, BCAST_ROWS.length), 200);
     const [bd, cd, fd] = await Promise.all([
-      api('/api/miniapp/broadcasts'),
+      api(_bcastQuery(0, want)),
       api('/api/miniapp/campaigns'),
       api('/api/miniapp/funnels'),
     ]);
-    renderBcasts(bd.broadcasts||[]);
+    BCAST_ROWS = bd.broadcasts||[];
+    BCAST_TOTAL = (bd.total != null) ? bd.total : BCAST_ROWS.length;
+    BCAST_COUNTS = bd.counts || {};
+    renderBcasts(BCAST_ROWS);
     renderCmps(cd.campaigns||[]);
     renderFuns(fd.funnels||[]);
   } catch(e) {
     txt('bcastList', errHtml(e.message,'loadBroadcasts()'));
+    txt('bcastChips',''); txt('bcastMore','');
     txt('cmpList',''); txt('funList','');
+  }
+}
+function renderBcastChips() {
+  const box = document.getElementById('bcastChips');
+  if (!box) return;
+  const c = BCAST_COUNTS || {};
+  const defs = [['', 'Все', BCAST_TOTAL]].concat(
+    Object.keys(c).sort().map(k => [k, stb(k)[1], c[k]]));
+  // Срез, за которым никого нет, не показываем: обещание без содержания.
+  const vis = defs.filter(([k,,n]) => k === '' || n > 0);
+  if (vis.length <= 2) { box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='flex';
+  box.innerHTML = vis.map(([k,lbl,n]) =>
+    `<span class="lf-chip${BCAST_FILTER===k?' on':''}" role="button" tabindex="0" aria-pressed="${BCAST_FILTER===k}" onclick="filterBcasts('${k}')">${esc(lbl)} ${String(Number(n||0))}</span>`).join('');
+}
+function renderBcastMore() {
+  const box = document.getElementById('bcastMore');
+  if (!box) return;
+  const t = _bcastShownTotal();
+  if (BCAST_ROWS.length >= t || !t) { box.innerHTML=''; return; }
+  box.innerHTML = `<button class="btn btn-s" style="width:100%;font-size:13px;padding:10px" onclick="loadMoreBcasts()">Загрузить ещё · показано ${String(BCAST_ROWS.length)} из ${String(t)}</button>`;
+}
+async function filterBcasts(status) {
+  if (BCAST_LOADING) return;
+  BCAST_FILTER = status || '';
+  const el = document.getElementById('bcastList');
+  if (el) { el.className='lst'; el.innerHTML='<div class="spin-wrap"><div class="spin"></div></div>'; }
+  try {
+    const d = await api(_bcastQuery(0));
+    BCAST_ROWS = d.broadcasts||[];
+    if (d.total != null) BCAST_TOTAL = d.total;
+    if (d.counts) BCAST_COUNTS = d.counts;
+  } catch(e) {
+    if (el) el.innerHTML = errHtml(e.message, `filterBcasts('${BCAST_FILTER}')`);
+    return;
+  }
+  renderBcasts(BCAST_ROWS);
+}
+async function loadMoreBcasts() {
+  if (BCAST_LOADING) return;
+  BCAST_LOADING = true;
+  const box = document.getElementById('bcastMore');
+  if (box) box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api(_bcastQuery(BCAST_ROWS.length));
+    const known = new Set(BCAST_ROWS.map(b=>String(b.id)));
+    (d.broadcasts||[]).forEach(b => { if (!known.has(String(b.id))) BCAST_ROWS.push(b); });
+    if (d.total != null) BCAST_TOTAL = d.total;
+    if (d.counts) BCAST_COUNTS = d.counts;
+  } catch(e) {
+    txt('bcastMore','');
+    toast('⚠️ '+(e.message||'Не удалось догрузить'));
+  } finally {
+    BCAST_LOADING = false;
+    renderBcasts(BCAST_ROWS);
   }
 }
 
 function renderBcasts(items) {
   const el = document.getElementById('bcastList');
+  const sec = document.getElementById('bcastSec');
+  if (sec) sec.textContent = BCAST_TOTAL
+    ? `Рассылки по ботам · ${String(items.length)} из ${String(_bcastShownTotal())}`
+    : 'Рассылки по ботам';
+  renderBcastChips();
   if (!items.length) {
-    el.className='lst'; el.innerHTML=empty('📢','Нет рассылок','Рассылка отправляет сообщение всем подписчикам бота',
-      {label:'➕ Создать рассылку', fn:'openBcastPick()'}); return;
+    el.className='lst';
+    // Под активным срезом «рассылок нет» — неправда: они есть, просто не этого
+    // статуса, и предлагать создать новую здесь не то, что нужно человеку.
+    el.innerHTML = BCAST_FILTER
+      ? empty('🔍','По этому срезу пусто','Смените срез, чтобы увидеть остальные рассылки',
+              {label:'Показать все', fn:"filterBcasts('')"})
+      : empty('📢','Нет рассылок','Рассылка отправляет сообщение всем подписчикам бота',
+              {label:'➕ Создать рассылку', fn:'openBcastPick()'});
+    renderBcastMore(); return;
   }
   el.className = 'bc-table';
   el.innerHTML = `<div class="bc-head"><span>Текст / Бот</span><span style="text-align:center">✓</span><span style="text-align:center">✕</span><span>Статус</span></div>`
@@ -11013,10 +11104,11 @@ function renderBcasts(items) {
         <div class="bc-cell" style="display:flex;align-items:center;gap:4px">
           <span class="badge ${bc}">${bl}</span>
           ${(['done','failed','partial'].includes(b.status) && (b.failed_count||0)>0)
-            ? `<span onclick="resendBcast(${b.id})" title="Отправить недоставленным" style="cursor:pointer;font-size:15px;color:var(--blue)">↻</span>` : ''}
+            ? `<span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Отправить недоставленным" title="Отправить недоставленным" onclick="resendBcast(${b.id})">↻</span>` : ''}
         </div>
       </div>`;
     }).join('');
+  renderBcastMore();
 }
 async function resendBcast(id) {
   if (!await askConfirm('Отправить рассылку повторно только тем, кто её НЕ получил?')) return;
@@ -13671,17 +13763,32 @@ async function openBroadcastSchedule() {
 }
 async function loadBroadcastSchedule() {
   try {
-    const d = await api('/api/miniapp/broadcasts');
+    // Плитки считались по странице в тридцать строк и выдавались за всю
+    // историю: «Доставка 94%» означала «по последним тридцати рассылкам», а
+    // «Запланировано 3» — «три среди последних тридцати». Берём счётчики и
+    // суммы с сервера, по всей истории; страницу просим больше, чтобы списки
+    // ниже были полнее.
+    const d = await api('/api/miniapp/broadcasts?limit=200&offset=0');
     const all = d.broadcasts||[];
+    const c = d.counts || {};
+    const t = d.totals || {};
     const scheduled = all.filter(b=>b.status==='pending'||b.scheduled_at);
     const done = all.filter(b=>b.status==='done'||b.status==='completed');
-    const totalSent = all.reduce((s,b)=>(s+(b.sent_count||0)),0);
-    const totalFailed = all.reduce((s,b)=>(s+(b.failed_count||0)),0);
+    const totalSent = (t.sent != null) ? t.sent : all.reduce((s,b)=>(s+(b.sent_count||0)),0);
+    const totalFailed = (t.failed != null) ? t.failed : all.reduce((s,b)=>(s+(b.failed_count||0)),0);
     const delivery = (totalSent+totalFailed)>0 ? Math.round(totalSent/(totalSent+totalFailed)*100)+'%' : '—';
     _bcSchedData = scheduled;
-    txt('bs-pending', num(scheduled.length));
-    txt('bs-done', num(done.length));
+    txt('bs-pending', num(c.pending != null ? c.pending : scheduled.length));
+    txt('bs-done', num((c.done != null || c.completed != null)
+                       ? (c.done||0)+(c.completed||0) : done.length));
     txt('bs-delivery', delivery);
+    // Если запланированных на сервере больше, чем доехало в страницу, список
+    // ниже неполон — и это надо сказать, а не показать «вот всё, что есть».
+    const schedNote = document.getElementById('bcSchedNote');
+    if (schedNote) schedNote.innerHTML =
+      (c.pending != null && c.pending > scheduled.length)
+        ? `<div class="lst-more-note">Показаны ${String(scheduled.length)} из ${String(c.pending)} запланированных — остальные в истории рассылок.</div>`
+        : '';
     const abList = all.filter(b=>b.ab_variant);
     txt('bs-ab-active', num(abList.length));
     _bcAbData = abList;
