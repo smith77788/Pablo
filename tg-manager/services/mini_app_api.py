@@ -5304,14 +5304,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def _console_account(uid: int, acc_id: int):
         """Загрузить сессию+транспорт аккаунта для консоли, скоуп по владельцу.
 
+        Транспорт берём КАНОНИЧЕСКИМ загрузчиком `db.get_account_for_telethon`.
+        Свой SELECT здесь брал только session_str, отпечаток устройства и
+        proxy_url, а `_make_client` выбирает выход по четырём полям: назначенный
+        прокси, `cf_relay_url`, политика прокси владельца (`owner_id` →
+        `proxy_policy`) и его IPv6-подсеть. Трёх последних в словаре не было,
+        поэтому консоль уводила аккаунт ДРУГИМ выходом, чем массовые операции:
+        владелец с политикой strict или со своей IPv6-подсетью получал одну
+        сессию с двух адресов. Это AUTH_KEY_DUPLICATED — Telegram отзывает ключ
+        навсегда, а снаружи это выглядит как «аккаунты сами отваливаются».
+
         Внешние данные (тексты, имена) — это ДАННЫЕ: экранирует их фронт, бэкенд
         отдаёт сырьё. session_str наружу не отдаём и не логируем.
         """
-        return await _safe_fetchrow(pool,
-            "SELECT id, session_str, device_model, system_version, app_version, "
-            "lang_code, system_lang_code, "
-            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", acc_id, uid)
+        # Отдельной строкой, потому что канонический загрузчик не фильтрует
+        # is_active: выключенный аккаунт консоли не отдаём.
+        alive = await _safe_fetchval(
+            pool,
+            "SELECT 1 FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+            acc_id, uid)
+        if not alive:
+            return None
+        from database import db as _db
+        return await _db.get_account_for_telethon(pool, acc_id, uid)
 
     async def account_dialogs(request: web.Request) -> web.Response:
         """Список диалогов аккаунта (только чтение)."""
