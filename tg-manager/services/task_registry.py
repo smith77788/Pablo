@@ -38,6 +38,10 @@ class TaskEntry:
 # Global registry: user_id → {task_id → TaskEntry}
 _registry: dict[int, dict[str, TaskEntry]] = {}
 
+# С какого возраста живая задача считается долгожителем и попадает в лог.
+# Не порог удаления: удалять живую задачу нельзя (см. run_cleanup_loop).
+_LONG_RUNNING_S = 24 * 3600
+
 
 def register(user_id: int, kind: str, label: str, task: asyncio.Task) -> str:
     """Register a task and return its task_id."""
@@ -92,6 +96,16 @@ async def run_cleanup_loop(*, interval: int = 600) -> None:
     without firing) or that are done but not cleaned are swept here.
     Also removes entries for user buckets that have been empty for >1 hour
     (those should already be cleaned by _cleanup, but this is a safety net).
+
+    ЧТО УБИРАЕТСЯ, А ЧТО НЕТ. Убирается только ЗАВЕРШЁННАЯ задача. Раньше сюда
+    же попадала живая, работающая дольше суток — как «зависшая». Но удаление из
+    реестра её не останавливает: задача продолжает работать, а реестр — это
+    ровно тот экран «Активные задачи», через который пользователь её видит и
+    жмёт «Отменить». То есть подметание отбирало кнопку «стоп» именно у той
+    задачи, которую вероятнее всего надо остановить, и делало её невидимой.
+    Долгая работа сама по себе не повод: массовым операциям положено идти
+    часами (пейсинг против банов), и сутки для инвайта с продолжением — норма.
+    Долгожителя теперь только логируем.
     """
     import logging
 
@@ -104,15 +118,25 @@ async def run_cleanup_loop(*, interval: int = 600) -> None:
             now = time.time()
             removed = 0
 
-            # Sweep done/stale tasks
+            # Sweep done tasks
+            long_running = 0
             for user_id in list(_registry.keys()):
                 bucket = _registry.get(user_id, {})
                 for task_id in list(bucket.keys()):
                     entry = bucket[task_id]
-                    # Remove if done or running >24h (stuck)
-                    if entry.is_done() or (now - entry.started_at) > 86400:
+                    if entry.is_done():
                         bucket.pop(task_id, None)
                         removed += 1
+                    elif (now - entry.started_at) > _LONG_RUNNING_S:
+                        # Живая задача-долгожитель. НЕ удаляем: удаление её не
+                        # останавливает, а лишает пользователя кнопки «стоп»
+                        # (см. докстринг). Сообщаем в лог и оставляем в реестре.
+                        long_running += 1
+                        log.warning(
+                            "task_registry: задача %s (%s, %s) идёт %s — "
+                            "оставлена в реестре, чтобы её можно было отменить",
+                            task_id, entry.kind, entry.label[:60], entry.elapsed_str(),
+                        )
 
                 # Track empty buckets for delayed removal
                 if not bucket:
@@ -124,8 +148,17 @@ async def run_cleanup_loop(*, interval: int = 600) -> None:
                 else:
                     last_empty_bucket_sweep.pop(user_id, None)
 
-            if removed:
-                log.info("task_registry cleanup: removed %d done/stale tasks", removed)
+            # Отметки пустых корзин чистим по факту: корзину мог удалить
+            # done-callback (_cleanup), и тогда её user_id сюда больше не
+            # заглянет — словарь рос бы на каждого пользователя навсегда.
+            for stale_uid in [u for u in last_empty_bucket_sweep if u not in _registry]:
+                last_empty_bucket_sweep.pop(stale_uid, None)
+
+            if removed or long_running:
+                log.info(
+                    "task_registry cleanup: убрано завершённых %d, живых долгожителей %d",
+                    removed, long_running,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as e:

@@ -28,7 +28,22 @@ _ACCOUNT_FAIL_RATE_THRESHOLD = 0.70  # 70% ошибок за последние 
 _ACCOUNT_MIN_OPS_FOR_DECISION = 5  # минимум операций для вывода
 _ACCOUNT_TRUST_CRITICAL = 0.25  # trust ниже этого → немедленно исключить
 _PROXY_FAIL_RATE_THRESHOLD = 0.60  # 60% ошибок прокси → переназначить
-_QUEUE_STUCK_MINUTES = 90  # операция "running" дольше этого → stuck
+# Сторож зависших операций в этом движке — СТРАХОВКА ПОСЛЕ собственного таймаута
+# операции, а не конкурент ему. У op_worker каждый прогон идёт под
+# asyncio.wait_for(timeout_for(op_type, _OP_TIMEOUT_DEFAULT_S)) — то есть живая
+# операция не может идти дольше своего потолка: она либо закончится, либо её
+# снимет таймаут и переведёт в повтор/failed штатным путём. Значит всё, что
+# меньше этого потолка, — не «зависло», а «ещё работает».
+#
+# Здесь стояло жёсткое 90 минут при потолке операции 6 часов. Массовой операции
+# идти часами — норма (пейсинг против банов), поэтому под этот порог попадала
+# именно ЗДОРОВАЯ работа: её возвращали в pending, поллер тут же забирал её
+# снова, и та же массовая операция шла ВТОРЫМ прогоном по тем же аккаунтам —
+# ровно тот класс двойного исполнения, от которого всё остальное бережётся
+# (аренда аккаунтов, дедуп в шине, отсечка _active_op_ids у вотчдога). Плюс
+# у исправной операции сгорала единица retry_count.
+_QUEUE_STUCK_GRACE_MIN = 30  # запас поверх потолка операции
+_QUEUE_STUCK_MIN_FLOOR = 90  # ниже этого порог не опускаем ни при каких env
 _RECOVERY_INTERVAL = 900  # 15 минут между полными циклами
 _COOLDOWN_RECOVERY_HOURS = 4  # куллдаун для восстановленного аккаунта
 
@@ -371,11 +386,70 @@ async def _proxy_recovery(
 # ─── Queue Recovery ────────────────────────────────────────────────────────────
 
 
+def _queue_stuck_minutes() -> int:
+    """Через сколько минут 'running' операция считается зависшей.
+
+    Отсчёт идёт ОТ потолка одного прогона (op_worker._OP_TIMEOUT_DEFAULT_S плюс
+    штучные timeout_sec в OP_REGISTRY), а не от произвольного числа: пока потолок
+    не вышел, операция не зависла — она работает, и снимет её собственный
+    asyncio.wait_for исполнителя. Потолок читается на каждом цикле, потому что
+    OP_TIMEOUT_SEC задаётся переменной окружения и может отличаться от дефолта.
+    """
+    cap_s = 0
+    try:
+        from services import op_worker as _ow
+
+        cap_s = int(getattr(_ow, "_OP_TIMEOUT_DEFAULT_S", 0) or 0)
+    except Exception:
+        cap_s = 0
+    try:
+        from services import operation_bus as _obus
+
+        for meta in (getattr(_obus, "OP_REGISTRY", {}) or {}).values():
+            try:
+                cap_s = max(cap_s, int((meta or {}).get("timeout_sec") or 0))
+            except (TypeError, ValueError):
+                continue
+    except Exception:
+        pass
+    return max(_QUEUE_STUCK_MIN_FLOOR, cap_s // 60 + _QUEUE_STUCK_GRACE_MIN)
+
+
+async def _active_op_ids_here() -> frozenset[int] | None:
+    """Операции, которые ЭТОТ процесс прямо сейчас реально выполняет.
+
+    Тот же критерий, по которому op_worker._watchdog_stale их НЕ сбрасывает, а
+    _watchdog_alerts — не считает застрявшими. Без него этот движок оставался
+    единственным местом, которое возвращало РАБОТАЮЩУЮ операцию в очередь.
+
+    None — «сведений нет» (сбой чтения реестра). В этом случае не трогаем
+    ничего: цена ложного сброса — второй прогон массовой операции по живым
+    аккаунтам, цена паузы — минуты до следующего цикла восстановления.
+    """
+    try:
+        from services import op_worker as _ow
+
+        async with _ow._active_lock:
+            return frozenset(int(i) for i in _ow._active_op_ids)
+    except Exception as e:
+        log.warning(
+            "recovery_engine: не удалось прочитать реестр активных операций (%s) "
+            "— сброс зависших пропущен на этом цикле", e,
+        )
+        return None
+
+
 async def _queue_recovery(
     pool: asyncpg.Pool, bot, owner_id: int
 ) -> list[RecoveryAction]:
     """Обнаруживает зависшие операции в статусе 'running' и восстанавливает их."""
     actions: list[RecoveryAction] = []
+
+    active_here = await _active_op_ids_here()
+    if active_here is None:
+        return actions
+    active_list = [int(i) for i in active_here] or None
+    stuck_after_min = _queue_stuck_minutes()
 
     try:
         stuck = await pool.fetch(
@@ -386,10 +460,12 @@ async def _queue_recovery(
                WHERE owner_id=$1
                  AND status='running'
                  AND started_at < NOW() - ($2 * INTERVAL '1 minute')
+                 AND ($3::bigint[] IS NULL OR id != ALL($3::bigint[]))
                ORDER BY stuck_minutes DESC
                LIMIT 10""",
             owner_id,
-            _QUEUE_STUCK_MINUTES,
+            stuck_after_min,
+            active_list,
         )
         for op in stuck:
             op_id = op["id"]
