@@ -141,6 +141,10 @@ _pending_device: dict[str, dict] = {}
 
 # QR login sessions: user_id -> (client, qr_login_object, device dict)
 _pending_qr: dict[int, tuple] = {}
+# Сколько держать незавершённый QR-вход. Сам QR-код Telegram живёт около минуты,
+# а весь поток ожидания рассчитан на 120с — после этого ждать нечего, и висящий
+# коннект надо закрыть.
+_QR_PENDING_TTL_S = 300
 
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
@@ -2141,17 +2145,50 @@ async def start_qr_login(user_id: int) -> bytes:
     import qrcode
 
     await cleanup_qr_pending(user_id)
+    await _reap_stale_qr_logins()
 
     device = generate_device_fingerprint()
     client = _make_client("", device)
-    await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-    qr = await client.qr_login()
-    _pending_qr[user_id] = (client, qr, device)
+    # Всё, что между connect() и записью в _pending_qr, обязано быть под
+    # защитой: до записи на клиента НЕТ НИ ОДНОЙ ссылки, и отключить его потом
+    # некому. Живой коннект к Telegram остаётся висеть навсегда.
+    #
+    # Сорваться здесь — обычное дело: qr_login() отдаёт FloodWait, а оба
+    # вызывающих оборачивают start_qr_login во внешний таймаут (мини-апп — в 40с),
+    # то есть приходит ещё и CancelledError. Поэтому ловим BaseException.
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        qr = await client.qr_login()
+        img = qrcode.make(qr.url)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+    except BaseException:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "start_qr_login: disconnect после сбоя")
+        raise
 
-    img = qrcode.make(qr.url)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    # Записываем ТОЛЬКО собранное целиком — иначе в словаре оказался бы клиент
+    # без пригодного QR, и пользователь ждал бы сканирования несуществующего кода.
+    _pending_qr[user_id] = (client, qr, device, time.time())
     return buf.getvalue()
+
+
+async def _reap_stale_qr_logins() -> None:
+    """Отключить QR-входы, которые никто не довёл до конца.
+
+    Пользователь открывает QR и уходит — клиент остаётся подключённым к Telegram
+    в _pending_qr навсегда: сборщика не было, а cleanup_qr_pending вызывается
+    только по новому входу ТОГО ЖЕ пользователя. Сам QR живёт около минуты,
+    ждать дольше нечего.
+    """
+    now = time.time()
+    stale = [uid for uid, entry in list(_pending_qr.items())
+             if now - (entry[3] if len(entry) > 3 else now) > _QR_PENDING_TTL_S]
+    for uid in stale:
+        log.info("QR-вход uid=%s заброшен — отключаем клиент", uid)
+        await cleanup_qr_pending(uid)
 
 
 async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict]:
@@ -2165,7 +2202,7 @@ async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict
     entry = _pending_qr.get(user_id)
     if not entry:
         raise ValueError("QR сессия не найдена — начните заново.")
-    client, qr, device = entry
+    client, qr, device = entry[0], entry[1], entry[2]
     try:
         await asyncio.wait_for(qr.wait(), timeout=timeout)
     except SessionPasswordNeededError:
@@ -2191,7 +2228,7 @@ async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
     entry = _pending_qr.get(user_id)
     if not entry:
         raise ValueError("QR сессия не найдена — начните заново.")
-    client, _, device = entry
+    client, device = entry[0], entry[2]
     try:
         await client.sign_in(password=password)
     except PasswordHashInvalidError:
