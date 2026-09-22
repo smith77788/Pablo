@@ -11497,10 +11497,11 @@ async function openOpDetail(opId) {
     const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
     const dDone = o.total_items>0?Math.min(o.done_items||0,o.total_items):(o.done_items||0);
     const [bc,bl]=stb(o.status);
-    const logs = await api('/api/miniapp/operation/'+opId+'/log').catch(()=>({logs:[]}));
+    OPLOG_ID = opId; OPLOG_FILTER = ''; OPLOG_ROWS = [];
+    const logs = await api(_opLogQuery(0)).catch(()=>({logs:[]}));
     let html = `
       <div class="lst" style="margin:12px 16px 0">
-        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.op_type)}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || o.op_type || '')}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val">${num(dDone)} / ${num(o.total_items||0)} (${pct}%)</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru'):''}</div></div></div>
@@ -11574,17 +11575,125 @@ async function openOpDetail(opId) {
           }).join('')}
         </div>`;
     }
-    if (logs.logs&&logs.logs.length) {
-      html += `<div class="sec" style="margin-top:12px">📋 Лог (${logs.logs.length})</div>
-        <div class="lst" style="margin:0 16px;max-height:300px;overflow-y:auto">
-          ${logs.logs.map(l=>`<div class="row"><div class="row-body">
-            <div class="row-name">${esc(l.target||'')}</div>
-            <div class="row-val">${esc(l.message||'').substring(0,120)} <span class="badge ${l.status==='ok'?'b-gr':'b-rd'}">${l.status||''}</span></div>
-          </div></div>`).join('')}
-        </div>`;
+    if (logs.logs && logs.logs.length) {
+      OPLOG_ROWS = logs.logs.slice();
+      OPLOG_TOTAL = (logs.total != null) ? logs.total : OPLOG_ROWS.length;
+      OPLOG_COUNTS = logs.counts || {};
+      html += `<div class="sec" style="margin-top:12px" id="oplogSec"></div>
+        <div id="oplogChips" class="lf-chips"></div>
+        <div class="lst" id="oplogList" style="margin:0 16px;max-height:300px;overflow-y:auto"></div>
+        <div class="lst-more" id="oplogMore"></div>`;
     }
     txt('opdetBody', html);
+    if (OPLOG_ROWS.length) renderOpLog();
   } catch(e) { txt('opdetBody', errHtml(e.message)); }
+}
+
+// ── Лог операции: кто именно и почему ─────────────────────────────────────
+// Заголовок писал длину ПОЛУЧЕННОЙ страницы: у операции на 2000 целей секция
+// называлась «Лог (500)», и это выдавалось за весь лог. Найти среди пятисот
+// строк неудачные цели было нечем — а ради них на лог и смотрят. Теперь видно
+// общее число, есть срез по статусу и догрузка остатка.
+const OPLOG_PAGE = 200;
+let OPLOG_ID = null, OPLOG_ROWS = [], OPLOG_TOTAL = 0, OPLOG_COUNTS = {},
+    OPLOG_FILTER = '', OPLOG_LOADING = false;
+function _opLogQuery(offset) {
+  let u = '/api/miniapp/operation/' + OPLOG_ID + '/log?limit=' + OPLOG_PAGE + '&offset=' + offset;
+  if (OPLOG_FILTER) u += '&status=' + encodeURIComponent(OPLOG_FILTER);
+  return u;
+}
+function _opLogShownTotal() {
+  if (!OPLOG_FILTER) return OPLOG_TOTAL;
+  const c = OPLOG_COUNTS || {};
+  return (c[OPLOG_FILTER] != null) ? c[OPLOG_FILTER] : OPLOG_ROWS.length;
+}
+function _opLogOk(st) { return String(st||'').toLowerCase() === 'ok'; }
+// Статус в логе пишет воркер, и пишет по-английски. Показывать владельцу
+// «failed» нельзя — переводим известные, неизвестный оставляем как есть, чтобы
+// не спрятать то, чего мы не поняли.
+const OPLOG_ST_RU = {ok:'Успешно', failed:'Ошибка', fail:'Ошибка', error:'Ошибка',
+                     skipped:'Пропущено', skip:'Пропущено', retry:'Повтор',
+                     timeout:'Таймаут', flood:'Лимит Telegram'};
+function _opLogStRu(st) {
+  const k = String(st||'').toLowerCase();
+  return OPLOG_ST_RU[k] || (st || '—');
+}
+// Счётчики срезов пишем точной цифрой, без округления: округлённые 1963 и 2000
+// оба дают «2.0K», и два разных среза становятся на вид одинаковыми — ровно та
+// цифра, ради которой на чипы и смотрят, пропадает.
+function _opLogNum(n) { return String(Number(n||0)); }
+function renderOpLog() {
+  const sec = document.getElementById('oplogSec');
+  if (sec) sec.textContent = OPLOG_FILTER
+    ? `📋 Лог · ${_opLogNum(OPLOG_ROWS.length)} из ${_opLogNum(_opLogShownTotal())} по срезу`
+    : `📋 Лог · показано ${_opLogNum(OPLOG_ROWS.length)} из ${_opLogNum(OPLOG_TOTAL)}`;
+  renderOpLogChips();
+  const el = document.getElementById('oplogList');
+  if (el) {
+    el.innerHTML = OPLOG_ROWS.length
+      ? OPLOG_ROWS.map(l=>`<div class="row"><div class="row-body">
+          <div class="row-name">${esc(l.target||'')}</div>
+          <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
+        </div></div>`).join('')
+      : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">По этому срезу записей нет.</div>`;
+  }
+  renderOpLogMore();
+}
+function renderOpLogChips() {
+  const box = document.getElementById('oplogChips');
+  if (!box) return;
+  const c = OPLOG_COUNTS || {};
+  const bad = Object.keys(c).filter(k => k !== 'ok');
+  const defs = [['', 'Все', OPLOG_TOTAL], ['ok', '🟢 Успешно', c.ok || 0]];
+  bad.forEach(k => defs.push([k, '🔴 ' + _opLogStRu(k), c[k] || 0]));
+  // Срез, за которым никого нет, не показываем: обещание без содержания.
+  const vis = defs.filter(([k,,n]) => k === '' || n > 0);
+  if (vis.length <= 1) { box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display = 'flex';
+  box.innerHTML = vis.map(([k,lbl,n]) =>
+    `<span class="lf-chip${OPLOG_FILTER===k?' on':''}" role="button" tabindex="0" aria-pressed="${OPLOG_FILTER===k}" onclick="filterOpLog('${k}')">${esc(lbl)} ${_opLogNum(n)}</span>`).join('');
+}
+function renderOpLogMore() {
+  const box = document.getElementById('oplogMore');
+  if (!box) return;
+  const t = _opLogShownTotal();
+  if (OPLOG_ROWS.length >= t || !t) { box.innerHTML=''; return; }
+  box.innerHTML = `<button class="btn btn-s" style="width:100%;font-size:13px;padding:10px" onclick="loadMoreOpLog()">Загрузить ещё · показано ${_opLogNum(OPLOG_ROWS.length)} из ${_opLogNum(t)}</button>`;
+}
+async function filterOpLog(status) {
+  if (OPLOG_LOADING) return;
+  OPLOG_FILTER = status || '';
+  OPLOG_ROWS = [];
+  const el = document.getElementById('oplogList');
+  if (el) el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api(_opLogQuery(0));
+    OPLOG_ROWS = d.logs || [];
+    if (d.total != null) OPLOG_TOTAL = d.total;
+    if (d.counts) OPLOG_COUNTS = d.counts;
+  } catch(e) {
+    if (el) el.innerHTML = errHtml(e.message, `filterOpLog('${OPLOG_FILTER}')`);
+    return;
+  }
+  renderOpLog();
+}
+async function loadMoreOpLog() {
+  if (OPLOG_LOADING) return;
+  OPLOG_LOADING = true;
+  const box = document.getElementById('oplogMore');
+  if (box) box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api(_opLogQuery(OPLOG_ROWS.length));
+    (d.logs||[]).forEach(r => OPLOG_ROWS.push(r));
+    if (d.total != null) OPLOG_TOTAL = d.total;
+    if (d.counts) OPLOG_COUNTS = d.counts;
+  } catch(e) {
+    txt('oplogMore','');
+    toast('⚠️ '+(e.message||'Не удалось догрузить лог'));
+  } finally {
+    OPLOG_LOADING = false;
+    renderOpLog();
+  }
 }
 
 // Отмена необратима: возобновить отменённую операцию нечем, остаётся только

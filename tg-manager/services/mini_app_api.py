@@ -3224,11 +3224,59 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT 1 FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not owns:
             return _err("Операция не найдена", 404)
-        rows = await _safe_fetch(pool,
-            "SELECT step_num, target, status, message, created_at "
-            "FROM operation_log WHERE op_id=$1 "
-            "ORDER BY step_num, id LIMIT 500", op_id)
-        return _json_resp({"logs": rows})
+        # Лог отдавался одним куском на 500 строк, а фронт писал в заголовок его
+        # длину: у операции на 2000 целей секция называлась «Лог (500)» и это
+        # выдавалось за весь лог. Найти среди них неудачные цели было нечем —
+        # а ради них на лог и смотрят. Теперь: страница, общее число и счётчики
+        # по статусам, плюс фильтр по статусу.
+        try:
+            limit = min(validate_integer(request.query.get("limit", "200"),
+                                         min_val=1, max_val=1000) or 200, 1000)
+        except (ValueError, TypeError):
+            limit = 200
+        try:
+            offset = max(validate_integer(request.query.get("offset", "0"),
+                                          min_val=0, max_val=1000000) or 0, 0)
+        except (ValueError, TypeError):
+            offset = 0
+        status = (request.query.get("status") or "").strip().lower()
+        if status not in ("ok", "fail", "failed", "error", "skip", "skipped"):
+            status = ""
+
+        counts: dict = {}
+        total = 0
+        try:
+            agg = await pool.fetch(
+                "SELECT status, COUNT(*) AS n FROM operation_log "
+                "WHERE op_id=$1 GROUP BY status", op_id)
+            for r in agg:
+                counts[(r["status"] or "").lower() or "unknown"] = int(r["n"] or 0)
+            total = sum(counts.values())
+        except Exception as exc:
+            log.warning("operation_log op=%d: агрегат недоступен: %s", op_id, exc)
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM operation_log WHERE op_id=$1", op_id)
+
+        if status:
+            rows = await _safe_fetch(pool,
+                "SELECT step_num, target, status, message, created_at "
+                "FROM operation_log WHERE op_id=$1 AND lower(status)=$2 "
+                "ORDER BY step_num, id LIMIT $3 OFFSET $4", op_id, status, limit, offset)
+            shown_total = counts.get(status, len(rows) + offset)
+        else:
+            rows = await _safe_fetch(pool,
+                "SELECT step_num, target, status, message, created_at "
+                "FROM operation_log WHERE op_id=$1 "
+                "ORDER BY step_num, id LIMIT $2 OFFSET $3", op_id, limit, offset)
+            shown_total = total
+        return _json_resp({
+            "logs": rows,
+            "total": total,
+            "counts": counts,
+            "status": status,
+            "page": {"offset": offset, "limit": limit,
+                     "has_more": offset + len(rows) < shown_total},
+        })
 
     async def cancel_operation(request: web.Request) -> web.Response:
         uid = _get_uid(request)
