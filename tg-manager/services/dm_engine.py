@@ -847,6 +847,7 @@ async def run_campaign(
                 pool, bot, owner_id, "op_complete",
                 f"⚠️ <b>DM «{campaign.get('name') or campaign_id}» не запущена</b>\n\n"
                 f"{reason}" + (f"\n\n💡 {hint}" if hint else ""),
+                dedup_key=f"dm-fail:{campaign_id}",
             )
         except Exception:
             log_exc_swallow(log, "dm_engine: failure notification failed")
@@ -931,6 +932,7 @@ async def run_campaign(
             await _db.notify_if_enabled(
                 pool, bot, owner_id, "op_complete",
                 f"📨 <b>DM «{campaign['name']}»</b> — отправлять некому{_why}",
+                dedup_key=f"dm-empty:{campaign_id}",
             )
         except Exception:
             log_exc_swallow(log, "dm_engine: empty-audience notification failed")
@@ -1331,6 +1333,7 @@ async def run_campaign(
                             "op_complete",
                             f"📨 <b>DM «{campaign['name']}»</b> — {_milestone}%\n"
                             f"✅ {sent} отправлено · ❌ {failed} ошибок · 📊 {total} всего",
+                            dedup_key=f"dm-milestone:{campaign_id}:{_milestone}",
                         )
                     except Exception:
                         log_exc_swallow(
@@ -1381,6 +1384,7 @@ async def run_campaign(
             f"📊 Всего целей: <b>{total}</b>"
             + (f"\n🚫 Пропущено по реестру «не писать»: <b>{opt_out_removed}</b>"
                if opt_out_removed else ""),
+            dedup_key=f"dm-done:{campaign_id}",
         )
     except Exception:
         log_exc_swallow(

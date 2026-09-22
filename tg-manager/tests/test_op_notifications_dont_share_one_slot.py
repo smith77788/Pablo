@@ -32,21 +32,26 @@ import re
 from pathlib import Path
 
 
-_SRC = Path(__file__).resolve().parents[1] / "services" / "op_worker.py"
+_ROOT = Path(__file__).resolve().parents[1]
+# Слой операций: движок очереди и движок DM-кампаний. Кампания — тоже операция
+# (op_type=dm_campaign), её сообщения идут под тем же pref='op_complete' и без
+# ключа делили бы ровно тот же слот.
+_SRCS = (_ROOT / "services" / "op_worker.py", _ROOT / "services" / "dm_engine.py")
+_SRC = _SRCS[0]
 
 
 def _calls():
-    src = _SRC.read_text(encoding="utf-8")
-    tree = ast.parse(src)
     out = []
-    for n in ast.walk(tree):
-        if not isinstance(n, ast.Call):
-            continue
-        fname = n.func.attr if isinstance(n.func, ast.Attribute) else ""
-        if fname != "notify_if_enabled":
-            continue
-        key = next((kw.value for kw in n.keywords if kw.arg == "dedup_key"), None)
-        out.append((n.lineno, key))
+    for path in _SRCS:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Call):
+                continue
+            fname = n.func.attr if isinstance(n.func, ast.Attribute) else ""
+            if fname != "notify_if_enabled":
+                continue
+            key = next((kw.value for kw in n.keywords if kw.arg == "dedup_key"), None)
+            out.append((f"{path.name}:{n.lineno}", key))
     return out
 
 
@@ -61,11 +66,11 @@ def test_every_notification_carries_its_own_dedup_key():
 
 def test_notifications_are_found_at_all():
     """Пробник, который ничего не нашёл, ничего и не проверил."""
-    assert len(_calls()) >= 10
+    assert len(_calls()) >= 14
 
 
 def _src_text() -> str:
-    return _SRC.read_text(encoding="utf-8")
+    return "\n".join(p.read_text(encoding="utf-8") for p in _SRCS)
 
 
 def test_result_and_progress_use_different_slots():
@@ -88,9 +93,16 @@ def test_keys_are_scoped_to_the_operation():
     keys = re.findall(r'dedup_key=f"([^"]+)"', src)
     assert keys, "ключи не найдены"
     for k in keys:
-        assert "{op_id}" in k or "{owner_id}" in k, (
+        assert "{op_id}" in k or "{owner_id}" in k or "{campaign_id}" in k, (
             f"ключ {k!r} не привязан ни к операции, ни к владельцу"
         )
+
+
+def test_dm_campaign_result_has_its_own_slot():
+    """Кампания шлёт старт-отказ, вехи и итог — тоже под одним pref."""
+    src = _src_text()
+    assert 'dedup_key=f"dm-done:{campaign_id}"' in src
+    assert 'dedup_key=f"dm-milestone:{campaign_id}:{_milestone}"' in src
 
 
 def test_blocking_explanations_have_their_own_slots():
