@@ -7097,7 +7097,12 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
     const _ci = _raw.indexOf(':');
     const _screen = _ci > 0 ? _raw.slice(0, _ci) : _raw;
     const _param = _ci > 0 ? _raw.slice(_ci + 1) : null;
-    if (_screen) setTimeout(() => { try { runPulseAction({kind: _screen, param: _param}); } catch(_){} }, 100);
+    // Раньше здесь стоял пустой catch: сломанная ссылка из уведомления роняла
+    // переход молча, и человек оставался на главной, не понимая, почему.
+    if (_screen) setTimeout(() => {
+      try { runPulseAction({kind: _screen, param: _param}); }
+      catch(err) { toast('⚠️ Не удалось открыть раздел из ссылки: ' + ((err && err.message) || 'ошибка')); }
+    }, 100);
   } catch(e) {
     document.getElementById('kpiScroll').innerHTML = errHtml(e.message);
   }
@@ -7848,11 +7853,23 @@ async function loadHome() {
 // 🚀 Онбординг: чеклист активации новичка. Скрывается сам после активации, чтобы
 // не мозолить глаза ветеранам. Действия шагов — дип-линки в существующие потоки.
 const _ONBOARD_ACT = {
-  import_accounts: () => (typeof openAccImportModal==='function') && openAccImportModal(),
-  proxy:           () => (typeof openProxies==='function') && openProxies(),
-  invite:          () => (typeof openMassInvite==='function') && openMassInvite(),
+  import_accounts: 'openAccImportModal',
+  proxy:           'openProxies',
+  invite:          'openMassInvite',
 };
-function onboardStep(kind) { const f=_ONBOARD_ACT[kind]; if (f) f(); }
+// Это первый экран нового владельца: кнопка, которая молча ничего не делает,
+// читается как «приложение сломано». Раньше и неизвестный шаг, и отсутствующая
+// функция давали ровно тишину.
+function onboardStep(kind) {
+  const fname = _ONBOARD_ACT[kind];
+  const f = fname && window[fname];
+  if (typeof f !== 'function') {
+    toast('⚠️ Шаг «' + String(kind || '—').substring(0, 24) + '» не открывается — сообщите нам');
+    return false;
+  }
+  f();
+  return true;
+}
 async function loadOnboarding() {
   const el = document.getElementById('onboardCard');
   if (!el) return;
@@ -8149,21 +8166,36 @@ function _pulseKeep(s) {
 }
 function runPulseActionById(key) {
   const a = _PULSE_ACTIONS[key];
-  if (a) runPulseAction(a);
+  // Раньше отсутствующий ключ давал полную тишину: нажатие без единого отклика.
+  // Так бывает, когда карточка пережила перерисовку Пульса и её действие уже
+  // забыто, — человеку надо сказать это, а не делать вид, что он не нажимал.
+  if (!a) { toast('Карточка устарела — обновляю подсказки'); loadOrganismPulse(); return; }
+  runPulseAction(a);
+}
+// Параметр действия приходит двумя именами: нудж бота кладёт его в ссылку как
+// «kind:param», а карточка Пульса отдаёт словарь бэкенда как есть — с op_id.
+// Раньше читали только param, и одно и то же событие вело в разные места: из
+// уведомления — прямо к операции, а из карточки в приложении — в общий список,
+// где номер операции уже потерян.
+function _pulseParam(a) {
+  if (!a) return null;
+  const v = (a.param != null && a.param !== '') ? a.param
+          : (a.op_id != null ? a.op_id : null);
+  return (v === null || v === undefined || v === '') ? null : v;
 }
 function runPulseAction(a) {
   const k = a && a.kind;
+  const prm = _pulseParam(a);
   if (k==='vault') {
     // С параметром ведём прямо в чат: приходить из уведомления «клиент удалил
     // сообщение» в общий список и искать его там — лишняя работа.
-    const cid = a && a.param;
-    if (cid && /^-?\d+$/.test(String(cid))) { openVault(); return openVaultChat(Number(cid)); }
+    if (prm && /^-?\d+$/.test(String(prm))) { openVault(); return openVaultChat(Number(prm)); }
     return openVault();
   }
   if (k==='governor' || k==='invite') return openMassInvite();
   if (k==='campaign') return openCampaignPlanner();
   if (k==='intents') return openIntentSensor();
-  if (k==='operation') return openMassOps(a.param);
+  if (k==='operation') return openMassOps(prm);
   if (k==='purge_dead') { goTab('accounts'); setTimeout(()=>filterAcc('dead', document.querySelector('[data-filter="dead"]')), 200); return; }
   if (k==='segment_hot') return openContactsHot();
   if (k==='chatwarmup') return openChatWarmup();
@@ -8175,7 +8207,11 @@ function runPulseAction(a) {
   if (k==='retention') return openMassInvite();
   if (k==='health') return openHealth();
   if (k==='vlayer') return openVLayer();
-  toast('Открываю…');
+  // «Открываю…» было обещанием, за которым ничего не следовало: человек нажимал
+  // «Открыть», читал, что раздел открывается, и оставался на месте. Неизвестный
+  // раздел — это поломка ссылки, и сказать надо именно это.
+  toast('⚠️ Не знаю раздела «' + String(k || '—').substring(0, 24) + '» — ссылка ведёт в никуда');
+  return false;
 }
 // Горячие контакты → сразу к сегмент-офферу (переговоры + тег интереса).
 function openContactsHot() {
