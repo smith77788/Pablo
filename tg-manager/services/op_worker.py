@@ -8219,6 +8219,26 @@ async def _exec_group_announce(
 
         ok_count = 0
         err_count = 0
+
+            # Повтор операции (автоматический после сетевого сбоя/флуда, сброс
+            # зависшей, ручной) запускает исполнителя заново с done_items=0, и он
+            # идёт по ВСЕМУ списку сначала. Без журнала целей это вторая
+            # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
+            # дневной лимит аккаунта и лишний повод для флуда.
+        async def _log_grp(step: int, key: str, ok: bool, msg: str = "") -> None:
+            await _safe_execute(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, step, key, "ok" if ok else "error", (msg or None),
+                log_ctx=f"[group_announce_log op={op_id}]",
+            )
+
+        _already = await completed_targets(pool, op_id)
+        if _already:
+            log.info("group_announce op=%d: повтор — %d групп уже получили объявление",
+                     op_id, len(_already))
+
         for idx, grp in enumerate(groups):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -8227,6 +8247,12 @@ async def _exec_group_announce(
                     "fail": err_count,
                     "summary": f"Отменено. Отправлено: {ok_count}/{total}",
                 }
+            _key = str(grp["id"])
+            if _key in _already:
+                ok_count += 1
+                await _safe_execute(
+                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             access_hash = grp.get("access_hash", 0) or 0
             _ann = _expand_spintax(text)  # свой вариант объявления в эту группу
             try:
@@ -8235,13 +8261,17 @@ async def _exec_group_announce(
                 )
                 if "error" in result or result.get("banned"):
                     err_count += 1
+                    await _log_grp(idx, _key, False,
+                                   str(result.get("error") or "banned")[:200])
                 else:
                     ok_count += 1
+                    await _log_grp(idx, _key, True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 log_exc_swallow(log, "group_announce: post_to_channel grp=%s: %s", grp.get("id"), exc)
                 err_count += 1
+                await _log_grp(idx, _key, False, str(exc)[:200])
 
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -8677,6 +8707,26 @@ async def _exec_bulk_post_to_channel(
         err_list: list[str] = []
         attempt = 0
 
+        # Повтор операции (автоматический после сетевого сбоя/флуда, сброс
+        # зависшей, ручной) запускает исполнителя заново с done_items=0, и он
+        # идёт по ВСЕМУ списку аккаунтов сначала. Единица работы здесь — пост
+        # ОТ аккаунта, поэтому ключ журнала — аккаунт: без него тот же аккаунт
+        # публиковал в канал второй раз (дубль у подписчиков, сожжённый дневной
+        # лимит аккаунта и лишний повод для флуда).
+        async def _log_acc(step: int, key: str, ok: bool, msg: str = "") -> None:
+            await _safe_execute(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, step, key, "ok" if ok else "error", (msg or None),
+                log_ctx=f"[bulk_post_to_channel_log op={op_id}]",
+            )
+
+        _already = await completed_targets(pool, op_id)
+        if _already:
+            log.info("bulk_post_to_channel op=%d: повтор — %d аккаунтов уже опубликовали",
+                     op_id, len(_already))
+
         for idx, acc in enumerate(accounts):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -8687,6 +8737,12 @@ async def _exec_bulk_post_to_channel(
                 }
 
             label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+            _key = str(acc["id"])
+            if _key in _already:
+                ok_list.append(f"✅ {label}: опубликовано ранее")
+                await _safe_execute(
+                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             _body = _expand_spintax(text_to_post)  # свой вариант текста от этого аккаунта
             try:
                 result = await account_manager.post_to_channel(
@@ -8701,6 +8757,7 @@ async def _exec_bulk_post_to_channel(
             except Exception as _post_exc:
                 log.warning("_exec_bulk_post_to_channel acc=%s: %s", acc.get("id"), _post_exc)
                 err_list.append(f"❌ {label}: {_html.escape(str(_post_exc)[:60])}")
+                await _log_acc(idx, _key, False, str(_post_exc)[:200])
                 await _safe_execute(
                         pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
@@ -8708,10 +8765,13 @@ async def _exec_bulk_post_to_channel(
                 await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
                 await _on_account_banned(pool, owner_id, acc["id"], "bulk_op", bot=bot)
                 err_list.append(f"❌ {label}: забанен")
+                await _log_acc(idx, _key, False, "Аккаунт забанен")
             elif result.get("flood_wait"):
                 err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                await _log_acc(idx, _key, False, "FloodWait — пропущен")
             elif "msg_id" in result:
                 ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
+                await _log_acc(idx, _key, True, f"msg_id={result['msg_id']}")
                 # Сигнал активности канала (last_post_at) — когда известен numeric id.
                 if chat_id:
                     try:
@@ -8734,6 +8794,7 @@ async def _exec_bulk_post_to_channel(
                     except Exception as e:
                         log_exc_swallow(log, f"bulk_post: dead session deactivate failed for acc {acc['id']}: {e}")
                 err_list.append(f"❌ {label}: {_html.escape(err_str[:60])}")
+                await _log_acc(idx, _key, False, err_str[:200])
 
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -9188,6 +9249,25 @@ async def _exec_bulk_post_chans(
         attempt = 0
         last_result: dict = {}
 
+            # Повтор операции (автоматический после сетевого сбоя/флуда, сброс
+            # зависшей, ручной) запускает исполнителя заново с done_items=0, и он
+            # идёт по ВСЕМУ списку сначала. Без журнала целей это вторая
+            # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
+            # дневной лимит аккаунта и лишний повод для флуда.
+        async def _log_ch(step: int, key: str, ok: bool, msg: str = "") -> None:
+            await _safe_execute(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, step, key, "ok" if ok else "error", (msg or None),
+                log_ctx=f"[bulk_post_chans_log op={op_id}]",
+            )
+
+        _already = await completed_targets(pool, op_id)
+        if _already:
+            log.info("bulk_post_chans op=%d: повтор — %d каналов уже опубликованы",
+                     op_id, len(_already))
+
         for idx, ch in enumerate(channels):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -9198,6 +9278,14 @@ async def _exec_bulk_post_chans(
                 }
 
             ch_id = ch["channel_id"]
+            _key = str(ch_id)
+            if _key in _already:
+                ok_count += 1
+                await _safe_execute(
+                        pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
             access_hash = ch.get("access_hash", 0) or 0
             ch_username = ch.get("username") or ""
             _body = _expand_spintax(text)  # свой вариант текста в этот канал
@@ -9209,10 +9297,13 @@ async def _exec_bulk_post_chans(
                 if last_result.get("banned"):
                     await _db.deactivate_account(pool, acc_id, "banned detected in bulk_post_chans")
                     err_count += 1
+                    await _log_ch(idx, _key, False, "Аккаунт забанен")
                 elif "error" in last_result:
                     err_count += 1
+                    await _log_ch(idx, _key, False, str(last_result.get("error") or "")[:200])
                 else:
                     ok_count += 1
+                    await _log_ch(idx, _key, True)
                     # Persist resolved access_hash for future fast-path
                     _rhash = last_result.get("resolved_access_hash", 0)
                     if _rhash and not access_hash:
@@ -9230,6 +9321,7 @@ async def _exec_bulk_post_chans(
                 log_exc_swallow(log, "_exec_bulk_post_chans ch=%s: %s", ch_id, exc)
                 err_count += 1
                 last_result = {}
+                await _log_ch(idx, _key, False, str(exc)[:200])
 
             await _safe_execute(
                     pool,
