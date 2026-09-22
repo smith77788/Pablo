@@ -34,7 +34,7 @@ def _read(rel: str) -> str:
 
 
 def _fn(src: str, name: str) -> str:
-    start = src.index(f"async def {name}")
+    start = src.index(f"async def {name}(")
     m = re.search(r"\n(?:async )?def ", src[start + 10:])
     return src[start:start + 10 + m.start()] if m else src[start:]
 

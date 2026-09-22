@@ -31,7 +31,7 @@ def _read(rel: str) -> str:
 
 def _fn(src: str, name: str) -> str:
     """Тело функции от её def до следующего def верхнего уровня."""
-    start = src.index(f"async def {name}")
+    start = src.index(f"async def {name}(")
     m = re.search(r"\nasync def |\ndef ", src[start + 10:])
     return src[start:start + 10 + m.start()] if m else src[start:]
 

@@ -2240,7 +2240,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         op_id = row["id"]
         async with _active_lock:
             _active_op_ids.add(op_id)
-        _op_task = asyncio.create_task(_run_op_task(pool, bot, dict(row)))
+        _op_task = asyncio.create_task(_run_op_task_guarded(pool, bot, dict(row)))
         _active_op_tasks.add(_op_task)
         _op_task.add_done_callback(_active_op_tasks.discard)
 
@@ -2428,6 +2428,55 @@ async def _notify_recurring_stopped(
         )
     except Exception:
         log_exc_swallow(log, f"op_worker: уведомление об остановке расписания op#{op_id}")
+
+
+async def _run_op_task_guarded(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
+    """Точка входа поллера: реестр активных операций освобождается ВСЕГДА.
+
+    ПОЧЕМУ ОТДЕЛЬНАЯ ОБЁРТКА. `_run_op_task` снимает op_id с `_active_op_ids` в
+    своём `finally` — но этот `finally` живёт ВНУТРИ `async with owner_sem`, то
+    есть накрывает не всю функцию. Пролог до семафора (разбор params, чтение
+    предохранителя, ожидание самого семафора) остаётся снаружи, и любое
+    исключение там оставляет op_id в реестре НАВСЕГДА.
+
+    Цена такой утечки максимальная из возможных. Операция числится активной в
+    памяти процесса, а по этому же признаку её ЩАДЯТ оба сторожа зависших и
+    алерт о застрявших: операция навечно остаётся в 'running', держит слот
+    параллельности владельца и не видна как проблема. Три таких случая — и у
+    владельца не стартует вообще ничего, до перезапуска процесса.
+
+    Здесь же разбирается и само исключение: операция, не дошедшая до
+    исполнителя, раньше умирала внутри задачи без следа (create_task без
+    обработчика прячет ошибку до сборки мусора), а в очереди оставалась
+    'running'. Теперь она идёт через обычный повтор, а исчерпав его — в честный
+    терминальный статус с причиной.
+    """
+    op_id = int(row["id"])
+    try:
+        await _run_op_task(pool, bot, row)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.exception("op_worker: op=%s не дошла до исполнителя: %s", op_id, e)
+        try:
+            requeued = await _maybe_requeue(
+                pool, op_id, e, {}, str(row.get("op_type") or ""),
+                bot=bot, owner_id=row.get("owner_id"),
+            )
+            if not requeued:
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET status='failed', finished_at=now(), "
+                    "started_at=NULL, error_msg=COALESCE(error_msg, $1) "
+                    f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
+                    f"Операция не запустилась: {str(e)[:200]}", op_id,
+                    log_ctx=f"[run_op_prologue_fail op={op_id}]",
+                )
+        except Exception:
+            log_exc_swallow(log, f"op_worker: разбор сбоя пролога op={op_id}")
+    finally:
+        async with _active_lock:
+            _active_op_ids.discard(op_id)
 
 
 async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:

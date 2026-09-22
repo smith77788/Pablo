@@ -106,6 +106,6 @@ def test_reconcile_and_release_use_the_same_lease_predicate():
     """Две функции пишут в одну колонку — расхождение предикатов и есть баг."""
     src = _op_worker_src()
     for fn in ("_db_release", "_reconcile_in_operation", "reset_stale_in_operation"):
-        idx = src.index(f"async def {fn}")
+        idx = src.index(f"async def {fn}(")
         seg = src[idx:idx + 2500]
         assert "op_lease_owner" in seg, f"{fn} снимает занятость мимо аренды"
