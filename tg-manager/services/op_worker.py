@@ -14351,7 +14351,15 @@ async def _exec_self_promo_blast(
         try:
             if bot_id not in token_cache:
                 from aiogram import Bot as _Bot
-                token_cache[bot_id] = _Bot(token=token)
+
+                # managed_bots.token хранится зашифрованным, а запрос выше —
+                # сырой (JOIN с bot_users, мимо db.fetch_bots, которая
+                # расшифровывает). aiogram на шифротексте бросает
+                # TokenValidationError, и вся рассылка падала на первом боте.
+                # Passthrough для старых незашифрованных строк.
+                from services.token_vault import decrypt_token as _dt_tok
+
+                token_cache[bot_id] = _Bot(token=_dt_tok(token or ""))
             _b = token_cache[bot_id]
             await _b.send_message(user_id, message_text, parse_mode="HTML")
             ok_count += 1

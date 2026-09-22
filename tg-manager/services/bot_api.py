@@ -11,6 +11,26 @@ _semaphore: asyncio.Semaphore | None = None
 TG = "https://api.telegram.org/bot{token}/{method}"
 TG_FILE = "https://api.telegram.org/file/bot{token}/{file_path}"
 
+
+def api_url(token: str, method: str) -> str:
+    """Адрес метода Bot API. Единственная дверь: токен расшифровывается ЗДЕСЬ.
+
+    `managed_bots.token` хранится зашифрованным (token_vault). Вызывающие
+    читают колонку по-разному — где-то через db.fetch_bots, которая
+    расшифровывает, где-то сырым SELECT, — и половина мест про расшифровку
+    забывала. Шифротекст в адресе даёт «/botENC:…/», Telegram отвечает 401, и
+    функция выглядит просто сломанной: «команды бота не показываются»,
+    «вебхук не ставится». Единственный надёжный ответ — расшифровывать в самой
+    последней точке, через которую проходят все.
+
+    decrypt_token — passthrough для строк без метки ENC:, поэтому уже
+    расшифрованный токен проходит без изменений, а двойного расшифрования не
+    бывает.
+    """
+    from services.token_vault import decrypt_token
+
+    return TG.format(token=decrypt_token(token or ""), method=method)
+
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 3
 _BASE_BACKOFF = 1.0
@@ -67,7 +87,7 @@ async def _call(
     Retries up to 3 times with exponential backoff for transient errors.
     Respects Telegram's retry_after header on 429 responses.
     """
-    url = TG.format(token=token, method=method)
+    url = api_url(token, method)
     payload = {k: v for k, v in params.items() if v is not None}
     last_error = None
 
@@ -251,7 +271,7 @@ async def set_photo(
     методов файла, которые возвращают bool. Как и в ``_call``, длинную паузу по
     429 на месте не отсыпаем.
     """
-    url = TG.format(token=token, method="setMyPhoto")
+    url = api_url(token, "setMyPhoto")
     for attempt in range(_MAX_RETRIES):
         try:
             form = aiohttp.FormData()

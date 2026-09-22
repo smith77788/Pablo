@@ -59,6 +59,15 @@ async def register_webhook(
 
     base_url: public HTTPS URL of the running server (e.g. https://app.railway.app)
     """
+    # Токен приходит прямо из managed_bots.token, а он хранится зашифрованным.
+    # Раньше шифротекст уходил и в адрес («/botENC:…/setWebhook» → 401, вебхук
+    # не регистрировался вовсе), и в _secret_map, откуда его берут для ответов
+    # боту. Расшифровываем на входе, чтобы дальше по функции был один вид
+    # токена. Passthrough для старых незашифрованных строк.
+    from services.token_vault import decrypt_token
+
+    bot_token = decrypt_token(bot_token or "")
+
     secret = _make_secret(bot_token)
     _secret_map[secret] = bot_token
     get_update_queue(bot_id)  # ensure queue exists
@@ -90,6 +99,12 @@ async def unregister_webhook(
     bot_id: int,
 ) -> bool:
     """Remove the Telegram webhook for a managed bot (back to polling)."""
+    # Тот же токен и та же причина, что в register_webhook: секрет должен
+    # считаться от ОДНОГО И ТОГО ЖЕ вида токена, иначе снятие не найдёт запись.
+    from services.token_vault import decrypt_token
+
+    bot_token = decrypt_token(bot_token or "")
+
     secret = _make_secret(bot_token)
     _secret_map.pop(secret, None)
 
