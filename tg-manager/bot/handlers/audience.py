@@ -342,14 +342,16 @@ async def cb_scan(
     new_count = 0
     if users:
         new_count = await db.upsert_users(pool, row["bot_id"], users)
-    if last_id > start_offset:
-        await db.set_update_offset(pool, callback_data.bot_id, last_id)
+    # Оффсет НЕ двигаем: сбор аудитории читает обновления, не подтверждая их.
+    # Раньше он сдвигал общий оффсет бота, и разобранные им сообщения пропадали
+    # для автоответчика — подписчик писал боту, попадал в базу и не получал
+    # ни авто-ответа, ни воронки, ни ответа оператора.
 
     total = await db.get_audience_count(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"👥 <b>Аудитория {label}</b>\n\n"
-        f"⚡ Просканировано апдейтов до ID #{last_id}\n"
+        f"⚡ Просмотрено обновлений до ID #{last_id}\n"
         f"Найдено уникальных пользователей: <b>{len(users)}</b>\n"
         f"Новых добавлено: <b>+{new_count}</b>\n"
         f"Всего активных: <b>{total}</b>",

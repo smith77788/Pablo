@@ -392,58 +392,69 @@ async def scan_all_users(
     start_offset: int = 0,
     max_batches: int = 50,
 ) -> tuple[list[dict], int]:
-    """Scan all available updates and return (users_list, last_update_id).
-    Pages through batches of 100. Does advance offset (confirms updates).
-    Returns deduplicated user list and the highest update_id seen.
+    """Собрать пользователей из ожидающих обновлений, НЕ подтверждая их.
+
+    Возвращает (список без дублей, наибольший update_id). Этот update_id —
+    только для показа: сохранять его как оффсет НЕЛЬЗЯ, иначе обновления
+    пропадут для автоответчика.
+
+    ЧТО БЫЛО. Функция листала обновления пачками, и каждая следующая просьба
+    шла с `offset = последний + 1`. Для Telegram это ПОДТВЕРЖДЕНИЕ: всё, что
+    раньше этого номера, он забывает и больше не отдаёт никому. А очередь
+    обновлений у бота одна на всех.
+
+    Значит нажатие «Сканировать все апдейты» съедало входящие сообщения,
+    которых автоответчик ещё не разобрал: человек написал боту, сбор аудитории
+    записал его в базу — и на этом всё. Ни авто-ответа, ни запуска воронки, ни
+    `/start`, ни пересылки оператору. Подписчик остался без ответа навсегда, а
+    владелец об этом не узнал: экран показывал успешный сбор.
+
+    Листать при этом было незачем. Telegram хранит только НЕподтверждённые
+    обновления, а автоответчик опрашивает бота каждые 10 секунд и подтверждает
+    всё, что разобрал. Поэтому «50 пачек по 100» — это в лучшем случае одно
+    десятисекундное окно: пятьдесят просьб уходили за тем, чего там нет.
+
+    ЧТО СТАЛО. Одна просьба с `offset=0` — Telegram отдаёт ожидающие
+    обновления и НИЧЕГО не забывает. Пользователей записываем, сами обновления
+    остаются в очереди, и автоответчик разбирает их своим чередом.
+
+    `start_offset` и `max_batches` сохранены для совместимости вызова и больше
+    ни на что не влияют.
     """
+    data = await _call(session, token, "getUpdates", offset=0, limit=100, timeout=0)
+    reason = _updates_conflict(data)
+    if reason:
+        raise UpdatesUnavailable(reason)
+    batch = data.get("result", []) if data.get("ok") else []
+
     seen: set[int] = set()
     users: list[dict] = []
-    offset = start_offset
     last_id = start_offset
-
-    for _ in range(max_batches):
-        data = await _call(
-            session,
-            token,
-            "getUpdates",
-            offset=offset + 1 if offset else 0,
-            limit=100,
-            timeout=0,
+    for upd in batch:
+        uid_update = upd.get("update_id", 0)
+        if uid_update > last_id:
+            last_id = uid_update
+        msg = (
+            upd.get("message")
+            or upd.get("edited_message")
+            or upd.get("callback_query")
         )
-        reason = _updates_conflict(data)
-        if reason:
-            raise UpdatesUnavailable(reason)
-        batch = data.get("result", []) if data.get("ok") else []
-        if not batch:
-            break
-        for upd in batch:
-            uid_update = upd.get("update_id", 0)
-            if uid_update > last_id:
-                last_id = uid_update
-            msg = (
-                upd.get("message")
-                or upd.get("edited_message")
-                or upd.get("callback_query")
-            )
-            if not msg:
-                continue
-            from_user = msg.get("from") or {}
-            uid = from_user.get("id")
-            if not uid or uid in seen or from_user.get("is_bot"):
-                continue
-            seen.add(uid)
-            users.append(
-                {
-                    "user_id": uid,
-                    "username": from_user.get("username"),
-                    "first_name": from_user.get("first_name"),
-                    "last_name": from_user.get("last_name"),
-                    "language_code": from_user.get("language_code"),
-                }
-            )
-        offset = last_id
-        if len(batch) < 100:
-            break
+        if not msg:
+            continue
+        from_user = msg.get("from") or {}
+        uid = from_user.get("id")
+        if not uid or uid in seen or from_user.get("is_bot"):
+            continue
+        seen.add(uid)
+        users.append(
+            {
+                "user_id": uid,
+                "username": from_user.get("username"),
+                "first_name": from_user.get("first_name"),
+                "last_name": from_user.get("last_name"),
+                "language_code": from_user.get("language_code"),
+            }
+        )
 
     return users, last_id
 
