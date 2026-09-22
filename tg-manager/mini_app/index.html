@@ -170,7 +170,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Header ─────────────────────────────────────────────────── */
 .hdr{padding:calc(var(--safe-t) + 8px) 14px 10px;background:var(--glass);backdrop-filter:saturate(150%) blur(16px);-webkit-backdrop-filter:saturate(150%) blur(16px);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
-.back{width:34px;height:34px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text);flex-shrink:0;border:1px solid var(--border);transition:transform .15s var(--spring),opacity .12s}
+.back{width:40px;height:40px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text);flex-shrink:0;border:1px solid var(--border);transition:transform .15s var(--spring),opacity .12s}
 .back:active{opacity:.6;transform:scale(.88)}
 /* flex:1 означает основу 0: заголовок не претендовал на место вообще и первым
    отдавал его соседям. Стоило в шапке аккаунтов появиться счётчику «6
@@ -181,7 +181,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .hdr-title{flex:1 1 auto;min-width:88px;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-meta{text-align:right;flex-shrink:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:8px}
 /* ── Боковая навигация (drawer) ── */
-.hdr-burger{flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);cursor:pointer;color:var(--text);font-size:18px;line-height:1;user-select:none;border:1px solid var(--sep)}
+.hdr-burger{flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);cursor:pointer;color:var(--text);font-size:18px;line-height:1;user-select:none;border:1px solid var(--sep)}
 .hdr-burger:active{background:var(--sep);transform:scale(.92)}
 /* Иконочная кнопка (обновить, свернуть и т.п.). Такие кнопки жили в разметке
    как голое эмодзи с font-size:17px и opacity:.7 — то есть как текст: без
@@ -189,9 +189,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    Рядом с бургером-чипом 34×34 это выглядело как случайный символ, а не как
    кнопка, и в неё было трудно попасть пальцем. Здесь тот же чип, что у
    бургера, и честная область нажатия. */
-.icon-btn{flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);border:1px solid var(--sep);color:var(--text);font-size:16px;line-height:1;cursor:pointer;user-select:none;transition:transform .15s var(--spring),background .12s}
+.icon-btn{flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);border:1px solid var(--sep);color:var(--text);font-size:16px;line-height:1;cursor:pointer;user-select:none;transition:transform .15s var(--spring),background .12s}
 .icon-btn:active{background:var(--sep);transform:scale(.92)}
-.icon-btn.sm{width:30px;height:30px;font-size:14px}
+.icon-btn.sm{width:36px;height:36px;font-size:14px}
+/* Красная иконка в строке — обычно удаление. Раньше это был голый span с
+   font-size:18px и padding:4px, то есть цель 26×33 без подписи для
+   озвучки, вплотную (6px) к соседней кнопке. Приложение открывают с
+   телефона, и на таком расстоянии промах по соседу — обычное дело. */
+.icon-btn.danger{color:var(--red);border-color:rgba(248,113,113,.28);background:rgba(248,113,113,.08)}
+.icon-btn.accent{color:var(--blue)}
 #navOverlay{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;visibility:hidden;transition:opacity .2s;z-index:120}
 #navOverlay.on{opacity:1;visibility:visible}
 #navDrawer{position:fixed;top:0;left:0;bottom:0;width:80%;max-width:320px;background:var(--bg);border-right:1px solid var(--sep);transform:translateX(-102%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:121;display:flex;flex-direction:column;box-shadow:2px 0 20px rgba(0,0,0,.35)}
@@ -269,7 +275,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .li-body{flex:1;min-width:0}
 .li-name{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .li-sub{font-size:13px;color:var(--hint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.li-right{flex-shrink:0;display:flex;align-items:center;gap:6px}
+/* Строка, которая несёт НЕСКОЛЬКО фактов сразу (тип · состояние · задержка ·
+   аккаунты), в одну строку на телефоне не влезает: под неё остаётся ~120px при
+   нужных 220, и многоточие съедает ровно то, ради чего на строку смотрят —
+   работает прокси или нет. Такие строки переносим, а не прячем. */
+.li-sub.wrap{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
+.li-right{flex-shrink:0;display:flex;align-items:center;gap:8px}
 .chev{color:var(--hint);font-size:14px;flex-shrink:0;opacity:.7;transition:transform .15s}
 .li.tap:active .chev{transform:translateX(2px)}
 
@@ -660,7 +671,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .bot-card-name{font-size:12px;font-weight:600;letter-spacing:-.1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px}
 .bot-card-subs{font-size:24px;font-weight:700;letter-spacing:-.5px;line-height:1;margin-bottom:2px}
 .bot-card-lbl{font-size:10px;color:var(--hint);margin-bottom:6px}
-.bot-card-del{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:6px;background:rgba(248,113,113,.1);display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;z-index:2;transition:transform .15s var(--spring)}
+.bot-card-del{position:absolute;top:6px;right:6px;width:34px;height:34px;border-radius:8px;background:rgba(248,113,113,.1);display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;z-index:2;transition:transform .15s var(--spring)}
 .bot-card-del:active{opacity:.6;transform:scale(.85)}
 
 /* ─── Broadcast mini-table ───────────────────────────────── */
@@ -9160,7 +9171,7 @@ function renderArList(items) {
       </div>
       <div class="li-right">
         <div class="toggle ${r.is_active?'on':'off'}" onclick="toggleAr(${r.id},this)"></div>
-        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteAr(${r.id})">🗑</span>
+        <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить авто-ответ" onclick="deleteAr(${r.id})">🗑</span>
       </div>
     </div>`;
   }).join('');
@@ -12069,7 +12080,7 @@ async function loadCompetitors() {
         </div>
         <div class="li-right">
           ${c.last_members!=null?`<span class="badge b-bl">${num(c.last_members)}</span>`:''}
-          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteComp(${c.id})">🗑</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить конкурента" onclick="deleteComp(${c.id})">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -12306,7 +12317,7 @@ async function loadKeywords() {
         </div>
         <div class="li-right">
           <span class="badge ${pc}">${posStr}</span>
-          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteKw(${k.id})">🗑</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить ключевое слово" onclick="deleteKw(${k.id})">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -12510,8 +12521,8 @@ async function loadTemplates() {
           <div class="li-sub">${esc(txt2)}${txt2.length===60?'…':''}</div>
         </div>
         <div class="li-right">
-          <span style="font-size:18px;cursor:pointer;color:var(--blue);padding:4px" onclick="useTpl(${t.id},'${esc(t.name||'')}','${esc((t.template?.text||'').replace(/'/g,"&#39;"))}')">📤</span>
-          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteTpl(${t.id})">🗑</span>
+          <span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Применить шаблон" onclick="useTpl(${t.id},'${esc(t.name||'')}','${esc((t.template?.text||'').replace(/'/g,"&#39;"))}')">📤</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаблон" onclick="deleteTpl(${t.id})">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -12749,13 +12760,13 @@ async function loadProxies() {
         <div class="ava ava-blue">🌐</div>
         <div class="li-body">
           <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}${backupBadge}</div>
-          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}${accNote}</div>
+          <div class="li-sub wrap">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}${checkedAt}${accNote}</div>
           ${stranded}
         </div>
         <div class="li-right">
-          <span title="Резервный прокси" style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
+          <span class="icon-btn sm" role="button" tabindex="0" title="Резервный прокси" aria-label="Пометить прокси резервным" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
           <span class="icon-btn sm" role="button" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
-          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -13480,19 +13491,28 @@ function renderProxyPoolList(items) {
     const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
     const type = (p.proxy_type||'socks5').toUpperCase();
     const host = (p.proxy_url||'').split('@').pop();
-    const lat = p.latency_ms ? p.latency_ms+'мс' : '';
+    // Задержка у мёртвого прокси — цифра из прошлого и ни о чём не говорит,
+    // а место в строке занимает.
+    const lat = (p.is_alive!==false && p.latency_ms) ? p.latency_ms+'мс' : '';
+    // На 360px под эту строку остаётся ~110px при нужных 220: многоточие
+    // съедало ровно то, ради чего на неё смотрят. Поэтому слово о состоянии
+    // пишем там, где оно НЕСЁТ смысл: у живого прокси его заменяет задержка
+    // (она и есть доказательство, что он жив), у мёртвого и непроверенного
+    // слово остаётся. Полная формулировка — в title, для наведения и озвучки.
+    const stWord = p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен';
+    const stShort = (p.is_alive===true && lat) ? '' : ' '+stWord;
     const backup = p.is_backup?' 🛟':'';
     const accounts = p.acc_count ? ' · 📱'+p.acc_count : '';
     return `<div class="li">
       <div class="ava ava-blue">🌐</div>
       <div class="li-body">
         <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}${backup}</div>
-        <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'} · ${lat}${accounts}</div>
+        <div class="li-sub wrap" title="${esc(stWord)}">${type} · ${alive}${stShort}${lat?' · '+lat:''}${accounts}</div>
       </div>
       <div class="li-right">
-        <span style="font-size:16px;cursor:pointer;padding:4px" onclick="toggleProxyBackup(${p.id})" title="Резервный">${p.is_backup?'🛟':'⚪'}</span>
+        <span class="icon-btn sm" role="button" tabindex="0" title="Резервный" aria-label="Пометить прокси резервным" onclick="toggleProxyBackup(${p.id})">${p.is_backup?'🛟':'⚪'}</span>
         <span class="icon-btn sm" role="button" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
-        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
+        <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
       </div>
     </div>`;
   }).join('');
@@ -21681,7 +21701,7 @@ async function loadMeshTargets() {
       <div class="row">
         <div class="row-ico" style="background:var(--bg-purple-16)">${x.enabled?'📡':'⏸'}</div>
         <div class="row-body"><div class="row-name">${esc(x.target_channel)}</div></div>
-        <div class="row-right"><span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteMeshTarget(${x.id})">🗑</span></div>
+        <div class="row-right"><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить цель" onclick="deleteMeshTarget(${x.id})">🗑</span></div>
       </div>`).join('');
   } catch(e){ el.innerHTML = empty('⚠️','Ошибка',e.message); }
 }
