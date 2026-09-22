@@ -191,6 +191,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    бургера, и честная область нажатия. */
 .icon-btn{flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);border:1px solid var(--sep);color:var(--text);font-size:16px;line-height:1;cursor:pointer;user-select:none;transition:transform .15s var(--spring),background .12s}
 .icon-btn:active{background:var(--sep);transform:scale(.92)}
+/* Фокус должен быть виден: с клавиатуры иначе не понять, на чём стоишь. */
+[role="button"]:focus-visible,.lf-chip:focus-visible,.icon-btn:focus-visible,.seg-opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
 .icon-btn.sm{width:36px;height:36px;font-size:14px}
 /* Красная иконка в строке — обычно удаление. Раньше это был голый span с
    font-size:18px и padding:4px, то есть цель 26×33 без подписи для
@@ -865,7 +867,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
-    <div class="icon-btn" role="button" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
       <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
@@ -1192,7 +1194,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">💬 Диалоги</div>
-    <div class="hdr-meta"><span class="icon-btn" role="button" onclick="openAccountContacts(ACC_CONSOLE_ID)" title="Контакты аккаунта" aria-label="Контакты аккаунта">📇</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="openAccountContacts(ACC_CONSOLE_ID)" title="Контакты аккаунта" aria-label="Контакты аккаунта">📇</span></div>
   </div>
   <div class="sub-sb"><div class="lst" id="adlgList"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
@@ -1202,7 +1204,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="achat-title">Чат</div>
-    <div class="hdr-meta"><span class="icon-btn" role="button" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
   </div>
   <div class="sub-sb" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
     <div id="achatBody" style="flex:1;overflow-y:auto;padding:8px 12px"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1249,7 +1251,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📇 Контакты аккаунта</div>
-    <div class="hdr-meta"><span class="icon-btn" role="button" id="accContSelBtn" onclick="toggleAccContSelect()" title="Выбрать несколько" aria-label="Выбрать несколько">☑️</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" id="accContSelBtn" onclick="toggleAccContSelect()" title="Выбрать несколько" aria-label="Выбрать несколько">☑️</span></div>
   </div>
   <div class="sub-sb">
     <div style="padding:6px 0"><input type="text" id="accContSearch" placeholder="🔍 Поиск..." oninput="filterAccountContacts()" class="inp"></div>
@@ -1326,7 +1328,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🗄 Хранилище</div>
-    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span class="icon-btn" role="button" onclick="openVaultSettings()" title="Уведомления" aria-label="Уведомления">🔔</span></div>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span class="icon-btn" role="button" tabindex="0" onclick="openVaultSettings()" title="Уведомления" aria-label="Уведомления">🔔</span></div>
   </div>
   <div class="sub-sb">
     <div id="vaultConnect" style="display:none"></div>
@@ -1379,7 +1381,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="vchat-title">Диалог</div>
-    <div class="hdr-meta"><span class="icon-btn" role="button" onclick="downloadVaultExport('html', VAULT_CHAT)" title="Экспорт чата" aria-label="Экспорт чата">⬇️</span></div>
+    <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="downloadVaultExport('html', VAULT_CHAT)" title="Экспорт чата" aria-label="Экспорт чата">⬇️</span></div>
   </div>
   <div style="display:flex;gap:6px;padding:6px 12px;overflow-x:auto;border-bottom:1px solid var(--sep)">
     <span class="vfilter on" data-f="all" onclick="setVaultFilter('all')">Все</span>
@@ -2286,7 +2288,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ PULSE DIGEST ══════════════════════ -->
 <div class="screen" id="s-digest">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📈 Пульс-отчёт</div>
-    <div class="icon-btn" role="button" aria-label="Обновить" style="margin-left:auto" onclick="openDigest()">🔄</div></div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="openDigest()">🔄</div></div>
   <div class="sub-sb">
     <div id="digestBody"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -2295,7 +2297,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <!-- ══════════════════════ FLEET DOCTOR ══════════════════════ -->
 <div class="screen" id="s-fleetdoctor">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🩺 Диагностика флота</div>
-    <div class="icon-btn" role="button" aria-label="Обновить" style="margin-left:auto" onclick="openFleetDoctor()">🔄</div></div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="openFleetDoctor()">🔄</div></div>
   <div class="sub-sb"><div id="fleetDoctorBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
@@ -3440,7 +3442,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-ops">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Диспетчер задач</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
-      <span class="icon-btn" role="button" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
+      <span class="icon-btn" role="button" tabindex="0" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
       <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openOpCreate()">+ Создать</button>
     </div>
   </div>
@@ -3492,9 +3494,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-contacts">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
-      <span class="icon-btn" role="button" onclick="openUchAI()" title="AI Ассистент" aria-label="AI Ассистент">🤖</span>
-      <span class="icon-btn" role="button" onclick="toggleContactSelect()" title="Выбор" aria-label="Выбор" id="contactSelectBtn">☑️</span>
-      <span class="icon-btn" role="button" onclick="openContactStats()" title="Статистика" aria-label="Статистика">📊</span>
+      <span class="icon-btn" role="button" tabindex="0" onclick="openUchAI()" title="AI Ассистент" aria-label="AI Ассистент">🤖</span>
+      <span class="icon-btn" role="button" tabindex="0" onclick="toggleContactSelect()" title="Выбор" aria-label="Выбор" id="contactSelectBtn">☑️</span>
+      <span class="icon-btn" role="button" tabindex="0" onclick="openContactStats()" title="Статистика" aria-label="Статистика">📊</span>
     </div>
   </div>
   <div class="sub-sb">
@@ -3610,8 +3612,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-contactdetail">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cdTitle">Контакт</div>
     <div class="hdr-meta" style="display:flex;gap:6px">
-      <span class="icon-btn" role="button" onclick="editContact()" title="Редактировать" aria-label="Редактировать">✏️</span>
-      <span class="icon-btn" role="button" onclick="toggleContactFavorite()" title="Избранное" id="cdFavBtn" aria-label="Избранное">⭐</span>
+      <span class="icon-btn" role="button" tabindex="0" onclick="editContact()" title="Редактировать" aria-label="Редактировать">✏️</span>
+      <span class="icon-btn" role="button" tabindex="0" onclick="toggleContactFavorite()" title="Избранное" id="cdFavBtn" aria-label="Избранное">⭐</span>
     </div>
   </div>
   <div class="sub-sb" id="cdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -7891,7 +7893,7 @@ async function loadOrganismPulse() {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-size:18px">🫀</span>
         <span style="font-size:14px;font-weight:700">Пульс</span>
-        <span class="icon-btn sm" role="button" aria-label="Обновить пульс" style="margin-left:auto" onclick="loadOrganismPulse()">🔄</span>
+        <span class="icon-btn sm" role="button" tabindex="0" aria-label="Обновить пульс" style="margin-left:auto" onclick="loadOrganismPulse()">🔄</span>
       </div>
       <div style="font-size:12px;color:var(--hint);line-height:1.5">${esc(p.narrative) || 'Пока тихо: ничего, что требует вмешательства. Как появятся события, сводка будет здесь.'}</div>`;
     if (sugs.length) {
@@ -8374,6 +8376,28 @@ function clearFrequent() {
   renderFrequent();
   toast('Список очищен');
 }
+// role="button" — это обещание: «сюда можно нажать». Озвучка его повторяет, и
+// человек нажимает Enter или пробел. По спецификации WAI-ARIA такой элемент
+// обязан отвечать на обе клавиши, а отвечал он только на касание: 33 элемента
+// приложения (иконки в шапках, чипы срезов, действия в строках) фокус получали,
+// а нажатие не делали ничего. Обещание без исполнения — та же мёртвая кнопка,
+// только видит её не каждый.
+//
+// Один делегированный слушатель вместо обработчика на каждом элементе: он
+// покрывает и то, что перерисовывается, и то, что появится позже. Настоящие
+// <button> и ссылки пропускаем — браузер сам их нажимает, и двойной вызов
+// отправил бы форму дважды.
+document.addEventListener('keydown', function(ev) {
+  if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return;
+  const el = ev.target;
+  if (!el || !el.getAttribute || el.getAttribute('role') !== 'button') return;
+  const tag = el.tagName;
+  if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled')) return;
+  // Пробел на странице прокручивает — на нажатой кнопке это не то, что нужно.
+  ev.preventDefault();
+  el.click();
+});
 // Единый делегированный слушатель: ловит клики по плиткам каталога и
 // быстрым действиям, чтобы запоминать реально используемые разделы.
 document.addEventListener('click', function(ev) {
@@ -12966,7 +12990,7 @@ async function loadProxies() {
         </div>
         <div class="li-right">
           <span class="icon-btn sm" role="button" tabindex="0" title="Резервный прокси" aria-label="Пометить прокси резервным" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
-          <span class="icon-btn sm" role="button" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
+          <span class="icon-btn sm" role="button" tabindex="0" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
           <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
         </div>
       </div>`;
@@ -13712,7 +13736,7 @@ function renderProxyPoolList(items) {
       </div>
       <div class="li-right">
         <span class="icon-btn sm" role="button" tabindex="0" title="Резервный" aria-label="Пометить прокси резервным" onclick="toggleProxyBackup(${p.id})">${p.is_backup?'🛟':'⚪'}</span>
-        <span class="icon-btn sm" role="button" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
+        <span class="icon-btn sm" role="button" tabindex="0" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
         <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
       </div>
     </div>`;
