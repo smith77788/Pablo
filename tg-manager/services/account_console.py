@@ -227,6 +227,34 @@ async def _unclaim(acc_id: "int | None") -> None:
     await _opw.release_accounts([int(acc_id)])
 
 
+async def note_error(pool, acc: dict | None, exc: BaseException) -> tuple[str, str]:
+    """Ошибка живой консоли → (код, текст по-русски) + запись паузы Telegram.
+
+    Консоль ходит в Telegram тем же аккаунтом, что и массовые операции. Если
+    Telegram попросил паузу, а мы только показали это владельцу и забыли —
+    для остального продукта аккаунт остаётся «спокойным»: выбор аккаунта под
+    следующую операцию возьмёт его снова и уведёт под действующее ограничение,
+    где следующая пауза будет длиннее предыдущей.
+
+    Медленный режим чата (`slow_mode`) сюда НЕ попадает: это свойство чата, а
+    не аккаунта, и ставить из-за него аккаунт на кулдаун — значит без причины
+    вывести здоровый аккаунт из работы.
+    """
+    code, human = classify_error(str(exc))
+    acc_id = int((acc or {}).get("id") or 0)
+    if code == "flood" and acc_id:
+        try:
+            from services import flood_engine as _fe
+
+            secs = _fe.flood_seconds(exc) or 0
+            if secs > 0:
+                await _fe.record_flood(pool, acc_id, int(secs), "console")
+        except Exception:
+            log.warning("account_console: пауза Telegram не записана в пульс здоровья",
+                        exc_info=True)
+    return code, human
+
+
 _BUSY_RESULT = {
     "ok": False,
     "code": "busy",
@@ -235,7 +263,7 @@ _BUSY_RESULT = {
 
 
 async def list_dialogs(session_string: str, acc: dict | None,
-                       limit: int = 40) -> dict[str, Any]:
+                       limit: int = 40, pool=None) -> dict[str, Any]:
     """Список диалогов аккаунта (последние `limit`). Только чтение."""
     from services.account_manager import _make_client
 
@@ -275,7 +303,7 @@ async def list_dialogs(session_string: str, acc: dict | None,
             })
         return {"ok": True, "dialogs": out}
     except Exception as exc:
-        code, human = classify_error(str(exc))
+        code, human = await note_error(pool, acc, exc)
         log.warning("account_console.list_dialogs acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
@@ -287,7 +315,8 @@ async def list_dialogs(session_string: str, acc: dict | None,
 
 
 async def get_history(session_string: str, acc: dict | None, peer: int | str,
-                      limit: int = 40, access_hash: int | None = None) -> dict[str, Any]:
+                      limit: int = 40, access_hash: int | None = None,
+                      pool=None) -> dict[str, Any]:
     """История одного диалога (последние `limit` сообщений, новые внизу)."""
     from services.account_manager import _make_client
 
@@ -327,7 +356,7 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
         msgs.reverse()  # get_messages отдаёт от новых к старым — в UI новые внизу
         return {"ok": True, "peer_name": peer_name, "messages": msgs}
     except Exception as exc:
-        code, human = classify_error(str(exc))
+        code, human = await note_error(pool, acc, exc)
         log.warning("account_console.get_history acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
@@ -339,7 +368,8 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
 
 
 async def send_text(session_string: str, acc: dict | None, peer: int | str,
-                    text: str, access_hash: int | None = None) -> dict[str, Any]:
+                    text: str, access_hash: int | None = None,
+                    pool=None) -> dict[str, Any]:
     """Отправить текстовое сообщение в диалог. Ручное действие 1:1.
 
     FloodWait/приватность/нет прав возвращаются классифицированной ошибкой, а не
@@ -371,7 +401,7 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
             action="dm_send")
         return {"ok": True, "message_id": getattr(sent, "id", None)}
     except Exception as exc:
-        code, human = classify_error(str(exc))
+        code, human = await note_error(pool, acc, exc)
         log.warning("account_console.send_text acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
@@ -384,7 +414,8 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
 
 async def send_file(session_string: str, acc: dict | None, peer: int | str,
                     file_bytes: bytes, filename: str, caption: str = "",
-                    access_hash: int | None = None) -> dict[str, Any]:
+                    access_hash: int | None = None,
+                    pool=None) -> dict[str, Any]:
     """Отправить файл (фото/документ) в диалог. Ручное действие 1:1.
 
     Telethon сам определит изображение и отправит как фото, остальное — как
@@ -415,7 +446,7 @@ async def send_file(session_string: str, acc: dict | None, peer: int | str,
             action="dm_file")
         return {"ok": True, "message_id": getattr(sent, "id", None)}
     except Exception as exc:
-        code, human = classify_error(str(exc))
+        code, human = await note_error(pool, acc, exc)
         log.warning("account_console.send_file acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
@@ -444,7 +475,8 @@ def _to_ui_contact(c: dict) -> dict:
     }
 
 
-async def list_contacts(session_string: str, acc: dict | None) -> dict[str, Any]:
+async def list_contacts(session_string: str, acc: dict | None,
+                        pool=None) -> dict[str, Any]:
     """Контакты аккаунта. Только чтение.
 
     Два источника, как в синхронизации контакт-хаба: адресная книга
@@ -465,7 +497,7 @@ async def list_contacts(session_string: str, acc: dict | None) -> dict[str, Any]
         try:
             book = await am.get_contacts(session_string, acc)
         except Exception as exc:
-            code, human = classify_error(str(exc))
+            code, human = await note_error(pool, acc, exc)
             log.warning("account_console.list_contacts acc=%s: %s", (acc or {}).get("id"), exc)
             return {"ok": False, "code": code, "error": human}
 

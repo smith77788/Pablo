@@ -118,37 +118,14 @@ _FLOOD_INLINE_MAX_S = 120
 
 
 def flood_seconds(exc: BaseException) -> int | None:
-    """Сколько Telegram просит подождать, или None если это не флуд.
+    """Сколько Telegram просит подождать, или None если это не пауза.
 
-    Сначала спрашиваем сам объект ошибки: у Telethon это `FloodWaitError.seconds`.
-    Разбор текста — запасной путь, и по НАСТОЯЩЕМУ тексту Telethon: «A wait of
-    300 seconds is required». Прежний разбор делил строку по «wait » и брал
-    следующее слово, а это «of» — int() падал всегда, и вместо настоящей паузы
-    подставлялось 30 секунд. То есть на просьбу подождать пять минут разбор
-    возвращался через полминуты, каждый раз.
+    Псевдоним общего разбора из flood_engine: второй источник правды о паузах
+    Telegram продукту не нужен.
     """
-    secs = getattr(exc, "seconds", None)
-    if secs is not None:
-        try:
-            return max(0, int(secs))
-        except (TypeError, ValueError):
-            pass
-    import re as _re
+    from services import flood_engine as _fe
 
-    text = str(exc)
-    # Канонический текст Telethon. В нём нет слова «flood», поэтому проверка
-    # «есть ли flood в тексте» его не узнаёт — а это и есть тот самый текст,
-    # который приходит чаще всего.
-    m = _re.search(r"a wait of\s+(\d+)\s*second", text, _re.IGNORECASE)
-    if m:
-        return int(m.group(1))
-    if "flood" not in text.lower() and "flood" not in type(exc).__name__.lower():
-        return None
-    m = _re.search(r"(\d+)\s*second", text)
-    if m:
-        return int(m.group(1))
-    m = _re.search(r"(\d+)", text)
-    return int(m.group(1)) if m else None
+    return _fe.flood_seconds(exc)
 
 
 async def _record_parse_flood(pool, account_id, seconds: int) -> None:

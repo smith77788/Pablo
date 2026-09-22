@@ -5328,7 +5328,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import account_console
             res = await asyncio.wait_for(
-                account_console.list_dialogs(acc["session_str"], dict(acc), limit=50),
+                account_console.list_dialogs(acc["session_str"], dict(acc), limit=50,
+                                             pool=pool),
                 timeout=60)
         except asyncio.TimeoutError:
             return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
@@ -5359,7 +5360,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             res = await asyncio.wait_for(
                 account_console.get_history(acc["session_str"], dict(acc), peer,
-                                            limit=50, access_hash=access_hash),
+                                            limit=50, access_hash=access_hash,
+                                            pool=pool),
                 timeout=60)
         except asyncio.TimeoutError:
             return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
@@ -5395,7 +5397,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             res = await asyncio.wait_for(
                 account_console.send_text(acc["session_str"], dict(acc), peer, text,
-                                          access_hash=access_hash),
+                                          access_hash=access_hash, pool=pool),
                 timeout=60)
         except asyncio.TimeoutError:
             return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)
@@ -5456,7 +5458,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             res = await asyncio.wait_for(
                 account_console.send_file(acc["session_str"], dict(acc), peer,
-                                          file_bytes, filename, caption, access_hash),
+                                          file_bytes, filename, caption, access_hash,
+                                          pool=pool),
                 timeout=180)
         except asyncio.TimeoutError:
             return _err("Отправка файла не завершилась за 180с — проверьте прокси/сессию", 400)
@@ -5482,7 +5485,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import account_console
             res = await asyncio.wait_for(
-                account_console.list_contacts(acc["session_str"], dict(acc)),
+                account_console.list_contacts(acc["session_str"], dict(acc), pool=pool),
                 timeout=60)
         except asyncio.TimeoutError:
             return _err("Аккаунт не ответил за 60с — проверьте прокси/сессию", 400)

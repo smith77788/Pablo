@@ -150,9 +150,9 @@ async def search_public(
         _code, _text = _ru_error(str(e))
         _out = {"ok": False, "error": _text, "error_code": _code, "results": []}
         if _code == "flood":
-            from services import parser as _parser
+            from services import flood_engine as _fe
 
-            _secs = _parser.flood_seconds(e) or 0
+            _secs = _fe.flood_seconds(e) or 0
             if _secs:
                 await _note_flood(pool, _acc, _secs)
                 _out["flood_wait"] = _secs

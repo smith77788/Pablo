@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -669,6 +670,34 @@ def _recency_penalty(last_used: object, now_ts: float, *, max_penalty: float = 0
     import math
 
     return max_penalty * math.exp(-age / half_life_s)
+
+
+def flood_seconds(exc: BaseException) -> int | None:
+    """Сколько Telegram просит подождать, или None если это не пауза.
+
+    Единственный разбор на весь продукт: разбор аудитории, глобальный поиск и
+    живая консоль спрашивают здесь. Сначала сам объект ошибки (у Telethon это
+    FloodWaitError.seconds), затем текст — и текст разбираем НАСТОЯЩИЙ: «A wait
+    of 300 seconds is required». Слова «flood» в нём нет, поэтому проверка «есть
+    ли flood в тексте» его не узнаёт, а это самый частый вид этой ошибки.
+    """
+    secs = getattr(exc, "seconds", None)
+    if secs is not None:
+        try:
+            return max(0, int(secs))
+        except (TypeError, ValueError):
+            pass
+    text = str(exc)
+    m = re.search(r"a wait of\s+(\d+)\s*second", text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    if "flood" not in text.lower() and "flood" not in type(exc).__name__.lower():
+        return None
+    m = re.search(r"(\d+)\s*second", text)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(\d+)", text)
+    return int(m.group(1)) if m else None
 
 
 async def record_flood(
