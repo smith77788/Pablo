@@ -5097,8 +5097,15 @@ async def promote_to_admin_ex(
     pin_messages: bool = False,
     manage_call: bool = False,
     add_admins: bool = False,
+    anonymous: bool = False,
 ) -> tuple[bool, str]:
     """Выдать пользователю права админа в канале/группе.
+
+    anonymous=True прячет личность админа: его действия (в т.ч. системные
+    вступления новых участников через промоут-трюк) в списке участников/логе
+    чата подписываются названием чата, а не именем аккаунта. Для массового
+    инвайта это снижает заметность — иначе всплеск свежепромоутнутых видимых
+    админов сам по себе сигнал для других участников/детекта чата.
 
     Возвращает (успех, причина). Причина нужна вызывающему, чтобы отличить
     временный сбой от окончательного отказа:
@@ -5161,7 +5168,7 @@ async def promote_to_admin_ex(
             manage_call=manage_call,
             other=False,
             change_info=change_info,
-            anonymous=False,
+            anonymous=anonymous,
             manage_topics=False,
         )
         await client(

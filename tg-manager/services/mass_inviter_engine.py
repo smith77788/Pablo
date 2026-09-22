@@ -806,7 +806,11 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     _grant = ChatAdminRights(
         post_messages=False, edit_messages=False, delete_messages=False,
         ban_users=False, invite_users=True, pin_messages=False, add_admins=False,
-        manage_call=False, other=False, change_info=False, anonymous=False,
+        manage_call=False, other=False, change_info=False,
+        # Анонимно: цель на короткое время становится админом (промоут-трюк) —
+        # без anonymous её имя мелькнёт в списке админов чата даже на секунды,
+        # лишний след для владельца канала/детекта.
+        anonymous=True,
         manage_topics=False)
     _revoke = ChatAdminRights(
         post_messages=False, edit_messages=False, delete_messages=False,

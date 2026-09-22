@@ -12768,7 +12768,11 @@ async def _exec_mass_invite(
                             # Метод «admin»: инвайтер сам добавляет цели промоут-трюком,
                             # значит ему нужно право «Назначать админов» (add_admins),
                             # а не только invite_users.
-                            add_admins=(_invite_method == "admin")),
+                            add_admins=(_invite_method == "admin"),
+                            # Анонимный админ не подписывается своим именем — всплеск
+                            # свежепромоутнутых видимых инвайтеров сам по себе заметный
+                            # сигнал для участников/детекта чата.
+                            anonymous=True),
                         timeout=45)
                     if okp:
                         _promoted_n += 1
@@ -13316,7 +13320,8 @@ async def _exec_mass_invite(
                                 _am.promote_to_admin_ex(
                                     _promoter["session_str"], group, int(_u),
                                     _acc=dict(_promoter), invite_users=True, post_messages=False,
-                                    add_admins=(_invite_method == "admin")),
+                                    add_admins=(_invite_method == "admin"),
+                                    anonymous=True),
                                 timeout=45)
                             if _okp:
                                 _promoted_n += 1
