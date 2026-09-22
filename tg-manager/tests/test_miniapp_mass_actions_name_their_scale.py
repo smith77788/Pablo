@@ -135,3 +135,50 @@ def test_irreversible_contact_delete_counts_before_asking():
     assert "uchN === 0" in body, (
         "удаление по фильтру, под который никто не попадает, должно "
         "останавливаться, а не рапортовать «Удалено: 0»")
+
+
+# ── Действия по всему флоту: потолок операции тоже часть масштаба ────────────
+
+@pytest.mark.parametrize("kind, counting", [
+    # Отбор обязан совпадать с тем, которым действие берёт аккаунты.
+    ("join_all",
+     "FROM tg_accounts WHERE owner_id=$1 AND is_active "),
+    # «Все активные» и «все активные БЕЗ плана» — разные наборы.
+    ("warmup_bulk", "FROM account_warmup_plans wp"),
+])
+def test_fleet_action_counts_its_own_selection(kind, counting):
+    body = _handler("mass_targets")
+    assert f'kind == "{kind}"' in body, f"масштаб {kind} не считается"
+    assert counting in body, (
+        f"счёт для {kind} идёт не тем отбором, которым действие берёт аккаунты")
+
+
+def test_fleet_actions_report_their_cap():
+    """У обеих операций бэкенд берёт лишь первые N подходящих."""
+    body = _handler("mass_targets")
+    assert '"cap": 200' in body and '"cap": 500' in body, (
+        "потолок не доезжает до фронта: согласие на «всеми аккаунтами», когда "
+        "дойдёт только до двухсот, — согласие не на то, что произойдёт")
+
+
+def test_cap_is_passed_through_to_the_dialog():
+    body = _fn("massTargets")
+    assert "cap" in body, "massTargets теряет потолок по дороге"
+    scale = _fn("massScaleCapped")
+    assert "t.cap" in scale and "t.total > t.cap" in scale, (
+        "строка масштаба не различает «их N» и «подходящих N, берутся первые M»")
+
+
+@pytest.mark.parametrize("fn, op", [
+    ("joinAllToGroup", "join_all"),
+    ("bulkWarmup", "warmup_bulk"),
+])
+def test_fleet_confirmation_names_the_scale(fn, op):
+    body = _fn(fn)
+    assert f"massTargets('{op}')" in body, f"{fn} не спрашивает масштаб"
+    assert "massScaleCapped(" in body, (
+        f"подтверждение в {fn} не называет ни числа аккаунтов, ни потолка")
+    assert body.index("massTargets(") < body.index("askConfirm("), (
+        f"{fn} спрашивает согласие раньше, чем узнаёт масштаб")
+    assert ".total === 0" in body, (
+        f"{fn} запускает операцию в пустоту вместо честного отказа")

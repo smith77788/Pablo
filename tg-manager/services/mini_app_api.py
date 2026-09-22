@@ -8408,6 +8408,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "AND type IN ('megagroup','supergroup','group','chat') "
                 "ORDER BY members_count DESC NULLS LAST, channel_id DESC LIMIT 8",
                 uid, int(acc_id))
+        elif kind == "join_all":
+            # Тот же отбор, что invite_join_all, и тот же его потолок: без него
+            # человек с тремя сотнями аккаунтов согласился бы на «всеми
+            # активными», а вступили бы двести.
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active "
+                "AND session_str IS NOT NULL", uid)
+            return _json_resp({"ok": True, "op": kind, "total": int(total or 0),
+                               "cap": 200, "sample": []})
+        elif kind == "warmup_bulk":
+            # Тот же отбор, что _warmup_bulk_core: активные, с сессией, не под
+            # блокировкой и ещё БЕЗ активного плана. Общее число активных
+            # аккаунтов здесь назвало бы набор заметно шире реального.
+            total = await _safe_count(pool,
+                """SELECT COUNT(*) FROM tg_accounts a
+                   WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
+                     AND COALESCE(a.acc_status,'active')
+                         NOT IN ('banned','deactivated','session_expired','spamblock')
+                     AND NOT EXISTS (
+                         SELECT 1 FROM account_warmup_plans wp
+                         WHERE wp.account_id=a.id AND wp.status='active')""", uid)
+            return _json_resp({"ok": True, "op": kind, "total": int(total or 0),
+                               "cap": 500, "sample": []})
         elif kind == "admin_broadcast":
             # Тот же набор, что admin_broadcast: живым людям, кроме забаненных.
             if not _is_admin(uid):

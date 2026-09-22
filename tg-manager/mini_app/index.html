@@ -12886,13 +12886,24 @@ async function massTargets(op, accId) {
     let u = '/api/miniapp/mass_targets?op=' + encodeURIComponent(op);
     if (accId) u += '&acc_id=' + encodeURIComponent(accId);
     const d = await api(u);
-    return {total: Number(d.total||0), sample: d.sample||[]};
+    return {total: Number(d.total||0), sample: d.sample||[], cap: (d.cap!=null ? Number(d.cap) : null)};
   } catch(e) { return null; }
 }
 
 // Строка «— их N» или честное «число узнать не удалось».
 function massScale(t, one, few, many) {
   if (!t) return ' (узнать их число не удалось)';
+  return ' — их ' + t.total + ' ' + plural(t.total, one, few, many);
+}
+
+// То же, но с потолком операции: у части действий бэкенд берёт лишь первые N
+// подходящих. Согласие на «всеми аккаунтами», когда дойдёт только до двухсот,
+// — это согласие не на то, что произойдёт.
+function massScaleCapped(t, one, few, many) {
+  if (!t) return ' (узнать их число не удалось)';
+  if (t.cap && t.total > t.cap) {
+    return ': подходящих ' + t.total + ', но за раз берутся первые ' + t.cap;
+  }
   return ' — их ' + t.total + ' ' + plural(t.total, one, few, many);
 }
 
@@ -18435,7 +18446,13 @@ async function joinAllToGroup() {
   if (!g) return;
   const group = g.value.trim();
   if (!group) { toast('Укажите группу'); return; }
-  if (!(await askConfirm('Вступить всеми активными аккаунтами в «'+group+'»?\nНужно для прямого инвайта. Идемпотентно — уже вступившие не пострадают.'))) return;
+  // Сколько аккаунтов реально пойдут вступать — считаем тем же отбором, что и
+  // сама операция, вместе с её потолком.
+  const jaT = await massTargets('join_all');
+  if (jaT && jaT.total === 0) { toast('Нет активных аккаунтов с сессией — вступать некем'); return; }
+  if (!(await askConfirm('Вступить активными аккаунтами в «'+group+'»'
+      + massScaleCapped(jaT, 'аккаунт', 'аккаунта', 'аккаунтов')
+      + '?\nНужно для прямого инвайта. Идемпотентно — уже вступившие не пострадают.'))) return;
   if (el) el.innerHTML = '<span style="color:var(--hint)">Ставлю операцию вступления…</span>';
   try {
     const r = await api('/api/miniapp/invite/join_all', {method:'POST', body:JSON.stringify({group})});
@@ -18912,7 +18929,16 @@ async function openWarmupModal() {
 }
 function closeWarmupModal() { document.getElementById('warmupMbg').classList.remove('show'); }
 async function bulkWarmup() {
-  if (!await askConfirm('Запустить прогрев для ВСЕХ активных аккаунтов без плана?\nРежим: Standard, поведение: смешанное.')) return;
+  // «ВСЕХ активных без плана» — набор заметно уже, чем «все активные»: из него
+  // выпадают заблокированные и те, у кого план уже идёт. Считаем его же.
+  const wuT = await massTargets('warmup_bulk');
+  if (wuT && wuT.total === 0) {
+    toast('Нет подходящих аккаунтов: все уже греются или недоступны');
+    return;
+  }
+  if (!await askConfirm('Запустить прогрев для активных аккаунтов без плана'
+      + massScaleCapped(wuT, 'аккаунт', 'аккаунта', 'аккаунтов')
+      + '?\nРежим: Standard, поведение: смешанное.')) return;
   toast('🔥 Запускаю массовый прогрев…');
   try {
     const r = await api('/api/miniapp/warmup/bulk_start', {method:'POST', body:JSON.stringify({plan_type:'standard', profile_type:'mixed', niche:'general'})});
