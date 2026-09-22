@@ -3890,54 +3890,95 @@ async def get_keyword_notify_enabled(
     return bool(val)
 
 
-async def upsert_managed_channels(
-    pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict]
-) -> int:
-    """Сохраняет/обновляет список каналов аккаунта в managed_channels. Возвращает кол-во строк.
+# Один INSERT на обе двери записи каналов: и точечное добавление, и полный
+# ре-импорт. members_count не даём обнулять: частичная страница диалогов или
+# временный сбой Telegram не обязаны откатывать известное число участников
+# назад (из-за этого в мини-аппе у ВСЕХ каналов показывался 0).
+_MANAGED_CHANNEL_UPSERT_SQL = """
+    INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username,
+                                 access_hash, type, is_admin, is_creator, members_count)
+    VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    ON CONFLICT (owner_id, channel_id) DO UPDATE
+    SET title=EXCLUDED.title, username=EXCLUDED.username,
+        acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
+        type=EXCLUDED.type,
+        is_admin=COALESCE(EXCLUDED.is_admin, managed_channels.is_admin),
+        is_creator=COALESCE(EXCLUDED.is_creator, managed_channels.is_creator),
+        members_count=CASE WHEN EXCLUDED.members_count > 0
+                            THEN EXCLUDED.members_count
+                            ELSE managed_channels.members_count END
+"""
 
-    ⚠️ ОПАСНО для частичных данных: сначала DELETE ВСЕХ существующих строк
-    (owner_id, acc_id), затем INSERT только переданного списка. Рассчитана
-    на ПОЛНЫЙ ре-импорт (например, «перезагрузить с нуля из Telegram», где
-    channels — заведомо исчерпывающий список для аккаунта). Вызов с
-    усечённым/частичным списком (одна страница пагинации диалогов, один
-    только что созданный канал, срез списка, обрезанный лимитом квоты
-    подписки) тихо стирает все остальные ранее сохранённые каналы этого
-    аккаунта. Для частичных данных используй add_managed_channels() ниже —
-    она ничего не удаляет, только добавляет/обновляет переданные строки.
+
+def _managed_channel_rows(owner_id: int, acc_id: int, channels: list[dict]) -> list[tuple]:
+    """Строки под _MANAGED_CHANNEL_UPSERT_SQL."""
+    return [
+        (
+            owner_id,
+            acc_id,
+            ch["id"],
+            ch.get("title", ""),
+            ch.get("username", ""),
+            ch.get("access_hash", 0),
+            ch.get("type", "channel"),
+            ch.get("is_admin"),
+            ch.get("is_creator"),
+            int(ch.get("members") or 0),
+        )
+        for ch in channels
+    ]
+
+
+async def upsert_managed_channels(
+    pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict],
+    *, complete: bool,
+) -> int:
+    """Сверяет список каналов аккаунта с базой. Возвращает кол-во переданных строк.
+
+    `complete` — обязательный и осознанный ответ на вопрос «переданный список
+    точно исчерпывающий?». Это единственное, что отличает ре-импорт от потери
+    данных:
+
+    * `complete=True` — строки этого аккаунта, которых нет в списке, удаляются
+      (канал действительно отдан/удалён). Уцелевшие строки НЕ пересоздаются, а
+      обновляются: раньше здесь был DELETE всех строк и INSERT заново, и вместе
+      со строками обнулялось число участников — те самые «0 участников» у всех
+      каналов, которые чинили в add_managed_channels, но не тут.
+    * `complete=False` — не удаляем ничего, просто добавляем/обновляем
+      переданное. Так ведёт себя любой срез: скан диалогов упирается в лимит
+      (account_manager.scan_owned_assets → truncated), страница пагинации,
+      один только что созданный канал. По неполному списку отсутствие канала
+      НИЧЕГО не доказывает, а удаление его строки — потеря данных, которую
+      никто не заметит до следующей рассылки.
+
+    Параметр именованный и без значения по умолчанию намеренно: забыть его
+    нельзя, а значит нельзя и случайно получить удаление.
     """
     if not channels:
         return 0
+    if not complete:
+        log.warning(
+            "upsert_managed_channels: список неполный (acc_id=%s) — ничего не "
+            "удаляем, только добавляем %d строк", acc_id, len(channels),
+        )
+        return await add_managed_channels(pool, owner_id, acc_id, channels)
+
+    ids = []
+    for ch in channels:
+        try:
+            ids.append(int(ch["id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    rows = _managed_channel_rows(owner_id, acc_id, channels)
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(
-                "DELETE FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
-                owner_id,
-                acc_id,
+                "DELETE FROM managed_channels "
+                " WHERE owner_id=$1 AND acc_id=$2 "
+                "   AND NOT (channel_id = ANY($3::bigint[]))",
+                owner_id, acc_id, ids,
             )
-            await conn.executemany(
-                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, is_admin, is_creator)
-                   VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                   ON CONFLICT (owner_id, channel_id) DO UPDATE
-                   SET title=EXCLUDED.title, username=EXCLUDED.username,
-                       acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-                       type=EXCLUDED.type,
-                       is_admin=COALESCE(EXCLUDED.is_admin, managed_channels.is_admin),
-                       is_creator=COALESCE(EXCLUDED.is_creator, managed_channels.is_creator)""",
-                [
-                    (
-                        owner_id,
-                        acc_id,
-                        ch["id"],
-                        ch.get("title", ""),
-                        ch.get("username", ""),
-                        ch.get("access_hash", 0),
-                        ch.get("type", "channel"),
-                        ch.get("is_admin"),
-                        ch.get("is_creator"),
-                    )
-                    for ch in channels
-                ],
-            )
+            await conn.executemany(_MANAGED_CHANNEL_UPSERT_SQL, rows)
     return len(channels)
 
 
@@ -3952,43 +3993,13 @@ async def add_managed_channels(
     подписки) — то есть везде, где переданный `channels` не гарантированно
     является полным набором каналов аккаунта. Для настоящего полного
     ре-импорта (когда список заведомо полный и стейл-записи действительно
-    нужно удалить) — см. upsert_managed_channels().
+    нужно удалить) — см. upsert_managed_channels(..., complete=True).
     """
     if not channels:
         return 0
-    # members_count: account_manager.get_dialogs() уже кладёт его в каждый
-    # диалог (entity.participants_count), но до сих пор терялся на пути в БД —
-    # отсюда «0 участников» у ВСЕХ импортированных каналов в мини-аппе.
-    # Не даём нулю/отсутствующему значению затирать уже известный счётчик
-    # (частичная страница диалогов/временный сбой Telegram не обязаны откатывать
-    # число назад).
     await pool.executemany(
-        """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type, is_admin, is_creator, members_count)
-           VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-           ON CONFLICT (owner_id, channel_id) DO UPDATE
-           SET title=EXCLUDED.title, username=EXCLUDED.username,
-               acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
-               type=EXCLUDED.type,
-               is_admin=COALESCE(EXCLUDED.is_admin, managed_channels.is_admin),
-               is_creator=COALESCE(EXCLUDED.is_creator, managed_channels.is_creator),
-               members_count=CASE WHEN EXCLUDED.members_count > 0
-                                   THEN EXCLUDED.members_count
-                                   ELSE managed_channels.members_count END""",
-        [
-            (
-                owner_id,
-                acc_id,
-                ch["id"],
-                ch.get("title", ""),
-                ch.get("username", ""),
-                ch.get("access_hash", 0),
-                ch.get("type", "channel"),
-                ch.get("is_admin"),
-                ch.get("is_creator"),
-                int(ch.get("members") or 0),
-            )
-            for ch in channels
-        ],
+        _MANAGED_CHANNEL_UPSERT_SQL,
+        _managed_channel_rows(owner_id, acc_id, channels),
     )
     return len(channels)
 

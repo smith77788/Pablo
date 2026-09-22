@@ -2597,11 +2597,39 @@ async def create_shared_folder_link(
             log_exc_swallow(log, "create_shared_folder_link: disconnect")
 
 
+# Сколько диалогов читаем при скане своих каналов. У рабочего аккаунта
+# диалоги — это не только каналы: каждая личная переписка тоже диалог, так что
+# лимит упирается быстро. Поэтому результат скана честно помечается как
+# обрезанный: по нему НЕЛЬЗЯ считать, что чего-то нет (см. truncated ниже и
+# database.db.upsert_managed_channels).
+_OWNED_SCAN_DIALOG_LIMIT = 300
+
+
+def scan_was_truncated(seen_dialogs: int | None) -> bool:
+    """Упёрся ли скан в лимит диалогов — то есть список заведомо неполный.
+
+    Неизвестность (None, мусор) считается обрывом: по такому списку удалять
+    нельзя, а лишняя осторожность стоит только того, что стейл-строка проживёт
+    до следующего полного скана.
+    """
+    if seen_dialogs is None:
+        return True
+    try:
+        return int(seen_dialogs) >= _OWNED_SCAN_DIALOG_LIMIT
+    except (TypeError, ValueError):
+        return True
+
+
 async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> dict:
     """Scan account for channels/groups where it's admin or creator.
 
-    Returns {'channels': [...], 'groups': [...], 'error': str|None}
+    Returns {'channels': [...], 'groups': [...], 'error': str|None,
+             'truncated': bool}
     Each item: {id, title, username, members, is_creator, access_hash}
+
+    truncated=True значит «список оборван, отсутствие канала ничего не
+    доказывает». Вызывающий обязан это учитывать, прежде чем удалять по
+    результату скана что-либо из базы.
     """
     from telethon.tl.types import Channel
 
@@ -2615,13 +2643,15 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
             from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
 
             _ch, _gr = [], []
+            _seen = 0
             # Use manual __anext__ so ChannelPrivateError from the iterator
             # itself (thrown mid-batch) skips that dialog instead of killing
             # the entire scan and discarding already-collected results.
-            _iter = client.iter_dialogs(limit=300)
+            _iter = client.iter_dialogs(limit=_OWNED_SCAN_DIALOG_LIMIT)
             while True:
                 try:
                     dialog = await _iter.__anext__()
+                    _seen += 1
                 except StopAsyncIteration:
                     break
                 except (ChannelPrivateError, ChatAdminRequiredError):
@@ -2659,10 +2689,11 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
                         _ch.append(item)
                     else:
                         _gr.append(item)
-            return _ch, _gr
+            return _ch, _gr, _seen
 
-        channels, groups = await asyncio.wait_for(_collect(), timeout=_OP_TIMEOUT)
-        return {"channels": channels, "groups": groups, "error": None}
+        channels, groups, seen = await asyncio.wait_for(_collect(), timeout=_OP_TIMEOUT)
+        return {"channels": channels, "groups": groups, "error": None,
+                "truncated": scan_was_truncated(seen)}
     except Exception as e:
         err_str = str(e)
         err_low = err_str.lower()
@@ -2681,7 +2712,9 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
             log.warning("scan_owned_assets session dead: %s", e)
         else:
             log.exception("scan_owned_assets error: %s", e)
-        return {"channels": [], "groups": [], "error": err_str[:200]}
+        # Скан не состоялся — про каналы аккаунта мы не знаем НИЧЕГО.
+        return {"channels": [], "groups": [], "error": err_str[:200],
+                "truncated": True}
     finally:
         try:
             await client.disconnect()

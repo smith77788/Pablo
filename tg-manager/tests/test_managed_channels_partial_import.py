@@ -215,17 +215,25 @@ def test_op_worker_reclassify_channels_persists_member_counts():
 
 
 def test_upsert_managed_channels_still_deletes_first():
-    """Документирует опасный контракт: DELETE по (owner_id, acc_id) ПЕРЕД INSERT.
-    Если это когда-нибудь изменится молча — все вызовы add_managed_channels()
-    вместо неё нужно будет пересмотреть заново."""
+    """Документирует опасный контракт: при complete=True лишние строки удаляются.
+
+    Удаление теперь адресное — только строки, которых НЕТ в переданном списке
+    (раньше сносились все строки аккаунта и вписывались заново, вместе с
+    обнулением числа участников). Если это когда-нибудь изменится молча — все
+    вызовы add_managed_channels() вместо неё нужно пересмотреть заново.
+    """
     pool = _FakePool()
 
     async def _run():
-        await db.upsert_managed_channels(pool, owner_id=1, acc_id=10, channels=_channels(100))
+        await db.upsert_managed_channels(
+            pool, owner_id=1, acc_id=10, channels=_channels(100), complete=True)
 
     asyncio.run(_run())
     deletes = [q for q, _ in pool.log if q.strip().startswith("DELETE")]
-    assert deletes, "upsert_managed_channels должна по-прежнему удалять существующие строки"
+    assert deletes, "upsert_managed_channels должна по-прежнему удалять лишние строки"
+    assert "NOT (channel_id = ANY" in deletes[0], (
+        "удаление должно обходить стороной каналы из переданного списка"
+    )
 
 
 def test_add_managed_channels_never_deletes():
@@ -262,7 +270,8 @@ def test_add_managed_channels_partial_call_does_not_wipe_existing_rows():
 
     async def _run():
         # Полный первичный импорт — легитимный вызов upsert_managed_channels.
-        await db.upsert_managed_channels(pool, owner_id=1, acc_id=10, channels=_channels(1))
+        await db.upsert_managed_channels(
+            pool, owner_id=1, acc_id=10, channels=_channels(1), complete=True)
         pool.log.clear()
         # Частичный довоз (например, только что созданный новый канал).
         await db.add_managed_channels(pool, owner_id=1, acc_id=10, channels=_channels(2))

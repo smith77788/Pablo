@@ -116,13 +116,16 @@ def test_upsert_managed_channels_persists_role_flags():
     pool = _FakePool()
     chans = [{"id": 100, "title": "Мой", "type": "channel", "is_admin": True, "is_creator": False}]
 
-    asyncio.run(db.upsert_managed_channels(pool, owner_id=1, acc_id=10, channels=chans))
+    asyncio.run(db.upsert_managed_channels(
+        pool, owner_id=1, acc_id=10, channels=chans, complete=True))
 
     inserts = [(q, a) for q, a in pool.log if "INSERT INTO managed_channels" in q]
     assert inserts
     q, row = inserts[0]
     assert "is_admin" in q and "is_creator" in q
-    assert row[-2:] == (True, False)
+    # Позиция от конца: последним параметром идёт members_count — полный
+    # ре-импорт теперь тоже его пишет, раньше он терял число участников.
+    assert row[-3:-1] == (True, False)
 
 
 # ── Импорт фильтрует чужие ────────────────────────────────────────────────────

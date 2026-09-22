@@ -1951,8 +1951,13 @@ async def cb_manage_show_dialogs_live(
     all_items = result.get("channels", []) + result.get("groups", [])
     # Save to DB for future use
     if all_items:
+        # Удалять недостающие строки можно ТОЛЬКО по исчерпывающему скану.
+        # scan_owned_assets читает ограниченное число диалогов и честно
+        # помечает обрыв; по обрезанному списку отсутствие канала ничего не
+        # доказывает, поэтому там только добавляем.
         await db.upsert_managed_channels(
-            pool, callback.from_user.id, callback_data.acc_id, all_items
+            pool, callback.from_user.id, callback_data.acc_id, all_items,
+            complete=not result.get("truncated") and not result.get("error"),
         )
     if not all_items:
         await callback.message.edit_text(
@@ -5631,7 +5636,12 @@ async def _show_my_chans_page(
                 log_exc_swallow(log, "Сбой отображения ошибки загрузки каналов")
             return
         if owner_id:
-            await upsert_managed_channels(pool, owner_id, acc_id, raw)
+            # complete — только если скан дочитал до конца и не упал: иначе
+            # отсутствие канала в списке значит «не дошли», а не «нет канала».
+            await upsert_managed_channels(
+                pool, owner_id, acc_id, raw,
+                complete=not owned.get("truncated") and not owned.get("error"),
+            )
             if raw:
                 async def _promote_botmother_bg(
                     _session: str, _channels: list[dict]
