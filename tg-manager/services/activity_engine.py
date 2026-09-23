@@ -437,6 +437,12 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                     error_str = str(exc)[:150]
                     if etype == "FloodWaitError":
                         seconds = getattr(exc, "seconds", 60)
+                        # Пейсинг замедляется только внутри этой сессии, а о
+                        # паузе обязан знать весь продукт: иначе следующая
+                        # подсистема возьмёт аккаунт как спокойный.
+                        from services import flood_engine as _fe
+
+                        await _fe.note_flood(pool, acc_id, exc, "activity")
                         flood_multiplier = min(flood_multiplier * 2, 8.0)
                         log.warning(
                             "activity_session %d FloodWait %ds, multiplier=%.1f",

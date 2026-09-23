@@ -1526,7 +1526,7 @@ async def handle_story_caption(
 
     try:
         res = await story_manager.post_story(
-            acc["session_str"], media_url, caption=caption, _acc=dict(acc)
+            acc["session_str"], media_url, caption=caption, _acc=dict(acc), pool=pool
         )
     except Exception as exc:
         await message.answer(

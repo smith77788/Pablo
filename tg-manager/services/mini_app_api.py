@@ -5328,7 +5328,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import story_manager
             res = await asyncio.wait_for(
-                story_manager.post_story(acc["session_str"], media_url, caption, period_hours, dict(acc)),
+                story_manager.post_story(acc["session_str"], media_url, caption,
+                                         period_hours, dict(acc), pool=pool),
                 timeout=180)
         except asyncio.TimeoutError:
             return _err("Публикация не завершилась за 180с — проверьте прокси/сессию", 400)

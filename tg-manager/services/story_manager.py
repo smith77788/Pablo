@@ -87,6 +87,7 @@ async def post_story(
     caption: str = "",
     period_hours: int = 24,
     _acc: dict | None = None,
+    pool=None,
 ) -> dict:
     """Опубликовать историю на СВОЙ аккаунт из media_url (фото/видео).
 
@@ -151,7 +152,16 @@ async def post_story(
                 timeout=120.0,
             )
         except FloodWaitError as e:
-            return {"ok": False, "status": "error", "error": f"FloodWait {e.seconds}s"}
+            # Пауза касается АККАУНТА, а не только историй: без записи в пульс
+            # его тут же возьмёт следующая подсистема, уже под ограничением.
+            # Плюс текст уходит владельцу напрямую — он был по-английски.
+            from services import flood_engine as _fe
+
+            _secs = await _fe.note_flood(pool, (_acc or {}).get("id"), e, "story")
+            return {"ok": False, "status": "error",
+                    "error": f"Telegram просит паузу {_secs or e.seconds} с — "
+                             "историю опубликуем позже.",
+                    "flood_wait": _secs or int(getattr(e, "seconds", 0) or 0)}
         return {"ok": True, "status": "posted", "media_type": media_type, "period_hours": period // 3600}
     except Exception as e:
         log.warning("post_story failed: %s", e)

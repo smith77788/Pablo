@@ -309,6 +309,11 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
         async with client:
             await fn(client, pool, profile_id, account_id)
     except FloodWaitError as e:
+        # Пропустить цикл мало: без записи в пульс аккаунт остаётся спокойным
+        # для операций, разбора аудитории и рассылки.
+        from services import flood_engine as _fe
+
+        await _fe.note_flood(pool, account_id, e, "ghost")
         await _log_action(pool, profile_id, account_id, action, None, "skip", f"flood:{e.seconds}s")
     except (UserDeactivatedBanError, AuthKeyError) as e:
         log.warning("Ghost Engine: account %d banned/invalid, disabling profile %d", account_id, profile_id)

@@ -124,6 +124,9 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
                 )
 
     except FloodWaitError as e:
+        from services import flood_engine as _fe
+
+        await _fe.note_flood(pool, account_id, e, "mesh_poll")
         log.debug("Content Mesh: flood wait %ds for mesh %d source poll", e.seconds, mesh_id)
     except (UserDeactivatedBanError, AuthKeyError):
         log.warning("Content Mesh: account %d banned, disabling mesh %d", account_id, mesh_id)
@@ -254,6 +257,11 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
         )
 
     except FloodWaitError as e:
+        # Перенести доставку мало: пауза касается АККАУНТА, а не только этой
+        # очереди, и без записи в пульс его тут же возьмёт другая подсистема.
+        from services import flood_engine as _fe
+
+        await _fe.note_flood(pool, account_id, e, "mesh_send")
         # Reschedule rather than fail
         new_time = datetime.now(timezone.utc) + timedelta(seconds=e.seconds + 30)
         await pool.execute(

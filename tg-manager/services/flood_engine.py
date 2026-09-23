@@ -700,6 +700,37 @@ def flood_seconds(exc: BaseException) -> int | None:
     return int(m.group(1)) if m else None
 
 
+async def note_flood(pool, account_id, exc: BaseException,
+                     action_type: str = "default") -> int:
+    """Записать паузу Telegram, если ошибка — пауза. Вернуть её длительность.
+
+    Один вызов на весь разбор-запись-возврат, потому что каждый раз, когда это
+    писали руками, какой-нибудь шаг терялся. Чаще всего терялась сама запись:
+    паузу ловили, показывали оператору или писали в лог — и забывали. После
+    этого выбор аккаунта под следующую операцию считал аккаунт спокойным и
+    уводил его под уже действующее ограничение, где следующая пауза будет
+    длиннее предыдущей.
+
+    Медленный режим чата сюда НЕ попадает: это свойство чата, а не аккаунта, и
+    ставить из-за него кулдаун — значит без причины вывести здоровый аккаунт из
+    работы.
+
+    Свою ошибку не поднимает: запись в пульс не должна ронять действие, ради
+    которого её делают.
+    """
+    text = str(exc)
+    if "another message in this chat" in text or "slowmode" in text.lower():
+        return 0
+    try:
+        secs = flood_seconds(exc) or 0
+        if secs > 0 and account_id:
+            await record_flood(pool, int(account_id), int(secs), action_type)
+        return secs
+    except Exception:
+        log.warning("пауза Telegram не записана в пульс здоровья", exc_info=True)
+        return 0
+
+
 async def record_flood(
     pool: Optional[asyncpg.Pool],
     account_id: int,
