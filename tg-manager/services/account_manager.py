@@ -3981,34 +3981,79 @@ async def join_channel(
         _record_proxy_fail(_acc, "join")
         return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
-        from telethon.errors import (
-            FloodWaitError,
-            UserBannedInChannelError,
-            ChannelPrivateError,
-            PeerFloodError,
-        )
+        # Разбираем по ИМЕНИ класса, как classify_invite_error в
+        # mass_inviter_engine: часть случаев Telethon отдаёт обычным ValueError
+        # без своего типа, да и импортировать десяток символов ради isinstance
+        # незачем. Раньше здесь разбирались ровно четыре ошибки, а всё
+        # остальное уезжало наверх сырым английским текстом — и вызывающий не
+        # мог отличить «уже в чате» от «ссылка протухла» и от «аккаунт упёрся
+        # в лимит чатов». Каждый такой случай он повторял снова и снова.
+        _name = type(e).__name__
+        _text = str(e)
 
-        if isinstance(e, FloodWaitError):
+        if "flood" in _name.lower() and "peerflood" not in _name.lower():
+            from services import flood_engine as _fe
+
+            _secs = _fe.flood_seconds(e) or 0
             return {
-                "error": f"FloodWait {e.seconds}с — подождите перед вступлением",
-                "flood_wait": e.seconds,
+                "error": f"Telegram просит паузу {_secs} с — вступление отложено.",
+                "flood_wait": _secs,
             }
-        if isinstance(e, UserBannedInChannelError):
-            return {"error": f"Аккаунт забанен в этом канале: {e}", "banned": True}
-        if isinstance(e, ChannelPrivateError):
+        if _name == "PeerFloodError":
+            # PeerFlood — временное ограничение АККАУНТА на вступления, а не бан
+            # в канале. peer_flood=True говорит вызывающему поставить аккаунт на
+            # паузу, а не выкидывать его из круга.
             return {
-                "error": f"Канал приватный или аккаунт заблокирован: {e}",
-                "banned": True,
-            }
-        if isinstance(e, PeerFloodError):
-            # PeerFlood = temporary account-level join rate limit, NOT a channel ban.
-            # peer_flood=True lets callers apply a cooldown instead of skipping the account.
-            return {
-                "error": f"PeerFlood: аккаунт временно ограничен: {e}",
+                "error": "Аккаунт временно ограничен Telegram (PeerFlood) — "
+                         "дайте ему отдохнуть.",
                 "peer_flood": True,
             }
+        if _name in ("UserBannedInChannelError", "UserKickedError"):
+            return {"error": "Аккаунт забанен в этом чате.", "banned": True}
+        if _name == "ChannelPrivateError":
+            return {
+                "error": "Чат приватный или аккаунт из него исключён.",
+                "banned": True,
+            }
+        if _name == "UserAlreadyParticipantError" or (
+                "already" in _text.lower() and "participant" in _text.lower()):
+            # Не ошибка: аккаунт уже в чате, а значит готов к работе. Раньше это
+            # возвращалось сырым английским текстом, и единственный способ
+            # отличить такой случай был поиск слова «already» в сообщении.
+            return {
+                "error": "Аккаунт уже состоит в этом чате.",
+                "already_member": True,
+            }
+        if _name == "InviteRequestSentError":
+            # Заявка подана и ждёт решения администратора. Повторять нельзя:
+            # каждая попытка — ещё одна заявка, и для чата это выглядит спамом.
+            return {
+                "error": "Заявка на вступление подана — ждём одобрения "
+                         "администратора чата.",
+                "request_sent": True,
+            }
+        if _name in ("InviteHashExpiredError", "InviteHashInvalidError",
+                     "InviteHashEmptyError", "UsernameNotOccupiedError",
+                     "UsernameInvalidError"):
+            # Дело в ссылке, а не в аккаунте: перебирать флот бессмысленно и
+            # со стороны выглядит как долбёжка.
+            return {
+                "error": "Ссылка или адрес чата недействительны — обновите "
+                         "приглашение.",
+                "invite_invalid": True,
+            }
+        if _name in ("UserChannelsTooMuchError", "ChannelsTooMuchError") or (
+                "too much" in _text.lower() and "channel" in _text.lower()):
+            # Аккаунт упёрся в потолок Telegram по числу чатов. Пока он не
+            # выйдет откуда-нибудь, вступить не сможет НИКОГДА — повторять
+            # бесполезно.
+            return {
+                "error": "Аккаунт достиг предела Telegram по числу чатов — "
+                         "освободите место, выйдя из ненужных.",
+                "channels_limit": True,
+            }
         log.exception("join_channel error: %s", e)
-        return {"error": str(e)[:200]}
+        return {"error": _text[:200]}
     finally:
         if client is not None:
             try:

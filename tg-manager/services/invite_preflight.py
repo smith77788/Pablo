@@ -221,10 +221,19 @@ async def join_all(pool: asyncpg.Pool, owner_id: int, group: str,
                     joiner(acc["session_str"], acc, group), timeout=_PER_ACC_TIMEOUT)
             except Exception:
                 return "failed"
-            err = str((r or {}).get("error", "")).lower()
+            res = r or {}
+            err = str(res.get("error", "")).lower()
             if not err:
                 return "joined"
-            if "already" in err or "participant" in err:
+            # Признак от движка, а не поиск слова в тексте ошибки. Пока «уже в
+            # чате» опознавалось по английскому «already», любая правка
+            # формулировки молча превращала готовый аккаунт в проваленный — и
+            # оператор видел «вступить не смогли» там, где вступать было не
+            # нужно. Текстовую проверку оставляем как запасную: сообщение может
+            # прийти и из чужого joiner-а.
+            if res.get("already_member"):
+                return "already"
+            if "already" in err or "participant" in err or "уже состоит" in err:
                 return "already"
             return "failed"
 
