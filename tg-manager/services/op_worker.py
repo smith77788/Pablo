@@ -10614,6 +10614,12 @@ async def _exec_scan_owned_resources(
         await release_accounts(claimed_ids)
 
 
+# Потолок прямых GetFullChannel за один прогон обновления. Запрос читающий и
+# сам по себе безобиден, но пятьсот подряд с одной сессии — уже поведение, на
+# которое Telegram отвечает FloodWait. Остальное доберёт фоновый drift_detector.
+_MEMBERS_REFRESH_CAP = max(1, int(os.getenv("CHANNELS_MEMBERS_REFRESH_CAP", "200") or 200))
+
+
 async def _exec_reclassify_channels(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -10735,6 +10741,42 @@ async def _exec_reclassify_channels(
                 # Обновление карточек — не причина заваливать переопределение ролей.
                 log.warning("_exec_reclassify_channels: карточки не обновлены: %s", _mexc)
 
+        # Число участников обходом диалогов НЕ берётся: participants_count там —
+        # необязательное поле, и Telegram присылает его редко. Именно поэтому
+        # кнопка «🔄 Обновить данные» подтягивала имя и ссылку, а число
+        # участников молча оставляла прежним — сколько её ни жми.
+        #
+        # Досчитываем его прямым GetFullChannel по тем каналам, о которых обход
+        # промолчал: одно подключение на аккаунт, с паузами и потолком.
+        counted = 0
+        _need_count = [cid for cid, m in meta_map.items() if not m.get("members")]
+        if _need_count and accounts:
+            _acc0 = accounts[0]
+            try:
+                _full = await account_manager.get_channels_full_info(
+                    _acc0["session_str"], _need_count, _acc=_acc0,
+                    limit=_MEMBERS_REFRESH_CAP,
+                )
+            except Exception as _fexc:
+                log.warning("_exec_reclassify_channels: счётчики не собраны: %s", _fexc)
+                _full = {}
+            _crows = [
+                (owner_id, cid, int(info.get("members_count") or 0))
+                for cid, info in (_full or {}).items()
+                if int(info.get("members_count") or 0) > 0
+            ]
+            if _crows:
+                try:
+                    await pool.executemany(
+                        "UPDATE managed_channels SET members_count=$3 "
+                        "WHERE owner_id=$1 AND channel_id=$2",
+                        _crows,
+                    )
+                    counted = len(_crows)
+                except Exception as _cexc:
+                    log.warning(
+                        "_exec_reclassify_channels: счётчики не записаны: %s", _cexc)
+
         # Проставляем роль по подтверждённым каналам.
         if owned_ids:
             await _safe_execute(
@@ -10771,19 +10813,28 @@ async def _exec_reclassify_channels(
         kept = len(owned_ids)
         err_note = f"\n⚠️ Сессий с ошибкой: {errors}" if errors else ""
         upd_note = f"\n🔄 Обновлено карточек: {refreshed}" if refreshed else ""
+        # Счётчики называем отдельно: раньше «Обновлено карточек» включало и
+        # каналы, у которых число участников осталось старым, — отчёт обещал
+        # больше, чем было сделано.
+        cnt_note = f"\n👥 Пересчитано участников: {counted}" if counted else ""
+        if _need_count and not counted:
+            cnt_note = ("\n👥 Число участников не обновилось: Telegram не отдал "
+                        "его ни по одному каналу (проверьте живую сессию и прокси)")
         if prune:
             summary = (f"✅ Инфраструктура переопределена\n"
                        f"👑 Моих каналов/групп: {kept}\n"
-                       f"🚫 Убрано чужих (только участник): {removed}{upd_note}{err_note}")
+                       f"🚫 Убрано чужих (только участник): {removed}"
+                       f"{upd_note}{cnt_note}{err_note}")
         else:
             summary = (f"✅ Список обновлён\n"
                        f"👑 Моих: {kept} · 🚫 Чужих помечено: {len(foreign_ids)}"
-                       f"{upd_note}{err_note}")
+                       f"{upd_note}{cnt_note}{err_note}")
         return {
             "status": "done",
             "owned": kept,
             "foreign_removed": removed,
             "refreshed": refreshed,
+            "members_refreshed": counted,
             "summary": summary,
         }
     finally:

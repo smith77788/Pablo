@@ -34,14 +34,19 @@ def _int(v) -> int:
 # Куда вести после успешной операции, когда особых проблем в исходе нет.
 # Раньше такая карта покрывала 4 типа из ~70 — большинство операций
 # заканчивались тупиком «готово» без единого следующего шага.
+#
+# Значение — (подпись, функция) или (подпись, функция, аргумент). Функция
+# обязана ОТКРЫВАТЬ экран: `loadBots` здесь стоял два раза и не открывал
+# ничего — он только перерисовывает содержимое вкладки ботов, которая в этот
+# момент скрыта. Подсказка «🤖 Открыть ботов» не открывала ботов.
 _AFTER_DONE = {
     "mass_invite":              ("📊 Открыть здоровье флота", "openHealth"),
     "auto_register":            ("🔥 Прогреть аккаунты", "openWarmup"),
     "reg_check":                ("🔥 Прогреть аккаунты", "openWarmup"),
-    "bot_factory":              ("🤖 Открыть ботов", "loadBots"),
+    "bot_factory":              ("🤖 Открыть ботов", "goTab", "bots"),
     "scan_owned_resources":     ("📡 Открыть каналы", "openChannels"),
     "scan_owned_bots":          ("🔌 Подключить найденных", "connectDiscoveredBots"),
-    "connect_discovered_bots":  ("🤖 Открыть ботов", "loadBots"),
+    "connect_discovered_bots":  ("🤖 Открыть ботов", "goTab", "bots"),
     "account_warmup":           ("📊 Открыть здоровье флота", "openHealth"),
     "check_accounts_health":    ("🩹 Открыть восстановление", "openRehab"),
     "import_sessions":          ("🌐 Назначить прокси", "openProxies"),
@@ -106,6 +111,7 @@ def suggest(op_type: str, status: str, result: dict | None,
     # 5. Обычный следующий шаг по типу операции.
     nxt = _AFTER_DONE.get(op_type or "")
     if nxt and st != "failed":
-        _add(f"next_{op_type}", nxt[0], nxt[1], "следующий шаг")
+        _add(f"next_{op_type}", nxt[0], nxt[1], "следующий шаг",
+             arg=(nxt[2] if len(nxt) > 2 else None))
 
     return out

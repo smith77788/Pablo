@@ -18,20 +18,25 @@ from services import account_manager
 
 log = logging.getLogger(__name__)
 
-_INTERVAL = 4 * 3600  # 4 часа между полными сканами
-_BATCH_SIZE = 10  # каналов за одну сессию аккаунта
+_INTERVAL = 4 * 3600  # 4 часа, когда обновлять больше нечего
+# Осталась очередь — ждать четыре часа нечего: карточки и так показывают
+# позавчерашние числа. При 167 каналах и прежних 10 за круг полный обход
+# занимал бы под трое суток, и владелец никогда не видел актуальных данных.
+_INTERVAL_BACKLOG = 15 * 60
+_BATCH_SIZE = 40  # каналов за одну сессию аккаунта (GetFullChannel — чтение)
 _PAUSE_BETWEEN = 3.0  # секунд между запросами к одному аккаунту
 
 
 async def run(pool: asyncpg.Pool, bot) -> None:
     while True:
+        backlog = False
         try:
-            await _check_all(pool, bot)
+            backlog = bool(await _check_all(pool, bot))
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception("drift_detector cycle error")
-        await asyncio.sleep(_INTERVAL)
+        await asyncio.sleep(_INTERVAL_BACKLOG if backlog else _INTERVAL)
 
 
 async def _compare_with_templates(
@@ -143,7 +148,50 @@ async def _compare_with_templates(
     return result
 
 
-async def _check_all(pool: asyncpg.Pool, bot) -> None:
+async def _fallback_account(pool: asyncpg.Pool, owner_id: int) -> asyncpg.Record | None:
+    """Любая живая сессия владельца — на случай, если «родной» аккаунт канала умер.
+
+    Канал принадлежит владельцу, а не той сессии, через которую его когда-то
+    завели. Привязка к acc_id была жёсткой, и смерть одного аккаунта замораживала
+    карточки всех его каналов навсегда.
+    """
+    try:
+        return await pool.fetchrow(
+            """SELECT * FROM tg_accounts
+                WHERE owner_id=$1 AND is_active=true AND session_str IS NOT NULL
+                  AND COALESCE(acc_status,'active') NOT IN ('banned','spamblock','deactivated')
+                ORDER BY COALESCE(trust_score,0) DESC, id
+                LIMIT 1""",
+            owner_id,
+        )
+    except Exception as e:
+        log.debug("drift_detector: запасной аккаунт владельца %s не найден: %s", owner_id, e)
+        return None
+
+
+async def _stamp_checked(pool: asyncpg.Pool, ids: list) -> None:
+    """Пометить каналы осмотренными, ничего в них не меняя.
+
+    Нужна, когда обновить карточку нечем: без отметки такие строки выбираются
+    каждым циклом и вытесняют из выборки те, которые обновить МОЖНО.
+    """
+    if not ids:
+        return
+    try:
+        await pool.execute(
+            "UPDATE managed_channels SET last_drift_check=now() WHERE id = ANY($1::int[])",
+            list(ids),
+        )
+    except Exception as e:
+        log.debug("drift_detector: отметка осмотра не записана: %s", e)
+
+
+async def _check_all(pool: asyncpg.Pool, bot) -> bool:
+    """Один круг обновления карточек. True — очередь не разобрана до конца.
+
+    Возвращаемое значение решает, ждать ли четыре часа: пока очередь есть,
+    ждать нечего — карточки показывают устаревшие числа.
+    """
     # Channels not checked in last 3 hours (give margin before 4h interval)
     rows = await pool.fetch(
         """SELECT mc.id, mc.owner_id, mc.acc_id, mc.channel_id,
@@ -156,9 +204,12 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
     )
     if not rows:
         log.debug("drift_detector: nothing to check")
-        return
+        return False
 
     log.info("drift_detector: checking %d channels", len(rows))
+    # Сколько строк круг не успел взять: группа режется по _BATCH_SIZE, и
+    # остаток — это честная очередь, а не «всё обновлено».
+    backlog = False
 
     # Group by (owner_id, acc_id) to minimise sessions opened
     groups: dict[tuple, list] = {}
@@ -173,16 +224,52 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
             acc_id,
         )
         if not acc:
-            continue
+            # Аккаунт, которым канал заводили, умер (бан, выключен, сессия
+            # вычищена). Раньше здесь стоял `continue` — и это была главная
+            # причина «данные не обновляются, сколько ни проси»:
+            #
+            #   • эти каналы НЕ обновлялись никогда;
+            #   • им не проставлялся last_drift_check, поэтому следующий цикл
+            #     выбирал их СНОВА — и так вечно;
+            #   • выборка ограничена 200 строками, и застрявшие занимали её
+            #     целиком, вытесняя живые каналы. Один забаненный аккаунт
+            #     останавливал обновление ВСЕГО списка владельца.
+            #
+            # Канал принадлежит владельцу, а не конкретной сессии: берём любой
+            # живой аккаунт этого же владельца.
+            acc = await _fallback_account(pool, owner_id)
+            if not acc:
+                # Живых сессий у владельца нет вовсе — обновлять нечем. Но
+                # отметку ставим, иначе эти строки навсегда забьют очередь.
+                await _stamp_checked(pool, [c["id"] for c in channels])
+                log.info(
+                    "drift_detector: у владельца %s нет живых сессий — %d каналов "
+                    "отложены до следующего круга", owner_id, len(channels),
+                )
+                continue
+            log.info(
+                "drift_detector: аккаунт %s недоступен — %d каналов владельца %s "
+                "обновляем аккаунтом %s", acc_id, len(channels), owner_id, acc["id"],
+            )
         acc_dict = dict(acc)
+
+        if len(channels) > _BATCH_SIZE:
+            backlog = True
 
         # Живая сессия аккаунта — тот же живой ресурс, что и у операций/прогрева.
         # Без атомарного захвата цикл дрейфа мог бы коннектиться к аккаунту
         # РОВНО тогда, когда его держит операция — два коннекта на одном
         # auth-key = AUTH_KEY_DUPLICATED. Фильтр in_operation в SQL выше не
         # закрывает гонку (TOCTOU), только try_claim_account это делает.
+        #
+        # Захватываем ИМЕННО ту сессию, которой будем подключаться: при мёртвом
+        # «родном» аккаунте это запасной аккаунт владельца, и acc_id указывал бы
+        # на чужую строку — захват не защитил бы ничего.
+        _use_acc_id = int(acc_dict["id"])
         from services import op_worker
-        if not await op_worker.try_claim_account(int(acc_id)):
+        if not await op_worker.try_claim_account(_use_acc_id):
+            # Аккаунт сейчас занят операцией. Отметку НЕ ставим: канал не
+            # осмотрен, пусть его возьмёт следующий круг.
             continue
 
         try:
@@ -341,4 +428,11 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
 
                 await asyncio.sleep(_PAUSE_BETWEEN)
         finally:
-            await op_worker.release_accounts([int(acc_id)])
+            # Освобождаем ту же сессию, что захватывали выше (при мёртвом
+            # «родном» аккаунте это запасной — acc_id указывал бы на чужую).
+            await op_worker.release_accounts([_use_acc_id])
+
+    # Выборка упёрлась в потолок — значит за ней стоит ещё очередь.
+    if len(rows) >= 200:
+        backlog = True
+    return backlog

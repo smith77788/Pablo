@@ -3704,6 +3704,75 @@ async def get_full_channel_info(
             log_exc_swallow(log, "Сбой в get_full_channel_info")
 
 
+async def get_channels_full_info(
+    session_string: str,
+    channel_ids: list,
+    _acc: dict | None = None,
+    pause: float = 1.2,
+    limit: int = 200,
+) -> dict[int, dict]:
+    """Карточки НЕСКОЛЬКИХ каналов за одно подключение: {id: {...}}.
+
+    Зачем отдельно от get_full_channel_info: та открывает и закрывает клиент на
+    КАЖДЫЙ канал. При 167 каналах это 167 подключений сессии подряд — само по
+    себе поведение, на которое Telegram реагирует, и минуты ожидания.
+
+    Почему вообще нужен GetFullChannel, а не обход диалогов: в списке диалогов
+    `participants_count` — необязательное поле, Telegram присылает его далеко не
+    всегда (тот же случай уже описан в get_channel_members_count). Поэтому
+    «обновление» по диалогам подтягивало имя и ссылку, а число участников молча
+    оставляло прежним.
+
+    Недоступный канал пропускается, остальные обрабатываются — одна ошибка не
+    должна отменять весь обход.
+    """
+    from telethon.tl.functions.channels import GetFullChannelRequest
+
+    out: dict[int, dict] = {}
+    ids = [c for c in (channel_ids or [])][:limit]
+    if not ids:
+        return out
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        for idx, cid in enumerate(ids):
+            try:
+                entity = await client.get_entity(int(cid))
+                full = await client(GetFullChannelRequest(entity))
+                out[int(cid)] = {
+                    "members_count": int(
+                        getattr(full.full_chat, "participants_count", 0) or 0
+                    ),
+                    "title": getattr(entity, "title", "") or "",
+                    "username": getattr(entity, "username", "") or "",
+                    "about": getattr(full.full_chat, "about", "") or "",
+                }
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                etype = type(e).__name__
+                if etype == "FloodWaitError":
+                    _fw = int(getattr(e, "seconds", 0) or 0)
+                    # Дальше долбить бессмысленно и опасно: отдаём собранное.
+                    log.warning(
+                        "get_channels_full_info: FloodWait %ds — прерываю обход "
+                        "на %d/%d каналов", _fw, idx, len(ids),
+                    )
+                    break
+                log.debug("get_channels_full_info: канал %s пропущен: %s", cid, e)
+            if idx < len(ids) - 1:
+                await asyncio.sleep(pause + random.uniform(0, 0.8))
+        return out
+    except Exception as e:
+        log.warning("get_channels_full_info: обход не состоялся: %s", e)
+        return out
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в get_channels_full_info")
+
+
 async def get_recent_messages(
     session_string: str,
     channel_username: str,

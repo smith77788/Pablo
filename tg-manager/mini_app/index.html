@@ -11671,7 +11671,12 @@ async function openOpDetail(opId) {
           const call = (a.arg===undefined||a.arg===null)
             ? `${a.fn}()`
             : `${a.fn}(${typeof a.arg==='number'?a.arg:`'${String(a.arg).replace(/'/g,"\\'")}'`})`;
-          return `<div class="row" style="cursor:pointer" onclick="${call};back()">
+          // back() ПЕРЕД действием, а не после. Было `${call};back()` — и почти
+          // каждая подсказка вела в никуда: openHealth/openWarmup/openChannels/
+          // openProxies/openRehab/openFolders/openMassInvite делают push() нового
+          // экрана, а back() тут же его снимал. Карточка выглядела кликабельной,
+          // нажатие срабатывало — и возвращало ровно туда, где стоял.
+          return `<div class="row" style="cursor:pointer" onclick="back();${call}">
             <div class="row-body"><div class="row-name">${esc(a.label)}</div>
             <div class="row-val" style="white-space:normal">${esc(a.reason||'')}</div></div>
             <div class="row-right"><span class="chev">›</span></div></div>`;

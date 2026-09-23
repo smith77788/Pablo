@@ -1356,6 +1356,17 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                         log.info("auto_responder: самолечением возвращено ботов: %d", healed)
                 except Exception:
                     log.debug("auto_responder: самолечение ботов не выполнено")
+                # Сверка имени и @username с Telegram. Их записывали один раз при
+                # подключении бота и больше никогда: переименование в @BotFather
+                # до списка ботов не доходило. Сам проход редкий (см.
+                # bot_profile_refresh.REFRESH_AFTER_HOURS) и только читает.
+                try:
+                    from services import bot_profile_refresh as _bpr
+                    _upd = await _bpr.refresh_bot_profiles(pool, http)
+                    if _upd:
+                        log.info("auto_responder: профиль обновлён у ботов: %d", _upd)
+                except Exception:
+                    log.debug("auto_responder: сверка профилей ботов не выполнена")
             if main_bot is not None and _cycle % 30 == 1:
                 try:
                     await notify_broken_bots(pool, main_bot)
