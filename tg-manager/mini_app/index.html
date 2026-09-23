@@ -15052,19 +15052,22 @@ async function openReporter() {
   push('s-reporter');
   txt('reporterHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>o.op_type==='report_peer').slice(0,10);
+    // Фильтр по типу считает сервер: раньше брали общую страницу очереди и
+    // отбирали свои операции здесь — стоило другим вытеснить последнюю, и
+    // экран писал «истории нет», хотя она была.
+    const d = await api('/api/miniapp/operations?op_type=report_peer&limit=10&offset=0');
+    const ops = d.operations||[];
     txt('reporterHistory', ops.length ? ops.map(o=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-red-16)">🚨</div>
         <div class="row-body">
-          <div class="row-name">${esc(o.label||'report_peer')}</div>
-          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+          <div class="row-name">${esc(o.label||'Жалоба')}</div>
+          <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)}</div>
         </div>
       </div>
-    `).join('') : empty('📋','История пуста',''));
+    `).join('') : empty('🚨','Жалоб ещё не было','Здесь появятся ваши запуски и их результат'));
   } catch(e) {
-    txt('reporterHistory', empty('⚠️','Ошибка',e.message));
+    txt('reporterHistory', errHtml(e.message, 'openReporter()'));
   }
 }
 async function submitReporter() {
@@ -15127,20 +15130,23 @@ async function openBoost() {
   const e=document.getElementById('boostErr'); if(e) e.textContent='';
   txt('boostHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>['boost_views','boost_reactions','boost_stories','boost_subscribers','boost_bot_starts'].includes(o.op_type)).slice(0,10);
+    // Фильтр по типу считает сервер: раньше брали общую страницу очереди и
+    // отбирали свои операции здесь — стоило другим вытеснить последнюю, и
+    // экран писал «истории нет», хотя она была.
+    const d = await api('/api/miniapp/operations?op_type=boost_views,boost_reactions,boost_stories,boost_subscribers,boost_bot_starts&limit=10&offset=0');
+    const ops = d.operations||[];
     const ICO={boost_views:'👁',boost_reactions:'❤',boost_stories:'📖',boost_subscribers:'👥',boost_bot_starts:'🚀'};
     txt('boostHistory', ops.length ? ops.map(o=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-blue-16)">${ICO[o.op_type]||'🚀'}</div>
         <div class="row-body">
-          <div class="row-name">${esc(o.label||o.op_type)}</div>
-          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+          <div class="row-name">${esc(o.label||'Накрутка')}</div>
+          <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)}</div>
         </div>
       </div>
-    `).join('') : empty('📋','История пуста','Запустите первую накрутку'));
+    `).join('') : empty('🚀','Накруток ещё не было','Запустите первую накрутку'));
   } catch(e) {
-    txt('boostHistory', empty('⚠️','Ошибка',e.message));
+    txt('boostHistory', errHtml(e.message, 'openBoost()'));
   }
 }
 async function submitBoost() {
@@ -15383,19 +15389,22 @@ async function openGrowth() {
   const e=document.getElementById('growthErr'); if(e) e.textContent='';
   txt('growthHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>o.op_type==='niche_growth_post').slice(0,10);
+    // Фильтр по типу считает сервер: раньше брали общую страницу очереди и
+    // отбирали свои операции здесь — стоило другим вытеснить последнюю, и
+    // экран писал «истории нет», хотя она была.
+    const d = await api('/api/miniapp/operations?op_type=niche_growth_post&limit=10&offset=0');
+    const ops = d.operations||[];
     txt('growthHistory', ops.length ? ops.map(o=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-green-16)">🌿</div>
         <div class="row-body">
-          <div class="row-name">${esc(o.label||'Growth Agent')}</div>
-          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+          <div class="row-name">${esc(o.label||'Продвижение')}</div>
+          <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)}</div>
         </div>
       </div>
-    `).join('') : empty('📋','История пуста','Запустите первое продвижение'));
+    `).join('') : empty('🌿','Продвижений ещё не было','Запустите первое продвижение'));
   } catch(e) {
-    txt('growthHistory', empty('⚠️','Ошибка',e.message));
+    txt('growthHistory', errHtml(e.message, 'openGrowth()'));
   }
 }
 async function submitGrowth() {
@@ -17850,20 +17859,23 @@ async function openPhoneChecker() {
   push('s-phonechecker');
   txt('phoneCheckHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/operations');
-    const ops = (d.operations||[]).filter(o=>o.op_type==='phone_check').slice(0,10);
-    if (!ops.length) { txt('phoneCheckHistory', empty('📞','Нет истории проверок','')); return; }
+    // Фильтр по типу считает сервер: раньше брали общую страницу очереди и
+    // отбирали свои операции здесь — стоило другим вытеснить последнюю, и
+    // экран писал «истории нет», хотя она была.
+    const d = await api('/api/miniapp/operations?op_type=phone_check&limit=10&offset=0');
+    const ops = d.operations||[];
+    if (!ops.length) { txt('phoneCheckHistory', empty('📞','Проверок ещё не было','Здесь появятся ваши проверки и их результат')); return; }
     txt('phoneCheckHistory', ops.map(o=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-blue-16)">📞</div>
         <div class="row-body">
-          <div class="row-name">${esc(o.label||'phone_check')}</div>
-          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0} проверено</div>
+          <div class="row-name">${esc(o.label||'Проверка номеров')}</div>
+          <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)} проверено</div>
         </div>
       </div>
     `).join(''));
   } catch(e) {
-    txt('phoneCheckHistory', empty('⚠️','Ошибка',e.message));
+    txt('phoneCheckHistory', errHtml(e.message, 'openPhoneChecker()'));
   }
 }
 async function submitPhoneCheck() {

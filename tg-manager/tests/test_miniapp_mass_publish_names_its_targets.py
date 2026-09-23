@@ -83,7 +83,9 @@ def test_operations_can_be_filtered_by_type():
     assert 'op_type_filter' in src and 'request.query.get("op_type")' in src, (
         "очередь операций не умеет фильтровать по типу — экран публикаций "
         "вынужден отбирать их из общей страницы и врать «нет операций»")
-    assert "oq.op_type=$" in src, "фильтр по типу не доходит до запроса"
+    # Фильтр принимает и несколько типов через запятую: один раздел может
+    # объединять их (накрутка — просмотры, реакции, сторис, подписчики, запуски).
+    assert "oq.op_type = ANY(" in src, "фильтр по типу не доходит до запроса"
 
 
 def test_unknown_op_type_is_rejected_not_swallowed():

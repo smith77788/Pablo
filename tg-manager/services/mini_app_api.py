@@ -3147,10 +3147,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # экран уверенно писал «Нет операций публикации», хотя публикации были.
         # Молча проигнорированный фильтр читается как сломанный, поэтому мусор
         # отклоняем, а не глотаем.
-        op_type_filter = (request.query.get("op_type") or "").strip()
-        if op_type_filter:
-            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", op_type_filter):
-                return _err("Неизвестный тип операции: " + op_type_filter[:40], 400)
+        # Через запятую — для экранов, где один раздел объединяет несколько типов
+        # (накрутка: просмотры, реакции, сторис, подписчики, запуски бота).
+        _op_raw = (request.query.get("op_type") or "").strip()
+        op_type_filter = [t for t in (x.strip() for x in _op_raw.split(",")) if t]
+        if len(op_type_filter) > 16:
+            return _err("Слишком много типов операций в фильтре", 400)
+        for _t in op_type_filter:
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", _t):
+                return _err("Неизвестный тип операции: " + _t[:40], 400)
         # err_cnt — число упавших под-элементов (каналов) для показа кнопки
         # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
         _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
@@ -3182,7 +3187,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if op_type_filter:
                 _cnt_rows = await pool.fetch(
                     """SELECT status, COUNT(*) AS n FROM operation_queue
-                       WHERE owner_id=$1 AND op_type=$2 GROUP BY status""",
+                       WHERE owner_id=$1 AND op_type = ANY($2::text[])
+                       GROUP BY status""",
                     uid, op_type_filter)
             else:
                 _cnt_rows = await pool.fetch(
@@ -3203,7 +3209,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _where += f" AND oq.status=${len(_wargs)}"
         if op_type_filter:
             _wargs.append(op_type_filter)
-            _where += f" AND oq.op_type=${len(_wargs)}"
+            _where += f" AND oq.op_type = ANY(${len(_wargs)}::text[])"
         rows = await _safe_fetch(pool,
             f"""SELECT {_cols}
                FROM operation_queue oq WHERE {_where}
@@ -3216,7 +3222,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "operations": rows,
             "total": int(total or 0),
             "counts": counts,
-            "op_type": op_type_filter or None,
+            "op_type": (",".join(op_type_filter) if op_type_filter else None),
             "page": {"offset": offset, "limit": limit,
                      "has_more": (offset + len(rows or [])) < int(total or 0)},
         })
