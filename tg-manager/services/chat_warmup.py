@@ -398,8 +398,16 @@ async def _resolve_and_join(client, chat_ref: str):
     from telethon.tl.functions.channels import JoinChannelRequest
     try:
         await client(JoinChannelRequest(entity))
-    except Exception:
-        pass  # уже участник / базовая группа / нет прав — читать/писать всё равно можно
+    except Exception as e:
+        # Здесь стоял голый `pass`: уже участник, базовая группа или нет прав —
+        # всё это действительно не мешает читать и писать. Но тем же `pass`
+        # глоталась и ПАУЗА Telegram, после чего ход продолжался: аккаунт читал
+        # историю, ставил реакцию и писал сообщение под действующим
+        # ограничением. Так зарабатывают спамблок, а не прогрев.
+        _name = type(e).__name__
+        if "flood" in _name.lower() or _name in (
+                "UserChannelsTooMuchError", "ChannelsTooMuchError"):
+            raise
     return entity
 
 
@@ -455,10 +463,23 @@ async def _process_session(pool, session: dict) -> None:
         "a.lang_code, a.system_lang_code, a.proxy_id, p.geo_country "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
         "WHERE a.id=$1 AND a.is_active AND a.session_str IS NOT NULL "
-        "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired')",
+        "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+        # Аккаунт на паузе Telegram трогать нельзя: прогрев — такое же живое
+        # действие, как операция, и ход под действующим ограничением приближает
+        # спамблок вместо того, чтобы его отдалить.
+        "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
         speaker)
     if not acc:
         return
+    # Единый пульс здоровья флота, fail-open: недавнее серьёзное ограничение —
+    # аккаунт отдыхает, а не прогревается.
+    try:
+        from services.infra_memory import is_account_quarantined
+
+        if await is_account_quarantined(pool, int(speaker)):
+            return
+    except Exception:
+        log.debug("chat_warmup: пульс здоровья недоступен, продолжаем (fail-open)")
     if not await _warmup_allowed(pool, owner_id, acc.get("geo_country"), __import__("datetime").datetime.now(__import__("datetime").timezone.utc)):
         return
 
@@ -521,6 +542,21 @@ async def _process_session(pool, session: dict) -> None:
                     sent = True
             # reply пусто (LLM недоступен) → тихо пропускаем ход (без мусора)
     except Exception as e:
+        # Пауза Telegram — не рядовой сбой хода: о ней обязан узнать весь
+        # продукт, иначе следующая подсистема возьмёт этот аккаунт как
+        # спокойный и уведёт под то же ограничение.
+        try:
+            from services import flood_engine as _fe
+
+            _secs = _fe.flood_seconds(e) or 0
+            if _secs > 0:
+                await _fe.record_flood(pool, int(speaker), _secs, "chat_warmup")
+                log.warning(
+                    "chat_warmup s=%d acc=%s: Telegram просит паузу %d с",
+                    sid, speaker, _secs)
+        except Exception:
+            log.warning("chat_warmup: пауза не записана в пульс здоровья",
+                        exc_info=True)
         log.debug("chat_warmup s=%d acc=%s ход не удался: %s", sid, speaker, e)
     finally:
         try:
