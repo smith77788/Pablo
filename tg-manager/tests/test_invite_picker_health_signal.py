@@ -24,11 +24,31 @@ def test_backend_accounts_expose_health_status():
     assert 'r["health_status"] = h["status"]' in src, "accounts должен отдавать health_status"
 
 
+def _fn_body(name: str) -> str:
+    """Тело функции по балансу скобок.
+
+    Раньше блок рендера выхватывался отрезком «от строки с massInviteAccsWrap до
+    комментария // Render history». Рендер переехал в отдельную функцию
+    (`_invLoadAccs`, пикер получил поиск и постраничную загрузку), и такой отрезок
+    стал перекрывать ДВЕ функции сразу: проверка всё ещё проходила, но смотрела
+    уже не туда. Границы берём по коду, а не по расстоянию."""
+    src = miniapp_source()
+    m = re.search(r"^(?:async )?function " + re.escape(name) + r"\s*\(", src, re.M)
+    assert m, f"функция {name} не найдена"
+    i = src.index("{", m.end() - 1)
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[i:j + 1]
+    raise AssertionError(f"не закрылось тело {name}")
+
+
 def test_invite_picker_marks_flagged_accounts():
-    m = re.search(r"const wrap = document\.getElementById\('massInviteAccsWrap'\);(.*?)// Render history",
-                  HTML, re.DOTALL)
-    assert m, "блок рендера пикера инвайтера не найден"
-    body = m.group(1)
+    body = _fn_body("_invLoadAccs")
     # per-account badge по обоим статусам
     assert "riskBadge" in body
     assert "health_status==='quarantine'" in body and "health_status==='at_risk'" in body
@@ -39,6 +59,6 @@ def test_invite_picker_marks_flagged_accounts():
 
 def test_badge_reflects_skip_semantics():
     # текст badge объясняет, что аккаунт будет ПРОПУЩЕН (совпадает с поведением executor)
-    i = HTML.index("riskBadge")
-    seg = HTML[i:i + 500]
-    assert "пропущен" in seg
+    body = _fn_body("_invLoadAccs")
+    i = body.index("riskBadge")
+    assert "пропущен" in body[i:i + 500]

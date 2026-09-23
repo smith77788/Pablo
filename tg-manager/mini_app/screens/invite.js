@@ -20,6 +20,11 @@ let INV_FILE_PHONES = null;// предразобранный список из �
 let INV_FILE_REFS = null;  // предразобранный список из файла (user_refs)
 let INV_IMPORT_OK = 0;     // распознанных целей в текущем списке (для подтверждения)
 let INV_PARSE_RUN = null;   // предвыбранный parse_run_id при заходе «из парсера»
+// Сколько активных аккаунтов у владельца ВСЕГО, по счёту сервера. Подтверждение
+// раньше считало флот по чекбоксам на экране, а их не больше страницы: при
+// флоте в 340 человек читал «Аккаунтов-инвайтеров: 200 — весь подходящий флот».
+// Пишется только при пустом поиске: под поисковым срезом это не флот.
+let INV_ACC_TOTAL = 0;
 
 function buildInvitePresets() {
   const row = document.getElementById('invitePresetRow');
@@ -172,38 +177,28 @@ async function openInviteAccount(accId) {
   }
 }
 
-async function openMassInvite() {
-  push('s-massinvite');
-  INV_PARSE_RUN = null;
-  loadGovernorBar();
-  loadInviteAnalytics();
-  loadInviteRetention();
-  loadInviteAdvice();
-  buildInvitePresets();
-  txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
-  ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc','massInviteWelcome'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
-  ['massInviteRights','massInviteListPreview','massInviteReadiness'].forEach(id=>{const e=document.getElementById(id); if(e) e.innerHTML='';});
-  INV_IMPORT_OK = 0;
-  INV_FILE_REFS = null; INV_FILE_PHONES = null;
-  massInviteSrcToggle();
-  // Заглушка «Загрузка…» лежит ВНУТРИ massInviteAccsWrap, и ниже по функции
-  // wrap.innerHTML затирает её насовсем. Поэтому при втором открытии экрана
-  // getElementById возвращал null, присваивание падало — а падало оно ДО
-  // await, то есть аккаунты-инвайтеры и история дальше не грузились вообще.
-  // Пересоздаём заглушку целиком: состояние одинаково на каждом открытии.
-  const accsWrapEl = document.getElementById('massInviteAccsWrap');
-  if (accsWrapEl) accsWrapEl.innerHTML =
-    '<div style="font-size:12px;color:var(--hint)" id="massInviteAccsLoad">Загрузка аккаунтов…</div>';
-  const [opsD, accsD] = await Promise.allSettled([
-    // Раньше просили общую страницу очереди и отбирали инвайты уже здесь: стоило
-    // тридцати другим операциям вытеснить последний инвайт — и экран писал «нет
-    // истории инвайтов», хотя она была. Фильтр по типу считает сервер.
-    api('/api/miniapp/operations?op_type=mass_invite&limit=10&offset=0'),
-    api('/api/miniapp/accounts'),
-  ]);
-  // Render account checkboxes
-  const accs = (accsD.status==='fulfilled' ? (accsD.value.accounts||[]) : []).filter(a=>a.is_active);
+// Аккаунты-инвайтеры: отбор активных делает СЕРВЕР (?filter=active), а список
+// берётся максимальной страницей. Раньше экран звал /accounts без параметров,
+// получал первую сотню и фильтровал её клиентом по `a.is_active`. При флоте в
+// несколько сотен это врало дважды: нужного инвайтера в списке не было вовсе, а
+// «весь подходящий флот» в подтверждении считался по показанной сотне. Клиентский
+// `is_active` к тому же пропускал забаненных и спамблокнутых — у них флаг остаётся
+// true, и пользователь отмечал аккаунты, обречённые упасть в воркере.
+async function _invLoadAccs(q) {
   const wrap = document.getElementById('massInviteAccsWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="font-size:12px;color:var(--hint)">Загрузка аккаунтов…</div>';
+  let r;
+  try {
+    r = await accPickerLoad('active', q);
+  } catch(e) {
+    wrap.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:4px">Не удалось загрузить аккаунты</div>';
+    accPickerSetNote('massInviteAccsWrap', '⚠️ ' + (e.message || 'Аккаунты не загрузились'));
+    return;
+  }
+  const accs = r.accs;
+  if (!q) INV_ACC_TOTAL = r.total;
+  accPickerSetNote('massInviteAccsWrap', accPickerNote(r));
   if (accs.length) {
     // Проактивный риск-пульс: помечаем аккаунты, которые исполнитель пропустит
     // для защиты от бана (карантин/под риском) — чтобы пользователь видел ДО запуска.
@@ -226,8 +221,43 @@ async function openMassInvite() {
       wrap.insertAdjacentHTML('afterbegin', `<div style="font-size:12px;color:var(--hint);padding:2px 4px 6px;border-bottom:1px solid var(--sep);margin-bottom:4px">🛡 ${flagged} аккаунт(ов) под риск-пульсом — их пропустят для защиты от бана</div>`);
     }
   } else {
-    wrap.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:4px">Нет активных аккаунтов</div>';
+    wrap.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:4px">'
+      + (q ? 'По запросу активных аккаунтов не найдено' : 'Нет активных аккаунтов') + '</div>';
   }
+}
+
+async function openMassInvite() {
+  push('s-massinvite');
+  INV_PARSE_RUN = null;
+  loadGovernorBar();
+  loadInviteAnalytics();
+  loadInviteRetention();
+  loadInviteAdvice();
+  buildInvitePresets();
+  txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  ['massInviteImport','massInviteBatch','massInviteMax','massInvitePerAcc','massInviteWelcome'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  ['massInviteRights','massInviteListPreview','massInviteReadiness'].forEach(id=>{const e=document.getElementById(id); if(e) e.innerHTML='';});
+  INV_IMPORT_OK = 0;
+  INV_FILE_REFS = null; INV_FILE_PHONES = null;
+  massInviteSrcToggle();
+  // Заглушка «Загрузка…» лежит ВНУТРИ massInviteAccsWrap, и ниже по функции
+  // wrap.innerHTML затирает её насовсем. Поэтому при втором открытии экрана
+  // getElementById возвращал null, присваивание падало — а падало оно ДО
+  // await, то есть аккаунты-инвайтеры и история дальше не грузились вообще.
+  // Пересоздаём заглушку целиком: состояние одинаково на каждом открытии.
+  const accsWrapEl = document.getElementById('massInviteAccsWrap');
+  if (accsWrapEl) accsWrapEl.innerHTML =
+    '<div style="font-size:12px;color:var(--hint)" id="massInviteAccsLoad">Загрузка аккаунтов…</div>';
+  accPickerSearchBox('massInviteAccsWrap', _invLoadAccs);
+  // Аккаунты и история по-прежнему грузятся параллельно: загрузку аккаунтов
+  // запускаем, но не ждём — свои ошибки она разбирает сама.
+  _invLoadAccs('');
+  const [opsD] = await Promise.allSettled([
+    // Раньше просили общую страницу очереди и отбирали инвайты уже здесь: стоило
+    // тридцати другим операциям вытеснить последний инвайт — и экран писал «нет
+    // истории инвайтов», хотя она была. Фильтр по типу считает сервер.
+    api('/api/miniapp/operations?op_type=mass_invite&limit=10&offset=0'),
+  ]);
   // Render history
   if (opsD.status==='fulfilled') {
     const ops = opsD.value.operations||[];
@@ -573,8 +603,10 @@ async function submitMassInvite() {
   // Кем приглашают: отмеченные аккаунты либо весь подходящий флот. Аккаунты под
   // риск-пульсом исполнитель пропустит — это видно на экране, но в момент
   // согласия человек смотрит в диалог, а не в список.
+  // Без отметок инвайтит ВЕСЬ подходящий флот — его размер знает сервер
+  // (INV_ACC_TOTAL), а не чекбоксы на экране: их не больше одной страницы.
   const _allBoxes = document.querySelectorAll('#massInviteAccsWrap input[type=checkbox]');
-  const _accN = checked.length || _allBoxes.length;
+  const _accN = checked.length || INV_ACC_TOTAL || _allBoxes.length;
   const _accLine = _accN
     ? '\nАккаунтов-инвайтеров: '+_accN+(checked.length ? ' (отмечены вами)' : ' — весь подходящий флот')+'.'
     : '';

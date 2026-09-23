@@ -18553,17 +18553,104 @@ async function deleteGhost(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
+
+// ── Пикеры аккаунтов: список не обрывается молча ──────────────────────
+// Пикеры звали /api/miniapp/accounts вообще без limit, а сервер по умолчанию
+// отдаёт первую сотню (максимум 200 за запрос). При флоте в несколько сотен
+// аккаунтов пользователь видел сотню и считал, что это ВЕСЬ его флот: отметка
+// «все» в чекбоксах накрывала часть, а нужного аккаунта в выпадашке просто не
+// существовало — и починить это было нечем, поиска в пикере не было.
+// Берём максимум, честно говорим, если показано не всё, и даём поиск.
+async function accPickerLoad(filter, q) {
+  let u = '/api/miniapp/accounts?limit=200';
+  if (filter) u += '&filter=' + encodeURIComponent(filter);
+  if (q) u += '&q=' + encodeURIComponent(q);
+  const d = await api(u);
+  const accs = d.accounts || [];
+  const page = d.page || {};
+  return {
+    accs: accs,
+    total: (page.filtered_total != null) ? Number(page.filtered_total) : accs.length,
+    more: !!page.has_more,
+    q: q || ''
+  };
+}
+
+// Приписка под списком. Молчит, когда показано всё, — лишняя строка под каждым
+// пикером мешала бы там, где аккаунтов десяток.
+function accPickerNote(r) {
+  if (!r) return '';
+  if (r.more) {
+    return '⚠️ Показаны ' + r.accs.length + ' ' + plural(r.accs.length, 'аккаунт', 'аккаунта', 'аккаунтов')
+         + ' из ' + r.total + '. Остальные за один раз не помещаются — найдите нужный поиском.';
+  }
+  if (r.q) {
+    return 'Найдено: ' + r.accs.length + ' ' + plural(r.accs.length, 'аккаунт', 'аккаунта', 'аккаунтов') + '.';
+  }
+  return '';
+}
+
+// Приписка ставится ОДИН раз рядом со списком и дальше только переписывается:
+// пикеры открываются многократно, и вставка на каждом открытии наплодила бы
+// дубли с одинаковым id.
+function accPickerSetNote(anchorId, text) {
+  const anchor = document.getElementById(anchorId);
+  if (!anchor || !anchor.parentNode) return;
+  const noteId = anchorId + '__note';
+  let note = document.getElementById(noteId);
+  if (!note) {
+    note = document.createElement('div');
+    note.id = noteId;
+    note.className = 'field-note';
+    anchor.parentNode.insertBefore(note, anchor.nextSibling);
+  }
+  note.textContent = text || '';
+  note.style.display = text ? '' : 'none';
+}
+
+// Поиск над пикером. Без него аккаунт за пределами первых двухсот недостижим
+// в принципе: выпадашка не прокручивается дальше того, что в неё положили.
+// Запрос уходит на сервер (?q=), а не фильтрует загруженную страницу, — иначе
+// поиск искал бы ровно в той сотне, из-за которой всё и затевалось.
+function accPickerSearchBox(anchorId, reload) {
+  const anchor = document.getElementById(anchorId);
+  if (!anchor || !anchor.parentNode) return;
+  const inpId = anchorId + '__q';
+  if (document.getElementById(inpId)) return;
+  const inp = document.createElement('input');
+  inp.id = inpId;
+  inp.type = 'text';
+  inp.className = 'inp';
+  inp.setAttribute('autocomplete', 'off');
+  inp.setAttribute('aria-label', 'Поиск по аккаунтам');
+  inp.placeholder = '🔍 Поиск: телефон / имя / @username';
+  inp.style.cssText = 'width:100%;box-sizing:border-box;margin-bottom:6px';
+  let timer = null;
+  inp.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () { reload(inp.value.trim()); }, 350);
+  });
+  anchor.parentNode.insertBefore(inp, anchor);
+}
+
 async function openGhostModal() {
+  accPickerSearchBox('gc-account', _ghostLoadAccs);
+  showModal('mo-ghost');
+  _ghostLoadAccs('');
+}
+async function _ghostLoadAccs(q) {
   const el = document.getElementById('gc-account');
   el.innerHTML = '<option value="">Загрузка...</option>';
   try {
-    const d = await api('/api/miniapp/accounts');
-    const accs = d.accounts || d || [];
-    el.innerHTML = accs.length
-      ? accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} ${a.phone?'('+a.phone+')':''}</option>`).join('')
-      : '<option value="">Нет аккаунтов</option>';
-  } catch(e) { el.innerHTML = '<option value="">Ошибка загрузки</option>'; }
-  showModal('mo-ghost');
+    const r = await accPickerLoad('', q);
+    el.innerHTML = r.accs.length
+      ? r.accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} ${a.phone?'('+a.phone+')':''}</option>`).join('')
+      : `<option value="">${q ? 'По запросу ничего не найдено' : 'Нет аккаунтов'}</option>`;
+    accPickerSetNote('gc-account', accPickerNote(r));
+  } catch(e) {
+    el.innerHTML = '<option value="">Ошибка загрузки</option>';
+    accPickerSetNote('gc-account', '⚠️ ' + (e.message || 'Аккаунты не загрузились'));
+  }
 }
 async function submitGhostCreate() {
   const errEl = document.getElementById('gc-err');
@@ -18880,15 +18967,28 @@ async function openWarmupModal() {
   document.getElementById('warmupDaily').value='';
   document.getElementById('warmupDays').value='';
   document.getElementById('warmupMbg').classList.add('show');
+  accPickerSearchBox('warmupAccSel', _warmupLoadAccs);
+  _warmupLoadAccs('');
+}
+// Отбор активных считает СЕРВЕР (?filter=active), а не клиент по загруженной
+// странице. Прежний клиентский фильтр врал в обе стороны: acc_status у здорового
+// аккаунта бывает NULL (эндпоинт отдаёт его как 'ok') — такой аккаунт из прогрева
+// выпадал; а выключенный аккаунт со старым acc_status='active' в список попадал,
+// хотя прогревать его нечем. Серверный срез ещё и отбрасывает banned/spamblock и
+// тех, кто в cooldown.
+async function _warmupLoadAccs(q) {
   const sel = document.getElementById('warmupAccSel');
   sel.innerHTML='<option value="">Загрузка...</option>';
   try {
-    const d = await api('/api/miniapp/accounts');
-    const accs = (d.accounts||[]).filter(a=>a.status==='active'||a.acc_status==='active');
-    sel.innerHTML = accs.length
-      ? accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} · ${esc(a.phone||'')}</option>`).join('')
-      : '<option value="">Нет активных аккаунтов</option>';
-  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+    const r = await accPickerLoad('active', q);
+    sel.innerHTML = r.accs.length
+      ? r.accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} · ${esc(a.phone||'')}</option>`).join('')
+      : `<option value="">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</option>`;
+    accPickerSetNote('warmupAccSel', accPickerNote(r));
+  } catch(e) {
+    sel.innerHTML='<option value="">Ошибка загрузки</option>';
+    accPickerSetNote('warmupAccSel', '⚠️ ' + (e.message || 'Аккаунты не загрузились'));
+  }
 }
 function closeWarmupModal() { document.getElementById('warmupMbg').classList.remove('show'); }
 async function bulkWarmup() {
@@ -20949,28 +21049,37 @@ async function openGlobalPresence() {
   } catch(e) { txt('gpList', empty('⚠️','Ошибка',e.message)); }
 }
 
-async function openGpCreateModal() {
-  showModal('mo-gp-create');
-  ['gpRefName','gpRefUsername','gpRefCity','gpNamePattern','gpUsernamePattern','gpCustomCities'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
-  { const _g=document.getElementById('gpGeoPreset'); if(_g) _g.value=''; gpGeoToggle(); }
-  loadGpGeoPresets();
-  // Load accounts
+// Отметка «выбрать все» в этом списке накрывает ровно то, что в нём показано,
+// поэтому список обязан сказать, если показано не всё.
+async function _gpLoadAccs(q) {
+  const list = document.getElementById('gpAccountsList');
+  if (!list) return;
+  list.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const accs = await api('/api/miniapp/accounts');
-    const list = document.getElementById('gpAccountsList');
-    list.innerHTML = (accs.accounts||[]).map(a=>
+    const r = await accPickerLoad('', q);
+    list.innerHTML = r.accs.map(a=>
       `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:13px;color:var(--text)">
         <input type="checkbox" class="gp-acc-cb" value="${a.id}" style="width:18px;height:18px">
         <span>${esc(a.phone||a.first_name||'#'+a.id)}</span>
         <span style="color:${a.is_active?'var(--green)':'var(--red)'};font-size:11px">${a.is_active?'🟢':'🔴'}</span>
       </label>`
-    ).join('') || '<div style="color:var(--hint);font-size:13px">Нет аккаунтов</div>';
+    ).join('') || `<div style="color:var(--hint);font-size:13px">${q ? 'По запросу ничего не найдено' : 'Нет аккаунтов'}</div>`;
+    accPickerSetNote('gpAccountsList', accPickerNote(r));
   } catch(e) {
     // «Нет аккаунтов» и «не смогли спросить» — разные вещи. Раньше сбой рисовал
     // пустоту, и владелец видел ровно то же, что при пустом парке.
-    const list = document.getElementById('gpAccountsList');
-    if (list) list.innerHTML = errHtml(e.message, 'openGpCreateModal()');
+    list.innerHTML = errHtml(e.message, '_gpLoadAccs()');
+    accPickerSetNote('gpAccountsList', '');
   }
+}
+
+async function openGpCreateModal() {
+  showModal('mo-gp-create');
+  ['gpRefName','gpRefUsername','gpRefCity','gpNamePattern','gpUsernamePattern','gpCustomCities'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  { const _g=document.getElementById('gpGeoPreset'); if(_g) _g.value=''; gpGeoToggle(); }
+  loadGpGeoPresets();
+  accPickerSearchBox('gpAccountsList', _gpLoadAccs);
+  _gpLoadAccs('');
   // Load ecosystems
   try {
     const ecos = await api('/api/miniapp/ecosystems');
@@ -21452,20 +21561,20 @@ async function loadFleetWarnings() {
   } catch(_) { /* предупреждения не критичны */ }
 }
 
-async function openMassOps(focusId) {
-  push('s-massops');
-  txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
-  loadFleetWarnings();
-  // Аккаунты для вступления/выхода: показываем только живые — на выключенных
-  // операция всё равно провалилась бы в воркере.
+// Аккаунты для вступления/выхода: только живые — на выключенных операция всё
+// равно провалилась бы в воркере. Отбор делает сервер (?filter=active): прежний
+// клиентский `a.is_active` пропускал в список забаненных и спамблокнутых (у них
+// is_active остаётся true), и пользователь отмечал аккаунты, обречённые упасть.
+async function _massOpsLoadAccs(q) {
   try {
-    const accs = await api('/api/miniapp/accounts');
-    const live = (accs.accounts||[]).filter(a=>a.is_active);
+    const r = await accPickerLoad('active', q);
+    const live = r.accs;
     txt('mjAccounts', live.length
       ? live.map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px">
           <input type="checkbox" class="mj-acc-cb" value="${a.id}" style="width:16px;height:16px">
           ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
-      : '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>');
+      : `<div style="font-size:13px;color:var(--hint)">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</div>`);
+    accPickerSetNote('mjAccounts', accPickerNote(r));
     beSyncFields();
     const accOpts = live.length
       ? live.map(a=>`<option value="${a.id}">${esc(a.phone||a.first_name||('#'+a.id))}</option>`).join('')
@@ -21474,7 +21583,18 @@ async function openMassOps(focusId) {
       const el = document.getElementById(id);
       if (el) el.innerHTML = accOpts;
     }
-  } catch(_) { txt('mjAccounts','<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'); }
+  } catch(e) {
+    txt('mjAccounts','<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>');
+    accPickerSetNote('mjAccounts', '⚠️ ' + (e.message || 'Аккаунты не загрузились'));
+  }
+}
+
+async function openMassOps(focusId) {
+  push('s-massops');
+  txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadFleetWarnings();
+  accPickerSearchBox('mjAccounts', _massOpsLoadAccs);
+  _massOpsLoadAccs('');
   try {
     const rows = await api('/api/miniapp/mass_ops');
     if (!rows.length) { txt('massopsList', empty('⚡','Нет массовых операций','')); return; }
@@ -21789,17 +21909,20 @@ async function openGroupFactory() {
 }
 // Повтор после сбоя вызывает ИМЕННО загрузку, а не открытие экрана: push() ещё
 // раз положил бы тот же экран в стек, и «назад» пришлось бы жать дважды.
-async function _gfLoadAccounts() {
+async function _gfLoadAccounts(q) {
   document.getElementById('gfErr').textContent='';
+  accPickerSearchBox('gfAccount', _gfLoadAccounts);
   const sel = document.getElementById('gfAccount');
   // Пока идёт запрос, в выпадашке висели аккаунты с ПРОШЛОГО открытия экрана.
   sel.innerHTML = '<option value="">Загрузка аккаунтов…</option>';
   _gfSetSubmit(false, '⏳ Загрузка аккаунтов…');
   try {
-    const d = await api('/api/miniapp/accounts');
-    const accs = d.accounts||d||[];
+    const r = await accPickerLoad('', q);
+    const accs = r.accs;
     if (!accs.length) {
-      sel.innerHTML = '<option value="">Нет подключённых аккаунтов</option>';
+      sel.innerHTML = `<option value="">${q ? 'По запросу ничего не найдено' : 'Нет подключённых аккаунтов'}</option>`;
+      accPickerSetNote('gfAccount', '');
+      if (q) { _gfSetSubmit(false, 'Уточните поиск'); return; }
       document.getElementById('gfErr').innerHTML =
         'Группу создаёт аккаунт, а их пока нет. '
         + '<span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
@@ -21808,6 +21931,7 @@ async function _gfLoadAccounts() {
       return;
     }
     sel.innerHTML='<option value="">Выберите аккаунт...</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
+    accPickerSetNote('gfAccount', accPickerNote(r));
     _gfSetSubmit(true);
   } catch(e) {
     sel.innerHTML = '<option value="">Аккаунты не загрузились</option>';
@@ -22194,22 +22318,27 @@ async function deleteMeshTarget(targetId) {
 }
 
 async function openMeshModal() {
+  accPickerSearchBox('mc-account', _meshLoadAccs);
+  showModal('mo-mesh');
+  _meshLoadAccs('');
+}
+async function _meshLoadAccs(q) {
   const el = document.getElementById('mc-account');
   el.innerHTML = '<option value="">— без аккаунта —</option>';
   try {
-    const d = await api('/api/miniapp/accounts');
-    const accs = d.accounts || d || [];
-    accs.forEach(a => {
+    const r = await accPickerLoad('', q);
+    r.accs.forEach(a => {
       const opt = document.createElement('option');
       opt.value = a.id;
       opt.textContent = (a.first_name||a.phone)+' ('+(a.phone||'')+')'
       el.appendChild(opt);
     });
+    accPickerSetNote('mc-account', accPickerNote(r));
   } catch(e) {
     el.innerHTML = '<option value="">— без аккаунта —</option>'
       + '<option value="" disabled>⚠️ Аккаунты не загрузились</option>';
+    accPickerSetNote('mc-account', '⚠️ ' + (e.message || 'Аккаунты не загрузились'));
   }
-  showModal('mo-mesh');
 }
 async function submitMeshCreate() {
   const errEl = document.getElementById('mc-err');
