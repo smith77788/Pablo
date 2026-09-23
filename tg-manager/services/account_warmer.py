@@ -820,6 +820,28 @@ _RESTRICTION_ERRORS = frozenset(
 )
 
 
+async def _note_flood(pool, account_id: int, exc: BaseException) -> int:
+    """Записать паузу Telegram в общий пульс здоровья. Вернуть её длительность.
+
+    Прогрев умел паузу переждать и даже остановить план, но нигде её не
+    записывал. Для остального продукта аккаунт при этом оставался спокойным:
+    выбор аккаунта под операцию, разбор аудитории или рассылку брал его сразу
+    же и уводил под то же самое действующее ограничение, где следующая пауза
+    будет длиннее предыдущей.
+    """
+    try:
+        from services import flood_engine as _fe
+
+        secs = _fe.flood_seconds(exc) or 0
+        if secs > 0 and account_id:
+            await _fe.record_flood(pool, int(account_id), int(secs), "warmup")
+        return secs
+    except Exception:
+        log.warning("warmup: пауза Telegram не записана в пульс здоровья",
+                    exc_info=True)
+        return 0
+
+
 def _is_fatal_error(etype: str, error_text: str = "") -> bool:
     if etype in _FATAL_ERRORS:
         return True
@@ -1985,6 +2007,7 @@ async def _run_daily_warmup_impl(
                 # Очень длинный flood (>30 мин) → пауза плана, не блокируем задачу. ──
                 if etype == "FloodWaitError":
                     fw_secs = int(getattr(e, "seconds", 60) or 60)
+                    await _note_flood(pool, account_id, e)
                     if fw_secs > _MAX_FLOOD_WAIT_INLINE:
                         log.warning(
                             "warmup: длинный FloodWait %ds acc=%d — пауза плана, стоп",
@@ -2561,6 +2584,7 @@ async def _run_warmup_session_impl(
                     # FloodWait → спим ровно столько, сколько просит Telegram
                     if _etype == "FloodWaitError":
                         _fw = int(getattr(exc, "seconds", 60) or 60)
+                        await _note_flood(pool, acc_id, exc)
                         if _fw > _MAX_FLOOD_WAIT_INLINE:
                             log.warning(
                                 "warmup_session: длинный FloodWait %ds acc=%d — стоп",
