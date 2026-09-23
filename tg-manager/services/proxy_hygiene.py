@@ -15,7 +15,10 @@
 """
 from __future__ import annotations
 
+import logging
 import re
+
+log = logging.getLogger(__name__)
 
 
 def proxy_is_dead(is_active, is_alive) -> bool:
@@ -116,6 +119,13 @@ async def delete_proxy_safely(pool, owner_id: int, proxy_id: int) -> dict:
     except (TypeError, ValueError):
         deleted = 0
     if deleted:
+        try:
+            from database.db import record_manual_action
+
+            await record_manual_action(
+                pool, oid, "proxy_delete", target=str(pid))
+        except Exception:
+            log.debug("proxy_delete: запись в журнал не удалась", exc_info=True)
         return {"ok": True, "reason": "", "assigned": 0}
 
     # Ничего не удалилось — объясняем почему. Считаем назначения БЕЗ фильтра по

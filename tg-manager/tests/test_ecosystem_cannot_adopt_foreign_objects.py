@@ -46,7 +46,10 @@ class _Pool:
         return {"found": owner is not None, "mine": owner == uid}
 
     async def execute(self, sql, *args):
-        self.inserts.append(sql)
+        # Запись отказа в журнал (operation_audit) — не добавление в
+        # экосистему; считаем только то, что реально кладёт объект.
+        if "operation_audit" not in sql:
+            self.inserts.append(sql)
         return "INSERT 0 1"
 
 

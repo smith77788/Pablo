@@ -142,8 +142,9 @@ def test_free_proxy_is_deleted_in_one_statement():
     res = _run(delete_proxy_safely(pool, 77, 5))
 
     assert res["ok"] is True
-    assert len(pool.executed) == 1, "проверка и удаление должны быть одним запросом"
-    assert "NOT EXISTS" in pool.executed[0].upper(), (
+    deletes = [q for q in pool.executed if q.strip().upper().startswith("DELETE")]
+    assert len(deletes) == 1, "проверка и удаление должны быть одним запросом"
+    assert "NOT EXISTS" in deletes[0].upper(), (
         "между отдельной проверкой и удалением прокси успеют назначить аккаунту"
     )
 

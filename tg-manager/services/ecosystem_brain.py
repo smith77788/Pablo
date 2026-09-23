@@ -275,6 +275,15 @@ async def add_member(
                 "ecosystem: попытка добавить чужой объект в экосистему "
                 "eco=%s owner=%s %s#%s", ecosystem_id, owner_id, object_type, object_id,
             )
+            # Это не опечатка пользователя: id объекта приходит из
+            # callback_data, руками его не введёшь. Отказ остаётся в журнале.
+            from database.db import record_manual_action
+
+            await record_manual_action(
+                pool, owner_id, "ecosystem_foreign_object_refused",
+                target=f"eco:{ecosystem_id} {object_type}:{object_id}",
+                result="refused",
+            )
             return False
     except Exception as e:
         # Не смогли проверить — не добавляем: это гейт доступа, а не удобство.

@@ -4614,6 +4614,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     + ("" if admin else " AND owner_id=$2"),
                     ids, *([] if admin else [uid]))
                 deleted = int(str(res).rsplit(" ", 1)[-1]) if str(res).startswith("DELETE") else n
+                # Массовое удаление идёт сырым запросом мимо db.remove_tg_account,
+                # поэтому журнал пишем здесь: иначе на вопрос «куда делись сорок
+                # аккаунтов» ответа в системе нет, а удалить их мог и напарник по
+                # workspace.
+                if deleted:
+                    from database.db import record_manual_action
+
+                    await record_manual_action(
+                        pool, uid, "accounts_bulk_delete",
+                        target=",".join(str(i) for i in ids[:50]))
                 return _json_resp({"ok": True, "count": deleted})
             if op == "leave_all":
                 # leave_all_chats — по одному аккаунту, ставим N операций
@@ -5166,6 +5176,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
             if str(res).endswith(" 0"):
                 return _err("Аккаунт не найден", 404)
+            from database.db import record_manual_action
+
+            await record_manual_action(
+                pool, uid, "account_delete", target=str(acc_id))
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("account_delete uid=%d acc=%d", uid, acc_id)

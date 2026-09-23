@@ -2812,6 +2812,8 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
             await pool.execute(
                 "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid
             )
+            await db.record_manual_action(
+                pool, uid, "account_delete", target=str(acc_id))
             deleted += 1
     except Exception as exc:
         mark_handled_error(f"purge_expired_confirm: {exc}")
@@ -2905,6 +2907,8 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             await pool.execute(
                 "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid
             )
+            await db.record_manual_action(
+                pool, uid, "account_delete", target=str(acc_id))
         except Exception:
             log_exc_swallow(
                 log, "Ошибка удаления мёртвого аккаунта из БД", account_id=acc_id

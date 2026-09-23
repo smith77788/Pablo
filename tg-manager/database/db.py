@@ -1049,6 +1049,8 @@ async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
         bot_id,
         added_by,
     )
+    if result == "UPDATE 1":
+        await record_manual_action(pool, added_by, "bot_remove", target=str(bot_id))
     return result == "UPDATE 1"
 
 
@@ -3624,6 +3626,44 @@ async def add_tg_account(
     return acc_id
 
 
+async def record_manual_action(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    action: str,
+    *,
+    target: str | None = None,
+    result: str = "success",
+    error_msg: str | None = None,
+) -> None:
+    """Записать в журнал действие, сделанное человеком руками.
+
+    Зачем. Массовые операции пишут в operation_audit каждый шаг, и по журналу
+    видно, что делал движок. А разрушительные действия из интерфейса —
+    удаление аккаунтов, ботов, прокси, выдача и отзыв тарифа, приглашение в
+    workspace — не писали НИЧЕГО. На вопрос «куда делись сорок аккаунтов»
+    ответа в системе не было, хотя доступ к чужим ресурсам даётся и через
+    workspace, и через экосистему, то есть удалить их мог не только хозяин.
+
+    account_id остаётся пустым намеренно. behavioral_engine считает риск
+    аккаунта как долю неудач среди ВСЕХ его строк в operation_audit за сутки:
+    добавив туда записи интерфейса, мы разбавили бы долю неудач и аккаунт
+    выглядел бы безопаснее, чем он есть. Идентификатор объекта кладём в target.
+
+    Никогда не бросает: журнал не должен ронять действие, которое он
+    описывает.
+    """
+    try:
+        await pool.execute(
+            """INSERT INTO operation_audit(
+                   owner_id, action, target, result, error_msg
+               ) VALUES ($1,$2,$3,$4,$5)""",
+            int(owner_id), action, target, result, error_msg,
+        )
+    except Exception:
+        log.debug("record_manual_action failed: %s owner=%s", action, owner_id,
+                  exc_info=True)
+
+
 async def get_account_label(
     pool: asyncpg.Pool, acc_id: int, owner_id: int
 ) -> str | None:
@@ -3661,6 +3701,8 @@ async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> b
                 "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2",
                 acc_id, owner_id,
             )
+    if result != "DELETE 0":
+        await record_manual_action(pool, owner_id, "account_delete", target=str(acc_id))
     return result != "DELETE 0"
 
 
@@ -5809,6 +5851,8 @@ async def create_workspace_invite(
         code,
         created_by,
     )
+    await record_manual_action(
+        pool, created_by, "workspace_invite_create", target=f"ws:{ws_id}")
     return code
 
 
@@ -5816,6 +5860,7 @@ async def use_workspace_invite(
     pool: asyncpg.Pool, code: str, user_id: int
 ) -> int | None:
     """Use invite code. Returns workspace_id on success, None if invalid/expired."""
+    joined = False
     async with pool.acquire() as conn:
         async with conn.transaction():
             invite = await conn.fetchrow(
@@ -5851,6 +5896,14 @@ async def use_workspace_invite(
                     "UPDATE workspace_invites SET uses_left=uses_left-1 WHERE invite_code=$1",
                     code,
                 )
+                joined = True
+    if joined:
+        # Кто и когда вошёл в чужой workspace — это раздача доступа к ботам и
+        # каналам его владельца, самое важное событие для разбора «откуда он
+        # тут взялся». Пишем владельцу workspace, а не вошедшему.
+        await record_manual_action(
+            pool, int(invite["created_by"]), "workspace_member_join",
+            target=f"ws:{ws_id} user:{user_id}")
     return ws_id
 
 
