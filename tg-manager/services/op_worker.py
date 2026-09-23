@@ -12631,18 +12631,28 @@ async def _exec_mass_invite(
     _promoter = None            # (acc_dict) — аккаунт с правами выдавать админку
     _privacy_blocked: list = []  # цели, отклонённые приватностью (для промоут-трюка)
     _promoted_n = 0
-    # Ротация мест админа: при большом флоте у чата не хватает мест на всех
-    # разом (Telegram: CHAT_ADMINS_TOO_MUCH) — аккаунты, отработавшие свой
-    # батч, обязаны отдавать место следующим в очереди, а не держать права
-    # админа до конца прогона впустую. _admin_seats — кто СЕЙЧАС держит место
-    # (наполняется при каждом успешном промоуте — и в первичной раздаче, и «на
-    # лету»); _admin_seats_freed — счётчик для честного итога.
+    # Ротация мест админа: у чата ограниченное число мест админа разом
+    # (Telegram: CHAT_ADMINS_TOO_MUCH, на практике порядка полусотни) — флот
+    # почти всегда больше. Полный цикл на аккаунт: вступил по ссылке → получил
+    # права НЕПОСРЕДСТВЕННО перед своим батчем (не всем сразу и не впрок) →
+    # пригласил → отдал права И вышел из чата, как только отработал (см.
+    # _release_admin_seat/_leave_after_seat_release ниже) — следующий в очереди
+    # тут же занимает освободившееся место. _admin_seats — кто СЕЙЧАС держит
+    # место (наполняется при каждом успешном промоуте — и в первичной раздаче
+    # ПЕРВОГО круга, и «на лету»); _admin_seats_freed — счётчик для честного
+    # итога.
     _admin_seats: set[int] = set()
     _admin_seats_freed = 0
     _promote_failed = 0          # инвайтеры, кому промоут вернул False/ошибку (не участник/нет прав)
     _promote_no_uid = 0          # инвайтеры, чей user_id не удалось получить (промоут пропущен)
     _promote_skipped_no_admin = False  # ни один аккаунт не админ чата → некому выдать право
     _acc_uid: dict = {}          # id аккаунта → tg_user_id (для промоута; наполняется ниже)
+    # id аккаунта → его собственный словарь (session_str и т.п.) — нужен, чтобы
+    # ОТРАБОТАВШИЙ своё место админа аккаунт мог выйти из чата САМ (leave_channel
+    # коннектится под его же сессией, не под сессией промоутера). Ротация мест
+    # «вступил по ссылке → получил права → пригласил → вышел» требует знать,
+    # ЧЕЙ session_str освобождать, а не только чей user_id снимать с админки.
+    _acc_by_id: dict = {int(a["id"]): a for a in accounts}
     # Сколько раз пробовали выдать права каждому инвайтеру по ходу прогона.
     # Было множеством («уже пробовали») — одна осечка по сети/флуду промоутера
     # стоила аккаунта на весь прогон (в отчёте: «N аккаунтов без прав выведены
@@ -12709,19 +12719,37 @@ async def _exec_mass_invite(
                 "(см. причину «сессия/сеть»). Права admin могли быть — но проверить их "
                 "без подключения нельзя.")
         elif _auto_promote:
-            # Потолок мест админа у ЭТОГО чата ещё не известен (узнаём только
-            # по факту первого отказа Telegram, см. admins_too_much) — пока не
-            # уткнулись в него, раздаём права как раньше, всем подряд.
+            # Заранее выдаём права НЕБОЛЬШОЙ партии — ровно тем, кто реально
+            # сядет инвайтить в первом же круге, а не всему выбранному флоту.
+            #
+            # Жалоба владельца: флот больше лимита чата на число админов (у
+            # Telegram он в районе 50) — упреждающая раздача ВСЕМ выжигала
+            # места админа на аккаунтах, до которых очередь дойдёт нескоро
+            # (или не дойдёт вовсе — суточный бюджет мог быть уже исчерпан, и
+            # именно так продолжение операции раздавало админку заново людям,
+            # которым она уже была не нужна). Права нужны инвайтеру НЕПОСРЕДСТВЕННО
+            # перед тем, как он начинает приглашать, а не при вступлении впрок.
+            #
+            # Партия ограничена ёмкостью одного круга (_INVITE_PARALLEL, тот же
+            # параметр, что ниже держит параллельность самого инвайта) — ровно
+            # столько мест единовременно и нужно. Остаток флота получает права
+            # «на лету» реактивно (см. ветку res.get("no_rights") ниже) —
+            # именно тогда, когда до него дошла очередь и бюджет дня не нулевой.
+            import os as _os_promote_cap
+            try:
+                _promote_upfront_cap = max(1, int(_os_promote_cap.getenv("INVITE_PARALLEL", "4")))
+            except (TypeError, ValueError):
+                _promote_upfront_cap = 4
             _admin_cap_hit = False
+            _promoted_upfront = 0
             for a in accounts:
                 if int(a["id"]) == int(_promoter["id"]):
                     continue
-                if _admin_cap_hit:
-                    # Дальше пытаться бессмысленно — И дорого: join+promote на
-                    # каждый гарантированно неудачный аккаунт стоит секунды
-                    # впустую при большом флоте (сотни аккаунтов сверх лимита
-                    # чата — это были бы лишние минуты работы ради заведомого
-                    # отказа). Остаток получит права «на лету» — по очереди, по
+                if _admin_cap_hit or _promoted_upfront >= _promote_upfront_cap:
+                    # Дальше пытаться бессмысленно (упёрлись в потолок чата) или
+                    # уже не нужно (первый круг обеспечен) — И дорого: join+promote
+                    # на каждый лишний аккаунт стоит секунды впустую при большом
+                    # флоте. Остаток получит права «на лету» — по очереди, по
                     # мере того как ротация освобождает места (см. ниже,
                     # ветка res.get("no_rights") и "admins_too_much").
                     break
@@ -12776,6 +12804,7 @@ async def _exec_mass_invite(
                         timeout=45)
                     if okp:
                         _promoted_n += 1
+                        _promoted_upfront += 1
                         _admin_seats.add(int(a["id"]))
                     else:
                         _promote_failed += 1
@@ -12786,7 +12815,10 @@ async def _exec_mass_invite(
                     _promote_failed += 1
                     log.debug("mass_invite op=%d: promote acc=%s failed: %s", op_id, a.get("id"), _pe)
             _rights_word = "invite_users+add_admins" if _invite_method == "admin" else "invite_users"
-            _promote_msg = f"выдана админка ({_rights_word}) {_promoted_n} инвайтерам через аккаунт #{_promoter['id']}"
+            _promote_msg = (
+                f"выдана админка ({_rights_word}) {_promoted_n} инвайтерам через "
+                f"аккаунт #{_promoter['id']} — только первому кругу, остальные получат "
+                "права по очереди, по мере отработки батча текущими")
             if _promote_no_uid:
                 _promote_msg += (f"; {_promote_no_uid} пропущено — не удалось получить их user_id "
                                  "(переавторизуйте эти аккаунты)")
@@ -12800,6 +12832,29 @@ async def _exec_mass_invite(
             await _safe_execute(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','ok',$2)", op_id, _promote_msg)
+
+    async def _leave_after_seat_release(acc_id: int) -> None:
+        """Аккаунт, чья роль админа закончилась, выходит из чата САМ.
+
+        Полный цикл ротации, который просил владелец: «вступил по ссылке →
+        получил права → пригласил → вышел», а не «вступил и остался в чате
+        навсегда, даже отработав своё». leave_channel коннектится под
+        сессией САМОГО аккаунта (не промоутера) — для РАЗНЫХ аккаунтов это
+        безопасно параллелить (в отличие от demote через одного промоутера,
+        см. demote_from_admin_batch). Освобождает не только место админа
+        (уже снято выше), но и след недавно промоутнутого-и-разжалованного
+        аккаунта в списке участников. Best-effort: сбой выхода не должен
+        ронять прогон — аккаунт просто останется участником чуть дольше."""
+        _acc = _acc_by_id.get(acc_id)
+        if not _acc or not _acc.get("session_str"):
+            return
+        try:
+            await asyncio.wait_for(
+                account_manager.leave_channel(_acc["session_str"], group, _acc=dict(_acc)),
+                timeout=30)
+        except Exception as _le:
+            log.debug("mass_invite op=%d acc=%s: leave_channel after seat release failed: %s",
+                      op_id, acc_id, _le)
 
     async def _release_admin_seat(acc_id: int) -> None:
         """Снять права админа с аккаунта, если он их держал, — освобождает
@@ -12817,6 +12872,7 @@ async def _exec_mass_invite(
         _u = _acc_uid.get(acc_id)
         if not _u:
             _admin_seats.discard(acc_id)  # без user_id снять права нечем — просто забываем о месте
+            await _leave_after_seat_release(acc_id)
             return
         try:
             ok = await asyncio.wait_for(
@@ -12829,6 +12885,7 @@ async def _exec_mass_invite(
             log.debug("mass_invite op=%d acc=%s: demote_from_admin failed: %s",
                       op_id, acc_id, _de)
         _admin_seats.discard(acc_id)
+        await _leave_after_seat_release(acc_id)
 
     async def _release_admin_seats_batch(acc_ids) -> None:
         """То же самое, но для ПАЧКИ аккаунтов сразу (ребаланс флота может
@@ -12869,6 +12926,12 @@ async def _exec_mass_invite(
                 log.debug("mass_invite op=%d: demote_from_admin_batch failed: %s", op_id, _de)
         for a in acc_ids:
             _admin_seats.discard(int(a))
+        # Выход из чата — своей сессией у КАЖДОГО, поэтому, в отличие от
+        # демоута через промоутера, здесь параллель безопасна: разные аккаунты
+        # держат разные auth-key, гонки за одну сессию нет.
+        if ids:
+            await asyncio.gather(
+                *(_leave_after_seat_release(a) for a in ids), return_exceptions=True)
 
     # ── Очередь-планировщик ──────────────────────────────────────────────────
     # Раньше аудитория НАРЕЗАЛАСЬ по аккаунтам заранее (_chunks). Цену платил

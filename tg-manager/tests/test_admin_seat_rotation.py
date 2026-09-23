@@ -97,11 +97,16 @@ def test_upfront_promote_stops_early_once_cap_is_hit():
     """При большом флоте promote-цикл ДО старта не должен долбить join+promote
     на заведомо обречённые аккаунты после первого admins_too_much — это
     дорого (сотни лишних сетевых вызовов) и бессмысленно: лимит чата один на
-    всех, а не персональный."""
+    всех, а не персональный. Так же он не должен раздавать права ВСЕМУ
+    выбранному флоту заранее — только первому кругу (_promote_upfront_cap):
+    остальным права нужны непосредственно перед их инвайтом, а не при
+    вступлении впрок (жалоба владельца — флот больше лимита чата на число
+    админов, упреждающая раздача всем выжигала места впустую)."""
     seg = _exec_mass_invite_source()
     i = seg.index("_admin_cap_hit = False")
-    loop = seg[i:i + 1100]
-    assert "if _admin_cap_hit:" in loop and "break" in loop
+    loop = seg[i:i + 1200]
+    assert "_promoted_upfront >= _promote_upfront_cap" in loop and "break" in loop
+    assert "if _admin_cap_hit or _promoted_upfront >= _promote_upfront_cap:" in loop
 
 
 def test_release_admin_seat_is_best_effort_and_scoped_to_holders():
@@ -180,3 +185,87 @@ def test_seat_wait_budget_is_far_more_patient_than_default():
     assert promote_retry_allowed(MAX_PROMOTE_ATTEMPTS, MAX_ADMIN_SEAT_WAIT_ATTEMPTS) is True
     assert promote_retry_allowed(MAX_ADMIN_SEAT_WAIT_ATTEMPTS - 1, MAX_ADMIN_SEAT_WAIT_ATTEMPTS) is True
     assert promote_retry_allowed(MAX_ADMIN_SEAT_WAIT_ATTEMPTS, MAX_ADMIN_SEAT_WAIT_ATTEMPTS) is False
+
+
+# ── жалоба владельца (операция #97): «продолжение раздаёт права заново» и
+# «весь флот получает админку сразу при вступлении, а не перед инвайтом» ────
+
+def test_upfront_promote_is_capped_not_whole_fleet():
+    """Раньше bulk-промоут ДО старта прогона шёл по ВСЕМУ выбранному флоту —
+    сотни аккаунтов получали права заранее, хотя реально сядут инвайтить
+    единицы за раз. При флоте больше лимита чата на число админов это
+    выжигало места впустую на аккаунтах, до которых очередь дойдёт нескоро
+    (или не дойдёт — суточный бюджет уже исчерпан), а КАЖДОЕ продолжение
+    операции повторяло эту раздачу заново всему флоту. Теперь партия
+    ограничена ёмкостью одного круга (_promote_upfront_cap, тот же параметр,
+    что держит параллельность самого инвайта) — остаток получает права
+    реактивно, по мере того как до него доходит очередь."""
+    seg = _exec_mass_invite_source()
+    i = seg.index("elif _auto_promote:")
+    j = seg.index("_rights_word =", i)
+    block = seg[i:j]
+    assert "_promote_upfront_cap" in block
+    assert "INVITE_PARALLEL" in block, (
+        "потолок первичной раздачи обязан совпадать с параллельностью круга "
+        "инвайта — ровно столько аккаунтов реально сядут инвайтить сразу"
+    )
+    assert "_promoted_upfront += 1" in block
+
+
+def test_release_admin_seat_makes_account_leave_the_chat():
+    """Явный запрос владельца: «вступил по ссылке — получил права —
+    пригласил — вышел из чата». Раньше отработавший своё место аккаунт
+    оставался УЧАСТНИКОМ чата навсегда (демоут снимал только права, не
+    членство) — полного цикла ротации не было."""
+    seg = _exec_mass_invite_source()
+    i = seg.index("async def _leave_after_seat_release")
+    j = seg.index("\n\n    async def _release_admin_seat", i)
+    helper = seg[i:j]
+    assert "leave_channel" in helper
+
+    single = seg[seg.index("async def _release_admin_seat("):
+                 seg.index("async def _release_admin_seats_batch")]
+    assert "_leave_after_seat_release(acc_id)" in single, (
+        "_release_admin_seat обязан звать выход из чата после снятия прав"
+    )
+
+    batch = seg[seg.index("async def _release_admin_seats_batch("):]
+    batch = batch[:batch.index("\n\n    # ── Очередь-планировщик")]
+    assert "_leave_after_seat_release(a) for a in ids" in batch, (
+        "_release_admin_seats_batch обязан звать выход из чата для ВСЕХ "
+        "аккаунтов пакета, а не только у одиночного release"
+    )
+
+
+def test_batch_leave_is_parallel_but_batch_demote_is_not():
+    """Демоут через промоутера — ОДНА сессия на всех (см. bug №2, «зависла на
+    2/77» второй раз): там нельзя параллелить, только один connect на пакет
+    (demote_from_admin_batch). Выход из чата, наоборот, — у КАЖДОГО аккаунта
+    СВОЯ сессия: параллель здесь безопасна и не создаёт AUTH_KEY_DUPLICATED,
+    и последовательно ждать выхода десятков аккаунтов было бы тем же классом
+    многоминутного простоя, который уже чинили для демоута."""
+    seg = _exec_mass_invite_source()
+    batch = seg[seg.index("async def _release_admin_seats_batch("):]
+    batch = batch[:batch.index("\n\n    # ── Очередь-планировщик")]
+    assert "demote_from_admin_batch(" in batch
+    assert "asyncio.gather(" in batch, (
+        "выход из чата в пакетном освобождении обязан идти параллельно — "
+        "у каждого аккаунта своя сессия, это безопасно и быстро"
+    )
+    # демоут — ДО gather (одно соединение промоутера), leave — ПОСЛЕ (через
+    # gather). rindex на gather — докстринг выше объясняет ПРЕЖНИЙ баг тем же
+    # словом "asyncio.gather", берём последнее (реальное) вхождение — в коде.
+    assert batch.index("demote_from_admin_batch(") < batch.rindex("asyncio.gather(")
+
+
+def test_acc_by_id_lookup_exists_for_leave_channel():
+    """leave_channel коннектится под сессией САМОГО аккаунта, не промоутера —
+    нужен способ найти session_str отработавшего аккаунта по его id."""
+    seg = _exec_mass_invite_source()
+    assert "_acc_by_id: dict = {int(a[\"id\"]) for a in accounts}" not in seg
+    assert '_acc_by_id: dict = {int(a["id"]): a for a in accounts}' in seg
+    i = seg.index("async def _leave_after_seat_release")
+    j = seg.index("\n\n    async def _release_admin_seat", i)
+    helper = seg[i:j]
+    assert "_acc_by_id.get(acc_id)" in helper
+    assert 'account_manager.leave_channel(_acc["session_str"], group' in helper
