@@ -176,8 +176,35 @@ async def desired_accounts(pool) -> set[int]:
     return {int(r["id"]) for r in (rows or [])}
 
 
+async def _drop_disconnected() -> None:
+    """Убрать из _listening тех, кто уже не подключён.
+
+    Единственный признак «слушаем» был — запись в `_listening`, а она переживает
+    обрыв соединения. Клиент создаётся с `connection_retries=1`, то есть после
+    неудачной попытки Telethon сдаётся и остаётся отключённым НАВСЕГДА. Дальше
+    получалось худшее из двух: обновления не приходят (слушатель глухой, и
+    оператор об этом не узнает), а аккаунт при этом так и числится арендованным
+    у арбитра — то есть выведен и из обычных операций тоже.
+
+    Здесь только снимаем запись и отпускаем аренду; подключит заново тот же
+    проход `tick`, обычным путём.
+    """
+    for acc_id, client in list(_listening.items()):
+        try:
+            alive = bool(client.is_connected())
+        except Exception:
+            # Не смогли спросить — считаем мёртвым: переподключение безопаснее
+            # глухого слушателя, держащего аккаунт.
+            alive = False
+        if not alive:
+            log.warning(
+                "audience_listener: acc=%d потерял соединение — переподключаем",
+                acc_id)
+            await _stop_one(acc_id)
+
+
 async def tick(pool, bot) -> None:
-    """Один проход: остановить лишних, подключить недостающих."""
+    """Один проход: снять оборвавшихся, остановить лишних, подключить недостающих."""
     from services.logger import log_exc_swallow
 
     try:
@@ -185,6 +212,8 @@ async def tick(pool, bot) -> None:
     except Exception:
         log_exc_swallow(log, "audience_listener: выборка listener_enabled упала")
         return
+
+    await _drop_disconnected()
 
     for acc_id in [a for a in _listening if a not in wanted]:
         await _stop_one(acc_id)
