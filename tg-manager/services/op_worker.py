@@ -2015,6 +2015,58 @@ async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
     return {"requeued": requeued, "released": len(held)}
 
 
+# Насколько глубоко идём вверх по цепочке повторов. Цепочка — это «повтор
+# повтора повтора»; десяти хватает с большим запасом, а предел нужен на случай
+# битых данных, чтобы обход не стал бесконечным.
+_RETRY_CHAIN_MAX = 10
+
+
+async def journal_op_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
+    """Операции, чей журнал относится к этой работе: она сама и её предки-повторы.
+
+    ЗАЧЕМ. Все три ключа идемпотентности (`completed_targets`,
+    `settled_targets`, `completed_steps`) читают operation_log ПО op_id. Пока
+    повтор — это возврат той же строки очереди в pending, ключ тот же и всё
+    сходится. Но кнопка «Повторить» ставит НОВУЮ операцию с новым id: журнал у
+    неё пустой, и исполнитель честно проходит весь список целей заново.
+
+    Для владельца это выглядит так: рассылка встала на 203 адресатах из 380, он
+    жмёт «Повторить» — и 203 человека получают ВТОРОЕ одинаковое сообщение.
+    Самая заметная спам-сигнатура, ровно та, от которой журнал и защищает.
+    Для постинга — второй пост в каналах, которые его уже получили; для
+    создания каналов — второй комплект каналов.
+
+    Связь между повтором и оригиналом в данных уже была: `retry_of_op` в params
+    ставит operation_bus.submit_retry_failed. Её никто не читал — теперь по ней
+    и идём.
+
+    Никогда не бросает: не прочитали цепочку — работаем по своему журналу, то
+    есть как раньше.
+    """
+    chain = [int(op_id)]
+    seen = {int(op_id)}
+    cur = int(op_id)
+    for _ in range(_RETRY_CHAIN_MAX):
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT params->>'retry_of_op' AS src FROM operation_queue WHERE id=$1",
+            cur,
+            log_ctx=f"[journal_chain op={cur}]",
+        )
+        if not row:
+            break
+        try:
+            src = int(row["src"])
+        except (KeyError, TypeError, ValueError, IndexError):
+            break
+        if src in seen:
+            break
+        seen.add(src)
+        chain.append(src)
+        cur = src
+    return chain
+
+
 async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     """Цели операции, уже отработанные УСПЕШНО (operation_log, status='ok').
 
@@ -2035,8 +2087,8 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     rows = await _safe_fetch(
         pool,
         "SELECT DISTINCT target FROM operation_log "
-        " WHERE op_id=$1 AND status='ok' AND target IS NOT NULL",
-        op_id,
+        " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND target IS NOT NULL",
+        await journal_op_ids(pool, op_id),
         log_ctx=f"[completed_targets op={op_id}]",
     )
     return {str(r["target"]) for r in (rows or []) if r["target"]}
@@ -2063,8 +2115,8 @@ async def completed_steps(pool: asyncpg.Pool, op_id: int) -> set[int]:
     rows = await _safe_fetch(
         pool,
         "SELECT DISTINCT step_num FROM operation_log "
-        " WHERE op_id=$1 AND status='ok' AND step_num IS NOT NULL",
-        op_id,
+        " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND step_num IS NOT NULL",
+        await journal_op_ids(pool, op_id),
         log_ctx=f"[completed_steps op={op_id}]",
     )
     out: set[int] = set()
@@ -2099,9 +2151,10 @@ async def settled_targets(pool: asyncpg.Pool, op_id: int) -> dict[str, str]:
     rows = await _safe_fetch(
         pool,
         "SELECT DISTINCT ON (target) target, status FROM operation_log "
-        " WHERE op_id=$1 AND status IN ('ok','skip') AND target IS NOT NULL "
+        " WHERE op_id = ANY($1::bigint[]) AND status IN ('ok','skip') "
+        "   AND target IS NOT NULL "
         " ORDER BY target, (status='ok') DESC",
-        op_id,
+        await journal_op_ids(pool, op_id),
         log_ctx=f"[settled_targets op={op_id}]",
     )
     # Разбор строк — защищённый: обещание «никогда не бросает» обязано держаться

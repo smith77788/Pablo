@@ -3616,6 +3616,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     base = {}
                 base = dict(base)
                 base["channel_ids"] = failed_ids
+                # Связь с исходной операцией: по ней исполнитель видит её журнал
+                # и не делает второй раз то, что там уже помечено сделанным
+                # (op_worker.journal_op_ids).
+                base["retry_of_op"] = op_id
                 new_id = await _obus.submit(
                     pool, uid, row["op_type"], base,
                     total_items=len(failed_ids),
@@ -3636,6 +3640,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                  else _json.loads(row["params"] or "{}"))
             except (TypeError, ValueError):
                 _retry_params = {}
+            # Связь с исходной операцией. Повтор — это НОВАЯ строка очереди с
+            # новым id, а журнал уже сделанной работы лежит под СТАРЫМ id. Без
+            # этой ссылки исполнитель начинал со свежим пустым журналом и честно
+            # проходил весь список целей заново: рассылка, вставшая на 203
+            # адресатах из 380, присылала этим 203 второе одинаковое сообщение,
+            # пост уходил второй раз в каналы, которые его уже получили, а
+            # создание каналов давало второй комплект. По ссылке исполнитель
+            # видит журнал предка (op_worker.journal_op_ids) и доделывает
+            # остаток, а не переделывает всё.
+            _retry_params = dict(_retry_params)
+            _retry_params["retry_of_op"] = op_id
             # dedup_window_sec=0: повтор — намеренно та же операция с теми же
             # params, и окно идемпотентности приняло бы его за двойной тап.
             try:

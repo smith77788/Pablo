@@ -210,4 +210,9 @@ async def test_retry_non_mass_publish_operation(as_user, submitted):
     assert data["new_id"] == 4242
     assert submitted[0]["op_type"] == "check_accounts_health"
     # params должны доехать разобранными, а не строкой
-    assert submitted[0]["params"] == {"account_ids": [11, 12]}
+    _p = submitted[0]["params"]
+    assert _p["account_ids"] == [11, 12]
+    # ...и нести ссылку на исходную операцию: по ней исполнитель видит её журнал
+    # и не делает второй раз уже сделанное (op_worker.journal_op_ids).
+    assert _p["retry_of_op"] == 99
+    assert set(_p) == {"account_ids", "retry_of_op"}, "в повтор просочились лишние параметры"

@@ -69,7 +69,16 @@ def test_helper_reads_only_successful_steps():
     ow = _read("services/op_worker.py")
     body = _fn(ow, "completed_targets")
     assert "status='ok'" in body, "уже-сделанными считаются только успешные шаги"
-    assert "op_id=$1" in body, "выборка обязана быть скоуплена своей операцией"
+    # Скоуп сохраняется, но теперь он — ЦЕПОЧКА повторов: у операции,
+    # поставленной кнопкой «Повторить», свой новый id, а журнал уже сделанной
+    # работы лежит под id предка (op_worker.journal_op_ids). Неограниченное
+    # чтение журнала по-прежнему запрещено.
+    assert "op_id = ANY($1::bigint[])" in body, (
+        "выборка обязана быть скоуплена операцией и её предками-повторами"
+    )
+    assert "journal_op_ids(pool, op_id)" in body, (
+        "скоуп собран не по цепочке повторов"
+    )
     assert "DISTINCT" in body
 
 

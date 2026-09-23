@@ -76,7 +76,16 @@ def test_creation_executors_report_ok_counter(name):
 def test_helper_reads_only_successful_steps():
     body = _fn("completed_steps")
     assert "status='ok'" in body, "сделанными считаются только успешные шаги"
-    assert "op_id=$1" in body, "выборка обязана быть скоуплена своей операцией"
+    # Скоуп сохраняется, но теперь он — ЦЕПОЧКА повторов: у операции,
+    # поставленной кнопкой «Повторить», свой новый id, а журнал уже сделанной
+    # работы лежит под id предка (op_worker.journal_op_ids). Неограниченное
+    # чтение журнала по-прежнему запрещено.
+    assert "op_id = ANY($1::bigint[])" in body, (
+        "выборка обязана быть скоуплена операцией и её предками-повторами"
+    )
+    assert "journal_op_ids(pool, op_id)" in body, (
+        "скоуп собран не по цепочке повторов"
+    )
     assert "_safe_fetch(" in body, "сбой чтения журнала не должен ронять операцию"
 
 
