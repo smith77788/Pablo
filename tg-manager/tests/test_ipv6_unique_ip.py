@@ -54,7 +54,10 @@ def test_make_client_wires_ipv6_priority_over_relay():
     assert seg.index("if not has_bound_proxy and _subnet and _acc_id") < seg.index("elif not has_bound_proxy and relay_url")
     assert "local_addr = _v6" in seg and "use_ipv6 = True" in seg
     # подсеть: пер-владелец (приложение) перекрывает env
-    assert 'device.get("ipv6_subnet")' in seg and "_OWNER_IPV6_SUBNET.get" in seg and "_IPV6_SUBNET" in seg
+    # Читаем из `d`, а не из `device`: `d` — словарь ПОСЛЕ добора транспортных
+    # полей из карты. Исходный `device` здесь означал бы прямой выход с host-IP
+    # ровно в том случае, ради которого добор и делается.
+    assert 'd.get("ipv6_subnet")' in seg and "_OWNER_IPV6_SUBNET.get" in seg and "_IPV6_SUBNET" in seg
     # per-owner конфиг реально доходит: get_account_for_telethon + db-функции
     db = _read("database/db.py")
     assert "async def set_ipv6_subnet" in db and "async def get_ipv6_subnet" in db

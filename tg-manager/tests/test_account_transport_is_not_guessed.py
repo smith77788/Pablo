@@ -98,16 +98,38 @@ def test_bound_proxy_is_filled_too():
     assert d["proxy_id"] == 42
 
 
-def test_prime_reads_only_accounts_with_a_non_default_exit():
-    pool = _Pool([{"id": 1, "owner_id": 10, "cf_relay_url": "https://r/1",
-                   "proxy_id": None, "proxy_url": None}])
+def test_prime_covers_accounts_with_a_direct_exit_too():
+    """Раньше здесь проверялось обратное: прайминг брал ТОЛЬКО аккаунты с
+    релеем или прокси, потому что «остальные и так идут напрямую».
+
+    Премисса оказалась неверной, и это стоило дыры ровно того же класса,
+    который закрывает весь этот файл. У аккаунта БЕЗ прокси выход определяют
+    политика прокси владельца и его IPv6-подсеть, а берутся они по `owner_id`.
+    То есть страховки не было именно у тех аккаунтов, которым она нужнее
+    всего: словарь без `owner_id` уводил их напрямую с host-IP, пока
+    канонический путь вёл тот же аккаунт через свой IPv6.
+
+    Поэтому теперь в карту попадают ВСЕ аккаунты с сессией. Отсекаются только
+    аккаунты без сессии: подключиться они не могут, добирать им нечего.
+    """
+    pool = _Pool([
+        {"id": 1, "owner_id": 10, "cf_relay_url": "https://r/1",
+         "proxy_id": None, "proxy_url": None},
+        {"id": 2, "owner_id": 10, "cf_relay_url": None,
+         "proxy_id": None, "proxy_url": None},
+    ])
     n = asyncio.run(am.prime_account_transport(pool, 10))
 
-    assert n == 1
+    assert n == 2, (
+        f"в карте {n} аккаунтов вместо двух — аккаунт с прямым выходом снова "
+        "остался без страховки")
     q = " ".join(pool.queries[0].split())
-    assert "cf_relay_url IS NOT NULL" in q and "proxy_id IS NOT NULL" in q, (
-        "прайминг обязан отбирать аккаунты с недефолтным выходом")
+    assert "session_str IS NOT NULL" in q, (
+        "прайминг обязан отсекать аккаунты без сессии")
     assert am._ACC_TRANSPORT[1]["cf_relay_url"] == "https://r/1"
+    assert am._ACC_TRANSPORT[2]["owner_id"] == 10, (
+        "владелец аккаунта с прямым выходом не запомнен — политика прокси и "
+        "IPv6-подсеть до него не доедут")
 
 
 def test_prime_drops_entries_the_database_no_longer_confirms():

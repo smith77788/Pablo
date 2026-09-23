@@ -519,8 +519,13 @@ def forget_account_transport(account_id: int | None) -> None:
 async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int:
     """Перечитать карту транспорта из БД. Возвращает число аккаунтов в карте.
 
-    Берём только аккаунты с НЕдефолтным выходом (есть релей или назначен
-    прокси): остальным добирать нечего — они и так идут напрямую.
+    Берём ВСЕ аккаунты, а не только тех, у кого назначен релей или прокси.
+    Прежняя выборка исходила из того, что остальные «и так идут напрямую», но
+    это неверно: у аккаунта без прокси выход определяют политика прокси
+    владельца и его IPv6-подсеть, а они берутся по owner_id. То есть страховки
+    не было ровно у тех аккаунтов, которым она нужнее всего. Строка на аккаунт
+    — четыре коротких поля, это дешевле одной отозванной сессии. Отсекаем
+    только аккаунты без сессии: подключиться они не могут, добирать им нечего.
 
     Прайминг АВТОРИТЕТЕН для тех владельцев, которых перечитали: записи, не
     подтверждённые свежей выборкой, удаляются. Иначе аккаунт, у которого релей
@@ -532,11 +537,11 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
     кого нет релея» и снова уводит аккаунты напрямую. Исключение уходит наверх,
     прежняя карта остаётся.
     """
-    where = "WHERE (a.cf_relay_url IS NOT NULL AND a.cf_relay_url <> '') OR a.proxy_id IS NOT NULL"
+    _has_session = "a.session_str IS NOT NULL AND a.session_str <> ''"
+    where = f"WHERE {_has_session}"
     args: list[Any] = []
     if owner_id is not None:
-        where = "WHERE a.owner_id = $1 AND ((a.cf_relay_url IS NOT NULL " \
-                "AND a.cf_relay_url <> '') OR a.proxy_id IS NOT NULL)"
+        where = f"WHERE a.owner_id = $1 AND {_has_session}"
         args = [int(owner_id)]
     rows = await pool.fetch(
         "SELECT a.id, a.owner_id, a.cf_relay_url, a.proxy_id, p.proxy_url "
@@ -606,6 +611,14 @@ def _fill_transport_fields(device: dict[str, Any]) -> list[str]:
         if k not in device and k in cached:
             device[k] = cached[k]
             filled.append(k)
+    # owner_id — тоже транспортное поле, хотя в таблице оно про другое: по нему
+    # берутся политика прокси владельца и его IPv6-подсеть. Без него аккаунт
+    # уходит ПРЯМО с host-IP, тогда как канонический путь ведёт тот же аккаунт
+    # через релей или свой IPv6. Это и есть AUTH_KEY_DUPLICATED — одна сессия с
+    # двух адресов. Добираем на тех же правах: только если в словаре его НЕТ.
+    if "owner_id" not in device and "owner_id" in cached:
+        device["owner_id"] = cached["owner_id"]
+        filled.append("owner_id")
     return filled
 
 
@@ -1357,7 +1370,11 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # нельзя тем более. Что добрали — тем и пойдём; о чём не знаем — говорим
     # вслух, с именем запроса, который надо чинить. Не падаем: клиент нужен.
     if device is not None:
-        _missing = [k for k in ("cf_relay_url", "proxy_id") if k not in d]
+        # owner_id здесь наравне с релеем и прокси: по нему берутся политика
+        # прокси владельца и его IPv6-подсеть, то есть он тоже решает, с какого
+        # адреса аккаунт выйдет. Без него в списке словарь с релеем, но без
+        # владельца, вообще не проверялся.
+        _missing = [k for k in ("cf_relay_url", "proxy_id", "owner_id") if k not in d]
         _filled = _fill_transport_fields(d) if _missing else []
         if _filled:
             log.warning(
@@ -1404,13 +1421,18 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # local_addr/use_ipv6 — привязка исходящего сокета к своему IPv6 аккаунта.
     local_addr = None
     use_ipv6 = False
-    _acc_id = device.get("id") if device else None
+    # Тоже из d, а не из device, и ровно по той же причине, что и релей выше:
+    # d — словарь ПОСЛЕ добора транспортных полей. Читая здесь исходный device,
+    # мы отправляли аккаунт напрямую с host-IP именно в том случае, ради
+    # которого добор и делается, — а у аккаунта без прокси свой IPv6 это
+    # единственный способ иметь стабильный собственный адрес.
+    _acc_id = d.get("id") if device else None
 
     # Подсеть: сначала пер-владелец из приложения (device/кэш), иначе глобальный env.
-    _owner_id = device.get("owner_id") if device else None
+    _owner_id = d.get("owner_id") if device else None
     _subnet = ""
     if device:
-        _subnet = (device.get("ipv6_subnet") or "").strip()
+        _subnet = (d.get("ipv6_subnet") or "").strip()
     if not _subnet and _owner_id is not None:
         _subnet = _OWNER_IPV6_SUBNET.get(int(_owner_id), "")
     if not _subnet:
