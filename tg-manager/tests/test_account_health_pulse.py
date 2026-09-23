@@ -148,5 +148,13 @@ def test_pulse_surfaced_in_api_and_ui():
     assert "async def accounts_health" in api
     assert 'add_get("/api/miniapp/accounts/health", accounts_health)' in api
     assert '"account_health": await _account_health_summary' in api
-    ui = _read("mini_app/index.html")
-    assert "dk-health" in ui and "account_health" in ui
+    # Раньше пульс искали по id чипа `dk-health` из второго «Дашборда метрик».
+    # Тот экран был недостижим (в него не вёл ни один push) и удалён; живой
+    # пульс рисует единый дашборд — и подробнее, тремя состояниями вместо одного
+    # числа. Требование прежнее: данные не приходят впустую, экран их показывает.
+    from tests.miniapp_source import miniapp_source
+
+    ui = miniapp_source()
+    assert "account_health" in ui, "ответ с пульсом никто не читает"
+    for state in ("Здоровы", "Под риском", "Карантин"):
+        assert state in ui, f"состояние пульса «{state}» нигде не показано"

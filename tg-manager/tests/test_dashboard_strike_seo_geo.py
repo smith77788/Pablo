@@ -38,9 +38,14 @@ def test_dashboard_has_seo_and_geo_vitals():
     # реально инъектятся в ответ дашборда
     assert '"seo": await _seo_vitals(uid)' in api
     assert '"geo": await _geo_vitals(uid)' in api
-    ui = _read("mini_app/index.html")
-    assert "dk-seo" in ui and "dk-geo" in ui
-    assert "d.seo" in ui and "d.geo" in ui
+    # Чипы `dk-seo`/`dk-geo` жили во втором «Дашборде метрик» — недостижимом
+    # экране, удалённом вместе с его кодом. SEO и гео показывает единый дашборд.
+    from tests.miniapp_source import miniapp_source
+
+    ui = miniapp_source()
+    assert "d.seo" in ui and "d.geo" in ui, "ответ дашборда читают не полностью"
+    assert "seo.tracked_keywords" in ui, "SEO-ключи не выведены на экран"
+    assert "geo.plans" in ui, "гео-планы не выведены на экран"
 
 
 def test_strike_records_outcome_to_memory():
@@ -81,8 +86,12 @@ def test_seo_surfaces_pending_suggestions():
     api = _read("services/mini_app_api.py")
     assert "pending_suggestions" in api
     assert "FROM bot_seo_suggestions" in api and "applied_at IS NULL" in api
-    ui = _read("mini_app/index.html")
-    assert "pending_suggestions" in ui
+    from tests.miniapp_source import miniapp_source
+
+    # см. комментарий выше: подсказки показывает единый дашборд, а не удалённый
+    # второй «Дашборд метрик».
+    ui = miniapp_source()
+    assert "seo.pending_suggestions" in ui, "непринятые подсказки нигде не видны"
     md = _read("bot/handlers/metrics_dashboard.py")
     assert "bot_seo_suggestions" in md and "applied_at IS NULL" in md
 

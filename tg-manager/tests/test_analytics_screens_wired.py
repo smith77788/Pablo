@@ -44,7 +44,22 @@ def test_audience_endpoint_route_and_shape():
 
 
 def test_frontend_dashboard_call_bug_fixed():
-    ui = _read("mini_app/index.html")
-    # старый баг (method вместо URL) устранён на обоих вызовах
+    """Параметры уезжают в URL, а не в объект опций.
+
+    Старый баг: `api('/dashboard_realtime', {method: '?' + params})` — строка
+    запроса подставлялась в HTTP-метод, сервер получал запрос без параметров.
+
+    Раньше проверка смотрела только в index.html и искала точное написание
+    через `new URLSearchParams`. Оба вызова оттуда удалены вместе со вторым
+    «Дашбордом метрик» (недостижимый экран `s-analytics-dashboard`), живой
+    вызов переехал в `screens/dashboard.js` и пишет параметр прямо в URL.
+    Смысл проверки прежний, поэтому она теперь смотрит во ВЕСЬ мини-апп и
+    требует параметры в URL, не диктуя способ их сборки."""
+    from tests.miniapp_source import miniapp_source
+
+    ui = miniapp_source()
+    # старый баг (method вместо URL) — нигде в мини-аппе
     assert "dashboard_realtime', { method: '?'" not in ui
-    assert "dashboard_realtime?' + new URLSearchParams" in ui
+    assert "dashboard_realtime\", { method: \"?" not in ui
+    # живой вызов передаёт параметры строкой запроса
+    assert "dashboard_realtime?" in ui, "экран аналитики больше не зовёт эндпоинт"
