@@ -2826,47 +2826,39 @@ async def get_top_active_users(pool, bot_id: int, limit: int = 10) -> list:
 
 
 async def autotag_by_activity(pool, bot_id: int) -> dict:
-    """Auto-tags users as activity:hot/warm/cold/lost. Returns counts."""
-    segs = await get_activity_segments(pool, bot_id)
+    """Переразмечает подписчиков тегами activity:hot/warm/cold/lost.
 
-    async def _tag_segment(user_ids, tag):
-        for uid in user_ids:
-            try:
-                await pool.execute(
-                    "DELETE FROM user_tags WHERE bot_id=$1 AND user_id=$2 AND tag LIKE 'activity:%'",
-                    bot_id,
-                    uid,
-                )
-                await pool.execute(
-                    "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3) ON CONFLICT (bot_id,user_id,tag) DO NOTHING",
-                    bot_id,
-                    uid,
-                    tag,
-                )
-            except Exception as e:
-                log.debug("autotag_by_activity: skip duplicate tag: %s", e)
+    Два запроса на весь бот, а не два на каждого подписчика. Прежняя версия
+    шла циклом по списку user_id и на каждого делала DELETE и INSERT: у бота
+    с десятками тысяч подписчиков это 2N последовательных обращений к базе,
+    каждое своей транзакцией. Такой проход не успевал доехать до конца —
+    таймаут или перезапуск оставлял разметку применённой наполовину, и часть
+    подписчиков уходила в рассылки с чужим сегментом.
 
-    hot_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '1 day'",
-        bot_id,
-    )
-    warm_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
-        bot_id,
-    )
-    cold_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
-        bot_id,
-    )
-    lost_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen < now() - INTERVAL '30 days'",
-        bot_id,
-    )
-    await _tag_segment([r["user_id"] for r in hot_ids], "activity:hot")
-    await _tag_segment([r["user_id"] for r in warm_ids], "activity:warm")
-    await _tag_segment([r["user_id"] for r in cold_ids], "activity:cold")
-    await _tag_segment([r["user_id"] for r in lost_ids], "activity:lost")
-    return segs
+    Теперь снятие старых тегов и простановка новых идут одной транзакцией:
+    состояния «теги сняты, новые не проставлены» снаружи не видно.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM user_tags WHERE bot_id=$1 AND tag LIKE 'activity:%'",
+                bot_id,
+            )
+            await conn.execute(
+                """INSERT INTO user_tags(bot_id, user_id, tag)
+                   SELECT $1, user_id,
+                          CASE
+                            WHEN last_seen >= now() - INTERVAL '1 day'   THEN 'activity:hot'
+                            WHEN last_seen >= now() - INTERVAL '7 days'  THEN 'activity:warm'
+                            WHEN last_seen >= now() - INTERVAL '30 days' THEN 'activity:cold'
+                            ELSE 'activity:lost'
+                          END
+                     FROM user_activity
+                    WHERE bot_id=$1 AND last_seen IS NOT NULL
+                   ON CONFLICT (bot_id, user_id, tag) DO NOTHING""",
+                bot_id,
+            )
+    return await get_activity_segments(pool, bot_id)
 
 
 # ── Keyword Analytics ──────────────────────────────────────────────────────
