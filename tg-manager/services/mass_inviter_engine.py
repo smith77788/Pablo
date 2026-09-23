@@ -824,6 +824,13 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     peer_flood = False
     flood_wait = 0
     no_rights = False  # у вызывающего нет add_admins — проблема аккаунта, не группы
+    # Кто РЕАЛЬНО добавлен трюком — нужно вызывающему, чтобы понять, кого трюк
+    # так и не взял (для финального фолбэка — ссылка в ЛС, см. op_worker
+    # _exec_mass_invite). Раньше вызывающий узнавал только общее число ok/failed
+    # и НЕ МОГ отличить, кто именно из user_refs добавлен, а кто нет — при
+    # частичном успехе помечал ВСЕХ целей пакета как обработанных (дубль-баг:
+    # реально не добавленные никогда не получали повторной попытки).
+    succeeded: list = []
     try:
         client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
@@ -843,9 +850,11 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                                             admin_rights=_revoke, rank="")),
                     timeout=_ACTION_TIMEOUT)
                 ok += 1
+                succeeded.append(ref)
                 await asyncio.sleep(random.uniform(2.5, 5.0))
             except UserAlreadyParticipantError:
                 ok += 1
+                succeeded.append(ref)
             except ChatAdminRequiredError:
                 # У ЭТОГО аккаунта нет add_admins — проблема аккаунта, не группы.
                 # no_rights → вызывающий выдаёт ему add_admins и продолжает, а не
@@ -893,8 +902,11 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
             except Exception:
                 log_exc_swallow(log, "add_via_promote: disconnect")
 
+    _done = {str(r) for r in succeeded}
+    still_blocked = [r for r in user_refs if str(r) not in _done]
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
-            "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights}
+            "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights,
+            "still_blocked": still_blocked}
 
 
 async def export_group_invite_link(session_string: str, _acc: dict | None,

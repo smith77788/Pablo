@@ -12153,8 +12153,19 @@ async def _exec_mass_invite(
     # переключать сразу всем. None = взять значение из окружения.
     _bulk_api = params.get("bulk_api")
     _bulk_api = None if _bulk_api is None else bool(_bulk_api)
-    # Необязательный текст сообщения для метода «ссылка в ЛС» ({link} — плейсхолдер).
+    # Необязательный текст сообщения для метода «ссылка в ЛС» ({link} — плейсхолдер) —
+    # используется и самим методом «link», и финальным фолбэком ниже.
     _link_msg = params.get("link_message") or None
+    # Финальный фолбэк: кого не взял НИ ОДИН способ (прямой инвайт отклонён
+    # приватностью, промоут-трюк тоже не смог) — вместо того чтобы просто
+    # списать цель в «ошибки», отправляем ей ссылку-приглашение в ЛС. Явный
+    # запрос владельца: «тех кого не удаётся заинвайтить никаким способом
+    # нужно приглашать через сообщение со ссылкой». По умолчанию включён
+    # (как и promote_trick) — это НАИМЕНЕЕ баноопасный из всех методов
+    # (см. docstring invite_via_link_batch), не добавляет риска сверх того,
+    # что уже даёт основной метод. Неприменим, если весь прогон и так идёт
+    # методом «link» — фолбэку тогда падать некуда, все уже получают ссылку.
+    _link_fallback = params.get("link_fallback", True) and _invite_method != "link"
     # «Мать-Дочка»: приглашать не в боевую (мать) группу, а в одноразовую дочернюю
     # с закреплённым редиректом на мать — риск бана инвайта поглощает расходник.
     # Если Telegram закрывает дочернюю группу, op_worker подставляет следующую и
@@ -13096,10 +13107,11 @@ async def _exec_mass_invite(
         # Ни ручного лимита, ни рекомендации — потолком служит сама очередь.
         return _acc_cap if _acc_cap else (len(all_users) + len(all_phones))
 
-    # Метод «ссылка в ЛС»: экспортируем ссылку-приглашение ОДИН раз (первым
-    # аккаунтом, у которого получилось) — её будут рассылать все инвайтеры.
+    # Метод «ссылка в ЛС» И финальный фолбэк («никаким другим способом не
+    # получилось») используют ОДНУ ссылку — экспортируем один раз (первым
+    # аккаунтом, у которого получилось), а не заново для каждой цели/аккаунта.
     _invite_link = ""
-    if _invite_method == "link":
+    if _invite_method == "link" or _link_fallback:
         from services import mass_inviter_engine as _lnk
         for a in accounts:
             try:
@@ -13111,10 +13123,15 @@ async def _exec_mass_invite(
             if _invite_link:
                 break
         if not _invite_link:
-            return {"status": "failed",
-                    "summary": "⚠️ Не удалось получить ссылку-приглашение группы. "
-                    "Нужен аккаунт с правом «Пригласительные ссылки» (админ/создатель) "
-                    "или откройте у группы публичную ссылку."}
+            if _invite_method == "link":
+                return {"status": "failed",
+                        "summary": "⚠️ Не удалось получить ссылку-приглашение группы. "
+                        "Нужен аккаунт с правом «Пригласительные ссылки» (админ/создатель) "
+                        "или откройте у группы публичную ссылку."}
+            # Фолбэк — не основной метод: без ссылки просто нечем его выполнить,
+            # но это НЕ повод рушить весь прогон (остальные методы работают как
+            # обычно). Тихо выключаем только этот последний шаг.
+            _link_fallback = False
 
     step = 0
     _given_back_n = 0
@@ -13662,14 +13679,18 @@ async def _exec_mass_invite(
     # Прямой инвайт их не взял; аккаунт-админ с add_admins пробует добавить через
     # выдачу/снятие админки. Ограничиваем объём, уважаем флуд/отмену/лимит прогона.
     _trick_ok = 0
-    if _promoter is not None and _promote_trick and _privacy_blocked and not group_broken \
+    _seen_pt: set = set()
+    _all_blocked_uniq = [x for x in _privacy_blocked
+                         if not (str(x) in _seen_pt or _seen_pt.add(str(x)))]
+    # Кого не взял НИ ОДИН способ — кандидат на финальный фолбэк (ссылка в ЛС)
+    # ниже. По умолчанию — все (трюк мог не запуститься вовсе); сужаем по факту.
+    _still_blocked: list = list(_all_blocked_uniq)
+    if _promoter is not None and _promote_trick and _all_blocked_uniq and not group_broken \
             and not flood_storm and not await _is_cancelled(pool, op_id):
         from services import mass_inviter_engine as _inv
-        _seen_pt: set = set()
-        _uniq_blocked = [x for x in _privacy_blocked
-                         if not (str(x) in _seen_pt or _seen_pt.add(str(x)))]
         _cap = 200 if not _max_invites else max(0, _max_invites - (total_ok + total_fail))
-        _uniq_blocked = _uniq_blocked[:max(0, _cap)] if _cap else _uniq_blocked[:200]
+        _uniq_blocked = _all_blocked_uniq[:_cap]
+        _never_tried = _all_blocked_uniq[_cap:]  # не уместились в лимит прогона — не пробовали
         if _uniq_blocked:
             log.info("mass_invite op=%d: промоут-трюк для %d заблокированных целей",
                      op_id, len(_uniq_blocked))
@@ -13678,10 +13699,19 @@ async def _exec_mass_invite(
                     _promoter["session_str"], dict(_promoter), group, _uniq_blocked)
                 _trick_ok = int(_tr.get("ok") or 0)
                 total_ok += _trick_ok
+                # still_blocked — РЕАЛЬНО не добавленные (не все _uniq_blocked при
+                # частичном успехе: раньше при trick_ok>0 в invited_this_run уходил
+                # ВЕСЬ пакет, и реально не добавленные никогда не получали повторной
+                # попытки/фолбэка — тихая потеря цели).
+                _tried_blocked = _tr.get("still_blocked") or []
+                _still_blocked = list(_tried_blocked) + _never_tried
                 if _trick_ok:
+                    _still_blocked_keys = {str(v) for v in _tried_blocked}
+                    _added_by_trick = [x for x in _uniq_blocked
+                                       if str(x) not in _still_blocked_keys]
                     await bump_daily_stats(pool, int(_promoter["id"]),
                                            ok=_trick_ok, invites=_trick_ok)
-                    invited_this_run.update(str(x) for x in _uniq_blocked)
+                    invited_this_run.update(str(x) for x in _added_by_trick)
                     await _safe_execute(
                         pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
                         op_id, _trick_ok)
@@ -13692,6 +13722,54 @@ async def _exec_mass_invite(
                     f"добавлено промоут-трюком: {_trick_ok}/{len(_uniq_blocked)}")
             except Exception as _te:
                 log.warning("mass_invite op=%d: промоут-трюк сбой: %s", op_id, _te)
+                # Сбой ДО результата — весь _uniq_blocked остаётся заблокированным
+                # (плюс некапнутый остаток); _still_blocked уже на дефолте это отражает.
+
+    # ── Финальный фолбэк: кого не взял НИ ОДИН способ — ссылка в ЛС ───────────
+    # Явный запрос владельца: "тех кого не удаётся заинвайтить никаким способом
+    # нужно приглашать через сообщение со ссылкой". Наименее баноопасный метод
+    # из всех (человек вступает сам) — подходящий именно для целей, на которых
+    # уже отработали прямой инвайт И промоут-трюк и оба отказали.
+    _link_fallback_ok = 0
+    if _link_fallback and _invite_link and _still_blocked and not group_broken \
+            and not flood_storm and not await _is_cancelled(pool, op_id):
+        from services import mass_inviter_engine as _inv2
+        _seen_lf: set = set()
+        _uniq_fallback = [x for x in _still_blocked
+                          if not (str(x) in _seen_lf or _seen_lf.add(str(x)))]
+        _lf_cap = 200 if not _max_invites else max(0, _max_invites - (total_ok + total_fail))
+        _uniq_fallback = _uniq_fallback[:_lf_cap]
+        # Отправитель ЛС не обязан быть ИМЕННО промоутером (право слать личные
+        # сообщения не связано с правом назначать админов в чате) — промоутер
+        # может отсутствовать вовсе, если основной метод «direct» и весь флот
+        # уже имел invite_users нативно. Первый живой аккаунт флота подходит
+        # ровно так же, лишь бы у него была сессия.
+        _dm_sender = _promoter or next((a for a in accounts if a.get("session_str")), None)
+        if _uniq_fallback and _dm_sender is not None:
+            log.info("mass_invite op=%d: ссылка в ЛС для %d недостижимых целей",
+                     op_id, len(_uniq_fallback))
+            try:
+                _lf = await asyncio.wait_for(
+                    _inv2.invite_via_link_batch(
+                        _dm_sender["session_str"], dict(_dm_sender), _invite_link,
+                        _uniq_fallback, _link_msg, _pace_mult),
+                    timeout=180)
+                _link_fallback_ok = int(_lf.get("ok") or 0)
+                total_ok += _link_fallback_ok
+                if _link_fallback_ok:
+                    await bump_daily_stats(pool, int(_dm_sender["id"]),
+                                           ok=_link_fallback_ok, invites=_link_fallback_ok)
+                    invited_this_run.update(str(x) for x in _uniq_fallback)
+                    await _safe_execute(
+                        pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                        op_id, _link_fallback_ok)
+                await _safe_execute(
+                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,0,'link_fallback',$2,$3)", op_id,
+                    "ok" if _link_fallback_ok else "fail",
+                    f"ссылка в ЛС недостижимым целям: доставлено {_link_fallback_ok}/{len(_uniq_fallback)}")
+            except Exception as _lfe:
+                log.warning("mass_invite op=%d: фолбэк-ссылка в ЛС сбой: %s", op_id, _lfe)
 
     # Запомнить обработанные цели, чтобы следующий прогон их не тыкал повторно.
     await _record_invited_targets(pool, owner_id, _group_key, op_id, invited_this_run)
@@ -13847,6 +13925,8 @@ async def _exec_mass_invite(
            if _use_daughter else "")
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
+        + (f"\n🔗 Недостижимым отправлена ссылка в ЛС: {_link_fallback_ok}"
+           if _link_fallback_ok else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
         + (f"\n📦 Источник больше {_INVITE_AUDIENCE_CAP} целей — взята первая порция; "
            "остальные подтянутся следующими прогонами." if not _source_exhausted else "")

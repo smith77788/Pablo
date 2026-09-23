@@ -4959,6 +4959,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
           добавляет её в чат) и тут же лишается прав. <b>Посторонний на секунды
           получает админку вашего чата</b> — снимите галочку, если это неприемлемо.</div>
         <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+          <input type="checkbox" id="massInviteLinkFallback" checked onchange="massInviteMethodToggle()">
+          <span>🔗 Недостижимым — ссылка в ЛС (последний шанс)</span>
+        </label>
+        <div class="field-note" style="margin-top:-6px">Кого не взял НИ обычный
+          инвайт, НИ трюк через админку — вместо того чтобы просто списать в
+          ошибки, отправляем ссылку-приглашение в личные сообщения: человек
+          вступает сам. Самый безопасный для аккаунта способ из всех — годится
+          именно как последний рубеж.</div>
+        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
           <input type="checkbox" id="massInviteIncludeRisky">
           <span>⚠️ Взять рисковые аккаунты (снять кулдаун/карантин)</span>
         </label>

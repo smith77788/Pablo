@@ -240,6 +240,7 @@ async function openMassInvite() {
   INV_IMPORT_OK = 0;
   INV_FILE_REFS = null; INV_FILE_PHONES = null;
   massInviteSrcToggle();
+  massInviteMethodToggle();
   // Заглушка «Загрузка…» лежит ВНУТРИ massInviteAccsWrap, и ниже по функции
   // wrap.innerHTML затирает её насовсем. Поэтому при втором открытии экрана
   // getElementById возвращал null, присваивание падало — а падало оно ДО
@@ -284,12 +285,14 @@ async function openMassInvite() {
 }
 
 function massInviteMethodToggle() {
-  // Поле текста нужно только методу «ссылка в ЛС»; остальным оно ничего не
-  // значит, а лишнее поле на экране запуска читается как настройка, которая
-  // на что-то влияет.
+  // Поле текста нужно методу «ссылка в ЛС» И фолбэку «недостижимым — ссылка
+  // в ЛС» (тот же текст, та же ссылка) — остальным оно ничего не значит, а
+  // лишнее поле на экране запуска читается как настройка, которая на
+  // что-то влияет.
   const m = document.getElementById('massInviteMethod')?.value;
+  const fb = document.getElementById('massInviteLinkFallback')?.checked;
   const f = document.getElementById('massInviteLinkMsgField');
-  if (f) f.style.display = (m === 'link') ? '' : 'none';
+  if (f) f.style.display = (m === 'link' || fb) ? '' : 'none';
 }
 
 function massInviteSrcToggle() {
@@ -550,8 +553,13 @@ async function submitMassInvite() {
   if (_onePass) body.one_pass = true;
   // Паритет с ботом: способ инвайта + режим объёма.
   body.invite_method = document.getElementById('massInviteMethod')?.value || 'direct';
+  // Фолбэк «недостижимым — ссылка в ЛС»: включён по умолчанию (как и
+  // promote_trick), отправляем явно только при снятой галочке.
+  const _linkFallbackOn = document.getElementById('massInviteLinkFallback')?.checked !== false;
+  if (!_linkFallbackOn) body.link_fallback = false;
   // Свой текст для «ссылки в ЛС»: без него весь флот шлёт одну и ту же фразу.
-  if (body.invite_method === 'link') {
+  // Нужен и основному методу link, и фолбэку — оба используют одно поле.
+  if (body.invite_method === 'link' || _linkFallbackOn) {
     const _lm = (document.getElementById('massInviteLinkMsg')?.value||'').trim();
     if (_lm) body.link_message = _lm;
   }

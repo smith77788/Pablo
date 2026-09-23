@@ -9674,7 +9674,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if _im not in ("direct", "admin", "link"):
                 _im = "direct"
             params["invite_method"] = _im
-            if _im == "link" and body.get("link_message"):
+            # Финальный фолбэк «недостижимым — ссылка в ЛС»: включён в исполнителе
+            # по умолчанию (как и promote_trick) — отключить явным False.
+            # Неприменим при invite_method="link" (там и так все получают ссылку) —
+            # исполнитель сам это учитывает, здесь просто пробрасываем флаг.
+            if body.get("link_fallback") is False:
+                params["link_fallback"] = False
+            # Текст сообщения нужен и методу "link", и фолбэку — оба шлют ссылку в
+            # ЛС тем же текстом. Раньше поле пробрасывалось ТОЛЬКО для метода
+            # "link" — фолбэк для direct/admin слал бы дефолтный текст всем разом.
+            if body.get("link_message") and (
+                    _im == "link" or body.get("link_fallback") is not False):
                 params["link_message"] = str(body.get("link_message"))[:500]
             # Режим объёма на аккаунт: "progressive" — по возрасту/доверию аккаунта.
             if str(body.get("volume_mode") or "").strip().lower() == "progressive":
@@ -19882,7 +19892,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["phones"] = [ref]
         else:
             params["user_refs"] = [ref]
-        if method == "link" and body.get("link_message"):
+        # Тот же движок mass_invite, тот же фолбэк «недостижимым — ссылка в ЛС»
+        # (включён по умолчанию в исполнителе) — пробрасываем на паритете с
+        # основным экраном массового инвайта.
+        if body.get("link_fallback") is False:
+            params["link_fallback"] = False
+        if body.get("link_message") and (method == "link" or body.get("link_fallback") is not False):
             params["link_message"] = str(body.get("link_message"))[:500]
         try:
             from services import operation_bus
@@ -20351,7 +20366,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             params["user_refs"] = user_refs
         if phones:
             params["phones"] = phones
-        if method == "link" and body.get("link_message"):
+        # Тот же движок mass_invite, тот же фолбэк «недостижимым — ссылка в ЛС»
+        # (включён по умолчанию в исполнителе) — пробрасываем на паритете с
+        # основным экраном массового инвайта.
+        if body.get("link_fallback") is False:
+            params["link_fallback"] = False
+        if body.get("link_message") and (method == "link" or body.get("link_fallback") is not False):
             params["link_message"] = str(body.get("link_message"))[:500]
         n_targets = len(user_refs) + len(phones)
         # Единый каркас: ban-safety гейт + постановка + событие в организм.
