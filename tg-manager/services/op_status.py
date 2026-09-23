@@ -114,6 +114,17 @@ def sql_terminal_list() -> str:
     return "('" + "','".join((DONE, PARTIAL, FAILED, CANCELLED)) + "')"
 
 
+def sql_in_flight_list() -> str:
+    """Литерал списка ЖИВЫХ статусов для SQL-guard'ов.
+
+    Пара к `sql_terminal_list`. Рукописный список живых статусов забывает
+    `paused` ровно так же, как рукописный список терминальных забывал
+    `partial`: приостановленная операция выглядит «не живой», и её запросто
+    сносит уборка. Порядок фиксирован — строка попадает в тексты запросов.
+    """
+    return "('" + "','".join(sorted(IN_FLIGHT)) + "')"
+
+
 def _as_int(value) -> int:
     try:
         return int(value or 0)

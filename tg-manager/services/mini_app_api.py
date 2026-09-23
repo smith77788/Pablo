@@ -15,6 +15,7 @@ import asyncpg
 from aiohttp import web
 
 from services import operation_bus as _obus
+from services import op_status
 from services.mini_app_auth import (validate_init_data, make_token, parse_token,
                                     signing_secret_ok)
 from services.secret_masking import redact_secrets
@@ -3518,14 +3519,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         (operation_log удаляется каскадом ON DELETE CASCADE), возвращаем факт.
 
         pending/running НЕ трогаем (активные операции). Скоуп по owner_id обязателен.
+
+        ЧЕГО ЕЩЁ НЕ ТРОГАЕМ: завершённую операцию, на журнал которой опирается
+        живой повтор. Журнал (operation_log) висит на строке очереди внешним
+        ключом ON DELETE CASCADE, то есть удаление строки уносит и его. А повтор
+        — это НОВАЯ операция, которая пропускает уже сделанное именно по журналу
+        исходной (op_worker.journal_op_ids). Последовательность «повторить, а
+        пока подчищу список» вполне естественная, и она стирала память о
+        сделанном: повтор рассылки, вставшей на 203 адресатах из 380, уходил бы
+        по всем 380 заново. Такая строка остаётся в списке до конца повтора.
         """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         try:
             res = await pool.execute(
-                "DELETE FROM operation_queue "
-                "WHERE owner_id=$1 AND status IN ('done','failed','cancelled')", uid)
+                "DELETE FROM operation_queue oq "
+                "WHERE oq.owner_id=$1 AND oq.status IN ('done','failed','cancelled') "
+                "  AND NOT EXISTS (SELECT 1 FROM operation_queue r "
+                "                   WHERE r.owner_id = oq.owner_id "
+                f"                    AND r.status IN {op_status.sql_in_flight_list()} "
+                "                     AND r.params->>'retry_of_op' = oq.id::text)", uid)
             tail = str(res).rsplit(" ", 1)[-1]
             deleted = int(tail) if tail.isdigit() else 0
             return _json_resp({"ok": True, "deleted": deleted})

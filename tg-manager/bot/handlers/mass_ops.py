@@ -1359,12 +1359,25 @@ async def cb_queue(
 
 @router.callback_query(MassOpCb.filter(F.action == "clear_completed"))
 async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Удалить записи со статусом done/failed старше 24 часов, затем показать очередь."""
+    """Удалить записи со статусом done/failed старше 24 часов, затем показать очередь.
+
+    Не трогаем завершённую операцию, на журнал которой опирается живой повтор:
+    журнал (operation_log) висит на строке очереди внешним ключом ON DELETE
+    CASCADE, а повтор — это НОВАЯ операция, пропускающая уже сделанное именно по
+    журналу исходной (op_worker.journal_op_ids). Снести предка значит стереть
+    память о сделанном: повтор рассылки, вставшей на 203 адресатах из 380, ушёл
+    бы по всем 380 заново. Та же оговорка в мини-аппе (clear_operations).
+    """
+    from services import op_status as _ost
     try:
         result = await pool.execute(
-            "DELETE FROM operation_queue "
-            "WHERE owner_id=$1 AND status IN ('done', 'partial', 'failed', 'cancelled') "
-            "AND finished_at < now() - interval '24 hours'",
+            "DELETE FROM operation_queue oq "
+            "WHERE oq.owner_id=$1 AND oq.status IN ('done', 'partial', 'failed', 'cancelled') "
+            "AND oq.finished_at < now() - interval '24 hours' "
+            "AND NOT EXISTS (SELECT 1 FROM operation_queue r "
+            "                 WHERE r.owner_id = oq.owner_id "
+            f"                  AND r.status IN {_ost.sql_in_flight_list()} "
+            "                   AND r.params->>'retry_of_op' = oq.id::text)",
             callback.from_user.id,
         )
         try:
