@@ -160,7 +160,7 @@ function _ccRender(d) {
           `<div style="background:#ef4444;height:${hFail}px;border-radius:3px 3px 0 0" title="ошибок ${o.failed}"></div>` +
           `<div style="background:#2dd4bf;height:${hDone}px;border-radius:${hFail?0:'3px 3px 0 0'}" title="успешно ${o.done}"></div>` +
           '</div>' +
-          `<div style="font-size:9px;color:var(--hint)">${esc(o.day)}</div></div>`;
+          `<div style="font-size:10px;color:var(--hint)">${esc(o.day)}</div></div>`;
       }).join('')
     : '<div style="color:var(--hint);font-size:12px">Нет операций за 7 дней</div>';
   const opsCard = _ccCard('⚙️ Операции за 7 дней',

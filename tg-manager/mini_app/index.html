@@ -122,7 +122,7 @@
   --bg2:#151d29;
   --bg3:#1a2432;
   --text:#dce4ee;
-  --hint:#7a8ba1;
+  --hint:#7a8ba1;--hint-strong:#93a3b8;
   --accent:#2dd4bf;
   --accent-2:#14b8a6;
   --accent-3:#0d9488;
@@ -283,7 +283,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    работает прокси или нет. Такие строки переносим, а не прячем. */
 .li-sub.wrap{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
 .li-right{flex-shrink:0;display:flex;align-items:center;gap:8px}
-.chev{color:var(--hint);font-size:14px;flex-shrink:0;opacity:.7;transition:transform .15s}
+.chev{color:var(--hint-strong);font-size:14px;flex-shrink:0;opacity:1;transition:transform .15s}
 .li.tap:active .chev{transform:translateX(2px)}
 
 /* ─── Rows (settings) ────────────────────────────────────────── */
@@ -307,7 +307,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .actions{display:flex;gap:8px;padding:10px 16px 4px;flex-wrap:wrap}
 .btn{display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:nowrap;flex:1 0 auto;min-width:88px;max-width:100%;overflow:hidden}
 .btn:active{opacity:.85;transform:translateY(1px) scale(.97)}
-.btn:disabled{opacity:.3;pointer-events:none}
+/* Неактивная кнопка: не вуаль из прозрачности (надпись переставала читаться),
+   а честное состояние — приглушённый фон и подсказочный цвет текста. */
+.btn:disabled,.btn[disabled]{background:var(--bg3) !important;color:var(--hint-strong) !important;
+  box-shadow:none !important;opacity:1;pointer-events:none;border:1px solid var(--sep)}
 .btn-p{background:var(--btn);color:var(--btn-text);box-shadow:0 2px 12px rgba(45,212,191,.25),inset 0 1px 0 rgba(255,255,255,.15)}
 .btn-p:active{box-shadow:0 1px 6px rgba(45,212,191,.2),inset 0 1px 0 rgba(255,255,255,.1)}
 .btn-s{background:var(--bg2);color:var(--text);border:1px solid var(--border)}
@@ -341,7 +344,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Empty / Error ──────────────────────────────────────────── */
 .empty{text-align:center;padding:36px 20px;color:var(--hint)}
-.empty-ico{font-size:36px;margin-bottom:8px;opacity:.6}
+.empty-ico{font-size:36px;margin-bottom:8px;opacity:.75}
 .empty-txt{font-size:14px;font-weight:500}
 .empty-sub{font-size:13px;margin-top:4px}
 .err-msg{padding:18px 16px;color:var(--red);font-size:14px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
@@ -527,7 +530,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .chart{display:flex;align-items:flex-end;gap:4px;height:55px;padding:0 16px 0}
 .bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
 .bar{width:100%;background:var(--accent);border-radius:3px 3px 0 0;transition:height .4s}
-.bar-lbl{font-size:9px;color:var(--hint)}
+.bar-lbl{font-size:10px;color:var(--hint)}
 
 /* ─── Live dot ───────────────────────────────────────────────── */
 .ld{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}
@@ -702,7 +705,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .dash-card-ico{font-size:18px;margin-bottom:5px}
 .dash-card-val{font-size:26px;font-weight:700;letter-spacing:-.5px;line-height:1}
 .dash-card-lbl{font-size:11px;color:var(--hint);margin-top:3px}
-.dash-card-badge{display:inline-flex;font-size:9px;font-weight:600;padding:2px 6px;border-radius:16px;margin-top:3px}
+.dash-card-badge{display:inline-flex;font-size:10px;font-weight:600;padding:2px 6px;border-radius:16px;margin-top:3px}
 
 /* ─── Account status KPI bar ─────────────────────────────── */
 .acc-kpi{display:flex;gap:6px;padding:8px 16px 4px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
@@ -766,7 +769,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .mini-bars{display:flex;align-items:flex-end;gap:3px;height:48px;margin-bottom:4px}
 .mini-bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}
 .mini-bar-item{width:100%;border-radius:2px 2px 0 0;min-height:3px;transition:height .4s}
-.mini-bar-lbl{font-size:9px;color:var(--hint)}
+.mini-bar-lbl{font-size:10px;color:var(--hint)}
 
 /* ─── Quick action tiles ─────────────────────────────────── */
 .qa-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:0 16px 4px}
@@ -831,6 +834,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .back:active{background:var(--sep);transform:scale(.88)}
 .prog-fill{background:linear-gradient(90deg,var(--accent-3),var(--accent))}
 .field textarea:focus,.field input:focus,.field select:focus,.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.12)}
+/* Фокус и неактивное состояние для полей, у которых нет класса: 107 из 491 поля
+   стоят с инлайновым стилем, и без этого правила при вводе ничего не подсвечивается. */
+input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(45,212,191,.12);border-color:var(--accent)}
+input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 .nav-item.on{background:rgba(45,212,191,.10);color:var(--accent)}
 </style>
 <script>
@@ -1620,7 +1627,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="sec">Статистика регистрации</div>
     <div id="autoregProChart" style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div style="display:flex;align-items:flex-end;gap:3px;height:50px" id="autoregProBars"></div>
-      <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px;color:var(--hint)" id="autoregProLabels"></div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--hint)" id="autoregProLabels"></div>
     </div>
     <div class="sec">Пакеты регистрации</div>
     <div class="lst" id="autoregProList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3829,7 +3836,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <!-- Экран обещал «во ВСЕ каналы» и спрашивал подтверждение, ни разу не
            назвав число: человек жал необратимую кнопку, не зная, три у него
            канала или триста. Теперь адресаты названы до нажатия. -->
-      <div id="mpTargets" style="margin-bottom:12px;font-size:12.5px;color:var(--hint);line-height:1.45"></div>
+      <div id="mpTargets" style="margin-bottom:12px;font-size:13px;color:var(--hint);line-height:1.45"></div>
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
         <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
@@ -14051,7 +14058,7 @@ function renderBcAnalytics(items) {
       <div style="width:100%;height:${h}px;background:var(--accent);border-radius:2px 2px 0 0;min-height:3px"></div>
     </div>`;
   }).join('');
-  if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:9px;color:var(--hint)">@${(name||'').substring(0,6)}</span>`).join('');
+  if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:10px;color:var(--hint)">@${(name||'').substring(0,6)}</span>`).join('');
   if(list) list.innerHTML = `<div class="li" style="cursor:default">
     <div class="ava ava-teal">📊</div>
     <div class="li-body">
