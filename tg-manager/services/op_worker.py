@@ -7151,6 +7151,22 @@ async def _exec_bot_factory_multi(
     _bf_ugen = (_nv.username_candidates(base_username, seed=op_id, require_suffix="bot")
                 if (_bf_seo and base_username) else None)
 
+    # Идемпотентность повтора — та же, что у одиночной фабрики, и по той же
+    # причине: второй проход создаёт второй комплект ботов, выжигая предел
+    # BotFather (20 на аккаунт) работой, которая уже сделана. Здесь цена выше:
+    # шагов accounts × bot_count, то есть до сотни лишних ботов.
+    #
+    # Ключ — номер шага (см. completed_steps): имена в режиме ключевых слов
+    # генерируются, сверять по ним ненадёжно. Оговорка: если между прогонами
+    # флот изменился, total меняется вместе с ним и нумерация сдвигается —
+    # пропуск тогда закроет не тот шаг. Это принятый в продукте компромисс,
+    # ровно так же устроено массовое создание каналов; даже со сдвигом это
+    # лучше, чем гарантированный второй комплект.
+    _done_steps = await completed_steps(pool, op_id)
+    if _done_steps:
+        log.info("bot_factory_multi op=%d: повтор — %d ботов уже созданы, пропускаем",
+                 op_id, len(_done_steps))
+
     try:
         for global_i in range(total):
             if await _is_cancelled(pool, op_id):
@@ -7172,6 +7188,16 @@ async def _exec_bot_factory_multi(
                 display_name = _bf_titles[global_i]
             else:
                 display_name = f"{bot_name} {global_i + 1}" if total > 1 else bot_name
+
+            # Пропуск ПОСЛЕ вычисления имени: генератор @юзернеймов вращается
+            # на каждом шаге, и пропуск до него сдвинул бы имена остальных ботов.
+            _step = global_i + 1
+            if _step in _done_steps:
+                created_count += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
 
             await session_simulator.typing_delay(display_name)
             result = None
@@ -7220,7 +7246,21 @@ async def _exec_bot_factory_multi(
                                 mask_bot_token(token), redact_secrets(str(e)))
                 if not bot_id:
                     failed_count += 1
-                    await pool.execute(
+                    # Статус 'ok', хотя шаг засчитан в ошибки, и это не описка.
+                    # BotFather бота УЖЕ создал — просто getMe не ответил, и
+                    # токен не попал в managed_bots. Для владельца это неудача,
+                    # для идемпотентности — закрытый шаг: повторить его значит
+                    # создать ВТОРОГО бота и сжечь ещё одно место из двадцати.
+                    # Сам токен не потерян, он уходит в created_tokens.
+                    await _safe_execute(
+                        pool,
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'ok',$4)",
+                        op_id, _step, display_name,
+                        "бот создан, но getMe не ответил — токен не сохранён в списке ботов",
+                    )
+                    await _safe_execute(
+                        pool,
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                     )
                     if global_i < total - 1:
@@ -7238,10 +7278,28 @@ async def _exec_bot_factory_multi(
                 except Exception as e:
                     log.warning("_exec_bot_factory_multi: managed_bots upsert failed bot_id=%s: %s", bot_id, e)
                 created_count += 1
+                # Построчный журнал: раньше эта операция не писала НИ ОДНОЙ
+                # строки — владелец видел только «Создано: N» и не мог узнать,
+                # какие именно боты завелись и на чём споткнулись остальные.
+                # На него же опирается пропуск при возобновлении.
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)",
+                    op_id, _step, display_name, f"@{actual_uname}",
+                )
             else:
                 failed_count += 1
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, _step, display_name,
+                    str(result.get("error") or "не удалось создать бота")[:200],
+                )
 
-            await pool.execute(
+            await _safe_execute(
+                pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
 
@@ -7324,6 +7382,23 @@ async def _exec_bot_factory(
         _bf_ugen = (_nv.username_candidates(uname_tpl, seed=op_id, require_suffix="bot")
                     if (_bf_seo and uname_tpl) else None)
 
+        # Идемпотентность повтора. Повтор запускает исполнителя заново с
+        # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
+        # зависшей операции сторожем, после перезапуска контейнера. Для фабрики
+        # ботов второй проход создаёт ВТОРОЙ комплект ботов: у BotFather жёсткий
+        # предел 20 ботов на аккаунт, и он выгорает на работе, которая уже
+        # сделана, а лишние боты остаются в Telegram навсегда — удалять их
+        # придётся руками.
+        #
+        # Ключ — номер шага, а не имя: в режиме ключевых слов имена генерируются,
+        # и сверять по ним ненадёжно. Номер устойчив по построению — цикл всегда
+        # идёт range(count) в том же порядке. Так же сделано в массовом создании
+        # каналов, см. completed_steps.
+        _done_steps = await completed_steps(pool, op_id)
+        if _done_steps:
+            log.info("bot_factory op=%d: повтор — %d ботов уже созданы, пропускаем",
+                     op_id, len(_done_steps))
+
         for i in range(count):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -7345,6 +7420,18 @@ async def _exec_bot_factory(
                 username_base = f"{uname_tpl}{num}" if uname_tpl else f"bot{random.randint(10000, 99999)}"
                 if not username_base.endswith("bot"):
                     username_base = username_base + "bot"
+
+            if num in _done_steps:
+                # Имя уже вычислено выше намеренно: генератор @юзернеймов
+                # вращается на каждом шаге, и пропуск до него сдвинул бы имена
+                # оставшихся ботов. Считаем шаг успехом — работа сделана, и
+                # счётчик не должен проседать из-за того, что сделал её
+                # прошлый прогон.
+                created_count += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
 
             await session_simulator.typing_delay(display_name)
 
