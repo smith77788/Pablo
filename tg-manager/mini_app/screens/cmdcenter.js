@@ -37,7 +37,7 @@ function _ccEnsureScreen() {
       '<div class="hdr-burger" onclick="openCmdCenter()" title="Обновить">⟳</div>' +
     '</div>' +
     '<div class="sb"><div id="ccBody" style="padding:4px 0">' +
-      '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>' +
+      '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   // Тот же родитель, что и у остальных экранов — наследуем раскладку/позицию.
   const anchor = document.getElementById('s-more') || document.body;
@@ -50,7 +50,7 @@ async function openCmdCenter() {
   push('s-cmdcenter');
   const body = document.getElementById('ccBody');
   if (body) body.innerHTML =
-    '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>';
+    '<div class="spin-wrap"><div class="spin"></div></div>';
   let d;
   try {
     d = await api('/api/miniapp/dashboard/visual');

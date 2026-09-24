@@ -176,7 +176,7 @@ function _spScreen(id, title, refreshFn) {
                  : '<div class="hdr-burger"></div>') +
     '</div>' +
     '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
-      '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>' +
+      '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
   return el;
@@ -189,7 +189,7 @@ async function openSalesManager(botId) {
   _spScreen('s-sales', '🧑‍💼 Менеджеры продаж', 'openSalesManager()');
   push('s-sales');
   const body = document.getElementById('s-sales-body');
-  body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>';
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const [pers, bots] = await Promise.all([
       api('/api/miniapp/sales/personas'),
@@ -239,7 +239,7 @@ async function openPersonaEditor(id) {
   _spScreen('s-salesedit', id ? '✏️ Настройка менеджера' : '➕ Новый менеджер', '');
   push('s-salesedit');
   const body = document.getElementById('s-salesedit-body');
-  body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>';
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     let persona = {}, products = [], faqs = [], examples = [];
     if (id) {
@@ -921,7 +921,7 @@ async function spOrders(pid) {
   _spScreen('s-salesorders', '📦 Заказы менеджера', '');
   push('s-salesorders');
   const body = document.getElementById('s-salesorders-body');
-  body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>';
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const d = await api('/api/miniapp/sales/orders');
     const orders = d.orders || [];

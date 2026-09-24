@@ -25,7 +25,7 @@ function _fgScreen(id, title) {
       '<div class="hdr-burger" onclick="openFloodGuard(' + '_fgBotId' + ')" title="Обновить">⟳</div>' +
     '</div>' +
     '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
-      '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>' +
+      '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
   return el;
@@ -36,7 +36,7 @@ async function openFloodGuard(botId) {
   _fgScreen('s-floodguard', '🛡 Защита от накрутки');
   push('s-floodguard');
   const body = document.getElementById('s-floodguard-body');
-  body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>';
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     _fgData = await api('/api/miniapp/flood/' + botId);
     body.innerHTML = _fgRender(_fgData);
