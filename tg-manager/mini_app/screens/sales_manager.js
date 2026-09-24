@@ -228,7 +228,9 @@ async function openSalesManager(botId) {
     }
     body.innerHTML = h;
   } catch (e) {
-    body.innerHTML = '<div style="color:var(--red);padding:20px">' + esc(e.message) + '</div>';
+    // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
+    // экран без единой кнопки, а таббар на подэкране скрыт.
+    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'openSalesManager(' + JSON.stringify(botId) + ')');
   }
 }
 
@@ -264,7 +266,9 @@ async function openPersonaEditor(id) {
       _spPreselectBot = null;
     }
   } catch (e) {
-    body.innerHTML = '<div style="color:var(--red);padding:20px">' + esc(e.message) + '</div>';
+    // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
+    // экран без единой кнопки, а таббар на подэкране скрыт.
+    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'openPersonaEditor(' + JSON.stringify(id) + ')');
   }
 }
 
@@ -950,6 +954,8 @@ async function spOrders(pid) {
         '</div></div>';
     }).join('');
   } catch (e) {
-    body.innerHTML = '<div style="color:var(--red);padding:20px">' + esc(e.message) + '</div>';
+    // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
+    // экран без единой кнопки, а таббар на подэкране скрыт.
+    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'spOrders(' + JSON.stringify(pid) + ')');
   }
 }

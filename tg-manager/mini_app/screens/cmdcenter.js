@@ -55,9 +55,9 @@ async function openCmdCenter() {
   try {
     d = await api('/api/miniapp/dashboard/visual');
   } catch (e) {
-    if (body) body.innerHTML =
-      '<div style="text-align:center;color:var(--orange);padding:40px">' +
-      '⚠️ ' + esc((e && e.message) || 'Ошибка загрузки') + '</div>';
+    // Через общий errHtml: он всегда даёт кнопку выхода. Своя вёрстка ошибки
+    // оставляла экран без единой кнопки, а таббар на подэкране скрыт.
+    if (body) body.innerHTML = errHtml((e && e.message) || 'Ошибка загрузки', 'openCmdCenter()');
     return;
   }
   if (body) body.innerHTML = _ccRender(d);

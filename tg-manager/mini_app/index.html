@@ -7176,9 +7176,13 @@ function errHtml(msg, retryFn) {
   let btn = '';
   if (retryFn) {
     btn = `<button class="err-retry" onclick="${retryFn}">↺ Повторить</button>`;
-  } else if (typeof STACK !== 'undefined' && STACK.length > 1) {
+  } else if (typeof STACK !== 'undefined' && STACK.length) {
+    // ВНИМАНИЕ: условие именно `STACK.length`, а не `> 1`. Экран, открытый с
+    // вкладки, лежит в стеке один, и при `> 1` эта ветка не срабатывала: кнопки
+    // не было ни одной, а таббар на подэкране скрыт — выхода не оставалось.
+    // back() при глубине 1 корректно возвращает на экран текущей вкладки.
     btn = `<button class="err-retry" onclick="back()">◀️ Назад</button>`;
-  } else if (typeof STACK === 'undefined' || !STACK.length) {
+  } else {
     btn = `<button class="err-retry" onclick="reloadView()">↺ Повторить</button>`;
   }
   return `<div class="err-msg"><div class="err-msg-ico">⚠️</div><div class="err-msg-txt">${esc(msg)}</div>${btn}</div>`;
@@ -17315,7 +17319,7 @@ async function openCloud() {
     </div>`;
     txt('cloudBody', head);
     await cloudRefreshList();
-  } catch (e) { txt('cloudBody', `<div style="padding:16px;color:var(--red)">${esc(e.message || 'Ошибка')}</div>`); }
+  } catch (e) { txt('cloudBody', errHtml((e && e.message) || 'Ошибка', 'openCloud()')); }
 }
 
 // Тип файла по расширению имени → вид/иконка (для различения файлов в списке
@@ -23300,7 +23304,9 @@ function empty(ico,txt2,sub,action) {
   } else if (isErr && atRoot) {
     // Ошибка загрузки корневой вкладки → один тап, чтобы повторить запрос.
     btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="reloadView()">↻ Повторить</button>`;
-  } else if (typeof STACK !== 'undefined' && STACK.length > 1) {
+  } else if (typeof STACK !== 'undefined' && STACK.length) {
+    // `STACK.length`, а не `> 1`: подэкран, открытый с вкладки, лежит в стеке
+    // один, и при `> 1` кнопки не появлялось вовсе — тот же тупик, что в errHtml.
     btn = `<button class="btn" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">◀️ Назад</button>`;
   } else {
     btn = '';

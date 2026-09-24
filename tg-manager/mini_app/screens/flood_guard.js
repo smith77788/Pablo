@@ -41,7 +41,9 @@ async function openFloodGuard(botId) {
     _fgData = await api('/api/miniapp/flood/' + botId);
     body.innerHTML = _fgRender(_fgData);
   } catch (e) {
-    body.innerHTML = '<div style="color:var(--red);padding:20px">' + esc(e.message) + '</div>';
+    // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
+    // экран без единой кнопки, а таббар на подэкране скрыт.
+    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'openFloodGuard(' + JSON.stringify(botId) + ')');
   }
 }
 
