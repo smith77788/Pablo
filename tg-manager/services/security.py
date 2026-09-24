@@ -179,9 +179,49 @@ async def check_rate_limit(
     return await _rate_limiter.check(key, max_requests, window)
 
 
+# Маршруты входа и связывания устройства: здесь перебирают коды и initData, а не
+# пользуются приложением. Лимит для них строже общего (RATE_LIMIT_AUTH_MAX).
+AUTH_RATE_LIMIT_PATHS = (
+    "/api/miniapp/auth",
+    "/api/miniapp/pair",
+    "/api/miniapp/pair/exchange",
+)
+
+
+def _rate_key(request: web.Request, uid: Optional[int] = None) -> str:
+    """Ключ лимитера: у входа он свой, с приставкой auth:.
+
+    Счётчик отдельный намеренно. С общим счётчиком обычный трафик приложения
+    (дашборд, список аккаунтов, поток событий — десятки запросов в минуту) съедал
+    бы лимит входа, а перебор кодов связывания, наоборот, выбивал бы из
+    приложения самого владельца.
+    """
+    key = _user_key(request, uid)
+    if request.path in AUTH_RATE_LIMIT_PATHS:
+        return "auth:" + key
+    return key
+
+
+async def check_rate_limit_for_path(
+    request: web.Request, uid: Optional[int] = None
+) -> bool:
+    """Лимит с учётом маршрута: вход и связывание — по RATE_LIMIT_AUTH_MAX.
+
+    RATE_LIMIT_AUTH_MAX был объявлен и настраивался переменной окружения, но не
+    использовался нигде: вход жил под общим лимитом в 120 запросов в минуту.
+    """
+    if request.path in AUTH_RATE_LIMIT_PATHS:
+        return await _rate_limiter.check(
+            _rate_key(request, uid), _RATE_LIMIT_AUTH_MAX, _RATE_LIMIT_WINDOW
+        )
+    return await _rate_limiter.check(
+        _rate_key(request, uid), _RATE_LIMIT_MAX_REQUESTS, _RATE_LIMIT_WINDOW
+    )
+
+
 def rate_limit_response(request: web.Request, uid: Optional[int] = None) -> web.Response:
     """Return a 429 Too Many Requests response."""
-    key = _user_key(request, uid)
+    key = _rate_key(request, uid)
     retry_after = _rate_limiter.get_retry_after(key, _RATE_LIMIT_WINDOW)
     return web.json_response(
         {"error": "Rate limit exceeded", "retry_after": retry_after},
@@ -511,15 +551,16 @@ def require_rest_api_auth(handler: Callable) -> Callable:
     @wraps(handler)
     async def wrapped(request: web.Request) -> web.Response:
         from config import ADMIN_SECRET
-        if ADMIN_SECRET is None:
-            return await handler(request)
+        # Ключ не настроен — доступа нет. Ветки «секрет is None — пускаем всех»
+        # здесь больше нет: см. services/rest_api._check_auth.
         if not ADMIN_SECRET:
             return web.json_response({"error": "Unauthorized"}, status=401)
         key = (
             request.headers.get("X-Api-Key", "")
             or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         )
-        if not hmac.compare_digest(key, ADMIN_SECRET):
+        # Байты, а не строки: см. services/rest_api._check_auth.
+        if not hmac.compare_digest(key.encode("utf-8"), ADMIN_SECRET.encode("utf-8")):
             return web.json_response({"error": "Unauthorized"}, status=401)
         return await handler(request)
     return wrapped
@@ -552,7 +593,7 @@ def security_middleware() -> Callable:
                     correlation_id=generate_correlation_id(), user_id=uid)
             except Exception:
                 pass
-            if not await check_rate_limit(request, uid):
+            if not await check_rate_limit_for_path(request, uid):
                 return rate_limit_response(request, uid)
 
         try:

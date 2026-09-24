@@ -11,7 +11,10 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 - Кастомный JSON-хук: POST /webhook/payment с {user_id, amount, currency, tx_hash}
 - Railway deploy webhook: POST /webhook/deploy — уведомления о деплоях
 
-Каждый webhook проходит проверку подписи (HMAC-SHA256) если задан WEBHOOK_SECRET.
+Денежные хуки (payment, cryptopay) проверяют подпись ВСЕГДА. Не задан секрет —
+хук закрыт и отвечает 503: раздать платный тариф без проверки хуже, чем не
+принять платёж (живой путь оплаты — services/payment_checker.py, проверка
+транзакции в блокчейне).
 """
 
 from __future__ import annotations
@@ -60,10 +63,32 @@ _PLAN_MAP = {
 }
 
 
+def _webhook_closed(var_name: str) -> web.Response:
+    """Отказ денежного хука, у которого не настроен секрет.
+
+    503, а не 403: это не «неверная подпись», а «приём не настроен». В тексте —
+    имя переменной окружения, иначе отказ выглядит поломкой и его ищут в коде.
+    """
+    log.error(
+        "%s не задан — денежный хук закрыт, запрос отклонён", var_name
+    )
+    return web.Response(
+        status=503,
+        text=f"Приём платёжных уведомлений не настроен: задайте {var_name}",
+    )
+
+
 def _verify_signature(body: bytes, signature: str) -> bool:
-    """Проверить HMAC-SHA256 подпись хука."""
+    """Проверить HMAC-SHA256 подпись хука.
+
+    Без секрета — ВСЕГДА False. Раньше здесь стояло `return True`: переменная
+    WEBHOOK_SECRET нигде в деплое не задана, поэтому подпись фактически никто не
+    проверял, и любой запрос с {"user_id": N, "plan": "pro_1m"} выдавал платный
+    тариф. Проверка, которая при отсутствии настройки пропускает всех, — не
+    проверка.
+    """
     if not _WEBHOOK_SECRET:
-        return True
+        return False
     expected = hmac.new(_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature.removeprefix("sha256="))
 
@@ -162,9 +187,12 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         if not await check_rate_limit(request, max_requests=60, window=60):
             return rate_limit_response(request)
 
+        if not _WEBHOOK_SECRET:
+            return _webhook_closed("WEBHOOK_SECRET")
+
         body = await request.read()
         sig = request.headers.get("X-Webhook-Signature", "")
-        if _WEBHOOK_SECRET and not _verify_signature(body, sig):
+        if not _verify_signature(body, sig):
             log.warning("payment_webhook: invalid signature")
             return web.Response(status=403, text="Invalid signature")
 
@@ -228,12 +256,16 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         if not await check_rate_limit(request, max_requests=60, window=60):
             return rate_limit_response(request)
 
-        body = await request.read()
         api_token = os.getenv("CRYPTOPAY_TOKEN", "")
-        if api_token:
-            sig = request.headers.get("Crypto-Pay-Api-Token", "")
-            if sig != api_token:
-                return web.Response(status=403, text="Forbidden")
+        if not api_token:
+            return _webhook_closed("CRYPTOPAY_TOKEN")
+        sig = request.headers.get("Crypto-Pay-Api-Token", "")
+        # compare_digest, а не !=: обычное сравнение строк выходит на первом
+        # несовпавшем символе и по времени ответа подсказывает токен посимвольно.
+        if not hmac.compare_digest(sig, api_token):
+            return web.Response(status=403, text="Forbidden")
+
+        body = await request.read()
 
         try:
             data = json.loads(body)

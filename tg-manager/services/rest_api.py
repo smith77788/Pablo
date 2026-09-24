@@ -46,16 +46,25 @@ import hmac
 
 
 def _check_auth(request: web.Request) -> bool:
-    if ADMIN_SECRET is None:
-        return True
+    """Ключ не настроен — доступа нет.
+
+    Раньше первой строкой стояло «ADMIN_SECRET is None — пускаем всех». Сегодня
+    config подставляет пустую строку и до этой ветки дело не доходит, но она
+    оставалась заряженной: убери значение по умолчанию в config.py — и весь
+    REST API (отправка сообщений ОТ ИМЕНИ аккаунта, чтение переписки, список
+    аккаунтов) молча становится публичным.
+    """
     if not ADMIN_SECRET:
-        log.warning("rest_api: ADMIN_SECRET is empty — all requests rejected")
+        log.warning("rest_api: ADMIN_SECRET не задан — все запросы отклоняются")
         return False
     key = (
         request.headers.get("X-Api-Key", "")
         or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     )
-    return hmac.compare_digest(key, ADMIN_SECRET)
+    # Сравниваем байты: compare_digest на строках падает TypeError, если в ключе
+    # есть не-ASCII. Ключ приходит снаружи — падение превратило бы отказ 401 в
+    # 500 с трейсом, то есть в способ отличать «не тот ключ» от «сломались».
+    return hmac.compare_digest(key.encode("utf-8"), ADMIN_SECRET.encode("utf-8"))
 
 
 def _unauth() -> web.Response:
