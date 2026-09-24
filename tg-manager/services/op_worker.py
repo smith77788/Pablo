@@ -15069,6 +15069,24 @@ async def _exec_ad_intel_scan(
         return {"status": "failed", "summary": f"⚠️ Ошибка сканирования: {exc}"}
 
 
+def _blast_final_status(ok_count: int, total: int, cancelled: bool) -> str:
+    """Честный статус рассылки: «выполнено» только если хоть кто-то её получил.
+
+    Получатели, заблокировавшие бота или удалённые, идут в «пропущено», а не в
+    «ошибки» — это верно: они недостижимы НАВСЕГДА, повтор бессмысленен, и на
+    предохранитель флота это не тянет. Но из-за этого рассылка, которую не
+    получил НИКТО, возвращала зелёное «done»: в счётчиках честное «✅ 0/3», а
+    бейдж операции — «выполнено». Ровно тот молчаливый итог, который продукт
+    ловит в других местах. Пустая рассылка (целей не было) остаётся «done» —
+    делать было нечего.
+    """
+    if cancelled:
+        return "cancelled"
+    if total > 0 and ok_count == 0:
+        return "failed"
+    return "done"
+
+
 async def _exec_self_promo_blast(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -15254,15 +15272,21 @@ async def _exec_self_promo_blast(
     # Отмена возвращалась как «done»: операция выходила из цикла по break и
     # рапортовала успех, хотя владелец её остановил.
     _skip_note = f" 🔒 {skip_count}" if skip_count else ""
+    _status = _blast_final_status(ok_count, total, cancelled)
+    _why = ""
+    if _status == "failed":
+        _why = " — сообщение не получил никто"
+        if skip_count:
+            _why += f": {skip_count} заблокировали бота или удалены (исключены из рассылки)"
     return {
-        "status": "cancelled" if cancelled else "done",
+        "status": _status,
         "ok": ok_count,
         "fail": fail_count,
         "skipped": skip_count,
         "total": total,
         "summary": (("🛑 Остановлено. " if cancelled else "📢 Self-promo рассылка: ")
                     + f"✅ {ok_count}/{total}"
-                    + (f" ❌ {fail_count}" if fail_count else "") + _skip_note),
+                    + (f" ❌ {fail_count}" if fail_count else "") + _skip_note + _why),
     }
 
 

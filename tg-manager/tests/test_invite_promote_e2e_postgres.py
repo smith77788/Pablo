@@ -286,7 +286,12 @@ def test_per_account_volume_one_pass(env):
     state["admin_id"] = ids[0]           # админ есть → всё подключается и инвайтит
     # объём 4 на аккаунт, один проход (без клампа предсказанным дневным лимитом)
     row, _ = _launch(pool, w, ids, run_id, 30, per_account_limit=4, one_pass=True)
-    assert row["status"] == "done", row["summary"]
+    # Из 30 за проход берётся 12 (3 аккаунта × 4), остаток уезжает в продолжение
+    # — это честный «partial», а не зелёный «done» (services/op_status.py).
+    # Раньше стояло «done»: файл пропускается без INFRAGRAM_TEST_DSN и после
+    # смены правила ни разу не выполнялся. Инвариант теста — объём на аккаунт,
+    # он ниже и не изменился.
+    assert row["status"] == "partial", row["summary"]
     # каждый аккаунт добавил РОВНО по 4 (3×4=12), а не по 2
     per_acc = {}
     for aid, refs in state["invite_calls"]:
@@ -307,7 +312,10 @@ def test_progressive_volume_fresh_accounts(env):
     ids, run_id = _seed(pool, n_acc=3, n_users=40)
     state["admin_id"] = ids[0]
     row, _ = _launch(pool, w, ids, run_id, 40, volume_mode="progressive")
-    assert row["status"] == "done", row["summary"]
+    # Аудитория (40) заведомо больше суммы лимитов (15) — остаток уезжает в
+    # продолжение, и честный статус такого прогона «partial», а не «done»
+    # (services/op_status.py). Инвариант теста — лимит на аккаунт, он ниже.
+    assert row["status"] == "partial", row["summary"]
     per_acc = {}
     for aid, refs in state["invite_calls"]:
         per_acc[aid] = per_acc.get(aid, 0) + len(refs)

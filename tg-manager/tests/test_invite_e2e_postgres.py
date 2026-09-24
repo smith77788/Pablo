@@ -310,8 +310,13 @@ def test_flood_loses_nothing(stand):
         refs = [f"@f{i}" for i in range(20)]
         r = _run(stand.run({"group": "@g", "source": "import_list", "user_refs": refs},
                            total=20))
-        covered = set(stand.sent) | _run(stand.carried_over())
-        assert r["status"] == "done"
+        carried = _run(stand.carried_over())
+        covered = set(stand.sent) | carried
+        # Статус стал честным: прогон, унёсший остаток в продолжение, — это
+        # «partial», а не зелёный «done» (правило в services/op_status.py).
+        # Этот файл требовал «done», потому что без INFRAGRAM_TEST_DSN он
+        # пропускается целиком и ни разу не выполнялся после смены правила.
+        assert r["status"] == ("partial" if carried else "done"), r["summary"]
         assert covered == set(refs), f"потеряно: {sorted(set(refs) - covered)}"
     finally:
         stand.mode = "ok"
@@ -426,7 +431,10 @@ def test_cold_start_limit_spills_into_a_continuation(stand):
     refs = [f"@s{i}" for i in range(50)]
     r = _run(stand.run({"group": "@g", "source": "import_list", "user_refs": refs},
                        total=50))
-    assert r["status"] == "done"
+    # Остаток уехал в продолжение, значит прогон честно «partial», а не «done»
+    # (правило в services/op_status.py). Раньше здесь стоял «done»: файл
+    # пропускается без INFRAGRAM_TEST_DSN и после смены правила не выполнялся.
+    assert r["status"] == "partial", r["summary"]
     covered = set(stand.sent) | _run(stand.carried_over())
     assert covered == set(refs), f"потеряно: {sorted(set(refs) - covered)}"
     assert "продолжим завтра" in (r["summary"] or ""), "остаток обязан быть виден"

@@ -62,6 +62,7 @@ def env():
         "add_via_promote": inv.add_via_promote,
         "channel_admin_status": inv.channel_admin_status,
         "promote_to_admin": am.promote_to_admin,
+        "promote_to_admin_ex": am.promote_to_admin_ex,
         "resolve_self_user_id": am.resolve_self_user_id,
         "join_channel": am.join_channel,
         "humanize": invite_behavior.humanize,
@@ -88,12 +89,21 @@ def env():
     async def fake_admin_status(session, acc, group):
         return {"ok": True, "can_promote": int(acc["id"]) == state["admin_id"]}
 
-    async def fake_promote(psession, group, uid, _acc=None, invite_users=False,
-                           post_messages=False, add_admins=False):
+    # Инвайт зовёт promote_to_admin_ex НАПРЯМУЮ (ему нужна причина отказа), а
+    # promote_to_admin — тонкая обёртка над ним для прежних вызывающих. Подменять
+    # только обёртку мало: стаб не срабатывал, в чат уходил настоящий Telethon и
+    # падал, а тест этого не видел — выдача add_admins флоту молча перестала
+    # проверяться. Подменяем ОБА имени.
+    async def fake_promote_ex(psession, group, uid, _acc=None, invite_users=False,
+                              post_messages=False, add_admins=False, **kw):
         state["promote_calls"].append(("grant", int(uid), bool(add_admins)))
         if add_admins:
             state["add_admins_grants"].append(int(uid))
-        return True
+        return True, ""
+
+    async def fake_promote(*a, **kw):
+        ok, _ = await fake_promote_ex(*a, **kw)
+        return ok
 
     async def fake_resolve(session, _acc=None):
         return 900000 + int(_acc["id"])
@@ -109,6 +119,7 @@ def env():
     inv.add_via_promote = fake_add_via_promote
     inv.channel_admin_status = fake_admin_status
     am.promote_to_admin = fake_promote
+    am.promote_to_admin_ex = fake_promote_ex
     am.resolve_self_user_id = fake_resolve
     am.join_channel = fake_join
     invite_behavior.humanize = fake_humanize
@@ -119,6 +130,7 @@ def env():
     inv.add_via_promote = orig["add_via_promote"]
     inv.channel_admin_status = orig["channel_admin_status"]
     am.promote_to_admin = orig["promote_to_admin"]
+    am.promote_to_admin_ex = orig["promote_to_admin_ex"]
     am.resolve_self_user_id = orig["resolve_self_user_id"]
     am.join_channel = orig["join_channel"]
     invite_behavior.humanize = orig["humanize"]

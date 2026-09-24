@@ -69,14 +69,32 @@ def test_run_now_handler_scoped_and_pending_only():
     assert "owner_id=$2" in seg
 
 
-def test_resume_operation_also_clears_scheduled_for():
+def test_resume_operation_does_not_touch_scheduled_for():
+    """«Возобновить» возвращает операцию в прежнее состояние, не торопя её.
+
+    Раньше возобновление заодно снимало scheduled_for — как быстрый способ
+    поторопить отложенную операцию. Для этого появилась отдельная кнопка
+    «Запустить сейчас», а побочный эффект ломал два сценария: пост, заведённый
+    на «завтра в 9:00», после паузы уходил в реальные каналы немедленно, и
+    флуд-пауза, живущая в том же поле, снималась в обход Telegram.
+
+    Тест раньше требовал обратного и этого не показывал: файл целиком
+    пропускается без INFRAGRAM_TEST_DSN, поэтому противоречие с кодом никто не
+    видел. Теперь он стережёт принятое решение.
+    """
     src = _read("services/mini_app_api.py")
     i = src.index("async def resume_operation")
     seg = src[i:src.index("\n    async def ", i + 10)]
-    assert "scheduled_for=NULL" in seg, (
-        "возобновление приостановленной операции обязано снимать старое "
-        "расписание — иначе 'Возобновить' молча ждёт исходное время"
-    )
+    body = seg[seg.index("uid = _get_uid(request)"):]
+    assert "scheduled_for" not in body, (
+        "возобновление снова трогает время запуска — запланированное владельцем "
+        "время и флуд-пауза будут сниматься в обход")
+
+    # Поторопить операцию можно, но это отдельное явное действие.
+    j = src.index("async def run_now_operation")
+    run_now = src[j:src.index("\n    async def ", j + 10)]
+    assert "scheduled_for=NULL" in run_now, (
+        "«Запустить сейчас» обязано снимать расписание — иначе торопить нечем")
 
 
 def test_ui_has_run_now_button_only_for_scheduled_pending():
