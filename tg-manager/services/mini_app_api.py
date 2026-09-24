@@ -1205,6 +1205,56 @@ async def _check_all_proxies_core(pool: asyncpg.Pool, uid: int) -> dict:
     return {"ok": True, "checked": len(rows), "alive": alive}
 
 
+async def _admin_broadcast_core(pool: asyncpg.Pool, uid: int, text: str) -> dict:
+    """Сообщение ВСЕМ пользователям платформы. Пишет след в журнал админа.
+
+    Это самое далеко идущее админское действие продукта: одно нажатие пишет
+    каждому живому пользователю, и отменить это нечем. Выдача подписки, бан и
+    разбан след в admin_audit_log оставляли, а рассылка — нет: кто и что
+    разослал, восстановить было неоткуда. Запись идёт и когда рассылка упала на
+    середине — тогда в ней видно, сколько успело уйти.
+    """
+    from database.db import log_admin_action
+
+    # Не шлём забаненным.
+    users = await pool.fetch(
+        "SELECT user_id FROM platform_users WHERE COALESCE(is_banned, false) = false")
+    if not users:
+        await log_admin_action(pool, uid, "admin_broadcast", None,
+                               {"recipients": 0, "sent": 0, "failed": 0,
+                                "text": text[:500]})
+        return {"ok": True, "sent": 0, "failed": 0}
+
+    from aiogram import Bot as _Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    from config import BOT_TOKEN as _tok
+    # ОДИН Bot на всю рассылку (раньше создавался на каждого юзера —
+    # утечка aiohttp-сессий). Закрываем сессию в finally.
+    _b = _Bot(token=_tok, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    sent = 0
+    failed = 0
+    try:
+        for u in users:
+            try:
+                await _b.send_message(u["user_id"], text)
+                sent += 1
+            except Exception:
+                failed += 1
+            await asyncio.sleep(0.05)
+    finally:
+        # Журнал пишем в finally: обрыв на середине (передеплой, таймаут шлюза)
+        # — это НЕ повод потерять запись о том, что рассылка уже пошла людям.
+        await log_admin_action(pool, uid, "admin_broadcast", None,
+                               {"recipients": len(users), "sent": sent,
+                                "failed": failed, "text": text[:500]})
+        try:
+            await _b.session.close()
+        except Exception as e:
+            log.warning("admin_broadcast session.close: %s", e)
+    return {"ok": True, "sent": sent, "failed": failed}
+
+
 async def _retry_sources(
     pool: asyncpg.Pool, uid: int, op_ids: list[int]
 ) -> dict[int, dict]:
@@ -22616,35 +22666,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not text:
             return _err("text required")
         try:
-            # Не шлём забаненным.
-            users = await pool.fetch(
-                "SELECT user_id FROM platform_users WHERE COALESCE(is_banned, false) = false"
-            )
-            if not users:
-                return _json_resp({"ok": True, "sent": 0, "failed": 0})
-            from aiogram import Bot as _Bot
-            from aiogram.client.default import DefaultBotProperties
-            from aiogram.enums import ParseMode
-            from config import BOT_TOKEN as _tok
-            # ОДИН Bot на всю рассылку (раньше создавался на каждого юзера —
-            # утечка aiohttp-сессий). Закрываем сессию в finally.
-            _b = _Bot(token=_tok, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-            sent = 0
-            failed = 0
-            try:
-                for u in users:
-                    try:
-                        await _b.send_message(u["user_id"], text)
-                        sent += 1
-                    except Exception:
-                        failed += 1
-                    await asyncio.sleep(0.05)
-            finally:
-                try:
-                    await _b.session.close()
-                except Exception as e:
-                    log.warning("admin_broadcast session.close: %s", e)
-            return _json_resp({"ok": True, "sent": sent, "failed": failed})
+            return _json_resp(await _admin_broadcast_core(pool, uid, text))
         except Exception as e:
             log.exception("admin_broadcast uid=%d", uid)
             return _err(str(e), 500)

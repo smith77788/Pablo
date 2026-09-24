@@ -5259,6 +5259,38 @@ async def get_all_platform_users(
     return [dict(r) for r in rows]
 
 
+async def log_admin_action(
+    pool: asyncpg.Pool,
+    admin_id: int,
+    action: str,
+    target_user_id: int | None = None,
+    details: dict | None = None,
+) -> None:
+    """Записать админ-действие в журнал. Один вход для всех таких записей.
+
+    Раньше INSERT в admin_audit_log был выписан в каждом месте отдельно, и они
+    разошлись: часть оборачивалась в try, часть нет. Где не оборачивалась, сбой
+    ЗАПИСИ (например, админа ещё нет в platform_users — там внешний ключ) ронял
+    запрос уже ПОСЛЕ применения действия: бан стоял, а админ видел 500 и не
+    знал, сработало ли.
+
+    Поэтому запись всегда fail-soft: действие уже применено, отменить его
+    нечем, а молчать нельзя — сбой уходит в лог с трейсом.
+    """
+    try:
+        await pool.execute(
+            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+               VALUES ($1, $2, $3, $4)""",
+            admin_id, action, target_user_id,
+            json.dumps(details or {}, ensure_ascii=False, default=str),
+        )
+    except Exception:
+        log_exc_swallow(
+            log, "Сбой записи admin_audit_log", admin_id=admin_id,
+            user_id=target_user_id, action=action,
+        )
+
+
 async def grant_plan_to_user(
     pool: asyncpg.Pool,
     user_id: int,
@@ -5354,22 +5386,9 @@ async def grant_plan_to_user(
                             user_id=user_id,
                         )
 
-    # Логировать действие
-    try:
-        await pool.execute(
-            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-               VALUES ($1, 'grant_plan', $2, $3)""",
-            admin_id,
-            user_id,
-            json.dumps(
-                {"plan": plan, "months": months, "expires_at": expires.isoformat()},
-                ensure_ascii=False,
-            ),
-        )
-    except Exception:
-        log_exc_swallow(
-            log, "Сбой записи admin_audit_log", admin_id=admin_id, user_id=user_id
-        )
+    await log_admin_action(
+        pool, admin_id, "grant_plan", user_id,
+        {"plan": plan, "months": months, "expires_at": expires.isoformat()})
 
     # Обе таблицы записаны выше — сбрасываем кеш плана, иначе get_plan отдаёт
     # старое значение до 60с (в т.ч. в мини-аппе — тот же процесс, тот же кеш).
@@ -5411,20 +5430,9 @@ async def revoke_plan_from_user(
                 "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
             )
 
-    # Логировать действие. Отдельно от транзакции и со снятием исключения:
-    # отзыв доступа уже состоялся, и ронять его из-за журнала нельзя — но и
-    # промолчать о несостоявшейся записи тоже.
-    try:
-        await pool.execute(
-            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-               VALUES ($1, 'revoke_plan', $2, '{}')""",
-            admin_id,
-            user_id,
-        )
-    except Exception:
-        log_exc_swallow(
-            log, "Сбой записи admin_audit_log", admin_id=admin_id, user_id=user_id
-        )
+    # Журнал — отдельно от транзакции: отзыв доступа уже состоялся, и ронять
+    # его из-за записи в журнал нельзя (log_admin_action сам fail-soft).
+    await log_admin_action(pool, admin_id, "revoke_plan", user_id)
     # Сброс кеша — иначе отозванный юзер до 60с считается платным.
     _invalidate_plan_cache(user_id)
 
@@ -5433,13 +5441,7 @@ async def revoke_strike_access(pool: asyncpg.Pool, user_id: int, admin_id: int) 
     """Забрать Strike доступ у пользователя."""
     await pool.execute("DELETE FROM strike_access WHERE user_id=$1", user_id)
 
-    # Логировать действие
-    await pool.execute(
-        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-           VALUES ($1, 'revoke_strike', $2, '{}')""",
-        admin_id,
-        user_id,
-    )
+    await log_admin_action(pool, admin_id, "revoke_strike", user_id)
 
 
 async def ban_user(
@@ -5454,14 +5456,8 @@ async def ban_user(
         user_id,
     )
 
-    # Логировать действие
-    await pool.execute(
-        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-           VALUES ($1, 'ban_user', $2, $3)""",
-        admin_id,
-        user_id,
-        json.dumps({"reason": reason or ""}),
-    )
+    await log_admin_action(pool, admin_id, "ban_user", user_id,
+                           {"reason": reason or ""})
 
 
 async def unban_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
@@ -5473,13 +5469,7 @@ async def unban_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
         user_id,
     )
 
-    # Логировать действие
-    await pool.execute(
-        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-           VALUES ($1, 'unban_user', $2, '{}')""",
-        admin_id,
-        user_id,
-    )
+    await log_admin_action(pool, admin_id, "unban_user", user_id)
 
 
 async def get_user_info(pool: asyncpg.Pool, user_id: int) -> dict:
