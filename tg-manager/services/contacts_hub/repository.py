@@ -208,29 +208,64 @@ async def get_contact(pool, contact_id, owner_id):
 
 
 async def upsert_contact(pool, owner_id, data: dict) -> str:
-    contact_id = data.get('id') or str(uuid.uuid4())
-    # RETURNING id: на конфликте по (owner, telegram_user_id) возвращаем id
-    # СУЩЕСТВУЮЩЕЙ строки, а не только что сгенерированный uuid. Иначе вызывающий
-    # привязывал бы CRM/теги/источники к несуществующему id (тихая потеря данных).
+    """Создать контакт или обновить существующий по telegram_user_id.
+
+    Здесь НЕТ `ON CONFLICT (owner_id, telegram_user_id)`, хотя напрашивается:
+    такого ограничения в схеме нет, есть только обычный индекс. Postgres
+    отвергает такой запрос на ИСПОЛНЕНИИ («no unique or exclusion constraint
+    matching the ON CONFLICT specification»), а не при разборе — поэтому он
+    молча падал каждый раз, сколько бы раз его ни звали. Единственный
+    вызывающий — сенсор намерений: он не мог завести ни одного контакта, а
+    значит и состояние воронки этому человеку писать было некуда.
+
+    Ограничение не заводится задним числом: в боевой базе уже могут лежать
+    пары-дубли, и создание уникального индекса на ней просто не пройдёт.
+    Порядок тот же, что в синхронизации контактов: найти, потом обновить или
+    вставить.
+    """
+    contact_id = data.get('id')
+    tg_id = data.get('telegram_user_id')
+    phones = json.dumps(data.get('phones', []))
+
+    if not contact_id and tg_id:
+        existing = await pool.fetchrow(
+            'SELECT id FROM unified_contacts '
+            'WHERE owner_id=$1 AND telegram_user_id=$2',
+            owner_id, tg_id)
+        if existing:
+            contact_id = existing['id']
+
+    if contact_id:
+        row = await pool.fetchrow(
+            'UPDATE unified_contacts SET '
+            'username = COALESCE($3, username), '
+            'first_name = COALESCE($4, first_name), '
+            'last_name = COALESCE($5, last_name), '
+            'display_name = COALESCE($6, display_name), '
+            'phones = $7::jsonb, '
+            'is_premium = $8, '
+            'last_synced_at = $9, '
+            'updated_at = NOW() '
+            'WHERE id=$1 AND owner_id=$2 '
+            'RETURNING id',
+            contact_id, owner_id, data.get('username'), data.get('first_name'),
+            data.get('last_name'), data.get('display_name'), phones,
+            data.get('is_premium', False), data.get('last_synced_at'))
+        if row:
+            return row['id']
+        # Строки с таким id у этого владельца нет — заводим новую ниже.
+
+    contact_id = contact_id or str(uuid.uuid4())
     row = await pool.fetchrow(
-        '''INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, first_name, last_name,
-            display_name, phones, is_premium, discovered_at, last_synced_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)
-           ON CONFLICT (owner_id, telegram_user_id) DO UPDATE SET
-            username = COALESCE(EXCLUDED.username, unified_contacts.username),
-            first_name = COALESCE(EXCLUDED.first_name, unified_contacts.first_name),
-            last_name = COALESCE(EXCLUDED.last_name, unified_contacts.last_name),
-            display_name = COALESCE(EXCLUDED.display_name, unified_contacts.display_name),
-            phones = EXCLUDED.phones,
-            is_premium = EXCLUDED.is_premium,
-            last_synced_at = EXCLUDED.last_synced_at,
-            updated_at = NOW()
-           RETURNING id''',
-        contact_id, owner_id, data.get('telegram_user_id'), data.get('username'),
+        'INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, '
+        'first_name, last_name, display_name, phones, is_premium, '
+        'discovered_at, last_synced_at) '
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11) '
+        'RETURNING id',
+        contact_id, owner_id, tg_id, data.get('username'),
         data.get('first_name'), data.get('last_name'), data.get('display_name'),
-        json.dumps(data.get('phones', [])), data.get('is_premium', False),
-        data.get('discovered_at'), data.get('last_synced_at'),
-    )
+        phones, data.get('is_premium', False),
+        data.get('discovered_at'), data.get('last_synced_at'))
     return row['id'] if row else contact_id
 
 

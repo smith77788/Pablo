@@ -320,6 +320,45 @@ async def signal(pool, owner_id: int, entity_type: str, entity_id,
     return change
 
 
+async def signal_for_telegram_user(pool, owner_id: int, tg_user_id,
+                                   signal_name: str, *, confidence: float = 0.6,
+                                   source: str | None = None) -> dict | None:
+    """Сигнал по Telegram-id человека, а не по id контакта.
+
+    Источники сигналов живут там, где приходят обновления Telegram, и знают
+    человека по его tg-id. Состояния этого слоя ключуются по контакту
+    (unified_contacts.id) — так же, как их пишет сенсор намерений. Разводить
+    два пространства идентификаторов нельзя: один и тот же человек получил бы
+    два независимых состояния, и оба были бы неполными.
+
+    Человека, которого у владельца нет в контактах, пропускаем молча: слой —
+    надстройка над CRM-контактом, и заводить контакт по чужому сообщению здесь
+    не его дело.
+
+    Fail-open: сбой слоя не ломает обработку сообщения.
+    """
+    if not owner_id or not tg_user_id:
+        return None
+    try:
+        contact_id = await pool.fetchval(
+            "SELECT id FROM unified_contacts "
+            "WHERE owner_id=$1 AND telegram_user_id=$2",
+            int(owner_id), int(tg_user_id))
+    except Exception:
+        log.debug("virtual_layer: contact lookup failed owner=%s tg=%s",
+                  owner_id, tg_user_id, exc_info=True)
+        return None
+    if not contact_id:
+        return None
+    try:
+        return await signal(pool, int(owner_id), USER, contact_id, signal_name,
+                            confidence=confidence, source=source)
+    except Exception:
+        log.debug("virtual_layer: signal failed owner=%s signal=%s",
+                  owner_id, signal_name, exc_info=True)
+        return None
+
+
 async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
                     now: datetime | None = None) -> int:
     """Остудить просроченные состояния (на рунг ниже). Возвращает число

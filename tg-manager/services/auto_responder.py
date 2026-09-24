@@ -521,6 +521,26 @@ async def _process_bot(
         )
         active_exp = await db.get_active_experiment(pool, bot_id, "start_message")
 
+        # Виртуальный слой: обновления бота — это сигналы воронки. Telegram
+        # сообщает, ЧТО произошло (тап, /start, «стоп»), слой определяет, ЧТО
+        # ЭТО ЗНАЧИТ, и на реальном переходе рождает виртуальное событие, на
+        # которое реагируют автоматизации. До сих пор слой кормил только сенсор
+        # намерений, то есть один источник из всех, какие у продукта есть.
+        _vl_owner = bot_row.get("added_by") if bot_row else None
+
+        async def _vl_signal(tg_user_id, signal_name: str, confidence: float):
+            """Fail-open: сбой слоя не должен ломать обработку сообщения."""
+            if not _vl_owner or not tg_user_id:
+                return
+            try:
+                from services import virtual_layer
+                await virtual_layer.signal_for_telegram_user(
+                    pool, _vl_owner, tg_user_id, signal_name,
+                    confidence=confidence, source=f"bot_{bot_id}")
+            except Exception:
+                log.debug("auto_responder: virtual_layer signal=%s bot=%s",
+                          signal_name, bot_id, exc_info=True)
+
         # Brand injection: cache free-tier status once per polling cycle
         try:
             _is_free = await brand_injection.is_free_tier(pool, bot_id)
@@ -553,6 +573,9 @@ async def _process_bot(
                         )
                     except Exception as e:
                         log_exc_swallow(log, "_process_bot: answer_callback")
+                # Тап по кнопке — осознанное действие, а не просмотр.
+                await _vl_signal((cbq.get("from") or {}).get("id"),
+                                 "clicked_offer", 0.7)
                 continue
 
             msg = upd.get("message")
@@ -607,10 +630,18 @@ async def _process_bot(
                     log_exc_swallow(log, "auto_responder: подтверждение отписки")
                 log.info("auto_responder: bot=%s user=%s отписан от %d воронок",
                          bot_id, chat_id, _dropped)
+                await _vl_signal(chat_id, "unsubscribed", 0.9)
                 continue
 
             # Extract user info once (used for notification + registration below)
             from_user = msg.get("from") or {}
+
+            # /start — человек открыл бота; любое другое сообщение — ответил.
+            # Сигнал не опускает состояние, только подтягивает, поэтому «ответил»
+            # у давно квалифицированного контакта ничего не испортит: он лишь
+            # обновит уверенность и отодвинет распад.
+            await _vl_signal(chat_id, "opened" if is_start else "replied",
+                             0.5 if is_start else 0.6)
 
             # Track user activity — returns True for first-ever message (new user)
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)

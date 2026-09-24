@@ -271,3 +271,57 @@ def test_probe_catches_a_broken_query(conn):
     assert _run(_try("SELECT b.bot_id, b.username FROM managed_bots b "
                      "GROUP BY b.bot_id")) == "GroupingError", (
         "измеритель не видит неверную группировку")
+
+
+# ── ON CONFLICT: PREPARE этого класса не ловит ────────────────────────────────
+#
+# Postgres проверяет, есть ли под указанные колонки уникальное ограничение, на
+# ИСПОЛНЕНИИ, а не при разборе. Поэтому запрос с несуществующим ограничением
+# проходит PREPARE и падает каждый раз, когда его реально зовут. Так молча не
+# работал upsert_contact: сенсор намерений не мог завести ни одного контакта.
+
+_ON_CONFLICT = re.compile(
+    r"INSERT\s+INTO\s+(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?[\s\S]*?"
+    r"ON\s+CONFLICT\s*\(([^)]*)\)", re.I)
+
+
+def _conflict_targets():
+    """{(таблица, колонки): {где встретилось}} по всем строковым константам."""
+    out: dict[tuple, set] = {}
+    for rel, tree in _py_files():
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                continue
+            for m in _ON_CONFLICT.finditer(node.value):
+                cols = tuple(sorted(c.strip().strip('"').lower()
+                                    for c in m.group(2).split(",")))
+                if not all(re.fullmatch(r"[a-z_][a-z0-9_]*", c) for c in cols):
+                    continue      # выражение, а не список колонок
+                key = (m.group(1).lower(), cols)
+                out.setdefault(key, set()).add(f"{rel}:{node.lineno}")
+    return out
+
+
+def test_on_conflict_targets_have_a_unique_index(conn):
+    rows = _run(conn.fetch(
+        "SELECT tablename, indexdef FROM pg_indexes "
+        "WHERE schemaname='public' AND indexdef LIKE '%UNIQUE%'"))
+    unique = set()
+    for r in rows:
+        inside = re.search(r"\(([^()]*)\)", r["indexdef"].split(" USING ", 1)[-1])
+        if inside:
+            unique.add((r["tablename"],
+                        tuple(sorted(c.strip().split()[0].lower()
+                                     for c in inside.group(1).split(",")))))
+
+    targets = _conflict_targets()
+    assert len(targets) > 50, (
+        f"разобрано всего {len(targets)} ON CONFLICT — разбор сломан")
+
+    bad = {k: v for k, v in targets.items() if k not in unique}
+    assert not bad, (
+        "ON CONFLICT по колонкам, под которыми нет уникального индекса "
+        "(такой запрос падает при каждом вызове):\n"
+        + "\n".join(f"  {t} ({', '.join(cols)}): {', '.join(sorted(w)[:3])}"
+                    for (t, cols), w in sorted(bad.items()))
+    )
