@@ -262,7 +262,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* Ссылка раздела («Подробнее →», «Все →») — строка высотой 18px, попасть в неё
    пальцем трудно. Отрицательные поля гасят добавленный паддинг, поэтому
    область нажатия вырастает до 32px, а вёрстка не сдвигается ни на пиксель. */
-.sec-btn,.sec-act{font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;transition:opacity .12s;padding:7px 6px;margin:-7px -6px;margin-left:auto}
+.sec-btn,.sec-act{font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;transition:opacity .12s;padding:8px 6px;margin:-8px -6px;margin-left:auto}
 .sec-btn:active,.sec-act:active{opacity:.6}
 /* Внутри `.sec` всё наследует ЗАГЛАВНЫЕ и разрядку заголовка. Для подписи
    галочки или ссылки-действия это неверно: они не заголовки. */
@@ -591,7 +591,7 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 
 /* ─── Segmented control ──────────────────────────────────────── */
 .seg{display:flex;background:var(--bg2);border-radius:var(--radius);padding:2px;gap:2px;margin:6px 16px;border:1px solid var(--border)}
-.seg-opt{flex:1;padding:7px 5px;text-align:center;font-size:13px;font-weight:500;color:var(--hint);cursor:pointer;border-radius:8px;transition:all .2s var(--ease)}
+.seg-opt{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:34px;overflow-wrap:anywhere;padding:7px 5px;text-align:center;font-size:13px;font-weight:500;color:var(--hint);cursor:pointer;border-radius:10px;transition:all .2s var(--ease)}
 /* Пять и больше вкладок в полосе фильтров не помещаются: подписи ломались
    посреди слова («Рабо/тают»). Такая полоса прокручивается вбок, а вкладки
    берут ширину по надписи — как ряд чипов. */
@@ -601,7 +601,7 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .seg-opt.on{background:var(--bg);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .seg-btn{flex:1;padding:7px 10px;text-align:center;font-size:13px;font-weight:600;color:var(--hint);cursor:pointer;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2);transition:all .2s var(--ease)}
 .seg-btn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(45,212,191,.25)}
-.mini-btn{padding:8px 12px;font-size:12px;font-weight:600;color:var(--accent);background:rgba(45,212,191,.1);border:none;border-radius:8px;cursor:pointer;white-space:nowrap;transition:opacity .12s}
+.mini-btn{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:8px 12px;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:none;border-radius:var(--radius);cursor:pointer;white-space:nowrap;transition:opacity .12s}
 .mini-btn:active{opacity:.7}
 .kpi-mini{flex:1;background:var(--bg2);border-radius:var(--radius);padding:9px;text-align:center;border:1px solid var(--border)}
 .kpi-mini-v{font-size:18px;font-weight:700;color:var(--text)}
@@ -777,7 +777,7 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 /* ─── Filter chip row ────────────────────────────────────── */
 .filter-chips{display:flex;gap:6px;padding:4px 16px 6px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
 .filter-chips::-webkit-scrollbar{display:none}
-.chip{display:inline-flex;align-items:center;gap:4px;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
+.chip{display:inline-flex;align-items:center;justify-content:center;min-height:34px;gap:4px;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
 /* Раскрываемая панель «Действия с аккаунтом»: явная стрелка-индикатор, чтобы
    свёрнутые кнопки не читались как «функции исчезли». */
 /* Раскрывающиеся блоки. У родного треугольника перенесённая строка уезжает
@@ -1215,7 +1215,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <!-- Поднять флот: снять залипшие блокировки с недавно переподключённых аккаунтов -->
     <button class="btn btn-g" onclick="reviveFleet()" title="Снять залипшие блокировки (in_operation/кулдаун/траст) с переподключённого флота, чтобы он сразу заработал" style="width:100%;margin:0 0 8px">🚀 Поднять флот</button>
-    <button class="btn btn-t" onclick="openChatWarmup()" title="Флот вступает в указанный чат и ведёт осмысленный LLM-диалог: между собой и с реальными участниками" style="width:100%;margin:0 0 8px">💬 Разогрев чата флотом</button>
+    <button class="btn btn-t" onclick="openChatWarmup()" title="Флот вступает в указанный чат и ведёт осмысленный ИИ-диалог: между собой и с реальными участниками" style="width:100%;margin:0 0 8px">💬 Разогрев чата флотом</button>
     <button class="btn btn-o" onclick="openFleetDoctor()" title="Почему операции не исполняются: воронка отбора аккаунтов, залипшие состояния, последние ошибки" style="width:100%;margin:0 0 8px">🩺 Диагностика флота</button>
     <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
     <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
@@ -2377,23 +2377,23 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">💬 Разогрев чата</div></div>
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:10px">
-      Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (LLM понимает контекст). Темп человеческий, сессии защищены.
+      Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (ИИ понимает контекст). Темп человеческий, сессии защищены.
     </div>
     <div id="cwAiStatus" style="font-size:11px;line-height:1.5;margin-bottom:10px"></div>
     <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
-      <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">🔀 Смешанный</button>
-      <button class="cw-mode" data-m="engage" onclick="cwPickMode('engage')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🗣 Вовлечение</button>
-      <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🌱 Оживление</button>
+      <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">🔀 Смешанный</button>
+      <button class="cw-mode" data-m="engage" onclick="cwPickMode('engage')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(255,255,255,.06);color:var(--text);cursor:pointer">🗣 Вовлечение</button>
+      <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(255,255,255,.06);color:var(--text);cursor:pointer">🌱 Оживление</button>
     </div>
     <div id="cwModeHint" style="font-size:11px;color:var(--hint);margin:0 16px 8px;line-height:1.4">Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.</div>
     <input id="cwTopics" type="text" placeholder="Темы через запятую (пусто = любые)" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Интенсивность</div>
     <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
-      <button class="cw-int" data-i="calm" onclick="cwPickInt('calm')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🐢 Спокойно</button>
-      <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">⚖️ Обычно</button>
-      <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">⚡ Активно</button>
+      <button class="cw-int" data-i="calm" onclick="cwPickInt('calm')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(255,255,255,.06);color:var(--text);cursor:pointer">🐢 Спокойно</button>
+      <button class="cw-int on" data-i="normal" onclick="cwPickInt('normal')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">⚖️ Обычно</button>
+      <button class="cw-int" data-i="active" onclick="cwPickInt('active')" style="flex:1;font-size:12px;font-weight:600;min-height:34px;padding:8px 6px;border-radius:var(--radius);border:none;background:rgba(255,255,255,.06);color:var(--text);cursor:pointer">⚡ Активно</button>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
       <span style="font-size:12px;color:var(--hint)">Аккаунты флота</span>
