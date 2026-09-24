@@ -138,7 +138,7 @@
   --shadow-glow:0 0 22px rgba(45,212,191,.18),0 6px 18px rgba(45,212,191,.1);
   --glow:0 6px 20px rgba(45,212,191,.30);
   --bg-input:rgba(255,255,255,.04);--border-input:rgba(255,255,255,.10);--bg-select:rgba(21,29,41,.97);
-  --bg-blue-16:rgba(59,130,246,.14);--bg-green-16:rgba(34,197,94,.14);--bg-purple-16:rgba(168,85,247,.14);--bg-yellow-16:rgba(245,158,11,.14);--bg-red-16:rgba(239,68,68,.14);--bg-violet-16:rgba(139,92,246,.14);--bg-red-18:rgba(239,68,68,.16);
+  --bg-blue-16:rgba(96,165,250,.14);--bg-green-16:rgba(52,211,153,.14);--bg-purple-16:rgba(192,132,252,.14);--bg-yellow-16:rgba(251,191,36,.14);--bg-red-16:rgba(248,113,113,.14);--bg-violet-16:rgba(167,139,250,.14);--bg-red-18:rgba(248,113,113,.16);
   --green:#34d399;--orange:#fbbf24;--purple:#c084fc;--red:#f87171;--blue:#60a5fa;--teal:#2dd4bf;--purple-light:#a78bfa;
   /* Палитра иконок модулей: приглушённые оттенки, ничего не «кричит». */
   --c-teal:#2dd4bf;--c-blue:#5b9dff;--c-violet:#a78bfa;--c-amber:#f4b860;
@@ -268,7 +268,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .li.tap{cursor:pointer}
 .li.tap:active{background:rgba(255,255,255,.04)}
 .ava{width:40px;height:40px;border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
-.ava-blue{background:rgba(59,130,246,.15);color:var(--blue)}
+.ava-blue{background:rgba(96,165,250,.15);color:var(--blue)}
 .ava-green{background:rgba(52,211,153,.15);color:var(--green)}
 .ava-orange{background:rgba(251,191,36,.15);color:var(--orange)}
 .ava-purple{background:rgba(192,132,252,.15);color:var(--purple)}
@@ -305,7 +305,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Action buttons ─────────────────────────────────────────── */
 .actions{display:flex;gap:8px;padding:10px 16px 4px;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:nowrap;flex:1 0 auto;min-width:88px;max-width:100%;overflow:hidden}
+.btn{display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:nowrap;flex:1 0 auto;min-width:88px;max-width:100%;overflow:hidden}
 .btn:active{opacity:.85;transform:translateY(1px) scale(.97)}
 .btn:disabled{opacity:.3;pointer-events:none}
 .btn-p{background:var(--btn);color:var(--btn-text);box-shadow:0 2px 12px rgba(45,212,191,.25),inset 0 1px 0 rgba(255,255,255,.15)}
@@ -360,7 +360,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 @keyframes sp{to{transform:rotate(360deg)}}
 
 /* ─── Toast ──────────────────────────────────────────────────── */
-#toast{position:fixed;bottom:calc(var(--tab-h)+var(--safe-b)+14px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,41,55,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:400;white-space:nowrap;max-width:calc(100vw - 32px);text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35)}
+#toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 14px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,41,55,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--glass-border);color:var(--text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s var(--ease),transform .25s var(--spring);pointer-events:none;z-index:400;white-space:nowrap;max-width:calc(100vw - 32px);text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 /* Плашка итога операции: тот же слой, что и тост, но кликабельная и живёт
    дольше — итог массовой операции нужно успеть прочитать и открыть детали. */
@@ -374,7 +374,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .mbg{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;display:none;align-items:flex-end}
 .mbg.show{display:flex;animation:mbin .25s var(--ease)}
 @keyframes mbin{from{opacity:0}to{opacity:1}}
-.modal{background:var(--bg2);border-radius:var(--radius-xl) var(--radius-xl) 0 0;padding:20px 16px calc(var(--safe-b)+20px);width:100%;max-height:85vh;overflow-y:auto;animation:min .3s var(--spring);position:relative;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
+.modal{background:var(--bg2);border-radius:var(--radius-xl) var(--radius-xl) 0 0;padding:20px 16px calc(var(--safe-b) + 20px);width:100%;max-height:85vh;overflow-y:auto;animation:min .3s var(--spring);position:relative;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
 @keyframes min{from{transform:translateY(100%)}to{transform:none}}
 .modal-title{font-size:17px;font-weight:700;margin-bottom:14px;text-align:center;letter-spacing:-.2px}
 .modal-x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--hint);font-size:14px;border:1px solid var(--border);transition:transform .15s var(--spring)}
@@ -476,7 +476,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .seg-opt,.seg-btn{min-width:0}
 
 /* ─── Inline → utility classes (replace hardcoded rgba(255,255,255,...)) ── */
-.inp{padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
+.inp{width:100%;min-width:0;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
 .inp:focus{border-color:var(--accent)}
 /* Поиск и срезы над длинным списком (боты, каналы). Списки рисовались целиком:
    после «Фабрики» это сотни карточек, и нужную можно было найти только
@@ -490,7 +490,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .lst-more-note{font-size:12px;color:var(--hint);text-align:center;padding:6px 8px 8px;line-height:1.45}
 .inp-s{padding:9px;border-radius:8px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px}
 .inp-s:focus{border-color:var(--accent)}
-.inp-sm{padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace}
+.inp-sm{width:100%;min-width:0;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace}
 .inp-sm:focus{border-color:var(--accent)}
 .sel{width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-select);color:var(--text);font-size:14px;-webkit-appearance:none;appearance:none}
 .sel:focus{border-color:var(--accent)}
@@ -745,8 +745,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .acc-right > .chev{grid-column:2;grid-row:1 / span 2}
 /* Лечение прямо в строке: список называл проблему, но чинить её заставлял
    идти в карточку и разворачивать «Действия». */
-.acc-fix{margin-top:5px;padding:4px 9px;font-size:11px;font-weight:600;border:none;border-radius:7px;cursor:pointer;background:var(--bg-orange-16,rgba(245,158,11,.16));color:var(--orange)}
-.acc-fix.danger{background:var(--bg-red-16,rgba(239,68,68,.16));color:var(--red)}
+.acc-fix{margin-top:5px;padding:4px 9px;font-size:11px;font-weight:600;border:none;border-radius:7px;cursor:pointer;background:var(--bg-orange-16,rgba(251,191,36,.16));color:var(--orange)}
+.acc-fix.danger{background:var(--bg-red-16,rgba(248,113,113,.16));color:var(--red)}
 .acc-fix:active{opacity:.65}
 
 /* ─── Dashboard KPI scroll ──────────────────────────────── */
@@ -1134,7 +1134,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       </div>
     </div>
     <!-- Быстрое удаление невоскрешаемых (появляется, когда есть мёртвые) -->
-    <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(239,68,68,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
+    <button id="purgeDeadBtn" onclick="purgeDeadAccounts()" style="display:none;width:100%;margin:2px 0 8px;padding:10px;border:none;border-radius:10px;background:rgba(248,113,113,.14);color:var(--red);font-size:13px;font-weight:600;cursor:pointer">🗑 Удалить мёртвые аккаунты (<span id="purgeDeadN">0</span>)</button>
     <!-- Массовые действия по аккаунтам -->
     <div style="display:flex;gap:8px;padding:4px 0 8px">
       <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
@@ -1173,8 +1173,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <button class="mini-btn" onclick="openMassProfile()">🎨 Профиль</button>
         <button class="mini-btn" onclick="openMassStage()">📂 В статус</button>
         <button class="mini-btn" onclick="runAccMass('detach_proxy')" title="Снять прокси — работать напрямую">🔌 Снять прокси</button>
-        <button class="mini-btn" style="color:var(--red);background:rgba(239,68,68,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
-        <button class="mini-btn" style="color:var(--red);background:rgba(239,68,68,.18)" onclick="runAccMass('delete')" title="Удалить выбранные аккаунты безвозвратно">🗑 Удалить</button>
+        <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.12)" onclick="runAccMass('leave_all')">🚪 Выход из чатов</button>
+        <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.18)" onclick="runAccMass('delete')" title="Удалить выбранные аккаунты безвозвратно">🗑 Удалить</button>
       </div>
     </div>
   </div>
@@ -1255,7 +1255,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <div style="padding:6px 0"><input type="text" id="accContSearch" placeholder="🔍 Поиск..." oninput="filterAccountContacts()" class="inp"></div>
-    <div id="accContBulk" style="display:none;padding:8px 12px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 0 8px">
+    <div id="accContBulk" style="display:none;padding:8px 12px;background:rgba(96,165,250,.1);border-radius:10px;margin:0 0 8px">
       <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="accContSelCount">0</span> <span style="color:var(--hint)">· массовая отправка идёт по @username</span></div>
       <button class="btn btn-p" style="width:100%;font-size:13px" onclick="writeSelectedContacts()">✍️ Написать всем выбранным</button>
     </div>
@@ -2427,7 +2427,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-gp-create')">✕</div>
     <div class="modal-title">🌍 Создать гео-сеть</div>
-    <div style="padding:16px">
+    <div>
       <div style="font-size:12px;color:var(--hint);margin-bottom:12px">Создайте новые каналы/группы/боты по городам с локализованными названиями.</div>
       
       <label style="font-size:13px;color:var(--hint);display:block;margin-bottom:4px">Тип актива *</label>
@@ -2439,7 +2439,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <option value="full_package">🎁 Полный пакет (К+Г+Б)</option>
       </select>
       
-      <div style="border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:10px;margin:12px 0;background:rgba(59,130,246,.06)">
+      <div style="border:1px solid rgba(96,165,250,.3);border-radius:10px;padding:10px;margin:12px 0;background:rgba(96,165,250,.06)">
         <div style="font-size:13px;color:var(--blue);margin-bottom:6px">🧬 Унификация из референса</div>
         <div style="font-size:11px;color:var(--hint);margin-bottom:8px">Впишите пример существующего названия/username и город-образец — паттерны соберутся сами.</div>
         <input type="text" id="gpRefName" placeholder="Название-образец: Новости Москва" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-bottom:6px">
@@ -3542,7 +3542,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
     <div id="contactFilterHint" style="display:none;font-size:12px;color:var(--hint);padding:2px 2px 6px;line-height:1.35"></div>
-    <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(59,130,246,.1);border-radius:10px;margin:0 16px 8px">
+    <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(96,165,250,.1);border-radius:10px;margin:0 16px 8px">
       <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="contactSelCount">0</span>
         <span id="contactWholeToggle" onclick="toggleSegmentWhole()" style="margin-left:8px;cursor:pointer;font-size:12px;color:var(--accent)">весь срез</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -5433,7 +5433,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="modal-x" onclick="closeModal('mo-apikey')">✕</div>
     <div class="modal-title">🔑 Новый API ключ</div>
     <div class="field"><label>Название ключа</label><input id="ak-name" type="text" maxlength="64" placeholder="Мой сервис" class="inp"></div>
-    <div id="ak-result" style="display:none;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:10px;padding:12px;margin:10px 0">
+    <div id="ak-result" style="display:none;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.3);border-radius:10px;padding:12px;margin:10px 0">
       <div style="font-size:13px;color:var(--hint);margin-bottom:6px">⚠️ Скопируйте ключ сейчас — он больше не будет показан!</div>
       <div id="ak-key-display" style="font-family:monospace;font-size:13px;word-break:break-all;color:var(--green);user-select:all"></div>
       <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="copyApiKey()">📋 Скопировать</button>
@@ -5705,11 +5705,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
   <div class="sub-sb">
     <!-- Current plan card -->
-    <div class="card" id="billingPlanCard" style="background:linear-gradient(135deg,rgba(139,92,246,.2),rgba(59,130,246,.15));border:1px solid rgba(139,92,246,.3);padding:20px 16px;margin-bottom:2px">
+    <div class="card" id="billingPlanCard" style="background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(96,165,250,.15));border:1px solid rgba(167,139,250,.3);padding:20px 16px;margin-bottom:2px">
       <div style="font-size:12px;color:var(--hint);margin-bottom:4px">Текущий тариф</div>
       <div style="display:flex;align-items:center;gap:10px">
         <div style="font-size:28px;font-weight:700" id="billingPlanName">—</div>
-        <div id="billingPlanBadge" style="background:rgba(139,92,246,.3);border:1px solid rgba(139,92,246,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600"></div>
+        <div id="billingPlanBadge" style="background:rgba(167,139,250,.3);border:1px solid rgba(167,139,250,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600"></div>
       </div>
       <div style="font-size:13px;color:var(--hint);margin-top:6px" id="billingExpires"></div>
     </div>
@@ -8059,7 +8059,7 @@ async function fleetDoctorLoad(){
   try{
     const d=await api('/api/miniapp/fleet/diagnose');
     const v=d.verdict||{}, f=d.funnel||{};
-    const okc=v.ok?'rgba(52,211,153,.12)':'rgba(245,158,11,.12)';
+    const okc=v.ok?'rgba(52,211,153,.12)':'rgba(251,191,36,.12)';
     let h=`<div style="background:${okc};border-radius:14px;padding:14px 16px;margin-bottom:12px">
       <div style="font-size:15px;font-weight:700;line-height:1.4">${v.ok?'🟢':'🟠'} ${esc(v.text||'—')}</div></div>`;
     // Воронка отбора: где обнуляется — красным.
@@ -8080,12 +8080,12 @@ async function fleetDoctorLoad(){
     h+='</div>';
     // Конфиг + залипшие.
     const tg=d.config&&d.config.telethon_ready;
-    if(tg===false) h+='<div style="background:rgba(239,68,68,.10);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--red)">⛔ TG_API_ID / TG_API_HASH не заданы — ни один аккаунт не подключится. Укажите их в переменных окружения.</div>';
+    if(tg===false) h+='<div style="background:rgba(248,113,113,.10);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--red)">⛔ TG_API_ID / TG_API_HASH не заданы — ни один аккаунт не подключится. Укажите их в переменных окружения.</div>';
     // Транспорт: как аккаунты выходят в сеть (частый корень «подключение падает»).
     const tr=d.transport||{};
     if(tr.total){
       const warn=(tr.direct_only>0 && !tr.cf_relay_configured && !tr.ipv6_configured && !tr.global_proxy);
-      h+=`<div style="background:${warn?'rgba(245,158,11,.10)':'var(--bg)'};border:1px solid var(--sep);border-radius:12px;padding:10px 14px;margin-bottom:10px">
+      h+=`<div style="background:${warn?'rgba(251,191,36,.10)':'var(--bg)'};border:1px solid var(--sep);border-radius:12px;padding:10px 14px;margin-bottom:10px">
         <div style="font-size:13px;font-weight:700;margin-bottom:4px">🌐 Транспорт (выход в сеть)</div>
         <div style="font-size:12px;color:var(--hint);line-height:1.6">
           Со своим прокси: <b style="color:${tr.with_proxy?'var(--green)':'var(--hint)'}">${tr.with_proxy||0}</b> ·
@@ -8499,7 +8499,7 @@ function renderMiniChart(acts) {
     <span class="badge b-bl">${total} всего</span>
   </div>
   <div class="mini-bars">${labels.map((l,i)=>`<div class="mini-bar-col">
-    <div class="mini-bar-item" style="height:${Math.max(3,Math.round(counts[i]/max*48))}px;background:${counts[i]>0?'linear-gradient(to top,var(--btn),rgba(59,130,246,.45))':'rgba(255,255,255,.06)'}"></div>
+    <div class="mini-bar-item" style="height:${Math.max(3,Math.round(counts[i]/max*48))}px;background:${counts[i]>0?'linear-gradient(to top,var(--btn),rgba(96,165,250,.45))':'rgba(255,255,255,.06)'}"></div>
     <div class="mini-bar-lbl">${l}</div>
   </div>`).join('')}</div>`;
 }
@@ -10419,7 +10419,7 @@ function buildAccDetail(d) {
   else if (cd) statusBadge = `<span class="badge b-or">⏸ На паузе ${cooldownLeft(a.cooldown_until)}</span>`;
   else statusBadge = '<span class="badge b-gr">🟢 Активен</span>';
 
-  if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(245,158,11,.18);color:var(--orange)">⭐ Premium</span>';
+  if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(251,191,36,.18);color:var(--orange)">⭐ Premium</span>';
   if (a.stage && ACC_STAGES[a.stage]) statusBadge += ' '+stageBadge(a.stage);
 
   // Почему «активный» аккаунт не работает: риск-пульс объясняет паузу и путь к фиксу.
@@ -10434,7 +10434,7 @@ function buildAccDetail(d) {
     if (_h.floods) parts.push(`FloodWait: ${_h.floods}`);
     if (_h.trust_score!=null && _h.trust_score<0.4) parts.push(`низкий траст: ${Math.round(_h.trust_score*100)}%`);
     const why = parts.length ? parts.join(' · ') : 'иммунная система зафиксировала риск';
-    healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:${q?'rgba(239,68,68,.10)':'rgba(245,158,11,.10)'};font-size:13px;line-height:1.4;color:var(--hint)">
+    healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:${q?'rgba(248,113,113,.10)':'rgba(251,191,36,.10)'};font-size:13px;line-height:1.4;color:var(--hint)">
       ${q?'🛑 <b>Аккаунт на паузе</b>':'⚠️ <b>Аккаунт под риском</b>'} — массовые операции его ${q?'пропускают':'берегут'}, чтобы не поймать бан.<br>
       <span style="opacity:.8">Причина: ${esc(why)}.</span><br>
       ${reasonHuman?`<span style="opacity:.8">Последний сбой: ${esc(reasonHuman)}</span><br>`:''}
@@ -10443,7 +10443,7 @@ function buildAccDetail(d) {
   } else if (reasonHuman && a.acc_status!=='ok' && a.acc_status!=='active') {
     // Баннер риска не сработал (напр. активный кулдаун / session_expired), но есть
     // машинная причина последнего сбоя — всё равно показать «почему не работает».
-    healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:rgba(245,158,11,.10);font-size:13px;line-height:1.4;color:var(--hint)">
+    healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:rgba(251,191,36,.10);font-size:13px;line-height:1.4;color:var(--hint)">
       <b>Последний сбой аккаунта:</b> ${esc(reasonHuman)}
     </div>`;
   }
@@ -14018,7 +14018,7 @@ function renderBcAbList(items) {
     const total = winsA+winsB;
     const pctA = total>0 ? Math.round(winsA/total*100) : 50;
     return `<div class="li" style="cursor:default">
-      <div class="ava" style="background:rgba(168,85,247,.15);color:var(--purple)">🧪</div>
+      <div class="ava" style="background:rgba(192,132,252,.15);color:var(--purple)">🧪</div>
       <div class="li-body">
         <div class="li-name">${esc((b.message_text||'').substring(0,28))}</div>
         <div class="li-sub">А: ${winsA} (${pctA}%) · Б: ${winsB}</div>
@@ -14670,9 +14670,9 @@ async function loadEngagement() {
   try {
     const d = await api('/api/miniapp/bot/'+ENG_BOT_ID+'/engagement');
     const segs = [
-      {ico:'🔥',label:'Горячие',key:'hot',color:'rgba(239,68,68,.15)'},
+      {ico:'🔥',label:'Горячие',key:'hot',color:'rgba(248,113,113,.15)'},
       {ico:'🌡',label:'Тёплые',key:'warm',color:'rgba(249,115,22,.15)'},
-      {ico:'❄️',label:'Холодные',key:'cold',color:'rgba(59,130,246,.15)'},
+      {ico:'❄️',label:'Холодные',key:'cold',color:'rgba(96,165,250,.15)'},
       {ico:'💀',label:'Потерянные',key:'lost',color:'rgba(107,114,128,.15)'},
     ];
     txt('engGrid', segs.map(s=>`
@@ -14999,7 +14999,7 @@ async function openInfra() {
     const _auditOk = r => r==='success' || r==='ok' || r==='done';
     txt('infraAudit', audit.length ? audit.map(a=>`
       <div class="row">
-        <div class="row-ico" style="background:rgba(${_auditOk(a.result)?'34,197,94':'239,68,68'},.16)">${_auditOk(a.result)?'✅':'❌'}</div>
+        <div class="row-ico" style="background:rgba(${_auditOk(a.result)?'52,211,153':'248,113,113'},.16)">${_auditOk(a.result)?'✅':'❌'}</div>
         <div class="row-body">
           <div class="row-name">${esc(a.action||'action')}</div>
           <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru'):''}</div>
@@ -15271,14 +15271,14 @@ async function runDiag() {
       <div class="row"><div class="row-body"><div class="row-name">За 24ч: успешно / ошибок</div></div><div class="row-right"><span style="color:var(--green)">${q.done_24h||0}</span> / <span style="color:var(--red)">${q.failed_24h||0}</span></div></div>
     </div>`;
     html += `<div class="sec">Живой тест подключения</div><div class="lst">
-      <div class="row"><div class="row-ico" style="background:${lt.ok?'rgba(34,197,94,.16)':'rgba(239,68,68,.16)'}">${lt.ok?'✅':'⚠️'}</div>
+      <div class="row"><div class="row-ico" style="background:${lt.ok?'rgba(52,211,153,.16)':'rgba(248,113,113,.16)'}">${lt.ok?'✅':'⚠️'}</div>
         <div class="row-body"><div class="row-name" style="color:${ltColor}">${lt.ok?'Подключение работает':'Подключение НЕ работает'}</div>
         <div class="row-val">${esc(lt.account?('Аккаунт: '+lt.account):'')}${lt.status?(' · '+esc(lt.status)):''}${lt.latency_ms!=null?(' · '+lt.latency_ms+'мс'):''}${lt.via_proxy!=null?(lt.via_proxy?' · через прокси':' · без прокси'):''}</div>
         ${lt.reason?`<div class="row-val" style="color:var(--hint)">${esc(lt.reason)}</div>`:''}
         </div></div>
     </div>`;
     if (!lt.ok) {
-      html += `<div style="padding:12px;margin-top:8px;background:rgba(239,68,68,.1);border-radius:12px;font-size:13px;color:var(--hint)">⚠️ Операции исполняются только через аккаунты. Если живой тест не проходит — операции не дадут результата. Причина выше — устраните её (релог аккаунта, прокси, FloodWait).</div>`;
+      html += `<div style="padding:12px;margin-top:8px;background:rgba(248,113,113,.1);border-radius:12px;font-size:13px;color:var(--hint)">⚠️ Операции исполняются только через аккаунты. Если живой тест не проходит — операции не дадут результата. Причина выше — устраните её (релог аккаунта, прокси, FloodWait).</div>`;
     }
     txt('diagResult', html);
   } catch(e) {
@@ -15440,10 +15440,10 @@ function toggleQpChannel(id) {
   const ico = document.getElementById('qpc-'+id);
   if (QUICK_POST_SELECTED.has(id)) {
     QUICK_POST_SELECTED.delete(id);
-    if (ico) ico.style.background='rgba(59,130,246,.16)';
+    if (ico) ico.style.background='rgba(96,165,250,.16)';
   } else {
     QUICK_POST_SELECTED.add(id);
-    if (ico) { ico.textContent='✅'; ico.style.background='rgba(34,197,94,.16)'; }
+    if (ico) { ico.textContent='✅'; ico.style.background='rgba(52,211,153,.16)'; }
   }
   const cnt = QUICK_POST_SELECTED.size;
   txt('quickPostSelected',`Выбрано: ${cnt} каналов`);
@@ -15770,7 +15770,7 @@ function renderVaultStale(botUsername, diag) {
   const el = document.getElementById('vaultConnect');
   el.style.display = 'block';
   el.innerHTML =
-    `<div style="padding:12px;background:rgba(245,158,11,.12);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
+    `<div style="padding:12px;background:rgba(251,191,36,.12);border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
       <b>⚠️ Хранилище не получает новые сообщения (${when})</b><br>
       Подключение числится активным, но свежих диалогов нет — обычно бизнес-бот
       тихо отвалился. Частые причины:
@@ -15789,7 +15789,7 @@ function renderVaultConnect(botUsername, diag) {
   const disabled = diag && diag.health === 'disabled';
   document.getElementById('vaultConnect').style.display = 'block';
   document.getElementById('vaultConnect').innerHTML =
-    `<div style="padding:12px;background:${disabled?'rgba(245,158,11,.12)':'rgba(59,130,246,.1)'};border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
+    `<div style="padding:12px;background:${disabled?'rgba(251,191,36,.12)':'rgba(96,165,250,.1)'};border-radius:12px;margin-bottom:8px;font-size:13px;line-height:1.5">
       <b>${disabled?'⏸ Хранилище отключено — переподключите':'🔌 Подключите хранилище'}</b><br>
       ${disabled?'Подключение было, но сейчас выключено (бот убран из бизнес-аккаунта или истёк Telegram Premium). Новые сообщения не сохраняются.':'Бот сохранит все сообщения в ваших личных чатах — даже если диалог удалён.'}
       <div style="margin-top:8px;color:var(--hint)">
@@ -16167,7 +16167,7 @@ async function loadContacts(append=false) {
       ].filter(Boolean).join(' · ');
       const sel = CONTACT_SELECT_MODE ? `onclick="event.stopPropagation();toggleContactCheck('${esc(c.id)}',this)" style="border:2px solid transparent;border-radius:14px"` : '';
       return `<div class="li tap" ${sel} onclick="${CONTACT_SELECT_MODE?'':'openContactDetail(\''+esc(c.id)+'\')'}">
-        <div class="ava" style="background:${c.color_label||'rgba(59,130,246,.16)'};color:var(--text)">${c.is_premium?'💎':'👤'}</div>
+        <div class="ava" style="background:${c.color_label||'rgba(96,165,250,.16)'};color:var(--text)">${c.is_premium?'💎':'👤'}</div>
         <div class="li-body">
           <div class="li-name">${esc(name)} ${c.is_favorite?'⭐':''}</div>
           <div class="li-sub">${esc(sub)}</div>
@@ -16778,7 +16778,7 @@ async function loadEditForm(id) {
         <button class="btn btn-p" onclick="saveContactEdit('${id}')" style="flex:1 1 auto">💾 Сохранить</button>
         <button class="btn" onclick="back()" style="flex:1 1 auto;background:var(--bg2)">Отмена</button>
       </div>
-      <div style="margin-top:12px"><button class="btn" style="width:100%;background:rgba(239,68,68,.15);color:var(--red)" onclick="deleteContact('${id}')">🗑 Удалить контакт</button></div>
+      <div style="margin-top:12px"><button class="btn" style="width:100%;background:rgba(248,113,113,.15);color:var(--red)" onclick="deleteContact('${id}')">🗑 Удалить контакт</button></div>
     </div>`;
     txt('ceBody', html);
   } catch(e) { txt('ceBody', errHtml(e.message)); }
@@ -16902,7 +16902,7 @@ async function openContactIdentity(id) {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/identity');
     const ids = d.identities||[];
     let html = '<div style="padding:12px 16px">';
-    if (d.last_active) html += `<div style="padding:8px 12px;background:rgba(59,130,246,.1);border-radius:8px;margin-bottom:8px;font-size:13px">🕐 ${esc(d.last_active)}</div>`;
+    if (d.last_active) html += `<div style="padding:8px 12px;background:rgba(96,165,250,.1);border-radius:8px;margin-bottom:8px;font-size:13px">🕐 ${esc(d.last_active)}</div>`;
     const grouped = {};
     ids.forEach(i=>{ grouped[i.identity_type] = grouped[i.identity_type]||[]; grouped[i.identity_type].push(i); });
     const typeEmoji = {'telegram_id':'🆔','username':'📛','phone':'📱','email':'📧','website':'🌐','tg_account':'🤖'};
@@ -16936,7 +16936,7 @@ async function openContactCRM(id) {
       <button class="btn btn-p" onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
     </div>`;
     if (crm.next_reminder_at) {
-      html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(245,158,11,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
+      html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(251,191,36,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
     }
     if (activity.length) {
       html += `<div class="sec" style="margin:0 16px">📝 Активность</div><div class="lst" style="margin:0 16px">`;
@@ -18210,10 +18210,10 @@ async function scanGifts() {
 // Цифры сами по себе не подсказывают, что три конкретных аккаунта пора вывести
 // из ротации или что флота не хватит под аудиторию.
 const ADV_STYLE = {
-  danger: ['#ef4444', 'var(--bg-red-16,rgba(239,68,68,.12))', '🛑'],
-  warn:   ['#f59e0b', 'rgba(245,158,11,.12)', '⚠️'],
+  danger: ['#ef4444', 'var(--bg-red-16,rgba(248,113,113,.12))', '🛑'],
+  warn:   ['#f59e0b', 'rgba(251,191,36,.12)', '⚠️'],
   info:   ['var(--hint)', 'var(--bg-select)', 'ℹ️'],
-  good:   ['#22c55e', 'rgba(34,197,94,.12)', '✅'],
+  good:   ['#22c55e', 'rgba(52,211,153,.12)', '✅'],
 };
 
 
@@ -18332,7 +18332,7 @@ async function loadGovernorBar() {
     if (g.level === 'green') { el.style.display = 'none'; return; }  // спокойно — не отвлекаем
     const c = g.level === 'red' ? 'var(--red)' : 'var(--orange)';
     el.style.display = 'block';
-    el.style.background = g.level === 'red' ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)';
+    el.style.background = g.level === 'red' ? 'rgba(248,113,113,.12)' : 'rgba(251,191,36,.12)';
     el.innerHTML = `<b style="color:${c}">${g.emoji||''} Губернатор темпа: ×${g.multiplier}</b> · давление ${g.score}/100<br>`
       + `<span style="color:var(--hint)">${esc(g.explain||'')}</span>`;
   } catch(e) { el.style.display = 'none'; }
@@ -18371,16 +18371,16 @@ function checkInviteRights() {
       const d = await api('/api/miniapp/invite/rights_check?group=' + encodeURIComponent(group));
       const box = (bg, col, html) => `<div style="padding:7px 9px;background:${bg};border-left:3px solid ${col};border-radius:8px;line-height:1.4">${html}</div>`;
       if (d.has_promoter) {
-        el.innerHTML = box('rgba(34,197,94,.10)', '#22c55e',
+        el.innerHTML = box('rgba(52,211,153,.10)', '#22c55e',
           `<span style="color:#22c55e">✓ Есть аккаунт-админ${d.promoter_label?' ('+esc(d.promoter_label)+')':''}</span> — право приглашать раздастся остальным автоматически.`
           + `<div style="margin-top:6px"><button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="massInviteGrantAdmin()">🛡 Выдать право приглашать всем сейчас</button></div>`);
       } else if (d.has_inviter) {
-        el.innerHTML = box('rgba(245,158,11,.10)', '#f59e0b',
+        el.innerHTML = box('rgba(251,191,36,.10)', '#f59e0b',
           `⚠️ Есть аккаунт с правом приглашать, но нет админа с правом «Назначать администраторов» — остальные инвайтеры право <b>не получат</b>. Сделайте один аккаунт админом чата с этим правом, чтобы работал весь флот.`);
       } else if (!d.usable) {
-        el.innerHTML = box('rgba(239,68,68,.10)', '#ef4444', '⚠️ Нет доступных аккаунтов для проверки.');
+        el.innerHTML = box('rgba(248,113,113,.10)', '#ef4444', '⚠️ Нет доступных аккаунтов для проверки.');
       } else {
-        el.innerHTML = box('rgba(239,68,68,.10)', '#ef4444',
+        el.innerHTML = box('rgba(248,113,113,.10)', '#ef4444',
           `⚠️ Ни один из ваших аккаунтов не админ этого чата. Инвайтеры <b>вступят, но не смогут приглашать</b>. Сделайте один свой аккаунт админом чата с правом «Назначать администраторов» и включите его в операцию.`);
       }
     } catch(e) { el.innerHTML=''; }  // не мешаем запуску, если проверка недоступна
@@ -19155,7 +19155,7 @@ async function openVLayer() {
     if (hot.length) {
       html += '<div class="sec">🔥 Дожать в первую очередь</div><div class="lst">';
       html += hot.slice(0, 20).map(h => `<div class="row">
-        <div class="row-ico" style="background:var(--bg-orange-16,rgba(245,158,11,.16))">🔥</div>
+        <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔥</div>
         <div class="row-body"><div class="row-name">${esc(h.label)} · #${esc(String(h.entity_id))}</div>
           <div class="row-val">уверенность ${Math.round((h.confidence||0)*100)}%</div></div>
       </div>`).join('');
@@ -20937,7 +20937,7 @@ async function openPpDetail(packId, packName) {
     const bots = botsD.bots||[];
     txt('ppDetailBot', bots.length ? bots.map(b=>`
       <div class="row tap" onclick="_ppPickBot(${b.bot_id})">
-        <div class="row-ico" id="ppb-${b.bot_id}" style="background:${PP_BOT_SEL===b.bot_id?'rgba(34,197,94,.16)':'rgba(59,130,246,.16)'}">${PP_BOT_SEL===b.bot_id?'✅':'🤖'}</div>
+        <div class="row-ico" id="ppb-${b.bot_id}" style="background:${PP_BOT_SEL===b.bot_id?'rgba(52,211,153,.16)':'rgba(96,165,250,.16)'}">${PP_BOT_SEL===b.bot_id?'✅':'🤖'}</div>
         <div class="row-body"><div class="row-name">${b.username?'@'+esc(b.username):esc(b.first_name||'Бот')}</div></div>
       </div>
     `).join('') : empty('🤖','Нет ботов',''));
@@ -20945,7 +20945,7 @@ async function openPpDetail(packId, packName) {
     const groups = (chD.channels||[]).filter(c=>_ppGroupTypes(c.type));
     const rowHtml = (c, sel, kind) => `
       <div class="row tap" onclick="_ppToggle(${c.id},'${kind}')">
-        <div class="row-ico" id="pp${kind}-${c.id}" style="background:${sel.has(c.id)?'rgba(34,197,94,.16)':'rgba(59,130,246,.16)'}">${sel.has(c.id)?'✅':(kind==='ch'?'📢':'👥')}</div>
+        <div class="row-ico" id="pp${kind}-${c.id}" style="background:${sel.has(c.id)?'rgba(52,211,153,.16)':'rgba(96,165,250,.16)'}">${sel.has(c.id)?'✅':(kind==='ch'?'📢':'👥')}</div>
         <div class="row-body"><div class="row-name">${esc(c.title||c.username||('#'+c.id))}</div></div>
       </div>`;
     txt('ppDetailChannels', chans.length ? chans.map(c=>rowHtml(c,PP_CH_SEL,'ch')).join('') : empty('📢','Нет каналов',''));
@@ -20958,15 +20958,15 @@ function _ppPickBot(botId) {
   PP_BOT_SEL = botId;
   document.querySelectorAll('#ppDetailBot .row-ico').forEach(el=>{
     const id = parseInt(el.id.replace('ppb-',''));
-    el.style.background = id===botId ? 'rgba(34,197,94,.16)' : 'rgba(59,130,246,.16)';
+    el.style.background = id===botId ? 'rgba(52,211,153,.16)' : 'rgba(96,165,250,.16)';
     el.textContent = id===botId ? '✅' : '🤖';
   });
 }
 function _ppToggle(id, kind) {
   const sel = kind==='ch' ? PP_CH_SEL : PP_GR_SEL;
   const ico = document.getElementById(`pp${kind}-${id}`);
-  if (sel.has(id)) { sel.delete(id); if(ico){ico.style.background='rgba(59,130,246,.16)'; ico.textContent=kind==='ch'?'📢':'👥';} }
-  else { sel.add(id); if(ico){ico.style.background='rgba(34,197,94,.16)'; ico.textContent='✅';} }
+  if (sel.has(id)) { sel.delete(id); if(ico){ico.style.background='rgba(96,165,250,.16)'; ico.textContent=kind==='ch'?'📢':'👥';} }
+  else { sel.add(id); if(ico){ico.style.background='rgba(52,211,153,.16)'; ico.textContent='✅';} }
   txt(kind==='ch'?'ppChCount':'ppGrCount', sel.size);
 }
 async function savePresencePackConfig() {
@@ -22484,10 +22484,10 @@ function toggleNcChannel(id) {
   const ico = document.getElementById('ncc-'+id);
   if (NC_CHANNELS_SELECTED.has(id)) {
     NC_CHANNELS_SELECTED.delete(id);
-    if (ico) { ico.textContent='📢'; ico.style.background='rgba(59,130,246,.16)'; }
+    if (ico) { ico.textContent='📢'; ico.style.background='rgba(96,165,250,.16)'; }
   } else {
     NC_CHANNELS_SELECTED.add(id);
-    if (ico) { ico.textContent='✅'; ico.style.background='rgba(34,197,94,.16)'; }
+    if (ico) { ico.textContent='✅'; ico.style.background='rgba(52,211,153,.16)'; }
   }
   txt('nc-selcount', `Выбрано: ${NC_CHANNELS_SELECTED.size} каналов`);
 }
@@ -23410,7 +23410,7 @@ async function openBilling() {
     if (badge) {
       if (plan==='paid') {
         badge.textContent='PRO';
-        badge.style.cssText='background:rgba(139,92,246,.3);border:1px solid rgba(139,92,246,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
+        badge.style.cssText='background:rgba(167,139,250,.3);border:1px solid rgba(167,139,250,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
       } else {
         badge.textContent='FREE';
         badge.style.cssText='background:rgba(107,114,128,.3);border:1px solid rgba(107,114,128,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
@@ -23434,10 +23434,10 @@ async function openBilling() {
     const feats = _PLAN_FEATURES[plan] || _PLAN_FEATURES.free;
     txt('billingFeaturesList', `<div class="card" style="padding:12px 16px">${feats.map(f=>`<div style="padding:5px 0;font-size:13px;${f.startsWith('❌')?'color:var(--hint)':'color:var(--text)'}">${f}</div>`).join('')}</div>`);
     txt('billingPlansList', _PLAN_PRICES.map(p=>`
-      <div class="card" style="padding:14px 16px;margin-bottom:8px;cursor:pointer;${p.popular?'border:1px solid rgba(139,92,246,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
+      <div class="card" style="padding:14px 16px;margin-bottom:8px;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div>
-            <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(139,92,246,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
+            <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(167,139,250,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
             ${p.save?`<div style="font-size:12px;color:var(--green)">Экономия ${p.save}</div>`:''}
           </div>
           <div style="font-size:20px;font-weight:700;color:var(--accent)">${p.price}</div>
@@ -23455,7 +23455,7 @@ async function openBilling() {
     } else {
       txt('billingHistory', hist.map(p=>`
         <div class="row">
-          <div class="row-ico" style="background:rgba(34,197,94,.12)">💳</div>
+          <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
           <div class="row-body">
             <div class="row-name">${esc(p.plan||'—')} · ${p.period_months||1} мес.</div>
             <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
