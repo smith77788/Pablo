@@ -2577,10 +2577,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 """SELECT f.id, f.name, f.is_active, mb.username AS bot_username,
-                          COUNT(fs.id) FILTER (WHERE fs.completed=false) AS active_subs,
-                          COUNT(fs.id) FILTER (WHERE fs.completed=true) AS completed_subs
+                          COUNT(fs.id) FILTER (WHERE fs.completed IS NOT TRUE) AS active_subs,
+                          COUNT(fs.id) FILTER (WHERE fs.completed IS TRUE) AS completed_subs
                    FROM funnels f
                    JOIN managed_bots mb ON mb.bot_id=f.bot_id
+                   -- Псевдонима fs не было вовсе: запрос ссылался на таблицу,
+                   -- которую не подключал, падал всегда, и экран «Воронки»
+                   -- отдавал пустой список при любом числе воронок.
+                   LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
                    WHERE mb.added_by=$1
                    GROUP BY f.id, f.name, f.is_active, mb.username
                    ORDER BY active_subs DESC LIMIT 30""", uid)
@@ -9611,13 +9615,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not table_exists:
                 return _json_resp({"total": 0, "transferable": 0, "items": [], "note": "Таблица подарков ещё не создана. Запустите сканирование через бота."})
             items = await pool.fetch(
+                # Колонка называется last_seen_at; scanned_at — имя поля в
+                # ответе, поэтому переименование остаётся псевдонимом и фронт
+                # не трогаем.
                 """SELECT gi.id, gi.gift_type, gi.stars_cost, gi.is_transferable,
-                          gi.is_unique, gi.is_premium, gi.scanned_at,
+                          gi.is_unique, gi.is_premium, gi.last_seen_at AS scanned_at,
                           ta.phone, ta.first_name
                    FROM gift_inventory gi
                    JOIN tg_accounts ta ON ta.id=gi.account_id
                    WHERE gi.owner_id=$1
-                   ORDER BY gi.scanned_at DESC LIMIT 100""",
+                   ORDER BY gi.last_seen_at DESC LIMIT 100""",
                 uid,
             )
             total = await pool.fetchval(
@@ -17136,7 +17143,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                               total_items, done_items, status, error_msg,
                               COALESCE(result->>'summary', result->>'reason') AS summary
                        FROM operation_queue WHERE owner_id=$1 AND status IN ('done','failed')
-                         AND finished_at > now() - make_interval(minutes => 30)
+                         AND finished_at > now() - make_interval(mins => 30)
                        ORDER BY finished_at DESC LIMIT 20""",
                     uid)
                 return [dict(r) for r in rows]
@@ -22388,16 +22395,30 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Audience Analytics ─────────────────────────────────────────────────
 
+    async def _owns_bot(uid: int, bot_id: int) -> bool:
+        """Бот принадлежит этому владельцу?
+
+        Раньше проверки не было: аналитика аудитории считалась по любому
+        bot_id из адреса, и чужую аудиторию мог посмотреть кто угодно, зная
+        номер бота. Сам модуль аналитики по владельцу не фильтрует — значит
+        фильтровать обязан вход.
+        """
+        return bool(await _safe_fetchval(
+            pool, "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid))
+
     async def audience_analyze(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            channel_id = int(request.match_info["channel_id"])
+            bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad channel_id", 400)
+            return _err("Неверный идентификатор бота", 400)
+        if not await _owns_bot(uid, bot_id):
+            return _err("Бот не найден", 404)
         try:
             from services.audience_analytics import analyze_audience
-            overview = await analyze_audience(pool, uid, channel_id)
+            overview = await analyze_audience(pool, uid, bot_id)
             if not overview:
                 return _err("Нет данных для анализа", 404)
             return _json_resp({
@@ -22411,19 +22432,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "avg_session_duration_min": overview.avg_session_duration_min,
             })
         except Exception as exc:
-            log.exception("audience_analyze uid=%d ch=%d", uid, channel_id)
+            log.exception("audience_analyze uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
 
     async def audience_segment(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            channel_id = int(request.match_info["channel_id"])
+            bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad channel_id", 400)
+            return _err("Неверный идентификатор бота", 400)
+        if not await _owns_bot(uid, bot_id):
+            return _err("Бот не найден", 404)
         try:
             from services.audience_analytics import segment_audience
-            segments = await segment_audience(pool, uid, channel_id)
+            segments = await segment_audience(pool, uid, bot_id)
             return _json_resp({"segments": [
                 {
                     "name": s.name,
@@ -22436,11 +22459,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 for s in segments
             ]})
         except Exception as exc:
-            log.exception("audience_segment uid=%d ch=%d", uid, channel_id)
+            log.exception("audience_segment uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
 
-    app.router.add_get("/api/miniapp/audience/analyze/{channel_id}", audience_analyze)
-    app.router.add_get("/api/miniapp/audience/segment/{channel_id}", audience_segment)
+    app.router.add_get("/api/miniapp/audience/analyze/{bot_id}", audience_analyze)
+    app.router.add_get("/api/miniapp/audience/segment/{bot_id}", audience_segment)
 
     # ── Analytics Dashboard ───────────────────────────────────────────────
 

@@ -100,9 +100,11 @@ async def get_dashboard_stats(pool: asyncpg.Pool, owner_id: int) -> dict[str, An
             ),
             # Revenue estimate (last 30 days)
             (
+                # В payments владелец записан как user_id; owner_id там нет,
+                # и оценка выручки возвращала ошибку вместо суммы.
                 """SELECT COALESCE(SUM(amount_usd), 0) AS total_usd
                    FROM payments
-                   WHERE owner_id = $1
+                   WHERE user_id = $1
                      AND status = 'confirmed'
                      AND created_at > NOW() - INTERVAL '30 days'""",
                 (owner_id,),

@@ -195,20 +195,27 @@ async def _account_recovery(
     # 2. Аккаунты с высоким fail rate за 24ч (по operation_queue)
     try:
         high_fail = await pool.fetch(
-            """SELECT oq.account_id,
-                      COALESCE(a.first_name, a.phone, 'id'||oq.account_id::text) AS label,
-                      COUNT(*) FILTER (WHERE oq.status='failed') AS fails,
-                      COUNT(*) AS total,
-                      COUNT(*) FILTER (WHERE oq.status='failed')::float / NULLIF(COUNT(*),0) AS fail_rate
-               FROM operation_queue oq
-               JOIN tg_accounts a ON a.id=oq.account_id AND a.owner_id=$1
-               WHERE oq.owner_id=$1
-                 AND oq.created_at > NOW() - INTERVAL '24 hours'
+            # Доля сбоев считается по infra_memory_accounts — единственному
+            # месту, где продукт ведёт счёт удач и сбоев ПО АККАУНТУ. Прежний
+            # запрос брал её из operation_queue.account_id, а такой колонки
+            # нет: очередь хранит операцию владельца, а не аккаунт. Запрос
+            # падал всегда, except писал строчку в debug — и эта ветка
+            # авто-восстановления не срабатывала ни разу.
+            """SELECT im.account_id,
+                      COALESCE(a.first_name, a.phone, 'id'||im.account_id::text) AS label,
+                      SUM(im.failures) AS fails,
+                      SUM(im.successes + im.failures) AS total,
+                      SUM(im.failures)::float
+                        / NULLIF(SUM(im.successes + im.failures), 0) AS fail_rate
+               FROM infra_memory_accounts im
+               JOIN tg_accounts a ON a.id=im.account_id AND a.owner_id=$1
+               WHERE im.last_failure_at > NOW() - INTERVAL '24 hours'
                  AND a.is_active=TRUE
                  AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())
-               GROUP BY oq.account_id, a.first_name, a.phone, a.id
-               HAVING COUNT(*) >= $2
-                  AND COUNT(*) FILTER (WHERE oq.status='failed')::float / NULLIF(COUNT(*),0) >= $3
+               GROUP BY im.account_id, a.first_name, a.phone
+               HAVING SUM(im.successes + im.failures) >= $2
+                  AND SUM(im.failures)::float
+                      / NULLIF(SUM(im.successes + im.failures), 0) >= $3
                ORDER BY fail_rate DESC
                LIMIT 5""",
             owner_id,
@@ -453,7 +460,9 @@ async def _queue_recovery(
 
     try:
         stuck = await pool.fetch(
-            """SELECT id, op_type, account_id, retry_count,
+            # account_id в operation_queue нет — очередь принадлежит владельцу,
+            # а не аккаунту; дальше по коду оно и не используется.
+            """SELECT id, op_type, retry_count,
                       COALESCE(max_retries, 3) AS max_retries,
                       EXTRACT(EPOCH FROM (NOW() - started_at)) / 60 AS stuck_minutes
                FROM operation_queue

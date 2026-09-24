@@ -5232,7 +5232,9 @@ async def get_all_platform_users(
         "COALESCE(current_plan, 'free') as current_plan, "
         "plan_expires_at, "
         "COALESCE(is_banned, false) as is_banned, "
-        "COALESCE(registered_at, first_seen, created_at) as registered_at "
+        # created_at в platform_users нет — со ссылкой на неё запрос падал,
+        # и список пользователей в админке не открывался вовсе.
+        "COALESCE(registered_at, first_seen) as registered_at "
         "FROM platform_users WHERE 1=1"
     )
     params = []

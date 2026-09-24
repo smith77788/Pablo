@@ -3222,7 +3222,11 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                FROM managed_bots b
                LEFT JOIN bot_users u ON u.bot_id = b.bot_id AND u.is_active = TRUE
                WHERE b.added_by=$1 AND b.is_active=TRUE
-               GROUP BY b.bot_id
+               -- bot_id не первичный ключ managed_bots (ключ — id), поэтому
+               -- группировки по нему одному Postgres не принимает: запрос падал
+               -- всегда, и карта инфраструктуры оставалась без ботов.
+               GROUP BY b.bot_id, b.username, b.first_name, b.cluster,
+                        b.swarm_enabled, b.bot_role
                ORDER BY user_count DESC LIMIT 30""",
             uid,
         )

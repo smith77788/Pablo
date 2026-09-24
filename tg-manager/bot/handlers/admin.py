@@ -1219,7 +1219,9 @@ async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     bots = await _safe_count("SELECT COUNT(*) FROM managed_bots")
     channels = await _safe_count("SELECT COUNT(*) FROM managed_channels")
     accounts = await _safe_count("SELECT COUNT(*) FROM tg_accounts WHERE COALESCE(is_active,true)=true")
-    strike_users = await _safe_count("SELECT COUNT(*) FROM platform_users WHERE COALESCE(strike_access,false)=true")
+    # strike_access — отдельная таблица с купившими доступ, а не колонка
+    # platform_users: прежний запрос падал, и в сводке всегда стоял ноль.
+    strike_users = await _safe_count("SELECT COUNT(*) FROM strike_access")
     text = (
         "🤖 <b>Боты, токены и Strike</b>\n\n"
         f"Ботов в системе: <b>{bots}</b>\n"

@@ -396,7 +396,7 @@ async def compute_health(
                JOIN tg_accounts a ON a.id=m.object_id
                LEFT JOIN (
                    SELECT DISTINCT ON (account_id) account_id, health_score
-                   FROM account_health_history ORDER BY account_id, checked_at DESC
+                   FROM account_health_history ORDER BY account_id, recorded_at DESC
                ) ah ON ah.account_id=a.id
                WHERE m.ecosystem_id=$1 AND m.object_type='account' AND a.is_active=TRUE""",
             ecosystem_id,
@@ -466,10 +466,14 @@ async def compute_health(
 
         # Reliability: infra_memory for member accounts
         mem_rows = await pool.fetch(
-            """SELECT success_rate FROM infra_memory_accounts im
+            # В infra_memory_accounts нет ни success_rate, ни total_ops —
+            # там счётчики successes/failures, и доля считается из них.
+            """SELECT im.successes::float
+                      / NULLIF(im.successes + im.failures, 0) AS success_rate
+               FROM infra_memory_accounts im
                JOIN ecosystem_members m ON m.object_id=im.account_id
                WHERE m.ecosystem_id=$1 AND m.object_type='account'
-                 AND im.total_ops >= 5""",
+                 AND im.successes + im.failures >= 5""",
             ecosystem_id,
         )
         if mem_rows:
@@ -562,7 +566,7 @@ async def compute_pressure(
                 """SELECT COUNT(*) FROM ecosystem_members m
                JOIN tg_accounts a ON a.id=m.object_id
                WHERE m.ecosystem_id=$1 AND m.object_type='account'
-                 AND (a.flood_count_7d or 0) > 5""",
+                 AND COALESCE(a.flood_count_7d, 0) > 5""",
                 ecosystem_id,
             )
             or 0
@@ -1861,8 +1865,9 @@ async def balance_content(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) 
     try:
         # Get member activity data
         members = await pool.fetch(
-            """SELECT m.object_id, m.object_type,
-                      COALESCE(m.last_activity_at, m.added_at) as last_activity
+            # Колонки last_activity_at у участника нет: время присоединения —
+            # единственная отметка времени в ecosystem_members.
+            """SELECT m.object_id, m.object_type, m.added_at AS last_activity
                FROM ecosystem_members m
                WHERE m.ecosystem_id=$1""",
             ecosystem_id,

@@ -1956,7 +1956,7 @@ class TestAudienceAnalytics:
         pool = FakePool(fetch_val=1000)
         result = await analyze_audience(pool, 123, 1001)
         assert result is not None
-        assert result.channel_id == 1001
+        assert result.bot_id == 1001
         assert result.owner_id == 123
         assert result.total_subscribers >= 0
 

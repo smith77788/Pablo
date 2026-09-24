@@ -1,4 +1,11 @@
-"""Audience Intelligence — advanced audience analytics, segmentation, and engagement prediction."""
+"""Аналитика аудитории: сегменты, удержание, предсказание вовлечённости.
+
+Ключ сущности — bot_id. Раньше весь модуль обращался к колонке `channel_id`,
+которой нет ни в bot_users, ни в user_activity, ни в content_performance: там
+bot_id. Каждый запрос модуля падал с UndefinedColumnError, ошибку глотал
+log_exc_swallow, и наружу это выходило нулями — «аудитории нет». Проверяет
+tests/test_sql_runs_on_real_schema_postgres.py.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +29,7 @@ _DAY_NAMES = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 @dataclass
 class AudienceOverview:
-    channel_id: int
+    bot_id: int
     owner_id: int
     total_subscribers: int = 0
     active_users: int = 0
@@ -47,7 +54,7 @@ class AudienceSegment:
 
 @dataclass
 class EngagementPrediction:
-    channel_id: int
+    bot_id: int
     predicted_er: float = 0.0
     confidence: float = 0.0
     best_post_hour: int = 0
@@ -59,7 +66,7 @@ class EngagementPrediction:
 
 @dataclass
 class AudienceInsights:
-    channel_id: int
+    bot_id: int
     growth_trend: str = "stable"
     growth_rate_pct: float = 0.0
     churn_risk_pct: float = 0.0
@@ -76,10 +83,10 @@ class AudienceInsights:
 async def analyze_audience(
     pool: asyncpg.Pool,
     owner_id: int,
-    channel_id: int,
+    bot_id: int,
 ) -> AudienceOverview | None:
     """
-    Комплексный анализ аудитории канала.
+    Комплексный анализ аудитории бота.
 
     Собирает данные о:
     - Общем количестве подписчиков
@@ -90,24 +97,24 @@ async def analyze_audience(
     """
     try:
         # ── 1. Базовая статистика ─────────────────────────────────────────────
-        total_subscribers = await _get_subscriber_count(pool, channel_id)
-        active_users = await _get_active_users(pool, channel_id, days=7)
+        total_subscribers = await _get_subscriber_count(pool, bot_id)
+        active_users = await _get_active_users(pool, bot_id, days=7)
 
         # ── 2. Активность по часам ───────────────────────────────────────────
-        peak_hour, peak_day = await _get_peak_activity(pool, channel_id)
+        peak_hour, peak_day = await _get_peak_activity(pool, bot_id)
 
         # ── 3. Retention rate ─────────────────────────────────────────────────
-        retention_7d = await _calc_retention(pool, channel_id, days=7)
-        retention_30d = await _calc_retention(pool, channel_id, days=30)
+        retention_7d = await _calc_retention(pool, bot_id, days=7)
+        retention_30d = await _calc_retention(pool, bot_id, days=30)
 
         # ── 4. Средняя продолжительность сессии ──────────────────────────────
-        avg_session = await _get_avg_session_duration(pool, channel_id)
+        avg_session = await _get_avg_session_duration(pool, bot_id)
 
         # ── 5. Активная аудитория ─────────────────────────────────────────────
         active_rate = (active_users / total_subscribers * 100) if total_subscribers > 0 else 0.0
 
         overview = AudienceOverview(
-            channel_id=channel_id,
+            bot_id=bot_id,
             owner_id=owner_id,
             total_subscribers=total_subscribers,
             active_users=active_users,
@@ -121,19 +128,19 @@ async def analyze_audience(
 
         log.info(
             "audience_analytics: analyze_audience channel=%s subscribers=%s active=%s",
-            channel_id, total_subscribers, active_users,
+            bot_id, total_subscribers, active_users,
         )
         return overview
 
     except Exception as exc:
-        log.warning("analyze_audience failed for channel_id=%s: %s", channel_id, exc)
+        log.warning("analyze_audience failed for bot_id=%s: %s", bot_id, exc)
         return None
 
 
 async def segment_audience(
     pool: asyncpg.Pool,
     owner_id: int,
-    channel_id: int,
+    bot_id: int,
 ) -> list[AudienceSegment]:
     """
     Сегментация аудитории по поведенческим характеристикам.
@@ -146,7 +153,7 @@ async def segment_audience(
     - "New" — присоединились за последние 7 дней
     """
     try:
-        users = await _fetch_user_activity(pool, channel_id)
+        users = await _fetch_user_activity(pool, bot_id)
         if not users:
             return []
 
@@ -240,19 +247,19 @@ async def segment_audience(
 
         log.info(
             "audience_analytics: segment_audience channel=%s segments=%d",
-            channel_id, len(segments),
+            bot_id, len(segments),
         )
         return segments
 
     except Exception as exc:
-        log.warning("segment_audience failed for channel_id=%s: %s", channel_id, exc)
+        log.warning("segment_audience failed for bot_id=%s: %s", bot_id, exc)
         return []
 
 
 async def predict_engagement(
     pool: asyncpg.Pool,
     owner_id: int,
-    channel_id: int,
+    bot_id: int,
 ) -> EngagementPrediction | None:
     """
     Прогнозирование вовлечённости на основе исторических данных.
@@ -265,9 +272,9 @@ async def predict_engagement(
     """
     try:
         # ── 1. Собираем исторические данные ───────────────────────────────────
-        hourly_er = await _get_hourly_engagement(pool, channel_id)
-        daily_er = await _get_daily_engagement(pool, channel_id)
-        content_er = await _get_content_type_engagement(pool, channel_id)
+        hourly_er = await _get_hourly_engagement(pool, bot_id)
+        daily_er = await _get_daily_engagement(pool, bot_id)
+        content_er = await _get_content_type_engagement(pool, bot_id)
 
         # ── 2. Определяем лучшее время ───────────────────────────────────────
         best_hour = 0
@@ -314,7 +321,7 @@ async def predict_engagement(
             factors.append(f"Топ-формат: {top_ct}")
 
         prediction = EngagementPrediction(
-            channel_id=channel_id,
+            bot_id=bot_id,
             predicted_er=round(predicted_er, 2),
             confidence=round(confidence, 2),
             best_post_hour=best_hour,
@@ -325,19 +332,19 @@ async def predict_engagement(
 
         log.info(
             "audience_analytics: predict_engagement channel=%s predicted_er=%.2f%%",
-            channel_id, predicted_er,
+            bot_id, predicted_er,
         )
         return prediction
 
     except Exception as exc:
-        log.warning("predict_engagement failed for channel_id=%s: %s", channel_id, exc)
+        log.warning("predict_engagement failed for bot_id=%s: %s", bot_id, exc)
         return None
 
 
 async def get_audience_insights(
     pool: asyncpg.Pool,
     owner_id: int,
-    channel_id: int,
+    bot_id: int,
 ) -> AudienceInsights | None:
     """
     Комплексные инсайты аудитории с рекомендациями.
@@ -351,19 +358,19 @@ async def get_audience_insights(
     """
     try:
         # ── 1. Тренд роста ────────────────────────────────────────────────────
-        growth_trend, growth_rate = await _calc_growth_trend(pool, channel_id)
+        growth_trend, growth_rate = await _calc_growth_trend(pool, bot_id)
 
         # ── 2. Риск оттока ───────────────────────────────────────────────────
-        churn_risk = await _calc_churn_risk(pool, channel_id)
+        churn_risk = await _calc_churn_risk(pool, bot_id)
 
         # ── 3. Пики активности ───────────────────────────────────────────────
-        peak_hours = await _get_top_activity_hours(pool, channel_id, limit=3)
+        peak_hours = await _get_top_activity_hours(pool, bot_id, limit=3)
 
         # ── 4. Предпочтения контента ─────────────────────────────────────────
-        content_prefs = await _get_content_preferences(pool, channel_id)
+        content_prefs = await _get_content_preferences(pool, bot_id)
 
         # ── 5. Качество аудитории ────────────────────────────────────────────
-        quality_score = await _calc_audience_quality(pool, channel_id)
+        quality_score = await _calc_audience_quality(pool, bot_id)
 
         # ── 6. Рекомендации ──────────────────────────────────────────────────
         recommendations = _generate_insight_recommendations(
@@ -376,7 +383,7 @@ async def get_audience_insights(
         )
 
         insights = AudienceInsights(
-            channel_id=channel_id,
+            bot_id=bot_id,
             growth_trend=growth_trend,
             growth_rate_pct=round(growth_rate, 2),
             churn_risk_pct=round(churn_risk, 2),
@@ -388,24 +395,24 @@ async def get_audience_insights(
 
         log.info(
             "audience_analytics: get_audience_insights channel=%s quality=%.1f churn=%.1f%%",
-            channel_id, quality_score, churn_risk,
+            bot_id, quality_score, churn_risk,
         )
         return insights
 
     except Exception as exc:
-        log.warning("get_audience_insights failed for channel_id=%s: %s", channel_id, exc)
+        log.warning("get_audience_insights failed for bot_id=%s: %s", bot_id, exc)
         return None
 
 
 # ── DB Helpers ────────────────────────────────────────────────────────────────
 
 
-async def _get_subscriber_count(pool: asyncpg.Pool, channel_id: int) -> int:
-    """Получить количество подписчиков канала."""
+async def _get_subscriber_count(pool: asyncpg.Pool, bot_id: int) -> int:
+    """Получить количество подписчиков бота."""
     try:
         row = await pool.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM bot_users WHERE channel_id = $1",
-            channel_id,
+            "SELECT COUNT(*) AS cnt FROM bot_users WHERE bot_id = $1",
+            bot_id,
         )
         return int(row["cnt"]) if row else 0
     except Exception:
@@ -413,17 +420,17 @@ async def _get_subscriber_count(pool: asyncpg.Pool, channel_id: int) -> int:
         return 0
 
 
-async def _get_active_users(pool: asyncpg.Pool, channel_id: int, days: int = 7) -> int:
+async def _get_active_users(pool: asyncpg.Pool, bot_id: int, days: int = 7) -> int:
     """Получить количество активных пользователей за N дней."""
     try:
         row = await pool.fetchrow(
             """
             SELECT COUNT(DISTINCT user_id) AS cnt
             FROM user_activity
-            WHERE channel_id = $1
+            WHERE bot_id = $1
               AND last_seen >= NOW() - ($2 || ' days')::INTERVAL
             """,
-            channel_id,
+            bot_id,
             str(days),
         )
         return int(row["cnt"]) if row else 0
@@ -433,7 +440,7 @@ async def _get_active_users(pool: asyncpg.Pool, channel_id: int, days: int = 7) 
 
 
 async def _get_peak_activity(
-    pool: asyncpg.Pool, channel_id: int
+    pool: asyncpg.Pool, bot_id: int
 ) -> tuple[int, str]:
     """Определить пиковые часы и дни активности."""
     try:
@@ -444,12 +451,12 @@ async def _get_peak_activity(
                 EXTRACT(DOW FROM last_seen)::INT AS dow,
                 COUNT(*) AS cnt
             FROM user_activity
-            WHERE channel_id = $1 AND last_seen IS NOT NULL
+            WHERE bot_id = $1 AND last_seen IS NOT NULL
             GROUP BY 1, 2
             ORDER BY cnt DESC
             LIMIT 10
             """,
-            channel_id,
+            bot_id,
         )
         if not rows:
             return 0, "Пн"
@@ -473,7 +480,7 @@ async def _get_peak_activity(
 
 
 async def _calc_retention(
-    pool: asyncpg.Pool, channel_id: int, days: int = 7
+    pool: asyncpg.Pool, bot_id: int, days: int = 7
 ) -> float:
     """Рассчитать retention rate за N дней."""
     try:
@@ -487,9 +494,9 @@ async def _calc_retention(
                     THEN user_id
                 END) AS retained_users
             FROM user_activity
-            WHERE channel_id = $1
+            WHERE bot_id = $1
             """,
-            channel_id,
+            bot_id,
             str(days),
         )
         if row and row["total_users"] and row["total_users"] > 0:
@@ -500,7 +507,7 @@ async def _calc_retention(
         return 0.0
 
 
-async def _get_avg_session_duration(pool: asyncpg.Pool, channel_id: int) -> float:
+async def _get_avg_session_duration(pool: asyncpg.Pool, bot_id: int) -> float:
     """Средняя продолжительность сессии в минутах."""
     try:
         row = await pool.fetchrow(
@@ -509,12 +516,12 @@ async def _get_avg_session_duration(pool: asyncpg.Pool, channel_id: int) -> floa
                 EXTRACT(EPOCH FROM (last_seen - first_seen)) / 60
             ) AS avg_duration
             FROM user_activity
-            WHERE channel_id = $1
+            WHERE bot_id = $1
               AND first_seen IS NOT NULL
               AND last_seen IS NOT NULL
               AND last_seen > first_seen
             """,
-            channel_id,
+            bot_id,
         )
         return float(row["avg_duration"]) if row and row["avg_duration"] else 0.0
     except Exception:
@@ -523,7 +530,7 @@ async def _get_avg_session_duration(pool: asyncpg.Pool, channel_id: int) -> floa
 
 
 async def _fetch_user_activity(
-    pool: asyncpg.Pool, channel_id: int
+    pool: asyncpg.Pool, bot_id: int
 ) -> list[dict[str, Any]]:
     """Получить данные активности пользователей для сегментации."""
     try:
@@ -536,14 +543,14 @@ async def _fetch_user_activity(
                 EXTRACT(DAY FROM NOW() - last_seen)::INT AS days_since_last,
                 EXTRACT(DAY FROM NOW() - first_seen)::INT AS days_since_first
             FROM user_activity
-            WHERE channel_id = $1
+            WHERE bot_id = $1
             """,
-            channel_id,
+            bot_id,
         )
         result = []
         for r in rows:
             days_active = max(0, 30 - (r["days_since_last"] or 30))
-            engagements = await _get_user_engagements(pool, r["user_id"], channel_id)
+            engagements = await _get_user_engagements(pool, r["user_id"], bot_id)
             result.append({
                 "user_id": r["user_id"],
                 "last_seen": r["last_seen"],
@@ -559,7 +566,7 @@ async def _fetch_user_activity(
 
 
 async def _get_user_engagements(
-    pool: asyncpg.Pool, user_id: int, channel_id: int
+    pool: asyncpg.Pool, user_id: int, bot_id: int
 ) -> int:
     """Получить количество взаимодействий пользователя за 30 дней."""
     try:
@@ -568,11 +575,11 @@ async def _get_user_engagements(
             SELECT COUNT(*) AS cnt
             FROM user_activity
             WHERE user_id = $1
-              AND channel_id = $2
+              AND bot_id = $2
               AND last_seen >= NOW() - INTERVAL '30 days'
             """,
             user_id,
-            channel_id,
+            bot_id,
         )
         return int(row["cnt"]) if row else 0
     except Exception:
@@ -581,7 +588,7 @@ async def _get_user_engagements(
 
 
 async def _get_hourly_engagement(
-    pool: asyncpg.Pool, channel_id: int
+    pool: asyncpg.Pool, bot_id: int
 ) -> dict[int, float]:
     """Получить средний ER по часам."""
     try:
@@ -591,12 +598,12 @@ async def _get_hourly_engagement(
                 EXTRACT(HOUR FROM published_at)::INT AS hour,
                 AVG(engagement_rate) AS avg_er
             FROM content_performance
-            WHERE channel_id = $1
+            WHERE bot_id = $1
               AND views > 0
             GROUP BY 1
             ORDER BY 1
             """,
-            channel_id,
+            bot_id,
         )
         return {r["hour"]: float(r["avg_er"]) for r in rows if r["hour"] is not None}
     except Exception:
@@ -605,7 +612,7 @@ async def _get_hourly_engagement(
 
 
 async def _get_daily_engagement(
-    pool: asyncpg.Pool, channel_id: int
+    pool: asyncpg.Pool, bot_id: int
 ) -> dict[int, float]:
     """Получить средний ER по дням недели."""
     try:
@@ -615,12 +622,12 @@ async def _get_daily_engagement(
                 EXTRACT(DOW FROM published_at)::INT AS dow,
                 AVG(engagement_rate) AS avg_er
             FROM content_performance
-            WHERE channel_id = $1
+            WHERE bot_id = $1
               AND views > 0
             GROUP BY 1
             ORDER BY 1
             """,
-            channel_id,
+            bot_id,
         )
         return {r["dow"]: float(r["avg_er"]) for r in rows if r["dow"] is not None}
     except Exception:
@@ -629,7 +636,7 @@ async def _get_daily_engagement(
 
 
 async def _get_content_type_engagement(
-    pool: asyncpg.Pool, channel_id: int
+    pool: asyncpg.Pool, bot_id: int
 ) -> dict[str, float]:
     """Получить средний ER по типам контента."""
     try:
@@ -639,14 +646,14 @@ async def _get_content_type_engagement(
                 content_type,
                 AVG(engagement_rate) AS avg_er
             FROM content_performance
-            WHERE channel_id = $1
+            WHERE bot_id = $1
               AND views > 0
             GROUP BY content_type
             HAVING COUNT(*) >= 2
             ORDER BY avg_er DESC
             LIMIT 5
             """,
-            channel_id,
+            bot_id,
         )
         return {r["content_type"]: float(r["avg_er"]) for r in rows if r["content_type"]}
     except Exception:
@@ -655,7 +662,7 @@ async def _get_content_type_engagement(
 
 
 async def _calc_growth_trend(
-    pool: asyncpg.Pool, channel_id: int
+    pool: asyncpg.Pool, bot_id: int
 ) -> tuple[str, float]:
     """Определить тренд роста аудитории."""
     try:
@@ -665,12 +672,12 @@ async def _calc_growth_trend(
                 DATE_TRUNC('week', first_seen)::DATE AS week,
                 COUNT(DISTINCT user_id) AS new_users
             FROM user_activity
-            WHERE channel_id = $1
+            WHERE bot_id = $1
               AND first_seen >= NOW() - INTERVAL '8 weeks'
             GROUP BY 1
             ORDER BY 1
             """,
-            channel_id,
+            bot_id,
         )
 
         if len(rows) < 2:
@@ -702,7 +709,7 @@ async def _calc_growth_trend(
         return "unknown", 0.0
 
 
-async def _calc_churn_risk(pool: asyncpg.Pool, channel_id: int) -> float:
+async def _calc_churn_risk(pool: asyncpg.Pool, bot_id: int) -> float:
     """Рассчитать риск оттока аудитории."""
     try:
         row = await pool.fetchrow(
@@ -713,9 +720,9 @@ async def _calc_churn_risk(pool: asyncpg.Pool, channel_id: int) -> float:
                     WHERE last_seen < NOW() - INTERVAL '14 days'
                 ) AS inactive_cnt
             FROM user_activity
-            WHERE channel_id = $1
+            WHERE bot_id = $1
             """,
-            channel_id,
+            bot_id,
         )
         if row and row["total"] and row["total"] > 0:
             return (row["inactive_cnt"] / row["total"]) * 100
@@ -726,7 +733,7 @@ async def _calc_churn_risk(pool: asyncpg.Pool, channel_id: int) -> float:
 
 
 async def _get_top_activity_hours(
-    pool: asyncpg.Pool, channel_id: int, limit: int = 3
+    pool: asyncpg.Pool, bot_id: int, limit: int = 3
 ) -> list[int]:
     """Получить топ-N часов активности."""
     try:
@@ -736,12 +743,12 @@ async def _get_top_activity_hours(
                 EXTRACT(HOUR FROM last_seen)::INT AS hour,
                 COUNT(*) AS cnt
             FROM user_activity
-            WHERE channel_id = $1 AND last_seen IS NOT NULL
+            WHERE bot_id = $1 AND last_seen IS NOT NULL
             GROUP BY 1
             ORDER BY cnt DESC
             LIMIT $2
             """,
-            channel_id,
+            bot_id,
             limit,
         )
         return [r["hour"] for r in rows if r["hour"] is not None]
@@ -751,7 +758,7 @@ async def _get_top_activity_hours(
 
 
 async def _get_content_preferences(
-    pool: asyncpg.Pool, channel_id: int
+    pool: asyncpg.Pool, bot_id: int
 ) -> list[str]:
     """Получить предпочтения контента по ER."""
     try:
@@ -759,13 +766,13 @@ async def _get_content_preferences(
             """
             SELECT content_type, AVG(engagement_rate) AS avg_er
             FROM content_performance
-            WHERE channel_id = $1 AND views > 0
+            WHERE bot_id = $1 AND views > 0
             GROUP BY content_type
             HAVING COUNT(*) >= 2
             ORDER BY avg_er DESC
             LIMIT 3
             """,
-            channel_id,
+            bot_id,
         )
         return [r["content_type"] for r in rows if r["content_type"]]
     except Exception:
@@ -773,7 +780,7 @@ async def _get_content_preferences(
         return []
 
 
-async def _calc_audience_quality(pool: asyncpg.Pool, channel_id: int) -> float:
+async def _calc_audience_quality(pool: asyncpg.Pool, bot_id: int) -> float:
     """
     Рассчитать качество аудитории (0-100).
 
@@ -791,9 +798,9 @@ async def _calc_audience_quality(pool: asyncpg.Pool, channel_id: int) -> float:
                 COUNT(*) FILTER (WHERE last_seen >= NOW() - INTERVAL '7 days') AS active_7d,
                 COUNT(*) FILTER (WHERE last_seen >= NOW() - INTERVAL '30 days') AS active_30d
             FROM user_activity
-            WHERE channel_id = $1
+            WHERE bot_id = $1
             """,
-            channel_id,
+            bot_id,
         )
 
         if not row or not row["total"] or row["total"] == 0:
@@ -822,9 +829,9 @@ async def _calc_audience_quality(pool: asyncpg.Pool, channel_id: int) -> float:
             """
             SELECT AVG(engagement_rate) AS avg_er
             FROM content_performance
-            WHERE channel_id = $1 AND views > 0
+            WHERE bot_id = $1 AND views > 0
             """,
-            channel_id,
+            bot_id,
         )
         if er_row and er_row["avg_er"]:
             er_pct = float(er_row["avg_er"]) * 100

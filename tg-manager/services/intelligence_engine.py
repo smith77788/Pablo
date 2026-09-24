@@ -440,25 +440,39 @@ async def _analyze_accounts_impl(
     # Запрос аккаунтов из БД (включая health_score для полного анализа)
     if account_ids:
         rows = await pool.fetch(
-            """SELECT id, phone, first_name, trust_score, flood_count_7d,
-                      cooldown_until, pool, tags, acc_status,
-                      (session_str IS NOT NULL AND session_str <> '') AS has_session,
-                      COALESCE(health_score, 0.5) AS health_score
-               FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE AND id=ANY($2)
-               ORDER BY COALESCE(trust_score, 1.0) DESC""",
+            # health_score живёт не в tg_accounts, а в account_health_history —
+            # это и есть единый пульс. Прежний запрос читал несуществующую
+            # колонку и падал целиком: интеллект-слой не получал НИ ОДНОГО
+            # аккаунта, а не просто оставался без оценки здоровья.
+            """SELECT a.id, a.phone, a.first_name, a.trust_score, a.flood_count_7d,
+                      a.cooldown_until, a.pool, a.tags, a.acc_status,
+                      (a.session_str IS NOT NULL AND a.session_str <> '') AS has_session,
+                      COALESCE(h.health_score, 0.5) AS health_score
+               FROM tg_accounts a
+               LEFT JOIN LATERAL (
+                   SELECT health_score FROM account_health_history hh
+                   WHERE hh.account_id = a.id
+                   ORDER BY hh.recorded_at DESC LIMIT 1
+               ) h ON TRUE
+               WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.id=ANY($2)
+               ORDER BY COALESCE(a.trust_score, 1.0) DESC""",
             owner_id,
             account_ids,
         )
     else:
         rows = await pool.fetch(
-            """SELECT id, phone, first_name, trust_score, flood_count_7d,
-                      cooldown_until, pool, tags, acc_status,
-                      (session_str IS NOT NULL AND session_str <> '') AS has_session,
-                      COALESCE(health_score, 0.5) AS health_score
-               FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE
-               ORDER BY COALESCE(trust_score, 1.0) DESC""",
+            """SELECT a.id, a.phone, a.first_name, a.trust_score, a.flood_count_7d,
+                      a.cooldown_until, a.pool, a.tags, a.acc_status,
+                      (a.session_str IS NOT NULL AND a.session_str <> '') AS has_session,
+                      COALESCE(h.health_score, 0.5) AS health_score
+               FROM tg_accounts a
+               LEFT JOIN LATERAL (
+                   SELECT health_score FROM account_health_history hh
+                   WHERE hh.account_id = a.id
+                   ORDER BY hh.recorded_at DESC LIMIT 1
+               ) h ON TRUE
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               ORDER BY COALESCE(a.trust_score, 1.0) DESC""",
             owner_id,
         )
 

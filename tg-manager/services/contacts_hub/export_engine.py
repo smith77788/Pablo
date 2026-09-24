@@ -318,10 +318,16 @@ async def get_export_stats(pool, owner_id: int) -> dict:
     total = await pool.fetchval(
         'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1', owner_id)
     with_phone = await pool.fetchval(
-        "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND phones IS NOT NULL AND phones != '[]' AND phones != ''",
+        # phones — jsonb: сравнение с '' валило запрос ('' не json), и счётчик
+        # контактов с phones всегда возвращал ошибку вместо числа.
+        "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 "
+        "AND jsonb_typeof(phones) = 'array' AND jsonb_array_length(phones) > 0",
         owner_id)
     with_email = await pool.fetchval(
-        "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND emails IS NOT NULL AND emails != '[]' AND emails != ''",
+        # emails — jsonb: сравнение с '' валило запрос ('' не json), и счётчик
+        # контактов с emails всегда возвращал ошибку вместо числа.
+        "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 "
+        "AND jsonb_typeof(emails) = 'array' AND jsonb_array_length(emails) > 0",
         owner_id)
     favorites = await pool.fetchval(
         'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_favorite=true',

@@ -211,8 +211,10 @@ SELECT COUNT(*) AS n
 FROM tg_accounts
 WHERE owner_id = $1
   AND (is_active IS FALSE OR acc_status = ANY($4::text[]))
-  AND created_at > now() - make_interval(days => $3)
-  AND (last_used IS NULL OR last_used <= created_at + make_interval(days => $2))
+  -- Колонка времени добавления аккаунта называется added_at; created_at в
+  -- tg_accounts нет, и счётчик «сожжённых» падал вместо числа.
+  AND added_at > now() - make_interval(days => $3)
+  AND (last_used IS NULL OR last_used <= added_at + make_interval(days => $2))
 """
 
 
