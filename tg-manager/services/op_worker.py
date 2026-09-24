@@ -3967,6 +3967,16 @@ async def _exec_mass_publish(
                     "VALUES($1,$2,$3,'ok',$4)",
                     op_id, idx, str(dialog["id"]), _ch_title,
                 )
+                # Content Memory: тело реально опубликованного поста → история канала.
+                # Кормит антиповтор редактора (channel_brain.repetition_check): без неё
+                # recent_texts брать неоткуда. Best-effort — не рушим публикацию.
+                try:
+                    from services import content_memory
+                    await content_memory.record_published(
+                        pool, owner_id, str(dialog["id"]), _ch_text, op_id=op_id,
+                    )
+                except Exception:
+                    log_exc_swallow(log, "mass_publish: content_memory record failed")
                 await _audit(
                     pool,
                     owner_id,
