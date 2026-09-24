@@ -603,7 +603,7 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .seg:has(> :nth-child(5)){overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
 .seg:has(> :nth-child(5))::-webkit-scrollbar{display:none}
 .seg:has(> :nth-child(5)) > .seg-opt{flex:0 0 auto;white-space:nowrap;padding-left:10px;padding-right:10px}
-.seg-opt.on{background:var(--bg);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.seg-opt.on{background:var(--accent-soft-2);color:var(--accent);font-weight:600}
 .seg-btn{flex:1;padding:7px 10px;text-align:center;font-size:13px;font-weight:600;color:var(--hint);cursor:pointer;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2);transition:all .2s var(--ease)}
 .seg-btn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(45,212,191,.25)}
 .mini-btn{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:8px 12px;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:none;border-radius:var(--radius);cursor:pointer;white-space:nowrap;transition:opacity .12s}
@@ -1594,7 +1594,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" style="margin-top:12px">A/B Тесты</div>
     <div class="lst" id="bcAbList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:12px">Аналитика рассылок</div>
-    <div id="bcAnalyticsChart" style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+    <div id="bcAnalyticsChart" style="margin:0 16px 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div style="display:flex;align-items:flex-end;gap:4px;height:60px" id="bcAnalyticsBars"></div>
       <div style="display:flex;justify-content:space-between;margin-top:4px" id="bcAnalyticsLabels"></div>
     </div>
@@ -1658,7 +1658,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="seg-opt" onclick="proxyPoolFilter('backup',this)">🛟 Резерв</div>
     </div>
     <div class="sec">Статистика прокси</div>
-    <div id="proxyPoolChart" style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+    <div id="proxyPoolChart" style="margin:0 16px 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Задержка по прокси (мс)</div>
       <div style="display:flex;align-items:flex-end;gap:3px;height:50px" id="proxyPoolBars"></div>
     </div>
@@ -1694,7 +1694,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="seg-opt" onclick="autoregProFilter('failed',this)">❌ Ошибки</div>
     </div>
     <div class="sec">Статистика регистрации</div>
-    <div id="autoregProChart" style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+    <div id="autoregProChart" style="margin:0 16px 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div style="display:flex;align-items:flex-end;gap:3px;height:50px" id="autoregProBars"></div>
       <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--hint)" id="autoregProLabels"></div>
     </div>
@@ -3404,7 +3404,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <!-- Настройки/инфо: куда ведёт реклама -->
-    <div id="spInfo" style="background:var(--bg2);border-radius:12px;padding:12px;margin:4px 0 10px">
+    <div id="spInfo" style="background:var(--bg2);border-radius:var(--radius-lg);padding:12px;margin:4px 16px 10px">
       <div style="font-size:13px;font-weight:600;margin-bottom:6px">⚙️ Куда ведёт реклама</div>
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Рассылка идёт подписчикам ваших ботов. Ссылка ведёт на системного бота с вашим реферальным кодом — все приглашённые засчитываются вам.</div>
       <div style="display:flex;align-items:center;gap:8px">
@@ -3658,7 +3658,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" style="width:100%;font-size:13px" onclick="seedIntentDefaults()">✨ Включить рекомендованные правила</button>
     </div>
     <div class="sec" style="margin-top:4px">➕ Новое правило</div>
-    <div style="background:var(--bg2);border-radius:12px;padding:12px;margin-bottom:10px">
+    <div style="background:var(--bg2);border-radius:var(--radius-lg);padding:12px;margin:0 16px 10px">
       <input type="text" id="intPhrase" placeholder="Фраза (напр. «цена», «купить»)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:4px">
       <div class="hint" style="font-size:11px;color:var(--hint);margin-bottom:8px;line-height:1.4">Несколько вариантов через <b>|</b> (цена|стоимость|прайс). Регэксп с префиксом <b>re:</b> (re:\d{4,}\s*руб).</div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -3969,7 +3969,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-p" style="width:100%;margin-top:6px" onclick="submitProxyImport()">Импортировать</button>
     </div>
     <div class="sec" style="margin-top:8px">🌐 Способ получения IP на аккаунт</div>
-    <div style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+    <div style="margin:0 16px 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div id="transportStatus" style="font-size:13px;margin-bottom:8px;color:var(--hint)">Проверяю, как аккаунты выходят в сеть…</div>
       <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px;margin-bottom:8px" onclick="detachAllProxies()">🔌 Работать без прокси — отвязать прокси у всех аккаунтов</button>
       <div style="font-size:12px;opacity:.72;line-height:1.5">
@@ -3988,7 +3988,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </details>
     </div>
     <div class="sec" style="margin-top:8px">☁️ Уникальный IP без прокси (Cloudflare)</div>
-    <div style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+    <div style="margin:0 16px 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div style="font-size:12px;opacity:.7;margin-bottom:8px">Трафик аккаунтов идёт через Cloudflare (edge-IP CDN, <b>не</b> датацентр Railway) — Telegram мягче к CDN-адресам. ⚠️ Важно: Cloudflare отдаёт <b>общий</b> IP на весь пул, это <b>НЕ</b> уникальный IP на аккаунт. Для строгой изоляции 1:1 нужны прокси (раздел «Мои прокси»). Проверить фактическое число IP — кнопка «🩺 Проверить».</div>
       <div id="cfPoolStatus" style="font-size:13px;margin-bottom:8px;color:var(--hint)">Смотрю состояние пула…</div>
       <details id="cfCredsBox" style="margin-bottom:8px">
