@@ -309,6 +309,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .btn:active{opacity:.85;transform:translateY(1px) scale(.97)}
 /* Неактивная кнопка: не вуаль из прозрачности (надпись переставала читаться),
    а честное состояние — приглушённый фон и подсказочный цвет текста. */
+/* Очень узкие экраны (складные телефоны в сложенном виде, ~280px): три кнопки
+   в ряд по 88px минимума не помещались и выносили ряд за экран. */
+@media (max-width:330px){.btn{min-width:72px;padding-left:8px;padding-right:8px;text-overflow:ellipsis}}
 .btn:disabled,.btn[disabled]{background:var(--bg3) !important;color:var(--hint-strong) !important;
   box-shadow:none !important;opacity:1;pointer-events:none;border:1px solid var(--sep)}
 .btn-p{background:var(--btn);color:var(--btn-text);box-shadow:0 2px 12px rgba(45,212,191,.25),inset 0 1px 0 rgba(255,255,255,.15)}
@@ -2685,7 +2688,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="checkChannelRanks()">🔄 Проверить позиции сейчас</button>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <select id="crChannel" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box"></select>
+        <select id="crChannel" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box"><option value="">Загружаю каналы…</option></select>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:6px">
         <input type="text" id="crKeyword" placeholder="Ключевое слово/фраза" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
