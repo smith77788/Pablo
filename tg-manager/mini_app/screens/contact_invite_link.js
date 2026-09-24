@@ -50,9 +50,9 @@ function _cilRender(contactId, d) {
     ? '<span class="badge b-rd">🚫 В реестре «не приглашать»</span>'
     : '<span class="badge b-gr">✅ Можно приглашать</span>';
   const btn = optedOut
-    ? '<button class="btn btn-s" onclick="_cilAllow(\'' + contactId + '\')" style="flex:0">' +
+    ? '<button class="btn btn-s" onclick="_cilAllow(\'' + contactId + '\')" style="flex:0 0 auto">' +
       '✅ Разрешить приглашать</button>'
-    : '<button class="btn btn-s" onclick="_cilOptOut(\'' + contactId + '\')" style="flex:0">' +
+    : '<button class="btn btn-s" onclick="_cilOptOut(\'' + contactId + '\')" style="flex:0 0 auto">' +
       '🚫 Не приглашать</button>';
   return '<div style="margin-bottom:6px">' + badge + '</div>' + histHtml +
     '<div style="margin-top:6px">' + btn + '</div>';

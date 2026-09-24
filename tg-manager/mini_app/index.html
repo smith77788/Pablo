@@ -178,8 +178,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    одно многоточие — по шапке нельзя было понять, где находишься. Основа по
    содержимому плюс нижний предел: заголовок ужимается наравне с соседями и
    всегда показывает хотя бы начало названия. */
-.hdr-title{flex:1 1 auto;min-width:88px;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr-title{flex:1 1 auto;min-width:72px;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-meta{text-align:right;flex-shrink:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.hdr-meta > .btn{flex:0 0 auto;max-width:none}
+.hdr-meta > .hdr-user{min-width:0;flex-shrink:1}
 /* ── Боковая навигация (drawer) ── */
 .hdr-burger{flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);cursor:pointer;color:var(--text);font-size:18px;line-height:1;user-select:none;border:1px solid var(--sep)}
 .hdr-burger:active{background:var(--sep);transform:scale(.92)}
@@ -305,7 +307,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Action buttons ─────────────────────────────────────────── */
 .actions{display:flex;gap:8px;padding:10px 16px 4px;flex-wrap:wrap}
-.btn{display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:nowrap;flex:1 0 auto;min-width:88px;max-width:100%;overflow:hidden}
+.btn{display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:normal;line-height:1.25;text-align:center;flex:1 0 auto;min-width:88px;max-width:100%;overflow:hidden}
 .btn:active{opacity:.85;transform:translateY(1px) scale(.97)}
 /* Неактивная кнопка: не вуаль из прозрачности (надпись переставала читаться),
    а честное состояние — приглушённый фон и подсказочный цвет текста. */
@@ -962,7 +964,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="quickBcText" rows="3" placeholder="Введите текст рассылки..." class="input-bc"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn btn-p" id="quickBcBtn" onclick="submitQuickBroadcast()" style="flex:1 1 auto">📢 Отправить всем</button>
-        <button class="btn btn-s" onclick="openBcastPick()" style="flex:0;padding:10px 16px">⚙️ Настроить</button>
+        <button class="btn btn-s" onclick="openBcastPick()" style="flex:0 0 auto;padding:10px 16px">⚙️ Настроить</button>
       </div>
       <div id="quickBcErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
     </div>
@@ -974,7 +976,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:0 0 8px">
       <div style="display:flex;gap:8px">
         <input type="text" id="quickChLink" placeholder="https://t.me/channel или @username" style="flex:1;padding:10px;border-radius:12px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
-        <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0;padding:10px 16px">➕</button>
+        <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0 0 auto;padding:10px 16px">➕</button>
       </div>
       <div id="quickChErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
     </div>
@@ -986,7 +988,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:0 0 8px">
       <div style="display:flex;gap:8px">
         <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx..." style="flex:1;padding:10px;border-radius:12px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
-        <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0;padding:10px 16px">➕</button>
+        <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0 0 auto;padding:10px 16px">➕</button>
       </div>
       <div id="quickBotErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
     </div>
@@ -3904,7 +3906,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec" style="margin-top:8px">🌐 Способ получения IP на аккаунт</div>
     <div style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
-      <div id="transportStatus" style="font-size:13px;margin-bottom:8px;opacity:.9">—</div>
+      <div id="transportStatus" style="font-size:13px;margin-bottom:8px;color:var(--hint)">Проверяю, как аккаунты выходят в сеть…</div>
       <button class="btn btn-s" style="width:100%;font-size:13px;padding:9px 6px;margin-bottom:8px" onclick="detachAllProxies()">🔌 Работать без прокси — отвязать прокси у всех аккаунтов</button>
       <div style="font-size:12px;opacity:.72;line-height:1.5">
         Приоритет для аккаунта <b>без своего прокси</b>: <b>1)</b> свой прокси (если назначен) → <b>2)</b> свой IPv6 → <b>3)</b> CF-релей → <b>4)</b> прямое.<br>
@@ -3924,7 +3926,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" style="margin-top:8px">☁️ Уникальный IP без прокси (Cloudflare)</div>
     <div style="margin:0 0 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div style="font-size:12px;opacity:.7;margin-bottom:8px">Трафик аккаунтов идёт через Cloudflare (edge-IP CDN, <b>не</b> датацентр Railway) — Telegram мягче к CDN-адресам. ⚠️ Важно: Cloudflare отдаёт <b>общий</b> IP на весь пул, это <b>НЕ</b> уникальный IP на аккаунт. Для строгой изоляции 1:1 нужны прокси (раздел «Мои прокси»). Проверить фактическое число IP — кнопка «🩺 Проверить».</div>
-      <div id="cfPoolStatus" style="font-size:13px;margin-bottom:8px;opacity:.85">—</div>
+      <div id="cfPoolStatus" style="font-size:13px;margin-bottom:8px;color:var(--hint)">Смотрю состояние пула…</div>
       <details id="cfCredsBox" style="margin-bottom:8px">
         <summary style="font-size:13px;cursor:pointer;opacity:.85">🔑 Доступы Cloudflare</summary>
         <div style="padding-top:8px">
@@ -13104,7 +13106,7 @@ async function loadTransport() {
       + (r.ipv6_subnet ? ` · IPv6: <code>${esc(r.ipv6_subnet)}</code>` : '') + `</span>`;
     const inp = document.getElementById('ipv6Subnet');
     if (inp && r.ipv6_subnet && !inp.value) inp.value = r.ipv6_subnet;
-  } catch(e) { el.textContent = '—'; }
+  } catch(e) { el.innerHTML = '<span style="color:var(--hint)">Не удалось узнать способ выхода в сеть: '+esc(e.message)+'</span>'; }
 }
 async function detachAllProxies() {
   if (!await askConfirm('Отвязать прокси у ВСЕХ аккаунтов и работать напрямую (без прокси)?\n\nАккаунты будут подключаться с реального IP сервера. Приоритет: свой IPv6 → CF-релей → прямое. Внимание: сессию, созданную через прокси, нельзя использовать с двух IP одновременно.')) return;
@@ -16339,18 +16341,18 @@ async function openContactDetail(id) {
       ${c.trust_score?`<div class="row"><div class="row-body"><div class="row-name">Доверие</div><div class="row-val">${Math.round((c.trust_score||0)*100)}%</div></div></div>`:''}
     </div>`;
     html += `<div style="padding:8px 16px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:0">📋 Юзернейм</button>
-      <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:0">📋 ID</button>
-      ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:0">📋 Тел.</button>`:''}
-      ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0">📋 Почта</button>`:''}
-      <button class="btn btn-s" id="cdExclBtn" onclick="cdToggleExclude(${c.excluded?'false':'true'})" style="flex:0">${c.excluded?'↩️ Вернуть в работу':'🙈 Личный (вне работы)'}</button>
+      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:0 0 auto">📋 Юзернейм</button>
+      <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:0 0 auto">📋 ID</button>
+      ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:0 0 auto">📋 Тел.</button>`:''}
+      ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0 0 auto">📋 Почта</button>`:''}
+      <button class="btn btn-s" id="cdExclBtn" onclick="cdToggleExclude(${c.excluded?'false':'true'})" style="flex:0 0 auto">${c.excluded?'↩️ Вернуть в работу':'🙈 Личный (вне работы)'}</button>
     </div>`;
     html += `<div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-p" onclick="openContactWrite()" style="flex:0">✍️ Написать</button>
-      <button class="btn btn-s" onclick="openContactInvite()" style="flex:0">➕ Пригласить</button>
-      ${c.telegram_user_id?`<button class="btn btn-s" onclick="openContactHistory()" style="flex:0">🕓 История</button>`:''}
-      ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0;text-decoration:none">↗ В Telegram</a>`:''}
-      ${c.telegram_user_id?`<a class="btn btn-s" href="tg://user?id=${c.telegram_user_id}" target="_blank" style="flex:0;text-decoration:none">👤 Профиль</a>`:''}
+      <button class="btn btn-p" onclick="openContactWrite()" style="flex:0 0 auto">✍️ Написать</button>
+      <button class="btn btn-s" onclick="openContactInvite()" style="flex:0 0 auto">➕ Пригласить</button>
+      ${c.telegram_user_id?`<button class="btn btn-s" onclick="openContactHistory()" style="flex:0 0 auto">🕓 История</button>`:''}
+      ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0 0 auto;text-decoration:none">↗ В Telegram</a>`:''}
+      ${c.telegram_user_id?`<a class="btn btn-s" href="tg://user?id=${c.telegram_user_id}" target="_blank" style="flex:0 0 auto;text-decoration:none">👤 Профиль</a>`:''}
     </div>`;
     if (sources.length) {
       html += `<div class="sec" style="margin-top:4px">📡 Найден в (${sources.length})</div><div class="lst" style="margin:0 16px">`;
@@ -16363,11 +16365,11 @@ async function openContactDetail(id) {
       html += '</div>';
     }
     html += `<div class="sec" style="margin-top:8px">Действия</div><div style="padding:4px 16px 12px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0">📅 Хронология</button>
-      <button class="btn btn-s" onclick="openContactVersions('${id}')" style="flex:0">📜 Версии</button>
-      <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0">🕸 Связи</button>
-      <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0">🔑 Личность</button>
-      <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0">💼 CRM</button>
+      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0 0 auto">📅 Хронология</button>
+      <button class="btn btn-s" onclick="openContactVersions('${id}')" style="flex:0 0 auto">📜 Версии</button>
+      <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0 0 auto">🕸 Связи</button>
+      <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0 0 auto">🔑 Личность</button>
+      <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0 0 auto">💼 CRM</button>
     </div>`;
     txt('cdBody', html);
     if (c.telegram_user_id || c.username || (c.phones && c.phones.length)) {
@@ -18025,10 +18027,10 @@ async function openCommunityNode(id, title, chatId) {
   txt('cnodeTitle','🏛 '+(title||'Сообщество'));
   txt('cnodeChannels','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('cnodeActions',`
-    <button class="btn btn-p" onclick="inviteToCommunity(${id},${chatId})" style="flex:0">➕ Пригласить аудиторию</button>
-    <button class="btn btn-s" onclick="livenCommunity(${id})" style="flex:0">🏛 Оживить флотом</button>
-    <button class="btn btn-s" onclick="openCommunityMembers(${id})" style="flex:0">🛡 Участники и роли</button>
-    <button class="btn btn-d" onclick="deleteCommunityNode(${id})" style="flex:0">🗑 Убрать</button>`);
+    <button class="btn btn-p" onclick="inviteToCommunity(${id},${chatId})" style="flex:0 0 auto">➕ Пригласить аудиторию</button>
+    <button class="btn btn-s" onclick="livenCommunity(${id})" style="flex:0 0 auto">🏛 Оживить флотом</button>
+    <button class="btn btn-s" onclick="openCommunityMembers(${id})" style="flex:0 0 auto">🛡 Участники и роли</button>
+    <button class="btn btn-d" onclick="deleteCommunityNode(${id})" style="flex:0 0 auto">🗑 Убрать</button>`);
   try {
     const d = await api('/api/miniapp/community/node/'+id+'/channels');
     const chs = d.channels||[];
@@ -24217,7 +24219,7 @@ async function openWorkflowDetail(wfId, wfName) {
 
     html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
-      <button class="btn btn-r" onclick="deleteWorkflow(${wfId})" style="flex:0;padding:8px 14px;font-size:13px">🗑</button>
+      <button class="btn btn-r" onclick="deleteWorkflow(${wfId})" style="flex:0 0 auto;padding:8px 14px;font-size:13px">🗑</button>
     </div>`;
 
     if (!steps.length) {
