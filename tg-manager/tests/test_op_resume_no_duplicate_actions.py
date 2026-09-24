@@ -39,9 +39,21 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Исполнитель → как выглядит ключ цели в журнале.
+#
+# У накрутки единица работы — аккаунт (цель у операции одна), и ключ там тот же
+# acc#<id>, что у жалобы. Повтор в накрутке вреден по-разному, и реакции —
+# худший случай: повторная отправка ТОЙ ЖЕ реакции её СНИМАЕТ, то есть
+# возобновление отбирало уже поставленные реакции и накрутка уходила в минус.
+# Подписчики — второй по цене случай: повторный joinChannel туда, где аккаунт
+# уже состоит, Telegram считает в лимит вступлений и в давление к PEER_FLOOD.
 GUARDED = {
     "_exec_mass_report": "_acc_key",
     "_exec_ai_comment": "ref",
+    "_exec_boost_subscribers": "_acc_key",
+    "_exec_boost_reactions": "_acc_key",
+    "_exec_boost_views": "_acc_key",
+    "_exec_boost_stories": "_acc_key",
+    "_exec_boost_bot_starts": "_acc_key",
 }
 
 
@@ -137,8 +149,22 @@ def test_journal_write_cannot_kill_the_operation(ow, name):
     исключение стоит всей операции, причём уже после внешнего действия.
     """
     body = _fn(ow, name)
-    assert "await pool.execute(\n" not in body and "await pool.execute(" not in body, (
+    assert "await pool.execute(" not in body, (
         f"{name}: запись в журнал идёт мимо _safe_execute и может уронить операцию"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(k for k, v in GUARDED.items() if v == "_acc_key"))
+def test_account_key_is_built_once(ow, name):
+    """Ключ собирается одной переменной, а не повторяется литералом.
+
+    Пропуск и запись обязаны разъехаться НЕ МОГУТ: ровно на разошедшихся ключах
+    однажды сломалась идемпотентность постинга.
+    """
+    body = _fn(ow, name)
+    assert body.count("_acc_key = f\"acc#{acc['id']}\"") == 1
+    assert "f\"acc#{acc['id']}\"" not in body.replace("_acc_key = f\"acc#{acc['id']}\"", "", 1), (
+        f"{name}: ключ где-то ещё собирается заново — он может разойтись"
     )
 
 

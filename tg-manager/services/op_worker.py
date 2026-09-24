@@ -11531,12 +11531,36 @@ async def _exec_boost_views(
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
+    # Идемпотентность повтора. Повтор запускает исполнителя заново с
+    # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
+    # зависшей операции сторожем, после перезапуска контейнера. Тогда
+    # аккаунты, уже отработавшие цель, отрабатывают её второй раз, а это
+    # повторный просмотр того же поста тем же аккаунтом. Просмотр Telegram
+    # засчитывает один раз, так что накрутка от этого не растёт — тратятся
+    # только вызовы и лимит аккаунта, то есть чистый риск без результата.
+    #
+    # Единица работы здесь — аккаунт (цель у операции одна), поэтому ключ
+    # журнала acc#<id> устойчив к любому порядку и составу отбора.
+    _already_done = await completed_targets(pool, op_id)
+    if _already_done:
+        log.info("boost_views op=%d: повтор — %d аккаунтов уже отработали, пропускаем",
+                 op_id, len(_already_done))
+
     ok_count, fail_count = 0, 0
     total = len(accounts)
 
     for idx, acc in enumerate(accounts, 1):
         if await _is_cancelled(pool, op_id):
             break
+        _acc_key = f"acc#{acc['id']}"
+        if _acc_key in _already_done:
+            # Работа сделана прошлым прогоном: засчитываем, иначе владелец
+            # увидит «2 из 40» на отработавшей операции и запустит её руками.
+            ok_count += 1
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
         try:
             res = await boost_engine.boost_views(
                 acc["session_str"],
@@ -11546,16 +11570,18 @@ async def _exec_boost_views(
             )
             if res["ok"]:
                 ok_count += 1
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, f"acc#{acc['id']}",
+                    op_id, idx, _acc_key,
                 )
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    op_id, idx, _acc_key, (res.get("error") or "")[:200],
                 )
         except Exception as exc:
             log.warning("boost_views op=%d acc=%s: %s", op_id, acc.get("id"), exc)
@@ -11607,12 +11633,36 @@ async def _exec_boost_reactions(
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
+    # Идемпотентность повтора. Повтор запускает исполнителя заново с
+    # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
+    # зависшей операции сторожем, после перезапуска контейнера. Тогда
+    # аккаунты, уже отработавшие цель, отрабатывают её второй раз, а это
+    # повторная отправка ТОЙ ЖЕ реакции тем же аккаунтом. Это не просто
+    # бесполезно: повторная реакция снимается, то есть возобновление могло
+    # отобрать уже поставленные реакции и накрутка уходила в минус.
+    #
+    # Единица работы здесь — аккаунт (цель у операции одна), поэтому ключ
+    # журнала acc#<id> устойчив к любому порядку и составу отбора.
+    _already_done = await completed_targets(pool, op_id)
+    if _already_done:
+        log.info("boost_reactions op=%d: повтор — %d аккаунтов уже отработали, пропускаем",
+                 op_id, len(_already_done))
+
     ok_count, fail_count = 0, 0
     total = len(accounts)
 
     for idx, acc in enumerate(accounts, 1):
         if await _is_cancelled(pool, op_id):
             break
+        _acc_key = f"acc#{acc['id']}"
+        if _acc_key in _already_done:
+            # Работа сделана прошлым прогоном: засчитываем, иначе владелец
+            # увидит «2 из 40» на отработавшей операции и запустит её руками.
+            ok_count += 1
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
         try:
             res = await boost_engine.boost_reaction(
                 acc["session_str"],
@@ -11623,16 +11673,18 @@ async def _exec_boost_reactions(
             )
             if res["ok"]:
                 ok_count += 1
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, f"acc#{acc['id']}",
+                    op_id, idx, _acc_key,
                 )
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    op_id, idx, _acc_key, (res.get("error") or "")[:200],
                 )
         except Exception as exc:
             log.warning("boost_reactions op=%d acc=%s: %s", op_id, acc.get("id"), exc)
@@ -11681,12 +11733,35 @@ async def _exec_boost_stories(
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
+    # Идемпотентность повтора. Повтор запускает исполнителя заново с
+    # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
+    # зависшей операции сторожем, после перезапуска контейнера. Тогда
+    # аккаунты, уже отработавшие цель, отрабатывают её второй раз, а это
+    # повторный просмотр тех же историй тем же аккаунтом. Просмотр
+    # засчитывается один раз, растёт только расход лимита аккаунта.
+    #
+    # Единица работы здесь — аккаунт (цель у операции одна), поэтому ключ
+    # журнала acc#<id> устойчив к любому порядку и составу отбора.
+    _already_done = await completed_targets(pool, op_id)
+    if _already_done:
+        log.info("boost_stories op=%d: повтор — %d аккаунтов уже отработали, пропускаем",
+                 op_id, len(_already_done))
+
     ok_count, fail_count, stories_seen = 0, 0, 0
     total = len(accounts)
 
     for idx, acc in enumerate(accounts, 1):
         if await _is_cancelled(pool, op_id):
             break
+        _acc_key = f"acc#{acc['id']}"
+        if _acc_key in _already_done:
+            # Работа сделана прошлым прогоном: засчитываем, иначе владелец
+            # увидит «2 из 40» на отработавшей операции и запустит её руками.
+            ok_count += 1
+            await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
         try:
             res = await boost_engine.boost_stories(
                 acc["session_str"],
@@ -11696,16 +11771,18 @@ async def _exec_boost_stories(
             if res["ok"]:
                 ok_count += 1
                 stories_seen = max(stories_seen, res.get("stories_count", 0))
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, f"acc#{acc['id']}",
+                    op_id, idx, _acc_key,
                 )
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    op_id, idx, _acc_key, (res.get("error") or "")[:200],
                 )
         except Exception as exc:
             log.warning("boost_stories op=%d acc=%s: %s", op_id, acc.get("id"), exc)
@@ -11952,26 +12029,54 @@ async def _exec_boost_subscribers(
                 "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
             )
 
+        # Идемпотентность повтора. Повтор запускает исполнителя заново с
+        # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
+        # зависшей операции сторожем, после перезапуска контейнера. Тогда
+        # аккаунты, уже отработавшие цель, отрабатывают её второй раз, а это
+        # вступление в канал с аккаунта, который уже в нём состоит. Telegram
+        # считает такой joinChannel в лимит вступлений и в давление, ведущее к
+        # PEER_FLOOD: повтор после сетевого блипа сам по себе поднимал риск бана —
+        # ровно то, от чего защищает весь пейсинг вокруг. От того же класса уже
+        # защищён bulk_join (см. completed_account_targets).
+        #
+        # Единица работы здесь — аккаунт (цель у операции одна), поэтому ключ
+        # журнала acc#<id> устойчив к любому порядку и составу отбора.
+        _already_done = await completed_targets(pool, op_id)
+        if _already_done:
+            log.info("boost_subscribers op=%d: повтор — %d аккаунтов уже отработали, пропускаем",
+                     op_id, len(_already_done))
+
         ok_count, fail_count = 0, 0
         total = len(accounts)
 
         for idx, acc in enumerate(accounts, 1):
             if await _is_cancelled(pool, op_id):
                 break
+            _acc_key = f"acc#{acc['id']}"
+            if _acc_key in _already_done:
+                # Работа сделана прошлым прогоном: засчитываем, иначе владелец
+                # увидит «2 из 40» на отработавшей операции и запустит её руками.
+                ok_count += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             try:
                 res = await account_manager.join_channel(acc["session_str"], target, _acc=dict(acc))
                 if res.get("error"):
                     fail_count += 1
                     await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                        op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                        op_id, idx, _acc_key, (res.get("error") or "")[:200],
                     )
                 else:
                     ok_count += 1
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                        op_id, idx, f"acc#{acc['id']}",
+                        op_id, idx, _acc_key,
                     )
             except Exception as exc:
                 log.warning("boost_subscribers op=%d acc=%s: %s", op_id, acc.get("id"), exc)
@@ -12039,12 +12144,35 @@ async def _exec_boost_bot_starts(
                 "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
             )
 
+        # Идемпотентность повтора. Повтор запускает исполнителя заново с
+        # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
+        # зависшей операции сторожем, после перезапуска контейнера. Тогда
+        # аккаунты, уже отработавшие цель, отрабатывают её второй раз, а это
+        # повторный /start в того же бота с того же аккаунта. Нового запуска у
+        # бота не появляется (пользователь уже знаком), тратится только лимит.
+        #
+        # Единица работы здесь — аккаунт (цель у операции одна), поэтому ключ
+        # журнала acc#<id> устойчив к любому порядку и составу отбора.
+        _already_done = await completed_targets(pool, op_id)
+        if _already_done:
+            log.info("boost_bot_starts op=%d: повтор — %d аккаунтов уже отработали, пропускаем",
+                     op_id, len(_already_done))
+
         ok_count, fail_count = 0, 0
         total = len(accounts)
 
         for idx, acc in enumerate(accounts, 1):
             if await _is_cancelled(pool, op_id):
                 break
+            _acc_key = f"acc#{acc['id']}"
+            if _acc_key in _already_done:
+                # Работа сделана прошлым прогоном: засчитываем, иначе владелец
+                # увидит «2 из 40» на отработавшей операции и запустит её руками.
+                ok_count += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             try:
                 res = await account_manager.send_bot_start(
                     acc["session_str"], bot_username, payload, _acc=dict(acc)
@@ -12052,15 +12180,17 @@ async def _exec_boost_bot_starts(
                 if res.get("error"):
                     fail_count += 1
                     await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                        op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                        op_id, idx, _acc_key, (res.get("error") or "")[:200],
                     )
                 else:
                     ok_count += 1
-                    await pool.execute(
+                    await _safe_execute(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                        op_id, idx, f"acc#{acc['id']}",
+                        op_id, idx, _acc_key,
                     )
             except Exception as exc:
                 log.warning("boost_bot_starts op=%d acc=%s: %s", op_id, acc.get("id"), exc)
