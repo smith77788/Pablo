@@ -1837,73 +1837,20 @@ async def generate_recommendations(
 
 # ── Auto-Management (автоуправление экосистемами) ───────────────────────────
 # Автоматическое обнаружение связей, добавление каналов, балансировка контента.
-
-async def auto_discover_members(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) -> dict:
-    """Auto-discover and add new channels/groups to ecosystem.
-    
-    Scans managed_channels and managed_bots for owner, adds relevant ones.
-    Returns {added: int, skipped: int, total: int}
-    """
-    try:
-        # Get existing members
-        existing = await pool.fetch(
-            "SELECT object_id FROM ecosystem_members WHERE ecosystem_id=$1",
-            ecosystem_id,
-        )
-        existing_ids = {r["object_id"] for r in existing}
-        
-        # Find channels not yet in ecosystem.
-        # managed_channels не имеет колонки is_active (есть channel_id/owner_id/
-        # title/username/... — см. schema) — прежнее AND is_active=TRUE валило
-        # запрос 500. Все управляемые каналы владельца считаются кандидатами.
-        channels = await pool.fetch(
-            """SELECT channel_id, title, username
-               FROM managed_channels
-               WHERE owner_id=$1""",
-            owner_id,
-        )
-        
-        added = 0
-        skipped = 0
-        for ch in channels:
-            ch_id = ch["channel_id"]
-            if ch_id in existing_ids:
-                skipped += 1
-                continue
-            try:
-                await add_member(pool, ecosystem_id, owner_id, "channel", ch_id)
-                added += 1
-            except Exception:
-                skipped += 1
-        
-        # Find bots not yet in ecosystem
-        bots = await pool.fetch(
-            """SELECT bot_id, username, first_name
-               FROM managed_bots
-               WHERE added_by=$1 AND is_active=TRUE""",
-            owner_id,
-        )
-        
-        for bot_row in bots:
-            bot_id = bot_row["bot_id"]
-            if bot_id in existing_ids:
-                skipped += 1
-                continue
-            try:
-                await add_member(pool, ecosystem_id, owner_id, "bot", bot_id)
-                added += 1
-            except Exception:
-                skipped += 1
-        
-        log.info(
-            "auto_discover eco=%d: added=%d skipped=%d total=%d",
-            ecosystem_id, added, skipped, added + skipped,
-        )
-        
-        return {"added": added, "skipped": skipped, "total": added + skipped}
-    except Exception as e:
-        log.warning("auto_discover failed for eco=%d: %s", ecosystem_id, e)
-        return {"added": 0, "skipped": 0, "total": 0}
+#
+# auto_discover_members ЗДЕСЬ БЫЛ ВТОРОЙ РАЗ определён (дубль имени тенил
+# первую версию выше, строка ~1009, — Python молча берёт последнее
+# объявление). Обе версии делали похожее, но с НЕСОВМЕСТИМЫМ форматом
+# ответа: первая — {object_type: count} (например {"channel": 5, "bot": 2}),
+# эта — {"added": N, "skipped": M, "total": K}. Все РЕАЛЬНЫЕ вызывающие
+# (services/mini_app_api.py:ecosystem_auto_discover,
+# bot/handlers/ecosystems.py — 3 места) читают результат по object_type
+# (`added[t]`, `sum(v for v in added.values())`) — то есть рассчитаны на
+# ПЕРВУЮ версию, а получали (из-за тени) ВТОРУЮ. На проде это означало: бот
+# всегда писал «объекты добавлены вручную» после авто-обнаружения, даже
+# когда объекты реально добавились, а мини-апп считал total суммированием
+# added+skipped+total вместо реального числа добавленных. Дубль удалён,
+# вызывающие снова получают ожидаемый формат.
 
 
 async def balance_content(pool: asyncpg.Pool, ecosystem_id: int, owner_id: int) -> dict:
