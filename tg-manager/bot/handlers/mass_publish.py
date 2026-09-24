@@ -405,6 +405,22 @@ async def _show_preview(
             log.warning('handler error in _show_preview: %s', e)
             intel_text = ""
 
+    # Редакционная подсказка (Virtual Channel Administrator): сравнить пост с
+    # недавними постами владельца и правилами бренда. Это СОВЕТ на подтверждении,
+    # а не блокировка — кнопку «Запустить» не трогаем. Fail-soft: сбой → без блока.
+    editorial_text = ""
+    if not dry_run:
+        try:
+            from services import editorial_review
+
+            _verdict = await editorial_review.review_draft(
+                pool, callback.from_user.id, post_text,
+            )
+            editorial_text = editorial_review.format_advisory(_verdict)
+        except Exception as e:
+            log.warning("mass_publish editorial advisory failed: %s", e)
+            editorial_text = ""
+
     media_hint = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
     _warn = unresolved_placeholders_warning(post_text)
     warn_line = f"\n{_warn}" if _warn else ""
@@ -420,6 +436,7 @@ async def _show_preview(
         f"{warn_line}"
         f"{dry_run_banner}"
         f"{intel_text}"
+        f"{editorial_text}"
     )
 
     kb = InlineKeyboardBuilder()

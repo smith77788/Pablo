@@ -94,6 +94,24 @@ async def test_recent_texts_failsoft_empty_on_error():
     assert await cm.recent_texts(Boom(), 1, "@ch") == []
 
 
+@pytest.mark.asyncio
+async def test_recent_texts_for_owner_returns_bodies_across_channels():
+    pool = _CapPool(fetch=[{"body": "a"}, {"body": "b"}])
+    got = await cm.recent_texts_for_owner(pool, 42, limit=5)
+    assert got == ["a", "b"]
+    q, args = pool.fetch_args[0]
+    assert "channel_key" not in q  # по всем каналам владельца
+    assert args[0] == 42
+
+
+@pytest.mark.asyncio
+async def test_recent_texts_for_owner_failsoft():
+    class Boom(FakePool):
+        async def fetch(self, *a, **k):
+            raise RuntimeError("db down")
+    assert await cm.recent_texts_for_owner(Boom(), 1) == []
+
+
 def test_migration_registered_in_checksums():
     fname = "schema_v223_va_channel_posts.sql"
     assert os.path.exists(os.path.join(ROOT, fname)), "миграция отсутствует"

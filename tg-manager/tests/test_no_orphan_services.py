@@ -29,9 +29,6 @@ KNOWN_ORPHANS = {
     "invite_engine",       # сценарий раздачи ссылок в продукте не реализован
     "ai_action_router",    # ассистент использует intent_planner
     "perf",                # инструмент разработки
-    "channel_brain_store",  # Channel Brain: политика канала (va_channel_brain)
-                            # + capability готовы; подключение к пути публикации —
-                            # отдельный срез (channel_brain уже используется отсюда)
 }
 
 

@@ -74,3 +74,30 @@ async def recent_texts(
                   owner_id, channel_key, exc_info=True)
         return []
     return [r["body"] for r in (rows or []) if r["body"]]
+
+
+async def recent_texts_for_owner(
+    pool,
+    owner_id: int,
+    *,
+    limit: int = 20,
+) -> list[str]:
+    """Последние тела постов владельца ПО ВСЕМ каналам (свежие сверху). Fail-soft → [].
+
+    Нужно там, где нет одного канала: массовая публикация идёт сразу во все каналы
+    аккаунта, поэтому антиповтор на предпросмотре сравнивает черновик с недавними
+    постами владельца вообще, а не одного канала.
+    """
+    n = max(1, min(int(limit), _MAX_WINDOW))
+    try:
+        rows = await pool.fetch(
+            "SELECT body FROM va_channel_posts "
+            "WHERE owner_id=$1 "
+            "ORDER BY published_at DESC, id DESC LIMIT $2",
+            int(owner_id), n,
+        )
+    except Exception:
+        log.debug("content_memory.recent_texts_for_owner failed owner=%s",
+                  owner_id, exc_info=True)
+        return []
+    return [r["body"] for r in (rows or []) if r["body"]]
