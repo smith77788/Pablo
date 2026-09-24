@@ -22497,7 +22497,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def admin_user_grant(request: web.Request) -> web.Response:
         """Выдать подписку пользователю (paid) на N месяцев."""
         uid, target_id, err = await _admin_target(request)
-        if err:
+        # `err is not None`, а НЕ `if err`: aiohttp StreamResponse определяет
+        # __len__, поэтому у ответа с пустым на этот момент телом bool() == False.
+        # Проверка молча не срабатывала — 403 создавался и выбрасывался, а
+        # выполнение шло дальше как у администратора.
+        if err is not None:
             return err
         try:
             body = await request.json()
@@ -22519,7 +22523,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def admin_user_revoke(request: web.Request) -> web.Response:
         """Отозвать подписку пользователя."""
         uid, target_id, err = await _admin_target(request)
-        if err:
+        # `err is not None`, а НЕ `if err`: aiohttp StreamResponse определяет
+        # __len__, поэтому у ответа с пустым на этот момент телом bool() == False.
+        # Проверка молча не срабатывала — 403 создавался и выбрасывался, а
+        # выполнение шло дальше как у администратора.
+        if err is not None:
             return err
         try:
             from database import db as _db
@@ -22532,7 +22540,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def admin_user_ban(request: web.Request) -> web.Response:
         """Забанить пользователя (нельзя банить админов и себя)."""
         uid, target_id, err = await _admin_target(request)
-        if err:
+        # `err is not None`, а НЕ `if err`: aiohttp StreamResponse определяет
+        # __len__, поэтому у ответа с пустым на этот момент телом bool() == False.
+        # Проверка молча не срабатывала — 403 создавался и выбрасывался, а
+        # выполнение шло дальше как у администратора.
+        if err is not None:
             return err
         if target_id == uid or _is_admin(target_id):
             return _err("Нельзя забанить администратора", 400)
@@ -22547,7 +22559,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def admin_user_unban(request: web.Request) -> web.Response:
         """Разбанить пользователя."""
         uid, target_id, err = await _admin_target(request)
-        if err:
+        # `err is not None`, а НЕ `if err`: aiohttp StreamResponse определяет
+        # __len__, поэтому у ответа с пустым на этот момент телом bool() == False.
+        # Проверка молча не срабатывала — 403 создавался и выбрасывался, а
+        # выполнение шло дальше как у администратора.
+        if err is not None:
             return err
         try:
             from database import db as _db
