@@ -235,6 +235,53 @@ if _ROOT not in sys.path:
 import pytest
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _live_schema():
+    """Один раз накатить схему на базу из INFRAGRAM_TEST_DSN.
+
+    Файлы tests/*_postgres.py пропускаются целиком без этой переменной, поэтому
+    в CI (где базы не было) они не выполнялись ни разу. Схему каждый из них
+    накатывал сам — но не все: четыре файла молча рассчитывали на уже готовую
+    базу и на свежей падали с UndefinedTableError. Делаем это здесь один раз на
+    сессию, чтобы CI не зависел от того, вспомнил ли конкретный файл про схему.
+
+    Без переменной фикстура не делает НИЧЕГО: обычный прогон без Postgres не
+    трогается. Ошибки отдельных файлов схемы глушим — они идемпотентны, а
+    частичный сбой не должен рушить весь прогон (так же поступают сами e2e).
+    """
+    dsn = os.getenv("INFRAGRAM_TEST_DSN")
+    if not dsn:
+        return
+    import asyncio
+    import glob
+    import re
+
+    async def _apply():
+        import asyncpg
+        conn = await asyncpg.connect(dsn)
+        try:
+            files = [os.path.join(_ROOT, "schema.sql")] + sorted(
+                glob.glob(os.path.join(_ROOT, "schema_v*.sql")),
+                key=lambda f: int(re.search(r"schema_v(\d+)", f).group(1)))
+            for f in files:
+                if not os.path.exists(f):
+                    continue
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        await conn.execute(fh.read())
+                except Exception:
+                    pass
+        finally:
+            await conn.close()
+
+    try:
+        asyncio.new_event_loop().run_until_complete(_apply())
+    except Exception:
+        # Нет сервера по DSN — пусть каждый e2e-файл сам честно скипнется со
+        # своим сообщением, а не падает здесь на всём прогоне.
+        pass
+
+
 @pytest.fixture(autouse=True)
 def _reset_session_mutex():
     """Сброс процессного мьютекса сессий между тестами.

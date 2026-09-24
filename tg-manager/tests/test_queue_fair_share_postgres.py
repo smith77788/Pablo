@@ -46,6 +46,16 @@ def _poller_sql() -> str:
     return src[head + 3:tail] + "RETURNING id, owner_id, op_type, params"
 
 
+async def _poll(conn, slots, per_owner, window, exclude=None):
+    """Позвать запрос поллера так, как его зовёт продукт.
+
+    У запроса есть ЧЕТВЁРТЫЙ параметр — список id операций, которые надо
+    пропустить ($4::bigint[]; NULL = не пропускать ничего). Тест звал его с
+    тремя аргументами и падал на связывании, но файл выполняется только с живым
+    Postgres, которого в CI не было, поэтому расхождение никто не видел.
+    """
+    return await conn.fetch(_poller_sql(), slots, per_owner, window, exclude)
+
 # ── Ратчет по исходнику: работает и без Postgres ─────────────────────────────
 
 def test_rank_is_computed_before_the_window_not_inside_it():
@@ -130,7 +140,7 @@ def _in_tx(conn, seed_sql, *, args=(), extra=(), slots=8, per_owner=3):
             await conn.execute(seed_sql, *args)
             for sql in extra:
                 await conn.execute(sql)
-            rows = await conn.fetch(_poller_sql(), slots, per_owner, window)
+            rows = await _poll(conn, slots, per_owner, window)
             return [(r["id"], r["owner_id"]) for r in rows]
         finally:
             await tr.rollback()
@@ -220,8 +230,8 @@ def test_two_pollers_never_take_the_same_operation(conn):
                 "FROM unnest($1::bigint[]) o", owners)
             tr = conn.transaction()
             await tr.start()
-            mine = await conn.fetch(_poller_sql(), 8, 3, 32)
-            theirs = await other.fetch(_poller_sql(), 8, 3, 32)
+            mine = await _poll(conn, 8, 3, 32)
+            theirs = await _poll(other, 8, 3, 32)
             await tr.commit()
             return {r["id"] for r in mine}, {r["id"] for r in theirs}
         finally:

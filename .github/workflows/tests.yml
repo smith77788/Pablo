@@ -30,6 +30,36 @@ jobs:
     defaults:
       run:
         working-directory: tg-manager
+
+    # Живой Postgres для сквозных тестов.
+    #
+    # Файлы tests/*_postgres.py пропускаются целиком, если не задан
+    # INFRAGRAM_TEST_DSN. Базы в CI не было, поэтому они не выполнялись НИ РАЗУ —
+    # и накопили падения, которых никто не видел: рассылка с нулевой доставкой
+    # рапортовала «выполнено», e2e метода «admin» подменял обёртку вместо
+    # реально вызываемой функции и молча перестал проверять выдачу прав флоту,
+    # четыре теста инвайта ждали статус, от которого продукт осознанно ушёл.
+    # Именно эти тесты ловят ошибки СВЯЗЫВАНИЯ параметров (строка вместо
+    # datetime, dict вместо jsonb), которые заглушка пула не видит в принципе —
+    # так в прод уехал сломанный operation_bus.submit(scheduled_for=…),
+    # убивавший все отложенные операции. Ветка автодеплойная, поэтому цена
+    # непроверенного слоя здесь — прод.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: infra
+        ports:
+          - 5432:5432
+        # Без health-check шаг тестов стартует раньше, чем база примет
+        # соединение, и весь слой снова молча уйдёт в skip.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v4
 
@@ -61,4 +91,8 @@ jobs:
             --output-format concise
 
       - name: Run tests
+        # Схему по базе раскатывают сами тесты (все schema*.sql по возрастанию
+        # версии) — отдельного шага миграций не нужно.
+        env:
+          INFRAGRAM_TEST_DSN: postgresql://postgres:postgres@127.0.0.1:5432/infra
         run: python -m pytest tests/ -q
