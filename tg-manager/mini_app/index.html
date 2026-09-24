@@ -178,7 +178,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    одно многоточие — по шапке нельзя было понять, где находишься. Основа по
    содержимому плюс нижний предел: заголовок ужимается наравне с соседями и
    всегда показывает хотя бы начало названия. */
-.hdr-title{flex:1 1 auto;min-width:72px;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr-title{flex:1 1 auto;min-width:72px;font-size:17px;font-weight:700;letter-spacing:-.3px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:break-word}
 .hdr-meta{text-align:right;flex-shrink:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .hdr-meta > .btn{flex:0 0 auto;max-width:none}
 .hdr-meta > .hdr-user{min-width:0;flex-shrink:1}
@@ -269,6 +269,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    стандарт; инлайновая рамка, если задана, перебивает это правило сама. */
 div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .lst{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin:0 16px;box-shadow:var(--shadow)}
+/* Пустой список — это рамка с нулевой высотой, на экране серая полоска
+   непонятно откуда. Пока в нём ничего нет, его не видно. */
+.lst:empty{display:none}
 .li{padding:11px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--sep);transition:background .12s}
 .li:last-child{border-bottom:none}
 .li.tap{cursor:pointer}
