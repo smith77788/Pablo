@@ -178,7 +178,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    одно многоточие — по шапке нельзя было понять, где находишься. Основа по
    содержимому плюс нижний предел: заголовок ужимается наравне с соседями и
    всегда показывает хотя бы начало названия. */
-.hdr-title{flex:1 1 auto;min-width:72px;font-size:17px;font-weight:700;letter-spacing:-.3px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:break-word}
+.hdr-title{flex:1 1 auto;min-width:72px;font-size:17px;font-weight:700;letter-spacing:-.3px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
 .hdr-meta{text-align:right;flex-shrink:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .hdr-meta > .btn{flex:0 0 auto;max-width:none}
 .hdr-meta > .hdr-user{min-width:0;flex-shrink:1}
@@ -617,7 +617,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .mgmt-tile-ico::after{content:"";position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:.15;z-index:0}
 .mgmt-tile-ico svg{width:23px;height:23px;display:block;position:relative;z-index:1;stroke-width:2}
 .mgmt-tile-ico>*:not(svg){position:relative;z-index:1}
-.mgmt-tile-lbl{font-size:11px;font-weight:600;color:var(--text);opacity:.9;line-height:1.22;max-width:100%}
+.mgmt-tile-lbl{font-size:11px;font-weight:600;color:var(--text);opacity:.9;line-height:1.22;max-width:100%;hyphens:auto;-webkit-hyphens:auto}
 .mgmt-tile-val{font-size:10px;color:var(--accent);font-weight:700;min-height:12px;line-height:1;font-variant-numeric:tabular-nums}
 /* Слот значения есть у каждой плитки, но счётчик приходит далеко не всем:
    у пустого слота всё равно оставались min-height:12px и gap:8px — двадцать
@@ -806,7 +806,7 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .qa-tile-ico::after{content:"";position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:.15;z-index:0}
 .qa-tile-ico svg{width:23px;height:23px;display:block;position:relative;z-index:1;stroke-width:2}
 .qa-tile-ico>*:not(svg){position:relative;z-index:1}
-.qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2;max-width:100%}
+.qa-tile-lbl{font-size:10px;font-weight:600;color:var(--hint);line-height:1.2;max-width:100%;hyphens:auto;-webkit-hyphens:auto}
 .qa-tile-val{font-size:16px;font-weight:700;margin-top:1px}
 /* Copilot «Что делать дальше» */
 .copilot-card{display:flex;align-items:flex-start;gap:11px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-lg);padding:12px 12px 12px 13px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow);transition:transform .12s,opacity .12s;position:relative}
@@ -1850,7 +1850,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="mgmt-tile" onclick="openSelfPromo()">
         <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Самопродвижение</div>
+        <div class="mgmt-tile-lbl">Самопиар</div>
         <div class="mgmt-tile-val" id="m-selfpromo-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openBoost()">
@@ -3355,7 +3355,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-selfpromo">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title">📣 Самопродвижение</div>
+    <div class="hdr-title">📣 Самопиар</div>
     <div class="hdr-meta">
       <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openSelfPromoCreateModal()">+ Создать</button>
     </div>
@@ -7682,7 +7682,7 @@ const MODULE_DESCS = {
   'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом','Быстрый пост':'Быстрый пост в один клик',
   'Массовый инвайт':'Приглашение пользователей в каналы/группы','Парсер':'Сбор аудитории из чатов и каналов',
   'SEO':'Оптимизация под поиск Telegram','Позиции':'Отслеживание позиций в поиске','Топ поиска':'Позиции и вывод в топ поиска','Рейтинг':'Рейтинг ресурсов в поиске',
-  'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопродвижение':'Автопродвижение ваших ресурсов',
+  'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопиар':'Автопродвижение ваших ресурсов',
   'CRM':'База контактов: сегменты, объединение','Контакты':'Контакты аккаунтов: синк, экспорт, напоминания','Напоминания':'Напоминания по контактам',
   'Аудитория+':'Углублённая аналитика аудитории','ДНК аудитории':'Профиль/сегменты аудитории','Статистика':'Метрики аудитории и операций',
   'Авто-воронки':'Автоматические сценарии-воронки','Воркфлоу':'Конструктор сценариев автоматизации','Мультигео':'Гео-раскладка присутствия',
