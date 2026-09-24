@@ -1029,8 +1029,11 @@ async def main() -> None:
         )
 
     async def _web_resilient(name: str, fn, *args):
-        """Like _resilient but starts immediately (no stagger) and restarts in 5s.
-        Used for the HTTP server which must bind to PORT before Railway health checks.
+        """Как _resilient, но БЕЗ гейта роли, без разноса стартов и с перезапуском в 5с.
+
+        Сюда идёт то, что обязано работать в ЛЮБОЙ роли: HTTP-сервер (должен
+        занять PORT раньше, чем Railway начнёт проверять здоровье) и сервисы,
+        от которых зависит обслуживание запросов в роли web.
         """
         await service_supervisor.supervise(
             name, fn, *args,
@@ -1170,8 +1173,16 @@ async def main() -> None:
         _spawn(_resilient("task_registry", task_registry.run_cleanup_loop))
         # Сессии админки живут в БД (schema_v181); процесс держит лишь кэш —
         # обновляем, чтобы вход в одном процессе был виден остальным.
+        #
+        # Обновление идёт ЧЕРЕЗ _web_resilient, а не _resilient: гейт роли
+        # выключает фоновые циклы в роли web, а решение о доступе принимает
+        # именно web-процесс — _is_admin мини-аппа и проверка тарифа читают
+        # этот самый кэш. С гейтом кэш в web оставался пустым НАВСЕГДА: вошедший
+        # по секретной фразе админ не получал прав в мини-аппе вообще, работали
+        # только постоянные ADMIN_IDS из окружения. Это не фоновая работа, а
+        # источник прав для обслуживания запросов.
         from bot.handlers.admin import run_session_admin_refresh
-        _spawn(_resilient("session_admin_refresh", run_session_admin_refresh, pool))
+        _spawn(_web_resilient("session_admin_refresh", run_session_admin_refresh, pool))
         # proxy_scraper (бесплатный публичный пул) УДАЛЁН: пул нестабилен и блокировал
         # работу. Транспорт — прокси пользователя или прямой host-IP; CF/IPv6 opt-in.
         _spawn(_resilient("activity_logger", activity_logger.run, pool))
