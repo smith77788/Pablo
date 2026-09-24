@@ -122,3 +122,56 @@ def test_no_duplicate_module_level_functions_anywhere_in_backend():
         "Оставьте одну версию (обычно вызывающие код рассчитаны только на "
         "одну — сверьте реальных вызывающих, прежде чем выбирать какую)."
     )
+
+
+# ── дубли безусловных команд бота между разными хендлер-модулями ───────────
+#
+# Живой случай (эта сессия): bot/handlers/start.py и bot/handlers/promo_platform.py
+# ОБА регистрировали безусловный @router.message(Command("cancel")). В отличие от
+# дубля имени функции внутри модуля (Python молча берёт последнее объявление),
+# здесь оба handler'а валидны по отдельности — побеждает порядок
+# dp.include_router(...) в main.py: start.router подключается раньше
+# promo_handler.router, поэтому версия promo_platform.py была на 100%
+# недостижимым мёртвым кодом — оператор промо-платформы никогда не видел
+# промо-специфичного текста подтверждения отмены.
+#
+# «Безусловный» = @router.message(Command("word")) БЕЗ дополнительных
+# аргументов-фильтров (StateFilter/F.chat.type/...). Хендлер с доп. фильтром
+# (bot/handlers/ranking.py: Command("cancel"), AddKeyword.waiting_keyword) —
+# законно узкий, ловит команду только в своём FSM-состоянии, не конфликтует.
+
+_BARE_COMMAND_RE = re.compile(
+    r'@router\.message\(\s*Command\(\s*["\']([\w]+)["\']\s*\)\s*\)'
+)
+
+# Команды, для которых несколько «безусловных» регистраций — осознанное и
+# проверенное решение (не баг): заполняется только после разбора конкретного
+# случая, как /unmute (chat_guard.py — с доп. фильтром F.chat.type, значит не
+# «безусловная» и сюда не попадает вовсе).
+_BARE_COMMAND_ALLOWLIST: set[str] = set()
+
+
+def test_no_duplicate_bare_command_across_bot_handlers():
+    by_command: dict[str, list[str]] = {}
+    for sub in ("bot",):
+        d = ROOT / sub
+        if not d.is_dir():
+            continue
+        for path in sorted(d.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            src = path.read_text(encoding="utf-8", errors="ignore")
+            rel = str(path.relative_to(ROOT))
+            for cmd in _BARE_COMMAND_RE.findall(src):
+                by_command.setdefault(cmd, []).append(rel)
+    offenders = {
+        cmd: files for cmd, files in by_command.items()
+        if len(files) > 1 and cmd not in _BARE_COMMAND_ALLOWLIST
+    }
+    assert not offenders, (
+        "Безусловная команда бота зарегистрирована в нескольких модулях сразу "
+        "(побеждает порядок dp.include_router в main.py, остальные версии — "
+        f"недостижимый мёртвый код): {offenders}. Либо оставьте одну версию, "
+        "либо добавьте различающий фильтр (StateFilter/F.chat.type/...) к "
+        "каждой, чтобы они не конфликтовали."
+    )

@@ -92,16 +92,10 @@ def _days_left(ready_at) -> str:
 
 
 # ── Cancel / back helpers ──────────────────────────────────────────────────────
-
-@router.message(Command("cancel"))
-async def cmd_cancel(message: Message, state: FSMContext) -> None:
-    current = await state.get_state()
-    if current:
-        await state.clear()
-        await message.answer("✅ Отменено. Откройте /promo для продолжения.")
-    else:
-        await message.answer("Нечего отменять. /promo — платформа продвижения.")
-
+# Безусловную команду "cancel" здесь НЕ регистрируем: bot/handlers/start.py уже
+# держит такой же безусловный хендлер, и его router подключён раньше в main.py
+# (dp.include_router) — этот хендлер был бы недостижимым дублем, молча тенящим
+# промо-специфичный текст подтверждения отмены.
 
 async def _cancel_fsm_and_back(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await state.clear()
