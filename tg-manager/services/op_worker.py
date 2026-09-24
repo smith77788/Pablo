@@ -4861,6 +4861,25 @@ async def _exec_bulk_leave(
         len(channels) * len(accounts), op_id,
     )
 
+    # Идемпотентность повтора — зеркало того, что давно сделано в bulk_join.
+    # Операция перезапускается целиком: после сетевой ошибки (_maybe_requeue),
+    # после сброса зависшей сторожем, после перезапуска контейнера. Без этой
+    # выборки каждый перезапуск снова выходил из каналов, которые аккаунт уже
+    # покинул, и дело не только в лишнем вызове: дневной лимит выходов
+    # (leaves_today ниже) считается ПО ТОМУ ЖЕ журналу operation_audit, поэтому
+    # повторные строки выжигали суточный бюджет аккаунта на уже сделанной
+    # работе — следующая операция упиралась в лимит на пустом месте.
+    #
+    # Ключ составной: цель отрабатывает КАЖДЫЙ аккаунт операции (цикл
+    # accounts × channels), и закрывать канал целиком из-за одного аккаунта
+    # значит не вывести из него остальные.
+    _already_left = await completed_account_targets(pool, op_id, "leave")
+    if _already_left:
+        log.info(
+            "bulk_leave op=%d: повтор прогона, пропускаю %d уже выполненных пар "
+            "(аккаунт, канал)", op_id, len(_already_left),
+        )
+
     for acc_idx, acc in enumerate(accounts):
         if proxy_mode == "relay":
             acc_dict = {**dict(acc), "proxy_url": None, "enforce_proxy": False}
@@ -4893,6 +4912,19 @@ async def _exec_bulk_leave(
             skipped_by_limit += 1
             continue
         for i, channel in enumerate(channels):
+            # Пара уже отработана прошлым прогоном. Считаем её успешной:
+            # работа сделана, и отчёт обязан это отражать, иначе владелец
+            # увидит «выполнено 12 из 50» на доведённой операции.
+            if (int(acc["id"]), str(channel)) in _already_left:
+                ok_count += 1
+                step += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
+                    log_ctx=f"[bulk_leave_skip_done op={op_id}]",
+                )
+                continue
             if await _is_cancelled(pool, op_id):
                 await release_accounts(used_acc_ids)
                 return {
