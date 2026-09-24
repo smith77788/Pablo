@@ -167,6 +167,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 16px)}
 .sub-sb{padding-bottom:28px}
+/* Содержимое не должно начинаться вплотную к шапке: замер по всем экранам
+   показал разброс от 0 до 40px. Восемь пикселей сверху телу экрана и
+   вдвое меньший верхний отступ у первого заголовка раздела выравнивают ритм. */
+.sb,.sub-sb{padding-top:8px}
+.sb > .sec:first-child,.sub-sb > .sec:first-child{padding-top:8px}
 
 /* ─── Header ─────────────────────────────────────────────────── */
 .hdr{padding:calc(var(--safe-t) + 8px) 14px 10px;background:var(--glass);backdrop-filter:saturate(150%) blur(16px);-webkit-backdrop-filter:saturate(150%) blur(16px);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
