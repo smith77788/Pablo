@@ -152,7 +152,7 @@ const SP_FORM = [
   { k: 'guardrails', label: 'Доп. правила честности/запреты', type: 'textarea' },
 
   { sec: '🧠 Модель ИИ' },
-  { k: 'ai_provider', label: 'AI-провайдер (пусто = авто)', type: 'text' },
+  { k: 'ai_provider', label: 'Провайдер ИИ (пусто — авто)', type: 'text' },
   { k: 'model', label: 'Модель (пусто = по умолчанию)', type: 'text' },
   { k: 'max_tokens', label: 'Макс. длина ответа (токенов)', type: 'number', ph: '400' },
   { k: 'temperature', label: 'Температура (0–2)', type: 'text', ph: '0.7' },

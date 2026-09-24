@@ -1107,7 +1107,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openArModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
-    <div class="sec">Статус AI <span class="sec-btn" onclick="testAi(this)" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Проверить →</span></div>
+    <div class="sec">Статус ИИ <span class="sec-btn" onclick="testAi(this)" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Проверить →</span></div>
     <div class="lst" id="aiStatusBox" style="margin-bottom:8px"></div>
     <div class="sec">Авто-ответы бота</div>
     <div class="lst" id="arList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2059,7 +2059,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- Расширенные -->
     <div class="sec">Расширенные</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Экосистемы, сети, топология, AI-инструменты, узлы.</div>
+    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Экосистемы, сети, топология, ИИ-инструменты, узлы.</div>
     <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openGraph()">
         <div class="mgmt-tile-ico">🕸</div>
@@ -3528,7 +3528,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-contacts">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
-      <span class="icon-btn" role="button" tabindex="0" onclick="openUchAI()" title="AI Ассистент" aria-label="AI Ассистент">🤖</span>
+      <span class="icon-btn" role="button" tabindex="0" onclick="openUchAI()" title="ИИ-ассистент" aria-label="ИИ-ассистент">🤖</span>
       <span class="icon-btn" role="button" tabindex="0" onclick="toggleContactSelect()" title="Выбор" aria-label="Выбор" id="contactSelectBtn">☑️</span>
       <span class="icon-btn" role="button" tabindex="0" onclick="openContactStats()" title="Статистика" aria-label="Статистика">📊</span>
     </div>
@@ -3715,7 +3715,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <div class="screen" id="s-uchai">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🤖 AI Ассистент</div></div>
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🤖 ИИ-ассистент</div></div>
   <div class="sub-sb">
     <div id="aiChat" style="padding:12px 16px;height:calc(100vh - 180px);overflow-y:auto"></div>
     <div style="padding:8px 16px;display:flex;gap:8px;border-top:1px solid var(--sep);background:var(--bg)">
@@ -4312,8 +4312,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-err" id="growthErr"></div>
       <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
     </div>
-    <div class="sec" style="margin-top:14px">💬 AI-комментинг</div>
-    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны AI-ключи). Естественно, по теме, на языке поста.</div>
+    <div class="sec" style="margin-top:14px">💬 ИИ-комментинг</div>
+    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны ключи ИИ). Естественно, по теме, на языке поста.</div>
     <div style="padding:8px 16px">
       <div class="field"><label>Каналы (по одному на строку или через запятую)</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;@channel2" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field"><label>Тематика (опционально, контекст для ИИ)</label><input type="text" id="aicNiche" placeholder="например: крипта, фитнес"></div>
@@ -4328,7 +4328,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="aicAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="aicErr"></div>
-      <button class="btn btn-p" id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить AI-комментинг</button>
+      <button class="btn btn-p" id="aicBtn" onclick="submitAiComment()" style="width:100%">💬 Запустить ИИ-комментинг</button>
     </div>
     <div class="sec" style="margin-top:8px">История</div>
     <div class="lst" id="growthHistory"></div>
@@ -4411,7 +4411,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec">Популярные ключевые слова</div>
     <div class="lst" id="seoKeywords"></div>
-    <div class="sec" style="margin-top:8px">AI SEO-предложения <span class="sec-act" onclick="applySeoAll()">Применить всё →</span></div>
+    <div class="sec" style="margin-top:8px">ИИ-предложения по SEO <span class="sec-act" onclick="applySeoAll()">Применить всё →</span></div>
     <div class="lst" id="seoSuggestions"></div>
     <div class="sec" style="margin-top:8px">Переоптимизация ботов
       <label style="float:right;font-size:12px;color:var(--hint);cursor:pointer">
@@ -6208,7 +6208,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeAiMemoryModal()">✕</div>
     <div class="modal-title">🧠 Новая запись в памяти</div>
     <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" placeholder="Краткое описание"></div>
-    <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для AI-ассистента..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для ИИ-ассистента…" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="aiMemErr"></div>
     <button class="btn btn-p" id="aiMemBtn" onclick="submitAiMemory()" style="width:100%">💾 Сохранить</button>
   </div>
@@ -6290,7 +6290,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeAdIntelModal()">✕</div>
     <div class="modal-title">📡 Добавить канал для анализа</div>
     <div class="field"><label>Username канала (без @)</label><input type="text" id="adIntelCh" placeholder="target_channel"></div>
-    <div class="field-note">AI просканирует рекламу в канале и оценит качество аудитории</div>
+    <div class="field-note">ИИ просканирует рекламу в канале и оценит качество аудитории</div>
     <div class="field-err" id="adIntelErr"></div>
     <button class="btn btn-p" id="adIntelBtn" onclick="submitAdIntelChannel()" style="width:100%">🚀 Запустить сканирование</button>
   </div>
@@ -7671,6 +7671,19 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
+  'Хранилище':'История переписки: удалённые и изменённые сообщения',
+  'Менеджер продаж':'Бот-продавец: товары, ответы на вопросы, заказы',
+  'Мотор роста':'Цель роста и подобранные под неё шаги',
+  'Накрутка':'Просмотры, реакции, сторис, подписчики',
+  'Восстановление':'Возврат аккаунтов после ограничений',
+  'Облако':'Файлы кусками в приватных каналах аккаунтов',
+  'Щит':'Защита аккаунтов от типовых ошибок',
+  'Нотариус':'Независимое заверение рекламных размещений',
+  'Модель поведения':'Сводит переписку в стадии готовности к покупке',
+  'Общие папки':'Папки чатов Telegram со ссылкой-приглашением',
+  'Позиции в поиске':'Отслеживание позиций по ключевым словам',
+  'Комьюнити':'Ноды-сообщества: каналы и топики',
+  'Приветствие':'Сценарий: первое сообщение новому подписчику',
   'Дашборд':'Сводка: аккаунты, аудитория, операции, здоровье','Дашборд метрик':'Реалтайм-метрики: аудитория, рост, посты','Дэшборд здоровья':'Здоровье аккаунтов и риски бана',
   'Боты':'Ваши Telegram-боты: настройка, рассылки, статистика','Аккаунты':'Telegram-аккаунты (сессии): вход, статус, прокси/IP',
   'Каналы':'Ваши каналы и массовые действия по ним','Рассылки':'Массовые сообщения аудитории ботов','Рассылка':'Массовое сообщение аудитории бота',
@@ -7690,7 +7703,7 @@ const MODULE_DESCS = {
   'Прогрев':'Разогрев новых аккаунтов под живое поведение','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
   'Синхронизация':'Синхронизация контактов и данных','Клонер контента':'Копирование постов из источника','Клон и адаптация':'Клон профиля/контента с адаптацией','Сеть контента':'Сеть распространения контента',
   'Экосистемы':'Управление сетями ресурсов','Сетки':'Сети ресурсов','Сеть ботов':'Связанная сеть ботов','Топология':'Карта связей ресурсов','Граф связей':'Граф связей аккаунтов/ресурсов','Граф-хаб':'Инструменты графа связей','Ноды':'Узлы распределённой сети','Связки (бот+каналы)':'Связка бота с каналами',
-  'ИИ Память':'AI-память по проекту','Нарратив':'AI-нарративы/легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'AI-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и алерты',
+  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и алерты',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Spintax':'Генерация вариаций текста (spintax)',
   'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
@@ -8031,7 +8044,7 @@ async function cwAiStatus(){
     if(eng.length){
       el.innerHTML='🧠 <span style="color:var(--green)">Модели разогрева:</span> '+eng.map(esc).join(' → ');
     }else{
-      el.innerHTML='⚠️ <span style="color:var(--orange)">AI-ключи не найдены</span> — задайте ключ (Claude/Groq) в админ-меню «AI-ключи», иначе флот вступит, но писать не будет.';
+      el.innerHTML='⚠️ <span style="color:var(--orange)">Ключи ИИ не найдены</span> — задайте ключ (Claude/Groq) в админ-меню «Ключи ИИ», иначе флот вступит, но писать не будет.';
     }
   }catch(e){ el.innerHTML=''; }
 }
@@ -8559,7 +8572,7 @@ function renderAct(items) {
     warmup_completed:  ['🌱','Прогрев завершён'],
     warmup_started:    ['🌱','Прогрев запущен'],
     strike:            ['⚡','STRIKE-операция'],
-    niche_growth_post: ['🌿','Growth Agent пост'],
+    niche_growth_post: ['🌿','Пост агента роста'],
     broadcast:         ['📢','Рассылка'],
     parse_members:     ['👥','Парсинг участников'],
     invite_members:    ['➕','Добавление участников'],
@@ -9190,7 +9203,7 @@ async function loadAiStatus() {
   try {
     const d = await api('/api/miniapp/ai/status');
     if (!d.configured) {
-      box.innerHTML = `<div class="li" style="cursor:default"><div class="ava ava-orange">⚠️</div><div class="li-body"><div class="li-name">AI не настроен</div><div class="li-sub">Авто-ответы с ИИ работать не будут — не заданы ключи AI-провайдеров.</div></div></div>`;
+      box.innerHTML = `<div class="li" style="cursor:default"><div class="ava ava-orange">⚠️</div><div class="li-body"><div class="li-name">ИИ не настроен</div><div class="li-sub">Авто-ответы с ИИ работать не будут — не заданы ключи провайдеров ИИ.</div></div></div>`;
       return;
     }
     box.innerHTML = (d.providers||[]).map(p=>`<div class="li" style="cursor:default"><div class="ava ava-blue">🧠</div><div class="li-body"><div class="li-name">${esc(p.name)}</div><div class="li-sub">${esc(p.model||'')}</div></div><span class="badge b-gy">настроен</span></div>`).join('');
@@ -9202,8 +9215,8 @@ async function testAi(btn) {
   try {
     const d = await api('/api/miniapp/ai/test', {method:'POST'});
     const provs = d.providers||[];
-    box.innerHTML = provs.length ? provs.map(p=>`<div class="li" style="cursor:default"><div class="ava ${p.ok?'ava-green':'ava-red'}">${p.ok?'✅':'❌'}</div><div class="li-body"><div class="li-name">${esc(p.name)}</div><div class="li-sub">${p.ms} мс</div></div><span class="badge ${p.ok?'b-gr':'b-rd'}">${p.ok?'работает':'сбой'}</span></div>`).join('') : empty('🧠','AI не настроен','Задайте ключи AI-провайдеров');
-    toast(d.any_ok ? '✅ AI отвечает' : '⚠️ AI не отвечает');
+    box.innerHTML = provs.length ? provs.map(p=>`<div class="li" style="cursor:default"><div class="ava ${p.ok?'ava-green':'ava-red'}">${p.ok?'✅':'❌'}</div><div class="li-body"><div class="li-name">${esc(p.name)}</div><div class="li-sub">${p.ms} мс</div></div><span class="badge ${p.ok?'b-gr':'b-rd'}">${p.ok?'работает':'сбой'}</span></div>`).join('') : empty('🧠','ИИ не настроен','Задайте ключи провайдеров ИИ');
+    toast(d.any_ok ? '✅ ИИ отвечает' : '⚠️ ИИ не отвечает');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
   finally { if (btn) btn.textContent = 'Проверить →'; }
 }
@@ -11480,7 +11493,7 @@ const OP_CREATE_CATS = [
   ]},
   {title:'🚀 Продвижение', items:[
     {ico:'🚀', name:'Накрутка', sub:'Просмотры, реакции, сторис', fn:'openBoost'},
-    {ico:'🌿', name:'Growth Agent', sub:'Органический рост', fn:'openGrowth'},
+    {ico:'🌿', name:'Агент роста', sub:'Органический рост', fn:'openGrowth'},
     {ico:'📣', name:'Самопиар', sub:'Продвижение по своей аудитории', fn:'openSelfPromo'},
     {ico:'⚔️', name:'Strike', sub:'Целевая зачистка', fn:'openStrike'},
   ]},
@@ -15437,10 +15450,10 @@ async function submitAiComment() {
   const btn=document.getElementById('aicBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const r=await api('/api/miniapp/ai_comment',{method:'POST',body:JSON.stringify({channels:list,niche,tone,acc_count})});
-    toast(`💬 AI-комментинг запущен: ${r.channels||list.length} каналов (#${r.op_id})`);
+    toast(`💬 ИИ-комментинг запущен: ${r.channels||list.length} каналов (#${r.op_id})`);
     openGrowth();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
-  finally { btn.disabled=false; btn.textContent='💬 Запустить AI-комментинг'; }
+  finally { btn.disabled=false; btn.textContent='💬 Запустить ИИ-комментинг'; }
 }
 
 // ── Quick Post ───────────────────────────────────────────
@@ -17517,7 +17530,7 @@ function openUchAI() {
   if (!AI_CHAT_HISTORY.length) {
     document.getElementById('aiChat').innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--hint)">
       <div style="font-size:48px;margin-bottom:12px">🤖</div>
-      <div style="font-size:15px;margin-bottom:8px">AI Ассистент контактов</div>
+      <div style="font-size:15px;margin-bottom:8px">ИИ-ассистент контактов</div>
       <div style="font-size:13px">Задайте вопрос о ваших контактах</div>
     </div>`;
   }
@@ -17968,7 +17981,7 @@ async function openAiMemory() {
     const d = await api('/api/miniapp/ai_memory');
     const mems = d.memories||[];
     txt('m-aimem-val',`${mems.length} записей`);
-    if (!mems.length) { txt('aiMemoryList', empty('🧠','Нет записей','Добавьте заметки для AI-ассистента')); return; }
+    if (!mems.length) { txt('aiMemoryList', empty('🧠','Нет записей','Добавьте заметки для ИИ-ассистента')); return; }
     txt('aiMemoryList', mems.map(m=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-purple-16)">${m.pinned?'📌':(MEM_KIND[m.kind]||'📝')}</div>
@@ -17986,7 +17999,7 @@ async function openAiMemory() {
   }
 }
 async function deleteAiMem(id) {
-  if (!await askConfirm('Удалить запись из AI-памяти?')) return;
+  if (!await askConfirm('Удалить запись из ИИ-памяти?')) return;
   try {
     await api(`/api/miniapp/ai_memory/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -21354,7 +21367,7 @@ const MASS_OP_LABELS = {
   bulk_chan_exec:'✏️ Username/About', bulk_create_channels:'📡 Создание каналов',
   bulk_dm_adhoc:'📨 Рассылка ЛС', boost_views:'👁 Просмотры', boost_reactions:'❤ Реакции',
   boost_stories:'📖 Сторис', boost_subscribers:'👥 Подписчики/участники', boost_bot_starts:'🚀 Старты в ботах',
-  niche_growth_post:'🌿 Growth Agent',
+  niche_growth_post:'🌿 Агент роста',
   check_accounts_health:'🔍 Проверка аккаунтов', scan_owned_resources:'🔎 Скан ресурсов',
   reclassify_channels:'🔄 Переопределение инфраструктуры',
   channel_import_all:'📡 Импорт каналов', group_import_all:'📥 Импорт групп',
