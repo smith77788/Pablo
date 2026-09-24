@@ -29,7 +29,34 @@ import os
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GUARDED = ("join_channel", "leave_channel")
+
+# Функции, которые зовёт исполнитель операций: у них зависший запрос стоит
+# слота параллельности и арендованного флота на часы, а не одного HTTP-ответа.
+GUARDED = (
+    "join_channel",
+    "leave_channel",
+    "send_dm",
+    "report_peer",
+    "create_channel",
+    "create_channel_invite_link",
+    "create_forum_supergroup",
+    "create_shared_folder_link",
+    "create_bot_via_botfather",
+    "scan_owned_bots",
+    "fetch_bot_tokens_via_botfather",
+    "edit_channel_title",
+    "edit_channel_about",
+    "set_channel_photo",
+    "set_channel_username",
+    "set_discussion_group",
+    "promote_to_admin_ex",
+    "demote_from_admin",
+    "demote_from_admin_batch",
+    "get_channels_full_info",
+    "forward_new_posts",
+    "update_profile",
+    "update_account_username",
+)
 
 
 def _tree():
@@ -105,7 +132,7 @@ def test_timeout_is_generous_enough_not_to_fail_live_requests(name):
     )
 
 
-@pytest.mark.parametrize("name", GUARDED)
+@pytest.mark.parametrize("name", ("join_channel", "leave_channel"))
 def test_timeout_is_classified_as_a_proxy_failure(name):
     """Таймаут обязан разбираться, а не всплывать сырым исключением.
 
@@ -149,3 +176,21 @@ def test_connect_itself_stays_bounded():
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_connect_and_track")
     body = "\n".join(src.splitlines()[fn.lineno - 1:fn.end_lineno])
     assert "wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)" in body
+
+
+@pytest.mark.parametrize("name", GUARDED)
+def test_timeout_never_escapes_as_a_raw_error(name):
+    """Таймаут обязан быть разобран, иначе он утечёт из исполнителя наверх.
+
+    Цена разницы велика: разобранный таймаут — это провал ОДНОЙ цели, а
+    необработанное исключение прерывает операцию целиком, уже после того как
+    часть целей отработана.
+    """
+    src, tree = _tree()
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == name)
+    body = "\n".join(src.splitlines()[fn.lineno - 1:fn.end_lineno])
+    assert ("except asyncio.TimeoutError" in body
+            or "except Exception" in body
+            or "except BaseException" in body), (
+        f"{name}: таймаут некому поймать — он оборвёт всю операцию")

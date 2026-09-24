@@ -2545,7 +2545,7 @@ async def create_shared_folder_link(
             skipped = 0
             for cid in chat_ids:
                 try:
-                    peers.append(await client.get_input_entity(int(cid)))
+                    peers.append(await asyncio.wait_for(client.get_input_entity(int(cid)), timeout=_OP_TIMEOUT))
                 except Exception:
                     skipped += 1
             if not peers:
@@ -2556,7 +2556,9 @@ async def create_shared_folder_link(
             fid = int(existing_filter_id) if existing_filter_id else 0
             if not fid:
                 try:
-                    existing = await client(functions.messages.GetDialogFiltersRequest())
+                    existing = await asyncio.wait_for(
+                        client(functions.messages.GetDialogFiltersRequest()),
+                        timeout=_OP_TIMEOUT)
                     used = [getattr(f, "id", 0)
                             for f in getattr(existing, "filters", existing) or []]
                 except Exception:
@@ -2575,23 +2577,23 @@ async def create_shared_folder_link(
             except Exception:
                 _title_obj = title
             try:
-                await client(functions.messages.UpdateDialogFilterRequest(
+                await asyncio.wait_for(client(functions.messages.UpdateDialogFilterRequest(
                     id=fid,
                     filter=types.DialogFilterChatlist(
                         id=fid, title=_title_obj,
-                        pinned_peers=[], include_peers=peers, emoticon=None)))
+                        pinned_peers=[], include_peers=peers, emoticon=None))), timeout=_OP_TIMEOUT)
             except TypeError:
                 # Старый слой: DialogFilterChatlist со строковым title.
-                await client(functions.messages.UpdateDialogFilterRequest(
+                await asyncio.wait_for(client(functions.messages.UpdateDialogFilterRequest(
                     id=fid,
                     filter=types.DialogFilterChatlist(
                         id=fid, title=title,
-                        pinned_peers=[], include_peers=peers, emoticon=None)))
+                        pinned_peers=[], include_peers=peers, emoticon=None))), timeout=_OP_TIMEOUT)
 
             # 4) экспорт ссылки-приглашения к папке.
-            res = await client(functions.chatlists.ExportChatlistInviteRequest(
+            res = await asyncio.wait_for(client(functions.chatlists.ExportChatlistInviteRequest(
                 chatlist=types.InputChatlistDialogFilter(filter_id=fid),
-                title=title, peers=peers))
+                title=title, peers=peers)), timeout=_OP_TIMEOUT)
             link = getattr(getattr(res, "invite", None), "url", "") or ""
             slug = link.rstrip("/").split("/")[-1] if link else ""
             return {"ok": bool(link), "invite_link": link, "slug": slug,
@@ -2897,7 +2899,7 @@ async def send_dm(
         # Try to resolve numeric IDs
         if isinstance(target, str) and target.isdigit():
             target = int(target)
-        await client.send_message(target, text)
+        await asyncio.wait_for(client.send_message(target, text), timeout=_OP_TIMEOUT)
         return {"ok": True}
     except FloodWaitError as e:
         return {"error": f"FloodWait: подождите {e.seconds}с", "flood_wait": e.seconds}
@@ -3737,8 +3739,8 @@ async def get_channels_full_info(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         for idx, cid in enumerate(ids):
             try:
-                entity = await client.get_entity(int(cid))
-                full = await client(GetFullChannelRequest(entity))
+                entity = await asyncio.wait_for(client.get_entity(int(cid)), timeout=_OP_TIMEOUT)
+                full = await asyncio.wait_for(client(GetFullChannelRequest(entity)), timeout=_OP_TIMEOUT)
                 out[int(cid)] = {
                     "members_count": int(
                         getattr(full.full_chat, "participants_count", 0) or 0
@@ -3947,14 +3949,14 @@ async def create_channel(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        result = await client(
+        result = await asyncio.wait_for(client(
             CreateChannelRequest(
                 title=title,
                 about=about,
                 megagroup=megagroup,
                 broadcast=not megagroup,
             )
-        )
+        ), timeout=_OP_TIMEOUT)
         ch = result.chats[0]
         _ch_id = ch.id
         _ch_hash = getattr(ch, "access_hash", 0) or 0
@@ -4304,7 +4306,7 @@ async def edit_channel_title(
         # по access_hash / iter_dialogs (тот же путь, что у пина и постинга).
         ref = f"@{username.lstrip('@')}" if username else channel_id
         entity = await _resolve_channel_peer(client, ref, access_hash)
-        await client(EditTitleRequest(channel=entity, title=title))
+        await asyncio.wait_for(client(EditTitleRequest(channel=entity, title=title)), timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
         log.exception("edit_channel_title error: %s", e)
@@ -4331,7 +4333,7 @@ async def edit_channel_about(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         ref = f"@{username.lstrip('@')}" if username else channel_id
         entity = await _resolve_channel_peer(client, ref, access_hash)
-        await client(EditChatAboutRequest(peer=entity, about=about))
+        await asyncio.wait_for(client(EditChatAboutRequest(peer=entity, about=about)), timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
         log.exception("edit_channel_about error: %s", e)
@@ -4372,8 +4374,11 @@ async def set_channel_photo(
         entity = await _resolve_channel_peer(client, channel_id, access_hash)
         buf = io.BytesIO(photo_bytes)
         buf.name = "avatar.png"
-        uploaded = await client.upload_file(buf, file_name="avatar.png")
-        await client(EditPhotoRequest(channel=entity, photo=InputChatUploadedPhoto(uploaded)))
+        uploaded = await asyncio.wait_for(client.upload_file(buf, file_name="avatar.png"), timeout=_OP_TIMEOUT)
+        await asyncio.wait_for(
+            client(EditPhotoRequest(
+                channel=entity, photo=InputChatUploadedPhoto(uploaded))),
+            timeout=_OP_TIMEOUT)
         return ""
     except Exception as e:
         log.warning("set_channel_photo error: %s", e)
@@ -4398,10 +4403,10 @@ async def set_channel_username(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(PeerChannel(channel_id))
-        await client(
+        entity = await asyncio.wait_for(client.get_entity(PeerChannel(channel_id)), timeout=_OP_TIMEOUT)
+        await asyncio.wait_for(client(
             UpdateUsernameRequest(channel=entity, username=username.lstrip("@"))
-        )
+        ), timeout=_OP_TIMEOUT)
         return ""
     except Exception as e:
         log.exception("set_channel_username error: %s", e)
@@ -4608,13 +4613,13 @@ async def create_channel_invite_link(
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await _resolve_channel_peer(client, channel_id, access_hash)
-        result = await client(ExportChatInviteRequest(
+        result = await asyncio.wait_for(client(ExportChatInviteRequest(
             peer=entity,
             title=opts["title"],
             expire_date=opts["expire_dt"],
             usage_limit=opts["usage_limit"],
             request_needed=bool(opts["request_needed"]) or None,
-        ))
+        )), timeout=_OP_TIMEOUT)
         return {
             "ok": True,
             "link": getattr(result, "link", "") or "",
@@ -5230,7 +5235,7 @@ async def promote_to_admin_ex(
 
         channel = await _resolve_channel_peer(client, channel_id, access_hash)
         try:
-            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+            input_user = await asyncio.wait_for(client.get_input_entity(PeerUser(user_id=user_id)), timeout=_OP_TIMEOUT)
         except (ValueError, TypeError):
             # StringSession НЕ хранит кэш сущностей между подключениями, поэтому
             # get_input_entity(PeerUser(id)) на свежем клиенте-промоутере не может
@@ -5244,7 +5249,7 @@ async def promote_to_admin_ex(
                     timeout=60)
             except Exception:
                 log_exc_swallow(log, "promote_to_admin: participant warm failed")
-            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+            input_user = await asyncio.wait_for(client.get_input_entity(PeerUser(user_id=user_id)), timeout=_OP_TIMEOUT)
 
         rights = ChatAdminRights(
             post_messages=post_messages,
@@ -5260,14 +5265,14 @@ async def promote_to_admin_ex(
             anonymous=anonymous,
             manage_topics=False,
         )
-        await client(
+        await asyncio.wait_for(client(
             EditAdminRequest(
                 channel=channel,
                 user_id=input_user,
                 admin_rights=rights,
                 rank="",
             )
-        )
+        ), timeout=_OP_TIMEOUT)
         log.info(
             "promote_to_admin: user %s promoted in channel %s", user_id, channel_id
         )
@@ -5328,21 +5333,24 @@ async def demote_from_admin(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         channel = await _resolve_channel_peer(client, channel_id, access_hash)
         try:
-            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+            input_user = await asyncio.wait_for(client.get_input_entity(PeerUser(user_id=user_id)), timeout=_OP_TIMEOUT)
         except (ValueError, TypeError):
             try:
                 await asyncio.wait_for(
                     client.get_participants(channel, limit=_PROMOTE_WARM_LIMIT), timeout=60)
             except Exception:
                 log_exc_swallow(log, "demote_from_admin: participant warm failed")
-            input_user = await client.get_input_entity(PeerUser(user_id=user_id))
+            input_user = await asyncio.wait_for(client.get_input_entity(PeerUser(user_id=user_id)), timeout=_OP_TIMEOUT)
         rights = ChatAdminRights(
             post_messages=False, edit_messages=False, delete_messages=False,
             ban_users=False, invite_users=False, pin_messages=False, add_admins=False,
             manage_call=False, other=False, change_info=False, anonymous=False,
             manage_topics=False,
         )
-        await client(EditAdminRequest(channel=channel, user_id=input_user, admin_rights=rights, rank=""))
+        await asyncio.wait_for(
+            client(EditAdminRequest(
+                channel=channel, user_id=input_user, admin_rights=rights, rank="")),
+            timeout=_OP_TIMEOUT)
         log.info("demote_from_admin: user %s demoted in channel %s", user_id, channel_id)
         return True
     except Exception as e:
@@ -5403,7 +5411,9 @@ async def demote_from_admin_batch(
         for uid in user_ids:
             try:
                 try:
-                    input_user = await client.get_input_entity(PeerUser(user_id=uid))
+                    input_user = await asyncio.wait_for(
+                        client.get_input_entity(PeerUser(user_id=uid)),
+                        timeout=_OP_TIMEOUT)
                 except (ValueError, TypeError):
                     if not _warmed:
                         try:
@@ -5413,9 +5423,11 @@ async def demote_from_admin_batch(
                         except Exception:
                             log_exc_swallow(log, "demote_from_admin_batch: participant warm failed")
                         _warmed = True
-                    input_user = await client.get_input_entity(PeerUser(user_id=uid))
-                await client(EditAdminRequest(
-                    channel=channel, user_id=input_user, admin_rights=rights, rank=""))
+                    input_user = await asyncio.wait_for(
+                        client.get_input_entity(PeerUser(user_id=uid)),
+                        timeout=_OP_TIMEOUT)
+                await asyncio.wait_for(client(EditAdminRequest(
+                    channel=channel, user_id=input_user, admin_rights=rights, rank="")), timeout=_OP_TIMEOUT)
                 out[int(uid)] = True
             except Exception as e:
                 log.warning("demote_from_admin_batch error user=%s chan=%s: %s",
@@ -5464,7 +5476,7 @@ async def set_discussion_group(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         channel = await _resolve_channel_peer(client, channel_id, channel_hash)
         group = await _resolve_channel_peer(client, group_id, group_hash)
-        await client(SetDiscussionGroupRequest(broadcast=channel, group=group))
+        await asyncio.wait_for(client(SetDiscussionGroupRequest(broadcast=channel, group=group)), timeout=_OP_TIMEOUT)
         log.info("set_discussion_group: group %s linked to channel %s", group_id, channel_id)
         return True
     except Exception as e:
@@ -5498,7 +5510,7 @@ async def create_forum_supergroup(
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await _resolve_channel_peer(client, ch_id, int(res.get("access_hash") or 0))
-        await client(ToggleForumRequest(channel=entity, enabled=True))
+        await asyncio.wait_for(client(ToggleForumRequest(channel=entity, enabled=True)), timeout=_OP_TIMEOUT)
         res["forum"] = True
     except Exception as e:
         log.warning("create_forum_supergroup: toggle forum failed chan=%s: %s", ch_id, e)
@@ -5535,7 +5547,7 @@ async def forward_new_posts(
         # Новая связка (курсор=0): не сваливаем старый бэклог в цель — просто
         # ставим курсор на текущий последний пост и стартуем отслеживание с «сейчас».
         if since <= 0:
-            latest = await client.get_messages(source, limit=1)
+            latest = await asyncio.wait_for(client.get_messages(source, limit=1), timeout=_OP_TIMEOUT)
             seed = int(getattr(latest[0], "id", 0)) if latest else 0
             return {"forwarded": 0, "last_msg_id": seed, "seeded": True}
         # min_id=since → только новее курсора; reverse=True → хронологически.
@@ -5547,7 +5559,7 @@ async def forward_new_posts(
             msgs.append(m)
         for m in msgs:
             try:
-                await client.forward_messages(target, m)
+                await asyncio.wait_for(client.forward_messages(target, m), timeout=_OP_TIMEOUT)
                 forwarded += 1
                 last_id = max(last_id, int(getattr(m, "id", 0) or 0))
                 await asyncio.sleep(random.uniform(1.5, 4.0))
@@ -5845,8 +5857,11 @@ async def report_peer(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(peer_username.lstrip("@"))
-        await client(ReportPeerRequest(peer=entity, reason=tg_reason, message=message))
+        entity = await asyncio.wait_for(client.get_entity(peer_username.lstrip("@")), timeout=_OP_TIMEOUT)
+        await asyncio.wait_for(
+            client(ReportPeerRequest(
+                peer=entity, reason=tg_reason, message=message)),
+            timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
         log.exception("report_peer error: %s", e)
@@ -7597,7 +7612,7 @@ async def update_profile(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        await client.get_me()
+        await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         kwargs: dict = {}
         if first_name is not None:
             kwargs["first_name"] = first_name
@@ -7607,7 +7622,7 @@ async def update_profile(
             kwargs["about"] = about
         if not kwargs:
             return True
-        await client(UpdateProfileRequest(**kwargs))
+        await asyncio.wait_for(client(UpdateProfileRequest(**kwargs)), timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
         from telethon.errors import FloodWaitError
@@ -7670,7 +7685,7 @@ async def update_account_username(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        await client(UpdateUsernameRequest(username=username.lstrip("@")))
+        await asyncio.wait_for(client(UpdateUsernameRequest(username=username.lstrip("@"))), timeout=_OP_TIMEOUT)
         return ""
     except Exception as e:
         from telethon.errors import FloodWaitError
@@ -7771,16 +7786,16 @@ async def fetch_bot_tokens_via_botfather(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        bf = await client.get_entity(_BOTFATHER_USERNAME)
+        bf = await asyncio.wait_for(client.get_entity(_BOTFATHER_USERNAME), timeout=_OP_TIMEOUT)
 
         async def _latest():
-            msgs = await client.get_messages(bf, limit=1)
+            msgs = await asyncio.wait_for(client.get_messages(bf, limit=1), timeout=_OP_TIMEOUT)
             return msgs[0] if msgs else None
 
         for uname in wanted:
             try:
                 await asyncio.sleep(random.uniform(2.0, 4.0))
-                await client.send_message(bf, "/mybots")
+                await asyncio.wait_for(client.send_message(bf, "/mybots"), timeout=_OP_TIMEOUT)
                 await asyncio.sleep(3.0)
                 msg = await _latest()
                 if msg is None:
@@ -7848,26 +7863,26 @@ async def scan_owned_bots(session_string: str, _acc: dict | None = None) -> dict
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        bf = await client.get_entity(_BOTFATHER_USERNAME)
+        bf = await asyncio.wait_for(client.get_entity(_BOTFATHER_USERNAME), timeout=_OP_TIMEOUT)
         bf_id = bf.id
 
         baseline = 0
         try:
-            msgs = await client.get_messages(bf, limit=1)
+            msgs = await asyncio.wait_for(client.get_messages(bf, limit=1), timeout=_OP_TIMEOUT)
             if msgs and msgs[0].sender_id == bf_id:
                 baseline = msgs[0].id
         except Exception:
             log_exc_swallow(log, "scan_owned_bots: baseline")
 
         await asyncio.sleep(random.uniform(1.0, 2.5))
-        await client.send_message(bf, "/mybots")
+        await asyncio.wait_for(client.send_message(bf, "/mybots"), timeout=_OP_TIMEOUT)
 
         labels: list[str] = []
         deadline = asyncio.get_event_loop().time() + 45.0
         while asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(2.5)
             try:
-                msgs = await client.get_messages(bf, limit=3)
+                msgs = await asyncio.wait_for(client.get_messages(bf, limit=3), timeout=_OP_TIMEOUT)
             except Exception:
                 continue
             fresh = [m for m in (msgs or [])
@@ -7957,13 +7972,13 @@ async def create_bot_via_botfather(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
         # Resolve BotFather entity once so get_messages sender check works
-        bf_entity = await client.get_entity(_BOTFATHER_USERNAME)
+        bf_entity = await asyncio.wait_for(client.get_entity(_BOTFATHER_USERNAME), timeout=_OP_TIMEOUT)
         bf_id = bf_entity.id
 
         async def _get_last_bf_msg_id() -> int:
             """Return the message_id of the latest BotFather message (0 if none)."""
             try:
-                msgs = await client.get_messages(bf_entity, limit=1)
+                msgs = await asyncio.wait_for(client.get_messages(bf_entity, limit=1), timeout=_OP_TIMEOUT)
                 if msgs and msgs[0].sender_id == bf_id:
                     return msgs[0].id
             except Exception as e:
@@ -7979,7 +7994,7 @@ async def create_bot_via_botfather(
             # Record baseline before sending so we detect the NEW response
             baseline_id = await _get_last_bf_msg_id()
             await asyncio.sleep(random.uniform(1.5, 3.5))  # human-like pre-send pause
-            await client.send_message(bf_entity, text)
+            await asyncio.wait_for(client.send_message(bf_entity, text), timeout=_OP_TIMEOUT)
 
             # Poll for BotFather's reply
             deadline = asyncio.get_event_loop().time() + timeout
@@ -7987,7 +8002,7 @@ async def create_bot_via_botfather(
             while asyncio.get_event_loop().time() < deadline:
                 await asyncio.sleep(poll_interval)
                 try:
-                    msgs = await client.get_messages(bf_entity, limit=3)
+                    msgs = await asyncio.wait_for(client.get_messages(bf_entity, limit=3), timeout=_OP_TIMEOUT)
                     for msg in msgs:
                         if msg.id > baseline_id and msg.sender_id == bf_id:
                             return msg.text or ""
@@ -8020,7 +8035,7 @@ async def create_bot_via_botfather(
         async def _bf_cancel() -> None:
             """Cancel any in-progress BotFather dialog."""
             try:
-                await client.send_message(bf_entity, "/cancel")
+                await asyncio.wait_for(client.send_message(bf_entity, "/cancel"), timeout=_OP_TIMEOUT)
                 await asyncio.sleep(random.uniform(2.0, 4.0))
             except Exception as e:
                 log.debug("create_bot_via_botfather: _bf_cancel: %s", e)
