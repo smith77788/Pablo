@@ -24,8 +24,13 @@ from bot.middlewares.user_activity import UserActivityLogMiddleware
 from bot.middlewares.subscription_gate import SubscriptionGateMiddleware, set_gate_enabled, set_gate_channels
 from bot.middlewares.latency import LatencyMiddleware
 from bot.utils.button_styles import install_button_style_patch
+from bot.utils.outgoing_redaction import install_outgoing_secret_redaction
 
 install_button_style_patch()
+# Чистка секретов на ВЫХОДЕ бота. Ставится до создания Bot и до импорта
+# обработчиков: в 47 местах текст исключения уходит прямо в сообщение
+# пользователю, а исключения прокси и базы несут в тексте логин с паролем.
+install_outgoing_secret_redaction()
 
 
 def _lazy_handler(module_path: str, attr: str = "router"):

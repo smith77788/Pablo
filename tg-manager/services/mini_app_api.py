@@ -5852,7 +5852,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("bad chat_id", 400)
         try:
-            limit = min(int(request.query.get("limit", 200)), 1000)
+            # max(1, ...) обязателен: без него ?limit=-5 уезжал в SQL как
+            # LIMIT -5, Postgres отвечал ошибкой, и экран отдавал 500 вместо
+            # данных — то есть параметр из запроса ронял эндпоинт.
+            limit = max(1, min(int(request.query.get("limit", 200)), 1000))
             offset = max(int(request.query.get("offset", 0)), 0)
         except (TypeError, ValueError):
             limit, offset = 200, 0
