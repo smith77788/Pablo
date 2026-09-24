@@ -138,6 +138,11 @@
   --shadow-glow:0 0 22px rgba(45,212,191,.18),0 6px 18px rgba(45,212,191,.1);
   --glow:0 6px 20px rgba(45,212,191,.30);
   --bg-input:rgba(255,255,255,.04);--border-input:rgba(255,255,255,.10);--bg-select:rgba(21,29,41,.97);
+  /* Псевдонимы: в разметке встречаются имена, которых в палитре не было, и
+     побеждало запасное значение — цвет уходил мимо палитры (серая рамка
+     #2a2a2a вместо --border, жёлтый .16 вместо .14 и так далее). */
+  --card:var(--bg2);--card-2:var(--bg-yellow-16);--line:var(--border);
+  --amber:var(--orange);--bg-orange-16:var(--bg-yellow-16);
   --bg-blue-16:rgba(96,165,250,.14);--bg-green-16:rgba(52,211,153,.14);--bg-purple-16:rgba(192,132,252,.14);--bg-yellow-16:rgba(251,191,36,.14);--bg-red-16:rgba(248,113,113,.14);--bg-violet-16:rgba(167,139,250,.14);--bg-red-18:rgba(248,113,113,.16);
   --green:#34d399;--orange:#fbbf24;--purple:#c084fc;--red:#f87171;--blue:#60a5fa;--teal:#2dd4bf;--purple-light:#a78bfa;
   /* Палитра иконок модулей: приглушённые оттенки, ничего не «кричит». */
@@ -337,7 +342,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
   box-shadow:none !important;opacity:1;pointer-events:none;border:1px solid var(--sep)}
 .btn-p{background:var(--btn);color:var(--btn-text);box-shadow:0 2px 12px rgba(45,212,191,.25),inset 0 1px 0 rgba(255,255,255,.15)}
 .btn-p:active{box-shadow:0 1px 6px rgba(45,212,191,.2),inset 0 1px 0 rgba(255,255,255,.1)}
-.btn-s{background:var(--bg2);color:var(--text);border:1px solid var(--border)}
+.btn-s{background:var(--bg3);color:var(--text);border:1px solid var(--border-strong)}
 .btn-s:active{background:rgba(255,255,255,.06)}
 .btn-g{background:rgba(52,211,153,.12);color:var(--green)}
 .btn-r{background:rgba(248,113,113,.12);color:var(--red)}
@@ -418,7 +423,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .modal-x:active{opacity:.6;transform:scale(.88)}
 .field{margin-bottom:12px}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--hint);margin-bottom:5px;letter-spacing:.03em}
-.field textarea,.field input,.field select{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:14px;color:var(--text);font-family:inherit;resize:none;outline:none;-webkit-appearance:none;appearance:none;transition:border-color .2s,box-shadow .2s}
+.field textarea,.field input,.field select{width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 12px;font-size:14px;color:var(--text);font-family:inherit;resize:none;outline:none;-webkit-appearance:none;appearance:none;transition:border-color .2s,box-shadow .2s}
 .field textarea:focus,.field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.12)}
 /* Поле формы, лежащее ПРЯМО в теле экрана (без обёртки с отступом), упиралось в
    край: рамка ввода вплотную к границе экрана — визуально «кривое окно». 16px —
@@ -514,7 +519,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .seg-opt,.seg-btn{min-width:0}
 
 /* ─── Inline → utility classes (replace hardcoded rgba(255,255,255,...)) ── */
-.inp{width:100%;min-width:0;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
+.inp{width:100%;min-width:0;padding:10px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:14px}
 .inp:focus{border-color:var(--accent)}
 /* Поиск и срезы над длинным списком (боты, каналы). Списки рисовались целиком:
    после «Фабрики» это сотни карточек, и нужную можно было найти только
@@ -526,11 +531,20 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .lf-chip.on{border-color:var(--accent);background:var(--accent-soft-2)}
 .lst-more{padding:2px 16px 10px}
 .lst-more-note{font-size:12px;color:var(--hint);text-align:center;padding:6px 8px 8px;line-height:1.45}
-.inp-s{padding:9px;border-radius:8px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px}
+.inp-s{padding:9px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:13px}
 .inp-s:focus{border-color:var(--accent)}
-.inp-sm{width:100%;min-width:0;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace}
+.inp-sm{width:100%;min-width:0;padding:10px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:13px;font-family:monospace}
 .inp-sm:focus{border-color:var(--accent)}
-.sel{width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--sep);background:var(--bg-select);color:var(--text);font-size:14px;-webkit-appearance:none;appearance:none}
+/* Шрифт полей. У <textarea> и <input> он по умолчанию системный
+   моноширинный — текст и подсказка в них выглядели набранными другим
+   шрифтом, чем весь остальной интерфейс. */
+input,select,textarea{font-family:inherit}
+/* У всех <select> снят системный вид (appearance:none), а своей стрелки не
+   было ни одной: выпадающий список выглядел ровно как поле ввода, и
+   понять, что он открывается, можно было только ткнув. Рисуем шеврон
+   фоном и освобождаем под него место справа. */
+select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%237a8ba1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:12px 8px;padding-right:32px}
+.sel{width:100%;padding:10px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:14px;-webkit-appearance:none;appearance:none}
 .sel:focus{border-color:var(--accent)}
 .err-txt{color:var(--red);font-size:13px;margin-top:6px}
 .err-txt-v{color:var(--red);font-size:13px;margin:6px 0}
@@ -544,14 +558,17 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .act-ico-yellow{background:var(--bg-yellow-16)}
 .act-ico-red{background:var(--bg-red-16)}
 .note-bg{background:var(--bg);border-radius:12px;padding:14px;min-height:60px}
-/* Рамка/радиус выровнены с каноническим стилем полей (.field input, стр. ~196:
-   1px / var(--radius)) — раньше эти классы имели 1.5px и 12/10px, из-за чего
-   ~8 полей выглядели иначе остальных ~278. Фон --bg-input оставлен намеренно
-   (полупрозрачный слой для контраста в этих контекстах). */
-.input-bc{width:100%;padding:10px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical}
-.input-bc-l{width:100%;padding:12px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical}
-.input-l{width:100%;padding:11px 12px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
-.input-flex{flex:1;padding:10px;border-radius:var(--radius);border:1px solid var(--sep);background:var(--bg-input);color:var(--text);font-size:14px}
+/* Один вид поля на всё приложение: var(--radius), рамка 1px --border-input,
+   заливка --bg3. Раньше видов было пять (.field input, .inp, .sel, .input-bc,
+   .inp-s) — разный радиус, разная толщина рамки и три разные заливки.
+   Заливка --bg3 непрозрачная и по двум причинам: полупрозрачный слой поверх
+   панели --bg2 давал поле, неотличимое от панели (замер: 20+ полей), а у
+   <select> фон поля наследует выпадающий список — сквозь прозрачный не
+   прочитать. */
+.input-bc{width:100%;padding:10px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:13px;resize:vertical}
+.input-bc-l{width:100%;padding:12px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:14px;resize:vertical}
+.input-l{width:100%;padding:11px 12px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:14px}
+.input-flex{flex:1;padding:10px;border-radius:var(--radius);border:1px solid var(--border-input);background:var(--bg3);color:var(--text);font-size:14px}
 
 /* ─── Activity feed ──────────────────────────────────────────── */
 .act{padding:9px 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--sep)}
@@ -865,7 +882,7 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 }
 .btn-p{background:var(--btn);color:var(--btn-text);font-weight:700;box-shadow:0 2px 14px rgba(45,212,191,.22),inset 0 1px 0 rgba(255,255,255,.12);border:none}
 .btn-p:active{transform:translateY(1px) scale(.98);box-shadow:0 1px 6px rgba(45,212,191,.18),inset 0 1px 0 rgba(255,255,255,.08)}
-.btn-s{background:var(--bg2);color:var(--text);border:1px solid var(--border)}
+.btn-s{background:var(--bg3);color:var(--text);border:1px solid var(--border-strong)}
 .btn-s:active{background:rgba(255,255,255,.05)}
 .card,.lst,.mgmt-tile,.qa-tile{border-color:var(--border);box-shadow:var(--shadow)}
 .card{transition:transform .2s var(--spring),box-shadow .2s var(--ease)}
@@ -1017,7 +1034,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div style="padding:0 0 8px">
       <div style="display:flex;gap:8px">
-        <input type="text" id="quickChLink" placeholder="https://t.me/channel или @username" style="flex:1;padding:10px;border-radius:12px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
+        <input type="text" id="quickChLink" placeholder="https://t.me/channel или @username" style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
         <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0 0 auto;padding:10px 16px">➕</button>
       </div>
       <div id="quickChErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
@@ -1029,7 +1046,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div style="padding:0 0 8px">
       <div style="display:flex;gap:8px">
-        <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx..." style="flex:1;padding:10px;border-radius:12px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
+        <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx..." style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
         <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0 0 auto;padding:10px 16px">➕</button>
       </div>
       <div id="quickBotErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
@@ -1103,8 +1120,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-bot-broadcast')">✕</div>
     <div class="modal-title">📢 Рассылка выбранным ботам</div>
     <div id="bbHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
-    <textarea id="bbText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
-    <textarea id="bbButtons" rows="2" placeholder="Кнопки: Текст | https://ссылка (по одной на строку)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical"></textarea>
+    <textarea id="bbText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
+    <textarea id="bbButtons" rows="2" placeholder="Кнопки: Текст | https://ссылка (по одной на строку)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
     <div id="bbErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" id="bbBtn" onclick="submitBotBroadcast()" style="width:100%;margin-top:8px">Запустить рассылку</button>
   </div>
@@ -1201,7 +1218,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <button class="btn btn-t" onclick="openChatWarmup()" title="Флот вступает в указанный чат и ведёт осмысленный LLM-диалог: между собой и с реальными участниками" style="width:100%;margin:0 0 8px">💬 Разогрев чата флотом</button>
     <button class="btn btn-o" onclick="openFleetDoctor()" title="Почему операции не исполняются: воронка отбора аккаунтов, залипшие состояния, последние ошибки" style="width:100%;margin:0 0 8px">🩺 Диагностика флота</button>
     <!-- Поиск по аккаунтам (серверный, снимает 100-лимит) -->
-    <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+    <input id="accSearch" type="text" oninput="onAccSearch(this.value)" placeholder="🔍 Поиск: телефон / имя / @username" style="width:100%;padding:9px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <!-- Срез по CRM-статусу (появляется, когда статусы проставлены) -->
     <div id="stageChips" style="display:none;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1323,7 +1340,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-acccont-msg')">✕</div>
     <div class="modal-title">✍️ Написать выбранным</div>
     <div id="accContMsgHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
-    <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="accContMsgErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitAccContMsg()">🚀 Отправить</button>
   </div>
@@ -1338,12 +1355,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выберите, с каких аккаунтов отправить. Отправка идёт с защитой от бана (темп/флуд-контроль).</div>
     <div style="font-size:12px;font-weight:600;margin:6px 0 4px">С каких аккаунтов:</div>
     <div id="ccwAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
-    <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="ccwAbWrap" style="display:none;margin-top:8px">
       <label style="font-size:12px;color:var(--hint);cursor:pointer;display:block"><input type="checkbox" id="ccwAbOn" onchange="toggleAb(this)" style="vertical-align:middle"> 🧪 A/B-тест: разложить варианты по аудитории поровну</label>
       <div id="ccwAbBox" style="display:none;margin-top:6px">
-        <textarea id="ccwVarB" rows="2" placeholder="Вариант B..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
-        <textarea id="ccwVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical"></textarea>
+        <textarea id="ccwVarB" rows="2" placeholder="Вариант B..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
+        <textarea id="ccwVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
         <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Основной текст — вариант A. Каждый вариант уйдёт своей равной доле. <span onclick="openAbResults()" style="color:var(--accent);cursor:pointer">Результаты последнего A/B →</span></div>
       </div>
     </div>
@@ -1445,7 +1462,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div id="vchatBody" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px"></div>
   <div id="vchatComposer" style="display:none;padding:8px 10px;border-top:1px solid var(--sep);gap:8px;align-items:flex-end">
-    <textarea id="vchatInput" rows="1" placeholder="Ответить от вашего имени..." style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:none;max-height:120px"></textarea>
+    <textarea id="vchatInput" rows="1" placeholder="Ответить от вашего имени..." style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
     <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()">➤</button>
   </div>
 </div>
@@ -1509,7 +1526,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-chan-mass')">✕</div>
     <div class="modal-title" id="chmTitle">Массовое действие</div>
     <div id="chmHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
-    <textarea id="chmValue" rows="4" placeholder="" style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+    <textarea id="chmValue" rows="4" placeholder="" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="chmErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" id="chmBtn" onclick="submitChMass()" style="width:100%;margin-top:8px">Применить</button>
   </div>
@@ -2363,7 +2380,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (LLM понимает контекст). Темп человеческий, сессии защищены.
     </div>
     <div id="cwAiStatus" style="font-size:11px;line-height:1.5;margin-bottom:10px"></div>
-    <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+    <input id="cwChat" type="text" placeholder="Чат: @username, ссылка t.me/… или ID" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Режим работы</div>
     <div id="cwMode" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-mode on" data-m="mixed" onclick="cwPickMode('mixed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:var(--accent-soft-2);color:var(--accent);cursor:pointer">🔀 Смешанный</button>
@@ -2371,7 +2388,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="cw-mode" data-m="seed" onclick="cwPickMode('seed')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🌱 Оживление</button>
     </div>
     <div id="cwModeHint" style="font-size:11px;color:var(--hint);margin:0 16px 8px;line-height:1.4">Смешанный: приоритет — ответы реальным участникам, иначе флот поддерживает беседу сам.</div>
-    <input id="cwTopics" type="text" placeholder="Темы через запятую (пусто = любые)" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
+    <input id="cwTopics" type="text" placeholder="Темы через запятую (пусто = любые)" style="width:100%;padding:10px 12px;margin-bottom:8px;border-radius:var(--radius);border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:13px">
     <div style="font-size:12px;color:var(--hint);margin:4px 0">Интенсивность</div>
     <div id="cwInt" style="display:flex;gap:6px;margin-bottom:8px;padding-left:16px;padding-right:16px">
       <button class="cw-int" data-i="calm" onclick="cwPickInt('calm')" style="flex:1;font-size:12px;padding:8px 4px;border-radius:9px;border:none;background:rgba(255,255,255,.06);color:#fff;cursor:pointer">🐢 Спокойно</button>
@@ -2496,9 +2513,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="border:1px solid rgba(96,165,250,.3);border-radius:10px;padding:10px;margin:12px 0;background:rgba(96,165,250,.06)">
         <div style="font-size:13px;color:var(--blue);margin-bottom:6px">🧬 Унификация из референса</div>
         <div style="font-size:11px;color:var(--hint);margin-bottom:8px">Впишите пример существующего названия/username и город-образец — паттерны соберутся сами.</div>
-        <input type="text" id="gpRefName" placeholder="Название-образец: Новости Москва" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-bottom:6px">
-        <input type="text" id="gpRefUsername" placeholder="Username-образец: novosti_moscow" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-bottom:6px">
-        <input type="text" id="gpRefCity" placeholder="Город в образце: Москва / moscow" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-bottom:6px">
+        <input type="text" id="gpRefName" placeholder="Название-образец: Новости Москва" style="width:100%;padding:9px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-bottom:6px">
+        <input type="text" id="gpRefUsername" placeholder="Username-образец: novosti_moscow" style="width:100%;padding:9px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-bottom:6px">
+        <input type="text" id="gpRefCity" placeholder="Город в образце: Москва / moscow" style="width:100%;padding:9px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;margin-bottom:6px">
         <button class="btn btn-s" style="width:100%;font-size:13px;padding:8px" onclick="gpApplyReference()">✨ Собрать паттерны из референса</button>
       </div>
 
@@ -2511,7 +2528,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="font-size:11px;color:var(--hint);margin-top:4px">Плейсхолдеры: {{CITY_SLUG}}, {{COUNTRY_SLUG}}, {{INDEX}}. Суффикс bot добавится для ботов</div>
 
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Описание (для каналов/групп)</label>
-      <textarea id="gpDescription" rows="2" placeholder="{{Новости {{city}}|Информация из {{city}}}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+      <textarea id="gpDescription" rows="2" placeholder="{{Новости {{city}}|Информация из {{city}}}}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
       
       <label style="font-size:13px;color:var(--hint);display:block;margin:12px 0 4px">Краткое описание (для ботов)</label>
       <input type="text" id="gpShortDesc" placeholder="{{Помощник из {{city}}|Бот {{city}}}}" class="inp">
@@ -2522,7 +2539,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="__custom">✍️ Свой список городов</option>
       </select>
       <div id="gpCustomCitiesWrap" style="display:none;margin-top:8px">
-        <textarea id="gpCustomCities" rows="4" placeholder="Москва&#10;Санкт-Петербург&#10;Київ" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+        <textarea id="gpCustomCities" rows="4" placeholder="Москва&#10;Санкт-Петербург&#10;Київ" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
         <div style="font-size:11px;color:var(--hint);margin-top:4px">По одному городу на строку. Нативные названия подтянутся автоматически</div>
       </div>
       <div id="gpPresetCitiesWrap" style="display:none;margin-top:8px">
@@ -2561,9 +2578,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="massopsWarn" style="display:none;margin:0 16px 10px"></div>
     <div class="sec">Вступление / выход по списку</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <textarea id="mjTargets" rows="3" placeholder="@channel1&#10;https://t.me/channel2&#10;@group3" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <textarea id="mjTargets" rows="3" placeholder="@channel1&#10;https://t.me/channel2&#10;@group3" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">По одному на строку (можно через запятую). До 500 целей.</div>
-      <select id="mjDelay" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <select id="mjDelay" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
         <option value="smart">🧠 Умный темп (авто)</option>
         <option value="slow">🐌 Медленно — безопаснее</option>
         <option value="normal">🛡 Нормально</option>
@@ -2579,14 +2596,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec">Рассылка в личные сообщения</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <textarea id="daUsers" rows="2" placeholder="@user1, @user2, @user3" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
-      <textarea id="daText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст сообщения…" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <textarea id="daUsers" rows="2" placeholder="@user1, @user2, @user3" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <textarea id="daText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст сообщения…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="daDelay" value="30" min="5" max="600" title="Задержка между сообщениями, сек" style="flex:0 0 100px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <input type="number" id="daDelay" value="30" min="5" max="600" title="Задержка между сообщениями, сек" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · spintax обязателен</div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="daPerAcc" min="1" max="500" placeholder="—" title="Максимум сообщений с одного аккаунта за эту рассылку" style="flex:0 0 100px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <input type="number" id="daPerAcc" min="1" max="500" placeholder="—" title="Максимум сообщений с одного аккаунта за эту рассылку" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">макс. с одного аккаунта за рассылку · защита от бана (пусто — без лимита)</div>
       </div>
       <button class="btn btn-p" style="width:100%" onclick="submitDmAdhoc()">✉️ Разослать в ЛС</button>
@@ -2595,16 +2612,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <div class="sec">Пост во все каналы аккаунта</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <select id="bpAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"><option value="">Выберите аккаунт...</option></select>
-      <textarea id="bpText" rows="3" placeholder="{{Новость|Обновление}}: текст поста…" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <select id="bpAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"><option value="">Выберите аккаунт...</option></select>
+      <textarea id="bpText" rows="3" placeholder="{{Новость|Обновление}}: текст поста…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <button class="btn btn-p" style="width:100%" onclick="submitBulkPostChans()">📤 Опубликовать во все</button>
       <div id="bpErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
 
     <div class="sec">🚨 Массовая жалоба</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <input type="text" id="mrTarget" placeholder="@target или t.me/target" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-      <select id="mrReason" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <input type="text" id="mrTarget" placeholder="@target или t.me/target" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <select id="mrReason" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
         <option value="spam">🗑 Спам</option>
         <option value="violence">⚔️ Насилие</option>
         <option value="porn">🔞 Порнография</option>
@@ -2613,7 +2630,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="personal">🔓 Личные данные</option>
         <option value="other">📋 Другое</option>
       </select>
-      <input type="text" id="mrText" placeholder="Пояснение (необязательно)" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <input type="text" id="mrText" placeholder="Пояснение (необязательно)" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">⚠️ Жалобы идут с ваших реальных аккаунтов — самая рискованная операция после Strike. При перегрузке инфраструктуры запуск будет отклонён.</div>
       <button class="btn btn-d" style="width:100%" onclick="submitMassReport()">🚨 Отправить жалобы</button>
       <div id="mrErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
@@ -2621,23 +2638,23 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <div class="sec">Массовое редактирование</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <select id="beTarget" onchange="beSyncFields()" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <select id="beTarget" onchange="beSyncFields()" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
         <option value="channels">📡 Каналы аккаунтов</option>
         <option value="bots">🤖 Мои боты</option>
         <option value="profile">👤 Профили аккаунтов</option>
       </select>
-      <select id="beField" onchange="beSyncHint()" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"></select>
-      <input type="text" id="beValue" placeholder="Новое значение" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
+      <select id="beField" onchange="beSyncHint()" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"></select>
+      <input type="text" id="beValue" placeholder="Новое значение" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
       <div id="beHint" style="font-size:12px;color:var(--hint);margin-bottom:8px"></div>
       <button class="btn btn-p" style="width:100%" onclick="submitBulkEdit()">✏️ Применить ко всем</button>
       <div id="beErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
     <div class="sec">Объявление во все группы аккаунта</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <select id="gaAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <select id="gaAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
         <option value="">Выберите аккаунт...</option>
       </select>
-      <textarea id="gaText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст объявления…" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <textarea id="gaText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст объявления…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Spintax {{вариант1|вариант2}} обязателен: одинаковый текст в десятки групп — палевная сигнатура. Вариант подбирается для каждой группы отдельно.</div>
       <button class="btn btn-p" style="width:100%" onclick="submitGroupAnnounce()">📣 Разослать по группам</button>
       <div id="gaErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
@@ -2672,37 +2689,37 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div class="sec">Создать каналы / группы массово</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <input type="text" id="cfTitle" placeholder="Название (общее для всех)" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-      <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <input type="text" id="cfTitle" placeholder="Название (общее для всех)" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:10px">
         <input type="checkbox" id="cfIsGroup" style="width:16px;height:16px"> Создавать группы (чаты), а не каналы
       </label>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="cfCount" value="1" min="1" max="20" title="Сколько на каждый аккаунт" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
-        <select id="cfNameMode" title="Как называть" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box">
+        <input type="number" id="cfCount" value="1" min="1" max="20" title="Сколько на каждый аккаунт" style="flex:0 0 90px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <select id="cfNameMode" title="Как называть" style="flex:1;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box">
           <option value="keywords">🔎 SEO: перестановка ключей</option>
           <option value="num">Название + номер (1, 2, 3…)</option>
           <option value="acc">Название + имя аккаунта</option>
           <option value="none">Одинаковое название</option>
         </select>
       </div>
-      <input type="text" id="cfUname" placeholder="Шаблон @юзернейма, напр. Dostavka_Moskva" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
+      <input type="text" id="cfUname" placeholder="Шаблон @юзернейма, напр. Dostavka_Moskva" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
       <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
         🔎 <b>SEO-режим</b>: название — это ключевые слова через пробел, @юзернейм — ключи через «_». Система расставит их для каждого ресурса по-разному (перестановка + добавление букв): <code>Dostavka_Moskva → Moskva_Dostavka, Dostavkaj_Moskva, Moskva_Dostavkagy…</code> — так вы занимаете много мест в поиске по многим сочетаниям ключей. @юзернейм — необязателен; занятые Telegram отвергнет, возьмётся следующий вариант.
       </div>
       <button class="btn btn-s" style="width:100%;margin-bottom:6px" onclick="previewFactoryNames('cf')">👁 Предпросмотр имён и @</button>
       <div id="cfPreview" style="margin-bottom:8px"></div>
       <div class="sec" style="margin:6px 0 4px">Автоматизация после создания</div>
-      <textarea id="cfFirstPost" placeholder="Первый пост (необязательно). Поддержка вариантов: {Привет|Здравствуйте}, будет закреплён" rows="2" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:6px"></textarea>
+      <textarea id="cfFirstPost" placeholder="Первый пост (необязательно). Поддержка вариантов: {Привет|Здравствуйте}, будет закреплён" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:6px"></textarea>
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
         <input type="checkbox" id="cfPinFirst" style="width:16px;height:16px" checked> Закрепить первый пост
       </label>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-        <input type="number" id="cfSeed" value="0" min="0" max="200" title="Сколько своих аккаунтов подписать" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <input type="number" id="cfSeed" value="0" min="0" max="200" title="Сколько своих аккаунтов подписать" style="flex:0 0 90px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <div style="font-size:12px;color:var(--hint);line-height:1.4">👥 Автопосев: столько своих аккаунтов сразу подпишутся на каждый ресурс. Размер аудитории — главный фактор высоты позиции в поиске. 0 — выключено.</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-        <input type="number" id="cfEngage" value="0" min="0" max="200" title="Реакции + просмотры на первый пост" style="flex:0 0 90px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <input type="number" id="cfEngage" value="0" min="0" max="200" title="Реакции + просмотры на первый пост" style="flex:0 0 90px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <div style="font-size:12px;color:var(--hint);line-height:1.4">🔥 Оживление: столько аккаунтов поставят реакцию и дадут просмотр первому посту (нужен первый пост и публичный @). Свежий пост выглядит живым. 0 — выключено.</div>
       </div>
       <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
@@ -2732,10 +2749,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="checkChannelRanks()">🔄 Проверить позиции сейчас</button>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <select id="crChannel" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box"><option value="">Загружаю каналы…</option></select>
+        <select id="crChannel" style="flex:1;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box"><option value="">Загружаю каналы…</option></select>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <input type="text" id="crKeyword" placeholder="Ключевое слово/фраза" style="flex:1;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <input type="text" id="crKeyword" placeholder="Ключевое слово/фраза" style="flex:1;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <button class="btn btn-s" style="flex:0 0 90px" onclick="addChannelKeyword()">Добавить</button>
       </div>
       <div id="crErr" style="color:var(--red);font-size:13px;margin-bottom:6px"></div>
@@ -2751,8 +2768,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div class="sec">Создать группу</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <input type="text" id="gfTitle" placeholder="Название группы" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-      <select id="gfAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <input type="text" id="gfTitle" placeholder="Название группы" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <select id="gfAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
         <option value="">Выберите аккаунт...</option>
       </select>
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
@@ -2834,7 +2851,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <option value="zh">🇨🇳 中文</option>
     </select></div>
     <div class="field"><label>Имя бота (макс. 64 символа)</label><input id="mg-name" type="text" maxlength="64" placeholder="Имя на выбранном языке" class="inp"></div>
-    <div class="field"><label>Описание (макс. 512 символов)</label><textarea id="mg-desc" rows="3" maxlength="512" placeholder="Описание бота на выбранном языке" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Описание (макс. 512 символов)</label><textarea id="mg-desc" rows="3" maxlength="512" placeholder="Описание бота на выбранном языке" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field"><label>Краткое описание (макс. 120 символов)</label><input id="mg-short" type="text" maxlength="120" placeholder="Краткое описание" class="inp"></div>
     <div class="field-err" id="mg-err"></div>
     <div style="display:flex;gap:8px">
@@ -2850,7 +2867,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div class="sec">Клонирование контента</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <input type="text" id="clonerSrc" placeholder="@channel или -100xxx" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+      <input type="text" id="clonerSrc" placeholder="@channel или -100xxx" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
       <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCloner()">📋 Клонировать</button>
       <div id="clonerErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
@@ -2899,11 +2916,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Описание (экран «О боте», до 512)</label>
-      <textarea id="bpDesc" maxlength="512" rows="3" placeholder="Показывается до старта бота" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <textarea id="bpDesc" maxlength="512" rows="3" placeholder="Показывается до старта бота" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field">
       <label>Краткое описание (профиль, до 120)</label>
-      <textarea id="bpShort" maxlength="120" rows="2" placeholder="Показывается в профиле и при шаринге" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <textarea id="bpShort" maxlength="120" rows="2" placeholder="Показывается в профиле и при шаринге" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field">
       <label>Аватар бота (публичный https URL картинки)</label>
@@ -2925,7 +2942,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-title">🖥 Добавить ноду</div>
     <div class="field">
       <label>Chat ID форум-группы *</label>
-      <input type="number" id="nodeChatId" placeholder="-1001234567890" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
+      <input type="number" id="nodeChatId" placeholder="-1001234567890" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
     </div>
     <div class="field">
       <label>Название ноды *</label>
@@ -2965,7 +2982,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Telegram ID</label>
-      <input type="number" id="crmTgId" placeholder="Оставьте пустым для ручного контакта" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
+      <input type="number" id="crmTgId" placeholder="Оставьте пустым для ручного контакта" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
     </div>
     <div class="field">
       <label>Телефон</label>
@@ -2998,7 +3015,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Текст сообщения * (поддерживает HTML)</label>
-      <textarea id="spContent" rows="5" placeholder="&lt;b&gt;Заголовок&lt;/b&gt;&#10;&#10;Текст рекламы..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <textarea id="spContent" rows="5" placeholder="&lt;b&gt;Заголовок&lt;/b&gt;&#10;&#10;Текст рекламы..." style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field">
       <label>Текст кнопки (CTA)</label>
@@ -3061,7 +3078,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="apF-name">
       <div class="field"><label>Имя *</label><input type="text" id="apFirst" placeholder="Имя" class="inp"></div>
       <div class="field"><label>Фамилия</label><input type="text" id="apLast" placeholder="(необязательно)" class="inp"></div>
-      <div class="field"><label>Bio / О себе</label><textarea id="apAbout" rows="2" placeholder="(необязательно)" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
+      <div class="field"><label>Bio / О себе</label><textarea id="apAbout" rows="2" placeholder="(необязательно)" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
     </div>
     <div id="apF-avatar">
       <div class="field"><label>Ссылка на изображение *</label><input type="text" id="apAvatar" placeholder="https://..." class="inp"></div>
@@ -3097,7 +3114,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-acc-note')">✕</div>
     <div class="modal-title">📝 Заметка к аккаунту</div>
     <div class="field">
-      <textarea id="antText" rows="4" maxlength="500" placeholder="Пометка для себя: назначение, кластер, статус…" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <textarea id="antText" rows="4" maxlength="500" placeholder="Пометка для себя: назначение, кластер, статус…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field-err" id="antErr"></div>
     <button class="btn btn-p" id="antBtn" onclick="submitAccNote()" style="width:100%">Сохранить</button>
@@ -3173,7 +3190,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="username">Username</option>
       </select>
     </div>
-    <div class="field"><label id="ceLbl">Новое описание *</label><textarea id="ceValue" rows="3" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
+    <div class="field"><label id="ceLbl">Новое описание *</label><textarea id="ceValue" rows="3" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
     <div class="field-err" id="ceErr"></div>
     <button class="btn btn-p" id="ceBtn" onclick="submitChanEdit()" style="width:100%">Применить</button>
   </div>
@@ -3185,7 +3202,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-asset-tpl')">✕</div>
     <div class="modal-title">📐 Новый шаблон</div>
     <div class="field"><label>Название</label><input id="at-name" type="text" placeholder="Шаблон приветствия" class="inp"></div>
-    <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона..." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="at-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-asset-tpl')" style="flex:1 1 auto">Отмена</button>
@@ -3207,7 +3224,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <option value="new_30d">Новые (30 дней)</option>
       <option value="inactive_30d">Неактивные (30 дней)</option>
     </select></div>
-    <div class="field"><label>Первое сообщение</label><textarea id="af-msg" rows="3" placeholder="Привет! Это первое сообщение воронки..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Первое сообщение</label><textarea id="af-msg" rows="3" placeholder="Привет! Это первое сообщение воронки..." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="af-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-autofunnel')" style="flex:1 1 auto">Отмена</button>
@@ -3345,7 +3362,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-narrative')">✕</div>
     <div class="modal-title">📖 Новая нарратив-кампания</div>
     <div class="field"><label>Тема / заголовок</label><input id="nc-topic" type="text" placeholder="Запуск нового продукта" class="inp"></div>
-    <div class="field"><label>Ключевое послание</label><textarea id="nc-message" rows="3" placeholder="Чего вы хотите донести до аудитории" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Ключевое послание</label><textarea id="nc-message" rows="3" placeholder="Чего вы хотите донести до аудитории" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field"><label>Тип кампании</label><select id="nc-type" class="sel">
       <option value="trend">📈 Тренд</option>
       <option value="launch">🚀 Запуск</option>
@@ -3816,7 +3833,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div style="padding:8px 16px 4px">
-      <input type="text" id="crmSearch" placeholder="🔍 Поиск по имени, нику, телефону..." style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:12px;padding:10px 13px;font-size:15px;color:var(--text);outline:none" oninput="filterCRM(this.value)">
+      <input type="text" id="crmSearch" placeholder="🔍 Поиск по имени, нику, телефону..." style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 13px;font-size:15px;color:var(--text);outline:none" oninput="filterCRM(this.value)">
     </div>
     <div id="crmTagsBar" style="display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="crmList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4039,7 +4056,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       Личная пометка, видна только вам. Помогает не запутаться среди нескольких ботов.<br>
       Отправьте пустой текст чтобы удалить заметку.
     </div>
-    <textarea id="noteText" style="width:100%;min-height:180px;background:var(--bg);border:1px solid var(--sep);border-radius:12px;padding:12px;color:var(--text);font-size:15px;resize:vertical;box-sizing:border-box" placeholder="Например: продажи, тест, клиент X..."></textarea>
+    <textarea id="noteText" style="width:100%;min-height:180px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:12px;color:var(--text);font-size:15px;resize:vertical;box-sizing:border-box" placeholder="Например: продажи, тест, клиент X..."></textarea>
     <div id="noteErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
   </div>
 </div>
@@ -4072,7 +4089,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div id="bstatsGrid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px"></div>
     <div class="sec" style="margin-top:8px">Рост аудитории (7 дней)</div>
-    <div id="bstatsChart" style="background:var(--bg);border-radius:12px;padding:14px;min-height:60px"></div>
+    <div id="bstatsChart" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;margin:0 16px;min-height:60px"></div>
     <div class="sec" style="margin-top:8px">Детали</div>
     <div class="lst" id="bstatsDetails"></div>
   </div>
@@ -4194,7 +4211,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec" style="margin-top:8px">🛡️ Проверка на запрещёнку</div>
     <div style="padding:8px 16px">
-      <div style="font-size:12px;opacity:.7;margin-bottom:6px">Read-only: сканирует ресурсы на запрещённую тематику (CSAM/террор) и собирает доказательное досье. Ничего не постит и не сносит — жалобу подаёте адресно выше.</div>
+      <div style="font-size:12px;opacity:.7;margin-bottom:6px">Только чтение: сканирует ресурсы на запрещённую тематику (CSAM/террор) и собирает доказательное досье. Ничего не постит и не сносит — жалобу подаёте адресно выше.</div>
       <div class="field"><label>Ресурсы (по одному в строке или через запятую)</label><textarea id="cscanResources" rows="4" placeholder="@channel1&#10;t.me/channel2"></textarea></div>
       <div class="field"><label>Сообщений на ресурс (1–200)</label><input type="number" id="cscanLimit" value="50" min="1" max="200" class="inp"></div>
       <div class="field"><label>Аккаунтов для чтения (1–10)</label><input type="number" id="cscanAccCount" value="2" min="1" max="10" class="inp"></div>
@@ -4327,7 +4344,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:8px 16px">
       <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" placeholder="например: крипта, маркетинг, фитнес"></div>
       <div class="field"><label>Гео / город (опционально)</label><input type="text" id="growthGeo" placeholder="например: Москва, СПб"></div>
-      <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах..." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="growthErr"></div>
       <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
@@ -4335,10 +4352,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" style="margin-top:14px">💬 ИИ-комментинг</div>
     <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Под постами указанных каналов бот оставит КОНТЕКСТНЫЙ комментарий, сгенерированный ИИ по тексту поста (нужны ключи ИИ). Естественно, по теме, на языке поста.</div>
     <div style="padding:8px 16px">
-      <div class="field"><label>Каналы (по одному на строку или через запятую)</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;@channel2" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><label>Каналы (по одному на строку или через запятую)</label><textarea id="aicChannels" rows="4" placeholder="@channel1&#10;@channel2" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field"><label>Тематика (опционально, контекст для ИИ)</label><input type="text" id="aicNiche" placeholder="например: крипта, фитнес"></div>
       <div class="field"><label>Тон</label>
-        <select id="aicTone" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
+        <select id="aicTone" class="sel">
           <option value="neutral">Нейтральный</option>
           <option value="friendly">Дружелюбный</option>
           <option value="expert">Экспертный</option>
@@ -4365,7 +4382,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Текст публикации</div>
     <div style="padding:8px 16px">
       <div class="preset-row" id="qpPresetRow"></div>
-      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
+      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
       <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div></div>
     </div>
     <div class="sec">Выберите каналы</div>
@@ -4407,7 +4424,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div class="sec">Текст сценария</div>
     <div style="padding:8px 16px">
-      <div class="field"><textarea id="spinText" rows="5" placeholder="Пришлите обычный текст сообщения — соберу из него spintax-варианты…" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><textarea id="spinText" rows="5" placeholder="Пришлите обычный текст сообщения — соберу из него spintax-варианты…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     </div>
     <div style="font-size:12px;color:var(--hint);padding:0 2px 4px">Синонимы в <code>{вариант1|вариант2}</code>, каждый вариант проверяется движком. Сверху — пример, снизу — сам шаблон для копирования в софт.</div>
     <div class="field-err" id="spinErr"></div>
@@ -4504,7 +4521,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field">
         <label>Описание</label>
-        <textarea id="bfDesc" rows="2" placeholder="{{Ваш персональный ассистент|Помощник для бизнеса}}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+        <textarea id="bfDesc" rows="2" placeholder="{{Ваш персональный ассистент|Помощник для бизнеса}}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
       </div>
       <div class="field">
         <label>Краткое описание</label>
@@ -4558,7 +4575,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field">
         <label>Биография (кратко)</label>
-        <textarea id="pBio" rows="2" placeholder="Краткое описание персонажа..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+        <textarea id="pBio" rows="2" placeholder="Краткое описание персонажа..." style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
       </div>
       <div class="field">
         <label>Интересы (через запятую)</label>
@@ -4623,7 +4640,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div class="sec">Проверка номеров</div>
     <div style="padding:8px 16px">
-      <div class="field"><label>Номера телефонов (по одному на строке или через запятую)</label><textarea id="phoneCheckInput" rows="5" placeholder="+79001234567&#10;+79001234568&#10;+79001234569" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><label>Номера телефонов (по одному на строке или через запятую)</label><textarea id="phoneCheckInput" rows="5" placeholder="+79001234567&#10;+79001234568&#10;+79001234569" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field-err" id="phoneCheckErr"></div>
       <button class="btn btn-p" id="phoneCheckBtn" onclick="submitPhoneCheck()" style="width:100%">🔍 Проверить</button>
     </div>
@@ -4735,7 +4752,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-title">🏛 Новое сообщество</div>
     <input type="text" id="ccTitle" placeholder="Название сообщества" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     <input type="text" id="ccChatId" placeholder="ID чата (-1001234567890)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
-    <textarea id="ccDesc" rows="2" placeholder="Описание (необязательно)" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px"></textarea>
+    <textarea id="ccDesc" rows="2" placeholder="Описание (необязательно)" style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px"></textarea>
     <div id="ccErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCommunityCreate()">Создать</button>
   </div>
@@ -4766,7 +4783,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0">
       <input type="text" id="seoTitle" placeholder="Заголовок" class="inp" style="width:100%;box-sizing:border-box">
       <input type="text" id="seoUser" placeholder="@username" class="inp" style="width:100%;box-sizing:border-box">
-      <textarea id="seoDesc" rows="3" placeholder="Описание" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px"></textarea>
+      <textarea id="seoDesc" rows="3" placeholder="Описание" style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px"></textarea>
       <input type="text" id="seoKw" placeholder="Целевые ключи через запятую (необязательно)" class="inp" style="width:100%;box-sizing:border-box">
       <button class="btn btn-p" onclick="runSeoAnalyze()">📊 Проанализировать</button>
     </div>
@@ -4807,7 +4824,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </select>
       </div>
       <div class="field"><label>✉️ Welcome вступившим (необязательно)</label>
-        <textarea id="cpWelcome" rows="2" placeholder="Приветствие тем, кто вступит" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px"></textarea>
+        <textarea id="cpWelcome" rows="2" placeholder="Приветствие тем, кто вступит" style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px"></textarea>
       </div>
       <button class="btn btn-p" style="width:100%" onclick="computeCampaignPlan()">📐 Рассчитать план</button>
     </div>
@@ -4932,7 +4949,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field" id="massInviteLinkMsgField" style="display:none">
         <label>Текст приглашения (метод «ссылка в ЛС»)</label>
-        <textarea id="massInviteLinkMsg" rows="3" placeholder="{Привет|Здравствуйте}! Заходите к нам: {link}" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+        <textarea id="massInviteLinkMsg" rows="3" placeholder="{Привет|Здравствуйте}! Заходите к нам: {link}" style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
         <div style="font-size:12px;color:var(--hint);margin-top:4px">
           <code>{link}</code> — куда подставить ссылку (без него добавится в конец).
           Поддерживается <b>spintax</b>: <code>{Привет|Здравствуйте}</code> — каждому
@@ -4953,7 +4970,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field">
         <label>✉️ Welcome вступившим (необязательно)</label>
-        <textarea id="massInviteWelcome" rows="2" placeholder="Автосообщение тем, кто реально вступил (для «Обычный»/«Через админку»). Пусто — не слать." style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px;resize:vertical"></textarea>
+        <textarea id="massInviteWelcome" rows="2" placeholder="Автосообщение тем, кто реально вступил (для «Обычный»/«Через админку»). Пусто — не слать." style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
         <div style="font-size:12px;color:var(--orange,#f59e0b);margin-top:4px">
           ⏸ Отправка приветствия приглашённым в ЛС сейчас отключена: свежих
           участников это спамит и выгоняет из чата. Поле сохранено на будущее —
@@ -4961,8 +4978,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </div>
         <label style="font-size:12px;color:var(--hint);cursor:pointer;display:block;margin-top:6px"><input type="checkbox" id="miWelcomeAbOn" onchange="toggleWelcomeAb(this)" style="vertical-align:middle"> 🧪 A/B приветствие: делить вступивших по вариантам</label>
         <div id="miWelcomeAbBox" style="display:none;margin-top:6px">
-          <textarea id="miWelcomeVarB" rows="2" placeholder="Вариант B приветствия..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
-          <textarea id="miWelcomeVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:13px;resize:vertical"></textarea>
+          <textarea id="miWelcomeVarB" rows="2" placeholder="Вариант B приветствия..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
+          <textarea id="miWelcomeVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
           <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Верхнее поле — вариант A. Сравните доставку в «Операциях»/A/B (метки A/B#1…).</div>
         </div>
       </div>
@@ -5351,10 +5368,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </select></div>
     <div style="font-size:13px;font-weight:600;margin:10px 0 6px">Вариант А</div>
     <div class="field"><label>Название варианта</label><input id="ec-va-name" type="text" value="Вариант А" class="inp"></div>
-    <div class="field"><label>Текст</label><textarea id="ec-va-text" rows="2" placeholder="Привет! 👋" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Текст</label><textarea id="ec-va-text" rows="2" placeholder="Привет! 👋" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div style="font-size:13px;font-weight:600;margin:10px 0 6px">Вариант Б</div>
     <div class="field"><label>Название варианта</label><input id="ec-vb-name" type="text" value="Вариант Б" class="inp"></div>
-    <div class="field"><label>Текст</label><textarea id="ec-vb-text" rows="2" placeholder="Добро пожаловать! 🎉" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Текст</label><textarea id="ec-vb-text" rows="2" placeholder="Добро пожаловать! 🎉" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="ec-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-exp')" style="flex:1 1 auto">Отмена</button>
@@ -5616,7 +5633,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div id="parserAudiencePane" style="display:none">
       <div style="padding:0 0 8px">
-        <input type="text" id="parserSearch" placeholder="🔍 Фильтр по источнику..." style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:12px;padding:9px 13px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box" oninput="loadParsedAudience(this.value)">
+        <input type="text" id="parserSearch" placeholder="🔍 Фильтр по источнику..." style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 13px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box" oninput="loadParsedAudience(this.value)">
       </div>
       <div class="lst" id="parserAudList"><div class="spin-wrap"><div class="spin"></div></div></div>
     </div>
@@ -5729,7 +5746,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="padding:8px 0;border-bottom:1px solid var(--sep)">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span style="font-size:14px">🛡 Политика прокси</span>
-          <select id="set-proxy-policy" style="background:var(--bg2);border:1px solid var(--sep);border-radius:8px;color:var(--text);padding:6px 10px;font-size:13px">
+          <select id="set-proxy-policy" style="background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);color:var(--text);padding:6px 10px;font-size:13px">
             <option value="allow_direct">Можно без прокси (риск)</option>
             <option value="strict">Только через прокси</option>
           </select>
@@ -5791,7 +5808,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Описание проблемы</label>
-      <textarea id="errRepText" style="width:100%;min-height:160px;background:var(--bg);border:1px solid var(--sep);border-radius:12px;padding:12px;color:var(--text);font-size:14px;resize:vertical;box-sizing:border-box" maxlength="2000" placeholder="Опишите ошибку подробно..."></textarea>
+      <textarea id="errRepText" style="width:100%;min-height:160px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:12px;color:var(--text);font-size:14px;resize:vertical;box-sizing:border-box" maxlength="2000" placeholder="Опишите ошибку подробно..."></textarea>
     </div>
     <div id="errRepErr" style="color:var(--red);font-size:13px;margin:4px 0"></div>
     <button class="btn btn-p" id="errRepBtn" onclick="submitErrReport()" style="width:100%">📤 Отправить</button>
@@ -6103,12 +6120,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Общий выбор прокси (для всех способов) -->
     <div class="field">
       <label>Прокси аккаунта (рекомендуется)</label>
-      <select id="accImportProxy" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
+      <select id="accImportProxy" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
         <option value="">Авто — разложить по моим прокси</option>
       </select>
       <div class="field-note">Авто раскладывает партию по вашим живым прокси, по одному аккаунту на прокси, пока их хватает — общий IP связывает аккаунты между собой. Если выбрать один прокси, за ним окажется вся партия.</div>
       <div style="display:flex;gap:6px;margin-top:8px">
-        <input type="text" id="accImportProxyNew" placeholder="или вставьте новый: socks5://user:pass@host:port" style="flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;box-sizing:border-box">
+        <input type="text" id="accImportProxyNew" placeholder="или вставьте новый: socks5://user:pass@host:port" style="flex:1;padding:9px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;box-sizing:border-box">
         <button type="button" class="btn" id="accImportProxyAddBtn" onclick="addAccImportProxy()" style="white-space:nowrap;padding:9px 12px">＋ Добавить</button>
       </div>
       <div class="field-note">Новый прокси сохранится в ваш список и сразу закрепится за импортируемыми аккаунтами.</div>
@@ -6118,7 +6135,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="accMethod-string">
       <div class="field">
         <label>Строки сессий (по одной на строку)</label>
-        <textarea id="accImportText" rows="4" placeholder="StringSession аккаунта…&#10;по одной сессии на строку" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea>
+        <textarea id="accImportText" rows="4" placeholder="StringSession аккаунта…&#10;по одной сессии на строку" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box"></textarea>
         <div class="field-note">Формат (Telethon/Pyrogram) определяется автоматически. Сессия проверяется подключением и шифруется при сохранении.</div>
       </div>
       <button class="btn btn-p" id="accImportBtn" onclick="submitAccImport()" style="width:100%">➕ Импортировать</button>
@@ -6128,18 +6145,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="accMethod-phone" style="display:none">
       <div class="field" id="accPhoneStep-phone">
         <label>Номер телефона</label>
-        <input type="tel" id="accPhoneNum" placeholder="+71234567890" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="tel" id="accPhoneNum" placeholder="+71234567890" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <div class="field-note">Telegram пришлёт код в приложение на этом номере.</div>
         <button class="btn btn-p" id="accPhoneStartBtn" onclick="accPhoneStart()" style="width:100%;margin-top:8px">📨 Отправить код</button>
       </div>
       <div class="field" id="accPhoneStep-code" style="display:none">
         <label>Код из Telegram</label>
-        <input type="text" inputmode="numeric" id="accPhoneCode" placeholder="12345" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="text" inputmode="numeric" id="accPhoneCode" placeholder="12345" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accPhoneCodeBtn" onclick="accPhoneCode()" style="width:100%;margin-top:8px">✅ Подтвердить код</button>
       </div>
       <div class="field" id="accPhoneStep-2fa" style="display:none">
         <label>Пароль 2FA (облачный пароль)</label>
-        <input type="password" id="accPhone2fa" placeholder="пароль двухфакторной защиты" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="password" id="accPhone2fa" placeholder="пароль двухфакторной защиты" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accPhone2faBtn" onclick="accPhone2fa()" style="width:100%;margin-top:8px">🔓 Подтвердить 2FA</button>
       </div>
     </div>
@@ -6154,7 +6171,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field" id="accQrStep-2fa" style="display:none">
         <label>Пароль 2FA</label>
-        <input type="password" id="accQr2fa" placeholder="облачный пароль" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="password" id="accQr2fa" placeholder="облачный пароль" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accQr2faBtn" onclick="accQr2fa()" style="width:100%;margin-top:8px">🔓 Подтвердить 2FA</button>
       </div>
     </div>
@@ -6228,7 +6245,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeAiMemoryModal()">✕</div>
     <div class="modal-title">🧠 Новая запись в памяти</div>
     <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" placeholder="Краткое описание"></div>
-    <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для ИИ-ассистента…" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для ИИ-ассистента…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="aiMemErr"></div>
     <button class="btn btn-p" id="aiMemBtn" onclick="submitAiMemory()" style="width:100%">💾 Сохранить</button>
   </div>
@@ -6324,7 +6341,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Источник (@username или ссылка)</label><input type="text" id="parserSrc" placeholder="@channel или t.me/channel"></div>
     <div class="field">
       <label>Тип парсинга</label>
-      <select id="parserType" onchange="parserTypeToggle()" style="width:100%;background:var(--bg);border:1px solid var(--sep);border-radius:8px;padding:10px;color:var(--text);font-size:15px">
+      <select id="parserType" onchange="parserTypeToggle()" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px;color:var(--text);font-size:15px">
         <option value="members">👥 Все участники</option>
         <option value="active">🔥 Активные (писали недавно)</option>
         <option value="comments">💬 Комментаторы канала</option>
@@ -6350,7 +6367,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Контакт</label><input type="text" id="dealContact" maxlength="200" placeholder="@username или имя"></div>
     <div class="field">
       <label>Стадия</label>
-      <select id="dealStage" style="width:100%;background:var(--bg);border:1px solid var(--sep);border-radius:8px;padding:10px;color:var(--text);font-size:15px">
+      <select id="dealStage" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px;color:var(--text);font-size:15px">
         <option value="lead">🎯 Лид</option>
         <option value="contact">📞 Контакт</option>
         <option value="proposal">📄 Предложение</option>
@@ -7028,7 +7045,7 @@ function askPairingCode() {
         + 'style="width:100%;box-sizing:border-box;padding:14px;font-size:20px;'
         + 'font-variant-numeric:tabular-nums;text-align:center;letter-spacing:2px;'
         + 'border-radius:var(--radius);border:1px solid var(--border-input);'
-        + 'background:var(--bg2);color:var(--text);text-transform:uppercase;'
+        + 'background:var(--bg3);color:var(--text);text-transform:uppercase;'
         + 'outline:none;margin-bottom:12px;transition:border-color .2s,box-shadow .2s">'
         + '<button id="pairBtn" class="btn btn-p" style="width:100%;padding:14px;font-size:16px">'
         + 'Войти</button>'
@@ -7942,7 +7959,7 @@ async function loadOrganismPulse() {
   try {
     const p = await api('/api/miniapp/organism/pulse');
     const sugs = p.suggestions || [];
-    let html = `<div style="background:var(--bg);border:1px solid var(--sep);border-radius:16px;padding:14px 16px">
+    let html = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-size:18px">🫀</span>
         <span style="font-size:14px;font-weight:700">Пульс</span>
@@ -7978,7 +7995,7 @@ async function loadOrganismPulse() {
     // Раньше блок молча исчезал: `el.innerHTML = ''`. Пользователь, у которого
     // отвалилась сеть, видел на месте пульса пустоту и не мог понять, это
     // «всё спокойно» или «не загрузилось». Показываем причину и кнопку повтора.
-    el.innerHTML = `<div style="background:var(--bg);border:1px solid var(--sep);border-radius:16px;padding:14px 16px">
+    el.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-size:18px">🫀</span>
         <span style="font-size:14px;font-weight:700">Пульс</span>
@@ -16828,17 +16845,17 @@ async function loadEditForm(id) {
     const d = await api('/api/miniapp/uch/contacts/'+id);
     const c = d.contact;
     let html = `<div style="padding:12px 16px">
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Имя</label><input id="ef-first" value="${esc(c.first_name||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Фамилия</label><input id="ef-last" value="${esc(c.last_name||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Username</label><input id="ef-username" value="${esc(c.username||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Компания</label><input id="ef-company" value="${esc(c.company||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Должность</label><input id="ef-position" value="${esc(c.position||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Телефоны (через запятую)</label><input id="ef-phones" value="${esc((Array.isArray(c.phones)?c.phones:[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Email (через запятую)</label><input id="ef-emails" value="${esc((Array.isArray(c.emails)?c.emails:[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сайты (через запятую)</label><input id="ef-websites" value="${esc((c.websites||[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">День рождения</label><input id="ef-birthday" type="date" value="${esc(c.birthday||'')}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Теги (через запятую)</label><input id="ef-tags" value="${esc((c.tags||[]).join(', '))}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Заметки</label><textarea id="ef-notes" rows="3" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px;resize:vertical">${esc(c.notes||'')}</textarea></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Имя</label><input id="ef-first" value="${esc(c.first_name||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Фамилия</label><input id="ef-last" value="${esc(c.last_name||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Username</label><input id="ef-username" value="${esc(c.username||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Компания</label><input id="ef-company" value="${esc(c.company||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Должность</label><input id="ef-position" value="${esc(c.position||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Телефоны (через запятую)</label><input id="ef-phones" value="${esc((Array.isArray(c.phones)?c.phones:[]).join(', '))}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Email (через запятую)</label><input id="ef-emails" value="${esc((Array.isArray(c.emails)?c.emails:[]).join(', '))}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сайты (через запятую)</label><input id="ef-websites" value="${esc((c.websites||[]).join(', '))}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">День рождения</label><input id="ef-birthday" type="date" value="${esc(c.birthday||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Теги (через запятую)</label><input id="ef-tags" value="${esc((c.tags||[]).join(', '))}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Заметки</label><textarea id="ef-notes" rows="3" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px;resize:vertical">${esc(c.notes||'')}</textarea></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Цветовая метка</label>
         <div style="display:flex;gap:8px;margin-top:4px">
           ${['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4',''].map(cl=>`<div onclick="document.getElementById('ef-color').value='${cl}';document.querySelectorAll('.color-pick').forEach(e=>e.style.outline='none');this.style.outline='2px solid #fff'" class="color-pick" style="width:32px;height:32px;border-radius:8px;background:${cl||'rgba(255,255,255,.1)'};cursor:pointer;${c.color_label===cl?'outline:2px solid #fff':''}"></div>`).join('')}
@@ -17001,8 +17018,8 @@ async function openContactCRM(id) {
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         ${Object.entries(stageLabels).map(([k,v])=>`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;${crm.stage===k?'background:var(--accent);color:var(--text)':''}" onclick="setCrmStage('${id}','${k}')">${v}</button>`).join('')}
       </div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><input id="crm-remind-text" placeholder="Текст напоминания" class="inp"></div>
       <button class="btn btn-p" onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
     </div>`;
@@ -20266,7 +20283,7 @@ async function openTakedownKit() {
         <div style="font-weight:600;margin-bottom:4px">${i+1}. ${esc(c.title)}</div>
         <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:6px">${esc(c.how)}</div>
         <div style="font-size:12px;margin-bottom:6px">🔗 ${link}</div>
-        <textarea readonly style="width:100%;min-height:96px;font-size:11px;background:var(--bg);color:var(--fg);border:1px solid var(--line,#333);border-radius:8px;padding:8px">${esc(full)}</textarea>
+        <textarea readonly style="width:100%;min-height:96px;font-size:11px;background:var(--bg3);color:var(--fg);border:1px solid var(--line,#333);border-radius:var(--radius);padding:8px">${esc(full)}</textarea>
         <button class="btn" style="width:100%;margin-top:6px;background:var(--bg)" onclick="copyComplaintText(${i})">📄 Скопировать текст</button>
       </div>`;
     }).join('') || '<div style="color:var(--hint)">Нет доступных каналов</div>';
