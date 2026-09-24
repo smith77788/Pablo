@@ -19,7 +19,7 @@ from services import operation_bus as _obus
 from services import op_status
 from services.mini_app_auth import (validate_init_data, make_token, parse_token,
                                     signing_secret_ok)
-from services.secret_masking import redact_secrets
+from services.secret_masking import redact_secrets, scrub_payload
 from services.security import (
     check_rate_limit,
     rate_limit_response,
@@ -519,6 +519,12 @@ async def _resolve_bot_username() -> str:
 
 
 def _json_resp(data: Any, status: int = 200) -> web.Response:
+    # Последний барьер: секрет не уходит в ответ, даже если о нём не подумали в
+    # обработчике. Все ответы API идут через эту функцию, поэтому достаточно
+    # одного места: `SELECT *` по таблице с сессиями или прокси, написанный
+    # завтра, отдаст клиенту «***», а не доступ к аккаунту. Чистка по имени
+    # ключа и по форме значения — подробности в services/secret_masking.py.
+    data = scrub_payload(data)
     return web.Response(
         text=json.dumps(data, ensure_ascii=False, default=str),
         content_type="application/json",
