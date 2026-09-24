@@ -137,123 +137,129 @@ async def analyze_audience(
         return None
 
 
+# Пороги сегментов вынесены в константы: они встречаются и в SQL, и в тесте,
+# и разъехавшиеся копии однажды уже сделали сегмент недостижимым.
+_LEADER_DAYS, _LEADER_MSGS = 3, 50
+_REGULAR_DAYS, _REGULAR_MSGS = 7, 20
+_AT_RISK_DAYS = 14
+_NEW_DAYS = 7
+
+_SEGMENTS_SQL = """
+WITH u AS (
+    SELECT ua.user_id, ua.last_seen, ua.first_seen,
+           COALESCE(ua.message_count, 0) AS msgs
+    FROM user_activity ua
+    JOIN managed_bots mb ON mb.bot_id = ua.bot_id
+    WHERE mb.added_by = $1
+      AND ($2::bigint IS NULL OR ua.bot_id = $2)
+)
+SELECT
+    COUNT(*) AS total,
+    COUNT(*) FILTER (
+        WHERE last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4
+    ) AS leaders,
+    AVG(msgs) FILTER (
+        WHERE last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4
+    ) AS leaders_msgs,
+    COUNT(*) FILTER (
+        WHERE last_seen >= NOW() - make_interval(days => $5) AND msgs >= $6
+          AND NOT (last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4)
+    ) AS regulars,
+    AVG(msgs) FILTER (
+        WHERE last_seen >= NOW() - make_interval(days => $5) AND msgs >= $6
+          AND NOT (last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4)
+    ) AS regulars_msgs,
+    COUNT(*) FILTER (
+        WHERE last_seen < NOW() - make_interval(days => $5)
+          AND last_seen >= NOW() - make_interval(days => $7)
+    ) AS at_risk,
+    AVG(msgs) FILTER (
+        WHERE last_seen < NOW() - make_interval(days => $5)
+          AND last_seen >= NOW() - make_interval(days => $7)
+    ) AS at_risk_msgs,
+    COUNT(*) FILTER (
+        WHERE last_seen IS NULL OR last_seen < NOW() - make_interval(days => $7)
+    ) AS dormant,
+    COUNT(*) FILTER (
+        WHERE first_seen >= NOW() - make_interval(days => $8)
+    ) AS newcomers,
+    AVG(msgs) FILTER (
+        WHERE first_seen >= NOW() - make_interval(days => $8)
+    ) AS newcomers_msgs
+FROM u
+"""
+
+
 async def segment_audience(
     pool: asyncpg.Pool,
     owner_id: int,
-    bot_id: int,
+    bot_id: int | None = None,
 ) -> list[AudienceSegment]:
-    """
-    Сегментация аудитории по поведенческим характеристикам.
+    """Сегменты аудитории одного бота или всех ботов владельца.
 
-    Сегменты:
-    - "Champions" — высокоактивные, высокий ER
-    - "Loyal" — стабильная активность, средний ER
-    - "At Risk" — снижение активности
-    - "Dormant" — неактивные 14+ дней
-    - "New" — присоединились за последние 7 дней
+    bot_id=None — по всем ботам владельца.
+
+    Считает ОДИН запрос, а не выборка всех подписчиков в память. Прежняя
+    версия тянула каждого подписчика строкой и на каждого делала ещё один
+    запрос за числом взаимодействий: на боте с полусотней тысяч подписчиков
+    это полсотни тысяч запросов на открытие экрана. Тот запрос к тому же
+    считал СТРОКИ user_activity, а строка там одна на пару «бот+человек», так
+    что взаимодействий всегда выходило ровно одно — и сегменты с порогами 50 и
+    20 не могли появиться в принципе. Настоящее число лежит рядом, в
+    message_count.
+
+    Названия сегментов — по-русски: их видит владелец.
     """
     try:
-        users = await _fetch_user_activity(pool, bot_id)
-        if not users:
-            return []
-
-        total = len(users)
-        now = datetime.now(timezone.utc)
-
-        segments: list[AudienceSegment] = []
-
-        # ── Champions ─────────────────────────────────────────────────────────
-        champions = [
-            u for u in users
-            if u["days_active_30d"] >= 20 and u["total_engagements"] >= 50
-        ]
-        if champions:
-            avg_er = sum(u.get("engagement_rate", 0) for u in champions) / len(champions)
-            segments.append(AudienceSegment(
-                name="Champions",
-                user_count=len(champions),
-                percentage=round(len(champions) / total * 100, 1),
-                avg_engagement=round(avg_er, 2),
-                description="Самые активные и вовлечённые подписчики",
-                tags=["high_value", "advocates"],
-            ))
-
-        # ── Loyal ─────────────────────────────────────────────────────────────
-        loyal = [
-            u for u in users
-            if u["days_active_30d"] >= 10 and u["total_engagements"] >= 20
-            and u not in champions
-        ]
-        if loyal:
-            avg_er = sum(u.get("engagement_rate", 0) for u in loyal) / len(loyal)
-            segments.append(AudienceSegment(
-                name="Loyal",
-                user_count=len(loyal),
-                percentage=round(len(loyal) / total * 100, 1),
-                avg_engagement=round(avg_er, 2),
-                description="Стабильные подписчики с регулярной активностью",
-                tags=["regular", "engaged"],
-            ))
-
-        # ── At Risk ───────────────────────────────────────────────────────────
-        at_risk = [
-            u for u in users
-            if u["days_active_30d"] >= 3 and u["days_active_30d"] < 10
-            and u.get("last_active")
-            and (now - u["last_active"]).days < 14
-        ]
-        if at_risk:
-            avg_er = sum(u.get("engagement_rate", 0) for u in at_risk) / len(at_risk)
-            segments.append(AudienceSegment(
-                name="At Risk",
-                user_count=len(at_risk),
-                percentage=round(len(at_risk) / total * 100, 1),
-                avg_engagement=round(avg_er, 2),
-                description="Подписчики со снижающейся активностью",
-                tags=["declining", "needs_reactivation"],
-            ))
-
-        # ── Dormant ───────────────────────────────────────────────────────────
-        dormant = [
-            u for u in users
-            if not u.get("last_active") or (now - u["last_active"]).days >= 14
-        ]
-        if dormant:
-            segments.append(AudienceSegment(
-                name="Dormant",
-                user_count=len(dormant),
-                percentage=round(len(dormant) / total * 100, 1),
-                avg_engagement=0.0,
-                description="Неактивные подписчики (14+ дней без активности)",
-                tags=["inactive", "churned"],
-            ))
-
-        # ── New ───────────────────────────────────────────────────────────────
-        new_users = [
-            u for u in users
-            if u.get("first_seen")
-            and (now - u["first_seen"]).days <= 7
-        ]
-        if new_users:
-            avg_er = sum(u.get("engagement_rate", 0) for u in new_users) / len(new_users) if new_users else 0.0
-            segments.append(AudienceSegment(
-                name="New",
-                user_count=len(new_users),
-                percentage=round(len(new_users) / total * 100, 1),
-                avg_engagement=round(avg_er, 2),
-                description="Новые подписчики за последние 7 дней",
-                tags=["new", "onboarding"],
-            ))
-
-        log.info(
-            "audience_analytics: segment_audience channel=%s segments=%d",
-            bot_id, len(segments),
+        row = await pool.fetchrow(
+            _SEGMENTS_SQL, owner_id, bot_id,
+            _LEADER_DAYS, _LEADER_MSGS,
+            _REGULAR_DAYS, _REGULAR_MSGS,
+            _AT_RISK_DAYS, _NEW_DAYS,
         )
-        return segments
-
     except Exception as exc:
-        log.warning("segment_audience failed for bot_id=%s: %s", bot_id, exc)
+        log.warning("segment_audience failed for owner=%s bot=%s: %s",
+                    owner_id, bot_id, exc)
         return []
+
+    total = int(row["total"] or 0) if row else 0
+    if not total:
+        return []
+
+    def _seg(name, count_key, avg_key, description, tags):
+        count = int(row[count_key] or 0)
+        if not count:
+            return None
+        avg = float(row[avg_key] or 0.0) if avg_key else 0.0
+        return AudienceSegment(
+            name=name,
+            user_count=count,
+            percentage=round(count / total * 100, 1),
+            avg_engagement=round(avg, 2),
+            description=description,
+            tags=tags,
+        )
+
+    candidates = [
+        _seg("Лидеры", "leaders", "leaders_msgs",
+             f"Писали за последние {_LEADER_DAYS} дн. и всего от "
+             f"{_LEADER_MSGS} сообщений", ["high_value", "advocates"]),
+        _seg("Постоянные", "regulars", "regulars_msgs",
+             f"Писали за последние {_REGULAR_DAYS} дн. и всего от "
+             f"{_REGULAR_MSGS} сообщений", ["regular", "engaged"]),
+        _seg("Под риском", "at_risk", "at_risk_msgs",
+             f"Молчат от {_REGULAR_DAYS} до {_AT_RISK_DAYS} дн.",
+             ["declining", "needs_reactivation"]),
+        _seg("Спящие", "dormant", None,
+             f"Молчат больше {_AT_RISK_DAYS} дн.", ["inactive", "churned"]),
+        _seg("Новые", "newcomers", "newcomers_msgs",
+             f"Пришли за последние {_NEW_DAYS} дн.", ["new", "onboarding"]),
+    ]
+    segments = [c for c in candidates if c]
+
+    log.info("audience_analytics: segment_audience owner=%s bot=%s segments=%d",
+             owner_id, bot_id, len(segments))
+    return segments
 
 
 async def predict_engagement(
@@ -527,64 +533,6 @@ async def _get_avg_session_duration(pool: asyncpg.Pool, bot_id: int) -> float:
     except Exception:
         log_exc_swallow(log, "_get_avg_session_duration")
         return 0.0
-
-
-async def _fetch_user_activity(
-    pool: asyncpg.Pool, bot_id: int
-) -> list[dict[str, Any]]:
-    """Получить данные активности пользователей для сегментации."""
-    try:
-        rows = await pool.fetch(
-            """
-            SELECT
-                user_id,
-                last_seen,
-                first_seen,
-                EXTRACT(DAY FROM NOW() - last_seen)::INT AS days_since_last,
-                EXTRACT(DAY FROM NOW() - first_seen)::INT AS days_since_first
-            FROM user_activity
-            WHERE bot_id = $1
-            """,
-            bot_id,
-        )
-        result = []
-        for r in rows:
-            days_active = max(0, 30 - (r["days_since_last"] or 30))
-            engagements = await _get_user_engagements(pool, r["user_id"], bot_id)
-            result.append({
-                "user_id": r["user_id"],
-                "last_seen": r["last_seen"],
-                "first_seen": r["first_seen"],
-                "days_active_30d": days_active,
-                "total_engagements": engagements,
-                "engagement_rate": engagements / 30 if engagements > 0 else 0.0,
-            })
-        return result
-    except Exception:
-        log_exc_swallow(log, "_fetch_user_activity")
-        return []
-
-
-async def _get_user_engagements(
-    pool: asyncpg.Pool, user_id: int, bot_id: int
-) -> int:
-    """Получить количество взаимодействий пользователя за 30 дней."""
-    try:
-        row = await pool.fetchrow(
-            """
-            SELECT COUNT(*) AS cnt
-            FROM user_activity
-            WHERE user_id = $1
-              AND bot_id = $2
-              AND last_seen >= NOW() - INTERVAL '30 days'
-            """,
-            user_id,
-            bot_id,
-        )
-        return int(row["cnt"]) if row else 0
-    except Exception:
-        log_exc_swallow(log, "_get_user_engagements")
-        return 0
 
 
 async def _get_hourly_engagement(

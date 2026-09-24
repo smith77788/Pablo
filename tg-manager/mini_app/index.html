@@ -24535,7 +24535,8 @@ function renderAudSegments(segments) {
       <div class="ava" style="background:${s.color || 'var(--bg-blue-16)'};color:${s.color || 'var(--blue)'}">👥</div>
       <div class="li-body">
         <div class="li-name">${esc(s.name)}</div>
-        <div class="li-sub">${num(s.count || 0)} · ${pct} · ${s.avg_activity || '—'}</div>
+        <div class="li-sub">${num(s.count || 0)} · ${pct}${s.avg_activity ? ' · ' + esc(s.avg_activity) : ''}</div>
+        ${s.description ? `<div class="li-sub" style="opacity:.7">${esc(s.description)}</div>` : ''}
         <div class="prog"><div class="prog-fill" style="width:${barW}%;background:${s.color || 'var(--accent)'}"></div></div>
       </div>
       <div class="li-right" style="flex-direction:column;align-items:flex-end;gap:2px">

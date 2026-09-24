@@ -25,8 +25,9 @@ Postgres не принимает, сравнение jsonb со строкой, 
   • счётчик контактов с телефоном сравнивал jsonb с пустой строкой;
   • карта инфраструктуры группировала по `b.bot_id`, который не первичный ключ.
 
-ЧТО ПРОВЕРЯЕТСЯ. Только запрос, целиком переданный драйверу одной строковой
-константой (`pool.fetch("…")`). Запросы, собираемые конкатенацией, сюда не
+ЧТО ПРОВЕРЯЕТСЯ. Только готовый запрос: строковая константа прямо в вызове
+(`pool.fetch("…")`) или константа модуля, переданная по имени
+(`pool.fetch(_BURNED_SQL, …)`). Запросы, собираемые конкатенацией, сюда не
 берутся сознательно: у них на руках половина текста, и судить о ней нельзя —
 детектор с ложными срабатываниями обесценивает сам себя.
 
@@ -90,9 +91,28 @@ def _py_files():
             yield rel, tree
 
 
+def _module_sql_constants(tree) -> dict[str, str]:
+    """Строковые константы модуля: NAME = "SELECT …".
+
+    Запрос, вынесенный в такую константу, — тот же готовый запрос, просто
+    названный. Без этого шага мимо проверки проходил, например,
+    `budget_radar._BURNED_SQL`, который читал tg_accounts.created_at (в схеме
+    added_at) и вместо числа сожжённых аккаунтов отдавал ошибку.
+    """
+    out: dict[str, str] = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            out[node.targets[0].id] = node.value.value
+    return out
+
+
 def driver_queries():
     """(файл, строка, SQL) для запросов, целиком переданных драйверу."""
     for rel, tree in _py_files():
+        constants = _module_sql_constants(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not node.args:
                 continue
@@ -102,9 +122,13 @@ def driver_queries():
             if name not in _DRIVER_CALLS:
                 continue
             arg = node.args[0]
-            if (isinstance(arg, ast.Constant) and isinstance(arg.value, str)
-                    and _STARTS.match(arg.value)):
-                yield rel, arg.lineno, arg.value
+            sql = None
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                sql = arg.value
+            elif isinstance(arg, ast.Name):
+                sql = constants.get(arg.id)
+            if sql and _STARTS.match(sql):
+                yield rel, arg.lineno, sql
 
 
 def _runtime_ddl():

@@ -19028,15 +19028,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    JOIN managed_bots mb ON mb.bot_id=bu.bot_id
                    WHERE mb.added_by=$1 AND bu.first_seen > NOW() - INTERVAL '7 days'""", uid) or 0
             dormant = max(total - active, 0)
-            def _seg(name, count, color):
-                return {"name": name, "count": int(count),
-                        "percentage": round(count / total * 100, 1) if total else 0.0,
-                        "growth_pct": None, "avg_activity": "", "color": color}
-            segments = [
-                _seg("Активные (7д)", active, "#34c759"),
-                _seg("Новые (7д)", int(new_7d), "#0a84ff"),
-                _seg("Спящие", dormant, "#ff9f0a"),
-            ] if total else []
+            # Сегменты считает services/audience_analytics одним запросом по
+            # всем ботам владельца: «Лидеры», «Постоянные», «Под риском»,
+            # «Спящие», «Новые» — с порогами по числу сообщений, а не просто
+            # «активен / не активен». Раньше экран показывал три грубые доли,
+            # посчитанные тут же, а настоящая сегментация лежала мёртвым кодом:
+            # её запросы падали на несуществующей колонке.
+            _COLORS = {"Лидеры": "#34c759", "Постоянные": "#0a84ff",
+                       "Под риском": "#ff9f0a", "Спящие": "#8e8e93",
+                       "Новые": "#af52de"}
+            segments = []
+            try:
+                from services.audience_analytics import segment_audience
+                for sg in await segment_audience(pool, uid):
+                    segments.append({
+                        "name": sg.name, "count": sg.user_count,
+                        "percentage": sg.percentage, "growth_pct": None,
+                        "avg_activity": (f"{sg.avg_engagement:.0f} сообщ."
+                                         if sg.avg_engagement else ""),
+                        "color": _COLORS.get(sg.name, "#0a84ff"),
+                        "description": sg.description,
+                    })
+            except Exception:
+                log.exception("audience_analytics segments uid=%s", uid)
             avg_eng = round(active / total * 100, 1) if total else 0.0
             hm_rows = await _safe_fetch(pool,
                 """SELECT EXTRACT(HOUR FROM bu.last_seen)::int AS h, COUNT(*) AS c
@@ -19051,6 +19065,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 if dormant:
                     insights.append({"title": "Реактивация", "text":
                         f"{dormant} спящих — кандидаты на прогрев/рассылку."})
+            if segments:
+                _in_seg = sum(sg["count"] for sg in segments)
+                insights.append({"title": "Как считаются сегменты", "text":
+                    f"По {_in_seg} подписчикам, у которых есть записанная "
+                    f"активность. Доли внутри сегментов считаются от них, а не "
+                    f"от общего числа."})
             return _json_resp({
                 "total_users": total, "active_users": active,
                 "avg_engagement": avg_eng, "segments": segments,

@@ -1054,36 +1054,37 @@ class TestAudienceAnalytics:
 
     @pytest.mark.asyncio
     async def test_segment_audience(self):
+        """Сегменты приходят одним запросом со счётчиками.
+
+        Прежняя версия теста кормила заглушку строками подписчиков и ответом
+        «60 взаимодействий», после чего проверяла, что появился сегмент
+        Champions. Такого ответа продукт получить не мог: взаимодействия
+        считались как число строк user_activity на пару «бот + человек», а
+        строка там одна. Тест был зелёным на данных, которых не бывает.
+        """
         from services.audience_analytics import segment_audience
-        now = datetime.now(timezone.utc)
-        user_rows = [
-            {
-                "user_id": 1,
-                "last_seen": now,
-                "first_seen": now,
-                "days_since_last": 1,
-                "days_since_first": 60,
-            },
-            {
-                "user_id": 2,
-                "last_seen": now,
-                "first_seen": now,
-                "days_since_last": 20,
-                "days_since_first": 30,
-            },
-        ]
-        pool = FakePool(
-            fetch_rows=user_rows,
-            fetch_row=[
-                {"cnt": 60},
-                {"cnt": 5},
-            ],
-        )
+
+        class _OneRowPool:
+            def __init__(self, row):
+                self.row = row
+                self.calls = 0
+
+            async def fetchrow(self, sql, *args):
+                self.calls += 1
+                return self.row
+
+        pool = _OneRowPool({
+            "total": 50,
+            "leaders": 4, "leaders_msgs": 90.0,
+            "regulars": 6, "regulars_msgs": 25.0,
+            "at_risk": 5, "at_risk_msgs": 7.0,
+            "dormant": 30,
+            "newcomers": 5, "newcomers_msgs": 1.0,
+        })
         result = await segment_audience(pool, 123, -100)
-        assert isinstance(result, list)
-        segment_names = [s.name for s in result]
-        assert "Champions" in segment_names
-        assert "Dormant" in segment_names
+        assert pool.calls == 1, "сегментация снова ходит в базу за каждым человеком"
+        names = [s.name for s in result]
+        assert "Лидеры" in names and "Спящие" in names, names
 
 
 # ── Analytics Dashboard tests ─────────────────────────────────────────────────
