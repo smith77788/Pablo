@@ -76,9 +76,13 @@ jobs:
           # `import anthropic`, и без пакета падает СБОР всех тестов (весь прогон
           # красный, ни один тест tg-manager не выполняется). Он уже в
           # requirements.txt (anthropic>=0.69.0) — здесь просто не был продублирован.
+          # qrcode — то же самое, но дешевле по последствиям: без него красные
+          # только tests/test_qr_login_no_leaked_client.py (7 штук), зато весь
+          # прогон ветки красный, и на его фоне настоящие падения не видны.
+          # Тоже есть в requirements.txt (qrcode[pil]>=7.4).
           pip install \
             "aiogram==3.30.0" "asyncpg==0.29.0" aiohttp openai anthropic python-dotenv \
-            openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks \
+            openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks "qrcode[pil]" \
             pytest pytest-asyncio ruff
 
       # Обращение к несуществующему имени — это падение при исполнении строки,
