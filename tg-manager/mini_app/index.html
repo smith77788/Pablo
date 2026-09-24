@@ -1853,7 +1853,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- Инструменты ботов -->
     <div class="sec">Инструменты ботов</div>
-    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Массовое редактирование, фабрика, клонирование и self-promo ботов.</div>
+    <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Массовое редактирование, фабрика, клонирование и самопиар ботов.</div>
     <div class="mgmt-grid">
       <div class="mgmt-tile" onclick="openAutoFunnels()">
         <div class="mgmt-tile-ico">🔀</div>
@@ -3485,7 +3485,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-dna-detail">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title" id="dnaDetail-name">DNA</div>
+    <div class="hdr-title" id="dnaDetail-name">ДНК</div>
     <div class="hdr-meta">
       <button class="btn btn-p" id="dnaRecomputeBtn" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="recomputeDna()">🔄 Пересчитать</button>
     </div>
@@ -4251,7 +4251,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field" id="boostF-target"><label>Цель — чьи сторис смотреть (@username)</label><input type="text" id="boostTarget" placeholder="@username"></div>
       <div class="field" id="boostF-subtarget"><label>Канал/группа для вступления (@username или t.me/+hash)</label><input type="text" id="boostSubTarget" placeholder="@channel или t.me/+hash"></div>
       <div class="field" id="boostF-botuser"><label>@username бота</label><input type="text" id="boostBotUsername" placeholder="@mybot"></div>
-      <div class="field" id="boostF-payload"><label>Deep-link payload для /start (опционально)</label><input type="text" id="boostPayload" placeholder="ref_XXXX"></div>
+      <div class="field" id="boostF-payload"><label>Что придёт в /start (необязательно)</label><input type="text" id="boostPayload" placeholder="ref_XXXX"></div>
       <div class="field" id="boostF-premium" style="display:none">
         <label>Фильтр аккаунтов</label>
         <select id="boostPremiumOnly" class="sel">
@@ -4828,7 +4828,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <option value="link">🔗 Ссылка в ЛС</option>
         </select>
       </div>
-      <div class="field"><label>✉️ Welcome вступившим (необязательно)</label>
+      <div class="field"><label>✉️ Приветствие вступившим (необязательно)</label>
         <textarea id="cpWelcome" rows="2" placeholder="Приветствие тем, кто вступит" style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px"></textarea>
       </div>
       <button class="btn btn-p" style="width:100%" onclick="computeCampaignPlan()">📐 Рассчитать план</button>
@@ -4974,7 +4974,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </div>
       </div>
       <div class="field">
-        <label>✉️ Welcome вступившим (необязательно)</label>
+        <label>✉️ Приветствие вступившим (необязательно)</label>
         <textarea id="massInviteWelcome" rows="2" placeholder="Автосообщение тем, кто реально вступил (для «Обычный»/«Через админку»). Пусто — не слать." style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
         <div style="font-size:12px;color:var(--orange,#f59e0b);margin-top:4px">
           ⏸ Отправка приветствия приглашённым в ЛС сейчас отключена: свежих
@@ -14651,7 +14651,7 @@ async function loadSub() {
 }
 
 function updatePlan(plan, exp) {
-  let t = plan==='paid'?'⭐ Paid — без ограничений':'🆓 Free — до 5 ботов';
+  let t = plan==='paid'?'⭐ Платный — без ограничений':'🆓 Бесплатный — до 5 ботов';
   if (plan==='paid' && exp) { const d=new Date(exp); t+=' · до '+d.toLocaleDateString('ru-RU'); }
   txt('planVal', t);
 }
@@ -22647,7 +22647,7 @@ async function toggleSelfPromo(id,btn) {
 async function launchSelfPromo(id,btn) {
   // Массовая рассылка подписчикам ботов → осознанное подтверждение (паритет с
   // остальными blast-операциями).
-  if (!await askConfirm('Запустить self-promo рассылку по подписчикам ваших ботов?')) return;
+  if (!await askConfirm('Запустить рассылку самопиара по подписчикам ваших ботов?')) return;
   btn.disabled=true; btn.textContent='...';
   try {
     await api(`/api/miniapp/self_promo/${id}/launch`,{method:'POST'});
@@ -22870,7 +22870,7 @@ async function openAudienceDna() {
 let _dnaDetailBotId = null;
 function _renderDnaProfile(d) {
   if (!d.computed) {
-    return empty('📭','DNA-профиль ещё не вычислен','Нажмите «🔄 Пересчитать» вверху для первичного анализа аудитории');
+    return empty('📭','ДНК-профиль ещё не вычислен','Нажмите «🔄 Пересчитать» вверху для первичного анализа аудитории');
   }
   const er = d.avg_engagement_rate ? d.avg_engagement_rate.toFixed(1)+'%' : 'нет данных';
   const risk = d.churn_risk_pct||0;
@@ -22914,7 +22914,7 @@ async function recomputeDna() {
   try {
     const d = await api(`/api/miniapp/audience_dna/${_dnaDetailBotId}/compute`, {method:'POST'});
     txt('dnaDetailBody', _renderDnaProfile(d));
-    toast('✅ DNA обновлён');
+    toast('✅ ДНК обновлён');
   } catch(e) {
     txt('dnaDetailBody', empty('⚠️','Ошибка',e.message));
     toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
@@ -23618,9 +23618,14 @@ async function loadAdminSection() {
   try {
     const stats = await api('/api/miniapp/admin/stats');
     document.getElementById('adminSection').style.display = 'block';
-    document.getElementById('m-admin-users-val').textContent = stats.total_users + ' юзеров';
+    // Без запаса здесь выводилось «undefined юзеров»: бэкенд может не прислать
+    // поле, и пользователь видел служебное слово вместо числа.
+    const tu = Number(stats.total_users);
+    document.getElementById('m-admin-users-val').textContent = Number.isFinite(tu)
+      ? tu + ' ' + plural(tu, 'пользователь', 'пользователя', 'пользователей')
+      : 'нет данных';
   } catch(e) {
-    // Not an admin — keep section hidden
+    // Не администратор — раздел так и остаётся скрытым.
   }
 }
 
