@@ -307,7 +307,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 /* ─── Action buttons ─────────────────────────────────────────── */
 .actions{display:flex;gap:8px;padding:10px 16px 4px;flex-wrap:wrap}
-.btn{display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:normal;line-height:1.25;text-align:center;flex:1 0 auto;min-width:88px;max-width:100%;overflow:hidden}
+.btn{display:inline-flex;min-height:34px;align-items:center;justify-content:center;gap:5px;padding:10px 14px;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:transform .15s var(--spring),box-shadow .2s,opacity .12s;white-space:normal;line-height:1.25;text-align:center;flex:0 0 auto;min-width:88px;max-width:100%;overflow:hidden}
 .btn:active{opacity:.85;transform:translateY(1px) scale(.97)}
 /* Неактивная кнопка: не вуаль из прозрачности (надпись переставала читаться),
    а честное состояние — приглушённый фон и подсказочный цвет текста. */
@@ -727,6 +727,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .chip{display:inline-flex;align-items:center;gap:4px;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
 /* Раскрываемая панель «Действия с аккаунтом»: явная стрелка-индикатор, чтобы
    свёрнутые кнопки не читались как «функции исчезли». */
+/* Раскрывающиеся блоки. У родного треугольника перенесённая строка уезжает
+   под маркер — свой маркер держит текст одной колонкой. */
+details > summary:not([style*="display:flex"]){list-style:none;display:flex;align-items:flex-start;gap:8px;outline:none}
+details > summary::-webkit-details-marker{display:none}
+details > summary:not([style*="display:flex"])::before{content:"\25B8";flex-shrink:0;color:var(--hint);line-height:1.45;transition:transform .15s var(--ease)}
+details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90deg)}
 .acc-actions>summary{list-style:none;outline:none}
 .acc-actions>summary::-webkit-details-marker{display:none}
 .acc-chev{display:inline-block;transition:transform .2s var(--ease)}
@@ -4782,7 +4788,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <button class="btn btn-s" style="width:100%;margin:6px 0 4px;font-size:13px" onclick="openCampaignPlanner()">🎯 Планировщик: цель → план по ёмкости флота</button>
     <div id="governorBar" style="display:none;margin:6px 0 8px;padding:9px 12px;border-radius:10px;font-size:13px;line-height:1.4"></div>
     <details style="margin:2px 0 8px">
-      <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:8px 16px">📊 Аналитика флота и рекомендации</summary>
+      <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:8px 0">📊 Аналитика флота и рекомендации</summary>
       <div class="sec">Сегодня по флоту</div>
       <div id="invAnalytics" style="padding:6px 0 10px"><div class="spin-wrap"><div class="spin"></div></div></div>
       <div class="sec">Ретеншен (30 дн.)</div>
