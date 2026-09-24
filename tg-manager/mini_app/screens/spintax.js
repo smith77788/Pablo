@@ -37,7 +37,7 @@ function _spinRender(variants) {
 function copySpinTpl(i) {
   const tpl = SPIN_TEMPLATES[i];
   if (tpl==null) return;
-  navigator.clipboard?.writeText(tpl).then(()=>toast('📋 Шаблон скопирован')).catch(()=>toast('Не удалось скопировать'));
+  copyToClipboard(tpl, '📋 Шаблон скопирован');
 }
 async function submitSpin() {
   const script = (document.getElementById('spinText').value||'').trim();

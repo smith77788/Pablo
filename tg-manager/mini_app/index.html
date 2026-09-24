@@ -9503,7 +9503,7 @@ async function submitAccProfile() {
     const btn=document.getElementById('apBtn'); btn.disabled=true; btn.textContent='Читаю…';
     try{
       const r=await api(`/api/miniapp/account/${AP_ACC_ID}/login_code`,{method:'POST'});
-      if(r.code){ try{await navigator.clipboard.writeText(r.code);}catch(_){} toast('📩 Код входа: '+r.code+' (скопирован)'); }
+      if(r.code){ await copyToClipboard(r.code, '📩 Код входа скопирован: '+r.code); }
       else toast('Код не найден');
     }catch(e){ errEl.textContent=e.message||'Ошибка'; }
     finally{ btn.disabled=false; btn.textContent='Применить'; }
@@ -9580,9 +9580,10 @@ async function getChannelInviteLink(chId) {
   try {
     const r=await api(`/api/miniapp/channel/${chId}/invite_link`);
     if(r.invite_link){
-      try { await navigator.clipboard.writeText(r.invite_link); } catch(_){}
+      const copied = await copyToClipboard(r.invite_link, '🔗 Ссылка скопирована');
+      // Ссылку показываем всегда: если буфер недоступен, её нужно забрать глазами.
       if(tg?.showPopup){ tg.showPopup({title:'Инвайт-ссылка', message:r.invite_link, buttons:[{type:'ok'}]}); }
-      else { toast('🔗 '+r.invite_link); }
+      else if(!copied){ toast('🔗 '+r.invite_link); }
     } else { toast('⚠️ Ссылка недоступна'); }
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
@@ -9685,8 +9686,7 @@ async function exportAccSession(id) {
   try {
     const r = await api(`/api/miniapp/account/${id}/action/export_session`, {method:'POST'});
     if (r.session) {
-      navigator.clipboard?.writeText(r.session);
-      toast('💾 Сессия скопирована в буфер обмена');
+      await copyToClipboard(r.session, '💾 Сессия скопирована в буфер обмена');
     } else {
       toast(r.message || '⚠️ Не удалось экспортировать');
     }
@@ -10957,7 +10957,7 @@ function buildChDetail(d) {
       </div>
       ${c.username?`<div class="row"><div class="row-ico" style="background:var(--bg-green-16)">🔗</div>
         <div class="row-body"><div class="row-name">Ссылка</div><div class="row-val">t.me/${esc(c.username)}</div></div>
-        <div class="row-right" onclick="navigator.clipboard?.writeText('https://t.me/${esc(c.username)}').then(()=>toast('Скопировано!')).catch(()=>toast('Не удалось скопировать'))"><span style="font-size:20px;cursor:pointer">📋</span></div>
+        <div class="row-right" onclick="copyToClipboard('https://t.me/${esc(c.username)}')"><span style="font-size:20px;cursor:pointer">📋</span></div>
       </div>`:''}
       ${c.channel_id?`<div class="row"><div class="row-ico" style="background:rgba(113,113,122,.16)">🆔</div>
         <div class="row-body"><div class="row-name">ID канала</div><div class="row-val">${c.channel_id}</div></div>
@@ -14615,7 +14615,7 @@ function refLink() {
 function copyRef() {
   const url = refLink();
   if (!url) { toast('⚠️ Username бота не определён'); return; }
-  navigator.clipboard?.writeText(url).then(()=>toast('✅ Ссылка скопирована!')).catch(()=>toast(url));
+  copyToClipboard(url, '✅ Ссылка скопирована!');
 }
 
 // ── Deep Links ─────────────────────────────────────────
@@ -16996,7 +16996,6 @@ async function saveCrmReminder(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
-function copyText(t) { navigator.clipboard?.writeText(t); toast('📋 Скопировано'); }
 
 async function syncContacts() {
   toast('🔄 Запускаю синхронизацию...');
@@ -19979,7 +19978,7 @@ async function submitApiKeyCreate() {
 }
 function copyApiKey() {
   if (_lastApiKey) {
-    navigator.clipboard?.writeText(_lastApiKey).then(()=>toast('📋 Скопировано!')).catch(()=>toast('Не удалось скопировать'));
+    copyToClipboard(_lastApiKey);
   }
 }
 
@@ -22091,10 +22090,9 @@ async function exportCompliance() {
   try {
     const d = await api('/api/miniapp/compliance/export?days=30');
     const text = d.text || 'Нет данных.';
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-      toast('📋 Отчёт скопирован в буфер');
-    } else {
+    // Один источник правды по буферу обмена; если скопировать не вышло —
+    // показываем отчёт, чтобы его можно было забрать глазами.
+    if (!await copyToClipboard(text, '📋 Отчёт скопирован в буфер')) {
       await askConfirm('Отчёт соответствия:\n\n' + text);
     }
   } catch(e) {
@@ -22540,7 +22538,7 @@ async function submitNarrativeCreate() {
 function copySpRefLink() {
   const url = refLink();
   if (!url) { toast('⚠️ Username бота не определён'); return; }
-  navigator.clipboard?.writeText(url).then(()=>toast('✅ Ссылка скопирована!')).catch(()=>toast(url));
+  copyToClipboard(url, '✅ Ссылка скопирована!');
 }
 async function openSelfPromo() {
   push('s-selfpromo');
@@ -23117,6 +23115,46 @@ function plural(n, one, few, many) {
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+// Копирование в буфер обмена — единственная честная дверь.
+//
+// navigator.clipboard существует только в защищённом контексте, а встроенный
+// браузер Telegram даёт его не всегда. Прежние вызовы делали одно из двух и оба
+// раза обманывали: `navigator.clipboard?.writeText(x).then(...)` при отсутствии
+// clipboard возвращал undefined, и `.then` падал TypeError мимо своего же
+// .catch — пользователь не получал ни текста, ни сообщения; а
+// `navigator.clipboard?.writeText(x); toast('Скопировано')` писал «Скопировано»
+// всегда. На экспорте сессии аккаунта это означало «сессия скопирована» при
+// пустом буфере — и потерю самого ценного, что есть у аккаунта.
+//
+// Возвращает true только если копирование реально произошло.
+async function copyToClipboard(text, okMsg) {
+  const s = (text === null || text === undefined) ? '' : String(text);
+  if (!s) { toast('Нечего копировать'); return false; }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(s);
+      toast(okMsg || '📋 Скопировано');
+      return true;
+    }
+  } catch(_) {}
+  // Запасной путь для незащищённого контекста: скрытое поле + execCommand.
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = s;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ta.setSelectionRange(0, s.length); } catch(_) {}
+    const ok = !!(document.execCommand && document.execCommand('copy'));
+    document.body.removeChild(ta);
+    if (ok) { toast(okMsg || '📋 Скопировано'); return true; }
+  } catch(_) {}
+  toast('⚠️ Буфер обмена недоступен — скопируйте текст вручную');
+  return false;
+}
+// Совместимость: прежнее имя осталось у части вызовов.
+function copyText(t) { return copyToClipboard(t); }
 // Честный прогресс операции: done не может превышать total (защита от «34/17»
 // у операций, перевыполненных при ретрае/пере-подхвате со старыми счётчиками).
 function progFrac(o) {

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from unittest.mock import patch
 
 from services import mini_app_api as M
@@ -76,8 +77,18 @@ class _CapPool:
 
 
 def _accounts_query(pool: "_CapPool") -> str:
+    """Подзапрос счётчика аккаунтов, а не вся сводка.
+
+    Счётчики свели в один запрос с подзапросами, и рядом с аккаунтами в нём
+    живут каналы, кампании и очередь — они owner-scoped ВСЕГДА. Проверка по
+    целому запросу после этого искала `owner_id` у соседей и падала на верном
+    коде. Сторожим ровно то, ради чего тест написан: срез по аккаунтам.
+    """
     for q, _ in pool.queries:
         if "FROM tg_accounts" in q and "COUNT(*)" in q:
+            m = re.search(r"\(SELECT COUNT\(\*\) FROM tg_accounts[^)]*\)", q)
+            if m:
+                return m.group(0)
             return q
     raise AssertionError("нет запроса счётчика аккаунтов")
 
