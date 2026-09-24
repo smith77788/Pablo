@@ -9,6 +9,7 @@ import logging
 import os
 import re  # модульный: часть хендлеров зовёт re.split/re.sub без локального import
 import time
+import urllib.parse
 from collections import deque
 from typing import Any
 
@@ -785,6 +786,36 @@ def _jlist(val) -> list:
         return json.loads(val) or []
     except Exception:
         return []
+
+
+def _cloud_safe_name(name: str | None) -> str:
+    """Имя файла, безопасное для манифеста и для заголовка ответа.
+
+    Имя приходит от пользователя и потом уезжает в `Content-Disposition`. Перевод
+    строки в нём ломает весь ответ, а слэш и `..` — это попытка управлять путём у
+    того, кто сохраняет файл. Режем управляющие символы и разделители пути; сами
+    буквы не трогаем, имена у нас русские.
+    """
+    raw = (name or "").strip()
+    cleaned = "".join(ch for ch in raw if ch.isprintable() and ch not in "\r\n")
+    # rstrip, а не strip: точка В НАЧАЛЕ — это обычное скрытое имя (.gitignore),
+    # а вот «..» и хвостовые точки — путь и ловушка Windows.
+    cleaned = cleaned.replace("\\", "/").rsplit("/", 1)[-1].strip().rstrip(". ")
+    return cleaned[:200] or "file"
+
+
+def _content_disposition(name: str) -> str:
+    """`Content-Disposition` с именем, которое переживёт кириллицу.
+
+    Значения заголовков по RFC — latin-1, а aiohttp пишет строку как UTF-8 байты:
+    браузер читает их как latin-1 и показывает «Ð¾Ñ‚Ñ‡Ñ‘Ñ‚.xlsx» вместо «отчёт.xlsx».
+    Поэтому имя отдаём дважды: ASCII-заглушка для старых клиентов и `filename*`
+    (RFC 5987) с процентным кодированием — его понимают все актуальные браузеры.
+    """
+    safe = _cloud_safe_name(name)
+    ascii_name = safe.encode("ascii", "replace").decode("ascii").replace('"', "")
+    quoted = urllib.parse.quote(safe, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}"
 
 
 def _resolve_best_plan(get_plan_result, exp_plan, pu_plan) -> str:
@@ -21281,6 +21312,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 'used_bytes': q['used_bytes'],
                 'limit_bytes': limit,          # 0 = безлимит
                 'paid': q['paid'],
+                # Потолок ОДНОЙ загрузки: мини-апп обязан отказать до чтения
+                # файла, иначе пользователь ждёт загрузку ради отказа в конце.
+                'max_upload_bytes': tg_cloud.MAX_FILE_BYTES,
             })
         except Exception as e:
             return _err(str(e), 500)
@@ -21319,21 +21353,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 500)
 
     async def cloud_upload(request: web.Request) -> web.Response:
-        """Загрузить файл в облако. Принимает JSON {name, data_b64}. v1 — байты
-        приходят base64 (мини-апп читает файл через FileReader)."""
+        """Загрузить файл в облако.
+
+        Основной путь — multipart (поле `file`): тело читается потоком, поэтому
+        размер ограничивает ТОЛЬКО наш потолок. Путь JSON {name, data_b64}
+        оставлен для совместимости, но у него жёсткий предел сверху: aiohttp
+        буферизует такое тело целиком и рубит его на `client_max_size` (1 МБ по
+        умолчанию), а base64 раздувает файл на треть — то есть через JSON не
+        проходил файл крупнее ~750 КБ. Отказ при этом прилетал из aiohttp
+        по-английски и превращался в «внутреннюю ошибку» на экране.
+        """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
+        from services import tg_cloud
+        cap_mb = tg_cloud.MAX_FILE_BYTES // (1024 * 1024)
+        too_big = f"файл больше предела одной загрузки ({cap_mb} МБ)"
         try:
             import base64 as _b64
-            from services import tg_cloud
-            d = await request.json()
-            name = (d.get('name') or 'file').strip()
-            raw = d.get('data_b64') or ''
-            try:
-                blob = _b64.b64decode(raw)
-            except Exception:
-                return _err("не удалось прочитать данные файла", 400)
-            f = await tg_cloud.store_file(pool, uid, name, blob)
+            ctype = (request.headers.get('Content-Type') or '').lower()
+            if ctype.startswith('multipart/'):
+                name, blob, got_part = '', b'', False
+                reader = await request.multipart()
+                async for part in reader:
+                    if part.name == 'name':
+                        name = (await part.text() or '').strip()
+                    elif part.name in ('file', 'data'):
+                        got_part = True
+                        if not name:
+                            name = (part.filename or '').strip()
+                        try:
+                            blob = await _read_upload(part, tg_cloud.MAX_FILE_BYTES)
+                        except ValueError:
+                            return _err(too_big, 413)
+                if not got_part:
+                    return _err("файл не приложен (ожидалось поле file)", 400)
+            else:
+                try:
+                    d = await request.json()
+                except web.HTTPRequestEntityTooLarge:
+                    return _err(too_big, 413)
+                except Exception:
+                    return _err("не удалось разобрать запрос", 400)
+                name = (d.get('name') or '').strip()
+                raw = d.get('data_b64') or ''
+                try:
+                    # validate=True: без него base64 молча выбрасывает всё, что не
+                    # из алфавита, и битая передача превращается в укороченный
+                    # файл, который проходит проверку целостности как «целый».
+                    blob = _b64.b64decode(raw, validate=True)
+                except Exception:
+                    return _err("не удалось прочитать данные файла", 400)
+            if not blob:
+                return _err("файл пустой", 400)
+            if len(blob) > tg_cloud.MAX_FILE_BYTES:
+                return _err(too_big, 413)
+            f = await tg_cloud.store_file(pool, uid, _cloud_safe_name(name), blob)
             return _json_resp({'file': f})
         except tg_cloud.AccessDenied as e:
             return _err(str(e) or "нет доступа к облаку — требуется подписка", 403)
@@ -21353,7 +21427,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not meta:
                 return _err("файл не найден", 404)
             data = await tg_cloud.retrieve_file(pool, uid, fid)
-            fname = (meta.get('name') or 'file').replace('"', '')
+            fname = _cloud_safe_name(meta.get('name'))
             # Реальный MIME по расширению: помогает нативному загрузчику Telegram
             # назвать файл и корректно проиграть видео/аудио в предпросмотре.
             import mimetypes
@@ -21363,7 +21437,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Content-Type": ctype,
-                    "Content-Disposition": f'attachment; filename="{fname}"',
+                    # Тип берётся из имени файла, то есть из данных пользователя —
+                    # nosniff не даёт браузеру передумать и исполнить содержимое.
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Disposition": _content_disposition(fname),
                 })
         except FileNotFoundError:
             return _err("файл не найден", 404)

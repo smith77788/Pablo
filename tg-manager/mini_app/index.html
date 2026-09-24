@@ -7206,8 +7206,12 @@ async function api(path, opts={}) {
   const _hdr = () => _isForm
     ? {'Authorization':'Bearer '+TK, ...(opts.headers||{})}
     : {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})};
+  // Таймаут по умолчанию рассчитан на ответ API. Загрузка файла живёт минутами,
+  // и общий 30-секундный предел рвал бы её на полпути, показывая «сервер не
+  // отвечает» вместо загрузки. Поэтому вызывающий может задать свой.
+  const _ms = Number(opts.timeoutMs) || FETCH_TIMEOUT_MS;
   try {
-    r = await fetchT(path, { ...opts, headers: _hdr() });
+    r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
   } catch(e) {
     throw new Error((e && e.message) || 'Нет соединения с сервером');
   }
@@ -7216,7 +7220,7 @@ async function api(path, opts={}) {
     await _reAuth();
     // Retry once with new token
     try {
-      r = await fetchT(path, { ...opts, headers: _hdr() });
+      r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
     } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
     if (r.status === 401) throw new Error('Сессия истекла, перезапустите приложение');
   }
@@ -17282,6 +17286,9 @@ async function openCloud() {
     }
     const limit = Number(st.limit_bytes) || 0;
     const used = Number(st.used_bytes) || 0;
+    // Потолок ОДНОЙ загрузки приходит с сервера: зашитое в UI число разъедется
+    // с сервером при первой же смене лимита и снова начнёт врать пользователю.
+    _CLOUD_MAX_UPLOAD = Number(st.max_upload_bytes) || 0;
     const quotaLine = limit > 0
       ? `${_cloudBytes(used)} из ${_cloudBytes(limit)}`
       : `${_cloudBytes(used)} · безлимит`;
@@ -17301,7 +17308,8 @@ async function openCloud() {
         ⬆️ Загрузить файл
         <input type="file" id="cloudFileInput" style="display:none" onchange="cloudUpload(this)">
       </label>
-      <div id="cloudUpMsg" style="font-size:12px;text-align:center;color:var(--hint);min-height:14px;margin-bottom:8px"></div>
+      <div id="cloudUpMsg" style="font-size:12px;text-align:center;color:var(--hint);min-height:14px;margin-bottom:8px">${
+        _CLOUD_MAX_UPLOAD ? 'Один файл — до ' + _cloudBytes(_CLOUD_MAX_UPLOAD) : ''}</div>
       <div class="sec">Мои файлы</div>
       <div id="cloudFiles"></div>
     </div>`;
@@ -17366,25 +17374,42 @@ async function cloudRefreshList() {
   } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(e.message || 'Ошибка')}</div>`; }
 }
 
+// Потолок одной загрузки — с сервера (см. openCloud). 0 = ещё не знаем.
+let _CLOUD_MAX_UPLOAD = 0;
+
+// Файл уходит как multipart, а не base64 в JSON. Через JSON не проходило ничего
+// крупнее ~750 КБ: aiohttp буферизует такое тело целиком и рубит его на 1 МБ, а
+// base64 раздувает файл на треть. Отказ приходил как «внутренняя ошибка», и со
+// стороны это выглядело поломкой облака, а не превышением размера.
 async function cloudUpload(input) {
   const file = input && input.files && input.files[0];
   if (!file) return;
   const msg = document.getElementById('cloudUpMsg');
-  if (msg) msg.textContent = '⏳ Читаю и шифрую…';
+  const say = t => { if (msg) msg.textContent = t; };
+  if (_CLOUD_MAX_UPLOAD && file.size > _CLOUD_MAX_UPLOAD) {
+    // Отказ ДО отправки: гонять гигабайты ради 413 в конце — пустая трата
+    // времени и трафика пользователя.
+    input.value = '';
+    say('');
+    toast(`Файл ${_cloudBytes(file.size)} — больше предела ${_cloudBytes(_CLOUD_MAX_UPLOAD)}`);
+    return;
+  }
+  if (!file.size) { input.value = ''; toast('Файл пустой'); return; }
+  say(`⏳ Загружаю ${_cloudBytes(file.size)}…`);
   try {
-    const b64 = await new Promise((resolve, reject) => {
-      const rd = new FileReader();
-      rd.onerror = () => reject(new Error('Не удалось прочитать файл'));
-      rd.onload = () => { const s = String(rd.result || ''); resolve(s.slice(s.indexOf(',') + 1)); };
-      rd.readAsDataURL(file);
-    });
-    if (msg) msg.textContent = '⏳ Загружаю в облако…';
-    await api('/api/miniapp/cloud/upload', { method: 'POST', body: JSON.stringify({ name: file.name, data_b64: b64 }) });
-    if (msg) msg.textContent = '✅ Загружено';
+    const fd = new FormData();
+    fd.append('name', file.name || 'file');
+    fd.append('file', file, file.name || 'file');
+    // Минута на связь плюс запас из расчёта скромных 50 КБ/с: на мобильном
+    // интернете 30 секунд не хватит даже на несколько мегабайт.
+    const budget = Math.min(15 * 60 * 1000, 60000 + (file.size / 1024 / 50) * 1000);
+    await api('/api/miniapp/cloud/upload', { method: 'POST', body: fd, timeoutMs: budget });
+    say('✅ Загружено');
     input.value = '';
     await openCloud();
   } catch (e) {
-    if (msg) msg.textContent = '';
+    say('');
+    input.value = '';
     toast(e.message || 'Ошибка загрузки');
   }
 }
