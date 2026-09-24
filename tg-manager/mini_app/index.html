@@ -264,6 +264,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .card-lbl{font-size:12px;color:var(--hint);margin-top:3px;line-height:1.3}
 
 /* ─── Lists ──────────────────────────────────────────────────── */
+/* Панели на цвете --bg2 несли волосяную рамку только в половине случаев: у
+   .card и .lst она есть, у панелей, собранных инлайном, не было. Рамка —
+   стандарт; инлайновая рамка, если задана, перебивает это правило сама. */
+div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .lst{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin:0 16px;box-shadow:var(--shadow)}
 .li{padding:11px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--sep);transition:background .12s}
 .li:last-child{border-bottom:none}
