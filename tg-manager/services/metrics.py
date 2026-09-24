@@ -35,6 +35,15 @@ _HELP = {
     "infragram_operation_seconds_sum": "Суммарная длительность операций, сек",
     "infragram_operation_seconds_count": "Число завершённых операций",
     "infragram_flood_events_total": "События FloodWait/PeerFlood",
+    # Механизмы надёжности очереди. Без этих счётчиков их срабатывания видны
+    # только в логах: снаружи операция просто «не доехала», и понять, почему
+    # именно — прервана по времени, отложена платформой или остановлена как
+    # ядовитая — можно было лишь чтением логов постфактум.
+    "infragram_op_timeouts_total": "Операции, прерванные по потолку прогона",
+    "infragram_op_revives_total": "Возвраты операции в очередь после падения/зависания воркера",
+    "infragram_op_poisoned_total": "Операции, остановленные по исчерпании бюджета живучести",
+    "infragram_op_flood_defers_total": "Операции, отложенные до конца длинной флуд-паузы",
+    "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
     "infragram_session_deaths_total": "Смерти сессий (auth key убит)",
     "infragram_db_pool_connections": "Соединения пула БД",
 }

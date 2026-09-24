@@ -517,6 +517,21 @@ async def _requeue_op_no_accounts(
 _FLOOD_INLINE_MAX_S = _int_env("OP_FLOOD_INLINE_MAX_SEC", 15 * 60, 30, 6 * 3600)
 
 
+def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
+    """Счётчик механизма надёжности. Никогда не бросает и ничего не ждёт.
+
+    Срабатывания этих механизмов раньше жили только в логах: снаружи операция
+    просто «не доехала», а понять, прервана она по времени, отложена платформой
+    или остановлена как ядовитая, можно было лишь чтением логов постфактум.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.inc(name, {k: str(v) for k, v in labels.items() if v is not None}, value)
+    except Exception:
+        pass
+
+
 async def bounded_flood_sleep(seconds: float, where: str = "") -> float:
     """Переждать флуд-паузу ВНУТРИ прогона, но не дольше _FLOOD_INLINE_MAX_S.
 
@@ -544,6 +559,7 @@ async def bounded_flood_sleep(seconds: float, where: str = "") -> float:
             "держать слот и флот столько времени",
             f" {where}" if where else "", want, actual,
         )
+        _reliability_metric("infragram_flood_sleep_truncated_total", where=where or "unknown")
     if actual > 0:
         await asyncio.sleep(actual)
     return actual
@@ -578,6 +594,7 @@ async def _defer_op_for_flood(
         "op_worker: op=%d отложена на %dс из-за длинной флуд-паузы — слот и аккаунты освобождены",
         op_id, delay,
     )
+    _reliability_metric("infragram_op_flood_defers_total")
     # Пауза в часы (PeerFlood откладывает на 48) без объяснения выглядит как
     # зависшая операция: в очереди «ожидает» и никаких причин. Молчание здесь
     # обходится дороже сообщения — владелец начинает отменять и запускать
@@ -1683,6 +1700,7 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
             "op_worker startup: %d operations exceeded revive budget (%d) → failed",
             poisoned_n, _MAX_REVIVES,
         )
+        _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="startup")
     result = await _safe_execute(
             pool,
         # done_items=0: операцию подхватит воркер заново и исполнитель прогонит её
@@ -1704,6 +1722,7 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
             "op_worker startup: reset %d stale 'running' operations → 'pending'",
             count,
         )
+        _reliability_metric("infragram_op_revives_total", count, source="startup")
     else:
         log.info("op_worker startup: no stale running operations found")
 
@@ -1744,6 +1763,7 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
                 "op_worker watchdog: %d hung ops exceeded revive budget (%d) → failed",
                 poisoned_n, _MAX_REVIVES,
             )
+            _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
 
         result = await pool.execute(
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
@@ -1760,6 +1780,7 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
         count = int((result or "UPDATE 0").split()[-1])
         if count:
             log.warning("op_worker watchdog: reset %d stale running ops → pending", count)
+            _reliability_metric("infragram_op_revives_total", count, source="watchdog")
     except Exception as e:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
 
@@ -1886,8 +1907,10 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
             f"{icon} #{r['id']} <code>{r['op_type']}</code> — "
             f"{r['status']} {int(r['age_min'])} мин (owner {r['owner_id']})"
         )
-    lines.append("\n<i>pending не разбирается → проверьте воркер/op_type; "
-                 "running зависло → будет авто-сброшено.</i>")
+    lines.append(
+        "\n<i>pending не разбирается → проверьте воркер/op_type; "
+        f"running зависло → будет авто-сброшено (не более {_MAX_REVIVES} раз, "
+        "дальше операция помечается ошибкой).</i>")
     text = "\n".join(lines)
     for aid in admin_ids:
         try:
@@ -2873,6 +2896,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         "прогон прерван, аккаунты и слот освобождаются",
                         op_id, op_type, _timeout_s,
                     )
+                    _reliability_metric(
+                        "infragram_op_timeouts_total", op_type=op_type)
                     raise TimeoutError(
                         f"Операция не уложилась в {_timeout_s // 60} мин и была "
                         f"прервана (вероятно, зависла на ответе Telegram или прокси)"
