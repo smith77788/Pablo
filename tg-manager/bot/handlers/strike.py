@@ -1105,10 +1105,25 @@ async def cb_mini_strike_run(
     except (TypeError, ValueError):
         pass
     if _fe.is_account_cooling(acc["id"]):
+        # Раньше отсюда был только выход «Назад»: экран говорил «попробуйте
+        # позже», не показывал, сколько ждать, и не давал снять паузу, хотя
+        # кнопка сброса уже есть в дашборде здоровья и в Mini App. Владелец
+        # видел тупик и шёл искать её вручную. Ведём в тот же общий сброс
+        # (services/account_reset.py через HealthCb), своей копии не заводим.
+        from bot.callbacks import HealthCb
+        _left = int(_fe.seconds_until_ready(acc["id"]))
+        _when = f"Осталось ещё {_left // 60} мин." if _left >= 60 else "Осталось меньше минуты."
         kb = InlineKeyboardBuilder()
+        kb.button(text="🔓 Снять остывание",
+                  callback_data=HealthCb(action="reset_cooldown_one", page=int(acc["id"])))
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.adjust(1)
         await safe_edit(callback,
-            "⏳ Аккаунт на остывании после флуда/страйка. Попробуйте позже.",
+            "⏳ <b>Аккаунт на остывании</b> после флуда или предыдущего страйка.\n"
+            f"{_when}\n\n"
+            "Пауза бережёт аккаунт: страйк — самая баноопасная операция, и бить "
+            "сразу после флуда — быстрый путь к бану. Снять её можно, но тогда "
+            "риск на вас.",
             kb.as_markup())
         return
 

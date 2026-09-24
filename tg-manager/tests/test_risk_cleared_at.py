@@ -298,3 +298,39 @@ def test_cooldown_menu_uses_shared_list():
         "меню снова считает остывающих само — разъедется с массовым сбросом")
     assert "cooldown_until > NOW()" not in seg, (
         "меню снова смотрит только в базу и не видит остывание в памяти")
+
+
+# ── выход из остывания там, где владелец в него упирается ────────────────────
+
+def test_strike_cooling_screen_offers_the_reset():
+    """Экран страйка при остывании не должен быть тупиком «попробуйте позже».
+
+    Кнопка сброса есть в дашборде здоровья и в Mini App, а здесь владелец
+    упирался в стену с одним «Назад» и шёл искать её вручную.
+    """
+    strike = (ROOT / "bot" / "handlers" / "strike.py").read_text(encoding="utf-8")
+    m = re.search(r'if _fe\.is_account_cooling\(acc\["id"\]\):(.*?)\n        return',
+                  strike, re.S)
+    assert m, "экран остывания в страйке не найден — тест устарел"
+    seg = m.group(1)
+    assert 'HealthCb(action="reset_cooldown_one"' in seg, (
+        "с экрана остывания нет выхода к сбросу — снова тупик")
+    assert "seconds_until_ready" in seg, (
+        "экран обязан говорить, сколько ещё ждать, а не просто «позже»")
+    assert "UPDATE tg_accounts" not in seg and "clear_account_cooldown" not in seg, (
+        "экран страйка завёл свою копию сброса вместо общей")
+
+
+def test_strike_cooling_button_matches_reset_handler_wiring():
+    """Кнопка обязана класть id аккаунта в то поле, которое читает обработчик."""
+    strike = (ROOT / "bot" / "handlers" / "strike.py").read_text(encoding="utf-8")
+    m = re.search(r'HealthCb\(action="reset_cooldown_one",\s*(\w+)=', strike)
+    assert m, "кнопка сброса на экране страйка не найдена"
+    field = m.group(1)
+
+    dash = (ROOT / "bot" / "handlers" / "health_dashboard.py").read_text(encoding="utf-8")
+    h = re.search(r"async def cb_reset_cooldown_one\(.*?\n(?=@router)", dash, re.S)
+    assert h, "обработчик сброса не найден"
+    assert f"callback_data.{field}" in h.group(0), (
+        f"кнопка кладёт id в «{field}», а обработчик читает другое поле — "
+        "сброс уйдёт не в тот аккаунт")
