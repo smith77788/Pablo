@@ -4023,11 +4023,26 @@ async def join_channel(
         ref_kind, ref_value = normalize_telegram_join_ref(invite_or_username)
         if not ref_value:
             return {"error": "Telegram target is empty"}
+        # Потолок на сам запрос, а не только на коннект. Коннект ограничен в
+        # _connect_and_track, но мёртвый прокси чаще отдаёт не отказ, а
+        # half-open сокет: TCP установлен, ответа нет и не будет. Без потолка
+        # такой запрос не возвращается НИКОГДА, а вступление идёт циклом
+        # accounts × ссылки: один повисший аккаунт останавливал всю операцию,
+        # держа слот параллельности и арендованный флот до потолка прогона
+        # (часы). asyncio.TimeoutError ниже уже разбирается как сбой прокси.
+        #
+        # 45 секунд (_OP_TIMEOUT, штатный потолок одиночной Telethon-операции)
+        # выбраны с запасом СОЗНАТЕЛЬНО: живой Telegram отвечает за секунды, а
+        # ложный таймаут на успешном вступлении хуже задержки — он уводит цель
+        # в повтор, то есть в ЛИШНИЙ joinChannel, а это давление к PEER_FLOOD.
         if ref_kind == "invite":
-            result = await client(ImportChatInviteRequest(hash=ref_value))
+            result = await asyncio.wait_for(
+                client(ImportChatInviteRequest(hash=ref_value)), timeout=_OP_TIMEOUT)
         else:
-            entity = await client.get_entity(ref_value)
-            result = await client(JoinChannelRequest(channel=entity))
+            entity = await asyncio.wait_for(
+                client.get_entity(ref_value), timeout=_OP_TIMEOUT)
+            result = await asyncio.wait_for(
+                client(JoinChannelRequest(channel=entity)), timeout=_OP_TIMEOUT)
         chats = getattr(result, "chats", None) or []
         if not chats:
             return {"error": "Telegram did not return joined chat"}
@@ -4238,8 +4253,13 @@ async def leave_channel(
     client = _make_client(session_string, _acc)
     try:
         await _connect_and_track(client, _acc, "leave")
-        entity = await client.get_entity(channel_id)
-        await client(LeaveChannelRequest(channel=entity))
+        # Потолок на сам запрос — см. подробное пояснение в join_channel:
+        # коннект ограничен, а half-open сокет мёртвого прокси вешает запрос
+        # навсегда, останавливая цикл accounts × каналы целиком.
+        entity = await asyncio.wait_for(
+            client.get_entity(channel_id), timeout=_OP_TIMEOUT)
+        await asyncio.wait_for(
+            client(LeaveChannelRequest(channel=entity)), timeout=_OP_TIMEOUT)
         return {"ok": True}
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "leave")
