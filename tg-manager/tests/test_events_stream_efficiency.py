@@ -3,7 +3,8 @@
 Цикл крутится вечно на КАЖДОЕ открытое приложение: раньше он каждые 15 секунд
 делал десяток запросов к базе ПО ОЧЕРЕДИ и отправлял полные снимки, даже если
 ничего не изменилось. На мобильной сети это постоянный трафик и постоянные
-перерисовки на пустом месте.
+перерисовки на пустом месте. Счётчики дашборда теперь уходят одним запросом —
+не семью подряд и не семью соединениями из пула сразу.
 """
 from __future__ import annotations
 
@@ -16,86 +17,69 @@ import pytest
 from services import mini_app_api as m
 
 
-class _SlowPool:
-    """Пул, где каждый запрос стоит фиксированную задержку — видно, ждут ли по очереди."""
+class _FakePool:
+    """Пул-заглушка: записывает запросы и умеет ронять объединённый запрос."""
 
-    def __init__(self, delay=0.05, counts=None):
-        self.delay = delay
-        self.calls = 0
-        self.peak = 0
-        self._live = 0
-        self.counts = counts or {}
-
-    async def _work(self, query):
-        self.calls += 1
-        self._live += 1
-        self.peak = max(self.peak, self._live)
-        try:
-            await asyncio.sleep(self.delay)
-            for needle, value in self.counts.items():
-                if needle in query:
-                    return value
-            return 0
-        finally:
-            self._live -= 1
-
-    async def fetchval(self, query, *a):
-        return await self._work(query)
-
-    async def fetch(self, query, *a):
-        await self._work(query)
-        return []
+    def __init__(self, combined_ok=True, value=0):
+        self.queries: list[str] = []
+        self.combined_ok = combined_ok
+        self.value = value
 
     async def fetchrow(self, query, *a):
-        await self._work(query)
-        return None
+        self.queries.append(query)
+        if not self.combined_ok:
+            raise RuntimeError("нет такой таблицы")
+        from services.mini_app_api import _STATS_KEYS
+        return {k: self.value for k in _STATS_KEYS}
 
-    async def execute(self, query, *a):
-        return await self._work(query)
+    async def fetchval(self, query, *a):
+        self.queries.append(query)
+        return self.value
 
 
-def test_stats_queries_run_in_parallel():
-    pool = _SlowPool(delay=0.05)
-    started = time.monotonic()
+def test_stats_uses_a_single_combined_query():
+    pool = _FakePool(value=3)
     res = asyncio.run(m._stats(pool, 42))
-    elapsed = time.monotonic() - started
-
-    assert pool.calls == 7, "должно быть семь счётчиков"
-    # По очереди — ~0.35 с; параллельно — около одной задержки.
-    assert elapsed < 0.2, f"счётчики всё ещё считаются по очереди: {elapsed:.2f}s"
-    assert pool.peak > 1
-    assert set(res) == {"bots", "channels", "subscribers", "campaigns_active",
-                        "funnels_active", "accounts", "ops_running"}
+    assert len(pool.queries) == 1, "счётчики должны уходить одним запросом"
+    assert res == {k: 3 for k in m._STATS_KEYS}
 
 
-def test_stats_admin_scope_counts_the_whole_platform():
+def test_stats_falls_back_to_separate_counts():
+    """Сломанный объединённый запрос не должен обнулять весь дашборд."""
+    pool = _FakePool(combined_ok=False, value=5)
+    res = asyncio.run(m._stats(pool, 42))
+    assert len(pool.queries) == 1 + len(m._STATS_KEYS)
+    assert res == {k: 5 for k in m._STATS_KEYS}
+
+
+def test_admin_scope_drops_owner_filter_for_accounts():
+    pool = _FakePool()
+    asyncio.run(m._stats(pool, 42, admin=True))
+    combined = " ".join(pool.queries[0].split())
+    assert "(SELECT COUNT(*) FROM tg_accounts) AS accounts" in combined, \
+        "у админа счётчик аккаунтов межтенантный"
+
+    pool2 = _FakePool()
+    asyncio.run(m._stats(pool2, 42, admin=False))
+    combined2 = " ".join(pool2.queries[0].split())
+    assert "(SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1) AS accounts" in combined2
+
+
+def test_admin_fallback_does_not_pass_an_unused_parameter():
+    """Межтенантный счётчик $1 не использует: лишний параметр обнулил бы его."""
     seen = []
 
-    class _P(_SlowPool):
+    class _P(_FakePool):
+        async def fetchrow(self, query, *a):
+            raise RuntimeError("нет")
+
         async def fetchval(self, query, *a):
             seen.append((" ".join(query.split()), a))
-            return await self._work(query)
+            return 1
 
-    asyncio.run(m._stats(_P(delay=0), 42, admin=True))
-    acc = [q for q, a in seen if q.startswith("SELECT COUNT(*) FROM tg_accounts")]
-    assert acc == ["SELECT COUNT(*) FROM tg_accounts"], \
-        "у админа счётчик аккаунтов межтенантный, без owner_id"
-
-    seen.clear()
-    asyncio.run(m._stats(_P(delay=0), 42, admin=False))
-    acc = [(q, a) for q, a in seen if q.startswith("SELECT COUNT(*) FROM tg_accounts")]
-    assert acc and "owner_id=$1" in acc[0][0] and acc[0][1] == (42,)
-
-
-def test_stats_survives_a_broken_counter():
-    class _Broken(_SlowPool):
-        async def fetchval(self, query, *a):
-            if "funnel_subscriptions" in query:
-                raise RuntimeError("нет таблицы")
-            return await self._work(query)
-
-    res = asyncio.run(m._stats(_Broken(delay=0), 42))
-    assert res["funnels_active"] == 0, "сломанный счётчик не должен рушить дашборд"
+    asyncio.run(m._stats(_P(), 42, admin=True))
+    acc = [(q, a) for q, a in seen if q == "SELECT COUNT(*) FROM tg_accounts"]
+    assert acc and acc[0][1] == (), "запросу без $1 параметр слать нельзя"
 
 
 # ── Отправка только изменившихся снимков ────────────────────────────────────

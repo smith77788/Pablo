@@ -976,61 +976,65 @@ def _dna_to_dict(dna: Any) -> dict:
     }
 
 
+_STATS_KEYS = ("bots", "channels", "subscribers", "campaigns_active",
+               "accounts", "ops_running", "funnels_active")
+
+# Счётчики дашборда. Скоуп аккаунтов ДОЛЖЕН совпадать с экраном «Аккаунты»:
+# там админ видит все аккаунты платформы (межтенантно), а обычный пользователь
+# — свои. Иначе на дашборде «Аккаунтов: 0», а на экране — «25» (админ владеет
+# 0, но видит все). Счётчик — ВСЕГО в области видимости, а не только активные.
+_STATS_SQL = {
+    "bots": "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1",
+    "channels": "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+    "subscribers": ("SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu "
+                    "JOIN managed_bots mb ON mb.bot_id=bu.bot_id WHERE mb.added_by=$1"),
+    "campaigns_active": ("SELECT COUNT(*) FROM dm_campaigns "
+                         "WHERE owner_id=$1 AND status='running'"),
+    "accounts": "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1",
+    "ops_running": ("SELECT COUNT(*) FROM operation_queue "
+                    "WHERE owner_id=$1 AND status='running'"),
+    # funnels.bot_id → managed_bots.added_by = owner
+    "funnels_active": ("SELECT COUNT(*) FROM funnel_subscriptions fs "
+                       "JOIN funnels f ON f.id=fs.funnel_id "
+                       "JOIN managed_bots mb ON mb.bot_id=f.bot_id "
+                       "WHERE mb.added_by=$1 AND COALESCE(fs.completed, false)=false"),
+}
+_STATS_SQL_ADMIN_ACCOUNTS = "SELECT COUNT(*) FROM tg_accounts"
+
+
 async def _stats(pool: asyncpg.Pool, uid: int, admin: bool = False) -> dict:
-    """Счётчики дашборда. Семь независимых COUNT — считаем их параллельно.
+    """Счётчики дашборда ОДНИМ запросом.
 
-    Последовательно это семь round-trip к Postgres подряд, и платит за них не
-    только открытие дашборда: поток событий зовёт _stats КАЖДЫЕ 15 секунд на
-    каждое открытое приложение. Запросы друг от друга не зависят, пул asyncpg
-    рассчитан на одновременные — ждать их по очереди незачем.
+    Семь COUNT независимы, но платит за них не только открытие дашборда: поток
+    событий зовёт _stats каждые 15 секунд на КАЖДОЕ открытое приложение. Семь
+    round-trip подряд — это семь ожиданий сети; семь параллельных — это семь
+    соединений из пула одновременно на одного пользователя, и при нескольких
+    открытых приложениях пул (по умолчанию 20) начинает быть узким местом.
+    Скалярные подзапросы дают и одно ожидание, и одно соединение.
+
+    Если объединённый запрос почему-то не прошёл (нет таблицы после неудачной
+    миграции), считаем по одному: один сломанный счётчик не должен обнулять
+    весь дашборд.
     """
-    # Скоуп аккаунтов ДОЛЖЕН совпадать с экраном «Аккаунты»: там админ видит все
-    # аккаунты платформы (межтенантно), а обычный пользователь — свои. Иначе на
-    # дашборде «Аккаунтов: 0», а на экране — «25» (админ владеет 0, но видит все).
-    # Счётчик — ВСЕГО в области видимости (совпадает с крупной «25 аккаунтов»
-    # в шапке экрана), а не только активные.
-    accounts_q = (("SELECT COUNT(*) FROM tg_accounts", ()) if admin
-                  else ("SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", (uid,)))
+    parts = dict(_STATS_SQL)
+    if admin:
+        parts["accounts"] = _STATS_SQL_ADMIN_ACCOUNTS
+    combined = "SELECT " + ", ".join(
+        f"({parts[k]}) AS {k}" for k in _STATS_KEYS)
+    try:
+        row = await pool.fetchrow(combined, uid)
+        if row is not None:
+            return {k: int(row[k] or 0) for k in _STATS_KEYS}
+    except Exception:
+        log.warning("_stats: объединённый запрос не прошёл, считаю по одному",
+                    exc_info=True)
 
-    async def _funnels() -> int:
-        try:
-            # funnels.bot_id → managed_bots.added_by = owner
-            return int(await pool.fetchval(
-                """SELECT COUNT(*) FROM funnel_subscriptions fs
-                   JOIN funnels f ON f.id=fs.funnel_id
-                   JOIN managed_bots mb ON mb.bot_id=f.bot_id
-                   WHERE mb.added_by=$1 AND COALESCE(fs.completed, false)=false""",
-                uid) or 0)
-        except Exception:
-            log.debug("_stats: счётчик воронок не посчитался", exc_info=True)
-            return 0
-
-    (bots, channels, subscribers, campaigns_active,
-     accounts, ops_running, funnels_active) = await asyncio.gather(
-        _safe_count(pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid),
-        _safe_count(pool, "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid),
-        _safe_count(pool,
-                    """SELECT COUNT(DISTINCT bu.user_id)
-                       FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                       WHERE mb.added_by=$1""", uid),
-        _safe_count(pool,
-                    "SELECT COUNT(*) FROM dm_campaigns WHERE owner_id=$1 AND status='running'",
-                    uid),
-        _safe_count(pool, accounts_q[0], *accounts_q[1]),
-        _safe_count(pool,
-                    "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'",
-                    uid),
-        _funnels(),
-    )
-    return {
-        "bots": bots,
-        "channels": channels,
-        "subscribers": subscribers,
-        "campaigns_active": campaigns_active,
-        "funnels_active": funnels_active,
-        "accounts": accounts,
-        "ops_running": ops_running,
-    }
+    # Межтенантный счётчик аккаунтов $1 не использует — передавать его нельзя,
+    # asyncpg отклонит лишний параметр и счётчик молча обнулится.
+    values = await asyncio.gather(
+        *(_safe_count(pool, parts[k], *(() if "$1" not in parts[k] else (uid,)))
+          for k in _STATS_KEYS))
+    return dict(zip(_STATS_KEYS, values))
 
 
 # ── Ядра массовых действий (переиспользуются эндпоинтами и Copilot-apply) ──────
