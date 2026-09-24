@@ -870,7 +870,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
-      <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Live</span></div>
+      <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Онлайн</span></div>
     </div>
   </div>
   <div class="sb">
@@ -1001,7 +1001,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Массовые действия по ботам -->
     <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📢 Рассылка</button>
-      <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📣 Self Promo</button>
+      <button class="btn btn-s" onclick="openSelfPromo()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📣 Самопиар</button>
       <button class="btn btn-s" onclick="openBotFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 10px">
@@ -1442,7 +1442,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <button class="mini-btn" onclick="openChMass('post')">📤 Пост</button>
         <button class="mini-btn" onclick="openChMass('title')">📛 Название</button>
         <button class="mini-btn" onclick="openChMass('about')">✏️ Описание</button>
-        <button class="mini-btn" onclick="openChMass('username')">🔗 Username</button>
+        <button class="mini-btn" onclick="openChMass('username')">🔗 Юзернейм</button>
         <button class="mini-btn" onclick="runChMass('promote')">👑 Админы</button>
       </div>
     </div>
@@ -2198,7 +2198,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <!-- Подвал платформы -->
     <div class="platform-footer">
       <div class="pf-brand">⚡ Infragram OS</div>
-      <div class="pf-sub" id="statsSum">Telegram Infrastructure Platform</div>
+      <div class="pf-sub" id="statsSum">Инфраструктура Telegram и массовые операции</div>
       <button class="btn" style="background:var(--bg);font-size:13px;margin-top:4px" onclick="openErrorReport()">🐛 Сообщить об ошибке</button>
     </div>
 
@@ -2824,7 +2824,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="modal-x" onclick="closeModal('mo-bot-add')">✕</div>
     <div class="modal-title">🤖 Добавить бота</div>
     <div class="field">
-      <label>Bot Token *</label>
+      <label>Токен бота *</label>
       <input type="text" id="botAddToken" placeholder="1234567890:AAFxxxxxxxx..." class="inp-sm">
     </div>
     <div class="field" style="font-size:12px;color:var(--hint)">Получите токен у @BotFather в Telegram</div>
@@ -2969,7 +2969,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <select id="apOp" onchange="apToggle()" class="sel">
         <option value="name">Имя и Bio</option>
         <option value="avatar">Аватар</option>
-        <option value="username">Username</option>
+        <option value="username">Юзернейм</option>
         <option value="2fa">2FA пароль</option>
         <option value="close_sessions">🔒 Закрыть сторонние сессии</option>
         <option value="privacy">🛡 Приватность</option>
@@ -3918,8 +3918,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <details id="cfCredsBox" style="margin-bottom:8px">
         <summary style="font-size:13px;cursor:pointer;opacity:.85">🔑 Доступы Cloudflare</summary>
         <div style="padding-top:8px">
-          <div class="field"><label>API Token <span style="font-weight:400">(вставится 1 раз, хранится в БД зашифровано)</span></label><input type="password" id="cfToken" placeholder="cfut_… (оставьте пустым, чтобы не менять)" autocomplete="off"></div>
-          <div class="field"><label>Account ID</label><input type="text" id="cfAccountId" placeholder="6d808bb24be683c5a0e556074977a78a"></div>
+          <div class="field"><label>Токен API <span style="font-weight:400">(вставится 1 раз, хранится в БД зашифровано)</span></label><input type="password" id="cfToken" placeholder="cfut_… (оставьте пустым, чтобы не менять)" autocomplete="off"></div>
+          <div class="field"><label>ID аккаунта</label><input type="text" id="cfAccountId" placeholder="6d808bb24be683c5a0e556074977a78a"></div>
           <div class="field"><label>Workers-поддомен</label><input type="text" id="cfSubdomain" placeholder="infragram"></div>
           <button class="btn btn-s" id="cfSaveCredsBtn" style="width:100%;font-size:13px;padding:9px 6px" onclick="saveCfCreds()">💾 Сохранить доступы</button>
         </div>
@@ -4630,7 +4630,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-nodethreads">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title" id="nodethreads-title">🖥 Threads</div>
+    <div class="hdr-title" id="nodethreads-title">🖥 Топики</div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="nodethreadsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4680,7 +4680,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="modal-x" onclick="closeModal('mo-community-create')">✕</div>
     <div class="modal-title">🏛 Новое сообщество</div>
     <input type="text" id="ccTitle" placeholder="Название сообщества" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
-    <input type="text" id="ccChatId" placeholder="Chat ID (-1001234567890)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+    <input type="text" id="ccChatId" placeholder="ID чата (-1001234567890)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     <textarea id="ccDesc" rows="2" placeholder="Описание (необязательно)" style="width:100%;box-sizing:border-box;padding:9px;border-radius:10px;background:var(--bg2);color:var(--text);border:1px solid var(--sep);font-size:14px"></textarea>
     <div id="ccErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCommunityCreate()">Создать</button>
@@ -5391,7 +5391,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-relay">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title" id="relay-title">💬 Inbox</div>
+    <div class="hdr-title" id="relay-title">💬 Входящие</div>
     <div class="hdr-meta" id="relay-toggle"></div>
   </div>
   <div class="sub-sb">
@@ -5683,11 +5683,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
         <div style="font-size:11px;color:var(--hint);margin-top:6px">«Только через прокси» — массовые действия без прокси блокируются (защита от банов). «Можно без прокси» — работают и без прокси, но с риском блокировок. Одиночные чтения (напр. контакты) прокси не требуют в любом режиме.</div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:14px">🔐 Webhook Secret</span>
+        <span style="font-size:14px">🔐 Секрет вебхука</span>
         <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">Изменить</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0">
-        <span style="font-size:14px">📋 User ID</span>
+        <span style="font-size:14px">📋 ID пользователя</span>
         <span id="set-uid-val" style="font-family:monospace;font-size:13px;color:var(--hint)"></span>
       </div>
     </div>
@@ -11443,7 +11443,7 @@ const OP_CREATE_CATS = [
   {title:'🚀 Продвижение', items:[
     {ico:'🚀', name:'Накрутка', sub:'Просмотры, реакции, сторис', fn:'openBoost'},
     {ico:'🌿', name:'Growth Agent', sub:'Органический рост', fn:'openGrowth'},
-    {ico:'📣', name:'Self Promo', sub:'Самопиар по аудитории', fn:'openSelfPromo'},
+    {ico:'📣', name:'Самопиар', sub:'Продвижение по своей аудитории', fn:'openSelfPromo'},
     {ico:'⚔️', name:'Strike', sub:'Целевая зачистка', fn:'openStrike'},
   ]},
   {title:'👥 Аудитория', items:[
@@ -13568,7 +13568,7 @@ async function saveCfCreds() {
   const api_token = document.getElementById('cfToken').value.trim();
   const account_id = document.getElementById('cfAccountId').value.trim();
   const subdomain = document.getElementById('cfSubdomain').value.trim();
-  if (!account_id) { toast('Укажите Account ID'); return; }
+  if (!account_id) { toast('Укажите ID аккаунта'); return; }
   const btn = document.getElementById('cfSaveCredsBtn');
   btn.disabled=true; btn.textContent='💾 Сохраняю…';
   try {
@@ -13589,7 +13589,7 @@ async function loadCfPoolStatus() {
     // префилл некритичных полей (токен никогда не отдаётся)
     if (c.account_id && !document.getElementById('cfAccountId').value) document.getElementById('cfAccountId').value = c.account_id;
     if (c.subdomain && !document.getElementById('cfSubdomain').value) document.getElementById('cfSubdomain').value = c.subdomain;
-    const credLine = c.ready ? '🔑 доступы заданы ✓' : (c.has_token ? '🔑 нет Account ID' : '🔑 доступы не заданы');
+    const credLine = c.ready ? '🔑 доступы заданы ✓' : (c.has_token ? '🔑 нет ID аккаунта' : '🔑 доступы не заданы');
     let deployLine = '';
     const ld = r.last_deploy;
     if (ld) {
@@ -16314,25 +16314,25 @@ async function openContactDetail(id) {
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
       ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(String(c.registered_estimate))}</div></div></div>`:''}
       ${lastSeenLabel(c.last_seen_type)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
-      ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Verified</div></div></div>`:''}
+      ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Подтверждён</div></div></div>`:''}
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${enr.activity&&enr.activity.level!=='unknown'?`<div class="row"><div class="row-body"><div class="row-name">Активность</div><div class="row-val">${enr.activity.level==='hot'?'🔥':enr.activity.level==='warm'?'🌤':'❄️'} ${esc(enr.activity.label)}</div></div></div>`:''}
       ${enr.language&&enr.language.code?`<div class="row"><div class="row-body"><div class="row-name">Язык (оценка)</div><div class="row-val">${esc(({ru:'🇷🇺 Русский',en:'🌐 Латиница',cjk:'🀄 CJK',ar:'☪ Арабский'})[enr.language.code]||enr.language.code)} · ${Math.round((enr.language.confidence||0)*100)}%</div></div></div>`:''}
       ${Array.isArray(c.phones)&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
-      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Email</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
+      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
       ${c.position?`<div class="row"><div class="row-body"><div class="row-name">Должность</div><div class="row-val">${esc(c.position)}</div></div></div>`:''}
       ${c.websites&&c.websites.length?`<div class="row"><div class="row-body"><div class="row-name">Сайты</div><div class="row-val">${c.websites.map(w=>'<a href="'+esc(w)+'" target="_blank" style="color:var(--accent)">'+esc(w)+'</a>').join(', ')}</div></div></div>`:''}
       ${c.birthday?`<div class="row"><div class="row-body"><div class="row-name">День рождения</div><div class="row-val">🎂 ${esc(c.birthday)}</div></div></div>`:''}
       ${c.notes?`<div class="row"><div class="row-body"><div class="row-name">Заметки</div><div class="row-val">${esc(c.notes)}</div></div></div>`:''}
       ${c.tags&&c.tags.length?`<div class="row"><div class="row-body"><div class="row-name">Теги</div><div class="row-val">${c.tags.map(t=>'<span class="badge b-bl">'+esc(t)+'</span>').join(' ')}</div></div></div>`:''}
-      ${c.trust_score?`<div class="row"><div class="row-body"><div class="row-name">Trust</div><div class="row-val">${Math.round((c.trust_score||0)*100)}%</div></div></div>`:''}
+      ${c.trust_score?`<div class="row"><div class="row-body"><div class="row-name">Доверие</div><div class="row-val">${Math.round((c.trust_score||0)*100)}%</div></div></div>`:''}
     </div>`;
     html += `<div style="padding:8px 16px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:0">📋 Username</button>
+      <button class="btn btn-s" onclick="copyText('${esc(c.username||'')}')" style="flex:0">📋 Юзернейм</button>
       <button class="btn btn-s" onclick="copyText('${c.telegram_user_id||''}')" style="flex:0">📋 ID</button>
       ${c.phones&&c.phones.length?`<button class="btn btn-s" onclick="copyText('${esc(c.phones[0])}')" style="flex:0">📋 Тел.</button>`:''}
-      ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0">📋 Email</button>`:''}
+      ${c.emails&&c.emails.length?`<button class="btn btn-s" onclick="copyText('${esc(c.emails[0])}')" style="flex:0">📋 Почта</button>`:''}
       <button class="btn btn-s" id="cdExclBtn" onclick="cdToggleExclude(${c.excluded?'false':'true'})" style="flex:0">${c.excluded?'↩️ Вернуть в работу':'🙈 Личный (вне работы)'}</button>
     </div>`;
     html += `<div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
@@ -16353,10 +16353,10 @@ async function openContactDetail(id) {
       html += '</div>';
     }
     html += `<div class="sec" style="margin-top:8px">Действия</div><div style="padding:4px 16px 12px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0">📅 Timeline</button>
+      <button class="btn btn-s" onclick="openContactTimeline('${id}')" style="flex:0">📅 Хронология</button>
       <button class="btn btn-s" onclick="openContactVersions('${id}')" style="flex:0">📜 Версии</button>
       <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0">🕸 Связи</button>
-      <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0">🔑 Identity</button>
+      <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0">🔑 Личность</button>
       <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0">💼 CRM</button>
     </div>`;
     txt('cdBody', html);
@@ -16828,7 +16828,7 @@ async function toggleContactFavorite() {
 
 async function openContactTimeline(id) {
   push('s-contactdetail');
-  txt('cdTitle','📅 Timeline');
+  txt('cdTitle','📅 Хронология');
   txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/timeline');
@@ -16896,7 +16896,7 @@ async function openContactRelationships(id) {
 
 async function openContactIdentity(id) {
   push('s-contactdetail');
-  txt('cdTitle','🔑 Identity Graph');
+  txt('cdTitle','🔑 Граф личности');
   txt('cdBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/identity');
@@ -19844,7 +19844,7 @@ async function saveNetRole() {
 let RELAY_BOT_ID = null;
 async function openRelay(botId, botName) {
   RELAY_BOT_ID = botId;
-  txt('relay-title', '💬 Inbox · '+(botName||''));
+  txt('relay-title', '💬 Входящие · '+(botName||''));
   push('s-relay');
   txt('relay-toggle','');
   txt('relayList','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -23288,7 +23288,7 @@ function askPrompt(title, opts) {
       + fieldTag
       + '<div style="display:flex;gap:8px;margin-top:12px">'
       + '<button class="btn btn-d" id="_apc" style="flex:1 1 auto">Отмена</button>'
-      + '<button class="btn btn-p" id="_apo" style="flex:1 1 auto">OK</button>'
+      + '<button class="btn btn-p" id="_apo" style="flex:1 1 auto">ОК</button>'
       + '</div></div>';
     document.body.appendChild(bg);
     const inp = bg.querySelector('#_apf');
@@ -23371,7 +23371,7 @@ async function saveSettings() {
   if (msgEl) { msgEl.style.display='block'; msgEl.textContent='✅ Настройки сохранены'; setTimeout(()=>msgEl.style.display='none', 2500); }
 }
 function openWebhookSecretModal() {
-  toast('ℹ️ Webhook Secret настраивается в переменных окружения Railway');
+  toast('ℹ️ Секрет вебхука настраивается в переменных окружения Railway');
 }
 
 // ── Billing ────────────────────────────────────────────
