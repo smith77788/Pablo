@@ -23147,7 +23147,7 @@ function empty(ico,txt2,sub,action) {
   const isErr = ico === '⚠️';
   let btn;
   if (action) {
-    btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${action.label}</button>`;
+    btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${esc(action.label)}</button>`;
   } else if (isErr && atRoot) {
     // Ошибка загрузки корневой вкладки → один тап, чтобы повторить запрос.
     btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="reloadView()">↻ Повторить</button>`;
@@ -23156,7 +23156,11 @@ function empty(ico,txt2,sub,action) {
   } else {
     btn = '';
   }
-  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}${btn}</div>`;
+  // Текст экранируем: сюда приходит и сообщение об ошибке от сервера, и
+  // значение фильтра, которое сервер вернул обратно в тексте отказа, и имена
+  // каналов/контактов из Telegram. Соседний errHtml() уже звал esc(), а здесь
+  // строка попадала в innerHTML как разметка — внешний контент это данные.
+  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${esc(txt2)}</div>${sub?`<div class="empty-sub">${esc(sub)}</div>`:''}${btn}</div>`;
 }
 function txt(id, html) {
   const el=document.getElementById(id);
