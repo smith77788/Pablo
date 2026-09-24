@@ -1152,22 +1152,64 @@ async def _check_all_proxies_core(pool: asyncpg.Pool, uid: int) -> dict:
         return {"ok": True, "checked": 0, "alive": 0}
     from services.proxy_selector import probe_proxy
     sem = asyncio.Semaphore(10)
+    verdicts: dict[int, bool] = {}
 
     async def _one(r):
         async with sem:
             res = await probe_proxy(r["proxy_url"])
             alive = bool(res.get("ok"))
-            try:
-                await pool.execute(
-                    "UPDATE user_proxies SET is_alive=$1, last_check=now() WHERE id=$2 AND owner_id=$3",
-                    alive, r["id"], uid)
-            except Exception as e:
-                log.debug("check_all_proxies persist: %s", e)
+            verdicts[int(r["id"])] = alive
             return alive
 
-    results = await asyncio.gather(*[_one(r) for r in rows], return_exceptions=True)
+    try:
+        results = await asyncio.gather(*[_one(r) for r in rows],
+                                       return_exceptions=True)
+    finally:
+        # Итоги — ОДНИМ запросом, а не по одному на прокси: у владельца их до
+        # двухсот, и двести отдельных UPDATE на каждую проверку — это двести
+        # обращений к базе там, где достаточно одного. Запись в finally, чтобы
+        # проверенное не пропало, если запрос прервали на середине.
+        await _persist_proxy_verdicts(pool, uid, verdicts)
     alive = sum(1 for x in results if x is True)
     return {"ok": True, "checked": len(rows), "alive": alive}
+
+
+async def _retry_sources(
+    pool: asyncpg.Pool, uid: int, op_ids: list[int]
+) -> dict[int, dict]:
+    """Параметры операций для повтора — одним запросом, id → строка.
+
+    Раньше на каждую операцию шёл свой запрос: до 25 обращений к базе подряд на
+    одно нажатие «повторить недоведённые», и владелец ждал их все. Скоуп по
+    owner_id остаётся: чужую операцию повторить нельзя.
+    """
+    if not op_ids:
+        return {}
+    rows = await _safe_fetch(pool,
+        "SELECT id, op_type, params, label, total_items FROM operation_queue "
+        "WHERE id = ANY($1::bigint[]) AND owner_id=$2", op_ids, uid)
+    return {int(r["id"]): r for r in (rows or [])}
+
+
+async def _persist_proxy_verdicts(
+    pool: asyncpg.Pool, uid: int, verdicts: dict[int, bool]
+) -> int:
+    """Записать живость проверенных прокси одним запросом. Возвращает сколько."""
+    if not verdicts:
+        return 0
+    ids = list(verdicts.keys())
+    flags = [verdicts[i] for i in ids]
+    try:
+        done = await pool.fetch(
+            """UPDATE user_proxies p SET is_alive = v.alive, last_check = now()
+                 FROM unnest($1::bigint[], $2::boolean[]) AS v(pid, alive)
+                WHERE p.id = v.pid AND p.owner_id = $3
+             RETURNING p.id""",
+            ids, flags, uid)
+        return len(done or [])
+    except Exception as e:
+        log.warning("check_all_proxies: запись итогов не прошла: %s", e)
+        return 0
 
 
 async def _retry_failed_ops_core(pool: asyncpg.Pool, uid: int, hours: int = 24) -> dict:
@@ -10810,10 +10852,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         import json as _json2
 
         retried, skipped = [], []
-        for c in candidates[:25]:   # потолок: не заваливаем очередь одним нажатием
-            src = await _safe_fetchrow(pool,
-                "SELECT op_type, params, label, total_items FROM operation_queue "
-                "WHERE id=$1 AND owner_id=$2", int(c["id"]), uid)
+        chosen = candidates[:25]    # потолок: не заваливаем очередь одним нажатием
+        # Параметры всех выбранных операций — ОДНИМ запросом. Раньше здесь был
+        # отдельный запрос на каждую: до 25 обращений к базе подряд, и владелец
+        # ждал их все, прежде чем увидеть результат нажатия.
+        _srcs = await _retry_sources(pool, uid, [int(c["id"]) for c in chosen])
+        for c in chosen:
+            src = _srcs.get(int(c["id"]))
             if not src:
                 continue
             try:

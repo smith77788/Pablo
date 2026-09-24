@@ -237,3 +237,92 @@ def test_proxy_evacuate_plan_covers_all_stranded(pool):
     plan = plan_evacuation(accs, [(pid, 0) for pid in live])
     assert not plan["stranded"]
     assert sorted(a for a, _p in plan["moves"]) == sorted(accs)
+
+
+def _seed_plain_proxies(pool, owner, n):
+    async def _s():
+        await pool.execute("DELETE FROM user_proxies WHERE owner_id=$1", owner)
+        ids = []
+        for i in range(n):
+            ids.append(await pool.fetchval(
+                "INSERT INTO user_proxies(owner_id, proxy_url, is_alive) "
+                "VALUES($1,$2,NULL) RETURNING id",
+                owner, f"socks5://u{i}:p@10.0.{owner % 200}.{i % 250}:1080"))
+        return ids
+    return _run(_s())
+
+
+def test_proxy_verdicts_are_written_in_one_query(pool):
+    """Итоги проверки прокси — один UPDATE, а не по одному на прокси.
+
+    У владельца их до двухсот; двести отдельных UPDATE на каждую проверку это
+    двести обращений к базе там, где хватает одного.
+    """
+    from services import mini_app_api as m
+
+    ids = _seed_plain_proxies(pool, OWNER, 6)
+    alien = _seed_plain_proxies(pool, OTHER, 2)
+    verdicts = {pid: (i % 2 == 0) for i, pid in enumerate(ids)}
+    # Чужой прокси в словаре — скоуп по владельцу обязан его отсечь.
+    verdicts[alien[0]] = True
+
+    log: list[str] = []
+    written = _run(m._persist_proxy_verdicts(_Recorder(pool, log), OWNER, verdicts))
+
+    assert written == len(ids), f"записано {written}, ожидалось {len(ids)}"
+    updates = [q for q in log if q.upper().startswith("UPDATE USER_PROXIES")]
+    assert len(updates) == 1, f"UPDATE должен быть один, а их {len(updates)}: {log}"
+
+    async def _check():
+        rows = await pool.fetch(
+            "SELECT id, is_alive, last_check FROM user_proxies WHERE owner_id=$1 "
+            "ORDER BY id", OWNER)
+        return [(r["id"], r["is_alive"], r["last_check"] is not None) for r in rows]
+
+    for pid, alive, has_check in _run(_check()):
+        assert alive is verdicts[pid], f"прокси {pid}: записано {alive}"
+        assert has_check, "last_check не проставлен"
+
+    assert _run(pool.fetchval(
+        "SELECT count(*) FROM user_proxies WHERE owner_id=$1 AND is_alive IS NOT NULL",
+        OTHER)) == 0, "тронут прокси другого владельца"
+
+
+def _seed_ops(pool, owner, n):
+    async def _s():
+        await pool.execute("DELETE FROM operation_queue WHERE owner_id=$1", owner)
+        ids = []
+        for i in range(n):
+            ids.append(await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, params, status, "
+                "total_items, done_items, label) "
+                "VALUES($1,'mass_invite',$2::jsonb,'failed',10,3,$3) RETURNING id",
+                owner, json.dumps({"n": i}), f"операция {i}"))
+        return ids
+    return _run(_s())
+
+
+def test_retry_sources_are_fetched_in_one_query(pool):
+    """Параметры операций для повтора — одним запросом на все 25, не по одному."""
+    from services import mini_app_api as m
+
+    ids = _seed_ops(pool, OWNER, 9)
+    alien = _seed_ops(pool, OTHER, 2)
+
+    log: list[str] = []
+    got = _run(m._retry_sources(_Recorder(pool, log), OWNER, ids + alien))
+
+    selects = [q for q in log if q.upper().startswith("SELECT")]
+    assert len(selects) == 1, f"SELECT должен быть один, а их {len(selects)}: {log}"
+    assert set(got.keys()) == set(ids), "вернулись не те операции"
+    assert all(r["op_type"] == "mass_invite" for r in got.values())
+    for oid in alien:
+        assert oid not in got, "в выдачу попала операция другого владельца"
+
+
+def test_retry_sources_on_empty_list_does_not_touch_the_database(pool):
+    from services import mini_app_api as m
+
+    log: list[str] = []
+    assert _run(m._retry_sources(_Recorder(pool, log), OWNER, [])) == {}
+    assert log == [], f"пустой список не должен идти в базу: {log}"
