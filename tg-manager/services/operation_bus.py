@@ -122,6 +122,10 @@ async def _enforce_min_plan(pool, owner_id: int, op_type: str, meta: dict) -> No
 #     {"param": "<поле params со списком целей>",
 #      "prefix": "<префикс в operation_log.target, если есть>",
 #      "kind": "int" | "str"}
+#     "per_account": True — цель отрабатывает КАЖДЫЙ аккаунт операции, то есть
+#         одна и та же цель попадает в лог несколько раз, по разу на аккаунт.
+#         Тогда успех одного аккаунта НЕ закрывает цель: у остальных работа
+#         осталась. Без этого признака повтор молча терял такие цели.
 #     Объявляется ТОЛЬКО когда operation_log.target однозначно обратим в
 #     элемент этого списка. У большинства операций в лог пишется исполнитель
 #     («acc#123») или человекочитаемая метка (заголовок канала) — повторять по
@@ -149,7 +153,11 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 3,
         "icon": "📥",
         # target = сама ссылка-приглашение, как она пришла в params.
-        "retry_targets": {"param": "links", "kind": "str", "alt_params": ["targets"]},
+        # per_account: вступают ВСЕ аккаунты операции, и в лог по одной ссылке
+        # идёт строка на каждый. Успех одного аккаунта не означает, что вступили
+        # остальные.
+        "retry_targets": {"param": "links", "kind": "str", "alt_params": ["targets"],
+                          "per_account": True},
     },
     "bulk_leave": {
         "description": "Массовый выход из каналов",
@@ -157,7 +165,9 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "📤",
         # target = str(channel) — элемент списка channels как есть.
-        "retry_targets": {"param": "channels", "kind": "str"},
+        # per_account: выходят ВСЕ аккаунты операции (цикл accounts × channels),
+        # поэтому на один канал приходится строка на каждый аккаунт.
+        "retry_targets": {"param": "channels", "kind": "str", "per_account": True},
     },
     "find_contact": {
         "description": "Поиск потерянного контакта",
@@ -967,9 +977,21 @@ def parse_log_target(raw: str, meta: dict):
 async def collect_failed_targets(pool: asyncpg.Pool, op_id: int, op_type: str) -> list:
     """Упавшие цели операции, в формате элементов params. Порядок сохраняется.
 
-    Берутся ТОЛЬКО status='error'. Цель, у которой есть хотя бы одна успешная
-    запись, исключается: один и тот же канал мог упасть на одном аккаунте и
-    пройти на другом — повторять его значит сделать вторую публикацию.
+    Берутся ТОЛЬКО status='error'.
+
+    Что считать «уже сделанной» целью, зависит от того, КТО её отрабатывает.
+
+    Операция вида «одна цель — одно действие» (публикация, SEO по сетке): цель,
+    у которой есть хотя бы одна успешная запись, исключается. Один и тот же
+    канал мог упасть на одном аккаунте и пройти на другом — повторять его
+    значит сделать вторую публикацию.
+
+    Операция вида «каждый аккаунт отрабатывает каждую цель» (bulk_join,
+    bulk_leave — цикл accounts × targets): то же правило ТЕРЯЕТ РАБОТУ. Если из
+    пяти аккаунтов в канал вступил один, а четверо упали, канал считался
+    закрытым и в повтор не попадал — четыре аккаунта так и оставались снаружи,
+    причём операция отчитывалась, что повторять нечего. Такие типы помечены
+    per_account, и успех одного аккаунта у них цель не закрывает.
     """
     meta = retry_targets_meta(op_type)
     if not meta:
@@ -984,6 +1006,8 @@ async def collect_failed_targets(pool: asyncpg.Pool, op_id: int, op_type: str) -
         log.warning("operation_bus: чтение operation_log op=%s не удалось", op_id, exc_info=True)
         return []
 
+    per_account = bool(meta.get("per_account"))
+
     succeeded: set = set()
     failed_ordered: list = []
     seen: set = set()
@@ -997,6 +1021,11 @@ async def collect_failed_targets(pool: asyncpg.Pool, op_id: int, op_type: str) -
         elif r["status"] == "error" and key not in seen:
             seen.add(key)
             failed_ordered.append((key, parsed))
+    if per_account:
+        # Успех одного аккаунта не закрывает цель для остальных: повторяем всё,
+        # что где-то упало. Дубль здесь безобиден — аккаунт, который уже вступил
+        # или вышел, получает no-op, а тот, что упал, доделывает работу.
+        return [val for _key, val in failed_ordered]
     return [val for key, val in failed_ordered if key not in succeeded]
 
 
