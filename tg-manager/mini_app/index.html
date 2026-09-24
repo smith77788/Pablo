@@ -272,6 +272,9 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 /* Пустой список — это рамка с нулевой высотой, на экране серая полоска
    непонятно откуда. Пока в нём ничего нет, его не видно. */
 .lst:empty{display:none}
+/* Заголовок раздела, под которым ничего нет, — висячая строка. Пока в
+   следующем за ним блоке пусто, заголовок не показываем. */
+.sec:has(+ *:empty){display:none}
 .li{padding:11px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--sep);transition:background .12s}
 .li:last-child{border-bottom:none}
 .li.tap{cursor:pointer}
@@ -600,7 +603,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 
 /* ─── Management tile grid ───────────────────────────────── */
 .mgmt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 16px 4px}
-.mgmt-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 7px 11px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:transform .18s var(--spring),box-shadow .2s var(--ease),border-color .2s,background .2s;text-align:center;min-height:78px;justify-content:center;box-shadow:var(--shadow)}
+.mgmt-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 7px 11px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:transform .18s var(--spring),box-shadow .2s var(--ease),border-color .2s,background .2s;text-align:center;min-height:78px;justify-content:flex-start;box-shadow:var(--shadow)}
 .mgmt-tile:active{transform:translateY(1px) scale(.95);box-shadow:var(--shadow-lg);border-color:var(--border-strong);background:var(--bg3)}
 /* Иконочный чип: своя приглушённая заливка по currentColor (hue-класс задаёт цвет).
    Работает и для SVG (перекрашивается), и для эмодзи (цветной чип позади глифа). */
