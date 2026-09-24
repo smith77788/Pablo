@@ -2259,7 +2259,8 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     if _shutting_down:
         return
     async with _active_lock:
-        available_slots = _MAX_PARALLEL - len(_active_op_ids)
+        active_now = frozenset(_active_op_ids)
+        available_slots = _MAX_PARALLEL - len(active_now)
 
     if available_slots <= 0:
         return
@@ -2271,6 +2272,25 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     # Атомарно захватить задачи с учетом реальной per-owner параллельности.
     # Иначе лишние задачи одного владельца получают status='running', но фактически
     # стоят внутри semaphore и выглядят для пользователя как зависшие.
+    #
+    # ПОЧЕМУ ИСКЛЮЧАЮТСЯ АКТИВНЫЕ В ЭТОМ ПРОЦЕССЕ (active_now). Задача возвращает
+    # операцию в очередь ИЗНУТРИ себя: отсрочка по флуду, нехватка аккаунтов,
+    # открытая цепь предохранителя — все три ставят status='pending' и делают
+    # return, а освобождение аккаунтов и выписка из _active_op_ids происходят
+    # позже, в finally. Между этими моментами есть await'ы (уведомление
+    # владельцу уходит в сеть), то есть окно в сотни миллисекунд, а то и секунды.
+    #
+    # Поллер крутится в том же цикле раз в 10с и видел такую операцию как
+    # обычную ожидающую. Тогда она запускалась ВТОРОЙ раз, пока первая задача
+    # ещё доигрывала, и дальше ломалось всё подряд: finally старой задачи
+    # освобождал аккаунты ПОД новым прогоном (in_operation=FALSE на живых
+    # сессиях — их тут же подхватывали прогрев/призрак/ротация, а это
+    # AUTH_KEY_DUPLICATED), и выписывал из _active_op_ids чужой теперь op_id —
+    # после чего сторож зависших считал новый прогон брошенным и сбрасывал его
+    # по таймауту, а алерт слал владельцу ложное «застряла».
+    #
+    # Дешевле всего закрыть это на входе: пока задача не отпустила операцию,
+    # она не кандидат.
     #
     # ПОЧЕМУ РАНГ СЧИТАЕТСЯ ДО ОКНА, А НЕ ПОСЛЕ. Раньше окно кандидатов бралось
     # как «самые старые N ожидающих» и только ПОТОМ внутри него считался ранг по
@@ -2311,6 +2331,11 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
                WHERE oq.status = 'pending'
                  AND (oq.scheduled_for IS NULL OR oq.scheduled_for <= now())
                  AND (oq.requires_approval IS NOT TRUE)
+                 -- Операция, которую ЭТОТ процесс ещё доигрывает, не кандидат,
+                 -- даже если в БД она уже 'pending'. См. комментарий ниже: без
+                 -- этого условия поллер запускал её второй раз, пока первая
+                 -- задача не дошла до своего finally.
+                 AND ($4::bigint[] IS NULL OR oq.id != ALL($4::bigint[]))
            ),
            candidates AS (
                SELECT id, created_at
@@ -2335,6 +2360,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         available_slots,
         _MAX_PARALLEL_PER_OWNER,
         candidate_window,
+        (list(active_now) or None),
     )
 
     for row in rows:
