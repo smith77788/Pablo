@@ -197,7 +197,7 @@ function _udChip(ico, val, lbl, color) {
 // Мини-спарклайн из массива чисел / [{value}].
 function _udLine(series, color) {
   const vals = (series || []).map(p => typeof p === 'object' ? (p.value || 0) : (p || 0));
-  if (vals.length < 2) return '<div style="color:var(--hint);font-size:12px;padding:8px">Нет данных</div>';
+  if (vals.length < 2) return '<div class="empty-inline">Нет данных</div>';
   const W = 300, H = 54, max = Math.max(1, ...vals), min = Math.min(...vals);
   const rng = (max - min) || 1;
   const pts = vals.map((v, i) => {
@@ -244,7 +244,7 @@ function _udRenderAnalytics(d) {
         `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">` +
         `${esc(c.name || c.username || c.title || '—')}</span>` +
         `<span style="font-weight:700">${_udNum(c.subscribers || c.value || 0)}</span></div>`).join('')
-    : '<div style="color:var(--hint);font-size:12px">Нет данных</div>');
+    : '<div class="empty-inline">Нет данных</div>');
 
   const acts = d.recent_activity || [];
   const actCard = card('🕑 Последние события', acts.length

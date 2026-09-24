@@ -438,7 +438,7 @@ function _spRenderProducts(products) {
 
 function _spRenderFaqs(faqs) {
   if (!faqs || !faqs.length) {
-    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+    return '<div class="empty-inline">Пока пусто</div>';
   }
   return faqs.map(f => {
     const q = esc((f.question || '').slice(0, 80));
@@ -452,7 +452,7 @@ function _spRenderFaqs(faqs) {
 
 function _spRenderExamples(examples) {
   if (!examples || !examples.length) {
-    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+    return '<div class="empty-inline">Пока пусто</div>';
   }
   return examples.map(e => {
     const u = esc((e.user_msg || '').slice(0, 70));
@@ -527,7 +527,7 @@ async function spDelExample(eid) {
 
 function _spRenderDelivery(items) {
   if (!items || !items.length) {
-    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+    return '<div class="empty-inline">Пока пусто</div>';
   }
   return items.map(d => {
     const price = (d.price_cents ? ((d.price_cents / 100).toFixed(2) + ' ' +
@@ -542,7 +542,7 @@ function _spRenderDelivery(items) {
 
 function _spRenderPromos(items) {
   if (!items || !items.length) {
-    return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Пока пусто</div>';
+    return '<div class="empty-inline">Пока пусто</div>';
   }
   return items.map(p => {
     const mt = p.min_total_cents ? (' · от ' + (p.min_total_cents / 100).toFixed(2)) : '';

@@ -376,6 +376,11 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .empty-ico{font-size:36px;margin-bottom:8px;opacity:.75}
 .empty-txt{font-size:14px;font-weight:500}
 .empty-sub{font-size:13px;margin-top:4px}
+/* Короткое «нечего показать» внутри графика, врезки или колонки — там, где
+   полноразмерное пустое состояние с иконкой и отступом в 36px не помещается.
+   Было 13 таких строк, размеченных по месту: размер 12 или 13px, отступы
+   у каждой свои. */
+.empty-inline{font-size:13px;color:var(--hint);text-align:center;padding:10px 8px}
 .err-msg{padding:18px 16px;color:var(--red);font-size:14px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
 .err-msg-ico{font-size:30px;opacity:.6}
 .err-msg-txt{font-weight:500;line-height:1.4}
@@ -1743,7 +1748,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <!-- Категории действий -->
     <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 16px 4px;-ms-overflow-style:none;scrollbar-width:none"></div>
-    <div id="moreNoResult" style="display:none;text-align:center;color:var(--hint);padding:20px;font-size:13px">Ничего не найдено</div>
+    <div id="moreNoResult"  class="empty-inline" style="display:none">Ничего не найдено</div>
 
     <!-- ⚡ Быстрые действия (всегда наверху) -->
     <div class="sec">⚡ Быстрые действия</div>
@@ -6875,7 +6880,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" style="margin-top:12px">Активность по часам</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <canvas id="audHeatmap" style="width:100%;height:120px"></canvas>
-      <div id="audHeatmapEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Нет данных для тепловой карты</div>
+      <div id="audHeatmapEmpty"  class="empty-inline">Нет данных для тепловой карты</div>
     </div>
     <div class="sec" style="margin-top:12px">Рост по сегментам</div>
     <div style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
@@ -13949,7 +13954,7 @@ function renderProxyPoolBars(items) {
   const el = document.getElementById('proxyPoolBars');
   if (!el) return;
   const withLat = items.filter(p=>p.latency_ms).slice(0,20);
-  if (!withLat.length) { el.innerHTML='<div style="font-size:12px;color:var(--hint);text-align:center;width:100%">Нет данных о задержке</div>'; return; }
+  if (!withLat.length) { el.innerHTML='<div class="empty-inline" style="width:100%">Нет данных о задержке</div>'; return; }
   const max = Math.max(...withLat.map(p=>p.latency_ms));
   el.innerHTML = withLat.map(p=>{
     const h = Math.max(3, Math.round((p.latency_ms||0)/max*46));
@@ -14230,7 +14235,7 @@ function renderAutoregProBars(items) {
   const el = document.getElementById('autoregProBars');
   const labels = document.getElementById('autoregProLabels');
   if (!el) return;
-  if (!items.length) { el.innerHTML='<div style="font-size:12px;color:var(--hint);text-align:center;width:100%">Нет данных</div>'; return; }
+  if (!items.length) { el.innerHTML='<div class="empty-inline" style="width:100%">Нет данных</div>'; return; }
   const byDay = {};
   items.forEach(a=>{
     const d = (a.added_at||a.created_at||'').slice(0,10);
@@ -14940,7 +14945,7 @@ async function openBotStats(botId, botName) {
       }).join('');
       txt('bstatsChart', `<div style="display:flex;align-items:flex-end;gap:4px;height:80px">${bars}</div>`);
     } else {
-      txt('bstatsChart', '<div style="color:var(--hint);font-size:13px;text-align:center">Нет данных</div>');
+      txt('bstatsChart', '<div class="empty-inline">Нет данных</div>');
     }
     const compl = d.funnel_total_subs ? Math.round(d.funnel_completed/d.funnel_total_subs*100) : 0;
     txt('bstatsDetails', `
@@ -17332,7 +17337,7 @@ async function cloudRefreshList() {
     const files = d.files || [];
     _CLOUD_FILES = {};
     files.forEach(f => { _CLOUD_FILES[f.id] = f; });
-    if (!files.length) { box.innerHTML = '<div style="font-size:13px;color:var(--hint);padding:8px 0">Пока пусто — загрузите первый файл.</div>'; return; }
+    if (!files.length) { box.innerHTML = '<div class="empty-inline">Пока пусто — загрузите первый файл.</div>'; return; }
     const tgt = Number(d.target_replicas) || 2;
     box.innerHTML = files.map(f => {
       const mr = f.min_replicas;            // минимум живых копий среди кусков
@@ -24566,7 +24571,7 @@ function renderAudHeatmap(heatmap) {
 
 function renderAudSegChart(segments) {
   const el = document.getElementById('audSegChart');
-  if (!segments.length) { el.innerHTML = '<div style="text-align:center;color:var(--hint);font-size:13px;padding:8px">Нет данных</div>'; return; }
+  if (!segments.length) { el.innerHTML = '<div class="empty-inline">Нет данных</div>'; return; }
   const maxCount = Math.max(...segments.map(s => s.count || 0), 1);
   el.innerHTML = segments.slice(0, 8).map(s => {
     const pct = ((s.count || 0) / maxCount * 100).toFixed(0);
