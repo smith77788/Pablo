@@ -14230,12 +14230,36 @@ async def _exec_mass_report(
     # именно этого аккаунта. Отсеиваем (fail-open: все в карантине → работаем всеми).
     accounts, _skipped_quar = await _filter_quarantined_accounts(pool, op_id, accounts)
 
+    # Идемпотентность повтора. Повтор — и автоматический (_maybe_requeue после
+    # сетевой ошибки, сброс зависшей операции, воскрешение после перезапуска
+    # воркера), и ручной — запускает исполнителя заново с done_items=0, и тот
+    # проходит ВЕСЬ список аккаунтов сначала. Для жалобы это вторая жалоба с
+    # того же аккаунта на ту же цель: Telegram считает повторные жалобы от
+    # одного отправителя шумом, а для аккаунта это лишнее действие в том же
+    # направлении — ровно то давление, от которого страйк отдельно защищается
+    # правилом «не бить одну цель повторно в короткий интервал».
+    #
+    # Единица работы здесь — аккаунт (цель у операции одна), поэтому ключ
+    # журнала — acc#<id>, и он устойчив к любому порядку отбора аккаунтов.
+    _already_reported = await completed_targets(pool, op_id)
+    if _already_reported:
+        log.info("mass_report op=%d: повтор — %d аккаунтов уже подали жалобу, пропускаем",
+                 op_id, len(_already_reported))
+
     ok_count, fail_count = 0, 0
     total = len(accounts)
 
     for idx, acc in enumerate(accounts, 1):
         if await _is_cancelled(pool, op_id):
             break
+        _acc_key = f"acc#{acc['id']}"
+        if _acc_key in _already_reported:
+            # Работа сделана прошлым прогоном — счётчик не должен проседать
+            # только потому, что сделал её не этот прогон.
+            ok_count += 1
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
         try:
             if mode == "msg" and msg_ids:
                 res = await rep.report_message(
@@ -14247,15 +14271,21 @@ async def _exec_mass_report(
                 )
             if res["ok"]:
                 ok_count += 1
-                await pool.execute(
+                # _safe_execute, а не pool.execute: жалоба уже отправлена, и
+                # ронять операцию из-за сбоя записи в журнал нельзя. Ценой
+                # служит возможный повтор с этого аккаунта при возобновлении —
+                # это дешевле сорванной операции.
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, f"acc#{acc['id']}",
+                    op_id, idx, _acc_key,
                 )
             else:
                 fail_count += 1
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                    op_id, idx, _acc_key, (res.get("error") or "")[:200],
                 )
         except Exception as exc:
             log.warning("mass_report op=%d acc=%s: %s", op_id, acc.get("id"), exc)
@@ -14453,25 +14483,51 @@ async def _exec_ai_comment(
     accounts = accounts[:acc_count]
 
     channels = channels[:50]  # потолок против гигантских прогонов
+
+    # Идемпотентность повтора. Повтор — и автоматический (_maybe_requeue после
+    # сетевой ошибки, сброс зависшей операции, воскрешение после перезапуска
+    # воркера), и ручной — запускает исполнителя заново с done_items=0, и тот
+    # проходит ВЕСЬ список каналов сначала. Для комментинга это второй
+    # AI-комментарий под тем же каналом: в обсуждении появляется пара похожих
+    # реплик от аккаунтов одного владельца — самая заметная подпись накрутки,
+    # а для аккаунта это лишнее действие в канале, где он уже отметился.
+    _already_commented = await completed_targets(pool, op_id)
+    if _already_commented:
+        log.info("ai_comment op=%d: повтор — под %d каналами комментарий уже есть, пропускаем",
+                 op_id, len(_already_commented))
+
     ok_count, fail_count = 0, 0
     total = len(channels)
     for idx, ref in enumerate(channels, 1):
         if await _is_cancelled(pool, op_id):
             break
+        if ref in _already_commented:
+            # Работа сделана прошлым прогоном — счётчик не должен проседать
+            # только потому, что сделал её не этот прогон.
+            ok_count += 1
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
         acc = accounts[idx % len(accounts)]
         try:
             res = await ai_comment_engine.post_ai_comment(
                 acc["session_str"], dict(acc), ref, niche=niche, tone=tone)
             if res.get("ok"):
                 ok_count += 1
-                await pool.execute(
+                # _safe_execute, а не pool.execute: комментарий уже опубликован,
+                # и ронять операцию из-за сбоя записи в журнал нельзя. Ценой
+                # служит возможный повтор по этому каналу при возобновлении —
+                # это дешевле сорванной операции.
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok',$4)",
                     op_id, idx, ref, (res.get("comment") or "")[:200])
             else:
                 fail_count += 1
                 err = (res.get("error") or "")
-                await pool.execute(
+                await _safe_execute(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, err[:200])
                 if "FloodWait" in err or "flood" in err.lower():
