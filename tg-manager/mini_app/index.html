@@ -5066,7 +5066,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           «Под риском» и на кулдауне в работу не берутся — из-за этого часто
           работает лишь часть флота. Включите, если нужно задействовать их
           принудительно. <b style="color:var(--red)">Выше риск бана этих
-          аккаунтов.</b> Забаненные/spamblock всё равно не берутся.</div>
+          аккаунтов.</b> Забаненные и в спамблоке всё равно не берутся.</div>
         <div class="field-note" style="margin-top:-6px">По умолчанию тех, кого уже
           приглашали в эту группу, инвайт пропускает. Включайте, только если человек
           не увидел прошлое приглашение — повторный инвайт раздражает получателя и
@@ -9771,7 +9771,7 @@ async function massCheckAccounts() {
 
 // ── Поднять флот: снять залипшие блокировки с переподключённого флота ──────
 async function reviveFleet() {
-  if (!await askConfirm('Поднять флот? Снимет залипшие блокировки (in_operation, кулдаун, обнулённый траст) со всех аккаунтов, у которых есть сессия — недавно переподключённый флот сразу заработает. Реально мёртвые сессии монитор пометит заново.')) return;
+  if (!await askConfirm('Поднять флот? Снимет залипшие блокировки (зависший «в работе», кулдаун, обнулённое доверие) со всех аккаунтов, у которых есть сессия — недавно переподключённый флот сразу заработает. Реально мёртвые сессии монитор пометит заново.')) return;
   try {
     const r = await api('/api/miniapp/accounts/revive', {method:'POST'});
     toast(`🚀 Флот поднят: разблокировано ${r.revived||0} аккаунтов`);
@@ -17158,7 +17158,9 @@ async function detectDuplicates() {
 }
 
 async function mergeContacts(primary, secondary) {
-  if (!await askConfirm('Объединить контакты?')) return;
+  // Подтверждение обязано говорить, ЧТО произойдёт: «Объединить контакты?»
+  // не отвечало на главный вопрос — какой из двух останется.
+  if (!await askConfirm('Объединить два контакта в один?\n\nВторая запись будет удалена, её данные перенесутся в первую.')) return;
   try {
     await api('/api/miniapp/uch/merge', {method:'POST', body:JSON.stringify({primary_id:primary, secondary_id:secondary})});
     toast('✅ Контакты объединены');
@@ -19666,7 +19668,7 @@ async function resumeWarmupPlan(id) {
   }
 }
 async function cancelWarmupPlan(id) {
-  if (!await askConfirm('Отменить прогрев? Аккаунт вернётся в active.')) return;
+  if (!await askConfirm('Отменить прогрев? Аккаунт вернётся в рабочее состояние.')) return;
   try {
     await api(`/api/miniapp/warmup/${id}/cancel`, {method:'POST'});
     tg.HapticFeedback?.notificationOccurred('success');
@@ -20857,7 +20859,7 @@ function selectCleanerOp(op) {
 async function submitCleaner() {
   if (!CLEANER_ACC_ID) { document.getElementById('cleanerErr').textContent='Выберите аккаунт'; return; }
   const opLabels = {leave_all_chats:'выйти из всех чатов', delete_contacts:'удалить все контакты'};
-  if (!await askConfirm(`Вы уверены? Аккаунт #${CLEANER_ACC_ID}: ${opLabels[CLEANER_OP]}.\nЭто необратимо!`)) return;
+  if (!await askConfirm(`${opLabels[CLEANER_OP]} — аккаунт #${CLEANER_ACC_ID}.\n\nДействие необратимо: вернуть удалённое нельзя.`)) return;
   const btn = document.getElementById('cleanerBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   document.getElementById('cleanerErr').textContent='';
