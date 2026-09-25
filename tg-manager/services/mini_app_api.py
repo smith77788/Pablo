@@ -930,6 +930,21 @@ _PREFLIGHT_CONCURRENCY = max(1, int(os.getenv("PREFLIGHT_CONCURRENCY", "8") or 8
 # компрессора съедают выигрыш, а пакет всё равно уходит одним куском.
 _COMPRESS_MIN_BYTES = max(256, int(os.getenv("API_COMPRESS_MIN_BYTES", "1024") or 1024))
 
+# Потолок одновременных живых потоков событий (SSE) на одного владельца. Поток
+# держится ОТКРЫТЫМ, пока открыто приложение, и каждые 15 секунд ходит в базу.
+# Без потолка достаточно открыть их пачкой (лимит частоты пропускает 120
+# запросов в минуту) — и процесс держит сотню вечных соединений, каждое со
+# своими запросами: база и память выедаются, а закрыть их снаружи нечем.
+# Мини-апп держит РОВНО ОДИН поток на вкладку (старый закрывается перед
+# открытием нового), поэтому 8 — это с большим запасом над живым сценарием
+# «телефон плюс несколько вкладок».
+_SSE_MAX_PER_USER = max(1, int(os.getenv("SSE_MAX_STREAMS_PER_USER", "8") or 8))
+
+# Счётчик живых потоков по владельцу. Строго process-local и таким должен быть:
+# соединение физически живёт в ЭТОМ процессе, и считать его в общей БД
+# бессмысленно — при перезапуске процесса все его потоки умирают вместе с ним.
+_sse_streams: dict[int, int] = {}
+
 
 async def _scan_admin_status(rows: list, group: str, *,
                              timeout: int = _ADMIN_SCAN_TIMEOUT,
@@ -17118,6 +17133,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return web.Response(status=401, text="Unauthorized")
+        if _sse_streams.get(uid, 0) >= _SSE_MAX_PER_USER:
+            log.warning("events: у владельца %s уже %d живых потоков — отказ",
+                        uid, _sse_streams.get(uid, 0))
+            return web.Response(
+                status=429,
+                text=(f"Слишком много одновременных подключений к потоку "
+                      f"событий (предел {_SSE_MAX_PER_USER}). Закройте лишние "
+                      f"вкладки приложения."),
+                headers={"Retry-After": "30",
+                         "Access-Control-Allow-Origin": "*"})
         response = web.StreamResponse(headers={
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
@@ -17125,6 +17150,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "Access-Control-Allow-Origin": "*",
         })
         await response.prepare(request)
+        # Считаем поток ПОСЛЕ успешного prepare, а не до: если соединение
+        # оборвалось на рукопожатии, prepare бросает исключение, до finally
+        # ниже дело не доходит, и счёт остался бы навсегда завышенным — пара
+        # таких обрывов, и владелец упёрся бы в потолок без единого живого
+        # потока. Гонка «два одновременных открытия прошли проверку» здесь
+        # безвредна: потолок защищает от сотни соединений, а не от девятого.
+        _sse_streams[uid] = _sse_streams.get(uid, 0) + 1
 
         # Последний отправленный текст по каждому событию. Поток шлёт полные
         # снимки каждые 15 секунд, и раньше они уходили даже когда ничего не
@@ -17232,14 +17264,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     except Exception:
                         pass
                     break
-                # Четыре независимых выборки — одним заходом, а не по очереди:
-                # это цикл на КАЖДОЕ открытое приложение, и он крутится вечно.
-                data, activity, progress, completed = await asyncio.gather(
-                    _stats(pool, uid, _adm),
-                    fetch_activity(),
-                    fetch_op_progress(),
-                    fetch_completed_ops(),
-                )
+                # Четыре выборки идут ПО ОЧЕРЕДИ, а не одним заходом. Раньше
+                # здесь был gather — он ускоряет такт, но такту спешить некуда
+                # (раз в SSE_TICK_SECONDS). Зато одновременных соединений он брал
+                # вчетверо больше, а такты разных приложений выстраиваются в ряд
+                # после каждого передеплоя: все открытые приложения
+                # переподключаются одновременно и дальше тикают синхронно. Восемь
+                # потоков (потолок на владельца) по четыре соединения — это 32 при
+                # пуле в 20, то есть все остальные запросы владельца в этот момент
+                # ждут в очереди. Суммарная нагрузка на базу от порядка не
+                # меняется, меняется только пик.
+                data = await _stats(pool, uid, _adm)
+                activity = await fetch_activity()
+                progress = await fetch_op_progress()
+                completed = await fetch_completed_ops()
                 await push("stats", data, only_if_changed=True)
                 await push("activity", {"items": activity}, only_if_changed=True)
                 await push("op_progress", {"items": progress}, only_if_changed=True)
@@ -17268,6 +17306,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pass
         except Exception:
             log.exception("miniapp/events uid=%d", uid)
+        finally:
+            # Поток закрылся — освобождаем место под потолком. Именно finally:
+            # обычный выход отсюда это отмена задачи (клиент закрыл вкладку), и
+            # без finally счётчик бы только рос, пока владелец не упёрся бы в
+            # потолок на пустом месте.
+            left = _sse_streams.get(uid, 1) - 1
+            if left > 0:
+                _sse_streams[uid] = left
+            else:
+                _sse_streams.pop(uid, None)
         return response
 
     # ── Route registration ────────────────────────────────────────────────────
