@@ -111,7 +111,7 @@ async def get_dashboard_stats(pool: asyncpg.Pool, owner_id: int) -> dict[str, An
             ),
         ]
 
-        results = await _run_concurrent(pool, queries)
+        results = await _run_queries(pool, queries)
         acc, ops, running, audience, health, revenue = results
 
         return {
@@ -203,7 +203,7 @@ async def get_realtime_metrics(pool: asyncpg.Pool, owner_id: int) -> dict[str, A
             ),
         ]
 
-        results = await _run_concurrent(pool, queries)
+        results = await _run_queries(pool, queries)
         active_ops, events, status_dist, queue_depth = results
 
         return {
@@ -307,22 +307,22 @@ async def export_analytics(
 # ── Internal helpers ────────────────────────────────────────────────────
 
 
-async def _run_concurrent(
+async def _run_queries(
     pool: asyncpg.Pool,
     queries: list[tuple[str, tuple]],
 ) -> list[list[asyncpg.Record]]:
-    """Выполнить несколько независимых запросов параллельно."""
-    async with pool.acquire() as conn:
-        async def _safe_fetch(sql: str, params: tuple) -> list[asyncpg.Record]:
-            try:
-                return list(await conn.fetch(sql, *params))
-            except Exception:
-                log.debug("_run_concurrent: query failed: %.100s", sql, exc_info=True)
-                return []
-        results = await asyncio.gather(
-            *(_safe_fetch(sql, params) for sql, params in queries)
-        )
-        return list(results)
+    """Несколько независимых запросов на ОДНОМ соединении из пула.
+
+    Здесь была своя копия того же gather-по-одному-соединению, что и в
+    `database.db`, с той же поломкой: всё, кроме первого запроса, молча
+    возвращало пустой список, а этот модуль берёт из результата первую строку
+    (`ops[0]["total"]`) — то есть дашборд не «показывал нули», а падал с
+    IndexError. Реализация теперь одна, в `database.db`, чтобы вторая копия не
+    разошлась снова.
+    """
+    from database.db import run_queries_on_one_connection
+
+    return [list(r) for r in await run_queries_on_one_connection(pool, queries)]
 
 
 import asyncio

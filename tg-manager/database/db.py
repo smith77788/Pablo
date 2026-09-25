@@ -580,22 +580,41 @@ async def verify_vault_key(conn, *, strict: bool = False) -> str:
 # ── Performance Helpers ────────────────────────────────────────────────────
 
 
-async def run_concurrent_queries(pool: asyncpg.Pool, queries: list[tuple[str, tuple]]) -> list:
-    """Execute multiple independent queries concurrently using a single connection.
+async def run_queries_on_one_connection(
+    pool: asyncpg.Pool, queries: list[tuple[str, tuple]]
+) -> list:
+    """Выполнить несколько независимых запросов, взяв из пула ОДНО соединение.
 
-    Each query is (sql, params) tuple. Returns list of results.
-    More efficient than multiple pool.acquire() calls.
-    If a query fails, returns empty list for that position.
+    Каждый запрос — пара (sql, params). Возвращает список результатов в том же
+    порядке; упавший запрос отдаёт пустой список на своём месте, чтобы одна
+    отсутствующая таблица не обнуляла весь набор.
+
+    **Почему не asyncio.gather.** Раньше здесь был gather по одному соединению —
+    «параллельно и дёшево». Соединение asyncpg так не умеет: пока идёт один
+    запрос, второй получает
+    `InterfaceError: cannot perform operation: another operation is in progress`.
+    Ошибку глотал `except Exception: return []`, поэтому ПЕРВЫЙ запрос отдавал
+    данные, а все остальные — пустоту, молча и всегда.
+
+    Стоило это дорого: `get_audience_stats` показывала одно число из шести,
+    `get_bot_stats` — одно из шестнадцати, а дашборд приложения
+    (`analytics_dashboard`) падал с IndexError на `results[1][0]`, потому что
+    брал первую строку пустого списка.
+
+    Последовательный проход по одному соединению — это и есть максимум, который
+    даёт одно соединение, и он корректен. Экономия против `pool.fetch` в цикле
+    сохраняется: соединение берётся из пула один раз, а не N.
     """
     async with pool.acquire() as conn:
-        async def _safe_fetch(sql, params):
+        results = []
+        for sql, params in queries:
             try:
-                return await conn.fetch(sql, *params)
+                results.append(await conn.fetch(sql, *params))
             except Exception:
-                return []
-        return await asyncio.gather(
-            *(_safe_fetch(sql, params) for sql, params in queries)
-        )
+                log.debug("run_queries_on_one_connection: запрос не удался: %.100s",
+                          sql, exc_info=True)
+                results.append([])
+        return results
 
 
 async def batch_upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> int:
@@ -1356,7 +1375,7 @@ async def get_audience_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
         ("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= NOW() - INTERVAL '30 days'", (bot_id,)),
         ("SELECT COALESCE(language_code, 'unknown') AS lang, COUNT(*) AS cnt FROM bot_users WHERE bot_id=$1 AND is_active=TRUE GROUP BY lang ORDER BY cnt DESC LIMIT 10", (bot_id,)),
     ]
-    results = await run_concurrent_queries(pool, queries)
+    results = await run_queries_on_one_connection(pool, queries)
     total, inactive, joined_today, joined_week, joined_month, langs = results
     return {
         "total": (total[0]["count"] if total else 0) or 0,
@@ -2005,7 +2024,7 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
             ("SELECT COUNT(*) FROM broadcasts WHERE bot_id=$1", (bot_id,)),
             ("SELECT COALESCE(SUM(sent_count), 0) FROM broadcasts WHERE bot_id=$1", (bot_id,)),
         ]
-        results = await run_concurrent_queries(pool, queries)
+        results = await run_queries_on_one_connection(pool, queries)
         _v = lambda r: (r[0][0] if r else 0) or 0
     return {
         "relay_sessions": _v(results[0]),

@@ -326,3 +326,38 @@ def test_retry_sources_on_empty_list_does_not_touch_the_database(pool):
     log: list[str] = []
     assert _run(m._retry_sources(_Recorder(pool, log), OWNER, [])) == {}
     assert log == [], f"пустой список не должен идти в базу: {log}"
+
+
+def test_a_real_connection_runs_one_query_at_a_time(pool):
+    """Живое подтверждение, почему gather по одному соединению был поломкой.
+
+    На заглушке это можно было бы «доказать» как угодно, поэтому спрашиваем
+    настоящий asyncpg: второй запрос на занятом соединении падает, а не ждёт
+    очереди. Именно эта ошибка глоталась и превращала пять запросов из шести в
+    пустые списки.
+    """
+    import asyncio as _aio
+
+    async def _s():
+        async with pool.acquire() as conn:
+            async def one(i):
+                try:
+                    await conn.fetch(f"SELECT {i} AS n, pg_sleep(0.05)")
+                    return "ok"
+                except Exception as exc:
+                    return type(exc).__name__
+            return await _aio.gather(*(one(i) for i in range(4)))
+
+    verdicts = _run(_s())
+    assert verdicts[0] == "ok"
+    assert verdicts[1:] == ["InterfaceError"] * 3, (
+        f"поведение соединения изменилось: {verdicts}")
+
+
+def test_all_queries_come_back_on_a_real_connection(pool):
+    """А последовательный проход по тому же соединению отдаёт все результаты."""
+    from database.db import run_queries_on_one_connection
+
+    queries = [(f"SELECT {i} AS n", ()) for i in range(6)]
+    res = _run(run_queries_on_one_connection(pool, queries))
+    assert [r[0]["n"] for r in res] == list(range(6))

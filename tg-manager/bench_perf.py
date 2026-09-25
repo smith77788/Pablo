@@ -109,14 +109,15 @@ def bench_query_tracking():
 async def bench_concurrent_vs_sequential():
     """Benchmark 4: Concurrent vs sequential query execution."""
     print("=" * 60)
-    print("4. Concurrent vs Sequential Queries")
+    print("4. One pooled connection vs a connection per query")
     print("=" * 60)
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         print("  SKIPPED: Set DATABASE_URL to run live benchmark")
-        print("  Expected improvement: 3-5x faster for 6+ concurrent queries")
-        print("  (run_concurrent_queries uses asyncio.gather)")
+        print("  Expected improvement: одно взятие соединения вместо N")
+        print("  (раньше здесь мерился gather по одному соединению — а он")
+        print("   валил все запросы кроме первого, поэтому и был «быстрым»)")
         print()
         return
 
@@ -138,16 +139,22 @@ async def bench_concurrent_vs_sequential():
             await pool.fetch(sql, *params)
         seq_ms = (time.perf_counter() - start) * 1000
 
-        # Concurrent
-        from database.db import run_concurrent_queries
+        # Одно соединение на весь набор
+        from database.db import run_queries_on_one_connection
         start = time.perf_counter()
-        await run_concurrent_queries(pool, queries)
-        conc_ms = (time.perf_counter() - start) * 1000
+        results = await run_queries_on_one_connection(pool, queries)
+        one_ms = (time.perf_counter() - start) * 1000
 
-        speedup = seq_ms / conc_ms if conc_ms > 0 else float('inf')
-        print(f"  Sequential: {seq_ms:.2f}ms")
-        print(f"  Concurrent: {conc_ms:.2f}ms")
-        print(f"  Speedup: {speedup:.1f}x faster")
+        # Замер честный только если ВСЕ запросы реально отработали: пустой
+        # результат раньше и создавал иллюзию ускорения.
+        empty = [i for i, r in enumerate(results) if not r]
+        if empty:
+            print(f"  ВНИМАНИЕ: пустые результаты у запросов {empty} — замер недостоверен")
+
+        speedup = seq_ms / one_ms if one_ms > 0 else float('inf')
+        print(f"  Соединение на каждый запрос: {seq_ms:.2f}ms")
+        print(f"  Одно соединение на все:      {one_ms:.2f}ms")
+        print(f"  Выигрыш: {speedup:.1f}x")
         print(f"  Improvement: asyncio.gather eliminates sequential wait time")
     finally:
         await pool.close()
