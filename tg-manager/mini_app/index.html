@@ -226,7 +226,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* В шапке значковая кнопка компактнее: три штуки по 40px забирали 130px из
    320px, и даже короткое «Контакты» не помещалось в одну строку. 36px —
    всё ещё выше порога нажатия в 34px. */
-.hdr-meta > .icon-btn{width:36px;height:36px;font-size:15px}
+/* Значковая кнопка в шапке одного размера, стоит она в .hdr-meta или прямо
+   в шапке: на «Пульс-отчёте» и «Докторе флота» она была на 4px крупнее
+   соседних экранов. */
+.hdr-meta > .icon-btn,.hdr > .icon-btn{width:36px;height:36px;font-size:15px}
 @media (max-width:340px){.hdr-meta > .icon-btn{width:34px;height:34px}}
 /* Красная иконка в строке — обычно удаление. Раньше это был голый span с
    font-size:18px и padding:4px, то есть цель 26×33 без подписи для
@@ -2415,7 +2418,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📈 Пульс-отчёт</div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="openDigest()">🔄</div></div>
   <div class="sub-sb">
-    <div id="digestBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <!-- Обёртку заполняет JS карточками с инлайновым стилем и без своих
+         полей: без этого отступа они шли от края до края экрана. -->
+    <div id="digestBody" style="padding:0 16px"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -2423,7 +2428,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-fleetdoctor">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🩺 Диагностика флота</div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="openFleetDoctor()">🔄</div></div>
-  <div class="sub-sb"><div id="fleetDoctorBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+  <div class="sub-sb"><div id="fleetDoctorBody" style="padding:0 16px"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <!-- ══════════════════════ CHAT WARMUP ══════════════════════ -->
@@ -4349,8 +4354,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- Вкладка: подписчики ботов -->
     <div id="nuViewBots">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0 8px">
-        <div style="color:var(--hint);font-size:12px;flex:1">Пользователи, написавшие вашим ботам. Обновляется автоматически, независимо от push.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 16px 8px">
+        <div style="color:var(--hint);font-size:12px;flex:1">Пользователи, написавшие вашим ботам. Список обновляется сам.</div>
         <button class="mini-btn" onclick="exportCSV('/api/miniapp/new_users/export')">⬇️ CSV</button>
       </div>
       <div class="lst" id="newUsersList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -5509,7 +5514,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-webhook">
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
-    <div class="hdr-title" id="webhook-title">🔗 Webhook</div>
+    <div class="hdr-title" id="webhook-title">🔗 Вебхук</div>
   </div>
   <div class="sub-sb">
     <div id="webhookBody"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -6886,7 +6891,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="delay">⏳ Задержка</option>
         <option value="condition">🔀 Условие</option>
         <option value="action">⚡ Действие</option>
-        <option value="webhook">🌐 Webhook</option>
+        <option value="webhook">🌐 Вебхук</option>
       </select>
     </div>
     <div class="field" id="wfStepMsgField">
@@ -8279,7 +8284,7 @@ async function fleetDoctorLoad(){
       </div>`;
     }
     const st=d.stuck||{};
-    h+=`<div style="font-size:12px;color:var(--hint);margin:0 0 10px">В работе: ${st.running_ops||0} · в очереди: ${st.pending_ops||0} · помечено in_operation: ${f.in_operation||0}</div>`;
+    h+=`<div style="font-size:12px;color:var(--hint);margin:0 0 10px">В работе: ${st.running_ops||0} · в очереди: ${st.pending_ops||0} · занято аккаунтов: ${f.in_operation||0}</div>`;
     // Последние реальные ошибки операций.
     const errs=d.recent_errors||[];
     if(errs.length){
@@ -9255,7 +9260,7 @@ function buildBotDetail(d) {
       {ico:'💬',lbl:'Входящие',       fn:`openRelay(${bid},'${bn}')`},
       {ico:'🔗',lbl:'Диплинки',       fn:`openDeeplinks(${bid})`},
       {ico:'⌨️',lbl:'Команды',        fn:`openBotCommands(${bid})`},
-      {ico:'🔗',lbl:'Webhook',        fn:`openBotWebhook(${bid},'${bn}')`},
+      {ico:'🔗',lbl:'Вебхук',        fn:`openBotWebhook(${bid},'${bn}')`},
       {ico:'🌍',lbl:'Мультигео',      fn:`openMultigeo()`},
       {ico:'📝',lbl:'Заметка',        fn:`openBotNote(${bid})`},
     ]},
@@ -17436,7 +17441,9 @@ async function openCloud() {
       </label>
       <div id="cloudUpMsg" style="font-size:12px;text-align:center;color:var(--hint);min-height:14px;margin-bottom:8px">${
         _CLOUD_MAX_UPLOAD ? 'Один файл — до ' + _cloudBytes(_CLOUD_MAX_UPLOAD) : ''}</div>
-      <div class="sec">Мои файлы</div>
+      <!-- Обёртка уже держит боковой отступ 16px, а .sec добавляет свой:
+           заголовок секции уезжал вправо на 32px, вдвое дальше остального. -->
+      <div class="sec" style="padding-left:0;padding-right:0">Мои файлы</div>
       <div id="cloudFiles"></div>
     </div>`;
     txt('cloudBody', head);
@@ -17471,7 +17478,7 @@ async function cloudRefreshList() {
     const files = d.files || [];
     _CLOUD_FILES = {};
     files.forEach(f => { _CLOUD_FILES[f.id] = f; });
-    if (!files.length) { box.innerHTML = '<div class="empty-inline">Пока пусто — загрузите первый файл.</div>'; return; }
+    if (!files.length) { box.innerHTML = empty('☁️','Пока пусто','Загрузите первый файл кнопкой выше'); return; }
     const tgt = Number(d.target_replicas) || 2;
     box.innerHTML = files.map(f => {
       const mr = f.min_replicas;            // минимум живых копий среди кусков
@@ -18697,7 +18704,7 @@ async function openStars() {
   try {
     const d = await api('/api/miniapp/stars');
     txt('starsStats',`
-      <div class="kpi-card"><div class="kpi-val">⭐${d.total_revenue||0}</div><div class="kpi-lbl">Заработано</div></div>
+      <div class="kpi-card"><div class="kpi-val">⭐ ${d.total_revenue||0}</div><div class="kpi-lbl">Заработано</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.total_conversions||0}</div><div class="kpi-lbl">Конверсий</div></div>
       <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active_exps,'green')}">${d.active_exps||0}</div><div class="kpi-lbl">Активных A/B</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.total_exps||0}</div><div class="kpi-lbl">Всего тестов</div></div>
@@ -18932,7 +18939,7 @@ async function submitGhostCreate() {
 let WEBHOOK_BOT_ID = null;
 async function openBotWebhook(botId, botName) {
   WEBHOOK_BOT_ID = botId;
-  txt('webhook-title','🔗 Webhook · '+(botName||''));
+  txt('webhook-title','🔗 Вебхук · '+(botName||''));
   push('s-webhook');
   txt('webhookBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
@@ -19399,16 +19406,20 @@ async function openVLayer() {
       }).join('');
       html += '</div>';
     }
+    // Заголовок только вместе с содержимым: без этой проверки на экране
+    // оставалась надпись «Воронка аудитории», под которой ничего нет.
+    if (funnel.length) {
     html += '<div class="sec">Воронка аудитории</div>';
     html += funnel.map(f => {
       const w = Math.max(4, Math.round(f.count / max * 100));
-      return `<div style="padding:6px 2px">
+      return `<div style="padding:6px 16px">
         <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
           <span>${esc(f.label)}</span><span style="font-weight:600">${num(f.count)}</span></div>
         <div style="height:6px;background:var(--sep);border-radius:3px;overflow:hidden">
           <div style="height:100%;width:${w}%;background:var(--accent,#7c3aed);border-radius:3px"></div></div>
       </div>`;
     }).join('');
+    }
     // «Горячие» — кого дожимать первыми.
     if (hot.length) {
       html += '<div class="sec">🔥 Дожать в первую очередь</div><div class="lst">';
@@ -19422,7 +19433,9 @@ async function openVLayer() {
     // Лента виртуальных событий — «что слой понял».
     html += '<div class="sec">События поведения</div>';
     if (!events.length) {
-      html += '<div style="padding:10px;color:var(--hint);font-size:13px">Пока тихо</div>';
+      // Пустое состояние тем же видом, что и на остальных экранах: голая строка
+      // у левого края читалась как обрывок, а не как «здесь пока пусто».
+      html += empty('🤫','Пока тихо','События появятся, когда слой заметит поведение');
     } else {
       html += '<div class="lst">' + events.map(e => {
         const open = e.entity_id
@@ -21175,7 +21188,7 @@ async function openSwarm() {
   txt('swarmList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/swarm');
-    if (!rows.length) { txt('swarmList', empty('🐝','Нет данных','Роевые метрики появятся после активации')); return; }
+    if (!rows.length) { txt('swarmList', empty('🐝','Нет данных','Рой включается на карточке бота в Telegram-боте — оттуда же пойдут метрики')); return; }
     txt('swarmList', rows.map(r=>{
       const score = r.score?r.score.toFixed(2):'—';
       const ctr = r.ctr?(r.ctr*100).toFixed(1)+'%':'—';
@@ -21187,8 +21200,8 @@ async function openSwarm() {
           <div class="row-ico" style="background:var(--bg-yellow-16)">🤖</div>
           <div class="row-body">
             <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
-            <div class="row-val">${SWARM_ROLES[r.bot_role]||r.bot_role} · ${r.swarm_enabled?'🟢 Рой':'⚫ Выкл'} · Score: ${score}</div>
-            <div class="row-val">CTR: ${ctr} · CVR: ${cvr} · D1: ${d1} · D7: ${d7}</div>
+            <div class="row-val">${SWARM_ROLES[r.bot_role]||r.bot_role} · ${r.swarm_enabled?'🟢 В рою':'⚫ Выключен'} · Оценка: ${score}</div>
+            <div class="row-val">Клики: ${ctr} · Конверсия: ${cvr} · Возврат: за день ${d1} · за неделю ${d7}</div>
             ${r.cluster&&r.cluster!=='default'?`<div class="row-val" style="color:var(--hint)">Кластер: ${esc(r.cluster)}</div>`:''}
           </div>
         </div>
