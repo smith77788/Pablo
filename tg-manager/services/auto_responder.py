@@ -578,6 +578,21 @@ async def _process_bot(
                                  "clicked_offer", 0.7)
                 continue
 
+            # Человек заблокировал бота или вернулся. Telegram шлёт это сам,
+            # в наборе обновлений по умолчанию, — а продукт выбрасывал апдейт
+            # не глядя. Из-за этого bot_users.is_blocked не выставлялся НИ
+            # РАЗУ: фильтры `is_blocked=FALSE` пропускали всех, рассылки
+            # продолжали слать заблокировавшим, каждый такой вызов возвращал
+            # 403, а для Telegram это признак спама.
+            mcm = upd.get("my_chat_member")
+            if mcm:
+                try:
+                    await _handle_my_chat_member(pool, bot_id, mcm, _vl_signal)
+                except Exception:
+                    log.debug("auto_responder: my_chat_member bot=%s", bot_id,
+                              exc_info=True)
+                continue
+
             msg = upd.get("message")
             if not msg:
                 continue
@@ -1362,6 +1377,35 @@ async def _process_bot(
                     exc_info=True,
                 )
 
+
+
+async def _handle_my_chat_member(pool, bot_id: int, upd: dict, vl_signal) -> None:
+    """Блокировка бота и возврат: отметить в базе и сказать слою.
+
+    Статус "kicked" в личке — это и есть «заблокировал бота»; возврат из него в
+    "member" — разблокировал. Групповые чаты сюда не относятся: там тот же
+    статус означает бан бота админом, и к подписчику это отношения не имеет.
+    """
+    chat = upd.get("chat") or {}
+    if chat.get("type") != "private":
+        return
+    user_id = chat.get("id")
+    if not user_id:
+        return
+    old_status = ((upd.get("old_chat_member") or {}).get("status") or "")
+    new_status = ((upd.get("new_chat_member") or {}).get("status") or "")
+    if new_status == old_status:
+        return
+
+    if new_status == "kicked":
+        await db.block_user(pool, bot_id, user_id, True)
+        log.info("auto_responder: bot=%s user=%s заблокировал бота", bot_id, user_id)
+        await vl_signal(user_id, "blocked", 0.95)
+    elif old_status == "kicked" and new_status in ("member", "administrator",
+                                                   "creator"):
+        await db.block_user(pool, bot_id, user_id, False)
+        log.info("auto_responder: bot=%s user=%s вернулся", bot_id, user_id)
+        await vl_signal(user_id, "opened", 0.5)
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
     global _inactivity_sweep_task, _sales_followup_task, _cloud_reconcile_task

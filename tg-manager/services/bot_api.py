@@ -330,7 +330,11 @@ async def set_webhook(session: aiohttp.ClientSession, token: str, url: str) -> d
         token,
         "setWebhook",
         url=url,
-        allowed_updates=["message", "callback_query", "chat_member"],
+        # my_chat_member обязателен: это единственное обновление, из которого
+        # видно, что человек заблокировал бота. Без него бот на вебхуке не
+        # узнает об этом никогда, и рассылки продолжат бить в 403.
+        allowed_updates=["message", "callback_query", "chat_member",
+                         "my_chat_member"],
     )
 
 
