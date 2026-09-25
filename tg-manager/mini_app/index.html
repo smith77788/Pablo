@@ -21695,7 +21695,12 @@ async function submitBulkPostChans() {
     return;
   }
   const bpWho = (bpT && bpT.sample.length) ? '\n\n' + _mpChList(bpT.sample, 5) : '';
-  if (!await askConfirm('Опубликовать во все каналы этого аккаунта'
+  // Совет редактора (screens/editorial.js) — подсказка на подтверждении, не запрет.
+  const bpEd = (typeof editorialReviewForConfirm === 'function') ? await editorialReviewForConfirm(text) : null;
+  const bpEdNote = (bpEd && bpEd.needs_review && (bpEd.reasons||[]).length)
+    ? '✍️ Редактор советует проверить:\n' + bpEd.reasons.map(function(x){return '• '+x;}).join('\n') + '\n\n'
+    : '';
+  if (!await askConfirm(bpEdNote + 'Опубликовать во все каналы этого аккаунта'
       + massScale(bpT, 'канал', 'канала', 'каналов') + '?' + bpWho
       + '\n\nПосты появятся в Telegram — массово отменить нельзя.')) return;
   try {

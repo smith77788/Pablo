@@ -9880,6 +9880,16 @@ async def _exec_bulk_post_chans(
                 else:
                     ok_count += 1
                     await _log_ch(idx, _key, True)
+                    # Content Memory: без этой записи редактор видел только массовые
+                    # публикации, и повтор поста «во все каналы аккаунта» проходил
+                    # незамеченным. Best-effort — не рушим публикацию.
+                    try:
+                        from services import content_memory
+                        await content_memory.record_published(
+                            pool, owner_id, _key, _body, op_id=op_id,
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "bulk_post_chans: content_memory record failed")
                     # Persist resolved access_hash for future fast-path
                     _rhash = last_result.get("resolved_access_hash", 0)
                     if _rhash and not access_hash:

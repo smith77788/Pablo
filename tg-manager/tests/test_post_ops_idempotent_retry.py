@@ -32,6 +32,7 @@ class _FakePool:
         self.rows = rows or {}
         self.logged: list[tuple] = []
         self.done_items = 0
+        self.history: list[tuple] = []
 
     async def fetch(self, query, *args):
         if "FROM operation_log" in query:
@@ -53,6 +54,8 @@ class _FakePool:
     async def execute(self, query, *args):
         if "INSERT INTO operation_log" in query:
             self.logged.append((args[2], args[3]))
+        if "INSERT INTO va_channel_posts" in query:
+            self.history.append((args[0], args[1], args[4]))
         if "SET done_items=done_items+1" in query:
             self.done_items += 1
         return "UPDATE 1"
@@ -118,6 +121,18 @@ def test_bulk_post_chans_first_run_posts_everywhere(_stubs):
         "успешная публикация обязана оставлять след в журнале целей, иначе "
         "повтору не по чему понять, что канал уже отработан"
     )
+
+
+def test_bulk_post_chans_feeds_editor_history(_stubs):
+    """Пост «во все каналы аккаунта» попадает в историю редактора.
+
+    Раньше её писала только массовая публикация: повтор такого поста редактор
+    не видел, а совет на подтверждении молчал.
+    """
+    pool = _FakePool()
+    _run(op_worker._exec_bulk_post_chans(
+        pool, None, 42, 777, {"acc_id": 7, "channel_ids": [1, 2], "text": "привет"}))
+    assert sorted(pool.history) == [(777, "-1001", "привет"), (777, "-1002", "привет")]
 
 
 def test_bulk_post_chans_retry_skips_published(_stubs):

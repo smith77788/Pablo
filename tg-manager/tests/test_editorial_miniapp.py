@@ -244,6 +244,8 @@ def test_miniapp_publish_asks_editor_before_confirm():
     assert '<script src="screens/editorial.js"></script>' in html
     assert "editorialReviewForConfirm(text)" in html
     assert "askConfirm(edNote+'Опубликовать '" in html
+    # пост во все каналы аккаунта — тот же совет на своём подтверждении
+    assert "askConfirm(bpEdNote + 'Опубликовать во все каналы этого аккаунта'" in html
     assert "/api/miniapp/editorial/review" in js and "/api/miniapp/editorial/policy" in js
 
 
