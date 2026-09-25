@@ -4024,7 +4024,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="font-size:12px;opacity:.72;line-height:1.5">
         Приоритет для аккаунта <b>без своего прокси</b>: <b>1)</b> свой прокси (если назначен) → <b>2)</b> свой IPv6 → <b>3)</b> CF-релей → <b>4)</b> прямое.<br>
         • <b>Прокси</b> — уникальный IP 1:1, работает где угодно (платно/бесплатные ненадёжны). Раздел «Мои прокси».<br>
-        • <b>Свой IPv6</b> — <b>реально</b> уникальный IP на аккаунт <u>без прокси</u>, если у сервера есть выданная (routed) IPv6-подсеть. Нужен VPS с IPv6 (Railway не подойдёт).<br>
+        • <b>Свой IPv6</b> — <b>реально</b> уникальный IP на аккаунт <u>без прокси</u>, если у сервера есть выданная маршрутизируемая IPv6-подсеть. Нужен VPS с IPv6 (Railway не подойдёт).<br>
         • <b>CF-релей</b> — edge-IP Cloudflare (не датацентр), но <b>общий</b> на пул, <b>не</b> 1:1.
       </div>
       <details style="margin-top:8px">
@@ -4616,11 +4616,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field">
         <label>Стиль речи</label>
         <select id="pStyle" class="sel">
-          <option value="casual">💬 Разговорный (casual)</option>
-          <option value="formal">🎩 Формальный (formal)</option>
-          <option value="expert">🔬 Экспертный (expert)</option>
-          <option value="friendly">😊 Дружелюбный (friendly)</option>
-          <option value="sarcastic">😏 Саркастический (sarcastic)</option>
+          <option value="casual">💬 Разговорный</option>
+          <option value="formal">🎩 Формальный</option>
+          <option value="expert">🔬 Экспертный</option>
+          <option value="friendly">😊 Дружелюбный</option>
+          <option value="sarcastic">😏 Саркастический</option>
         </select>
       </div>
       <div class="field">
@@ -5181,7 +5181,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="mo-ghost" onclick="if(event.target===this)closeModal('mo-ghost')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-ghost')">✕</div>
-    <div class="modal-title">👻 Новый Ghost-профиль</div>
+    <div class="modal-title">👻 Новый призрачный профиль</div>
     <div class="field"><label>Аккаунт</label><select id="gc-account" class="sel"><option value="">Загрузка...</option></select></div>
     <div class="field"><label>Персонаж</label><select id="gc-personality" class="sel">
       <option value="ghost">👻 Призрак (пассивный)</option>
@@ -10069,7 +10069,15 @@ function updateAccKpi(list, stats) {
   // строго proxy_alive === false: непроверенный прокси мёртвым не считаем.
   const pdown  = (stats && stats.proxy_down!=null) ? stats.proxy_down
                  : list.filter(a=>a.has_proxy && a.proxy_alive === false).length;
-  const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
+  // Тревожный цвет — только когда есть о чём тревожиться. Красный ноль читается
+  // как проблема, хотя «0 забанено» — лучшая новость на этом экране. Исходный
+  // цвет из разметки запоминаем один раз и возвращаем, как только счётчик ожил.
+  const el = (id, v) => {
+    const e = document.getElementById(id); if (!e) return;
+    e.textContent = v;
+    if (e.dataset.tone === undefined) e.dataset.tone = e.style.color || '';
+    e.style.color = Number(v) > 0 ? e.dataset.tone : '';
+  };
   el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-spam', spam); el('kpi-ban', banned); el('kpi-dead', dead);
   el('kpi-proxydown', pdown);
   // Карточку показываем только когда есть о чём говорить — иначе она просто
@@ -12610,7 +12618,7 @@ async function loadCRM(append) {
     }
     const contacts = d.contacts||[];
     if (!contacts.length && !append) {
-      txt('crmList', empty('👤','Нет контактов','Нажмите «+ Добавить» чтобы создать контакт вручную'));
+      txt('crmList', empty('👤','Нет контактов','Нажмите «+ Добавить», чтобы создать контакт вручную'));
       return;
     }
     const html = contacts.map(c=>{
@@ -18328,7 +18336,7 @@ async function openNodes() {
       <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${active}</div><div class="kpi-lbl">Активных</div></div>
     `);
     txt('m-nodes-val',`${active} активных нод`);
-    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Нажмите «+ Добавить» чтобы зарегистрировать Forum Group')); return; }
+    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Нажмите «+ Добавить», чтобы зарегистрировать форум-группу')); return; }
     txt('nodesList', nodes.map(n=>`
       <div class="row">
         <div class="row-ico tap" style="background:var(--bg-green-16)" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">${n.is_active?'🟢':'⚫'}</div>
@@ -18743,7 +18751,7 @@ async function openGhost() {
     const d = await api('/api/miniapp/ghost');
     const profiles = d.profiles||[];
     txt('m-ghost-val',`${profiles.filter(p=>p.enabled).length} активных · ${profiles.length} профилей`);
-    if (!profiles.length) { txt('ghostList', empty('👻','Нет Ghost-профилей','Нажмите + Создать')); return; }
+    if (!profiles.length) { txt('ghostList', empty('👻','Нет призрачных профилей','Нажмите + Создать')); return; }
     txt('ghostList', profiles.map(p=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-violet-16)">${p.enabled?'🟢':'⚫'}</div>
@@ -18769,7 +18777,7 @@ async function toggleGhost(id, enabled) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 async function deleteGhost(id) {
-  if (!await askConfirm('Удалить Ghost-профиль?')) return;
+  if (!await askConfirm('Удалить призрачный профиль?')) return;
   try {
     await api(`/api/miniapp/ghost/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -18890,7 +18898,7 @@ async function submitGhostCreate() {
       account_id:parseInt(account_id), personality, active_hours_start, active_hours_end, daily_cap
     })});
     closeModal('mo-ghost');
-    toast('✅ Ghost-профиль создан');
+    toast('✅ Призрачный профиль создан');
     openGhost();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
@@ -19974,7 +19982,7 @@ async function openShield() {
       <div class="row"><div class="row-body"><div class="row-name">🔔 Уведомления</div><div class="row-val">Уведомлять в Telegram при обнаружении угрозы</div></div><div class="row-right">${cfg.notify_admin?'✅ Вкл':'❌ Выкл'}</div></div>
     `);
     const hist = d.history||[];
-    if (!hist.length) { txt('shieldHistory', empty('📋','История пуста','Shield следит за аккаунтами')); return; }
+    if (!hist.length) { txt('shieldHistory', empty('📋','История пуста','«Щит» следит за аккаунтами')); return; }
     txt('shieldHistory', hist.map(h=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-blue-16)">${h.action==='ban_detect'?'🚨':h.action==='rotate'?'🔄':'🛡'}</div>
@@ -22270,7 +22278,7 @@ async function openPhysics() {
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
           <div class="row-val">${riskLabel(r.risk_score||0)} · Риск: ${((r.risk_score||0)*100).toFixed(0)}%</div>
           <div class="row-val">Бан-вер.: ${((r.ban_probability||0)*100).toFixed(0)}% · Ops/24h: ${r.ops_24h||0}</div>
-          ${r.flood_rate_1h?`<div class="row-val" style="color:var(--orange)">Flood 1h: ${(r.flood_rate_1h).toFixed(1)}/час</div>`:''}
+          ${r.flood_rate_1h?`<div class="row-val" style="color:var(--orange)">Флуд за час: ${(r.flood_rate_1h).toFixed(1)}</div>`:''}
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
         </div>
       </div>
@@ -22323,12 +22331,13 @@ async function openCompliance() {
     const sr = (rep.success_rate!=null) ? rep.success_rate+'%' : '—';
     txt('complianceStats', `
       <div class="row"><div class="row-body"><div class="row-name">Всего записей</div><div class="row-val">${num(t.total||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Успешных</div><div class="row-val" style="color:var(--green)">${num(t.ok_cnt||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Рисковых</div><div class="row-val" style="color:var(--red)">${num(t.risk_cnt||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Успешных</div><div class="row-val" style="${kpiTone(t.ok_cnt,'green')}">${num(t.ok_cnt||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Рисковых</div><div class="row-val" style="${kpiTone(t.risk_cnt,'red')}">${num(t.risk_cnt||0)}</div></div></div>
       <div class="row"><div class="row-body"><div class="row-name">Успешность (30 дн.)</div><div class="row-val">${sr}</div></div></div>
       <div class="row"><div class="row-body"><div class="row-name">Охват (30 дн.)</div><div class="row-val">${num(rep.distinct_types||0)} тип. · ${num(rep.distinct_accounts||0)} акк.</div></div></div>
     `);
-    document.getElementById('m-compliance-val').textContent = (t.total||0)+' записей';
+    const ct = t.total||0;
+    document.getElementById('m-compliance-val').textContent = ct + ' ' + plural(ct,'запись','записи','записей');
     const rows = d.recent||[];
     if (!rows.length) { txt('complianceList', empty('📋','Нет записей','')); return; }
     const outCls = {success:'b-gr',ban:'b-rd',flood_wait:'b-or',error:'b-rd'};
@@ -22387,7 +22396,7 @@ async function loadMultigeo() {
     const d = await api(`/api/miniapp/bot/${botId}/multigeo`);
     const profiles = d.profiles||[];
     const langNames = {default:'🌐 По умолчанию',ru:'🇷🇺 Русский',en:'🇬🇧 English',de:'🇩🇪 Deutsch',fr:'🇫🇷 Français',es:'🇪🇸 Español',it:'🇮🇹 Italiano',uk:'🇺🇦 Українська',pt:'🇧🇷 Português',zh:'🇨🇳 中文'};
-    if (!profiles.length) { txt('mgProfiles', empty('🌍','Профилей нет','Нажмите ✏️ Изменить чтобы добавить')); return; }
+    if (!profiles.length) { txt('mgProfiles', empty('🌍','Профилей нет','Нажмите ✏️ Изменить, чтобы добавить')); return; }
     txt('mgProfiles', profiles.map(p=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-purple-16)">🌍</div>
@@ -24009,7 +24018,9 @@ async function loadRanking() {
     document.getElementById('rk-total').textContent = kw.length;
     document.getElementById('rk-top3').textContent = kw.filter(k => k.position != null && k.position <= 3).length;
     document.getElementById('rk-top10').textContent = kw.filter(k => k.position != null && k.position <= 10).length;
-    document.getElementById('rk-alerts').textContent = alerts.length;
+    const rkAl = document.getElementById('rk-alerts');
+    rkAl.textContent = alerts.length;
+    rkAl.style.color = alerts.length ? 'var(--orange)' : '';
 
     renderRankingList(kw);
     renderRankingAlerts(alerts);
@@ -24488,7 +24499,10 @@ async function loadWorkflows() {
     document.getElementById('wf-total').textContent = wfs.length;
     document.getElementById('wf-active').textContent = wfs.filter(w => w.status === 'active').length;
     document.getElementById('wf-running').textContent = wfs.filter(w => w.status === 'running').length;
-    document.getElementById('wf-failed').textContent = wfs.filter(w => w.status === 'failed').length;
+    const wfFail = wfs.filter(w => w.status === 'failed').length;
+    const wfFailEl = document.getElementById('wf-failed');
+    wfFailEl.textContent = wfFail;
+    wfFailEl.style.color = wfFail ? 'var(--red)' : '';
 
     if (!wfs.length) {
       txt('wfList', empty('🔄', 'Нет воркфлоу', 'Создайте первый процесс'));
