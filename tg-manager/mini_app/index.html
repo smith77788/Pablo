@@ -206,6 +206,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* Фокус должен быть виден: с клавиатуры иначе не понять, на чём стоишь. */
 [role="button"]:focus-visible,.lf-chip:focus-visible,.icon-btn:focus-visible,.seg-opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
 .icon-btn.sm{width:36px;height:36px;font-size:14px}
+/* В шапке значковая кнопка компактнее: три штуки по 40px забирали 130px из
+   320px, и даже короткое «Контакты» не помещалось в одну строку. 36px —
+   всё ещё выше порога нажатия в 34px. */
+.hdr-meta > .icon-btn{width:36px;height:36px;font-size:15px}
+@media (max-width:340px){.hdr-meta > .icon-btn{width:34px;height:34px}}
 /* Красная иконка в строке — обычно удаление. Раньше это был голый span с
    font-size:18px и padding:4px, то есть цель 26×33 без подписи для
    озвучки, вплотную (6px) к соседней кнопке. Приложение открывают с
@@ -300,7 +305,17 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .ava-purple{background:rgba(192,132,252,.15);color:var(--purple)}
 .ava-red{background:rgba(248,113,113,.15);color:var(--red)}
 .ava-teal{background:rgba(45,212,191,.15);color:var(--teal)}
-.li-body{flex:1;min-width:0}
+/* Имя в строке списка не должно ужиматься до нечитаемого огрызка. В
+   «Диспетчере задач» правая колонка (значок статуса + «Отмена» + «Повтор»)
+   забирала всё место, и от названия операции оставалось 67px — семь букв.
+   Имени отдаём не меньше 45% ширины строки, а действиям разрешаем
+   переноситься на вторую строку, когда они перестают помещаться. */
+.li-body{flex:1 1 auto;min-width:45%}
+.li-body + div{min-width:0;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}
+/* Значок статуса не сжимается: иначе место отбиралось у него, и вместо
+   «Ожидает» и «Готово» в строке стояло многоточие. Ужиматься и переноситься
+   должны ссылки-действия рядом, а не сам статус. */
+.li-body + div > .badge{flex-shrink:0}
 .li-name{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .li-sub{font-size:13px;color:var(--hint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Строка, которая несёт НЕСКОЛЬКО фактов сразу (тип · состояние · задержка ·
