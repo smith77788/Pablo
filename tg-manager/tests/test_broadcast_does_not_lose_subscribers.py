@@ -78,7 +78,7 @@ def _broadcast(error_code: int, description: str, users=None):
     """
     dropped: list[int] = []
 
-    async def _mark(pool, bot_id, uid):
+    async def _mark(pool, bot_id, uid, reason=""):
         dropped.append(uid)
 
     calls: list[int] = []

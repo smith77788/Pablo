@@ -631,6 +631,10 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name "
             "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id "
             "WHERE bu.bot_id=$1 AND mb.added_by=$2 AND bu.user_id > 0 "
+            # Заблокировал бота — это отказ от сообщений владельца. Дослать то
+            # же самое с личного аккаунта значит обойти отказ: ровно тот
+            # рисунок, по которому Telegram считает рассылку спамом.
+            "AND bu.is_blocked=FALSE "
             "AND bu.user_id " + (_EXCLUDE_SENT % 3) +
             f" ORDER BY bu.user_id LIMIT {_MAX_CAMPAIGN_TARGETS}",
             target_id, campaign["owner_id"], campaign_id,
@@ -772,7 +776,7 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
         rows = await pool.fetch(
             "SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username, bu.first_name "
             "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
-            "WHERE mb.added_by=$1 AND bu.user_id > 0 "
+            "WHERE mb.added_by=$1 AND bu.user_id > 0 AND bu.is_blocked=FALSE "
             "AND bu.user_id " + (_EXCLUDE_SENT % 2) +
             f" ORDER BY bu.user_id, bu.added_at DESC LIMIT {_MAX_CAMPAIGN_TARGETS}",
             campaign["owner_id"], campaign_id,

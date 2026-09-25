@@ -648,7 +648,19 @@ async def batch_upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict])
                    first_name    = EXCLUDED.first_name,
                    last_name     = EXCLUDED.last_name,
                    language_code = EXCLUDED.language_code,
-                   phone         = COALESCE(EXCLUDED.phone, bot_users.phone)""",
+                   phone         = COALESCE(EXCLUDED.phone, bot_users.phone),
+                   -- Человек написал боту — значит бот может ему ответить.
+                   -- Без этой строки пометка была НЕОБРАТИМОЙ:
+                   -- mark_user_inactive стоит на любой недоставке из
+                   -- RECIPIENT_GONE, в том числе на 'не начинал диалог', а
+                   -- вернуть is_active=TRUE было некому — вернувшийся
+                   -- подписчик навсегда выпадал из рассылок, молча.
+                   -- Блокировку эта строка НЕ снимает: сбор аудитории
+                   -- перечитывает старый хвост getUpdates, и сообщение
+                   -- годичной давности воскресило бы того, кто давно
+                   -- заблокировал бота. Снимает её только сам Telegram —
+                   -- обновлением my_chat_member (см. block_user).
+                   is_active     = NOT bot_users.is_blocked""",
             rows,
         )
     return len(rows)
@@ -1179,15 +1191,43 @@ async def get_user_by_id(
 async def block_user(
     pool: asyncpg.Pool, bot_id: int, user_id: int, blocked: bool
 ) -> None:
+    """Отметить блокировку бота пользователем (или её снятие).
+
+    Меняем оба флага сразу. `is_blocked` читают воронки и аналитика, а вот
+    отбор адресатов рассылок в большинстве мест смотрит на `is_active` — и
+    если трогать только `is_blocked`, заблокировавший останется в аудитории и
+    получит ещё одну попытку доставки с ответом 403. Обратно тоже симметрично:
+    человек вышел из блокировки — он снова досягаем.
+    """
     await pool.execute(
-        "UPDATE bot_users SET is_blocked=$3 WHERE bot_id=$1 AND user_id=$2",
+        "UPDATE bot_users SET is_blocked=$3::boolean, "
+        "is_active = NOT $3::boolean "
+        "WHERE bot_id=$1 AND user_id=$2",
         bot_id,
         user_id,
         blocked,
     )
 
 
-async def mark_user_inactive(pool: asyncpg.Pool, bot_id: int, user_id: int) -> None:
+async def mark_user_inactive(
+    pool: asyncpg.Pool, bot_id: int, user_id: int, reason: str = ""
+) -> None:
+    """Вывести подписчика из аудитории по причине недоставки.
+
+    `reason` — категория из `bot_api.classify_send_error`. Для 'blocked'
+    поднимаем и `is_blocked`: иначе единственным следом блокировки остаётся
+    `is_active=FALSE`, неотличимый от удалённого аккаунта, и фильтры
+    `is_blocked=FALSE` (воронки, сеть ботов) считали бы такого человека
+    незаблокированным.
+    """
+    if reason == "blocked":
+        await pool.execute(
+            "UPDATE bot_users SET is_active=FALSE, is_blocked=TRUE "
+            "WHERE bot_id=$1 AND user_id=$2",
+            bot_id,
+            user_id,
+        )
+        return
     await pool.execute(
         "UPDATE bot_users SET is_active=FALSE WHERE bot_id=$1 AND user_id=$2",
         bot_id,
@@ -2097,7 +2137,7 @@ async def get_audience_new_users(
     """Return user_ids of active users who joined within the last N days."""
     rows = await pool.fetch(
         """SELECT user_id FROM bot_users
-           WHERE bot_id=$1 AND is_active=TRUE
+           WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE
              AND first_seen >= NOW() - ($2 || ' days')::INTERVAL""",
         bot_id,
         str(days),
@@ -2110,7 +2150,8 @@ async def get_audience_by_language(
 ) -> list[int]:
     """Return user_ids filtered by language_code."""
     rows = await pool.fetch(
-        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND language_code=$2",
+        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
+        "AND is_blocked=FALSE AND language_code=$2",
         bot_id,
         lang_code,
     )

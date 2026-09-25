@@ -2393,7 +2393,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not bot_row:
             return _err("Бот не найден", 404)
         total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql, bot_id_int)
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
+            "AND is_blocked=false" + _seg_sql, bot_id_int)
         # Отложенная отправка: schedule_minutes минут от текущего момента.
         try:
             schedule_minutes = max(0, min(int(body.get("schedule_minutes") or 0), 60 * 24 * 30))
@@ -2493,7 +2494,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not owns:
             return _err("Бот не найден", 404)
         total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql,
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
+            "AND is_blocked=false" + _seg_sql,
             int(bot_id))
         return _json_resp({"count": int(total or 0), "segment": segment})
 
@@ -3217,12 +3219,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not owns_bot:
                 return _err("Бот не найден", 404)
             total_targets = await _safe_count(pool,
-                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
+                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
+                "AND is_blocked=false", bot_id_int)
         elif target_type == "all_bots":
             total_targets = await _safe_count(pool,
                 """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
                    JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                   WHERE mb.added_by=$1 AND bu.is_active=true""", uid)
+                   WHERE mb.added_by=$1 AND bu.is_active=true
+                     AND bu.is_blocked=false""", uid)
         try:
             row = await pool.fetchrow(
                 """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, total_targets)
@@ -10501,12 +10505,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             if target_type == "bot_users" and target_id:
                 total_targets = await _safe_count(pool,
-                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", int(target_id))
+                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
+                    "AND is_blocked=false", int(target_id))
             elif target_type == "all_bots":
                 total_targets = await _safe_count(pool,
                     """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
                        JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                       WHERE mb.added_by=$1 AND bu.is_active=true""", uid)
+                       WHERE mb.added_by=$1 AND bu.is_active=true
+                         AND bu.is_blocked=false""", uid)
             elif target_type == "cohort" and target_id:
                 total_targets = await _safe_count(pool,
                     f"""SELECT COUNT(*) FROM user_activity ua

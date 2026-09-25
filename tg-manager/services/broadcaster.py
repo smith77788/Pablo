@@ -321,7 +321,7 @@ async def run(
     async def _drop_if_gone(uid: int, category: str) -> None:
         _err_cats[category or "other"] = _err_cats.get(category or "other", 0) + 1
         if bot_api.recipient_is_gone(category):
-            await db.mark_user_inactive(pool, bot_id, uid)
+            await db.mark_user_inactive(pool, bot_id, uid, reason=category)
 
     # _loop_exc captures any exception (including CancelledError) so we can
     # always mark the broadcast final status in DB before propagating.
@@ -609,7 +609,7 @@ async def mass_broadcast_with_scheduling(
     total = await db.safe_count(
         pool,
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true "
-        "AND suspect=false" + _seg_sql,
+        "AND suspect=false AND is_blocked=false" + _seg_sql,
         bot_id,
     )
 
@@ -718,6 +718,7 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
         rows = await pool.fetch(
             """SELECT bu.user_id FROM bot_users bu
                WHERE bu.bot_id=$1 AND bu.is_active=true AND bu.suspect=false
+                 AND bu.is_blocked=false
                  AND NOT EXISTS (
                      SELECT 1 FROM broadcast_delivery_log dl
                      WHERE dl.broadcast_id=$2 AND dl.user_id=bu.user_id)""",
