@@ -604,7 +604,8 @@ async def run(pool, bot=None) -> None:
 
     Каждый тик обрабатывает по ОДНОМУ ходу на созревшую активную сессию —
     человеческий темп, атомарный захват, губернатор. Осмысленность — LLM."""
-    import asyncio
+    # asyncio теперь импортирован на уровне модуля (потолки запросов), локальный
+    # дубль сделал бы имя локальным на всю функцию.
     from datetime import datetime, timezone
     log.info("Chat Warmup engine started")
     while True:
