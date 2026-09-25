@@ -7132,6 +7132,7 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
       if(cfg.bot_username) window._botUsername = cfg.bot_username;
       if(cfg.paid_price) window._paidPrice = cfg.paid_price;
       if(cfg.period_discounts) window._periodDiscounts = cfg.period_discounts;
+      if(cfg.plans) window._planMatrix = cfg.plans;
       rebuildPlanPrices();
     }).catch(()=>{});
     // Приложение встало на ноги: ранний обработчик в <head> больше не нужен.
@@ -23690,10 +23691,20 @@ function openWebhookSecretModal() {
 }
 
 // ── Billing ────────────────────────────────────────────
-const _PLAN_FEATURES = {
-  free: ['✅ 1 управляемый бот','✅ 50 аккаунтов','✅ Базовые рассылки','❌ Авто-воронки','❌ Сенсор намерений','❌ Массовые жалобы','❌ Продвижение ботов'],
-  paid: ['✅ Неограниченно ботов','✅ 500 аккаунтов','✅ Все рассылки','✅ Авто-воронки','✅ Сенсор намерений','✅ Массовые жалобы','✅ Продвижение ботов','✅ Аналитика позиций','✅ Приоритетная поддержка'],
-};
+// Что даёт тариф — ТОЛЬКО с сервера, из тех же значений, по которым гейтится
+// доступ. Написанный здесь руками список успел разойтись с ними: бесплатному
+// обещали «50 аккаунтов» при фактическом нуле и «базовые рассылки», которые на
+// деле платные, а платному — «500 аккаунтов» вместо безлимита. Человек читал
+// экран, платил и получал не то.
+function _planLines(plan) {
+  const m = (window._planMatrix || []).find(p => p.plan === plan);
+  if (!m) return null;
+  const lines = (m.limits || [])
+    .filter(l => Number(l.value) !== 0)
+    .map(l => `✅ ${l.label}: ${l.display}`);
+  (m.features || []).forEach(f => lines.push((f.included ? '✅ ' : '❌ ') + f.label));
+  return lines;
+}
 // Цены строятся из конфига (базовая цена + скидки за период), чтобы совпадать
 // с реальным расчётом списания на бэкенде: base*months*(1-disc/100).
 let _PLAN_PRICES = [];
@@ -23748,8 +23759,16 @@ async function openBilling() {
       }
     }
     document.getElementById('m-billing-val').textContent = nameMap[plan]||plan;
-    const feats = _PLAN_FEATURES[plan] || _PLAN_FEATURES.free;
-    txt('billingFeaturesList', `<div class="card" style="padding:12px 16px">${feats.map(f=>`<div style="padding:5px 0;font-size:13px;${f.startsWith('❌')?'color:var(--hint)':'color:var(--text)'}">${f}</div>`).join('')}</div>`);
+    const feats = _planLines(plan);
+    if (!feats) {
+      // Матрица не доехала (сеть). Выдумывать состав тарифа нельзя — про него
+      // принимают решение о покупке.
+      txt('billingFeaturesList', `<div class="card" style="padding:12px 16px;font-size:13px;color:var(--hint)">
+        Состав тарифа не загрузился.
+        <button class="btn btn-s" style="margin-top:8px" onclick="openBilling()">↺ Повторить</button></div>`);
+    } else {
+      txt('billingFeaturesList', `<div class="card" style="padding:12px 16px">${feats.map(f=>`<div style="padding:5px 0;font-size:13px;${f.startsWith('❌')?'color:var(--hint)':'color:var(--text)'}">${esc(f)}</div>`).join('')}</div>`);
+    }
     txt('billingPlansList', _PLAN_PRICES.map(p=>`
       <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
         <div style="display:flex;align-items:center;justify-content:space-between">

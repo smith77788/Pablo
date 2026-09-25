@@ -22954,6 +22954,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             paid_price = 29
             period_discounts = {"1": 0, "3": 10, "6": 15, "12": 20}
+        # Что даёт тариф — из тех же значений, по которым гейтится доступ.
+        # Написанный руками список на экране разошёлся с ними: бесплатному
+        # обещали «50 аккаунтов» при фактическом нуле и «базовые рассылки»,
+        # которые на деле платные, а платному — «500 аккаунтов» вместо
+        # безлимита.
+        try:
+            from bot.utils import tariffs as _tariffs
+            plans = _tariffs.plan_matrix()
+        except Exception:
+            log.debug("miniapp_config: матрица тарифов недоступна", exc_info=True)
+            plans = []
         return _json_resp({
             "bot_username": bot_username,
             "mini_app_url": mini_app_url,
@@ -22961,6 +22972,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "version": "2.0",
             "paid_price": paid_price,
             "period_discounts": period_discounts,
+            "plans": plans,
         })
 
     app.router.add_get("/api/miniapp/config", miniapp_config)

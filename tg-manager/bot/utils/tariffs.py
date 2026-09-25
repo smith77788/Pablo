@@ -147,6 +147,76 @@ def feature_plan_map() -> dict[str, str]:
     return {key: feature_plan(key) for key in _FEATURE_DEFAULTS}
 
 
+# ── Что тариф даёт: русские подписи и сводная матрица ────────────────────────
+# Экран тарифов в мини-аппе был написан руками и разошёлся с тем, что реально
+# гейтится: бесплатному обещали «50 аккаунтов» при фактическом нуле и «базовые
+# рассылки», которые на деле платные, а платному — «500 аккаунтов» вместо
+# безлимита. Поэтому экран собирается ИЗ ЭТИХ ЖЕ значений, по которым проверка
+# доступа и работает: разойтись им теперь негде.
+
+PLAN_LABEL_RU: dict[str, str] = {"free": "Бесплатный", "paid": "Платный"}
+
+RESOURCE_LABEL_RU: dict[str, str] = {
+    "bots": "Управляемых ботов",
+    "channels": "Каналов",
+    "accounts": "Telegram-аккаунтов",
+    "ranking_keywords": "Ключевых слов трекера позиций",
+    "auto_reply_rules": "Правил авто-ответов",
+}
+
+# Подписи возможностей для витрины. Показываем не все ключи подряд, а те, что
+# покупателю что-то говорят; порядок — как на экране.
+FEATURE_LABEL_RU: dict[str, str] = {
+    "basic_bots": "Управление ботами",
+    "basic_broadcast": "Рассылки",
+    "inbox": "Общий входящий",
+    "account_ops": "Операции с аккаунтами",
+    "bulk_operations": "Массовые операции",
+    "audience_parser": "Парсер аудитории",
+    "channel_factory": "Фабрика каналов",
+    "funnels": "Авто-воронки",
+    "crm": "CRM и сделки",
+    "seo": "SEO и трекер позиций",
+    "proxy_manager": "Менеджер прокси",
+    "ai_assistant": "ИИ-помощник",
+    "autonomous_engine": "Автономный движок",
+    "strike": "Strike",
+    "workspaces": "Совместная работа",
+}
+
+
+def plan_matrix() -> list[dict]:
+    """Что даёт каждый тариф — из тех же значений, по которым гейтится доступ.
+
+    Единственный источник правды для витрины: лимиты берутся из
+    `resource_limit` (с учётом env-переопределений), возможности — из
+    `feature_plan`. Руками на экране ничего не пишется, поэтому расходиться с
+    фактическим поведением нечему.
+    """
+    out: list[dict] = []
+    for plan in PLANS:
+        limits = [
+            {"key": key, "label": RESOURCE_LABEL_RU.get(key, key),
+             "value": resource_limit(key, plan),
+             "display": format_limit(resource_limit(key, plan))}
+            for key in _RESOURCE_DEFAULTS
+        ]
+        features = [
+            {"key": key, "label": label,
+             "included": PLAN_LEVELS.get(plan, 0) >= PLAN_LEVELS.get(
+                 feature_plan(key), 0)}
+            for key, label in FEATURE_LABEL_RU.items()
+        ]
+        out.append({
+            "plan": plan,
+            "label": PLAN_LABEL_RU.get(plan, plan),
+            "price_usd": price_usd(plan),
+            "limits": limits,
+            "features": features,
+        })
+    return out
+
+
 # ── plan normalization ───────────────────────────────────────────────────────
 
 def normalize_plan(plan: str | None) -> str:
