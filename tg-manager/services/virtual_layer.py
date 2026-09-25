@@ -478,6 +478,120 @@ async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel
 
 # ── Read-поверхность (обзор для владельца) ─────────────────────────────────
 
+# Подписи временного рисунка: по одному текущему значению его не видно, а
+# решение от него зависит. «Заходил и уходил» — это не «интерес», это привычка
+# смотреть и не покупать; таких дожимают иначе.
+PATTERN_LABEL = {
+    "climbing": "📈 Идёт вверх",
+    "bouncing": "🔁 Заходил и уходил",
+    "cooling": "❄️ Остывает",
+    "steady": "➖ Без движения",
+}
+
+
+def temporal_pattern(transitions: list[dict]) -> str:
+    """Рисунок переходов по времени: climbing | bouncing | cooling | steady.
+
+    transitions — от старых к новым, каждый с from_value/to_value.
+    """
+    ups = downs = 0
+    for t in transitions:
+        a, b = rank(t.get("from_value")), rank(t.get("to_value"))
+        if b > a:
+            ups += 1
+        elif b < a or t.get("to_value") == LOST:
+            downs += 1
+    if ups >= 2 and downs >= 1:
+        return "bouncing"
+    if downs and not ups:
+        return "cooling"
+    if ups and downs == 0:
+        return "climbing"
+    if ups > downs:
+        return "climbing"
+    if downs > ups:
+        return "cooling"
+    return "steady"
+
+
+async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
+                         *, state_key: str = "funnel", limit: int = 30) -> dict:
+    """История переходов одной сущности + текущее состояние и рисунок.
+
+    История писалась с самого начала и не читалась никем: владелец видел
+    значение «интерес», но не видел, пришёл человек к нему впервые или уже
+    третий раз заходит и уходит. Fail-open: пустая история вместо падения.
+    """
+    eid = str(entity_id)
+    out = {"entity_type": entity_type, "entity_id": eid, "name": None,
+           "current": None, "pattern": "steady",
+           "pattern_label": PATTERN_LABEL["steady"], "transitions": []}
+    try:
+        rows = await pool.fetch(
+            "SELECT from_value, to_value, reason, confidence, created_at "
+            "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "AND entity_id=$3 AND state_key=$4 "
+            "ORDER BY created_at DESC LIMIT $5",
+            owner_id, entity_type, eid, state_key, int(limit))
+    except Exception:
+        log.debug("virtual_layer.entity_history failed owner=%s", owner_id)
+        return out
+
+    chrono = list(reversed(rows))
+    out["transitions"] = [
+        {"from": r["from_value"],
+         "from_label": VALUE_LABEL.get(r["from_value"]) if r["from_value"] else None,
+         "to": r["to_value"],
+         "to_label": VALUE_LABEL.get(r["to_value"], r["to_value"]),
+         "reason": r["reason"],
+         "confidence": round(float(r["confidence"] or 0), 2),
+         "at": r["created_at"]}
+        for r in chrono]
+
+    pattern = temporal_pattern([
+        {"from_value": r["from_value"], "to_value": r["to_value"]} for r in chrono])
+    out["pattern"] = pattern
+    out["pattern_label"] = PATTERN_LABEL[pattern]
+
+    try:
+        cur = await get_state(pool, owner_id, entity_type, eid, state_key)
+        if cur:
+            out["current"] = {
+                "value": cur.get("value"),
+                "label": VALUE_LABEL.get(cur.get("value"),
+                                         TEMPERATURE_LABEL.get(cur.get("value"),
+                                                               cur.get("value"))),
+                "confidence": round(float(cur.get("confidence") or 0), 2),
+                "source": cur.get("source"),
+            }
+    except Exception:
+        log.debug("virtual_layer.entity_history state failed owner=%s", owner_id)
+
+    out["name"] = await _entity_name(pool, owner_id, entity_type, eid)
+    return out
+
+
+async def _entity_name(pool, owner_id: int, entity_type: str, eid: str):
+    """Человеческое имя сущности: контакт по имени, бот по @username."""
+    try:
+        if entity_type == USER:
+            # id контакта — uuid, а сюда приходит строка из адреса. Сравнение
+            # приводим в самом запросе: иначе asyncpg падает на связывании
+            # («invalid UUID») на любом мусоре, а мусор из адреса и приходит.
+            return await pool.fetchval(
+                "SELECT COALESCE(display_name, first_name, username) "
+                "FROM unified_contacts WHERE owner_id=$1 AND id::text=$2",
+                owner_id, eid)
+        if entity_type == BOT:
+            name = await pool.fetchval(
+                "SELECT COALESCE(username, first_name) FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id::text=$2", owner_id, eid)
+            return f"@{name}" if name and not str(name).startswith("@") else name
+    except Exception:
+        log.debug("virtual_layer._entity_name failed owner=%s", owner_id)
+    return None
+
+
 async def overview(pool, owner_id: int, *, entity_type: str = USER,
                    state_key: str = "funnel") -> dict:
     """Сводка слоя для экрана: распределение воронки + «горячие» сущности.

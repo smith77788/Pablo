@@ -19336,7 +19336,7 @@ async function openVLayer() {
       html += bots.slice(0, 20).map(b => {
         const c = b.value === 'hot' ? 'var(--red)' : 'var(--orange)';
         const nm = b.name && b.name[0] === '@' ? b.name : '@' + b.name;
-        return `<div class="row">
+        return `<div class="row" onclick="openVLayerEntity('bot','${esc(String(b.bot_id))}')" style="cursor:pointer">
           <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">${b.value === 'hot' ? '🔥' : '🌤'}</div>
           <div class="row-body"><div class="row-name">${esc(nm)}</div>
             <div class="row-val" style="color:${c}">${esc(b.label)} · уверенность ${Math.round((b.confidence||0)*100)}%</div></div>
@@ -19357,10 +19357,10 @@ async function openVLayer() {
     // «Горячие» — кого дожимать первыми.
     if (hot.length) {
       html += '<div class="sec">🔥 Дожать в первую очередь</div><div class="lst">';
-      html += hot.slice(0, 20).map(h => `<div class="row">
+      html += hot.slice(0, 20).map(h => `<div class="row" onclick="openVLayerEntity('${esc(String(h.entity_type||'user'))}','${esc(String(h.entity_id))}')" style="cursor:pointer">
         <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔥</div>
         <div class="row-body"><div class="row-name">${esc(h.label)} · #${esc(String(h.entity_id))}</div>
-          <div class="row-val">уверенность ${Math.round((h.confidence||0)*100)}%</div></div>
+          <div class="row-val">уверенность ${Math.round((h.confidence||0)*100)}% · история →</div></div>
       </div>`).join('');
       html += '</div>';
     }
@@ -19377,6 +19377,42 @@ async function openVLayer() {
     html += '<div style="height:16px"></div>';
     txt('vlayerBody', html);
   } catch(e) { txt('vlayerBody', errHtml(e.message, 'openVLayer()')); }
+}
+
+// История переходов одной сущности: текущее значение не отвечает на вопрос
+// «как он сюда пришёл», а третий заход по кругу и первый подъём дожимают
+// по-разному.
+async function openVLayerEntity(entityType, entityId) {
+  txt('vlayerBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/vlayer/entity/' + encodeURIComponent(entityType)
+      + '/' + encodeURIComponent(entityId));
+    const who = d.name || ('#' + entityId);
+    const cur = d.current || {};
+    let html = `<div class="row" onclick="openVLayer()" style="cursor:pointer">
+      <div class="row-body"><div class="row-name">← К сводке модели</div></div></div>`;
+    html += `<div class="card" style="margin:8px 0">
+      <div style="font-weight:600;font-size:15px">${esc(String(who))}</div>
+      <div style="font-size:13px;color:var(--hint);margin-top:3px">
+        ${cur.label ? esc(cur.label) : 'Состояние не записано'}${cur.confidence != null ? ' · уверенность ' + Math.round(cur.confidence * 100) + '%' : ''}</div>
+      <div style="font-size:13px;margin-top:6px">${esc(d.pattern_label || '')}</div>
+    </div>`;
+    const tr = d.transitions || [];
+    html += '<div class="sec">История переходов</div>';
+    if (!tr.length) {
+      html += '<div style="padding:10px;color:var(--hint);font-size:13px">Переходов ещё не было</div>';
+    } else {
+      html += '<div class="lst">' + tr.slice().reverse().map(t => `<div class="row">
+        <div class="row-body">
+          <div class="row-name">${t.from_label ? esc(t.from_label) + ' → ' : ''}${esc(t.to_label || '')}</div>
+          <div class="row-val">${t.at ? new Date(t.at).toLocaleString('ru') : ''}${t.reason ? ' · ' + esc(t.reason) : ''}</div>
+        </div></div>`).join('') + '</div>';
+    }
+    html += '<div style="height:16px"></div>';
+    txt('vlayerBody', html);
+  } catch(e) {
+    txt('vlayerBody', errHtml(e.message, "openVLayerEntity('" + entityType + "','" + entityId + "')"));
+  }
 }
 
 // ── «Нотариус»: заверение рекламных размещений ───────────────────────────

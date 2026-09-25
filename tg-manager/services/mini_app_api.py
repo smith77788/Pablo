@@ -11155,6 +11155,36 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                            "total": ov["total"], "audience": ov.get("audience"),
                            "bots": ov.get("bots") or [], "events": events})
 
+    async def vlayer_entity(request: web.Request) -> web.Response:
+        """История переходов одной сущности: «заходил и уходил» видно только так.
+
+        Текущее значение отвечает «где человек сейчас», но не «как он сюда
+        пришёл». Третий заход по кругу и первый подъём выглядят одинаково, а
+        дожимать их надо по-разному.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import virtual_layer as _vl
+        etype = (request.match_info.get("entity_type") or "").strip()
+        eid = (request.match_info.get("entity_id") or "").strip()
+        if etype not in (_vl.USER, _vl.BOT, _vl.CAMPAIGN, _vl.NETWORK,
+                         _vl.CONVERSATION):
+            return _err("Неизвестный тип сущности", 400)
+        if not eid or len(eid) > 128:
+            return _err("Неверный идентификатор", 400)
+        try:
+            data = await _vl.entity_history(pool, uid, etype, eid)
+        except Exception as exc:
+            log.exception("vlayer_entity uid=%s type=%s", uid, etype)
+            return _err(str(exc)[:150], 500)
+        data["transitions"] = [
+            {**t, "at": t["at"].isoformat() if t.get("at") else None}
+            for t in data["transitions"]]
+        if not data["transitions"] and not data["current"]:
+            return _err("По этой сущности слой ещё ничего не знает", 404)
+        return _json_resp({"ok": True, **data})
+
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 
     async def notary_list(request: web.Request) -> web.Response:
@@ -17586,6 +17616,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/bots/enable_b2b", bots_enable_b2b)
     app.router.add_get("/api/miniapp/chatlist_folders", chatlist_folders_list)
     app.router.add_get("/api/miniapp/vlayer/overview", vlayer_overview)
+    app.router.add_get("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}",
+                       vlayer_entity)
     app.router.add_get("/api/miniapp/notary", notary_list)
     app.router.add_post("/api/miniapp/notary", notary_create)
     app.router.add_get("/api/miniapp/notary/{watch_id}", notary_detail)
