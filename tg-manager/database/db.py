@@ -235,7 +235,7 @@ class SchemaMigrationError(RuntimeError):
 _LOCK_RETRIES = 3
 
 
-def _is_lock_timeout(err: str | None) -> bool:
+def is_lock_timeout(err: str | None) -> bool:
     """Ошибка «не дождались блокировки», а не ошибка самой схемы.
 
     Такую миграцию имеет смысл повторить: SQL корректен, просто таблица была
@@ -251,6 +251,33 @@ def _is_lock_timeout(err: str | None) -> bool:
 # (очередь операций, аудит, журнал), и «тихий» старт означает молча теряемые
 # события вместо честного падения.
 _CRITICAL_TABLES = ("activity_log", "operation_audit", "operation_queue")
+
+
+def schema_lock_timeout() -> str:
+    """Потолок ожидания блокировки для DDL — один на все пути миграций.
+
+    Значение из `SCHEMA_LOCK_TIMEOUT`, по умолчанию 5s. Мусор в переменной —
+    берём default, а не падаем: таймаут не должен мешать старту.
+    """
+    value = (os.getenv("SCHEMA_LOCK_TIMEOUT") or "5s").strip()
+    if not re.fullmatch(r"\d{1,6}(ms|s|min)?", value):
+        log.warning("SCHEMA_LOCK_TIMEOUT=%r не похоже на интервал — беру 5s", value)
+        return "5s"
+    return value
+
+
+async def apply_schema_lock_timeout(conn) -> None:
+    """Поставить потолок ожидания блокировки на КОНКРЕТНОЕ соединение.
+
+    Важно: `SET` без `LOCAL` действует на сессию, то есть на одно соединение
+    пула, а не на пул. Любой путь, который льёт DDL, обязан позвать это на том
+    соединении, которым он льёт, иначе DDL ждёт блокировку бесконечно — см.
+    длинное объяснение в `create_pool`.
+    """
+    try:
+        await conn.execute(f"SET lock_timeout = '{schema_lock_timeout()}'")
+    except Exception as exc:
+        log.warning("не удалось задать lock_timeout: %s", exc)
 
 
 async def create_pool() -> asyncpg.Pool:
@@ -285,15 +312,7 @@ async def create_pool() -> asyncpg.Pool:
         # честно падает: файл откатывается, помечается неуспешным и повторяется
         # ниже, а приложение ВСЁ РАВНО СТАРТУЕТ. Пропущенная миграция хуже
         # аварии, но лучше замороженной базы, и она видна в schema_migrations.
-        _lock_timeout = (os.getenv("SCHEMA_LOCK_TIMEOUT") or "5s").strip()
-        if not re.fullmatch(r"\d{1,6}(ms|s|min)?", _lock_timeout):
-            log.warning("SCHEMA_LOCK_TIMEOUT=%r не похоже на интервал — беру 5s",
-                        _lock_timeout)
-            _lock_timeout = "5s"
-        try:
-            await conn.execute(f"SET lock_timeout = '{_lock_timeout}'")
-        except Exception as _lt_exc:
-            log.warning("не удалось задать lock_timeout: %s", _lt_exc)
+        await apply_schema_lock_timeout(conn)
 
         # Run all schema migration files in order — search both root and database/ subdir
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -408,7 +427,7 @@ async def create_pool() -> asyncpg.Pool:
             # паузой: за несколько секунд деплой почти всегда доигрывает.
             _tries = 0
             while (not file_ok and _tries < _LOCK_RETRIES
-                   and _is_lock_timeout(_last_error)):
+                   and is_lock_timeout(_last_error)):
                 _tries += 1
                 _pause = 2.0 * _tries
                 log.warning(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import json
 import json as _json  # модульный алиас: ряд эндпоинтов используют _json без локального import
 import logging
@@ -370,6 +371,124 @@ INLINE_MIGRATIONS: list[str] = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
 ]
+
+
+# Ключ инлайн-миграции в журнале `schema_migrations`: отпечаток самого текста.
+# Префикс отделяет её от файлов `schema_vN.sql`, у которых там имя файла.
+_INLINE_KEY_PREFIX = "inline:"
+
+
+def inline_migration_key(stmt: str) -> str:
+    """Отпечаток оператора, по которому он числится применённым.
+
+    Пробелы и переводы строк нормализуются: переформатировали отступы в списке
+    — ключ не поменялся, и оператор не поедет заново. Поменяли текст по смыслу
+    — ключ другой, и оператор применится.
+    """
+    return _INLINE_KEY_PREFIX + hashlib.sha256(
+        " ".join(stmt.split()).encode("utf-8")).hexdigest()[:32]
+
+
+async def apply_inline_migrations(pool, stmts: list[str] | None = None) -> dict[str, int]:
+    """Накатить инлайн-миграции на старте — один раз, а не на каждый запуск.
+
+    Что было не так. Список гнался целиком при КАЖДОМ старте веб-процесса: 75
+    отдельных `pool.execute`, из них 30 `ALTER TABLE`. Два следствия, и оба
+    больно:
+
+    1. `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` берёт `ACCESS EXCLUSIVE` даже
+       когда колонка уже есть и делать нечего. Потолка ожидания блокировки на
+       этом пути НЕ БЫЛО (`SET lock_timeout` в `create_pool` действует на одно
+       соединение, которое он сам взял, а не на пул), поэтому обычный деплой
+       мог встать насмерть: новый контейнер ждёт блокировку, которую держит
+       читающая транзакция старого, а за этим ожиданием выстраиваются все
+       читатели. Снаружи — «приложение не загружается».
+    2. Каждый оператор брал из пула своё соединение и возвращал, то есть 75
+       заходов туда-обратно на пустом месте.
+
+    Что теперь. Одно соединение на весь накат, с потолком ожидания блокировки, и
+    журнал `schema_migrations` — тот же, по которому пропускаются файлы
+    `schema_vN.sql`. Применённый оператор в журнале, на следующем старте он
+    пропускается, и обычный деплой не берёт ни одной блокировки.
+
+    Fail-open по журналу: не смогли его прочитать — играем весь список, как
+    раньше. Неудавшийся оператор в журнал НЕ пишется, поэтому повторится на
+    следующем старте сам — это и есть прежний self-heal.
+
+    `INFRAGRAM_INLINE_REPLAY=1` прогоняет всё заново, не глядя на журнал: нужно,
+    если кто-то руками снёс колонку и схему надо вылечить.
+    """
+    if stmts is None:
+        stmts = INLINE_MIGRATIONS
+    keys = [inline_migration_key(s) for s in stmts]
+    replay = (os.getenv("INFRAGRAM_INLINE_REPLAY") or "").strip().lower() in (
+        "1", "true", "yes")
+    # Одно соединение на весь накат. У заглушки пула в тестах отдельных
+    # соединений нет — тогда льём прямо через неё: потолок блокировки там не
+    # нужен, а ронять старт из-за формы заглушки нельзя.
+    try:
+        ctx = pool.acquire()
+    except Exception:
+        ctx = None
+    if ctx is None or not hasattr(ctx, "__aenter__"):
+        return await _run_inline_migrations(pool, stmts, keys, replay)
+    async with ctx as conn:
+        return await _run_inline_migrations(conn, stmts, keys, replay)
+
+
+async def _run_inline_migrations(conn, stmts: list[str], keys: list[str],
+                                 replay: bool) -> dict[str, int]:
+    """Тело наката на УЖЕ ВЗЯТОМ соединении. Отдельно — чтобы `async with` не
+    дублировал десяток строк ради двух способов добыть соединение."""
+    # Локальный импорт: модульного импорта database.db здесь нет намеренно
+    # (циклическая зависимость), остальной файл тоже импортирует его по месту.
+    from database.db import apply_schema_lock_timeout, is_lock_timeout
+
+    applied = failed = skipped = 0
+    # Потолок ставится на ЭТО соединение: без него DDL ждёт блокировку
+    # бесконечно и кладёт старт целиком.
+    await apply_schema_lock_timeout(conn)
+    done: set[str] = set()
+    if not replay:
+        try:
+            rows = await conn.fetch(
+                "SELECT filename FROM schema_migrations "
+                "WHERE status = 'ok' AND filename = ANY($1::text[])", keys)
+            done = {r["filename"] for r in rows}
+        except Exception:
+            # Журнала ещё нет (первый старт) или он недоступен — играем всё.
+            done = set()
+    for stmt, key in zip(stmts, keys):
+        if key in done:
+            skipped += 1
+            continue
+        try:
+            await conn.execute(stmt)
+        except Exception as exc:
+            failed += 1
+            if is_lock_timeout(str(exc)):
+                # Таблица занята (обычно умирающий контейнер предыдущего
+                # деплоя). Не повторяем здесь: старт важнее, а в журнал
+                # оператор не попал — доиграется на следующем запуске.
+                log.warning("инлайн-миграция ждала блокировку и не дождалась, "
+                            "повторится на следующем старте: %.80s", stmt[:80])
+            else:
+                log.exception("инлайн-миграция не применилась: %.80s", stmt[:80])
+            continue
+        applied += 1
+        try:
+            await conn.execute(
+                """INSERT INTO schema_migrations(filename, status, error_count, applied_at)
+                   VALUES($1, 'ok', 0, now())
+                   ON CONFLICT (filename) DO UPDATE SET status = 'ok',
+                       error_count = 0, applied_at = now()""", key)
+        except Exception:
+            # Не записали — оператор просто прогонится ещё раз. Он
+            # идемпотентен, так что это не ошибка, а лишняя работа.
+            log.debug("не смог отметить инлайн-миграцию в журнале", exc_info=True)
+    log.info("Инлайн-миграции: применено %d, пропущено %d (уже в журнале), ошибок %d",
+             applied, skipped, failed)
+    return {"applied": applied, "skipped": skipped, "failed": failed}
 
 # Заголовки, которые НЕЛЬЗЯ переносить из снимка в новый ответ: их считает сам
 # aiohttp под конкретное соединение. Перенос Content-Length/Transfer-Encoding
@@ -1492,12 +1611,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.middlewares.append(security_middleware())
 
     async def _apply_inline_migrations(application: web.Application) -> None:
-        stmts = INLINE_MIGRATIONS
-        for stmt in stmts:
-            try:
-                await pool.execute(stmt)
-            except Exception:
-                log.exception("inline migration failed: %.80s", stmt[:80])
+        await apply_inline_migrations(pool)
 
     app.on_startup.append(_apply_inline_migrations)
 
@@ -12323,7 +12437,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             body = {}
         name = (body.get("name") or "Mini App Key").strip()[:64]
-        import secrets, hashlib
+        import secrets
         raw_key = secrets.token_urlsafe(32)
         prefix = raw_key[:8]
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
