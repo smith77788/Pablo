@@ -61,7 +61,8 @@ def test_overview_hot_lists_top_rungs():
 
 def test_overview_empty_is_safe():
     ov = asyncio.run(V.overview(_Pool([], []), 7))
-    assert ov == {"funnel": [], "hot": [], "total": 0, "audience": None}
+    assert ov == {"funnel": [], "hot": [], "total": 0, "audience": None,
+                  "bots": []}
 
 
 def test_overview_survives_a_broken_pool():

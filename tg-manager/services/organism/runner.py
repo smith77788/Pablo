@@ -81,6 +81,20 @@ async def _tick(pool, bot) -> int:
                     min_count=20, min_share=0.15)
             except Exception:
                 log.debug("organism.runner: cascade failed owner=%s", oid, exc_info=True)
+            # Каскад «бот ← люди». Раньше его было не из чего построить: связи
+            # контакт→бот не существовало. Теперь податель сигнала пишет её в
+            # source состояния ("bot_<id>"), и температура считается по каждому
+            # боту отдельно: владелец видит, ГДЕ именно греется аудитория, а не
+            # только что она греется вообще.
+            try:
+                from services import virtual_layer as _vl2
+                hot_bots = await _vl2.recompute_bot_cascade(pool, oid)
+                if hot_bots:
+                    log.info("organism.runner: температура ботов owner=%s: %s",
+                             oid, hot_bots)
+            except Exception:
+                log.debug("organism.runner: bot cascade failed owner=%s", oid,
+                          exc_info=True)
             # Дозор роста: запомнить новые всплески/обвалы подписчиков (дедуп внутри).
             try:
                 from services import growth_sentry

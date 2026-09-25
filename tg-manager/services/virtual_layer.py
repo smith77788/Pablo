@@ -40,6 +40,7 @@ Telegram сообщает, ЧТО произошло (пришло сообще�
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ VALUE_LABEL = {
     "qualified": "Квалифицирован", "ready": "Готов купить",
     "purchased": "Купил", LOST: "Потерян",
 }
+TEMPERATURE_LABEL = {"hot": "🔥 Горячий", "warm": "🌤 Тёплый"}
 EVENT_LABEL = {
     "user_became_active": "🌱 Ожил",
     "user_showed_interest": "👀 Проявил интерес",
@@ -395,21 +397,9 @@ async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
     return n
 
 
-async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
-                            child_type: str, *, state_key: str = "funnel",
-                            **kw) -> str | None:
-    """Пересчитать состояние родителя из состояний детей и записать его.
-
-    Детьми считаются все сущности `child_type` этого владельца с состоянием по
-    `state_key`. Родитель получает hot/warm по правилу `cascade`. Возвращает
-    новое состояние родителя или None.
-    """
-    rows = await pool.fetch(
-        "SELECT value FROM virtual_states WHERE owner_id=$1 AND entity_type=$2 "
-        "AND state_key=$3", owner_id, child_type, state_key)
-    verdict = cascade([r["value"] for r in rows], **kw)
-    if verdict is None:
-        return None
+async def _apply_cascade_verdict(pool, owner_id: int, parent_type: str, parent_id,
+                                 state_key: str, verdict: str) -> str:
+    """Записать вердикт каскада родителю и, на смене, эмитнуть событие."""
     pid = str(parent_id)
     current = await get_state(pool, owner_id, parent_type, pid, state_key)
     if (current or {}).get("value") == verdict:
@@ -428,6 +418,64 @@ async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
     return verdict
 
 
+async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
+                            child_type: str, *, state_key: str = "funnel",
+                            **kw) -> str | None:
+    """Пересчитать состояние родителя из состояний детей и записать его.
+
+    Детьми считаются все сущности `child_type` этого владельца с состоянием по
+    `state_key`. Родитель получает hot/warm по правилу `cascade`. Возвращает
+    новое состояние родителя или None.
+    """
+    rows = await pool.fetch(
+        "SELECT value FROM virtual_states WHERE owner_id=$1 AND entity_type=$2 "
+        "AND state_key=$3", owner_id, child_type, state_key)
+    verdict = cascade([r["value"] for r in rows], **kw)
+    if verdict is None:
+        return None
+    return await _apply_cascade_verdict(pool, owner_id, parent_type, parent_id,
+                                        state_key, verdict)
+
+
+# Источник состояния записывается подателем сигнала: auto_responder ставит
+# "bot_<id>". Это и есть недостающая связь «человек → бот», из-за отсутствия
+# которой каскад до сих пор катился только на уровень всей аудитории владельца.
+_BOT_SOURCE = re.compile(r"^bot_(\d+)$")
+
+
+async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel",
+                                min_count: int = 5, min_share: float = 0.1,
+                                **kw) -> dict[str, str]:
+    """Свернуть состояния людей в состояние БОТА, через которого они пришли.
+
+    Пороги ниже, чем у каскада на всю аудиторию: у отдельного бота аудитория
+    меньше на порядок, и порог «20 горячих» для него недостижим — каскад просто
+    никогда не срабатывал бы. Пять горячих из полусотни — уже разговор.
+
+    Возвращает {bot_id: вердикт} только по ботам, где вердикт есть.
+    """
+    rows = await pool.fetch(
+        "SELECT source, value FROM virtual_states "
+        "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+        "AND source IS NOT NULL",
+        owner_id, USER, state_key)
+
+    by_bot: dict[str, list[str]] = {}
+    for r in rows:
+        m = _BOT_SOURCE.match(r["source"] or "")
+        if m:
+            by_bot.setdefault(m.group(1), []).append(r["value"])
+
+    out: dict[str, str] = {}
+    for bot_id, values in by_bot.items():
+        verdict = cascade(values, min_count=min_count, min_share=min_share, **kw)
+        if verdict is None:
+            continue
+        out[bot_id] = await _apply_cascade_verdict(
+            pool, owner_id, BOT, bot_id, state_key, verdict)
+    return out
+
+
 # ── Read-поверхность (обзор для владельца) ─────────────────────────────────
 
 async def overview(pool, owner_id: int, *, entity_type: str = USER,
@@ -437,7 +485,7 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     Лента виртуальных событий берётся отдельно из spine (это его память),
     поэтому здесь только состояния. Fail-open: пустая сводка вместо падения.
     """
-    out = {"funnel": [], "hot": [], "total": 0, "audience": None}
+    out = {"funnel": [], "hot": [], "total": 0, "audience": None, "bots": []}
     try:
         rows = await pool.fetch(
             "SELECT value, COUNT(*) AS c FROM virtual_states "
@@ -474,4 +522,25 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
             out["audience"] = aud.get("value")
     except Exception:
         log.debug("virtual_layer.overview audience failed owner=%s", owner_id)
+    # Температура КАЖДОГО бота (каскад «бот ← люди»). Владельцу важно не
+    # «аудитория греется», а ГДЕ именно: с каким ботом разговаривают всерьёз.
+    try:
+        bot_rows = await pool.fetch(
+            "SELECT vs.entity_id, vs.value, vs.confidence, vs.updated_at, "
+            "       COALESCE(mb.username, mb.first_name) AS bot_name "
+            "FROM virtual_states vs "
+            "LEFT JOIN managed_bots mb ON mb.bot_id::text = vs.entity_id "
+            "WHERE vs.owner_id=$1 AND vs.entity_type=$2 AND vs.state_key=$3 "
+            "ORDER BY vs.updated_at DESC LIMIT 50",
+            owner_id, BOT, state_key)
+        out["bots"] = [
+            {"bot_id": r["entity_id"],
+             "name": r["bot_name"] or f"id{r['entity_id']}",
+             "value": r["value"],
+             "label": TEMPERATURE_LABEL.get(r["value"], r["value"]),
+             "confidence": round(float(r["confidence"] or 0), 2)}
+            for r in bot_rows]
+    except Exception:
+        log.debug("virtual_layer.overview bots failed owner=%s", owner_id)
     return out
+

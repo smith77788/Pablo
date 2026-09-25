@@ -19329,6 +19329,21 @@ async function openVLayer() {
         <div style="font-size:12px;color:var(--hint);margin-top:2px">Готовых и квалифицированных набралось достаточно — момент для рассылки/оффера.</div>
       </div>`;
     }
+    // Температура по каждому боту: где именно греется аудитория.
+    const bots = (d.bots || []).filter(b => b.value);
+    if (bots.length) {
+      html += '<div class="sec">Температура ботов</div><div class="lst">';
+      html += bots.slice(0, 20).map(b => {
+        const c = b.value === 'hot' ? 'var(--red)' : 'var(--orange)';
+        const nm = b.name && b.name[0] === '@' ? b.name : '@' + b.name;
+        return `<div class="row">
+          <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">${b.value === 'hot' ? '🔥' : '🌤'}</div>
+          <div class="row-body"><div class="row-name">${esc(nm)}</div>
+            <div class="row-val" style="color:${c}">${esc(b.label)} · уверенность ${Math.round((b.confidence||0)*100)}%</div></div>
+        </div>`;
+      }).join('');
+      html += '</div>';
+    }
     html += '<div class="sec">Воронка аудитории</div>';
     html += funnel.map(f => {
       const w = Math.max(4, Math.round(f.count / max * 100));
