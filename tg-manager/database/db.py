@@ -2138,6 +2138,7 @@ async def get_audience_new_users(
     rows = await pool.fetch(
         """SELECT user_id FROM bot_users
            WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE
+             AND suspect=FALSE
              AND first_seen >= NOW() - ($2 || ' days')::INTERVAL""",
         bot_id,
         str(days),
@@ -2151,7 +2152,7 @@ async def get_audience_by_language(
     """Return user_ids filtered by language_code."""
     rows = await pool.fetch(
         "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
-        "AND is_blocked=FALSE AND language_code=$2",
+        "AND is_blocked=FALSE AND suspect=FALSE AND language_code=$2",
         bot_id,
         lang_code,
     )

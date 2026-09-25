@@ -8106,7 +8106,7 @@ async def _exec_network_broadcast(
             try:
                 rows = await pool.fetch(
                     "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
-                    "AND is_blocked=FALSE", b["bot_id"]
+                    "AND is_blocked=FALSE AND suspect=FALSE", b["bot_id"]
                 )
             except Exception:
                 log.warning("network_broadcast op=%d: fetch users failed bot=%s", op_id, b.get("bot_id"), exc_info=True)
@@ -8191,7 +8191,7 @@ async def _exec_network_broadcast(
             try:
                 rows = await pool.fetch(
                     "SELECT user_id FROM bot_users WHERE bot_id=$1 AND language_code=$2 "
-                    "AND is_active=TRUE AND is_blocked=FALSE",
+                    "AND is_active=TRUE AND is_blocked=FALSE AND suspect=FALSE",
                     b["bot_id"], lang,
                 )
             except Exception:
@@ -16301,7 +16301,7 @@ async def _exec_run_broadcast(
         else:
             user_ids = [r["user_id"] for r in await pool.fetch(
                 "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
-                "AND is_blocked=FALSE" + _seg_sql, int(bot_id)
+                "AND is_blocked=FALSE AND suspect=FALSE" + _seg_sql, int(bot_id)
             )]
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}

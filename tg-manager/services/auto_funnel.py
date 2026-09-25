@@ -160,22 +160,22 @@ async def launch_funnel(
     # Segment query
     if segment == "all":
         users = await pool.fetch(
-            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE AND suspect=FALSE",
             funnel["bot_id"],
         )
     elif segment == "new_7d":
         users = await pool.fetch(
-            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE AND first_seen >= NOW() - INTERVAL '7 days'",
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE AND suspect=FALSE AND first_seen >= NOW() - INTERVAL '7 days'",
             funnel["bot_id"],
         )
     elif segment == "new_30d":
         users = await pool.fetch(
-            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE AND first_seen >= NOW() - INTERVAL '30 days'",
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE AND suspect=FALSE AND first_seen >= NOW() - INTERVAL '30 days'",
             funnel["bot_id"],
         )
     elif segment == "inactive_30d":
         users = await pool.fetch(
-            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE AND last_seen < NOW() - INTERVAL '30 days'",
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE AND suspect=FALSE AND last_seen < NOW() - INTERVAL '30 days'",
             funnel["bot_id"],
         )
     else:
