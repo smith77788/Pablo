@@ -95,6 +95,20 @@ async def _tick(pool, bot) -> int:
             except Exception:
                 log.debug("organism.runner: bot cascade failed owner=%s", oid,
                           exc_info=True)
+            # Невидимый триггер «заходил и уходил». Telegram такого события не
+            # шлёт и прислать не может: он знает отдельные сообщения, а не то,
+            # что человек третий раз подходит к покупке и отходит. Считается по
+            # истории переходов слоя; отметка живёт отдельным ключом, поэтому
+            # событие рождается один раз, а не на каждом проходе.
+            try:
+                from services import virtual_layer as _vl3
+                _bounced = await _vl3.detect_bouncing(pool, oid)
+                if _bounced:
+                    log.info("organism.runner: ходят по кругу owner=%s: %d",
+                             oid, len(_bounced))
+            except Exception:
+                log.debug("organism.runner: bouncing failed owner=%s", oid,
+                          exc_info=True)
             # Дозор роста: запомнить новые всплески/обвалы подписчиков (дедуп внутри).
             try:
                 from services import growth_sentry

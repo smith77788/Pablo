@@ -514,6 +514,95 @@ def temporal_pattern(transitions: list[dict]) -> str:
     return "steady"
 
 
+# ── Невидимый триггер: «заходил и уходил» ──────────────────────────────────
+#
+# Telegram такого события не шлёт и прислать не может: он знает отдельные
+# сообщения, а не то, что человек третий раз подходит к покупке и отходит.
+# Это состояние вычисляется только по истории переходов — ради таких вещей
+# слой и строился.
+PATTERN_KEY = "pattern"
+BOUNCING_EVENT = "user_keeps_bouncing"
+EVENT_LABEL[BOUNCING_EVENT] = "🔁 Ходит по кругу"
+# Иначе событие не попадёт в ленту слоя: она фильтруется по этому списку, и
+# родившееся событие владелец просто не увидел бы.
+if BOUNCING_EVENT not in VIRTUAL_EVENT_KINDS:
+    VIRTUAL_EVENT_KINDS.append(BOUNCING_EVENT)
+
+
+async def detect_bouncing(pool, owner_id: int, *, entity_type: str = USER,
+                          state_key: str = "funnel", days: int = 30,
+                          min_transitions: int = 3, limit: int = 200) -> list[str]:
+    """Найти тех, кто заходит и уходит, и отметить это состоянием.
+
+    Правило рисунка — одно, `temporal_pattern`: повторять его отдельным SQL
+    нельзя, разошедшиеся копии правила в этом продукте уже обходились дорого.
+    Поэтому запрос только СУЖАЕТ круг (у кого вообще есть история), а решение
+    принимает та же функция, что и на экране.
+
+    Отметка живёт отдельным state_key="pattern": слой сам не пишет и не шумит,
+    когда значение не изменилось, — значит событие родится один раз, а не на
+    каждом проходе.
+
+    Возвращает id тех, для кого рисунок стал «bouncing» ИМЕННО СЕЙЧАС.
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT entity_id FROM virtual_state_history "
+            "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+            "AND created_at > now() - make_interval(days => $4) "
+            "GROUP BY entity_id HAVING COUNT(*) >= $5 "
+            "ORDER BY MAX(created_at) DESC LIMIT $6",
+            owner_id, entity_type, state_key, int(days),
+            int(min_transitions), int(limit))
+    except Exception:
+        log.debug("virtual_layer.detect_bouncing candidates failed owner=%s",
+                  owner_id, exc_info=True)
+        return []
+
+    ids = [r["entity_id"] for r in rows]
+    if not ids:
+        return []
+
+    try:
+        hist = await pool.fetch(
+            "SELECT entity_id, from_value, to_value, created_at "
+            "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "AND state_key=$3 AND entity_id = ANY($4::text[]) "
+            "AND created_at > now() - make_interval(days => $5) "
+            "ORDER BY created_at",
+            owner_id, entity_type, state_key, ids, int(days))
+    except Exception:
+        log.debug("virtual_layer.detect_bouncing history failed owner=%s",
+                  owner_id, exc_info=True)
+        return []
+
+    by_entity: dict[str, list[dict]] = {}
+    for r in hist:
+        by_entity.setdefault(r["entity_id"], []).append(
+            {"from_value": r["from_value"], "to_value": r["to_value"]})
+
+    fresh: list[str] = []
+    for eid, transitions in by_entity.items():
+        if temporal_pattern(transitions) != "bouncing":
+            continue
+        current = await get_state(pool, owner_id, entity_type, eid, PATTERN_KEY)
+        if (current or {}).get("value") == "bouncing":
+            continue                       # уже отмечен — не шумим повторно
+        await _write(pool, owner_id, entity_type, eid, PATTERN_KEY,
+                     {"value": "bouncing", "confidence": 0.7,
+                      "expires_at": None, "reason": "temporal"},
+                     "temporal", (current or {}).get("value"))
+        fresh.append(eid)
+        try:
+            from services.organism import spine
+            await spine.emit(pool, owner_id, BOUNCING_EVENT, {
+                "entity_type": entity_type, "entity_id": eid,
+                "state_key": PATTERN_KEY, "to": "bouncing"})
+        except Exception:
+            log.debug("virtual_layer: bouncing emit failed", exc_info=True)
+    return fresh
+
+
 async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
                          *, state_key: str = "funnel", limit: int = 30) -> dict:
     """История переходов одной сущности + текущее состояние и рисунок.

@@ -45,7 +45,8 @@ async def _vlayer(pool, owner_id: int) -> dict:
     и то же про один и тот же остывающий список.
     """
     out = {"ready": 0, "hot": 0, "audience": None,
-           "became_ready_24h": 0, "cooled_24h": 0, "hot_bot": None}
+           "became_ready_24h": 0, "cooled_24h": 0, "hot_bot": None,
+           "bouncing": 0}
     try:
         r = await pool.fetchrow(
             "SELECT COUNT(*) FILTER (WHERE value='ready') AS ready, "
@@ -74,6 +75,15 @@ async def _vlayer(pool, owner_id: int) -> dict:
         out["cooled_24h"] = counts.get("user_lost_interest", 0)
     except Exception:
         log.debug("world._vlayer events failed owner=%s", owner_id)
+
+    # Ходят по кругу: невидимый триггер, которого нет как события Telegram.
+    try:
+        out["bouncing"] = int(await pool.fetchval(
+            "SELECT COUNT(*) FROM virtual_states WHERE owner_id=$1 "
+            "AND entity_type='user' AND state_key='pattern' "
+            "AND value='bouncing'", owner_id) or 0)
+    except Exception:
+        log.debug("world._vlayer bouncing failed owner=%s", owner_id)
 
     # Самый горячий бот: по состоянию, посчитанному каскадом «бот ← люди».
     try:
