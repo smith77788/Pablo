@@ -455,7 +455,12 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
    край — так стояли поясняющие карточки на экранах заметки к боту и
    баг-репорта. Тот же кант 16px, что у .lst. */
 .sb > .card,.sub-sb > .card,
-.sb > .row,.sub-sb > .row{margin-left:16px;margin-right:16px}
+.sb > .row,.sub-sb > .row,
+/* И то же самое на один уровень глубже: обёртка без класса, которую
+   заполняет JS (списки тарифов, подборки), собственного канта не имеет,
+   и карточки в ней шли от края до края. */
+.sb > div:not([class]) > .card,.sub-sb > div:not([class]) > .card,
+.sb > div:not([class]) > .row,.sub-sb > div:not([class]) > .row{margin-left:16px;margin-right:16px}
 /* Боковой отступ содержимого экрана. 16px — канон приложения: его держат .sec,
    .lst (margin:0 16px), .cards, .qa-grid, .mgmt-grid, .kpi-scroll. Но десятки
    блоков в разметке экранов — ряды кнопок, ленты KPI, строки пояснений —
@@ -23622,16 +23627,18 @@ async function openBilling() {
   try {
     const sub = await api('/api/miniapp/subscription');
     const plan = sub.plan || 'free';
-    const nameMap = {free:'Free', paid:'Paid'};
-    txt('billingPlanName', nameMap[plan] || plan.toUpperCase());
+    const nameMap = {free:'Бесплатный', paid:'Платный'};
+    txt('billingPlanName', nameMap[plan] || plan);
     const badge = document.getElementById('billingPlanBadge');
     if (badge) {
       if (plan==='paid') {
-        badge.textContent='PRO';
-        badge.style.cssText='background:rgba(167,139,250,.3);border:1px solid rgba(167,139,250,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
+        badge.textContent='ПРО';
+        badge.style.cssText='background:var(--bg-violet-16);border:1px solid rgba(167,139,250,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
       } else {
-        badge.textContent='FREE';
-        badge.style.cssText='background:rgba(107,114,128,.3);border:1px solid rgba(107,114,128,.5);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600';
+        // Значок повторял бы название тарифа слово в слово. Прячем целиком:
+        // пустой значок оставлял рядом с названием серую таблетку ни о чём.
+        badge.textContent='';
+        badge.style.cssText='display:none';
       }
     }
     const expEl = document.getElementById('billingExpires');
@@ -23639,20 +23646,20 @@ async function openBilling() {
       if (sub.expires_at && sub.is_active) {
         const d = new Date(sub.expires_at);
         expEl.textContent = `Действует до: ${d.toLocaleDateString('ru-RU')}`;
-        expEl.style.color = '#22c55e';
+        expEl.style.color = 'var(--green)';
       } else if (plan==='paid') {
         expEl.textContent = 'Истёк';
-        expEl.style.color = '#f87171';
+        expEl.style.color = 'var(--red)';
       } else {
         expEl.textContent = 'Бессрочно';
-        expEl.style.color = '#aaa';
+        expEl.style.color = 'var(--hint)';
       }
     }
-    document.getElementById('m-billing-val').textContent = (nameMap[plan]||plan).toUpperCase();
+    document.getElementById('m-billing-val').textContent = nameMap[plan]||plan;
     const feats = _PLAN_FEATURES[plan] || _PLAN_FEATURES.free;
     txt('billingFeaturesList', `<div class="card" style="padding:12px 16px">${feats.map(f=>`<div style="padding:5px 0;font-size:13px;${f.startsWith('❌')?'color:var(--hint)':'color:var(--text)'}">${f}</div>`).join('')}</div>`);
     txt('billingPlansList', _PLAN_PRICES.map(p=>`
-      <div class="card" style="padding:14px 16px;margin-bottom:8px;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
+      <div class="card" style="padding:14px 16px;margin-bottom:8px;min-height:auto;cursor:pointer;${p.popular?'border:1px solid rgba(167,139,250,.5)':''}" onclick="initPayment('${p.key}','${p.label}','${p.price}')">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div>
             <div style="font-weight:600;font-size:15px">${p.label} ${p.popular?'<span style="background:rgba(167,139,250,.3);border-radius:10px;padding:2px 7px;font-size:11px">Популярный</span>':''}</div>
@@ -23663,7 +23670,7 @@ async function openBilling() {
       </div>
     `).join(''));
   } catch(e) {
-    txt('billingPlanName','Free');
+    txt('billingPlanName','Бесплатный');
     txt('billingExpires','');
   }
   try {
