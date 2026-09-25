@@ -788,6 +788,12 @@ def _jlist(val) -> list:
         return []
 
 
+# Период опроса живого потока. Константа, а не число в цикле: от неё зависит и
+# нагрузка на базу (запросы на каждое открытое приложение), и то, как быстро
+# поток замечает истекший токен — обе величины стоит видеть в одном месте.
+SSE_TICK_SECONDS = 15
+
+
 def _cloud_safe_name(name: str | None) -> str:
     """Имя файла, безопасное для манифеста и для заголовка ответа.
 
@@ -17212,7 +17218,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await push("activity", {"items": await fetch_activity()})
             await push("op_progress", {"items": await fetch_op_progress()})
             while True:
-                await asyncio.sleep(15)
+                await asyncio.sleep(SSE_TICK_SECONDS)
+                # Токен сверяется НЕ только на входе. Поток живёт столько, сколько
+                # открыто приложение, а токен — два часа; без повторной проверки
+                # соединение, открытое с ещё живым токеном, продолжало отдавать
+                # статистику, активность и ход операций и после его истечения.
+                # Проверка — HMAC над строкой, без похода в базу.
+                if _get_uid(request) != uid:
+                    # Клиенту говорим причину: иначе EventSource будет вечно
+                    # ломиться с тем же протухшим токеном и получать 401.
+                    try:
+                        await push("auth_expired", {"reason": "token_expired"})
+                    except Exception:
+                        pass
+                    break
                 # Четыре независимых выборки — одним заходом, а не по очереди:
                 # это цикл на КАЖДОЕ открытое приложение, и он крутится вечно.
                 data, activity, progress, completed = await asyncio.gather(

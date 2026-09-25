@@ -7268,7 +7268,14 @@ window.addEventListener('error', function(ev){
 
 // ── SSE ────────────────────────────────────────────────
 let _sseRetry = 0;
+// Одно запланированное переподключение, не пачка. EventSource переподключается
+// САМ и при каждой неудаче зовёт onerror — а onerror ставил ещё один таймер.
+// Пока сервер недоступен, таймеры копились, и на восстановлении связи каждый из
+// них рвал уже поднятое соединение, чтобы открыть новое: живой поток мигал
+// «Переподключение…» вместо того, чтобы работать.
+let _sseTimer = null;
 function openSSE() {
+  clearTimeout(_sseTimer); _sseTimer = null;
   if (SSE) { try{SSE.close()}catch(_){} }
   SSE = new EventSource('/api/miniapp/events?token='+encodeURIComponent(TK));
   SSE.addEventListener('stats', e => {
@@ -7288,6 +7295,16 @@ function openSSE() {
   SSE.addEventListener('op_complete', e => {
     try { queueOpComplete(JSON.parse(e.data)); } catch(_) {}
   });
+  // Токен живёт два часа, приложение — дольше. Сервер закрывает поток, когда
+  // токен истёк; без этого обработчика EventSource бесконечно ломился бы с тем
+  // же протухшим токеном и получал 401, а экран тихо замирал на старых цифрах.
+  SSE.addEventListener('auth_expired', () => {
+    try{SSE.close()}catch(_){}
+    SSE = null;
+    _reAuth();          // получит новый токен и сам переоткроет поток
+    // Запасной ход на случай, если и обновление токена не прошло (нет связи).
+    if (!_sseTimer) _sseTimer = setTimeout(openSSE, 15000);
+  });
   SSE.onopen = () => {
     _sseRetry = 0;
     const hLive = document.getElementById('hLive');
@@ -7300,8 +7317,18 @@ function openSSE() {
     const sseVal = document.getElementById('sseVal');
     if (hLive) hLive.style.display='none';
     if (sseVal) sseVal.textContent='🟡 Переподключение...';
+    // Закрываем сами: иначе браузер переподключается параллельно с нашим
+    // таймером, и на один поток приходится два соединения.
+    try{SSE.close()}catch(_){}
     _sseRetry = Math.min(_sseRetry + 1, 5);
-    setTimeout(openSSE, Math.min(6000 * Math.pow(2, _sseRetry - 1), 60000));
+    // Две неудачи подряд — скорее всего протух токен (сервер отвечает 401, и
+    // это для EventSource неотличимо от обрыва связи). Обновляем его, а он сам
+    // переоткроет поток.
+    // openSSE() гасит таймер первым делом, поэтому удачный _reAuth отменит
+    // запасное переподключение сам, а неудачный — не оставит поток мёртвым.
+    if (_sseRetry === 2) _reAuth();
+    if (_sseTimer) return;
+    _sseTimer = setTimeout(openSSE, Math.min(6000 * Math.pow(2, _sseRetry - 1), 60000));
   };
 }
 
