@@ -97,8 +97,23 @@
 
 ## Как проверять (кратко — полный список в AGENT_PROTOCOL.md)
 
-- **Python:** `ast.parse` + `pytest` (чистая среда: `pytest pytest-asyncio
-  python-dotenv openpyxl aiohttp`; asyncpg стаблен в `tests/conftest.py`).
+- **Python:** `ast.parse` + `pytest`. **Ставьте тот же набор зависимостей, что
+  и CI** (`.github/workflows/tests.yml`), иначе прогон врёт: на урезанном наборе
+  («pytest pytest-asyncio python-dotenv openpyxl aiohttp») ~70 тестов падают на
+  `ModuleNotFoundError`, и на их фоне настоящее падение не видно. Проверено
+  2026-09-25: с полным набором прогон **полностью зелёный**, 0 падений, то есть
+  «красный тест — стоп» работает буквально.
+
+  ```bash
+  pip install "aiogram==3.30.0" asyncpg aiohttp openai anthropic python-dotenv \
+      openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks "qrcode[pil]" \
+      pillow telethon pytest pytest-asyncio ruff
+  ```
+
+  telethon и asyncpg застаблены в `tests/conftest.py` и в CI не ставятся, но
+  локально ставить их можно и полезно: заглушка не умеет всё (например,
+  `asyncio.wait_for` требует настоящую корутину), и часть кода на ней не
+  исполняется.
 - **Мини-апп JS:** `node --check` извлечённого `<script>` из `index.html` и
   `mini_app/screens/*.js`.
 - **UI:** Playwright `deploy/scripts/render_miniapp.mjs`.
