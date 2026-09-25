@@ -38,7 +38,16 @@ class PlanRequiredError(PermissionError):
     def __init__(self, op_type: str, required_plan: str) -> None:
         self.op_type = op_type
         self.required_plan = required_plan
-        super().__init__(f"operation {op_type!r} requires plan {required_plan!r}")
+        # Текст исключения — это РОВНО то, что увидит человек: сорок с лишним
+        # хендлеров мини-аппа отдают его как `_err(str(exc), 403)`. Пока он был
+        # английским («operation 'mass_invite' requires plan 'paid'»), владелец,
+        # который по-английски не читает, получал непонятную техническую строку.
+        # Хуже того, единый маркер пейволла в `_err` ставится по слову
+        # «подписка» — без него отказ показывался сухим тостом вместо экрана
+        # оформления, то есть в лучшей точке конверсии путь к оплате обрывался.
+        # Тип операции и требуемый тариф остаются полями исключения — для логов.
+        what = (OP_REGISTRY.get(op_type) or {}).get("description") or op_type
+        super().__init__(f"Операция «{what}» доступна по подписке")
 
 
 class ImmunityBlockedError(PermissionError):

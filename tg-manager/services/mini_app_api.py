@@ -8803,7 +8803,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         elif kind == "admin_broadcast":
             # Тот же набор, что admin_broadcast: живым людям, кроме забаненных.
             if not _is_admin(uid):
-                return _err("Forbidden", 403)
+                return _err("Раздел только для владельца платформы", 403)
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM platform_users "
                 "WHERE COALESCE(is_banned, false) = false")
@@ -16156,7 +16156,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT owner_id FROM tg_accounts WHERE id=$1", account_id
             )
             if owner != uid:
-                return _err("forbidden", 403)
+                return _err("Это не ваш ресурс", 403)
             rows = await pool.fetch(
                 """
                 SELECT op_type, outcome, COUNT(*) AS cnt,
@@ -16957,7 +16957,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             owner = await pool.fetchval("SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
             if owner != uid:
-                return _err("forbidden", 403)
+                return _err("Это не ваш ресурс", 403)
             facts = await pool.fetch(
                 "SELECT user_id, fact_key, fact_value, confidence, updated_at "
                 "FROM bot_user_facts WHERE bot_id=$1 ORDER BY updated_at DESC LIMIT 100",
@@ -17960,7 +17960,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def mp_admin_status(request):
         uid = _get_uid(request)
         if not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         try:
             pid = int(request.match_info["pid"])
             d = await request.json()
@@ -17981,7 +17981,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def mp_admin_providers(request):
         uid = _get_uid(request)
         if not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         return _json_resp({"providers": await _mp.list_providers(
             pool, status=request.query.get("status") or None)})
 
@@ -20059,7 +20059,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def team_audit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
-        if not uid or not _is_admin(uid): return _err("Forbidden", 403)
+        if not uid or not _is_admin(uid): return _err("Раздел только для владельца платформы", 403)
         try:
             rows = await pool.fetch(
                 """SELECT ol.op_id, ol.target, ol.status, ol.message, ol.created_at,
@@ -22830,7 +22830,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         """Список пользователей платформы (только для админов)."""
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         try:
             rows = await pool.fetch(
                 """SELECT user_id, username, first_name, current_plan, plan_expires_at,
@@ -22845,7 +22845,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         """Системная статистика (только для админов)."""
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         try:
             stats = {}
             stats["total_users"] = int(await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0)
@@ -22869,7 +22869,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         """Детали пользователя (только для админов)."""
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         try:
             target_id = int(request.match_info["user_id"])
         except (KeyError, ValueError):
@@ -22900,7 +22900,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         """Рассылка всем пользователям (только для админов)."""
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         try:
             body = await request.json()
         except Exception:
@@ -22918,7 +22918,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         """Общая проверка админ-действия: (uid, target_id) или (None, error-resp)."""
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
-            return None, None, _err("Forbidden", 403)
+            return None, None, _err("Раздел только для владельца платформы", 403)
         try:
             target_id = int(request.match_info["user_id"])
         except (KeyError, ValueError):
@@ -23007,7 +23007,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def admin_audit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         try:
             rows = await pool.fetch(
                 """SELECT ol.op_id, ol.step_num, ol.target, ol.status, ol.message, ol.created_at,
@@ -23027,7 +23027,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def admin_ops_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid or not _is_admin(uid):
-            return _err("Forbidden", 403)
+            return _err("Раздел только для владельца платформы", 403)
         try:
             rows = await pool.fetch(
                 """SELECT op_type, COUNT(*) as total,
