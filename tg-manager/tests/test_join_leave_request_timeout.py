@@ -56,6 +56,13 @@ GUARDED = (
     "forward_new_posts",
     "update_profile",
     "update_account_username",
+    # Добавлено после разбора: исполнитель зовёт их НЕ напрямую, а через движок
+    # (strike_engine, channel_ranking), и рукописный список это пропустил.
+    # Чтобы пропуск не повторился, соседний тест ниже считает этот список сам.
+    "report_peer_deep_v2",
+    "strike_map_target",
+    "search_global_ranked",
+    "get_contacts",
 )
 
 
@@ -145,6 +152,106 @@ def test_timeout_is_classified_as_a_proxy_failure(name):
     body = "\n".join(src.splitlines()[fn.lineno - 1:fn.end_lineno])
     assert "except asyncio.TimeoutError:" in body
     assert "proxy_error" in body
+
+
+# ── Список GUARDED считается, а не пишется от руки ───────────────────────────
+
+def _modules_executors_delegate_to() -> set[str]:
+    """Модули, которые исполнитель операций зовёт ИЗ ТЕЛА `_exec_*`.
+
+    Именно они продолжают путь операции: зависание внутри них стоит слота
+    параллельности и арендованного флота, а не одного HTTP-ответа.
+    """
+    with open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    mods: set[str] = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not fn.name.startswith("_exec"):
+            continue
+        for node in ast.walk(fn):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module == "services":
+                    mods |= {a.name for a in node.names}
+                elif node.module.startswith("services."):
+                    mods.add(node.module.split(".", 1)[1])
+    return {m for m in mods
+            if os.path.exists(os.path.join(ROOT, "services", f"{m}.py"))}
+
+
+def _public_am_functions() -> dict:
+    _src, tree = _tree()
+    # Только async: запрос в Telegram делается через await, синхронные
+    # помощники (форматирование ссылок и т.п.) к сети не ходят.
+    return {n.name: n for n in tree.body
+            if isinstance(n, ast.AsyncFunctionDef) and not n.name.startswith("_")}
+
+
+def test_no_operation_path_function_was_left_out_of_guarded():
+    """Список выше однажды оказался неполным, и это стоило двадцати дыр.
+
+    `_exec_strike` зовёт `strike_engine`, а тот — `account_manager.
+    report_peer_deep_v2` и `strike_map_target`: двадцать запросов без потолка
+    прямо в пути самой тяжёлой операции. Рукописный список их не видел, потому
+    что перечислял только то, что исполнитель зовёт НАПРЯМУЮ.
+
+    Поэтому список теперь проверяется вычислением: берём модули, которые зовут
+    тела `_exec_*`, смотрим, какие публичные функции `account_manager` они
+    зовут, и требуем, чтобы у голых запросов среди них не осталось.
+    """
+    import re
+
+    funcs = _public_am_functions()
+    offenders: dict[str, list[str]] = {}
+    for mod in sorted(_modules_executors_delegate_to() | {"op_worker"}):
+        if mod == "account_manager":
+            continue
+        with open(os.path.join(ROOT, "services", f"{mod}.py"), encoding="utf-8") as f:
+            src = f.read()
+        for name, node in funcs.items():
+            if name in GUARDED:
+                continue
+            if not re.search(rf"[\w_]*\.{re.escape(name)}\s*\(", src):
+                continue
+            if _naked_requests(name):
+                offenders.setdefault(name, []).append(mod)
+    assert not offenders, (
+        "в пути операции есть функции account_manager без потолка:\n  "
+        + "\n  ".join(f"{n} ← {', '.join(m)}" for n, m in sorted(offenders.items()))
+        + "\n\nОберните запросы в asyncio.wait_for(..., timeout=_OP_TIMEOUT) "
+          "и внесите имя в GUARDED."
+    )
+
+
+def test_the_computed_check_can_actually_flag_something():
+    """Проверка, которая ничего не способна найти, вечно зелёная и потому лживая.
+
+    `report_peer_deep` (первая версия, без вызывающих) держит два десятка голых
+    запросов. Детектор обязан их видеть — и при этом не жаловаться на них: в
+    путь операции эта функция не входит, её никто не зовёт. Обе половины важны:
+    первая доказывает, что механизм работает, вторая — что он не шумит.
+    """
+    assert len(_naked_requests("report_peer_deep")) > 10, (
+        "детектор перестал видеть голые запросы — проверка выше стала пустой")
+    delegated = _modules_executors_delegate_to() | {"op_worker"}
+    import re
+    callers = [m for m in delegated
+               if m != "account_manager"
+               and re.search(r"[\w_]*\.report_peer_deep\s*\(",
+                             open(os.path.join(ROOT, "services", f"{m}.py"),
+                                  encoding="utf-8").read())]
+    assert not callers, (
+        f"report_peer_deep снова в пути операции ({callers}) — обвяжите её "
+        f"потолками и внесите в GUARDED")
+
+
+def test_delegation_detector_sees_the_engines():
+    """Пустой список модулей сделал бы проверку выше вечно зелёной."""
+    mods = _modules_executors_delegate_to()
+    assert len(mods) > 20, f"модулей найдено {len(mods)} — разбор op_worker сломан"
+    assert "strike_engine" in mods, (
+        "strike_engine пропал из разбора — именно на нём проверка и была нужна")
 
 
 # ── Сторож самой проверки ────────────────────────────────────────────────────

@@ -3873,7 +3873,7 @@ async def search_global_ranked(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        result = await client(SearchRequest(q=query, limit=limit))
+        result = await asyncio.wait_for(client(SearchRequest(q=query, limit=limit)), timeout=_OP_TIMEOUT)
         users = {
             u.id: {"username": getattr(u, "username", "") or "",
                    "first_name": getattr(u, "first_name", "") or "",
@@ -5020,7 +5020,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
     client = _make_client(session_string, _acc, low_risk=True)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        result = await client(GetContactsRequest(hash=0))
+        result = await asyncio.wait_for(client(GetContactsRequest(hash=0)), timeout=_OP_TIMEOUT)
         mutual_ids = {c.user_id for c in getattr(result, "contacts", []) if getattr(c, "mutual", False)}
         contacts = []
         for user in result.users:
@@ -7012,7 +7012,7 @@ async def report_peer_deep_v2(  # noqa: C901
                 # 3. Негативная реакция на каждый N-й пост (после "прочтения")
                 if negative_react and (_bi % _react_every == 0) and _react_count < 12:
                     try:
-                        await client(
+                        await asyncio.wait_for(client(
                             SendReactionRequest(
                                 peer=entity,
                                 msg_id=_bm.id,
@@ -7022,7 +7022,7 @@ async def report_peer_deep_v2(  # noqa: C901
                                     )
                                 ],
                             )
-                        )
+                        ), timeout=_OP_TIMEOUT)
                         R["reactions_sent"] += 1
                         _react_count += 1
                         await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -7038,7 +7038,7 @@ async def report_peer_deep_v2(  # noqa: C901
             for _sv in _save_cands:
                 try:
                     await asyncio.sleep(random.uniform(0.5, 1.5))
-                    await client.forward_messages("me", _sv)
+                    await asyncio.wait_for(client.forward_messages("me", _sv), timeout=_OP_TIMEOUT)
                 except Exception as e:
                     log.debug("rpv2[6/save_to_fav]: %s", e)
 
@@ -7058,13 +7058,13 @@ async def report_peer_deep_v2(  # noqa: C901
             if idx > 0:
                 await asyncio.sleep(random.betavariate(2, 5) * 2.0 + 0.5)
             try:
-                await client(
+                await asyncio.wait_for(client(
                     ReportPeerRequest(
                         peer=entity,
                         reason=r_obj,
                         message=msg_pool[idx % len(msg_pool)],
                     )
-                )
+                ), timeout=_OP_TIMEOUT)
                 if idx == 0:
                     R["peer_reported"] = True
                 else:
@@ -7074,13 +7074,13 @@ async def report_peer_deep_v2(  # noqa: C901
                 if "FLOOD_WAIT" in err.upper():
                     await asyncio.sleep(_flood(err) + random.uniform(1, 3))
                     try:
-                        await client(
+                        await asyncio.wait_for(client(
                             ReportPeerRequest(
                                 peer=entity,
                                 reason=r_obj,
                                 message=msg_pool[idx % len(msg_pool)],
                             )
-                        )
+                        ), timeout=_OP_TIMEOUT)
                         if idx == 0:
                             R["peer_reported"] = True
                         else:
@@ -7121,14 +7121,14 @@ async def report_peer_deep_v2(  # noqa: C901
                         access_hash=_p.access_hash,
                         file_reference=_p.file_reference,
                     )
-                    await client(
+                    await asyncio.wait_for(client(
                         _RPP(
                             peer=entity,
                             photo_id=_photo_input,
                             reason=tg_reason,
                             message=msg_pool[0],
                         )
-                    )
+                    ), timeout=_OP_TIMEOUT)
                     R["photo_reported"] = True
                     log.info("rpv2[8/photo] reported acc=%s", acc_id)
             except Exception as e:
@@ -7246,9 +7246,9 @@ async def report_peer_deep_v2(  # noqa: C901
             if spam_ids and _spam_participant:
                 try:
                     await asyncio.sleep(random.uniform(0.5, 1.5))
-                    await client(
+                    await asyncio.wait_for(client(
                         _CSR(channel=entity, participant=_spam_participant, id=spam_ids)
-                    )
+                    ), timeout=_OP_TIMEOUT)
                     R["spam_signaled"] += len(spam_ids)
                     log.info("rpv2[11] spam_signaled=%d acc=%s", len(spam_ids), acc_id)
                 except Exception as e:
@@ -7276,13 +7276,13 @@ async def report_peer_deep_v2(  # noqa: C901
                 for ai, usr in enumerate(admins):
                     try:
                         await asyncio.sleep(random.betavariate(2, 4) * 1.5 + 0.5)
-                        await client(
+                        await asyncio.wait_for(client(
                             ReportPeerRequest(
                                 peer=usr,
                                 reason=all_reasons[ai % len(all_reasons)],
                                 message=msg_pool[ai % len(msg_pool)],
                             )
-                        )
+                        ), timeout=_OP_TIMEOUT)
                         R["admins_reported"] += 1
                     except Exception as e:
                         err = str(e)
@@ -7304,13 +7304,13 @@ async def report_peer_deep_v2(  # noqa: C901
                     for li in range(min(4, len(all_reasons))):
                         try:
                             await asyncio.sleep(random.betavariate(2, 5) * 1.5 + 0.5)
-                            await client(
+                            await asyncio.wait_for(client(
                                 ReportPeerRequest(
                                     peer=lent,
                                     reason=all_reasons[li],
                                     message=msg_pool[li % len(msg_pool)],
                                 )
-                            )
+                            ), timeout=_OP_TIMEOUT)
                             R["linked_group_reported"] = True
                         except Exception as e:
                             log.warning(
@@ -7337,13 +7337,13 @@ async def report_peer_deep_v2(  # noqa: C901
             for bi, bname in enumerate(_bot_candidates[:6]):
                 try:
                     bent = await _timed(client.get_entity(bname), 8.0)
-                    await client(
+                    await asyncio.wait_for(client(
                         ReportPeerRequest(
                             peer=bent,
                             reason=all_reasons[bi % len(all_reasons)],
                             message=msg_pool[bi % len(msg_pool)],
                         )
-                    )
+                    ), timeout=_OP_TIMEOUT)
                     R["bots_reported"] += 1
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                 except Exception as e:
@@ -7359,13 +7359,13 @@ async def report_peer_deep_v2(  # noqa: C901
                 try:
                     fbot = await _timed(client.get_entity(bot_uname), 8.0)
                     try:
-                        await client.send_message(fbot, "/start")
+                        await asyncio.wait_for(client.send_message(fbot, "/start"), timeout=_OP_TIMEOUT)
                         await asyncio.sleep(random.uniform(1.5, 3.0))
                     except Exception as e:
                         log.debug("rpv2[15/fwd_start %s]: %s", bot_uname, e)
                     for em in fwd_msgs[:4]:
                         try:
-                            await client.forward_messages(fbot, em)
+                            await asyncio.wait_for(client.forward_messages(fbot, em), timeout=_OP_TIMEOUT)
                             R["forwarded"] += 1
                             await asyncio.sleep(random.uniform(0.8, 1.8))
                         except Exception as e:
@@ -7397,25 +7397,25 @@ async def report_peer_deep_v2(  # noqa: C901
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
 
-            await client(
+            await asyncio.wait_for(client(
                 UpdateNotifySettingsRequest(
                     peer=InputNotifyPeer(peer=entity),
                     settings=InputPeerNotifySettings(
                         mute_until=_TELEGRAM_MAX_MUTE_UNTIL
                     ),
                 )
-            )
+            ), timeout=_OP_TIMEOUT)
         except Exception as e:
             log.debug("rpv2[16/mute] acc=%s: %s", acc_id, e)
         if R["joined"]:
             try:
-                await client(LeaveChannelRequest(entity))
+                await asyncio.wait_for(client(LeaveChannelRequest(entity)), timeout=_OP_TIMEOUT)
             except Exception as e:
                 log.debug("rpv2[16/leave] acc=%s: %s", acc_id, e)
         if block_after:
             try:
                 await asyncio.sleep(random.uniform(0.5, 1.5))
-                await client(BlockRequest(id=entity))
+                await asyncio.wait_for(client(BlockRequest(id=entity)), timeout=_OP_TIMEOUT)
                 R["blocked"] = True
             except Exception as e:
                 log.warning("rpv2[13/block] acc=%s: %s", acc_id, str(e)[:80])
@@ -7490,7 +7490,7 @@ async def strike_map_target(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(peer_username.lstrip("@"))
+        entity = await asyncio.wait_for(client.get_entity(peer_username.lstrip("@")), timeout=_OP_TIMEOUT)
         if not isinstance(entity, Channel):
             intel["error"] = "not_a_channel"
             return intel
@@ -7502,7 +7502,7 @@ async def strike_map_target(
 
         # Полная инфо о канале (описание, linked_chat_id) + refresh entity
         try:
-            full = await client(GetFullChannelRequest(entity))
+            full = await asyncio.wait_for(client(GetFullChannelRequest(entity)), timeout=_OP_TIMEOUT)
             fc = full.full_chat
             intel["description"] = (getattr(fc, "about", "") or "")[:500]
             intel["linked_group_id"] = getattr(fc, "linked_chat_id", None)
@@ -7522,7 +7522,7 @@ async def strike_map_target(
             log_exc_swallow(log, "Сбой в strike_map_target")
         # Все администраторы (до 200)
         try:
-            adm = await client(
+            adm = await asyncio.wait_for(client(
                 GetParticipantsRequest(
                     channel=entity,
                     filter=ChannelParticipantsAdmins(),
@@ -7530,28 +7530,28 @@ async def strike_map_target(
                     limit=200,
                     hash=0,
                 )
-            )
+            ), timeout=_OP_TIMEOUT)
             intel["admin_ids"] = [u.id for u in getattr(adm, "users", [])]
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
         # Закреплённые сообщения
         try:
-            pinned = await client.get_messages(
+            pinned = await asyncio.wait_for(client.get_messages(
                 entity, filter=InputMessagesFilterPinned(), limit=20
-            )
+            ), timeout=_OP_TIMEOUT)
             intel["pinned_msg_ids"] = [m.id for m in pinned if m and m.id]
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
         # Последние 100 сообщений
         try:
-            msgs = await client.get_messages(entity, limit=100)
+            msgs = await asyncio.wait_for(client.get_messages(entity, limit=100), timeout=_OP_TIMEOUT)
             intel["latest_msg_ids"] = [m.id for m in msgs if m and m.id]
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
         # Упомянутые @usernames и @botы из описания + последних постов
         scan_text = intel["description"]
         try:
-            msgs_text = await client.get_messages(entity, limit=15)
+            msgs_text = await asyncio.wait_for(client.get_messages(entity, limit=15), timeout=_OP_TIMEOUT)
             for m in msgs_text:
                 if m and m.text:
                     scan_text += " " + m.text
