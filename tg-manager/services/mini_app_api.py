@@ -1628,10 +1628,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         init_data = validate_string(body.get("initData"), max_len=8192)
         if not init_data:
-            return _err("Missing initData")
+            return _err("Нет данных входа Telegram")
         bot_token = _bot_token()
         if not signing_secret_ok(bot_token):
             return _err(_NO_SIGNING_SECRET, 403)
@@ -1650,7 +1650,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         code = validate_string(body.get("code"), max_len=32)
         if not code:
             return _err("Введите код связывания")
@@ -1673,10 +1673,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         dev = validate_string(body.get("device_token"), max_len=256)
         if not dev:
-            return _err("Missing device_token")
+            return _err("Нет токена устройства")
         bot_token = _bot_token()
         if not signing_secret_ok(bot_token):
             return _err(_NO_SIGNING_SECRET, 403)
@@ -1714,7 +1714,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         try:
             pairing_id = int(body.get("id"))
         except (TypeError, ValueError):
@@ -1776,7 +1776,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         try:
             channel_id = int(data.get("channel_id"))
         except (TypeError, ValueError):
@@ -2076,7 +2076,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         # Проверяем доступ: личный бот ИЛИ бот из экосистемы/рабочего пространства
         owns = await _safe_count(pool,
             """SELECT COUNT(*) FROM managed_bots mb
@@ -2096,11 +2096,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    )
                )""", bot_id, uid)
         if not owns:
-            return _err("Bot not found or access denied", 404)
+            return _err("Бот не найден или нет доступа", 404)
         bot = await _safe_fetchrow(pool,
             "SELECT * FROM managed_bots WHERE bot_id=$1", bot_id)
         if not bot:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         # Токен клиенту не отдаём. `SELECT *` тянул и его: у ботов, добавленных
         # до включения шифрования, он лежит в открытом виде (decrypt_token
         # намеренно пропускает legacy-строки как есть), то есть ответ отдавал
@@ -2150,7 +2150,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
             """SELECT COUNT(*) FROM managed_bots mb
                WHERE mb.bot_id=$1 AND (
@@ -2169,7 +2169,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    )
                )""", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         # Счётчик срабатываний из auto_reply_log — аналитика прямо в списке.
         # LEFT JOIN, чтобы правила без срабатываний тоже вернулись (fired=0).
         # Фолбэк на простой SELECT, если новых колонок/лога ещё нет.
@@ -2203,7 +2203,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             """SELECT COUNT(*) FROM managed_bots mb
                WHERE mb.bot_id=$1 AND (
@@ -2222,7 +2222,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    )
                 )""", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         trigger_type = body.get("trigger_type", "keyword")
         keyword = body.get("keyword", "").strip()
         response_text = body.get("response_text", "").strip()
@@ -2232,7 +2232,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if match_mode not in ("contains", "exact", "starts"):
             match_mode = "contains"
         if not response_text:
-            return _err("response_text required", 400)
+            return _err("Нужен текст ответа", 400)
         # buttons/priority/reply_delay_sec принимались из UI, но НЕ персистились
         # (тот же класс #3, что и match_mode) → инлайн-кнопки, приоритет правила и
         # человекоподобная задержка молча терялись при создании. Send-путь
@@ -2275,7 +2275,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             reply_id = int(request.match_info["reply_id"])
         except (KeyError, ValueError):
-            return _err("Invalid reply_id", 400)
+            return _err("Неверный идентификатор ответа", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE auto_replies SET is_active = NOT is_active
@@ -2283,7 +2283,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    RETURNING id, is_active""",
                 reply_id, uid)
             if not row:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
         except Exception:
             return _err("Failed to toggle", 500)
@@ -2295,7 +2295,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             reply_id = int(request.match_info["reply_id"])
         except (KeyError, ValueError):
-            return _err("Invalid reply_id", 400)
+            return _err("Неверный идентификатор ответа", 400)
         try:
             await pool.execute(
                 """DELETE FROM auto_replies WHERE id=$1
@@ -2312,11 +2312,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         rows = await _safe_fetch(pool,
             """SELECT f.id, f.name, f.trigger_type, f.keyword, f.is_active, f.created_at,
                       COUNT(fs.id) AS total_subs,
@@ -2334,7 +2334,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             funnel_id = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
-            return _err("Invalid funnel_id", 400)
+            return _err("Неверный идентификатор воронки", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE funnels SET is_active = NOT is_active
@@ -2342,7 +2342,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    RETURNING id, is_active""",
                 funnel_id, uid)
             if not row:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
         except Exception:
             return _err("Failed to toggle", 500)
@@ -2356,20 +2356,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         bot_id = validate_integer(body.get("bot_id"), min_val=1)
         text = validate_string(body.get("text"), max_len=4096)
         if not bot_id or not text:
-            return _err("bot_id and text required")
+            return _err("Нужны идентификатор бота и текст")
         # SQL injection defense on text
         if check_sql_suspicious(text):
-            return _err("Invalid characters in message text")
+            return _err("Недопустимые символы в тексте сообщения")
         if len(text) > 4096:
-            return _err("Message too long (max 4096 chars)")
+            return _err("Сообщение длиннее 4096 символов")
         try:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
-            return _err("Invalid bot_id")
+            return _err("Неверный идентификатор бота")
         silent = bool(body.get("silent"))
         # Сегмент аудитории: all | active_7d | active_30d
         segment = validate_string(body.get("segment") or "all", max_len=20) or "all"
@@ -2391,7 +2391,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT bot_id, token, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id_int, uid)
         if not bot_row:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql, bot_id_int)
         # Отложенная отправка: schedule_minutes минут от текущего момента.
@@ -2480,7 +2480,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         bot_id = validate_integer(request.rel_url.query.get("bot_id"), min_val=1)
         if not bot_id:
-            return _err("bot_id required", 400)
+            return _err("Нужен идентификатор бота", 400)
         segment = validate_string(request.rel_url.query.get("segment") or "all", max_len=20) or "all"
         _seg_sql = {
             "active_7d": " AND last_seen >= now() - interval '7 days'",
@@ -2491,7 +2491,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             int(bot_id), uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true" + _seg_sql,
             int(bot_id))
@@ -2505,7 +2505,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bc_id = int(request.match_info["bc_id"])
         except (KeyError, ValueError):
-            return _err("bad broadcast id", 400)
+            return _err("Неверный идентификатор рассылки", 400)
         # Единая реализация (общая с ботом) — не дублируем логику недоставленных.
         from services import broadcaster
         res = await broadcaster.resend_undelivered(pool, uid, bc_id)
@@ -2594,19 +2594,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         bot_id = validate_integer(body.get("bot_id"), min_val=1)
         # Фронт (submitScheduledBroadcast) шлёт message_text/scheduled_at — принимаем
         # оба контракта (иначе кнопка «Запланировать» отдавала бы 400/404).
         text = validate_string(body.get("text") or body.get("message_text"), max_len=4096)
         if not bot_id or not text:
-            return _err("bot_id and text required")
+            return _err("Нужны идентификатор бота и текст")
         if check_sql_suspicious(text):
-            return _err("Invalid characters in message text")
+            return _err("Недопустимые символы в тексте сообщения")
         try:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
-            return _err("Invalid bot_id")
+            return _err("Неверный идентификатор бота")
         schedule = {
             "schedule_minutes": body.get("schedule_minutes"),
             "scheduled_for": body.get("scheduled_for") or body.get("scheduled_at"),
@@ -2631,20 +2631,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         bot_id = validate_integer(body.get("bot_id"), min_val=1)
         variants = body.get("variants")
         if not bot_id or not variants:
-            return _err("bot_id and variants required")
+            return _err("Нужны идентификатор бота и варианты")
         try:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
-            return _err("Invalid bot_id")
+            return _err("Неверный идентификатор бота")
         if not isinstance(variants, list) or len(variants) < 2:
-            return _err("variants must be a list with at least 2 items")
+            return _err("Вариантов должно быть не меньше двух, списком")
         for v in variants:
             if not isinstance(v, dict) or not v.get("text"):
-                return _err("Each variant must have 'text'")
+                return _err("У каждого варианта должен быть текст")
         try:
             from services.broadcaster import ab_test_broadcast
             result = await ab_test_broadcast(pool, uid, bot_id_int, variants)
@@ -2663,7 +2663,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bc_id = int(request.match_info["bc_id"])
         except (KeyError, ValueError):
-            return _err("Invalid broadcast id", 400)
+            return _err("Неверный идентификатор рассылки", 400)
         try:
             from services.broadcaster import get_broadcast_analytics
             result = await get_broadcast_analytics(pool, uid, bc_id)
@@ -2984,7 +2984,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("Invalid acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         if admin:
             acc = await _safe_fetchrow(pool,
                 """SELECT id, phone, first_name, username, tg_user_id,
@@ -3002,7 +3002,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           status_reason, cooldown_until, cluster, stage, proxy_id
                    FROM tg_accounts WHERE id=$1 AND owner_id=$2""", acc_id, uid)
         if not acc:
-            return _err("Account not found", 404)
+            return _err("Аккаунт не найден", 404)
         caps = await _safe_fetchrow(pool,
             """SELECT can_invite, can_dm, can_create_channel, can_create_bot,
                       can_set_username, is_premium, has_2fa,
@@ -3150,7 +3150,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
             """SELECT COUNT(*) FROM managed_bots mb
                WHERE mb.bot_id=$1 AND (
@@ -3169,7 +3169,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    )
                )""", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         try:
             offset = max(0, int(request.query.get("offset", 0)))
         except (TypeError, ValueError):
@@ -3189,27 +3189,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         name = validate_string(body.get("name"), max_len=200)
         text_template = validate_string(body.get("text_template"), max_len=4096)
         target_type = validate_string(body.get("target_type"), max_len=30) or "all_bots"
         target_id = body.get("target_id")
         if not name:
-            return _err("name required")
+            return _err("Нужно название")
         if not text_template:
-            return _err("text_template required")
+            return _err("Нужен шаблон текста")
         if check_sql_suspicious(text_template):
-            return _err("Invalid characters in message text")
+            return _err("Недопустимые символы в тексте сообщения")
         if target_type not in ("bot_users", "all_bots", "crm", "parsed_audience"):
-            return _err("Invalid target_type")
+            return _err("Неверный тип цели")
         if target_type == "bot_users" and not target_id:
-            return _err("target_id required for bot_users target")
+            return _err("Для цели bot_users нужен идентификатор цели")
         total_targets = 0
         if target_type == "bot_users" and target_id:
             try:
                 bot_id_int = int(target_id)
             except (TypeError, ValueError):
-                return _err("Invalid target_id", 400)
+                return _err("Неверный идентификатор цели", 400)
             # IDOR-защита: бот должен принадлежать пользователю, иначе можно
             # разослать DM подписчикам чужого бота и узнать их число.
             owns_bot = await _safe_count(pool,
@@ -3242,21 +3242,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ch_id = int(request.match_info["ch_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         text = validate_string(body.get("text"), max_len=4096)
         if not text:
-            return _err("text required")
+            return _err("Нужен текст")
         if check_sql_suspicious(text):
-            return _err("Invalid characters in post text")
+            return _err("Недопустимые символы в тексте поста")
         if len(text) > 4096:
-            return _err("Message too long (max 4096 chars)")
+            return _err("Сообщение длиннее 4096 символов")
         ch = await _safe_fetchrow(pool,
             "SELECT channel_id, title, acc_id, access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
             ch_id, uid)
         if not ch:
-            return _err("Channel not found", 404)
+            return _err("Канал не найден", 404)
         if not ch.get("acc_id"):
-            return _err("No linked account for this channel", 400)
+            return _err("У канала нет привязанного аккаунта", 400)
         # Отложенная публикация: schedule_minutes минут от текущего момента.
         try:
             schedule_minutes = max(0, min(int(body.get("schedule_minutes") or 0), 60 * 24 * 30))
@@ -3293,14 +3293,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             ch_id = int(request.match_info["ch_id"])
         except (KeyError, ValueError):
-            return _err("Invalid ch_id", 400)
+            return _err("Неверный идентификатор канала", 400)
         ch = await _safe_fetchrow(pool,
             "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
             "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
         if not ch:
-            return _err("Channel not found", 404)
+            return _err("Канал не найден", 404)
         if not ch.get("acc_id"):
-            return _err("No linked account for this channel", 400)
+            return _err("У канала нет привязанного аккаунта", 400)
         try:
             from services.operation_bus import submit
             op_id = await submit(pool, uid, "pin_last_post", {
@@ -3326,7 +3326,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             ch_id = int(request.match_info["ch_id"])
         except (KeyError, ValueError):
-            return _err("Invalid ch_id", 400)
+            return _err("Неверный идентификатор канала", 400)
         ch = await _safe_fetchrow(pool,
             "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
             "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
@@ -3361,14 +3361,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             ch_id = int(request.match_info["ch_id"])
         except (KeyError, ValueError):
-            return _err("Invalid ch_id", 400)
+            return _err("Неверный идентификатор канала", 400)
         ch = await _safe_fetchrow(pool,
             """SELECT channel_id, username, title, type,
                       COALESCE(members_count, 0) AS member_count,
                       acc_id, added_at
                FROM managed_channels WHERE channel_id=$1 AND owner_id=$2""", ch_id, uid)
         if not ch:
-            return _err("Channel not found", 404)
+            return _err("Канал не найден", 404)
         acc = None
         if ch and ch.get("acc_id"):
             acc = await _safe_fetchrow(pool,
@@ -3537,7 +3537,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
-            return _err("bad op_id", 400)
+            return _err("Неверный идентификатор операции", 400)
         row = await _safe_fetchrow(pool,
             "SELECT id, op_type, status, label, total_items, done_items, "
             # error_msg честно: колонка, иначе reason из result (старые «мягкие»
@@ -3601,7 +3601,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
-            return _err("bad op_id", 400)
+            return _err("Неверный идентификатор операции", 400)
         # Проверяем владение операцией перед чтением её лога.
         owns = await _safe_fetchrow(pool,
             "SELECT 1 FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
@@ -3668,7 +3668,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
-            return _err("Invalid op_id", 400)
+            return _err("Неверный идентификатор операции", 400)
         try:
             # 'paused' обязателен: приостановленную операцию иначе нельзя было ни
             # отменить, ни снять поштучно — она навсегда висела в очереди, пока
@@ -3703,7 +3703,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
-            return _err("Invalid op_id", 400)
+            return _err("Неверный идентификатор операции", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE operation_queue SET status='paused'
@@ -3756,7 +3756,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
-            return _err("Invalid op_id", 400)
+            return _err("Неверный идентификатор операции", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE operation_queue SET status='pending'
@@ -3791,7 +3791,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
-            return _err("Invalid op_id", 400)
+            return _err("Неверный идентификатор операции", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE operation_queue SET scheduled_for=NULL
@@ -3899,7 +3899,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             op_id = int(request.match_info["op_id"])
         except (KeyError, ValueError):
-            return _err("Invalid op_id", 400)
+            return _err("Неверный идентификатор операции", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT op_type, params, label, status, total_items, done_items, "
@@ -3908,7 +3908,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "FROM operation_queue WHERE id=$1 AND owner_id=$2",
                 op_id, uid)
             if not row:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
 
             # Массовая публикация: повторяем ТОЛЬКО упавшие каналы (channel_ids из
             # operation_log). Иначе успешные каналы получили бы пост повторно
@@ -3999,11 +3999,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         links = await _safe_fetch(pool,
             """SELECT id, name, start_param, click_count, unique_users, created_at
                FROM bot_deep_links WHERE bot_id=$1 ORDER BY click_count DESC LIMIT 30""", bot_id)
@@ -4020,23 +4020,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         name = validate_string(body.get("name"), max_len=200)
         start_param = validate_string(body.get("start_param"), max_len=64)
         if not name or not start_param:
-            return _err("name and start_param required")
+            return _err("Нужны название и start_param")
         if not validate_start_param(start_param):
-            return _err("start_param: only letters, digits, _ and - allowed (max 64 chars)")
+            return _err("start_param: только латиница, цифры, _ и -, не длиннее 64 символов")
         try:
             row = await pool.fetchrow(
                 "INSERT INTO bot_deep_links(bot_id, name, start_param) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id",
                 bot_id, name, start_param)
             if not row:
-                return _err("start_param already exists for this bot")
+                return _err("Такой start_param у бота уже есть")
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
             log.exception("create_deeplink bot=%d uid=%d", bot_id, uid)
@@ -4049,7 +4049,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             link_id = int(request.match_info["link_id"])
         except (KeyError, ValueError):
-            return _err("Invalid link_id", 400)
+            return _err("Неверный идентификатор ссылки", 400)
         try:
             await pool.execute(
                 """DELETE FROM bot_deep_links WHERE id=$1
@@ -4069,11 +4069,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         # Try user_activity table first, fallback to bot_users.last_seen
         try:
             row = await pool.fetchrow(
@@ -4115,7 +4115,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
@@ -4125,7 +4125,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_note uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
         if not row:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         return _json_resp({"note": row["note"] or ""})
 
     async def save_bot_note(request: web.Request) -> web.Response:
@@ -4135,12 +4135,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             body = await request.json()
             note = validate_string(body.get("note"), max_len=2000, required=False)
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         try:
             res = await pool.execute(
                 "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
@@ -4150,7 +4150,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("save_bot_note uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
         if res == "UPDATE 0":
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         return _json_resp({"ok": True})
 
     # ── Bot Commands ───────────────────────────────────────────────────────────
@@ -4162,7 +4162,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
@@ -4172,7 +4172,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_commands uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
         if not row:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             from services import bot_api
             import aiohttp as _ahttp
@@ -4190,19 +4190,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             body = await request.json()
             commands = body.get("commands", [])
             if not isinstance(commands, list):
-                return _err("commands must be array", 400)
+                return _err("Команды должны быть списком", 400)
             for c in commands:
                 if not isinstance(c, dict) or not c.get("command") or not c.get("description"):
-                    return _err("each command must have command and description", 400)
+                    return _err("У каждой команды должны быть имя и описание", 400)
                 if len(c["command"]) > 32 or len(c["description"]) > 256:
-                    return _err("command or description too long", 400)
+                    return _err("Команда или описание слишком длинные", 400)
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
@@ -4212,7 +4212,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("set_bot_commands uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
         if not row:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             from services import bot_api
             import aiohttp as _ahttp
@@ -4237,7 +4237,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         name = (body.get("name") or "").strip()[:64]
         description = (body.get("description") or "").strip()[:512]
         short_description = (body.get("short_description") or "").strip()[:120]
@@ -4291,7 +4291,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         row = await _safe_fetchrow(pool,
             "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not row:
@@ -4316,7 +4316,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         photo_url = (body.get("photo_url") or "").strip()
         # Здесь сервер скачивает по URL СРАЗУ (несколькими строками ниже),
         # поэтому нужен авторитетный гард с резолвом DNS, а не синтаксический.
@@ -4354,7 +4354,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             owned = await pool.fetchval(
                 "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
@@ -4363,7 +4363,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_stats uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
         if not owned:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         from database import db as _db
         try:
             stats = await _db.get_bot_stats(pool, bot_id)
@@ -4401,11 +4401,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op = validate_string(body.get("op"), max_len=20)
             acc_count = validate_integer(body.get("acc_count", 0), min_val=0) or 0
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if op not in ("name", "avatar", "2fa"):
-            return _err("op must be name|avatar|2fa", 400)
+            return _err("Операция: name, avatar или 2fa", 400)
         if acc_count < 0:
-            return _err("acc_count must be >= 0", 400)
+            return _err("Число аккаунтов не может быть отрицательным", 400)
         try:
             total = await pool.fetchval(
                 "SELECT COUNT(*) FROM tg_accounts "
@@ -4442,7 +4442,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         elif op == "avatar":
             url = str(body.get("avatar_url", "")).strip()
             if not url.startswith("http"):
-                return _err("avatar_url must start with http", 400)
+                return _err("Ссылка на аватар должна начинаться с http", 400)
             params["avatar_url"] = url
         elif op == "2fa":
             new_pass = str(body.get("new_password", "")).strip()
@@ -4503,11 +4503,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             op = validate_string(body.get("op"), max_len=30)
             account_id = validate_integer(body.get("account_id"), min_val=1)
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if not op or not account_id:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if op not in ("leave_all_chats", "delete_contacts"):
-            return _err("op must be leave_all_chats or delete_contacts", 400)
+            return _err("Операция: leave_all_chats или delete_contacts", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
@@ -4882,7 +4882,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         op = body.get("op")
         # По умолчанию масс-операция идёт по СВОИМ аккаунтам (даже у админа) —
         # чтобы админ случайно не оперировал над чужими. Платформенный срез —
@@ -5014,7 +5014,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
         if not owns:
@@ -5056,7 +5056,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         elif op == "privacy":
             pk = (body.get("privacy_key") or "phone").strip()
             if pk not in ("phone", "invite", "lastseen"):
-                return _err("privacy_key: phone|invite|lastseen", 400)
+                return _err("Настройка приватности: phone, invite или lastseen", 400)
             params["privacy_key"] = pk
             params["privacy_allow"] = bool(body.get("privacy_allow", False))
             label = f"Приватность: {pk}"
@@ -5105,7 +5105,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         query = sanitize_search_query(body.get("query") or "")
         if not query:
             return _err("Укажите поисковый запрос", 400)
@@ -5150,7 +5150,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         name = sanitize_search_query(body.get("name") or "")
         prefix = sanitize_search_query(body.get("username_prefix") or "").lstrip("@")
         if not name:
@@ -5190,7 +5190,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         acc = await _safe_fetchrow(pool,
             "SELECT id, session_str, device_model, system_version, app_version, "
             "lang_code, system_lang_code, "
@@ -5222,7 +5222,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         acc = await _safe_fetchrow(pool,
             "SELECT id, session_str, device_model, system_version, app_version, "
             "lang_code, system_lang_code, "
@@ -5297,7 +5297,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ch_id = int(request.match_info["ch_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         op = body.get("op")
         value = (body.get("value") or "").strip()
         worker_op = channel_edit_worker_op(op)
@@ -5340,7 +5340,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             ch_id = int(request.match_info["ch_id"])
         except (KeyError, ValueError):
-            return _err("bad ch_id", 400)
+            return _err("Неверный идентификатор канала", 400)
         ch = await _safe_fetchrow(pool,
             "SELECT channel_id, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
             ch_id, uid)
@@ -5371,7 +5371,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         op = body.get("op")
         ids_in = [int(x) for x in (body.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
         if not ids_in:
@@ -5446,13 +5446,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         link = validate_string(body.get("channel_identifier"), max_len=500)
         if not link:
-            return _err("channel_identifier required")
+            return _err("Нужен идентификатор канала")
         # Validate URL format for channel identifier
         if not link.startswith(("http", "@", "t.me")):
-            return _err("Invalid channel identifier format")
+            return _err("Неверный формат идентификатора канала")
         try:
             from bot.utils.subscription import get_channel_limit, get_effective_channel_count
             _lim = await get_channel_limit(pool, uid)
@@ -5479,7 +5479,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             ch_id = int(request.match_info["ch_id"])
         except (KeyError, ValueError):
-            return _err("bad ch_id", 400)
+            return _err("Неверный идентификатор канала", 400)
         try:
             res = await pool.execute(
                 "DELETE FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
@@ -5498,7 +5498,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT is_active FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
@@ -5521,7 +5521,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         try:
             res = await pool.execute(
                 "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
@@ -5546,7 +5546,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             act = request.match_info["act"]
         except (KeyError, ValueError):
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
         if not owns:
@@ -5627,7 +5627,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         media_url = (body.get("media_url") or "").strip()
         if not media_url:
             return _err("Укажите ссылку на медиа (фото/видео)", 400)
@@ -5702,7 +5702,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         acc = await _console_account(uid, acc_id)
         if not acc or not acc.get("session_str"):
             return _err("Аккаунт недоступен", 400)
@@ -5729,7 +5729,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         from services import account_console
         peer = account_console.parse_peer(request.match_info.get("peer", ""))
         if peer == "" or peer is None:
@@ -5763,7 +5763,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         from services import account_console
         peer = account_console.parse_peer(request.match_info.get("peer", ""))
         if peer == "" or peer is None:
@@ -5801,7 +5801,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         from services import account_console
         peer = account_console.parse_peer(request.match_info.get("peer", ""))
         if peer == "" or peer is None:
@@ -5809,7 +5809,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             reader = await request.multipart()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         file_bytes = b""
         filename = "file"
         caption = ""
@@ -5859,7 +5859,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         acc = await _console_account(uid, acc_id)
         if not acc or not acc.get("session_str"):
             return _err("Аккаунт недоступен", 400)
@@ -5889,7 +5889,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         rows = await _safe_fetch(pool,
             "SELECT channel_id AS id, channel_id, username, title, type, "
             "COALESCE(members_count, 0) AS member_count "
@@ -5910,7 +5910,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         rows = await _safe_fetch(pool,
             "SELECT bot_id, username, first_name, is_active FROM managed_bots "
             "WHERE added_by=$1 AND acc_id=$2 ORDER BY added_at DESC LIMIT 500", uid, acc_id)
@@ -5985,7 +5985,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             chat_id = int(request.match_info["chat_id"])
         except (KeyError, ValueError):
-            return _err("bad chat_id", 400)
+            return _err("Неверный идентификатор чата", 400)
         try:
             # max(1, ...) обязателен: без него ?limit=-5 уезжал в SQL как
             # LIMIT -5, Postgres отвечал ошибкой, и экран отдавал 500 вместо
@@ -6040,7 +6040,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 body = await request.json()
             except Exception:
-                return _err("bad request", 400)
+                return _err("Неверный запрос", 400)
             await _v.set_notify_prefs(
                 pool, uid,
                 notify_deleted=body.get("notify_deleted"),
@@ -6059,7 +6059,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 chat_id = int(request.query["chat_id"])
             except (TypeError, ValueError):
-                return _err("bad chat_id", 400)
+                return _err("Неверный идентификатор чата", 400)
         fmt = request.query.get("format", "html")
         from services import vault_service as _v
         try:
@@ -6124,7 +6124,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             chat_id = int(request.match_info["chat_id"])
             msg_id = int(request.match_info["msg_id"])
         except (KeyError, ValueError):
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         token = _bot_token()
         if not token:
             return _err("Бот не настроен", 500)
@@ -6171,7 +6171,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             chat_id = int(request.match_info["chat_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         text = (body.get("text") or "").strip()
         if not text:
             return _err("Введите текст сообщения", 400)
@@ -6204,7 +6204,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         acc = await _safe_fetchrow(pool,
             "SELECT id, session_str, device_model, system_version, app_version, "
             "lang_code, system_lang_code, "
@@ -6248,7 +6248,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
         if not owns:
@@ -6259,7 +6259,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 proxy_id = int(raw)
             except (TypeError, ValueError):
-                return _err("Invalid proxy_id", 400)
+                return _err("Неверный идентификатор прокси", 400)
             owns_proxy = await _safe_count(pool,
                 "SELECT COUNT(*) FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, uid)
             if not owns_proxy:
@@ -6282,7 +6282,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         note = validate_string(body.get("note"), max_len=500, required=False)
         try:
             res = await pool.execute(
@@ -6304,7 +6304,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
         if not owns:
@@ -6351,7 +6351,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
         if not owns:
@@ -6552,7 +6552,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         btype = validate_string(body.get("type"), max_len=20)
         if btype not in ("views", "reactions", "stories", "subscribers", "bot_starts"):
             return _err("Неверный тип накрутки", 400)
@@ -6677,7 +6677,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         niche = validate_string(body.get("niche"), max_len=200)
         geo = validate_string(body.get("geo"), max_len=60) or ""
         promo_text = validate_string(body.get("promo_text"), max_len=4096)
@@ -6690,7 +6690,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not promo_text:
             return _err("Укажите рекламный текст", 400)
         if check_sql_suspicious(promo_text):
-            return _err("Invalid characters in promo text")
+            return _err("Недопустимые символы в тексте промо")
         from services import content_safety
 
         _v = await content_safety.enforce(pool, uid, niche, promo_text, surface="growth_agent")
@@ -6726,7 +6726,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         raw_ch = body.get("channels") or []
         if isinstance(raw_ch, str):
             raw_ch = re.split(r"[\s,]+", raw_ch)
@@ -6776,7 +6776,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         raw = body.get("resources") or []
         if isinstance(raw, str):
             raw = re.split(r"[\s,]+", raw)
@@ -6840,7 +6840,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         target = validate_string(body.get("target"), max_len=200)
         reason = validate_string(body.get("reason"), max_len=50) or "spam"
         acc_count = validate_integer(body.get("acc_count", 5), min_val=1, max_val=100) or 5
@@ -6869,20 +6869,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         text = validate_string(body.get("text"), max_len=4096)
         channel_ids = body.get("channel_ids") or []
         if not text:
             return _err("Заполните текст поста", 400)
         if check_sql_suspicious(text):
-            return _err("Invalid characters in post text")
+            return _err("Недопустимые символы в тексте поста")
         if not channel_ids:
             return _err("Выберите хотя бы один канал", 400)
         # Validate channel IDs are integers
         try:
             channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
         except (TypeError, ValueError):
-            return _err("Invalid channel IDs", 400)
+            return _err("Неверные идентификаторы каналов", 400)
         try:
             schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
         except (TypeError, ValueError):
@@ -6982,7 +6982,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         try:
             chan_id = int(body.get("chan_id"))
         except (TypeError, ValueError):
@@ -7037,7 +7037,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         try:
             bot_id = int(body.get("bot_id"))
         except (TypeError, ValueError):
@@ -7062,7 +7062,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         enabled = bool(body.get("enabled"))
         try:
             await pool.execute(
@@ -7157,7 +7157,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         token = validate_string(data.get("token"), max_len=200)
         if not token:
             return _err("token обязателен", 400)
@@ -7222,7 +7222,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         token = validate_string(data.get("token"), max_len=200)
         name_template = validate_string(data.get("name"), max_len=128)
         uname_template = validate_string(data.get("username"), max_len=32)
@@ -7324,7 +7324,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         # ── Мульти-аккаунт: создаём ботов через @BotFather у КАЖДОГО выбранного
         # аккаунта. Тот же op bot_factory — при наличии account_ids исполнитель
@@ -7431,7 +7431,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         # ── Мульти-аккаунт: создаём у КАЖДОГО выбранного аккаунта (Фабрика в
         # мини-аппе). Тот же op bulk_create_channels — при наличии account_ids
@@ -7558,7 +7558,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         raw = data.get("targets") or data.get("links") or data.get("channels") or []
         if isinstance(raw, str):
@@ -7676,7 +7676,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         field = str(data.get("field") or "").strip()
         allowed = _BULK_EDIT_FIELDS[kind]
@@ -7838,7 +7838,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         raw = str(body.get("import_list") or "")
         from services.mass_inviter_engine import classify_invite_list
         r = classify_invite_list(raw)
@@ -8278,7 +8278,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         chat_ref = validate_string(body.get("chat_ref"), max_len=256)
         if not chat_ref:
             return _err("Укажите чат (@username, ссылка или ID)", 400)
@@ -8311,11 +8311,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             sid = int(request.match_info["sid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         status = body.get("status")
         from services import chat_warmup
         ok = await chat_warmup.set_status(pool, uid, sid, status)
@@ -8395,7 +8395,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         goal = validate_integer(body.get("goal_count"), min_val=1, max_val=1000000)
         if not goal:
             return _err("Укажите цель (+N участников)", 400)
@@ -8601,7 +8601,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad account id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
 
         acc = await _safe_fetchrow(
             pool,
@@ -8668,7 +8668,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         raw = data.get("usernames") or []
         if isinstance(raw, str):
@@ -8824,7 +8824,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         acc_id = validate_integer(data.get("acc_id"), min_val=1)
         if not acc_id:
@@ -8877,7 +8877,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         target = validate_string(data.get("target"), max_len=256)
         if not target:
@@ -9012,7 +9012,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         acc_id = validate_integer(data.get("acc_id"), min_val=1)
         if not acc_id:
@@ -9116,7 +9116,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
@@ -9166,7 +9166,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             persona_id = int(request.match_info["persona_id"])
         except (KeyError, ValueError):
-            return _err("bad persona_id", 400)
+            return _err("Неверный идентификатор персоны", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT id, is_active FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
@@ -9189,7 +9189,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             persona_id = int(request.match_info["persona_id"])
         except (KeyError, ValueError):
-            return _err("bad persona_id", 400)
+            return _err("Неверный идентификатор персоны", 400)
         try:
             await pool.execute(
                 "DELETE FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
@@ -9206,7 +9206,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         name = validate_string(body.get("persona_name"), max_len=100)
         if not name:
             return _err("Имя персоны обязательно", 400)
@@ -9281,7 +9281,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         try:
             count = max(1, min(50, validate_integer(body.get("count") or 1, min_val=1, max_val=50) or 1))
         except (TypeError, ValueError):
@@ -9317,7 +9317,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         phones_raw = validate_string(body.get("phones"), max_len=10000)
         if not phones_raw:
             return _err("Укажите номера телефонов", 400)
@@ -9432,7 +9432,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         title = (body.get("title") or "").strip()
         mem_body = (body.get("body") or "").strip()
         if not mem_body:
@@ -9455,7 +9455,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             mem_id = int(request.match_info["mem_id"])
         except (KeyError, ValueError):
-            return _err("bad mem_id", 400)
+            return _err("Неверный идентификатор участника", 400)
         try:
             await pool.execute(
                 "DELETE FROM botmother_memory WHERE id=$1 AND owner_id=$2", mem_id, uid
@@ -9497,7 +9497,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             node_id = int(request.match_info["node_id"])
         except (KeyError, ValueError):
-            return _err("bad node_id", 400)
+            return _err("Неверный идентификатор узла", 400)
         try:
             node = await pool.fetchrow(
                 "SELECT id, name FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2",
@@ -9528,7 +9528,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         tg_chat_id_raw = data.get("tg_chat_id")
         node_type = str(data.get("node_type", "workspace")).strip()
         name = str(data.get("name", "")).strip()
@@ -9561,7 +9561,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             node_id = int(request.match_info["node_id"])
         except (KeyError, ValueError):
-            return _err("bad node_id", 400)
+            return _err("Неверный идентификатор узла", 400)
         try:
             await pool.execute(
                 "DELETE FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2", node_id, uid
@@ -9590,7 +9590,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         title = validate_string(data.get("title"), max_len=128) or ""
         description = validate_string(data.get("description"), max_len=512) or ""
         try:
@@ -9614,7 +9614,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             node_id = int(request.match_info["node_id"])
         except (KeyError, ValueError):
-            return _err("bad node_id", 400)
+            return _err("Неверный идентификатор узла", 400)
         from services import nodes_engine
         await nodes_engine.deactivate_community_node(pool, uid, node_id)
         return _json_resp({"ok": True})
@@ -9642,7 +9642,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             node_id = int(request.match_info["node_id"])
         except (KeyError, ValueError):
-            return _err("Invalid node_id", 400)
+            return _err("Неверный идентификатор узла", 400)
         node = await _safe_fetchrow(
             pool, "SELECT id, tg_chat_id FROM community_nodes WHERE id=$1 AND owner_id=$2",
             node_id, uid)
@@ -9685,7 +9685,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             node_id = int(request.match_info["node_id"])
         except (KeyError, ValueError):
-            return _err("bad node_id", 400)
+            return _err("Неверный идентификатор узла", 400)
         from services import nodes_engine
         return _json_resp({"channels": await nodes_engine.list_community_channels(pool, uid, node_id)})
 
@@ -9698,7 +9698,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             node_id = int(request.match_info["node_id"])
             data = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         name = validate_string(data.get("name"), max_len=128)
         if not name:
             return _err("Укажите название канала", 400)
@@ -9726,7 +9726,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             node_id = int(request.match_info["node_id"])
         except (KeyError, ValueError):
-            return _err("bad node_id", 400)
+            return _err("Неверный идентификатор узла", 400)
         from services import nodes_engine
         members = await nodes_engine.list_node_members(pool, uid, node_id)
         stats = await nodes_engine.node_member_stats(pool, node_id)
@@ -9746,7 +9746,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             node_id = int(request.match_info["node_id"])
             data = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _community_owns(uid, node_id):
             return _err("Нода не найдена", 404)
         count = validate_integer(data.get("count", 5), min_val=1, max_val=50) or 5
@@ -9771,7 +9771,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             node_id = int(request.match_info["node_id"])
             data = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _community_owns(uid, node_id):
             return _err("Нода не найдена", 404)
         role = data.get("role") if data.get("role") in ("moderator", "admin") else "moderator"
@@ -9858,7 +9858,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         group = (body.get("group") or "").strip()
         # Форма ссылки проверяется ЗДЕСЬ: иначе опечатка уезжает в очередь,
         # клеймит аккаунты, подключается ими и падает на резолве — прогон и
@@ -10101,7 +10101,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         bot_id = data.get("bot_id")
         name = str(data.get("name", "")).strip()
         content_type = data.get("content_type", "message")
@@ -10137,7 +10137,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             eid = int(request.match_info["exp_id"])
         except (KeyError, ValueError):
-            return _err("bad exp_id", 400)
+            return _err("Неверный идентификатор эксперимента", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT id, status FROM stars_experiments WHERE id=$1 AND owner_id=$2", eid, uid
@@ -10184,7 +10184,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             profile_id = int(request.match_info["profile_id"])
         except (KeyError, ValueError):
-            return _err("bad profile_id", 400)
+            return _err("Неверный идентификатор профиля", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT id, enabled FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
@@ -10207,7 +10207,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             profile_id = int(request.match_info["profile_id"])
         except (KeyError, ValueError):
-            return _err("bad profile_id", 400)
+            return _err("Неверный идентификатор профиля", 400)
         try:
             await pool.execute(
                 "DELETE FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
@@ -10224,7 +10224,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         account_id = data.get("account_id")
         personality = data.get("personality", "ghost")
         active_hours_start = int(data.get("active_hours_start", 9))
@@ -10234,7 +10234,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not account_id:
             return _err("account_id обязателен", 400)
         if personality not in ("ghost", "watcher", "active"):
-            return _err("personality: ghost|watcher|active", 400)
+            return _err("Характер: ghost, watcher или active", 400)
         try:
             acc = await pool.fetchrow(
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", int(account_id), uid
@@ -10271,7 +10271,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
@@ -10306,7 +10306,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
@@ -10359,7 +10359,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         target = (body.get("target") or "").strip()
         if not target:
             return _err("Укажите цель проверки", 400)
@@ -10429,7 +10429,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         name = (body.get("name") or "").strip()
         text = (body.get("text") or "").strip()
         target_type = body.get("target_type", "bot_users")
@@ -10455,7 +10455,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 _seg_id = int(target_id)
             except (TypeError, ValueError):
-                return _err("Invalid target_id", 400)
+                return _err("Неверный идентификатор цели", 400)
             try:
                 from services.contacts_hub import repository as _repo
                 _segment_filters = await _repo.get_segment_filters(pool, uid, _seg_id)
@@ -10469,7 +10469,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 _bid = int(target_id)
             except (TypeError, ValueError):
-                return _err("Invalid target_id", 400)
+                return _err("Неверный идентификатор цели", 400)
             owns_bot = await _safe_count(pool,
                 "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", _bid, uid)
             if not owns_bot:
@@ -10597,7 +10597,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             campaign_id = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT id, name, status FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
@@ -10660,11 +10660,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             campaign_id = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
 
         row = await _safe_fetchrow(
             pool,
@@ -10782,7 +10782,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             campaign_id = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         # IDOR: отчёт только по своей кампании.
         row = await _safe_fetchrow(
             pool,
@@ -10855,7 +10855,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             campaign_id = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT status FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
@@ -10881,7 +10881,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             campaign_id = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         try:
             await pool.execute(
                 "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2", campaign_id, uid
@@ -10969,7 +10969,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
         _BASE = """wp.id, wp.account_id, wp.status, wp.current_day,
                       wp.target_days, wp.last_action_at, wp.started_at"""
         _SQL = ("SELECT {cols} FROM account_warmup_plans wp "
@@ -11344,7 +11344,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         channel = validate_string(body.get("channel"), max_len=120)
         if not channel:
             return _err("Укажите канал (@username или id)", 400)
@@ -11381,7 +11381,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wid = int(request.match_info["watch_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         row = await _safe_fetchrow(pool,
             "SELECT * FROM notary_watches WHERE id=$1 AND owner_id=$2", wid, uid)
         if not row:
@@ -11451,7 +11451,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wid = int(request.match_info["watch_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         row = await _safe_fetchrow(pool,
             "SELECT * FROM notary_watches WHERE id=$1 AND owner_id=$2", wid, uid)
         if not row:
@@ -11473,7 +11473,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wid = int(request.match_info["watch_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         # Журнал наблюдений не трогаем: протокол, который можно стереть, ничего
         # не стоит. Снимаем только с наблюдения.
         row = await _safe_fetchrow(pool,
@@ -11511,7 +11511,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         from services import chatlist_folders as cf
 
         # Разрешаем два источника набора: явные chat_ids ИЛИ узлы связки.
@@ -11590,7 +11590,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             fid = int(request.match_info["folder_id"])
         except (KeyError, ValueError):
-            return _err("bad folder_id", 400)
+            return _err("Неверный идентификатор папки", 400)
         row = await pool.fetchrow(
             "DELETE FROM chatlist_folders WHERE id=$1 AND owner_id=$2 RETURNING id",
             fid, uid)
@@ -11626,7 +11626,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("bad acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         action = (request.match_info.get("action") or "").lower()
         from services import account_rehab as _rh
 
@@ -11650,7 +11650,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         account_id = body.get("account_id")
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("gentle", "standard", "aggressive"):
@@ -11799,7 +11799,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
         try:
             await pool.execute(
                 "DELETE FROM account_warmup_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
@@ -11816,7 +11816,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
         try:
             # pause_reason='user' + метка «уже сообщили»: о своей же паузе
             # уведомлять человека незачем, а причина отличает её от паузы,
@@ -11842,7 +11842,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
         try:
             # Возобновление — не нейтральное действие: на забаненном или
             # флагнутом аккаунте оно снова гонит действия и добивает его.
@@ -11892,7 +11892,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE account_warmup_plans
@@ -11947,7 +11947,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             exp_id = int(request.match_info["exp_id"])
         except (KeyError, ValueError):
-            return _err("bad exp_id", 400)
+            return _err("Неверный идентификатор эксперимента", 400)
         try:
             exp = await pool.fetchrow(
                 """SELECT e.id, e.name, e.experiment_type, e.status, e.created_at,
@@ -11979,7 +11979,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             exp_id = int(request.match_info["exp_id"])
         except (KeyError, ValueError):
-            return _err("bad exp_id", 400)
+            return _err("Неверный идентификатор эксперимента", 400)
         try:
             await pool.execute(
                 "DELETE FROM experiments e USING managed_bots b WHERE e.id=$1 AND e.bot_id=b.bot_id AND b.added_by=$2",
@@ -11997,7 +11997,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         bot_id = data.get("bot_id")
         name = str(data.get("name", "")).strip()
         experiment_type = data.get("experiment_type", "start_message")
@@ -12200,7 +12200,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
             channel = str(body.get("channel", "")).strip().lstrip("@")
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if not channel:
             return _err("channel обязателен", 400)
         label = f"Разведка рекламы @{channel}"
@@ -12264,7 +12264,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             role = str(body.get("role", "general")).strip()
             cluster = str(body.get("cluster", "default")).strip()[:64]
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         valid_roles = ("entry", "conversion", "retention", "general")
         if role not in valid_roles:
             return _err(f"role must be one of {valid_roles}", 400)
@@ -12274,7 +12274,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 role, cluster, bot_id, uid,
             )
             if res == "UPDATE 0":
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("set_bot_role_api uid=%d bot=%d", uid, bot_id)
@@ -12289,7 +12289,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             owned = await pool.fetchval(
                 "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
@@ -12298,7 +12298,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("relay_sessions_list ownership uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
         if not owned:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             rows = await pool.fetch(
                 """SELECT id, user_id, username, first_name, last_activity, messages_count
@@ -12327,7 +12327,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             session_id = int(request.match_info["session_id"])
         except (KeyError, ValueError):
-            return _err("bad session_id", 400)
+            return _err("Неверный идентификатор сессии", 400)
         # Verify ownership via join
         try:
             row = await pool.fetchrow(
@@ -12340,7 +12340,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("relay_session_messages ownership uid=%d sess=%d", uid, session_id)
             return _err(str(exc), 500)
         if not row:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             msgs = await pool.fetch(
                 "SELECT id, direction, text, created_at FROM relay_messages "
@@ -12369,14 +12369,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
             enabled = bool(body.get("enabled", True))
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         try:
             res = await pool.execute(
                 "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
                 enabled, bot_id, uid,
             )
             if res == "UPDATE 0":
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True, "relay_enabled": enabled})
         except Exception as exc:
             log.exception("relay_toggle uid=%d bot=%d", uid, bot_id)
@@ -12415,14 +12415,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             key_id = int(request.match_info["key_id"])
         except (KeyError, ValueError):
-            return _err("bad key_id", 400)
+            return _err("Неверный идентификатор ключа", 400)
         try:
             res = await pool.execute(
                 "UPDATE api_keys SET is_active=FALSE WHERE id=$1 AND user_id=$2",
                 key_id, uid,
             )
             if res == "UPDATE 0":
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("revoke_api_key uid=%d key=%d", uid, key_id)
@@ -12461,7 +12461,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
@@ -12471,7 +12471,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.warning("multigeo_get db error: %s", e)
             return _err("db error", 500)
         if not row:
-            return _err("bot not found", 404)
+            return _err("Бот не найден", 404)
         import aiohttp as _aiohttp
         from services import bot_api as _bapi
         langs = ["", "ru", "en", "de", "fr", "es", "it", "uk", "pt", "zh", "ar"]
@@ -12498,11 +12498,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         lang = (body.get("lang") or "").strip()
         name = (body.get("name") or "").strip()[:64]
         description = (body.get("description") or "").strip()[:512]
@@ -12518,7 +12518,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.warning("multigeo_set db error: %s", e)
             return _err("db error", 500)
         if not row:
-            return _err("bot not found", 404)
+            return _err("Бот не найден", 404)
         import aiohttp as _aiohttp
         from services import bot_api as _bapi
         errors = []
@@ -12916,7 +12916,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Предложение не найдено", 404)
             return _json_resp({"ok": True})
         except (KeyError, ValueError):
-            return _err("Invalid offering_id", 400)
+            return _err("Неверный идентификатор предложения", 400)
         except Exception as exc:
             log.exception("host_server_toggle_offering uid=%s", uid)
             return _err(str(exc), 500)
@@ -12972,7 +12972,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except ValueError as ve:
             return _err(str(ve), 400)
         except KeyError:
-            return _err("Invalid rental_id", 400)
+            return _err("Неверный идентификатор аренды", 400)
         except Exception as exc:
             log.exception("host_server_rental_status uid=%s", uid)
             return _err(str(exc), 500)
@@ -13131,7 +13131,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             parse_type = str(body.get("parse_type", "members")).strip()
             limit = int(body.get("limit", 500))
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if not source_ref:
             return _err("source_ref обязателен", 400)
         if parse_type not in ("members", "active", "comments"):
@@ -13219,7 +13219,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             value = float(body.get("value", 0) or 0)
             notes = str(body.get("notes", "")).strip()
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if not title:
             return _err("title обязателен", 400)
         valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
@@ -13245,17 +13245,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
             stage = str(body.get("stage", "")).strip()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
         if stage not in valid_stages:
-            return _err("invalid stage", 400)
+            return _err("Неверная стадия", 400)
         try:
             res = await pool.execute(
                 "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
                 stage, deal_id, uid,
             )
             if res == "UPDATE 0":
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("update_crm_deal_stage uid=%d deal=%d", uid, deal_id)
@@ -13268,13 +13268,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             deal_id = int(request.match_info["deal_id"])
         except (KeyError, ValueError):
-            return _err("bad deal_id", 400)
+            return _err("Неверный идентификатор сделки", 400)
         try:
             res = await pool.execute(
                 "DELETE FROM crm_deals WHERE id=$1 AND owner_id=$2", deal_id, uid
             )
             if res == "DELETE 0":
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("delete_crm_deal uid=%d deal=%d", uid, deal_id)
@@ -13318,7 +13318,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             name = str(body.get("name", "")).strip()[:100]
             description = str(body.get("description", "")).strip()[:500]
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if not name:
             return _err("name обязателен", 400)
         try:
@@ -13342,7 +13342,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             ws_id = int(request.match_info["ws_id"])
         except (KeyError, ValueError):
-            return _err("bad ws_id", 400)
+            return _err("Неверный идентификатор рабочего пространства", 400)
         # Check if owner — owners must delete instead of leave
         try:
             role = await pool.fetchval(
@@ -13353,7 +13353,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("leave_workspace role uid=%d ws=%d", uid, ws_id)
             return _err(str(exc), 500)
         if not role:
-            return _err("Not a member", 404)
+            return _err("Вы не участник", 404)
         try:
             if role == "owner":
                 # Delete workspace entirely
@@ -13429,14 +13429,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             order_id = int(request.match_info["order_id"])
         except (KeyError, ValueError):
-            return _err("bad order_id", 400)
+            return _err("Неверный идентификатор заказа", 400)
         try:
             res = await pool.execute(
                 "UPDATE promo_orders SET status='cancelled', updated_at=NOW() WHERE id=$1 AND owner_id=$2",
                 order_id, uid,
             )
             if res == "UPDATE 0":
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("promo_cancel_order uid=%d order=%d", uid, order_id)
@@ -13454,11 +13454,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = body.get("bot_id")
             smm_panel_id = body.get("smm_panel_id")
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if not keyword:
             return _err("keyword обязателен", 400)
         if target_position < 1 or target_position > 50:
-            return _err("target_position 1-50", 400)
+            return _err("Позиция цели — от 1 до 50", 400)
 
         # Бот и панель приходят из тела запроса, то есть от клиента. Без этой
         # проверки заказ можно было создать с ЧУЖИМ smm_panel_id: запуск
@@ -13503,7 +13503,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             order_id = int(request.match_info["order_id"])
         except (KeyError, ValueError):
-            return _err("bad order_id", 400)
+            return _err("Неверный идентификатор заказа", 400)
 
         from database import db
         from services import smm_panel as smm_svc
@@ -13564,7 +13564,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
             bot_username = str(body.get("bot_username", "")).strip().lstrip("@")
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if not bot_username:
             return _err("bot_username обязателен", 400)
         try:
@@ -13592,7 +13592,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             description = str(body.get("description", "")).strip()
             context = body.get("context", None)
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         if len(description) < 10:
             return _err("Описание слишком короткое (мин. 10 символов)", 400)
         if len(description) > 2000:
@@ -13641,14 +13641,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE managed_bots SET is_active = NOT is_active
                    WHERE bot_id=$1 AND added_by=$2 RETURNING bot_id, is_active""",
                 bot_id, uid)
             if not row:
-                return _err("Bot not found", 404)
+                return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
         except Exception:
             return _err("Failed to toggle bot", 500)
@@ -13662,14 +13662,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             funnel_id = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
-            return _err("Invalid funnel_id", 400)
+            return _err("Неверный идентификатор воронки", 400)
         # Verify ownership via managed_bots
         funnel = await _safe_fetchrow(pool,
             """SELECT f.id, f.name, f.trigger_type, f.keyword, f.is_active, mb.username AS bot_username
                FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
                WHERE f.id=$1 AND mb.added_by=$2""", funnel_id, uid)
         if not funnel:
-            return _err("Funnel not found", 404)
+            return _err("Воронка не найдена", 404)
         steps = await _safe_fetch(pool,
             "SELECT id, step_order, message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order",
             funnel_id)
@@ -13733,23 +13733,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         name = (body.get("name") or "").strip()
         trigger_type = body.get("trigger_type", "start")
         keyword = (body.get("keyword") or "").strip() or None
         first_message = (body.get("first_message") or "").strip()
         if not name:
-            return _err("name required")
+            return _err("Нужно название")
         if trigger_type not in ("start", "keyword"):
-            return _err("trigger_type must be start or keyword")
+            return _err("Тип триггера: start или keyword")
         if trigger_type == "keyword" and not keyword:
-            return _err("keyword required for keyword trigger")
+            return _err("Для триггера по ключевому слову нужно само слово")
         if not first_message:
-            return _err("first_message required")
+            return _err("Нужно первое сообщение")
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -13775,7 +13775,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             funnel_id = int(request.match_info["funnel_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         # Владение через managed_bots.
         funnel = await _safe_fetchrow(pool,
             """SELECT f.id FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
@@ -13814,7 +13814,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             step_id = int(request.match_info["step_id"])
         except (KeyError, ValueError):
-            return _err("Invalid step_id", 400)
+            return _err("Неверный идентификатор шага", 400)
         # Владение + защита шага 1 через JOIN.
         step = await _safe_fetchrow(pool,
             """SELECT fs.id, fs.step_order FROM funnel_steps fs
@@ -13846,11 +13846,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             step_id = int(request.match_info["step_id"])
         except (KeyError, ValueError):
-            return _err("Invalid step_id", 400)
+            return _err("Неверный идентификатор шага", 400)
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         # Владение — тем же JOIN, что у удаления.
         step = await _safe_fetchrow(pool,
             """SELECT fs.id FROM funnel_steps fs
@@ -13905,13 +13905,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         username = (body.get("username") or "").strip().lstrip("@").lower()
         label = (body.get("label") or "").strip() or None
         if not username:
-            return _err("username required")
+            return _err("Нужно имя пользователя")
         if len(username) > 50:
-            return _err("username too long")
+            return _err("Имя пользователя слишком длинное")
         try:
             row = await pool.fetchrow(
                 """INSERT INTO competitors(owner_id, username, label) VALUES($1,$2,$3)
@@ -13930,7 +13930,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             comp_id = int(request.match_info["comp_id"])
         except (KeyError, ValueError):
-            return _err("Invalid comp_id", 400)
+            return _err("Неверный идентификатор конкурента", 400)
         try:
             await pool.execute(
                 "DELETE FROM competitors WHERE id=$1 AND owner_id=$2", comp_id, uid)
@@ -13947,12 +13947,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         text = (body.get("text") or "").strip()
         if not text:
-            return _err("text required")
+            return _err("Нужен текст")
         if len(text) > 4096:
-            return _err("text too long (max 4096)")
+            return _err("Текст длиннее 4096 символов")
         # Опциональный выбор ботов: bot_ids → рассылка только выбранным
         sel_ids = [int(x) for x in (body.get("bot_ids") or []) if str(x).lstrip("-").isdigit()]
         if sel_ids:
@@ -13970,7 +13970,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE mb.added_by=$1 AND mb.is_active=true
                    GROUP BY mb.bot_id""", uid)
         if not bots:
-            return _err("No active bots found")
+            return _err("Активных ботов нет")
         total_recipients = sum(b["active_subs"] or 0 for b in bots)
         lang = body.get("lang", "")
         # Инлайн-кнопки (необязательно)
@@ -14061,7 +14061,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         first_name = str(data.get("first_name", "")).strip()
         last_name = str(data.get("last_name", "")).strip() or None
         username = str(data.get("username", "")).strip().lstrip("@") or None
@@ -14104,7 +14104,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             contact_id = int(request.match_info["contact_id"])
         except (KeyError, ValueError):
-            return _err("bad contact_id", 400)
+            return _err("Неверный идентификатор контакта", 400)
         try:
             await pool.execute(
                 "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", contact_id, uid
@@ -14121,11 +14121,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
         active = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id)
         new_today = await _safe_count(pool,
@@ -14175,21 +14175,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         bot_id = body.get("bot_id")
         keyword = (body.get("keyword") or "").strip().lower()
         if not bot_id or not keyword:
-            return _err("bot_id and keyword required")
+            return _err("Нужны идентификатор бота и ключевое слово")
         if len(keyword) > 100:
-            return _err("keyword too long")
+            return _err("Ключевое слово слишком длинное")
         try:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
-            return _err("Invalid bot_id")
+            return _err("Неверный идентификатор бота")
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         try:
             row = await pool.fetchrow(
                 """INSERT INTO tracked_keywords(bot_id, owner_id, keyword)
@@ -14208,7 +14208,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             kw_id = int(request.match_info["kw_id"])
         except (KeyError, ValueError):
-            return _err("Invalid kw_id", 400)
+            return _err("Неверный идентификатор ключевого слова", 400)
         try:
             await pool.execute(
                 "DELETE FROM tracked_keywords WHERE id=$1 AND owner_id=$2", kw_id, uid)
@@ -14226,11 +14226,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_id = int(request.match_info["acc_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
         if not owns:
-            return _err("Account not found", 404)
+            return _err("Аккаунт не найден", 404)
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("standard", "gentle", "aggressive"):
             plan_type = "standard"
@@ -14278,14 +14278,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
-            return _err("Invalid acc_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE account_warmup_plans SET status='paused'
                    WHERE account_id=$1 AND owner_id=$2 AND status='active'
                    RETURNING id""", acc_id, uid)
             if not row:
-                return _err("No active warmup", 404)
+                return _err("Активного прогрева нет", 404)
             return _json_resp({"ok": True})
         except Exception:
             return _err("Failed to pause", 500)
@@ -14299,11 +14299,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("Invalid bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         rows = await _safe_fetch(pool,
             """SELECT id, message_text, execute_at, status, created_at
                FROM scheduled_broadcasts WHERE bot_id=$1
@@ -14318,17 +14318,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             body = await request.json()
         except Exception:
-            return _err("Invalid request", 400)
+            return _err("Неверный запрос", 400)
         text = (body.get("text") or "").strip()
         execute_at = (body.get("execute_at") or "").strip()
         if not text:
-            return _err("text required")
+            return _err("Нужен текст")
         if not execute_at:
-            return _err("execute_at required (ISO datetime)")
+            return _err("Нужно время запуска в формате ISO")
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not owns:
-            return _err("Bot not found", 404)
+            return _err("Бот не найден", 404)
         try:
             import datetime
             dt = datetime.datetime.fromisoformat(execute_at.replace("Z", "+00:00"))
@@ -14336,7 +14336,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 import datetime as _dt
                 dt = dt.replace(tzinfo=_dt.timezone.utc)
         except ValueError:
-            return _err("execute_at must be ISO datetime (e.g. 2025-12-31T15:00:00Z)")
+            return _err("Время запуска должно быть в формате ISO, например 2025-12-31T15:00:00Z")
         repeat_min = schedule_repeat_minutes(body.get("repeat"))
         try:
             try:
@@ -14361,14 +14361,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             sch_id = int(request.match_info["sch_id"])
         except (KeyError, ValueError):
-            return _err("Invalid sch_id", 400)
+            return _err("Неверный идентификатор расписания", 400)
         try:
             row = await pool.fetchrow(
                 """UPDATE scheduled_broadcasts SET status='cancelled'
                    WHERE id=$1 AND created_by=$2 AND status='pending'
                    RETURNING id""", sch_id, uid)
             if not row:
-                return _err("Not found or already done", 404)
+                return _err("Не найдено или уже выполнено", 404)
             return _json_resp({"ok": True})
         except Exception:
             return _err("Failed to cancel", 500)
@@ -14400,15 +14400,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         name = (body.get("name") or "").strip()
         text = (body.get("text") or "").strip()
         if not name:
-            return _err("name required")
+            return _err("Нужно название")
         if not text:
-            return _err("text required")
+            return _err("Нужен текст")
         if len(text) > 4096:
-            return _err("text too long (max 4096)")
+            return _err("Текст длиннее 4096 символов")
         try:
             row = await pool.fetchrow(
                 "INSERT INTO asset_templates(owner_id, asset_type, name, template) VALUES($1,'post',$2,$3::jsonb) RETURNING id",
@@ -14425,7 +14425,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
-            return _err("Invalid tpl_id", 400)
+            return _err("Неверный идентификатор шаблона", 400)
         try:
             await pool.execute(
                 "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid)
@@ -14483,14 +14483,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         text = validate_string(body.get("text"), max_len=4096)
         delay = validate_integer(body.get("delay", 30), min_val=-1, max_val=300) or 30
         channel_ids = body.get("channel_ids")  # optional list; None = all channels
         if not text:
-            return _err("text required")
+            return _err("Нужен текст")
         if check_sql_suspicious(text):
-            return _err("Invalid characters in text")
+            return _err("Недопустимые символы в тексте")
         if delay not in (5, 30, 60, -1):
             delay = 30
         # Validate channel IDs if provided
@@ -14498,7 +14498,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
             except (TypeError, ValueError):
-                return _err("Invalid channel IDs", 400)
+                return _err("Неверные идентификаторы каналов", 400)
         # Count target channels
         if channel_ids:
             total = len(channel_ids)
@@ -14506,7 +14506,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
         if total == 0:
-            return _err("No channels to publish to")
+            return _err("Нет каналов для публикации")
         # Расписание (необязательно): ISO-время запуска в будущем. Фронт присылает
         # UTC ISO (new Date(local).toISOString()); воркер уважает scheduled_for.
         scheduled_for = None
@@ -14632,11 +14632,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         proxy_url = (body.get("proxy_url") or "").strip()
         label = (body.get("label") or "").strip() or None
         if not proxy_url:
-            return _err("proxy_url required")
+            return _err("Нужен адрес прокси")
         # Единая валидация (паритет с import_proxies): длина, loopback, схема.
         _reason = _reject_proxy_reason(proxy_url)
         if _reason == "too_long":
@@ -14644,7 +14644,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if _reason == "internal":
             return _err("Внутренние/loopback-адреса недопустимы")
         if _reason == "scheme":
-            return _err("proxy_url must start with socks5://, socks4://, or http://")
+            return _err("Адрес прокси должен начинаться с socks5://, socks4:// или http://")
         proxy_type = parse_proxy_type(proxy_url)
         try:
             # шифруем at-rest; дедуп по детерминированному proxy_fp (шифр недетерминирован)
@@ -14679,7 +14679,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             proxy_id = int(request.match_info["proxy_id"])
         except (KeyError, ValueError):
-            return _err("Invalid proxy_id", 400)
+            return _err("Неверный идентификатор прокси", 400)
         try:
             from services import proxy_hygiene
             # Гард изоляции живёт в одной двери на весь продукт: FK
@@ -14778,7 +14778,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             proxy_id = int(request.match_info["proxy_id"])
         except (KeyError, ValueError):
-            return _err("Invalid proxy_id", 400)
+            return _err("Неверный идентификатор прокси", 400)
         row = await _safe_fetchrow(pool,
             "SELECT id, proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, uid)
         if not row:
@@ -14805,7 +14805,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             proxy_id = int(request.match_info["proxy_id"])
         except (KeyError, ValueError):
-            return _err("Invalid proxy_id", 400)
+            return _err("Неверный идентификатор прокси", 400)
         row = await _safe_fetchrow(pool,
             "SELECT COALESCE(is_backup, FALSE) AS is_backup FROM user_proxies "
             "WHERE id=$1 AND owner_id=$2", proxy_id, uid)
@@ -14921,7 +14921,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         from services.token_vault import encrypt_token, proxy_fingerprint
         raw = validate_string(body.get("proxies"), max_len=50000) or ""
 
@@ -15212,13 +15212,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
-            return _err("bad tpl_id", 400)
+            return _err("Неверный идентификатор шаблона", 400)
         try:
             tpl = await pool.fetchrow(
                 "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
             )
             if not tpl:
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp(dict(tpl))
         except Exception as exc:
             log.exception("asset_template_detail uid=%d tpl=%d", uid, tpl_id)
@@ -15231,13 +15231,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
-            return _err("bad tpl_id", 400)
+            return _err("Неверный идентификатор шаблона", 400)
         try:
             result = await pool.execute(
                 "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
             )
             if result == "DELETE 0":
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True})
         except Exception as exc:
             log.exception("asset_template_delete uid=%d tpl=%d", uid, tpl_id)
@@ -15364,14 +15364,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         name = (body.get("name") or "").strip()
         description = (body.get("description") or "").strip()
         target_url = (body.get("target_url") or "").strip()
         target_label = (body.get("target_label") or "").strip()
         bot_id = body.get("bot_id") or None
         if not name:
-            return _err("name required")
+            return _err("Нужно название")
         if bot_id:
             try:
                 bot_id = int(bot_id)
@@ -15395,7 +15395,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pack_id = int(request.match_info["pack_id"])
         except (KeyError, ValueError):
-            return _err("bad pack_id", 400)
+            return _err("Неверный идентификатор пакета", 400)
         try:
             await pool.execute(
                 "DELETE FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, uid
@@ -15418,12 +15418,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pack_id = int(request.match_info["pack_id"])
         except (KeyError, ValueError):
-            return _err("bad pack_id", 400)
+            return _err("Неверный идентификатор пакета", 400)
         try:
             from database import db
             pack = await db.get_presence_pack(pool, pack_id, uid)
             if not pack:
-                return _err("Pack not found", 404)
+                return _err("Пакет не найден", 404)
             return _json_resp(_presence_pack_dict(pack))
         except Exception as exc:
             log.exception("presence_pack_detail uid=%d pack_id=%d", uid, pack_id)
@@ -15436,16 +15436,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pack_id = int(request.match_info["pack_id"])
         except (KeyError, ValueError):
-            return _err("bad pack_id", 400)
+            return _err("Неверный идентификатор пакета", 400)
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         try:
             from database import db
             pack = await db.get_presence_pack(pool, pack_id, uid)
             if not pack:
-                return _err("Pack not found", 404)
+                return _err("Пакет не найден", 404)
 
             if "bot_id" in body:
                 bot_id = body.get("bot_id") or None
@@ -15454,7 +15454,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     try:
                         bot_id = int(bot_id)
                     except (TypeError, ValueError):
-                        return _err("Invalid bot_id", 400)
+                        return _err("Неверный идентификатор бота", 400)
                     # Owner-scope: привязывать к паку можно ТОЛЬКО свой бот
                     # (added_by=uid), иначе — линковка чужого bot_id в свой пак.
                     bot_row = await pool.fetchrow(
@@ -15475,7 +15475,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 channel_ids = body.get("channel_ids", cur)
                 group_ids = body.get("group_ids", grp)
                 if not isinstance(channel_ids, list) or not isinstance(group_ids, list):
-                    return _err("channel_ids/group_ids must be lists", 400)
+                    return _err("channel_ids и group_ids должны быть списками", 400)
                 await db.update_presence_pack_channels(
                     pool, pack_id, uid,
                     [int(x) for x in channel_ids],
@@ -15495,12 +15495,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pack_id = int(request.match_info["pack_id"])
         except (KeyError, ValueError):
-            return _err("bad pack_id", 400)
+            return _err("Неверный идентификатор пакета", 400)
         try:
             from database import db
             pack = await db.get_presence_pack(pool, pack_id, uid)
             if not pack:
-                return _err("Pack not found", 404)
+                return _err("Пакет не найден", 404)
             ch_ids = _jlist(pack.get("channel_ids"))
             if not ch_ids:
                 return _err("Нет каналов в пакете", 400)
@@ -15525,12 +15525,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pack_id = int(request.match_info["pack_id"])
         except (KeyError, ValueError):
-            return _err("bad pack_id", 400)
+            return _err("Неверный идентификатор пакета", 400)
         try:
             from database import db
             pack = await db.get_presence_pack(pool, pack_id, uid)
             if not pack:
-                return _err("Pack not found", 404)
+                return _err("Пакет не найден", 404)
             if not pack.get("bot_id"):
                 return _err("Нет бота в пакете. Привяжите бот перед назначением admin.", 400)
             ch_ids = _jlist(pack.get("channel_ids"))
@@ -15592,13 +15592,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
         try:
             plan = await pool.fetchrow(
                 "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
             )
             if not plan:
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             targets = await pool.fetch(
                 "SELECT country, region, city, language, asset_type, planned_name, status, "
                 "       error_message, role, level, "
@@ -15638,7 +15638,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         
         asset_type = body.get("asset_type", "channel")
         name_pattern = (body.get("name_pattern") or "").strip()
@@ -15665,7 +15665,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 ref_username, ref_city_slug or ref_city, "{{CITY_SLUG}}")
 
         if asset_type not in ("channel", "group", "bot", "package", "full_package"):
-            return _err("Invalid asset_type: must be channel/group/bot/package/full_package", 400)
+            return _err("Неверный тип ресурса: допустимы channel, group, bot, package, full_package", 400)
         if not name_pattern:
             return _err("Укажите паттерн названия или референс", 400)
 
@@ -15778,15 +15778,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
         try:
             plan = await pool.fetchrow(
                 "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
             )
             if not plan:
-                return _err("Plan not found", 404)
+                return _err("План не найден", 404)
             if plan["status"] not in ("pending", "failed"):
-                return _err("Plan already running or completed", 400)
+                return _err("План уже запущен или завершён", 400)
             
             # Queue the operation
             from services import operation_bus
@@ -15818,15 +15818,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             plan_id = int(request.match_info["plan_id"])
         except (KeyError, ValueError):
-            return _err("bad plan_id", 400)
+            return _err("Неверный идентификатор плана", 400)
 
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         action = (body.get("action") or "both").strip()
         if action not in ("about", "avatar", "both"):
-            return _err("action must be one of: about, avatar, both", 400)
+            return _err("Действие: about, avatar или both", 400)
         about_template = (body.get("about_template") or "").strip()
 
         try:
@@ -15836,7 +15836,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             if not plan:
-                return _err("Plan not found", 404)
+                return _err("План не найден", 404)
 
             n_targets = await pool.fetchval(
                 "SELECT COUNT(*) FROM global_presence_targets "
@@ -15927,13 +15927,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             eco_id = int(request.match_info["eco_id"])
         except (KeyError, ValueError):
-            return _err("bad eco_id", 400)
+            return _err("Неверный идентификатор экосистемы", 400)
         try:
             eco = await pool.fetchrow(
                 "SELECT * FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
             )
             if not eco:
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             members = await pool.fetch(
                 "SELECT object_type, object_id, role, added_at "
                 "FROM ecosystem_members WHERE ecosystem_id=$1 ORDER BY added_at DESC LIMIT 50",
@@ -15965,7 +15965,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             eco_id = int(request.match_info["eco_id"])
         except (KeyError, ValueError):
-            return _err("bad eco_id", 400)
+            return _err("Неверный идентификатор экосистемы", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid)
         if not owns:
@@ -15986,13 +15986,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         name = (body.get("name") or "").strip()
         description = (body.get("description") or "").strip()
         ecosystem_type = (body.get("ecosystem_type") or "custom").strip()
         region = (body.get("region") or "").strip()
         if not name:
-            return _err("name required")
+            return _err("Нужно название")
         try:
             row = await pool.fetchrow(
                 """INSERT INTO ecosystems(owner_id, name, description, ecosystem_type, region)
@@ -16011,7 +16011,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             eco_id = int(request.match_info["eco_id"])
         except (KeyError, ValueError):
-            return _err("bad eco_id", 400)
+            return _err("Неверный идентификатор экосистемы", 400)
         try:
             await pool.execute(
                 "DELETE FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
@@ -16030,14 +16030,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         title = (body.get("title") or "").strip()
         about = (body.get("about") or "").strip()
         account_id = body.get("account_id")
         if not title:
-            return _err("title required")
+            return _err("Нужен заголовок")
         if not account_id:
-            return _err("account_id required")
+            return _err("Нужен идентификатор аккаунта")
         try:
             acc = await pool.fetchrow(
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
@@ -16086,14 +16086,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad body", 400)
+            return _err("Неверное тело запроса", 400)
         title = (body.get("title") or "").strip()
         account_id = body.get("account_id")
         is_supergroup = body.get("is_supergroup", True)
         if not title:
-            return _err("title required")
+            return _err("Нужен заголовок")
         if not account_id:
-            return _err("account_id required")
+            return _err("Нужен идентификатор аккаунта")
         try:
             acc = await pool.fetchrow(
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
@@ -16150,7 +16150,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             account_id = int(request.match_info["account_id"])
         except (KeyError, ValueError):
-            return _err("bad account_id", 400)
+            return _err("Неверный идентификатор аккаунта", 400)
         try:
             owner = await pool.fetchval(
                 "SELECT owner_id FROM tg_accounts WHERE id=$1", account_id
@@ -16316,10 +16316,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         source = (body.get("source") or "").strip()
         if not source:
-            return _err("source required")
+            return _err("Нужен источник")
         account_id = body.get("account_id")
         # Resolve the worker's contract here: _exec_content_clone expects source_ref,
         # a list of target channels and an explicit account list. The Mini App only
@@ -16428,13 +16428,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             mesh_id = int(request.match_info["mesh_id"])
         except (KeyError, ValueError):
-            return _err("bad mesh_id", 400)
+            return _err("Неверный идентификатор задачи сети", 400)
         try:
             mesh = await pool.fetchrow(
                 "SELECT enabled FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid
             )
             if not mesh:
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             new_state = not mesh["enabled"]
             await pool.execute(
                 "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3", new_state, mesh_id, uid
@@ -16451,7 +16451,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         source_bot_id = data.get("source_bot_id")
         target_bot_id = data.get("target_bot_id")
         fields = data.get("fields", "name,desc")
@@ -16496,7 +16496,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         name = str(data.get("name", "")).strip()
         source_channel = str(data.get("source_channel", "")).strip() or None
         source_account_id = data.get("source_account_id")
@@ -16529,7 +16529,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             mesh_id = int(request.match_info["mesh_id"])
         except (KeyError, ValueError):
-            return _err("bad mesh_id", 400)
+            return _err("Неверный идентификатор задачи сети", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid)
         if not owns:
@@ -16546,7 +16546,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             mesh_id = int(request.match_info["mesh_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid)
         if not owns:
@@ -16581,7 +16581,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             target_id = int(request.match_info["target_id"])
         except (KeyError, ValueError):
-            return _err("bad target_id", 400)
+            return _err("Неверный идентификатор цели", 400)
         # Владение через JOIN на content_meshes.
         row = await _safe_fetchrow(pool,
             """SELECT mt.id FROM mesh_targets mt
@@ -16620,13 +16620,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             cid = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         try:
             campaign = await pool.fetchrow(
                 "SELECT * FROM narrative_campaigns WHERE id=$1 AND owner_id=$2", cid, uid
             )
             if not campaign:
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             posts = await pool.fetch(
                 "SELECT channel_username, angle, status, scheduled_at, published_at "
                 "FROM narrative_posts WHERE campaign_id=$1 ORDER BY scheduled_at LIMIT 50",
@@ -16645,7 +16645,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             cid = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         try:
             from services import narrative_engine
             ok = await narrative_engine.pause_campaign(pool, cid, uid)
@@ -16664,7 +16664,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             cid = int(request.match_info["campaign_id"])
         except (KeyError, ValueError):
-            return _err("bad campaign_id", 400)
+            return _err("Неверный идентификатор кампании", 400)
         try:
             from services import narrative_engine
             ok = await narrative_engine.resume_campaign(pool, cid, uid)
@@ -16685,7 +16685,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         topic = str(data.get("topic", "")).strip()
         core_message = str(data.get("core_message", "")).strip()
         campaign_type = data.get("campaign_type", "trend")
@@ -16745,7 +16745,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         script = str(data.get("script", "")).strip()
         if not script:
             return _err("Пришлите текст сценария", 400)
@@ -16775,7 +16775,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         templates = data.get("templates") or []
         single = str(data.get("template", "")).strip()
         if single:
@@ -16817,7 +16817,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         style = data.get("style", "direct")
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
@@ -16849,7 +16849,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
-            return _err("bad tpl_id", 400)
+            return _err("Неверный идентификатор шаблона", 400)
         try:
             result = await pool.execute(
                 "DELETE FROM self_promo_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
@@ -16868,14 +16868,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
-            return _err("bad tpl_id", 400)
+            return _err("Неверный идентификатор шаблона", 400)
         try:
             tpl = await pool.fetchrow(
                 "SELECT is_active, owner_id FROM self_promo_templates WHERE id=$1 AND (owner_id=$2 OR owner_id IS NULL)",
                 tpl_id, uid,
             )
             if not tpl:
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             # Системные (общие) шаблоны нельзя переключать обычному пользователю —
             # это влияло бы на всех. Меняем только свои.
             if tpl["owner_id"] is None:
@@ -16897,7 +16897,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             tpl_id = int(request.match_info["tpl_id"])
         except (KeyError, ValueError):
-            return _err("bad tpl_id", 400)
+            return _err("Неверный идентификатор шаблона", 400)
         try:
             tpl = await pool.fetchrow(
                 "SELECT id, title FROM self_promo_templates "
@@ -16953,7 +16953,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             owner = await pool.fetchval("SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
             if owner != uid:
@@ -17000,14 +17000,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             from database import db as _db
             from services import audience_dna as dna_svc
 
             bot_row = await _db.get_bot(pool, bot_id, uid)
             if not bot_row:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
 
             dna = await dna_svc.get_dna(pool, bot_id)
             if not dna:
@@ -17028,14 +17028,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             from database import db as _db
             from services import audience_dna as dna_svc
 
             bot_row = await _db.get_bot(pool, bot_id, uid)
             if not bot_row:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
 
             dna = await dna_svc.compute_dna(pool, bot_id, uid)
             data = _dna_to_dict(dna)
@@ -17053,14 +17053,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad bot_id", 400)
+            return _err("Неверный идентификатор бота", 400)
         try:
             from database import db as _db
             from services import audience_dna as dna_svc
 
             bot_row = await _db.get_bot(pool, bot_id, uid)
             if not bot_row:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
 
             history = await dna_svc.get_dna_history(pool, bot_id, limit=10)
             return _json_resp([_dna_to_dict(snap) for snap in history])
@@ -17104,7 +17104,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             fid = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
-            return _err("bad funnel_id", 400)
+            return _err("Неверный идентификатор воронки", 400)
         try:
             funnel = await pool.fetchrow(
                 "SELECT enabled FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
@@ -17113,7 +17113,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("auto_funnel_toggle fetch uid=%d fid=%d", uid, fid)
             return _err(str(exc), 500)
         if not funnel:
-            return _err("not found", 404)
+            return _err("Не найдено", 404)
         new_state = not funnel["enabled"]
         try:
             await pool.execute(
@@ -17131,7 +17131,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             fid = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
-            return _err("bad funnel_id", 400)
+            return _err("Неверный идентификатор воронки", 400)
         try:
             funnel = await pool.fetchrow(
                 """
@@ -17143,7 +17143,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 fid, uid,
             )
             if not funnel:
-                return _err("not found", 404)
+                return _err("Не найдено", 404)
             steps = await pool.fetch(
                 "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", fid
             )
@@ -17159,25 +17159,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         name = (body.get("name") or "").strip()
         bot_id = body.get("bot_id")
         target_segment = (body.get("target_segment") or "all").strip()
         first_message = (body.get("first_message") or "").strip()
         if not name:
-            return _err("name required")
+            return _err("Нужно название")
         if not bot_id:
-            return _err("bot_id required")
+            return _err("Нужен идентификатор бота")
         try:
             bot_id = int(bot_id)
         except (TypeError, ValueError):
-            return _err("invalid bot_id")
+            return _err("Неверный идентификатор бота")
         bot_row = await pool.fetchrow(
             "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id, uid,
         )
         if not bot_row:
-            return _err("bot not found", 404)
+            return _err("Бот не найден", 404)
         try:
             row = await pool.fetchrow(
                 "INSERT INTO auto_funnels(owner_id, name, bot_id, target_segment) VALUES($1,$2,$3,$4) RETURNING id",
@@ -17201,7 +17201,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             fid = int(request.match_info["funnel_id"])
         except (KeyError, ValueError):
-            return _err("bad funnel_id", 400)
+            return _err("Неверный идентификатор воронки", 400)
         try:
             await pool.execute(
                 "DELETE FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
@@ -17256,7 +17256,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             text = data.get("text", "")
             scheduled_at = data.get("scheduled_at")
             if not channel_id or not text or not scheduled_at:
-                return _err("Missing channel_id, text, or scheduled_at")
+                return _err("Нужны канал, текст и время публикации")
             # Раньше здесь был прямой INSERT со строкой в scheduled_for БЕЗ
             # ::timestamptz — asyncpg на строку в timestamptz кидает DataError,
             # т.е. эндпойнт падал 500 при любом вызове. operation_bus.submit
@@ -17786,7 +17786,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             d = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         try:
             p = await _mp.register_provider(
                 pool, uid, d.get("name", ""), description=d.get("description", ""),
@@ -17816,10 +17816,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pid = int(request.match_info["pid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         p = await _mp_owned_provider(uid, pid)
         if not p:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         return _json_resp({"provider": p,
                            "services": await _mp.list_services(pool, pid),
                            "api_keys": await _mp.list_api_keys(pool, pid)})
@@ -17832,9 +17832,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _mp_owned_provider(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             p = await _mp.update_provider_profile(pool, pid, uid, **d)
             return _json_resp({"ok": True, "provider": p})
@@ -17849,9 +17849,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pid = int(request.match_info["pid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         if not await _mp_owned_provider(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             # api_key возвращается ОДИН раз — фронт обязан показать и попросить сохранить
             return _json_resp({"ok": True, "key": await _mp.issue_api_key(
@@ -17868,9 +17868,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             kid = int(request.match_info["kid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         if not await _mp_owned_provider(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         ok = await _mp.revoke_api_key(pool, pid, kid, actor_id=uid)
         return _json_resp({"ok": ok})
 
@@ -17882,9 +17882,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _mp_owned_provider(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
                            else _mp.to_cents(d.get("price", "0")))
@@ -17911,10 +17911,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             sid = int(request.match_info["sid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         s, p = await _mp_owned_service(uid, sid)
         if not p:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             if d.get("price") is not None and d.get("price_cents") is None:
                 d["price_cents"] = _mp.to_cents(d.pop("price"))
@@ -17934,10 +17934,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             sid = int(request.match_info["sid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         s, p = await _mp_owned_service(uid, sid)
         if not p:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         ok = await _mp.set_service_active(pool, sid, p["id"], bool(d.get("active", True)),
                                           actor_id=uid)
         return _json_resp({"ok": ok})
@@ -17965,12 +17965,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         try:
             p = await _mp.set_provider_status(
                 pool, pid, d.get("status", ""), by=uid, reason=d.get("reason", ""))
             if not p:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True, "provider": p})
         except ValueError as e:
             return _err(str(e), 400)
@@ -18018,7 +18018,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             d = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         try:
             name = d.pop("name", "")
             p = await _bsp.create_persona(pool, uid, name, **d)
@@ -18036,10 +18036,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pid = int(request.match_info["pid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         p = await _sp_owned(uid, pid)
         if not p:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         return _json_resp({"persona": p,
                            "products": await _bsp.list_products(pool, pid),
                            "faqs": await _bsp.list_faq(pool, pid),
@@ -18055,9 +18055,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             return _json_resp({"ok": True,
                                "persona": await _bsp.update_persona(pool, pid, uid, **d)})
@@ -18074,7 +18074,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pid = int(request.match_info["pid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         return _json_resp({"ok": await _bsp.delete_persona(pool, pid, uid)})
 
     async def sp_assign(request):
@@ -18086,14 +18086,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             d = await request.json()
             bot_id = int(d["bot_id"])
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         # бот должен принадлежать пользователю (added_by)
         own = await pool.fetchval(
             "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
         if not own:
             return _err("бот не найден или не ваш", 403)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         r = await _bsp.assign_to_bot(pool, pid, uid, bot_id)
         return _json_resp({"ok": bool(r), "persona": r})
 
@@ -18104,7 +18104,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pid = int(request.match_info["pid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         return _json_resp({"ok": await _bsp.unassign_from_bot(pool, pid, uid)})
 
     async def sp_product_add(request):
@@ -18115,9 +18115,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
                            else _mp.to_cents(d.get("price", "0")))
@@ -18144,13 +18144,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             prid = int(request.match_info["prid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         try:
             if d.get("price") is not None and d.get("price_cents") is None:
                 d["price_cents"] = _mp.to_cents(d.pop("price"))
             r = await _bsp.update_product(pool, prid, uid, **d)
             if not r:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp({"ok": True, "product": r})
         except ValueError as e:
             return _err(str(e), 400)
@@ -18165,7 +18165,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             prid = int(request.match_info["prid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         return _json_resp({"ok": await _bsp.delete_product(pool, prid, uid)})
 
     async def sp_test(request):
@@ -18175,10 +18175,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pid = int(request.match_info["pid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         p = await _sp_owned(uid, pid)
         if not p:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         products = await _bsp.list_products(pool, pid, active_only=True)
         return _json_resp(await _bsp.diagnose_generation(p, products))
 
@@ -18189,9 +18189,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             pid = int(request.match_info["pid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         return _json_resp({"stats": await _bsp.persona_stats(pool, pid, uid)})
 
     async def sp_chat(request):
@@ -18203,10 +18203,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         p = await _sp_owned(uid, pid)
         if not p:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         text = (d.get("text") or "").strip()
         if not text:
             return _err("пустое сообщение", 400)
@@ -18226,9 +18226,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             faq = await _bsp.add_faq(
                 pool, pid, uid, d.get("question", ""), d.get("answer", ""),
@@ -18249,10 +18249,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             fid = int(request.match_info["fid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         r = await _bsp.update_faq(pool, fid, uid, **d)
         if not r:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         return _json_resp({"ok": True, "faq": r})
 
     async def sp_faq_delete(request):
@@ -18262,7 +18262,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             fid = int(request.match_info["fid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         return _json_resp({"ok": await _bsp.delete_faq(pool, fid, uid)})
 
     # ── Эталонные примеры (few-shot) ───────────────────────────────────────
@@ -18274,9 +18274,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             ex = await _bsp.add_example(
                 pool, pid, uid, d.get("user_msg", ""), d.get("assistant_msg", ""),
@@ -18295,7 +18295,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             eid = int(request.match_info["eid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         return _json_resp({"ok": await _bsp.delete_example(pool, eid, uid)})
 
     # ── Способы доставки ───────────────────────────────────────────────────
@@ -18307,9 +18307,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
                            else _mp.to_cents(d.get("price", "0")))
@@ -18330,7 +18330,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             did = int(request.match_info["did"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         return _json_resp({"ok": await _bsp.delete_delivery(pool, did, uid)})
 
     # ── Промокоды ──────────────────────────────────────────────────────────
@@ -18342,9 +18342,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             pid = int(request.match_info["pid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _sp_owned(uid, pid):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             min_total = (int(d["min_total_cents"]) if d.get("min_total_cents") is not None
                          else _mp.to_cents(d.get("min_total", "0")))
@@ -18365,7 +18365,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             prid = int(request.match_info["prid"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         return _json_resp({"ok": await _bsp.delete_promo(pool, prid, uid)})
 
     async def sp_orders(request):
@@ -18388,10 +18388,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             oid = int(request.match_info["oid"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         r = await _bsp.update_order(pool, oid, uid, **d)
         if not r:
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         return _json_resp({"ok": True, "order": r})
 
     app.router.add_get("/api/miniapp/sales/personas", sp_list)
@@ -18434,9 +18434,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         if not await _fg_owns(uid, bot_id):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         cfg = await _fg.get_config(pool, bot_id)
         ep = await _fg.active_episode(pool, bot_id)
         if ep:
@@ -18454,9 +18454,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _fg_owns(uid, bot_id):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         try:
             cfg = await _fg.set_config(
                 pool, bot_id, uid, mode=d.get("mode"),
@@ -18474,9 +18474,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _fg_owns(uid, bot_id):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         n = await _fg.flag_recent(pool, bot_id, int(d.get("minutes", 10) or 10))
         return _json_resp({"ok": True, "flagged": n})
 
@@ -18488,9 +18488,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
             d = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not await _fg_owns(uid, bot_id):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         n = await _fg.purge_suspects(pool, bot_id, hard=bool(d.get("hard", False)))
         return _json_resp({"ok": True, "purged": n})
 
@@ -18501,9 +18501,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         if not await _fg_owns(uid, bot_id):
-            return _err("Not found", 404)
+            return _err("Не найдено", 404)
         n = await _fg.unflag_all(pool, bot_id)
         return _json_resp({"ok": True, "unflagged": n})
 
@@ -18809,7 +18809,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     uid,
                 )
                 if not owns:
-                    return _err("not found", 404)
+                    return _err("Не найдено", 404)
                 # Реальное членство каналов — ecosystem_members (object_type='channel').
                 # Прежде читалось из ecosystem_channels — мёртвой таблицы, куда никто
                 # не пишет → ch_ids всегда пуст → overlap всегда {} (фича 4A мертва).
@@ -19328,7 +19328,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         name = validate_string(body.get("name"), max_len=100)
         if not name:
             return _err("Укажите название сети", 400)
@@ -19349,7 +19349,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             nid = int(request.match_info["net_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         from services import network_builder as _nb
         d = await _nb.get_instance_detail(pool, uid, nid)
         if not d:
@@ -19379,7 +19379,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             nid = int(request.match_info["net_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         from services import network_builder as _nb
         d = await _nb.get_instance_detail(pool, uid, nid)
         if not d:
@@ -19400,7 +19400,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             nid = int(request.match_info["net_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
         if not owns:
@@ -19484,7 +19484,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             nid = int(request.match_info["net_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
         if not owns:
@@ -19506,7 +19506,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             node_id = int(request.match_info["node_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         await pool.execute(
             "DELETE FROM network_nodes WHERE id=$1 AND instance_id IN "
             "(SELECT id FROM network_instances WHERE owner_id=$2)", node_id, uid)
@@ -19521,7 +19521,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
             frm = int(body.get("from_id")); to = int(body.get("to_id"))
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         owns = await _safe_count(pool,
             "SELECT COUNT(*) FROM network_instances WHERE id=$1 AND owner_id=$2", nid, uid)
         if not owns:
@@ -19538,7 +19538,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             edge_id = int(request.match_info["edge_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         await pool.execute(
             "DELETE FROM network_edges WHERE id=$1 AND instance_id IN "
             "(SELECT id FROM network_instances WHERE owner_id=$2)", edge_id, uid)
@@ -19552,7 +19552,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         name = validate_string(body.get("name"), max_len=120)
         if not name:
             return _err("Укажите название воркфлоу", 400)
@@ -19574,7 +19574,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wid = int(request.match_info["wf_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         row = await _safe_fetchrow(pool,
             "SELECT id, name, description, steps, COALESCE(is_active,FALSE) AS is_active "
             "FROM workflow_definitions WHERE id=$1 AND owner_id=$2", wid, uid)
@@ -19599,7 +19599,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             wid = int(request.match_info["wf_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         active = bool(body.get("active"))
         res = await pool.execute(
             "UPDATE workflow_definitions SET is_active=$1, updated_at=NOW() "
@@ -19615,7 +19615,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wid = int(request.match_info["wf_id"])
         except (KeyError, ValueError):
-            return _err("bad id", 400)
+            return _err("Неверный идентификатор", 400)
         await pool.execute(
             "DELETE FROM workflow_definitions WHERE id=$1 AND owner_id=$2", wid, uid)
         return _json_resp({"ok": True})
@@ -19629,7 +19629,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             wid = int(request.match_info["wf_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         if not isinstance(body, dict) or not body.get("type"):
             return _err("Шаг должен содержать type", 400)
         res = await pool.execute(
@@ -20139,7 +20139,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             contact_id = request.match_info['contact_id']
             from services.contacts_hub.repository import get_contact
             result = await get_contact(pool, contact_id, uid)
-            if not result: return _err("Not found", 404)
+            if not result: return _err("Не найдено", 404)
             # Авто-обогащение (чистое, на чтение): активность + предполагаемый язык.
             try:
                 from services.contacts_hub import enrich as _enr
@@ -20188,7 +20188,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             contact_id = request.match_info['contact_id']
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         from services.contacts_hub.repository import get_contact
         res = await get_contact(pool, contact_id, uid)
         if not res:
@@ -20306,7 +20306,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             contact_id = request.match_info['contact_id']
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         group = (body.get("group") or "").strip()
         if not group:
             return _err("Укажите канал/чат (@username или ссылку)", 400)
@@ -20463,7 +20463,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         # A/B: если передан список variants (2–4 текста) — раскладка по вариантам.
         from services import ab_engine
         variants = ab_engine.clean_variants(body.get("variants"))
@@ -20777,7 +20777,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         group = (body.get("group") or "").strip()
         if not group:
             return _err("Укажите канал/чат (@username или ссылку)", 400)
@@ -20848,7 +20848,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         name = (body.get("name") or "").strip()
         if not name:
             return _err("Укажите название сегмента", 400)
@@ -20868,7 +20868,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             sid = int(request.match_info["seg_id"])
         except (KeyError, ValueError):
-            return _err("bad seg_id", 400)
+            return _err("Неверный идентификатор сегмента", 400)
         from services.contacts_hub.repository import delete_segment
         return _json_resp({"ok": await delete_segment(pool, uid, sid)})
 
@@ -20892,7 +20892,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("bad json", 400)
+            return _err("Не удалось разобрать запрос", 400)
         from services import intent_sensor
         try:
             rid = await intent_sensor.add_rule(
@@ -20912,7 +20912,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rid = int(request.match_info["rule_id"])
         except (KeyError, ValueError):
-            return _err("bad rule_id", 400)
+            return _err("Неверный идентификатор правила", 400)
         from services import intent_sensor
         ok = await intent_sensor.delete_rule(pool, uid, rid)
         return _json_resp({"ok": ok})
@@ -20928,7 +20928,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rid = int(request.match_info["rule_id"])
             body = await request.json()
         except Exception:
-            return _err("bad request", 400)
+            return _err("Неверный запрос", 400)
         from services import intent_sensor
         kwargs = {}
         if "phrase" in body:
@@ -20962,7 +20962,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try:
                 rid = int(request.query["rule_id"])
             except (TypeError, ValueError):
-                return _err("bad rule_id", 400)
+                return _err("Неверный идентификатор правила", 400)
         from services import intent_sensor
         try:
             hits = await intent_sensor.recent_hits(pool, uid, rid, limit=50)
@@ -20978,7 +20978,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rid = int(request.match_info["rule_id"])
         except (KeyError, ValueError):
-            return _err("bad rule_id", 400)
+            return _err("Неверный идентификатор правила", 400)
         from services import intent_sensor
         await intent_sensor.toggle_rule(pool, uid, rid)
         return _json_resp({"ok": True})
@@ -21000,7 +21000,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
             from services.contacts_hub.repository import update_contact, log_contact_history
             success = await update_contact(pool, contact_id, uid, data)
-            if not success: return _err("Not found", 404)
+            if not success: return _err("Не найдено", 404)
             await log_contact_history(pool, contact_id, uid, 'edit', source='user')
             return _json_resp({'ok': True})
         except Exception as e:
@@ -21013,7 +21013,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             contact_id = request.match_info['contact_id']
             from services.contacts_hub.repository import delete_contact
             success = await delete_contact(pool, contact_id, uid)
-            if not success: return _err("Not found", 404)
+            if not success: return _err("Не найдено", 404)
             return _json_resp({'ok': True})
         except Exception as e:
             return _err(str(e), 500)
@@ -21022,7 +21022,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         query = request.query.get('q', '')
-        if not query: return _err("Query required", 400)
+        if not query: return _err("Нужен поисковый запрос", 400)
         try:
             from services.contacts_hub.search_engine import search_contacts
             results = await search_contacts(pool, uid, query)
@@ -21121,7 +21121,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             cid = request.match_info['contact_id']
             from services.contacts_hub.repository import update_contact
             row = await pool.fetchrow('SELECT is_favorite FROM unified_contacts WHERE id=$1 AND owner_id=$2', cid, uid)
-            if not row: return _err("Not found", 404)
+            if not row: return _err("Не найдено", 404)
             new_val = not row['is_favorite']
             await update_contact(pool, cid, uid, {'is_favorite': new_val})
             return _json_resp({'ok': True, 'is_favorite': new_val})
@@ -21226,7 +21226,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             vnum = int(request.match_info['version_num'])
             from services.contacts_hub.versioning_engine import rollback_to_version
             ok = await rollback_to_version(pool, cid, uid, vnum)
-            if not ok: return _err("Version not found", 404)
+            if not ok: return _err("Версия не найдена", 404)
             return _json_resp({'ok': True})
         except Exception as e:
             return _err(str(e), 500)
@@ -21396,7 +21396,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             primary_id = data.get('primary_id')
             secondary_id = data.get('secondary_id')
             if not primary_id or not secondary_id:
-                return _err("primary_id and secondary_id required", 400)
+                return _err("Нужны основной и дополнительный идентификаторы", 400)
             from services.contacts_hub.merge_engine import manual_merge
             result = await manual_merge(pool, primary_id, secondary_id, uid)
             return _json_resp(result)
@@ -21784,7 +21784,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
             gid = data.get('group_id')
-            if not gid: return _err("group_id required", 400)
+            if not gid: return _err("Нужен идентификатор группы", 400)
             action = data.get('action', 'add')
             if action == 'add':
                 from services.contacts_hub.bulk_ops_engine import bulk_add_to_group
@@ -21802,7 +21802,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
             pairs = data.get('pairs', [])
-            if not pairs: return _err("pairs required", 400)
+            if not pairs: return _err("Нужны пары значений", 400)
             from services.contacts_hub.bulk_ops_engine import bulk_merge
             result = await bulk_merge(pool, uid, pairs)
             return _json_resp(result)
@@ -21931,7 +21931,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
             query = data.get('query', '').strip()
-            if not query: return _err("Query required", 400)
+            if not query: return _err("Нужен поисковый запрос", 400)
             from services.contacts_hub.ai_assistant import process_ai_query
             result = await process_ai_query(pool, uid, query)
             return _json_resp(result)
@@ -22088,7 +22088,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         account_id = validate_string(data.get("account_id"), max_len=64) or ""
         subdomain = validate_string(data.get("subdomain"), max_len=80) or ""
         api_token = (data.get("api_token") or "").strip()
@@ -22248,7 +22248,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         try:
             from database import db
             norm = await db.set_ipv6_subnet(pool, uid, data.get("subnet") or "")
@@ -22492,7 +22492,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.network_builder import get_instance_detail
             detail = await get_instance_detail(pool, uid, instance_id)
             if not detail:
-                return _err("Not found", 404)
+                return _err("Не найдено", 404)
             return _json_resp(detail)
         except Exception as e:
             return _err(str(e), 500)
@@ -22550,7 +22550,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON", 400)
+            return _err("Не удалось разобрать запрос", 400)
         name = (body.get("name") or "").strip()
         steps = body.get("steps")
         if not name:
@@ -22584,7 +22584,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wf_id = int(request.match_info["wf_id"])
         except (KeyError, ValueError):
-            return _err("bad wf_id", 400)
+            return _err("Неверный идентификатор сценария", 400)
         try:
             from services.workflow_engine import execute_workflow
             result = await execute_workflow(pool, uid, wf_id)
@@ -22604,7 +22604,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wf_id = int(request.match_info["wf_id"])
         except (KeyError, ValueError):
-            return _err("bad wf_id", 400)
+            return _err("Неверный идентификатор сценария", 400)
         try:
             from services.workflow_engine import get_workflow_status
             status = await get_workflow_status(pool, uid, wf_id)
@@ -22622,7 +22622,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wf_id = int(request.match_info["wf_id"])
         except (KeyError, ValueError):
-            return _err("bad wf_id", 400)
+            return _err("Неверный идентификатор сценария", 400)
         try:
             from services.workflow_engine import pause_workflow
             result = await pause_workflow(pool, uid, wf_id)
@@ -22642,7 +22642,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wf_id = int(request.match_info["wf_id"])
         except (KeyError, ValueError):
-            return _err("bad wf_id", 400)
+            return _err("Неверный идентификатор сценария", 400)
         try:
             from services.workflow_engine import resume_workflow
             result = await resume_workflow(pool, uid, wf_id)
@@ -22662,7 +22662,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             wf_id = int(request.match_info["wf_id"])
         except (KeyError, ValueError):
-            return _err("bad wf_id", 400)
+            return _err("Неверный идентификатор сценария", 400)
         try:
             from services.workflow_engine import delete_workflow
             ok = await delete_workflow(pool, uid, wf_id)
@@ -22873,13 +22873,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             target_id = int(request.match_info["user_id"])
         except (KeyError, ValueError):
-            return _err("bad user_id", 400)
+            return _err("Неверный идентификатор пользователя", 400)
         try:
             user = await pool.fetchrow(
                 """SELECT *, registered_at AS created_at, last_seen AS last_active_at
                    FROM platform_users WHERE user_id=$1""", target_id)
             if not user:
-                return _err("User not found", 404)
+                return _err("Пользователь не найден", 404)
             bots = await pool.fetchval(
                 "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=true", target_id) or 0
             channels = await pool.fetchval(
@@ -22904,10 +22904,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             body = await request.json()
         except Exception:
-            return _err("Invalid JSON")
+            return _err("Не удалось разобрать запрос")
         text = (body.get("text") or "").strip()
         if not text:
-            return _err("text required")
+            return _err("Нужен текст")
         try:
             return _json_resp(await _admin_broadcast_core(pool, uid, text))
         except Exception as e:
@@ -22922,7 +22922,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             target_id = int(request.match_info["user_id"])
         except (KeyError, ValueError):
-            return None, None, _err("bad user_id", 400)
+            return None, None, _err("Неверный идентификатор пользователя", 400)
         return uid, target_id, None
 
     async def admin_user_grant(request: web.Request) -> web.Response:

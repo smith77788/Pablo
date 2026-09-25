@@ -13,8 +13,12 @@
 проверяет, что отказ доходит как 403 с причиной, `test_paywall_upgrade_sheet` —
 что механизм маркировки стоит в одном месте. Никто не проверял сам ТЕКСТ.
 
-Заодно сплошной проверкой закрыт весь класс: у 403-отказа мини-аппа не может
-быть английского текста («Forbidden», «forbidden»).
+Заодно сплошной проверкой закрыт весь класс. Английскими были не только
+отказы по тарифу: из 1151 английского `_err` пользователь ВИДИТ 516 — это
+статусы 400, 403 и 404, которые мини-апп показывает как есть («Not found»,
+«Invalid JSON», «bad bot_id»). Статусы 401 и 500 в проверку не входят
+намеренно: их мини-апп заменяет своими словами, и английское тело туда не
+доходит.
 """
 from __future__ import annotations
 
@@ -57,33 +61,45 @@ def test_technical_detail_stays_available_for_logs():
     assert exc.op_type == "mass_invite" and exc.required_plan == "paid"
 
 
-# ── Сплошная проверка: у 403 мини-аппа нет английского текста ────────────────
+# ── Сплошная проверка: отказ мини-аппа не может быть на английском ──────────
 
-def _err_403_literals() -> list[tuple[int, str]]:
+# Статусы, чей текст пользователь ВИДИТ. 401 и 500 сюда не входят намеренно:
+# мини-апп заменяет их своими словами (на 401 молча обновляет токен, на 500
+# показывает «Внутренняя ошибка сервиса»), поэтому английское тело туда не
+# доходит. 403, 400 и 404 показываются как есть.
+USER_VISIBLE_STATUSES = (400, 403, 404)
+
+
+def _err_literals() -> list[tuple[int, int, str]]:
+    """(строка, статус, текст) для каждого `_err` с литеральным сообщением."""
     tree = ast.parse(API.read_text("utf-8"))
     out = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "_err"):
             continue
-        if len(node.args) < 2:
+        if not node.args:
             continue
-        status = node.args[1]
-        if not (isinstance(status, ast.Constant) and status.value == 403):
-            continue
+        status = 400          # умолчание самого _err
+        if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+            status = node.args[1].value
         msg = node.args[0]
         if isinstance(msg, ast.Constant) and isinstance(msg.value, str):
-            out.append((node.lineno, msg.value))
+            out.append((node.lineno, status, msg.value))
     return out
 
 
 def test_detector_sees_the_refusals():
     """Страховка измерителя: пустой список превратил бы проверку в заглушку."""
-    assert len(_err_403_literals()) > 20
+    visible = [x for x in _err_literals() if x[1] in USER_VISIBLE_STATUSES]
+    assert len(visible) > 400, f"измеритель нашёл всего {len(visible)} отказов"
 
 
-def test_no_english_403_in_the_mini_app():
-    bad = [(ln, m) for ln, m in _err_403_literals() if not CYRILLIC.search(m)]
+def test_no_english_refusal_reaches_the_user():
+    bad = [(ln, st, m) for ln, st, m in _err_literals()
+           if st in USER_VISIBLE_STATUSES and not CYRILLIC.search(m)]
     assert not bad, (
-        "отказ уйдёт пользователю по-английски:\n  "
-        + "\n  ".join(f"services/mini_app_api.py:{ln}  {m!r}" for ln, m in bad))
+        f"отказ уйдёт пользователю по-английски ({len(bad)} шт.), "
+        "а владелец по-английски не читает:\n  "
+        + "\n  ".join(f"services/mini_app_api.py:{ln} [{st}] {m!r}"
+                      for ln, st, m in sorted(bad)[:25]))
