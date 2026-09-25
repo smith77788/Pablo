@@ -18,15 +18,32 @@ def _run(coro):
 
 # ── A. upsert_contact возвращает РЕАЛЬНЫЙ id (RETURNING id) ──────────────────
 def test_upsert_contact_returns_existing_id_on_conflict():
+    """Повторный вызов отдаёт id СУЩЕСТВУЮЩЕЙ строки, а не новый uuid.
+
+    Смысл проверки прежний, механизм другой: раньше здесь ждали один запрос с
+    `ON CONFLICT ... RETURNING id`, но такого ограничения в схеме нет, и
+    Postgres отвергал этот запрос на исполнении — проверка стерегла код,
+    который не мог отработать ни разу. Теперь порядок тот же, что в
+    синхронизации контактов: найти, потом обновить.
+    """
     from services.contacts_hub import repository
 
     class _Pool:
-        async def fetchrow(self, sql, *a):
-            assert "RETURNING id" in sql          # исправление на месте
-            return {"id": "EXISTING-UUID"}        # id существующей строки
+        def __init__(self):
+            self.calls = []
 
-    got = _run(repository.upsert_contact(_Pool(), 1, {"telegram_user_id": 42}))
+        async def fetchrow(self, sql, *a):
+            self.calls.append(sql)
+            return {"id": "EXISTING-UUID"}
+
+    pool = _Pool()
+    got = _run(repository.upsert_contact(pool, 1, {"telegram_user_id": 42}))
     assert got == "EXISTING-UUID"                 # не только что сгенерированный
+    assert "SELECT id" in pool.calls[0], "поиск существующего контакта пропал"
+    assert "UPDATE unified_contacts" in pool.calls[1], (
+        "найденный контакт не обновляется")
+    assert not any("INSERT" in c for c in pool.calls), (
+        "существующий контакт заводится заново — это дубль")
 
 
 # ── B. Губернатор покрывает bulk_join ───────────────────────────────────────

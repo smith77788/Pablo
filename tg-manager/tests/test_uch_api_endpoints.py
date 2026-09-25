@@ -236,7 +236,10 @@ class TestRepositoryCRUD:
         result = await upsert_contact(pool, 123, data)
         assert result is not None
         assert len(result) > 0
-        assert "INSERT" in pool._calls[0][1]
+        # Сначала поиск существующего контакта, потом вставка: одним запросом
+        # с ON CONFLICT это сделать нельзя — такого ограничения в схеме нет.
+        assert any("INSERT" in c[1] for c in pool._calls), (
+            [c[1][:40] for c in pool._calls])
 
     @pytest.mark.asyncio
     async def test_upsert_contact_with_existing_id(self):
