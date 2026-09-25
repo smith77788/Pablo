@@ -345,7 +345,9 @@ async def scan_channel_ads(
 
         # Получаем метаданные канала
         try:
-            entity = await client.get_entity(f"@{channel_username}")
+            entity = await asyncio.wait_for(
+                client.get_entity(f"@{channel_username}"),
+                timeout=account_manager._OP_TIMEOUT)
         except Exception as exc:
             return {"status": "error", "error": f"Не удалось получить канал: {exc}"}
 

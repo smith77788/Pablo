@@ -14,10 +14,17 @@ from telethon.errors import (
     MessageIdInvalidError,
 )
 
-from services.account_manager import _make_client
+from services.account_manager import (_make_client, _CONNECT_TIMEOUT,
+                                      _OP_TIMEOUT)
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
+
+# Перенос медиа — не round-trip: видео законно едет минутами, и общий
+# потолок одиночного запроса тут обрывал бы здоровую работу. Отдельный,
+# заведомо больший: он ловит мёртвый сокет, а не медленный файл.
+_MEDIA_TIMEOUT = 300
+
 
 _FLOOD_BASE = 2
 _INTER_MSG_DELAY = 1.5   # секунды между постами в copy-режиме
@@ -103,21 +110,21 @@ async def clone_to_channel(
     }
 
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         if not await client.is_user_authorized():
             result["errors"].append("Сессия истекла")
             result["fail"] = len(msg_ids)
             return result
 
         try:
-            source_entity = await client.get_entity(source_ref)
+            source_entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
         except Exception as exc:
             result["errors"].append(f"Нет доступа к источнику: {exc}")
             result["fail"] = len(msg_ids)
             return result
 
         try:
-            target_entity = await client.get_entity(target_ref)
+            target_entity = await asyncio.wait_for(client.get_entity(target_ref), timeout=_OP_TIMEOUT)
         except Exception as exc:
             result["errors"].append(f"Нет доступа к цели {target_ref}: {exc}")
             result["fail"] = len(msg_ids)
@@ -128,7 +135,9 @@ async def clone_to_channel(
             for i in range(0, len(msg_ids), batch_size):
                 batch = msg_ids[i: i + batch_size]
                 try:
-                    await client.forward_messages(target_entity, batch, source_entity)
+                    await asyncio.wait_for(
+                        client.forward_messages(target_entity, batch, source_entity),
+                        timeout=_OP_TIMEOUT)
                     result["ok"] += len(batch)
                 except PeerFloodError:
                     # Спам-блок аккаунта — не ретраим и не идём дальше.
@@ -150,7 +159,9 @@ async def clone_to_channel(
                     log.warning("content_cloner: FloodWait %ds", _fw)
                     await asyncio.sleep(_fw + _FLOOD_BASE)
                     try:
-                        await client.forward_messages(target_entity, batch, source_entity)
+                        await asyncio.wait_for(
+                            client.forward_messages(target_entity, batch, source_entity),
+                            timeout=_OP_TIMEOUT)
                         result["ok"] += len(batch)
                     except Exception as exc2:
                         result["fail"] += len(batch)
@@ -170,7 +181,7 @@ async def clone_to_channel(
         else:  # copy mode
             for msg_id in msg_ids:
                 try:
-                    msgs = await client.get_messages(source_entity, ids=msg_id)
+                    msgs = await asyncio.wait_for(client.get_messages(source_entity, ids=msg_id), timeout=_OP_TIMEOUT)
                     msg = msgs if not isinstance(msgs, list) else (msgs[0] if msgs else None)
                     if msg is None:
                         result["fail"] += 1
@@ -181,19 +192,21 @@ async def clone_to_channel(
                     media = getattr(msg, "media", None)
 
                     if media is not None:
-                        file_bytes = await client.download_media(msg, file=bytes)
-                        await client.send_file(
+                        file_bytes = await asyncio.wait_for(
+                            client.download_media(msg, file=bytes),
+                            timeout=_MEDIA_TIMEOUT)
+                        await asyncio.wait_for(client.send_file(
                             target_entity,
                             file=file_bytes,
                             caption=text,
                             formatting_entities=fmt_entities,
-                        )
+                        ), timeout=_MEDIA_TIMEOUT)
                     elif text:
-                        await client.send_message(
+                        await asyncio.wait_for(client.send_message(
                             target_entity,
                             message=text,
                             formatting_entities=fmt_entities,
-                        )
+                        ), timeout=_OP_TIMEOUT)
                     else:
                         result["fail"] += 1
                         continue
@@ -259,11 +272,11 @@ async def get_last_msg_ids(
     client = _make_client(session_string, device)
     ids: list[int] = []
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         if not await client.is_user_authorized():
             return ids
-        entity = await client.get_entity(source_ref)
-        msgs = await client.get_messages(entity, limit=count)
+        entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=count), timeout=_OP_TIMEOUT)
         ids = [m.id for m in msgs if m is not None]
     except Exception as exc:
         log.warning("content_cloner get_last_msg_ids: %s", exc)

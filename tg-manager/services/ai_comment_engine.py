@@ -92,10 +92,10 @@ async def post_ai_comment(
     client = _make_client(session_string, _acc, low_risk=low_risk)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(channel_ref)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_ACTION_TIMEOUT)
         if not getattr(entity, "broadcast", False):
             return {"ok": False, "comment": None, "error": "не канал (нет обсуждений)"}
-        full = await client(GetFullChannelRequest(entity))
+        full = await asyncio.wait_for(client(GetFullChannelRequest(entity)), timeout=_ACTION_TIMEOUT)
         linked_id = getattr(full.full_chat, "linked_chat_id", None)
         if not linked_id:
             return {"ok": False, "comment": None, "error": "у канала нет группы обсуждений"}
@@ -108,7 +108,7 @@ async def post_ai_comment(
         comment = await generate_comment(getattr(post, "message", "") or "", niche, tone)
         if not comment:
             return {"ok": False, "comment": None, "error": "LLM не дал комментарий (проверьте AI-ключи)"}
-        discussion = await client.get_entity(linked_id)
+        discussion = await asyncio.wait_for(client.get_entity(linked_id), timeout=_ACTION_TIMEOUT)
         await asyncio.wait_for(
             client.send_message(discussion, comment, comment_to=post.id),
             timeout=_ACTION_TIMEOUT,

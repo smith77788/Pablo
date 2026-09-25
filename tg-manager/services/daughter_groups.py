@@ -106,7 +106,10 @@ async def _pin_mother_redirect(
 ) -> bool:
     """Закрепить редирект на мать. Провал не критичен — группа остаётся рабочей
     (люди просто не увидят подсказку куда переходить), поэтому не критично."""
-    from services.account_manager import _make_client, _CONNECT_TIMEOUT
+    # _OP_TIMEOUT — общий потолок одиночного запроса к Telegram: без него
+    # half-open сокет мёртвого прокси вешает вызов навсегда.
+    from services.account_manager import (_make_client, _CONNECT_TIMEOUT,
+                                          _OP_TIMEOUT)
 
     client = _make_client(session_string, _acc)
     try:
@@ -116,8 +119,10 @@ async def _pin_mother_redirect(
 
         channel = InputChannel(channel_id=channel_id, access_hash=access_hash)
         text = f"➡️ Основной канал: {mother_display}" if mother_display else "➡️ Переходите в основной канал по ссылке из описания"
-        msg = await client.send_message(channel, text)
-        await client(UpdatePinnedMessageRequest(peer=channel, id=msg.id, silent=True))
+        msg = await asyncio.wait_for(client.send_message(channel, text), timeout=_OP_TIMEOUT)
+        await asyncio.wait_for(
+            client(UpdatePinnedMessageRequest(peer=channel, id=msg.id, silent=True)),
+            timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
         log.warning("daughter_groups: pin redirect failed channel=%s: %s", channel_id, e)

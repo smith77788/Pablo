@@ -109,7 +109,7 @@ async def scan_resource(
     client = _make_client(session_string, _acc, low_risk=low_risk)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(ref)
+        entity = await asyncio.wait_for(client.get_entity(ref), timeout=_ACTION_TIMEOUT)
         items: list[tuple[str, str]] = []
         title = getattr(entity, "title", None) or getattr(entity, "username", "") or ""
         if title:

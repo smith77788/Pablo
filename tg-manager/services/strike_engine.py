@@ -2533,13 +2533,15 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
                 bot_entity = await asyncio.wait_for(
                     client.get_entity(bot_name), timeout=8
                 )
-                await client.send_message(bot_entity, "/start")
+                await asyncio.wait_for(client.send_message(bot_entity, "/start"), timeout=account_manager._OP_TIMEOUT)
                 await asyncio.sleep(random.uniform(1.5, 3.0))
                 fwd_count = 0
                 _stop = False
                 for m in msgs[:3]:
                     try:
-                        await client.forward_messages(bot_entity, m)
+                        await asyncio.wait_for(
+                            client.forward_messages(bot_entity, m),
+                            timeout=account_manager._OP_TIMEOUT)
                         fwd_count += 1
                         await asyncio.sleep(random.uniform(0.8, 1.8))
                     except Exception as _fe2:
@@ -2559,7 +2561,9 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
                 if bot_name == "SpamBot" and fwd_count > 0:
                     try:
                         await asyncio.sleep(1.5)
-                        await client.send_message(bot_entity, "/report")
+                        await asyncio.wait_for(
+                            client.send_message(bot_entity, "/report"),
+                            timeout=account_manager._OP_TIMEOUT)
                     except Exception as e:
                         log_exc_swallow(log, "_one_account_strike: record_account_op")
                 results[bot_name] = "sent" if fwd_count > 0 else "no_msgs"
@@ -2641,7 +2645,7 @@ async def verify_target_takedown(
                 else:
                     entity = None
             else:
-                entity = await client.get_entity(clean)
+                entity = await asyncio.wait_for(client.get_entity(clean), timeout=account_manager._OP_TIMEOUT)
 
             # Проверка на бан/ограничение
             if entity is None:

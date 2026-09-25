@@ -25,6 +25,17 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
+# Потолок на ОТДЕЛЬНЫЙ запрос к Telegram. Значение то же, что в
+# account_manager._OP_TIMEOUT, но константа своя: account_manager здесь
+# импортируется ЛОКАЛЬНО, по функциям (защита от кольца импортов), и в
+# _collect_and_save_senders его в области видимости нет вовсе.
+#
+# Коннект ограничен своим таймаутом, а мёртвый прокси чаще отдаёт не отказ,
+# а half-open сокет: TCP установлен, ответа нет и не будет. Без потолка
+# разбор аудитории вешался навсегда, держа слот операции и аккаунт.
+_OP_TIMEOUT = 45
+
+
 
 # ── Чистые хелперы (тестируемые, без БД/Telethon) ─────────────────────────
 
@@ -287,7 +298,7 @@ async def parse_members(
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
         try:
-            entity = await client.get_entity(source_ref)
+            entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
             source_id = entity.id
             source_title = getattr(entity, "title", source_ref)
             source_username = getattr(entity, "username", "") or source_ref.lstrip("@")
@@ -308,7 +319,7 @@ async def parse_members(
         batch_size = 200
         while total_found < limit:
             try:
-                result = await client(
+                result = await asyncio.wait_for(client(
                     GetParticipantsRequest(
                         entity,
                         ChannelParticipantsSearch(""),
@@ -316,7 +327,7 @@ async def parse_members(
                         limit=min(batch_size, limit - total_found),
                         hash=0,
                     )
-                )
+                ), timeout=_OP_TIMEOUT)
                 if not result.users:
                     break
 
@@ -457,7 +468,7 @@ async def _collect_and_save_senders(
 
         user = None
         try:
-            user = await client.get_entity(msg.sender_id)
+            user = await asyncio.wait_for(client.get_entity(msg.sender_id), timeout=_OP_TIMEOUT)
         except Exception as exc:
             _fw = flood_seconds(exc)
             if _fw is not None:
@@ -543,7 +554,7 @@ async def parse_active_users(
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
         try:
-            entity = await client.get_entity(source_ref)
+            entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
             source_id = entity.id
             source_title = getattr(entity, "title", source_ref)
         except Exception as e:
@@ -642,7 +653,7 @@ async def parse_commenters(
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
         try:
-            entity = await client.get_entity(source_ref)
+            entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
             source_title = getattr(entity, "title", source_ref)
             source_username = getattr(entity, "username", "") or source_ref.lstrip("@")
         except Exception as e:
@@ -656,11 +667,11 @@ async def parse_commenters(
         # Ищем привязанную группу обсуждений. Сообщения-комментарии живут в ней.
         target = entity
         try:
-            full = await client(GetFullChannelRequest(entity))
+            full = await asyncio.wait_for(client(GetFullChannelRequest(entity)), timeout=_OP_TIMEOUT)
             linked_id = getattr(full.full_chat, "linked_chat_id", None)
             if linked_id:
                 try:
-                    target = await client.get_entity(linked_id)
+                    target = await asyncio.wait_for(client.get_entity(linked_id), timeout=_OP_TIMEOUT)
                 except Exception:
                     log_exc_swallow(
                         log, "Не удалось получить группу обсуждений", linked_id=linked_id

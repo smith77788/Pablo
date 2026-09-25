@@ -216,7 +216,10 @@ async def _post_wave(session_string: str, channel_id: int, access_hash: int,
     и учтена, следующая волна перекроет — ронять прогон из-за поста незачем."""
     import asyncio
 
-    from services.account_manager import _make_client, _CONNECT_TIMEOUT
+    # _OP_TIMEOUT — общий потолок одиночного запроса к Telegram: без него
+    # half-open сокет мёртвого прокси вешает вызов навсегда.
+    from services.account_manager import (_make_client, _CONNECT_TIMEOUT,
+                                          _OP_TIMEOUT)
 
     client = _make_client(session_string, _acc)
     try:
@@ -224,11 +227,11 @@ async def _post_wave(session_string: str, channel_id: int, access_hash: int,
         from telethon.tl.types import InputChannel
 
         channel = InputChannel(channel_id=channel_id, access_hash=access_hash)
-        await client.send_message(
+        await asyncio.wait_for(client.send_message(
             channel,
             f"🔓 Открыт вход в основной канал — {size} мест: {link}\n"
             "Места кончатся — следующая порция откроется позже.",
-        )
+        ), timeout=_OP_TIMEOUT)
         return True
     except Exception as e:
         log.warning("showcase_layer: пост волны в витрину %s не ушёл: %s", channel_id, e)

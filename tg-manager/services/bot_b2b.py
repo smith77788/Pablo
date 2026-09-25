@@ -25,6 +25,13 @@ log = logging.getLogger(__name__)
 
 _BOTFATHER = "BotFather"
 _CONNECT_TIMEOUT = 30
+# Потолок на ОТДЕЛЬНЫЙ запрос к Telegram. Коннект ограничен своим таймаутом,
+# но мёртвый прокси чаще отдаёт не отказ, а half-open сокет: TCP установлен,
+# ответа нет и не будет, и запрос не возвращается никогда — операция стоит,
+# держа слот и арендованный флот. Значение щедрое намеренно: живой Telegram
+# отвечает за секунды, ложный таймаут увёл бы цель в лишний повтор.
+_ACTION_TIMEOUT = 45
+
 
 # Кандидаты подписи пункта «Bot-to-Bot» в меню бота у BotFather (низкий регистр).
 _B2B_KEYS = ("bot-to-bot", "bot to bot", "b2b", "бот-бот", "бот к боту",
@@ -124,16 +131,16 @@ async def enable_b2b_via_botfather(session_string: str, usernames: list,
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        bf = await client.get_entity(_BOTFATHER)
+        bf = await asyncio.wait_for(client.get_entity(_BOTFATHER), timeout=_ACTION_TIMEOUT)
 
         async def _latest():
-            msgs = await client.get_messages(bf, limit=1)
+            msgs = await asyncio.wait_for(client.get_messages(bf, limit=1), timeout=_ACTION_TIMEOUT)
             return msgs[0] if msgs else None
 
         for uname in wanted:
             try:
                 await asyncio.sleep(random.uniform(2.0, 4.0))
-                await client.send_message(bf, "/mybots")
+                await asyncio.wait_for(client.send_message(bf, "/mybots"), timeout=_ACTION_TIMEOUT)
                 await asyncio.sleep(3.0)
                 msg = await _latest()
                 if msg is None:

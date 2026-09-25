@@ -516,6 +516,14 @@ async def _requeue_op_no_accounts(
 # и съедает его целиком, обрывая всю операцию.
 _FLOOD_INLINE_MAX_S = _int_env("OP_FLOOD_INLINE_MAX_SEC", 15 * 60, 30, 6 * 3600)
 
+# Потолок на ОТДЕЛЬНЫЙ запрос к Telegram. Коннект ограничен своим таймаутом,
+# но мёртвый прокси чаще отдаёт не отказ, а half-open сокет: TCP установлен,
+# ответа нет и не будет, и запрос не возвращается никогда — операция стоит,
+# держа слот и арендованный флот. Значение щедрое намеренно: живой Telegram
+# отвечает за секунды, ложный таймаут увёл бы цель в лишний повтор.
+_OP_REQUEST_TIMEOUT = 45
+
+
 
 def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
     """Счётчик механизма надёжности. Никогда не бросает и ничего не ждёт.
@@ -16089,7 +16097,7 @@ async def _exec_delete_contacts(
                     if await _is_cancelled(pool, op_id):
                         break
                     try:
-                        await client(DeleteContactsRequest(id=[u]))
+                        await asyncio.wait_for(client(DeleteContactsRequest(id=[u])), timeout=_OP_REQUEST_TIMEOUT)
                         deleted += 1
                     except Exception as e:
                         log_exc_swallow(log, f"delete_contacts: single contact delete failed for user {getattr(u, 'id', '?')}: {e}")
