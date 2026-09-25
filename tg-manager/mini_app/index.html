@@ -190,7 +190,24 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    всегда показывает хотя бы начало названия. */
 .hdr-title{flex:1 1 auto;min-width:72px;font-size:17px;font-weight:700;letter-spacing:-.3px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
 .hdr-meta{text-align:right;flex-shrink:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:8px}
-.hdr-meta > .btn{flex:0 0 auto;max-width:none}
+/* Кнопке в шапке разрешено ужиматься — иначе она вылезала за правый край и
+   наезжала на заголовок. Но не уже 112px: на этой ширине длинная подпись
+   («+ Ключевое слово») ложится в две строки, а не в три этажа по слову. */
+.hdr-meta > .btn{flex:0 1 auto;max-width:none;min-width:112px}
+/* На совсем узких экранах этот запас не по карману: заголовку остаётся меньше
+   его минимума и шапка вылезает за край. Там кнопка ужимается как обычная. */
+@media (max-width:319px){.hdr-meta > .btn{min-width:88px}}
+/* Кнопка в шапке наезжала на заголовок. У .hdr-meta было min-width:0, поэтому
+   флекс сжимал сам блок уже кнопки, а кнопка (flex:0 0 auto) из него вылезала
+   влево — на 18 экранах подпись заголовка уходила под кнопку, местами на 37px.
+   Блок с кнопкой не сжимаем: место уступает заголовок, который и так
+   переносится на две строки. */
+.hdr-meta:has(> .btn),.hdr-meta:has(> .icon-btn){min-width:auto}
+/* Когда в шапке есть кнопка действия, заголовку остаётся мало места и в две
+   строки он не укладывался — «Диспетчер задач» превращался в «Диспет…».
+   На узком экране уменьшаем кегль заголовка: название экрана важнее его
+   размера. */
+@media (max-width:400px){.hdr:has(.hdr-meta > .btn) .hdr-title{font-size:15px;-webkit-line-clamp:3}}
 .hdr-meta > .hdr-user{min-width:0;flex-shrink:1}
 /* ── Боковая навигация (drawer) ── */
 .hdr-burger{flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:var(--bg2);cursor:pointer;color:var(--text);font-size:18px;line-height:1;user-select:none;border:1px solid var(--sep)}
@@ -626,11 +643,13 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .seg{display:flex;background:var(--bg2);border-radius:var(--radius);padding:2px;gap:2px;margin:6px 16px;border:1px solid var(--border)}
 .seg-opt{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:34px;overflow-wrap:anywhere;padding:7px 5px;text-align:center;font-size:13px;font-weight:500;color:var(--hint);cursor:pointer;border-radius:10px;transition:all .2s var(--ease)}
 /* Пять и больше вкладок в полосе фильтров не помещаются: подписи ломались
-   посреди слова («Рабо/тают»). Такая полоса прокручивается вбок, а вкладки
-   берут ширину по надписи — как ряд чипов. */
-.seg:has(> :nth-child(5)){overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
-.seg:has(> :nth-child(5))::-webkit-scrollbar{display:none}
-.seg:has(> :nth-child(5)) > .seg-opt{flex:0 0 auto;white-space:nowrap;padding-left:10px;padding-right:10px}
+   посреди слова («Рабо/тают»). Раньше такая полоса прокручивалась вбок, но на
+   узком экране из шести статусов было видно два с половиной, а «Ошибки» и
+   «Готово» уезжали за край без единого намёка, что они есть. Теперь вкладки
+   берут ширину по надписи и переносятся на следующую строку: полоса выше на
+   один ряд, зато виден весь набор фильтров. */
+.seg:has(> :nth-child(5)){flex-wrap:wrap;row-gap:2px}
+.seg:has(> :nth-child(5)) > .seg-opt{flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;line-height:20px;max-width:100%;padding-left:10px;padding-right:10px}
 .seg-opt.on{background:var(--accent-soft-2);color:var(--accent);font-weight:600}
 .seg-btn{flex:1;padding:7px 10px;text-align:center;font-size:13px;font-weight:600;color:var(--hint);cursor:pointer;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2);transition:all .2s var(--ease)}
 .seg-btn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(45,212,191,.25)}
@@ -808,7 +827,9 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .acc-kpi-lbl{font-size:10px;color:var(--hint);margin-top:1px;white-space:nowrap}
 
 /* ─── Filter chip row ────────────────────────────────────── */
-.filter-chips{display:flex;gap:6px;padding:4px 16px 6px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+/* Ряд фильтров переносится, а не прокручивается: последний чип обрезался на
+   14px и выглядел сломанным, а не «есть ещё, листайте». */
+.filter-chips{display:flex;flex-wrap:wrap;gap:6px;padding:4px 16px 6px}
 .filter-chips::-webkit-scrollbar{display:none}
 .chip{display:inline-flex;align-items:center;justify-content:center;min-height:34px;gap:4px;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1px solid transparent;flex-shrink:0;transition:all .2s var(--ease);max-width:100%;overflow:hidden}
 /* Раскрываемая панель «Действия с аккаунтом»: явная стрелка-индикатор, чтобы
@@ -1174,7 +1195,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="ar-name">Авто-ответы</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openArModal()">+ Добавить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openArModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Статус ИИ <span class="sec-btn" onclick="testAi(this)" style="float:right;color:var(--accent);cursor:pointer;font-size:12px">Проверить →</span></div>
@@ -1189,7 +1210,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="bf-name">Воронки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openFunnelModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openFunnelModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Воронки бота</div>
@@ -1416,7 +1437,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <option value="admin">Через админку (обход приватности)</option>
       <option value="link">Ссылка в ЛС (человек вступает сам)</option>
     </select>
-    <div style="font-size:12px;font-weight:600;margin:6px 0 4px">Каким аккаунтами приглашать:</div>
+    <div style="font-size:12px;font-weight:600;margin:6px 0 4px">Какими аккаунтами приглашать:</div>
     <div id="cciAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
     <div id="cciErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitContactInvite()">🚀 Пригласить</button>
@@ -1579,7 +1600,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()">☰</div>
     <div class="hdr-title">📨 Рассылки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
   <div class="sb">
     <div class="copilot-wrap" style="display:none;margin:0 0 10px">
@@ -1607,7 +1628,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📅 Расписание рассылок</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openBcScheduleModal()">+ Новая</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openBcScheduleModal()">+ Новая</button></div>
   </div>
   <div class="sub-sb">
     <div class="cards" id="bcSchedKpi">
@@ -1666,7 +1687,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🌐 Пул прокси</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
     <div class="cards" id="proxyPoolKpi">
@@ -1702,7 +1723,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📱 Авторег Pro</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openAutoregProModal()">+ Пакет</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAutoregProModal()">+ Пакет</button></div>
   </div>
   <div class="sub-sb">
     <div class="cards" id="autoregProKpi">
@@ -2364,7 +2385,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📐 Шаблоны ассетов</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openAssetTplModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAssetTplModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div style="padding:8px 16px 4px;display:flex;gap:6px;overflow-x:auto">
@@ -2382,7 +2403,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-infrahealth">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🏥 Здоровье инфры</div></div>
   <div class="sub-sb">
-    <div class="sec">Активные алерты</div>
+    <div class="sec">Активные оповещения</div>
     <div class="lst" id="ihAlerts"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">События восстановления</div>
     <div class="lst" id="ihRecovery"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2454,7 +2475,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔗 Связки (бот+каналы)</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openPresencePackModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openPresencePackModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Объединяет ВАШИ существующие бота + каналы + группы в одну воронку: бот-админ, посевные посты, синхронная работа. Это <b>не</b> создание новых каналов.</div>
@@ -2494,7 +2515,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
 <div class="screen" id="s-globalpresence">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openGpCreateModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openGpCreateModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="row tap" onclick="openPresenceMap()" style="background:var(--bg2);border-radius:12px;margin-bottom:8px">
@@ -2702,7 +2723,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🌐 Экосистемы</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openEcosystemModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openEcosystemModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Мои экосистемы</div>
@@ -2786,7 +2807,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div style="display:flex;gap:8px;margin-bottom:6px">
         <input type="text" id="crKeyword" placeholder="Ключевое слово/фраза" style="flex:1;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
-        <button class="btn btn-s" style="flex:0 0 90px" onclick="addChannelKeyword()">Добавить</button>
+        <button class="btn btn-s" style="flex:0 0 auto" onclick="addChannelKeyword()">Добавить</button>
       </div>
       <div id="crErr" style="color:var(--red);font-size:13px;margin-bottom:6px"></div>
     </div>
@@ -2852,7 +2873,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🌍 Мультигео</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openMultigeoSetModal()">✏️ Изменить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMultigeoSetModal()">✏️ Изменить</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Выберите бота</div>
@@ -2914,7 +2935,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔄 Клон и адаптация</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCloneModal()">+ Клонировать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCloneModal()">+ Клонировать</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">История клонирования ботов</div>
@@ -3335,7 +3356,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🕸 Сеть контента</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openMeshModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMeshModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Сети контент-репостинга</div>
@@ -3381,7 +3402,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📖 Движок нарратива</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openNarrativeModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNarrativeModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Нарратив-кампании</div>
@@ -3427,7 +3448,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📣 Самопиар</div>
     <div class="hdr-meta">
-      <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openSelfPromoCreateModal()">+ Создать</button>
+      <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openSelfPromoCreateModal()">+ Создать</button>
     </div>
   </div>
   <div class="sub-sb">
@@ -3515,7 +3536,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="dnaDetail-name">ДНК</div>
     <div class="hdr-meta">
-      <button class="btn btn-p" id="dnaRecomputeBtn" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="recomputeDna()">🔄 Пересчитать</button>
+      <button class="btn btn-p" id="dnaRecomputeBtn" style="padding:7px 14px;font-size:13px" onclick="recomputeDna()">🔄 Пересчитать</button>
     </div>
   </div>
   <div class="sub-sb">
@@ -3528,7 +3549,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔀 Авто-воронки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openAutofunnelModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAutofunnelModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Цепочки сообщений</div>
@@ -3678,7 +3699,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🎯 Сенсор намерений</div></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
-      Ключевая фраза во <b>входящем ЛС</b> (из Хранилища) → авто-стадия CRM + тег + алерт.
+      Ключевая фраза во <b>входящем ЛС</b> (из Хранилища) → авто-стадия CRM + тег + оповещение.
       Хранилище перестаёт быть архивом и становится триггером на граф контактов.
       Работает при подключённом Хранилище.
     </div>
@@ -3735,7 +3756,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-uchduplicates">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔍 Возможные дубликаты</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="detectDuplicates()">🔄 Проверить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="detectDuplicates()">🔄 Проверить</button></div>
   </div>
   <div class="sub-sb" id="dupBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -3747,7 +3768,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-uchsmarttags">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🏷 Умные теги</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="applySmartTags()">⚡ Применить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="applySmartTags()">⚡ Применить</button></div>
   </div>
   <div class="sub-sb" id="stBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -3769,7 +3790,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-uchgraph">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🕸 Граф связей</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="computeGraph()">🔄 Рассчитать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="computeGraph()">🔄 Рассчитать</button></div>
   </div>
   <div class="sub-sb" id="graphBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -3838,7 +3859,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="fd-name">Воронка</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="toggleFunnelFromDetail()">Вкл/Выкл</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="toggleFunnelFromDetail()">Вкл/Выкл</button></div>
   </div>
   <div class="sub-sb" id="fd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -3848,7 +3869,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📈 Конкуренты</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCompModal()">+ Добавить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCompModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="compList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3861,7 +3882,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">👤 CRM — Контакты</div>
     <div class="hdr-meta">
-      <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCrmContactModal()">+ Добавить</button>
+      <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCrmContactModal()">+ Добавить</button>
     </div>
   </div>
   <div class="sub-sb">
@@ -3890,7 +3911,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔍 Позиции в поиске</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openKwModal()">+ Добавить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openKwModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="kwTrackList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3902,7 +3923,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="sch-name">Расписание</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openSchModal()">+ Запланировать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openSchModal()">+ Запланировать</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="schList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3914,7 +3935,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📝 Шаблоны</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openTplModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openTplModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="tplList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3972,7 +3993,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🌐 Прокси</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
     <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -4049,7 +4070,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔗 Диплинки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openDlModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openDlModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div id="dlStats" style="display:flex;gap:10px;padding:10px 16px 4px"></div>
@@ -4082,7 +4103,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📝 Заметка к боту</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="saveBotNote()">Сохранить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="saveBotNote()">Сохранить</button></div>
   </div>
   <div class="sub-sb" style="padding:12px 0">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:10px">
@@ -4099,7 +4120,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">⌨️ Команды бота</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCmdModal()">+ Добавить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCmdModal()">+ Добавить</button></div>
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:4px">
@@ -4701,7 +4722,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🧠 ИИ Память</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openAiMemoryModal()">+ Запись</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAiMemoryModal()">+ Запись</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="aiMemoryList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4714,7 +4735,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🖥 Ноды</div>
     <div class="hdr-meta">
-      <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openNodeModal()">+ Добавить</button>
+      <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNodeModal()">+ Добавить</button>
     </div>
   </div>
   <div class="sub-sb">
@@ -4746,7 +4767,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🏛 Комьюнити</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCommunityCreate()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCommunityCreate()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
@@ -4759,7 +4780,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-communitynode">
   <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cnodeTitle">🏛 Сообщество</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="addCommunityChannel()">+ Канал</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="addCommunityChannel()">+ Канал</button></div>
   </div>
   <div class="sub-sb">
     <div id="cnodeActions" style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 16px 8px"></div>
@@ -4796,7 +4817,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🎁 Перевод подарков</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="scanGifts()">📡 Скан</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="scanGifts()">📡 Скан</button></div>
   </div>
   <div class="sub-sb">
     <div id="giftsStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
@@ -5110,7 +5131,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">⭐ Звёзды</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openStarsExpModal()">+ A/B тест</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openStarsExpModal()">+ A/B тест</button></div>
   </div>
   <div class="sub-sb">
     <div id="starsStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
@@ -5149,7 +5170,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">👻 Призрачный движок</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openGhostModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openGhostModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="ghostList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -5188,7 +5209,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📅 Дата регистрации</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openRegCheckModal()">Проверить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openRegCheckModal()">Проверить</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="regCheckList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -5200,7 +5221,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">✉️ DM-кампании</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openCmpModal()">+ Новая</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCmpModal()">+ Новая</button></div>
   </div>
   <div class="sub-sb">
     <div id="dmStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
@@ -5225,7 +5246,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🌱 Прогрев аккаунтов</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openWarmupModal()">+ Запустить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWarmupModal()">+ Запустить</button></div>
   </div>
   <div class="sub-sb">
     <div id="warmupStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
@@ -5271,7 +5292,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">⚖️ Нотариус</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openNotaryNew()">+ Заверить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNotaryNew()">+ Заверить</button></div>
   </div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
@@ -5318,7 +5339,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📁 Общие папки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openFolderCompose()">+ Собрать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openFolderCompose()">+ Собрать</button></div>
   </div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
@@ -5351,7 +5372,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🤖 Найденные боты</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="connectDiscoveredBots()">🔌 Подключить всех</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="connectDiscoveredBots()">🔌 Подключить всех</button></div>
   </div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
@@ -5380,7 +5401,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🧪 A/B Эксперименты</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openExpModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openExpModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="lst" id="experimentsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -5457,7 +5478,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">📡 Разведка рекламы</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
   </div>
   <div class="sub-sb">
     <div id="adIntelStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
@@ -5519,7 +5540,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔑 API Ключи</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openApiKeyModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openApiKeyModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
@@ -5654,7 +5675,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔭 Парсер аудитории</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openParserModal()">▶ Запустить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openParserModal()">▶ Запустить</button></div>
   </div>
   <div class="sub-sb">
     <div style="display:flex;gap:8px;padding:4px 0 10px">
@@ -5678,7 +5699,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">💼 CRM — Сделки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openDealModal()">+ Сделка</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openDealModal()">+ Сделка</button></div>
   </div>
   <div class="sub-sb">
     <div id="dealSummary" style="display:flex;gap:8px;overflow-x:auto;padding:6px 16px 10px;-webkit-overflow-scrolling:touch"></div>
@@ -5698,7 +5719,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🏢 Рабочие пространства</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openWsModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWsModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
@@ -5751,7 +5772,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">⚙️ Настройки</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="saveSettings()">Сохранить</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="saveSettings()">Сохранить</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Уведомления</div>
@@ -6586,14 +6607,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🏆 Рейтинг — позиции</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openRankingAddModal()">+ Ключевое слово</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openRankingAddModal()">+ Ключевое слово</button></div>
   </div>
   <div class="sub-sb">
     <div class="acc-kpi" id="rankingKpi">
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-total">—</div><div class="acc-kpi-lbl">Слов</div></div>
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-top3" style="color:var(--green)">—</div><div class="acc-kpi-lbl">Топ-3</div></div>
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-top10" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">Топ-10</div></div>
-      <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-alerts" style="color:var(--orange)">—</div><div class="acc-kpi-lbl">Алерты</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="rk-alerts" style="color:var(--orange)">—</div><div class="acc-kpi-lbl">Оповещения</div></div>
     </div>
     <div class="filter-chips" id="rankingFilter">
       <div class="chip on" onclick="filterRanking('all',this)">Все</div>
@@ -6608,7 +6629,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <canvas id="rankingChart" style="width:100%;height:160px"></canvas>
       <div id="rankingChartEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px">Добавьте ключевые слова для отслеживания</div>
     </div>
-    <div class="sec" style="margin-top:12px">🔔 Последние алерты</div>
+    <div class="sec" style="margin-top:12px">🔔 Последние оповещения</div>
     <div class="lst" id="rankingAlerts"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -6645,7 +6666,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🕸️ Сетки — конструктор</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openNetBuilderCreateModal()">+ Новая сеть</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNetBuilderCreateModal()">+ Новая сеть</button></div>
   </div>
   <div class="sub-sb">
     <div class="acc-kpi" id="netKpi">
@@ -6784,7 +6805,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title">🔄 Воркфлоу</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openWorkflowCreateModal()">+ Создать</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWorkflowCreateModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="acc-kpi" id="wfKpi">
@@ -6844,7 +6865,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="wfd-name">Воркфлоу</div>
-    <div class="hdr-meta"><button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openWfAddStepModal()">+ Шаг</button></div>
+    <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWfAddStepModal()">+ Шаг</button></div>
   </div>
   <div class="sub-sb" id="wfd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -7809,7 +7830,7 @@ const MODULE_DESCS = {
   'Прогрев':'Разогрев новых аккаунтов под живое поведение','Очистка':'Чистка аккаунтов: контакты, диалоги','Дубликаты':'Поиск дублей контактов','Конфликты':'Поиск конфликтов данных',
   'Синхронизация':'Синхронизация контактов и данных','Клонер контента':'Копирование постов из источника','Клон и адаптация':'Клон профиля/контента с адаптацией','Сеть контента':'Сеть распространения контента',
   'Экосистемы':'Управление сетями ресурсов','Сетки':'Сети ресурсов','Сеть ботов':'Связанная сеть ботов','Топология':'Карта связей ресурсов','Граф связей':'Граф связей аккаунтов/ресурсов','Граф-хаб':'Инструменты графа связей','Ноды':'Узлы распределённой сети','Связки (бот+каналы)':'Связка бота с каналами',
-  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и алерты',
+  'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
   'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Spintax':'Генерация вариаций текста (spintax)',
   'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
@@ -18147,7 +18168,7 @@ async function deleteAiMem(id) {
 }
 
 // ── Nodes Hub ───────────────────────────────────────────
-const NODE_TYPE = {proxies:'🌐 Прокси',accounts:'👥 Аккаунты',tasks:'📋 Задачи',alerts:'🔔 Алерты'};
+const NODE_TYPE = {proxies:'🌐 Прокси',accounts:'👥 Аккаунты',tasks:'📋 Задачи',alerts:'🔔 Оповещения'};
 // ── Ноды-комьюнити (mini-Discord) ────────────────────────
 let _CUR_CNODE = null;
 // Кэш списка сообществ: строка передаёт в обработчик только id, а название и
@@ -21081,7 +21102,7 @@ async function openInfraHealth() {
     const recovery = d.recovery||[];
     const sevCls = {info:'b-bl',warning:'b-or',error:'b-rd',critical:'b-rd'};
     if (!alerts.length) {
-      txt('ihAlerts', empty('✅','Нет активных алертов','Инфраструктура работает нормально'));
+      txt('ihAlerts', empty('✅','Нет активных оповещений','Инфраструктура работает нормально'));
     } else {
       txt('ihAlerts', alerts.map(a=>`
         <div class="row">
@@ -21094,7 +21115,7 @@ async function openInfraHealth() {
         </div>
       `).join(''));
     }
-    document.getElementById('m-ih-val').textContent = alerts.length?`${alerts.length} алертов`:'Всё в норме';
+    document.getElementById('m-ih-val').textContent = alerts.length?`${alerts.length} ${plural(alerts.length,'оповещение','оповещения','оповещений')}`:'Всё в норме';
     if (!recovery.length) {
       txt('ihRecovery', empty('🔄','Нет событий восстановления',''));
     } else {
@@ -24033,7 +24054,7 @@ function renderRankingList(kw) {
 
 function renderRankingAlerts(alerts) {
   if (!alerts.length) {
-    txt('rankingAlerts', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет алертов</div>');
+    txt('rankingAlerts', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет оповещений</div>');
     return;
   }
   txt('rankingAlerts', alerts.map(a => {
@@ -24053,8 +24074,12 @@ function renderRankingAlerts(alerts) {
 function renderRankingChart(kw) {
   const canvas = document.getElementById('rankingChart');
   const emptyEl = document.getElementById('rankingChartEmpty');
-  if (!canvas || !kw.length) { if (emptyEl) emptyEl.style.display = 'block'; return; }
+  // Пустой холст в 160px оставался на экране вместе с надписью «добавьте
+  // слова»: карточка графика зияла пустотой в две трети экрана. Нет данных —
+  // нет холста.
+  if (!canvas || !kw.length) { if (emptyEl) emptyEl.style.display = 'block'; if (canvas) canvas.style.display = 'none'; return; }
   if (emptyEl) emptyEl.style.display = 'none';
+  canvas.style.display = 'block';
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.parentElement.getBoundingClientRect();
@@ -24066,7 +24091,7 @@ function renderRankingChart(kw) {
   ctx.clearRect(0, 0, W, H);
 
   const withPos = kw.filter(k => k.history && k.history.length > 1);
-  if (!withPos.length) { if (emptyEl) emptyEl.style.display = 'block'; return; }
+  if (!withPos.length) { if (emptyEl) emptyEl.style.display = 'block'; canvas.style.display = 'none'; return; }
   const maxPos = Math.max(...withPos.flatMap(k => k.history.map(h => h.position)), 1);
   const colors = ['#2dd4bf', '#60a5fa', '#f59e0b', '#c084fc', '#f87171', '#34d399', '#a78bfa'];
 
