@@ -291,6 +291,10 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 /* Пустой список — это рамка с нулевой высотой, на экране серая полоска
    непонятно откуда. Пока в нём ничего нет, его не видно. */
 .lst:empty{display:none}
+/* Пустая обёртка, которую заполняет JS, держала свой padding и оставляла
+   на экране дыру: на «Реферальной программе» между показателями и списком
+   зиял пустой блок с отступами. Пока не заполнена — её нет. */
+.sb > div:empty,.sub-sb > div:empty{display:none}
 /* Заголовок раздела, под которым ничего нет, — висячая строка. Пока в
    следующем за ним блоке пусто, заголовок не показываем. */
 .sec:has(+ *:empty){display:none}
@@ -18041,7 +18045,7 @@ async function openReferral() {
       <div class="kpi-card"><div class="kpi-val">${REFERRAL_TIER[d.tier]||d.tier||'—'}</div><div class="kpi-lbl">Уровень</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.referral_count||0}</div><div class="kpi-lbl">Рефералов</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.paid_count||0}</div><div class="kpi-lbl">Оплативших</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">$${Number(d.total_earned||0).toFixed(2)}</div><div class="kpi-lbl">Заработано</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.total_earned,'green')}">$${Number(d.total_earned||0).toFixed(2)}</div><div class="kpi-lbl">Заработано</div></div>
     `);
     txt('m-ref-val',`${d.referral_count||0} рефералов · ${d.commission_rate||0}% комиссия`);
     if (d.ref_code) {
