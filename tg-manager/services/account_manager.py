@@ -446,6 +446,66 @@ _PROMOTE_WARM_LIMIT = 3000
 # Таймаут на отдельные Telethon операции (get_entity, send_message и т.д.)
 _OP_TIMEOUT = 45
 
+
+class _Timeboxed:
+    """Клиент, у которого КАЖДЫЙ сетевой запрос ограничен по времени.
+
+    Мёртвый прокси чаще отдаёт не отказ, а half-open сокет: TCP установлен,
+    коннект прошёл, ответа нет и не будет. Такой запрос не возвращается никогда
+    — ни ошибкой, ни успехом. В пути операции это стоит дороже всего: массовая
+    операция идёт циклом последовательно, один повисший аккаунт останавливает её
+    целиком, а она при этом держит слот параллельности (один из восьми) и
+    арендованный флот до потолка прогона, то есть часы, не делая ничего.
+    Владелец видит «выполняется» с замершим счётчиком.
+
+    Обёртка ставится ОДНОЙ строкой на функцию вместо оборачивания каждого из
+    десятков вызовов: в `report_peer_deep_v2` их 32, и забыть один из них —
+    вопрос времени.
+
+    Прозрачность: если результат вызова не корутина (async-итератор вроде
+    `iter_messages`, локальный `_get_input_photo`, свойство), он отдаётся как
+    есть. Поэтому обёртка не меняет поведение ничего, кроме собственно запросов.
+
+    Потолок обязан быть ЩЕДРЫМ: живой Telegram отвечает за секунды, поэтому 45
+    секунд означают мёртвый сокет, а не медленный ответ. Занижать нельзя —
+    ложный таймаут уводит цель в повтор, то есть в лишнее действие по Telegram.
+    Перенос медиа сюда не заворачивать: видео законно едет минутами.
+    """
+
+    __slots__ = ("_client", "_timeout")
+
+    def __init__(self, client: Any, timeout: float = _OP_TIMEOUT) -> None:
+        object.__setattr__(self, "_client", client)
+        object.__setattr__(self, "_timeout", timeout)
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(object.__getattribute__(self, "_client"), name)
+        if not callable(attr):
+            return attr
+        timeout = object.__getattribute__(self, "_timeout")
+
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            res = attr(*args, **kwargs)
+            if inspect.iscoroutine(res):
+                return asyncio.wait_for(res, timeout=timeout)
+            return res
+
+        return wrapped
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(object.__getattribute__(self, "_client"), name, value)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Сырой TL-запрос: `await client(ReportPeerRequest(...))`."""
+        client = object.__getattribute__(self, "_client")
+        return asyncio.wait_for(client(*args, **kwargs),
+                                timeout=object.__getattribute__(self, "_timeout"))
+
+
+def timeboxed(client: Any, timeout: float = _OP_TIMEOUT) -> Any:
+    """Обернуть клиент потолком на запрос. См. `_Timeboxed`."""
+    return client if isinstance(client, _Timeboxed) else _Timeboxed(client, timeout)
+
 # ── Уникальный IPv6 на аккаунт БЕЗ прокси ─────────────────────────────────────
 # Реальная (в отличие от CF-релея с общим edge-IP) изоляция: если хосту
 # маршрутизирована IPv6-подсеть (/64, /48 — миллиарды адресов), привязываем
@@ -6406,6 +6466,10 @@ async def report_peer_deep(
     msg_pool = msg_messages or [message] or [""]
 
     client = _make_client(session_string, _acc)
+    # Тот же потолок на запрос, что и в v2. Эту версию сейчас никто не
+    # зовёт (путь strike идёт через report_peer_deep_v2), но без обёртки
+    # она ждёт мёртвый сокет вечно — ловушка тому, кто её вернёт.
+    client = timeboxed(client)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(peer_username.lstrip("@"))
@@ -7038,6 +7102,9 @@ async def report_peer_deep_v2(  # noqa: C901
         return await _traverse(b"", 0)
 
     client = _make_client(session_string, _acc)
+    # Потолок на КАЖДЫЙ запрос: см. _Timeboxed. Одной строкой вместо
+    # оборачивания десятков вызовов ниже по одному.
+    client = timeboxed(client)
     try:
         await _timed(client.connect(), _CONNECT_TIMEOUT)
 
@@ -7876,6 +7943,9 @@ async def strike_map_target(
     }
 
     client = _make_client(session_string, _acc)
+    # Потолок на КАЖДЫЙ запрос: см. _Timeboxed. Одной строкой вместо
+    # оборачивания десятков вызовов ниже по одному.
+    client = timeboxed(client)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await asyncio.wait_for(client.get_entity(peer_username.lstrip("@")), timeout=_OP_TIMEOUT)
