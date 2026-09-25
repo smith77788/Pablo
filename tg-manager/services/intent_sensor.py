@@ -331,6 +331,20 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
     Тихо ничего не делает, если правил нет или совпадений нет."""
     if not text:
         return {"matched": 0}
+
+    # Виртуальный слой: ЛЮБОЙ входящий ответ — уже сигнал, даже если ни одна
+    # фраза-правило не совпала. Раньше сигнал уходил только при смене стадии,
+    # то есть человек мог месяцами вести переписку, а слой считал бы его
+    # состояние непозтверждённым и остужал распадом. Молчаливо пропускаем
+    # того, кого нет в контактах: слой надстроен над контактом.
+    try:
+        from services import virtual_layer
+        await virtual_layer.signal_for_telegram_user(
+            pool, owner_id, peer.get("peer_user_id"), "replied",
+            confidence=0.6, source="vault")
+    except Exception:
+        log.debug("intent_sensor: virtual_layer replied failed owner=%s", owner_id)
+
     rules = await pool.fetch(
         "SELECT id, phrase, stage, tag, notify FROM vault_intent_rules "
         "WHERE owner_id=$1 AND is_active=TRUE", owner_id)
