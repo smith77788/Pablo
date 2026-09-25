@@ -2728,9 +2728,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <option value="none">Одинаковое название</option>
         </select>
       </div>
-      <input type="text" id="cfUname" placeholder="Шаблон @юзернейма, напр. Dostavka_Moskva" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
+      <input type="text" id="cfUname" placeholder="Шаблон @username, напр. Dostavka_Moskva" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:6px">
       <div style="font-size:12px;color:var(--hint);margin:0 0 8px;line-height:1.45">
-        🔎 <b>SEO-режим</b>: название — это ключевые слова через пробел, @юзернейм — ключи через «_». Система расставит их для каждого ресурса по-разному (перестановка + добавление букв): <code>Dostavka_Moskva → Moskva_Dostavka, Dostavkaj_Moskva, Moskva_Dostavkagy…</code> — так вы занимаете много мест в поиске по многим сочетаниям ключей. @юзернейм — необязателен; занятые Telegram отвергнет, возьмётся следующий вариант.
+        🔎 <b>SEO-режим</b>: название — это ключевые слова через пробел, @username — ключи через «_». Система расставит их для каждого ресурса по-разному (перестановка + добавление букв): <code>Dostavka_Moskva → Moskva_Dostavka, Dostavkaj_Moskva, Moskva_Dostavkagy…</code> — так вы занимаете много мест в поиске по многим сочетаниям ключей. @username — необязателен; занятые Telegram отвергнет, возьмётся следующий вариант.
       </div>
       <button class="btn btn-s" style="width:100%;margin-bottom:6px" onclick="previewFactoryNames('cf')">👁 Предпросмотр имён и @</button>
       <div id="cfPreview" style="margin-bottom:8px"></div>
@@ -4295,7 +4295,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">🩺 Диагностика</div>
   </div>
   <div class="sub-sb">
-    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Проверка всей цепочки исполнения: креды, аккаунты, очередь и живое подключение одного аккаунта (тот же путь, что у операций).</div>
+    <div style="padding:4px 0 8px;color:var(--hint);font-size:12px">Проверка всей цепочки исполнения: доступы, аккаунты, очередь и живое подключение одного аккаунта (тот же путь, что у операций).</div>
     <button class="btn btn-p" id="diagBtn" onclick="runDiag()" style="width:100%;margin-bottom:10px">▶️ Запустить диагностику</button>
     <div id="diagResult"></div>
   </div>
@@ -9605,7 +9605,7 @@ const AP_INFO = {
   check_restriction: '🔎 Проверит состояние аккаунта: жив / ограничен / удалён (restriction_reason). Для одного аккаунта — результат сразу.',
   set_online: '🟢 Разово выставит статус «в сети». Непрерывное присутствие — задача прогрева/планировщика.',
   clear_bio: '🧹 Полностью очистит поле «О себе» (bio).',
-  remove_username: '🗑 Снимет публичный @username (аккаунт станет без юзернейма).',
+  remove_username: '🗑 Снимет публичный @username (аккаунт останется без @username).',
   remove_avatar: '🗑 Удалит ВСЕ фотографии профиля.',
   reset_2fa: '🔓 Снимет облачный пароль 2FA. Нужен действующий текущий пароль.',
 };
@@ -21931,7 +21931,7 @@ async function previewFactoryNames(prefix) {
   const unameTpl = (document.getElementById(isBot?'bfUsername':'cfUname')?.value || '').trim();
   const box = document.getElementById(isBot?'bfPreview':'cfPreview');
   if (!box) return;
-  if (!title && !unameTpl) { box.innerHTML = '<div style="font-size:12px;color:var(--hint)">Введите название и/или шаблон @юзернейма для предпросмотра.</div>'; return; }
+  if (!title && !unameTpl) { box.innerHTML = '<div style="font-size:12px;color:var(--hint)">Введите название и/или шаблон @username для предпросмотра.</div>'; return; }
   box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const r = await api('/api/miniapp/factory/name_preview', {method:'POST', body:JSON.stringify({
@@ -23851,7 +23851,7 @@ async function submitAdminBroadcast() {
       + '\n\nСообщения уйдут живым людям — отменить отправку нельзя.')) return;
   try {
     const r = await api('/api/miniapp/admin/broadcast', {method:'POST', body:JSON.stringify({text})});
-    toast('✅ Отправлено: ' + (r.sent||0) + ' юзерам');
+    toast('✅ Отправлено: ' + (r.sent||0) + ' ' + plural(r.sent||0,'пользователю','пользователям','пользователям'));
     back();
   } catch(e) { toast('⚠️ ' + (e.message||'Ошибка')); }
 }
