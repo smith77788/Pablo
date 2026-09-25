@@ -101,3 +101,32 @@ async def recent_texts_for_owner(
                   owner_id, exc_info=True)
         return []
     return [r["body"] for r in (rows or []) if r["body"]]
+
+
+async def recent_pillars_for_owner(
+    pool,
+    owner_id: int,
+    *,
+    limit: int = 30,
+) -> list[str]:
+    """Рубрики недавних публикаций владельца, СТАРЫЕ В НАЧАЛЕ (как ждёт
+    channel_brain.pick_next_pillar). Fail-soft → [].
+
+    Одна публикация = одна запись: массовая публикация в 300 каналов пишет 300
+    строк с одной рубрикой, и без группировки по операции одна «Реклама»
+    выглядела бы как триста реклам подряд.
+    """
+    n = max(1, min(int(limit), _MAX_WINDOW))
+    try:
+        rows = await pool.fetch(
+            "SELECT pillar, MAX(published_at) AS t FROM va_channel_posts "
+            "WHERE owner_id=$1 AND pillar IS NOT NULL "
+            "GROUP BY COALESCE(op_id, -id), pillar "
+            "ORDER BY t DESC LIMIT $2",
+            int(owner_id), n,
+        )
+    except Exception:
+        log.debug("content_memory.recent_pillars_for_owner failed owner=%s",
+                  owner_id, exc_info=True)
+        return []
+    return [r["pillar"] for r in reversed(rows or []) if r["pillar"]]

@@ -31,6 +31,7 @@ class _BrainPool:
         self.rows: dict = {}
         self.posts = posts or []
         self.fail_save = False
+        self.pillar_history: list = []   # старые в начале
 
     async def fetchrow(self, q, *a):
         if "INSERT INTO va_channel_brain" in q:
@@ -48,6 +49,9 @@ class _BrainPool:
         return None
 
     async def fetch(self, q, *a):
+        if "SELECT pillar" in q:
+            # свежие сверху, как отдаёт ORDER BY t DESC
+            return [{"pillar": p} for p in reversed(self.pillar_history)]
         if "FROM va_channel_posts" in q:
             return [{"body": b} for b in self.posts]
         return []
@@ -254,3 +258,74 @@ def test_verdict_to_public_shape():
                             repetition={"max_similarity": 0.734})
     out = er.verdict_to_public(v)
     assert out == {"needs_review": True, "reasons": ["x"] * 8, "similarity": 73}
+
+
+# ── рубрики (контент-микс) ──────────────────────────────────────────────────
+
+
+def test_validate_pillars_lines_and_weights():
+    names, w, errors = store.validate_pillars("Новости: 3\nИтоги: неделя\n\nРеклама")
+    assert errors == []
+    assert names == ["Новости", "Итоги: неделя", "Реклама"]
+    assert w == {"Новости": 3.0, "Итоги: неделя": 1.0, "Реклама": 1.0}
+
+
+@pytest.mark.parametrize("raw,needle", [
+    ("Новости: 0", "доля от 1 до 10"),
+    ("Новости: 11", "доля от 1 до 10"),
+    ("Новости\nновости", "указана дважды"),
+    ("\n".join("Р%d" % i for i in range(13)), "не больше 12"),
+    ("я" * 41, "длиннее 40"),
+    (42, "нужен список"),
+])
+def test_validate_pillars_rejects(raw, needle):
+    _, _, errors = store.validate_pillars(raw)
+    assert any(needle in e for e in errors), errors
+
+
+def test_pillars_saved_and_next_pillar_follows_mix(monkeypatch):
+    pool = _BrainPool()
+    # две рекламы подряд — третьей редактор не советует
+    pool.pillar_history = ["Новости", "Реклама", "Реклама"]
+
+    async def go():
+        st, d = await _call(pool, monkeypatch, "PUT", "/api/miniapp/editorial/policy",
+                            {"pillars": "Реклама: 5\nНовости: 1"})
+        assert st == 200, d
+        assert d["policy"]["pillars"] == [{"name": "Реклама", "weight": 5},
+                                          {"name": "Новости", "weight": 1}]
+        assert d["next_pillar"] == "Новости"
+        # сохранение без поля pillars не стирает рубрики
+        st, d = await _call(pool, monkeypatch, "PUT", "/api/miniapp/editorial/policy",
+                            {"max_emoji": 2})
+        assert [p["name"] for p in d["policy"]["pillars"]] == ["Реклама", "Новости"]
+
+    asyncio.run(go())
+
+
+def test_mass_publish_rejects_unknown_pillar(monkeypatch):
+    pool = _BrainPool()
+
+    async def _count(*a, **k):
+        return 3
+    monkeypatch.setattr(M, "_safe_count", _count)
+
+    async def go():
+        return await _call(pool, monkeypatch, "POST", "/api/miniapp/mass_publish",
+                           {"text": "пост", "pillar": "Опечатка"})
+
+    st, d = asyncio.run(go())
+    assert st == 400 and "рубрики нет" in d["error"]
+
+
+@pytest.mark.asyncio
+async def test_recent_pillars_oldest_first():
+    from services import content_memory as cm
+    pool = _BrainPool()
+    pool.pillar_history = ["А", "Б", "В"]
+    assert await cm.recent_pillars_for_owner(pool, UID) == ["А", "Б", "В"]
+
+
+def test_mass_publish_records_pillar():
+    src = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
+    assert 'pillar=params.get("pillar")' in src

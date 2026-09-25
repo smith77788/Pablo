@@ -14531,6 +14531,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         params = {"text": text, "delay": delay, "owner_id": uid}
         if channel_ids:
             params["channel_ids"] = channel_ids
+        # Рубрика поста (контент-микс редактора): только из рубрик владельца,
+        # иначе история заполнится опечатками и микс перестанет что-то значить.
+        _pillar = str(body.get("pillar") or "").strip()
+        if _pillar:
+            from services import channel_brain_store as _cbs
+            _brain = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+            if not _brain or _pillar not in _brain.pillars:
+                return _err("Такой рубрики нет в правилах редактора", 400)
+            params["pillar"] = _pillar
         try:
             from services.operation_bus import submit
             op_id = await submit(pool, uid, "mass_publish", params, total_items=total,
@@ -14556,7 +14565,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         from services import channel_brain_store as _cbs
         brain = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
-        return _json_resp({"ok": True, "policy": _cbs.to_public(brain)})
+        return _json_resp({"ok": True, "policy": _cbs.to_public(brain),
+                           "next_pillar": await _editorial_next_pillar(uid, brain)})
+
+    async def _editorial_next_pillar(uid: int, brain) -> str | None:
+        """Какую рубрику публиковать следующей (контент-микс) или None."""
+        if brain is None or not brain.pillars:
+            return None
+        from services import content_memory as _cm
+        recent = await _cm.recent_pillars_for_owner(pool, uid)
+        return brain.plan_next([p for p in recent if p in brain.pillars])
 
     async def editorial_policy_save(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14568,17 +14586,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось разобрать запрос")
         from services import channel_brain_store as _cbs
         clean, errors = _cbs.validate_policy(body)
+        pillars = weights = None
+        if isinstance(body, dict) and "pillars" in body:
+            pillars, weights, p_err = _cbs.validate_pillars(body.get("pillars"))
+            errors += p_err
         if errors:
             return _err("; ".join(errors[:5]), 400)
-        # Рубрики, микс и режим автономности этим экраном не задаются —
-        # сохраняем их как были, а не затираем значениями по умолчанию.
+        # Что запрос не прислал (рубрики, режим автономности), сохраняем как
+        # было, а не затираем значениями по умолчанию.
         prev = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+        if pillars is None:
+            pillars = prev.pillars if prev else None
+            weights = prev.mix_weights if prev else None
         row_id = await _cbs.save_profile(
             pool, uid, _cbs.OWNER_DEFAULT_KEY,
             brand_rules=clean["brand_rules"],
             dup_threshold=clean["dup_threshold"],
-            pillars=prev.pillars if prev else None,
-            mix_weights=prev.mix_weights if prev else None,
+            pillars=pillars,
+            mix_weights=weights,
             autonomy_mode=prev.autonomy_mode if prev else "manual",
             max_streak=prev.max_streak if prev else 2,
         )
@@ -14589,7 +14614,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                  uid, len(clean["brand_rules"]["forbidden_words"]),
                  len(clean["brand_rules"]["banned_openings"]))
         brain = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
-        return _json_resp({"ok": True, "policy": _cbs.to_public(brain)})
+        return _json_resp({"ok": True, "policy": _cbs.to_public(brain),
+                           "next_pillar": await _editorial_next_pillar(uid, brain)})
 
     async def editorial_review_draft(request: web.Request) -> web.Response:
         """Совет редактора по черновику перед публикацией. Не блокирует её."""

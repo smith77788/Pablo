@@ -3982,6 +3982,7 @@ async def _exec_mass_publish(
                     from services import content_memory
                     await content_memory.record_published(
                         pool, owner_id, str(dialog["id"]), _ch_text, op_id=op_id,
+                        pillar=params.get("pillar"),
                     )
                 except Exception:
                     log_exc_swallow(log, "mass_publish: content_memory record failed")

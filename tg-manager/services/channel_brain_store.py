@@ -39,6 +39,9 @@ _MAX_WORDS = 100
 _MAX_OPENINGS = 50
 _MAX_WORD_LEN = 60
 _DUP_MIN, _DUP_MAX = 0.3, 1.0
+_MAX_PILLARS = 12
+_MAX_PILLAR_LEN = 40
+_MAX_WEIGHT = 10
 
 
 def brand_rules_from_dict(d: Optional[dict]) -> cb.BrandRules:
@@ -215,6 +218,63 @@ def validate_policy(payload: Any) -> tuple[dict, list[str]]:
     return {"brand_rules": rules, "dup_threshold": round(dup, 3)}, errors
 
 
+def validate_pillars(raw: Any) -> tuple[list[str], dict[str, float], list[str]]:
+    """Рубрики канала → (названия, доли, ошибки по-русски).
+
+    Принимает строки «Название: доля» (по одной на строку) или список
+    {name, weight}. Доля — целое 1…10, по умолчанию 1: это относительный вес,
+    а не процент, поэтому «Новости: 3, Реклама: 1» значит «новостей втрое больше».
+    """
+    errors: list[str] = []
+    items: list[tuple[str, Any]] = []
+    if raw is None:
+        return [], {}, errors
+    if isinstance(raw, str):
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            # «Итоги: неделя» — это название с двоеточием, а не доля.
+            name, _, w = line.rpartition(":")
+            if not name or not w.strip().lstrip("-").isdigit():
+                name, w = line, ""
+            items.append((name, w or None))
+    elif isinstance(raw, list):
+        for it in raw:
+            if isinstance(it, dict):
+                items.append((it.get("name", ""), it.get("weight")))
+            else:
+                items.append((it, None))
+    else:
+        return [], {}, ["Рубрики: нужен список"]
+    names: list[str] = []
+    weights: dict[str, float] = {}
+    for name, w in items:
+        n = " ".join(str(name or "").split())
+        if not n:
+            continue
+        if len(n) > _MAX_PILLAR_LEN:
+            errors.append(f"Рубрика «{n[:20]}…» длиннее {_MAX_PILLAR_LEN} символов")
+            continue
+        if n.lower() in (x.lower() for x in names):
+            errors.append(f"Рубрика «{n}» указана дважды")
+            continue
+        weight = 1
+        if w is not None and str(w).strip():
+            try:
+                weight = int(str(w).strip())
+            except ValueError:
+                errors.append(f"Рубрика «{n}»: доля должна быть целым числом")
+                continue
+            if not 1 <= weight <= _MAX_WEIGHT:
+                errors.append(f"Рубрика «{n}»: доля от 1 до {_MAX_WEIGHT}")
+                continue
+        names.append(n)
+        weights[n] = float(weight)
+    if len(names) > _MAX_PILLARS:
+        errors.append(f"Рубрик не больше {_MAX_PILLARS}, сейчас {len(names)}")
+    return names[:_MAX_PILLARS], weights, errors
+
+
 def to_public(brain: Optional[ChannelBrain]) -> dict:
     """Политика → JSON для Mini App. Нет политики → значения по умолчанию."""
     r = brain.brand_rules if brain else cb.BrandRules()
@@ -227,6 +287,10 @@ def to_public(brain: Optional[ChannelBrain]) -> dict:
         "forbidden_words": list(r.forbidden_words),
         "banned_openings": list(r.banned_openings),
         "dup_threshold": brain.dup_threshold if brain else 0.6,
+        "pillars": [
+            {"name": p, "weight": int((brain.mix_weights or {}).get(p, 1))}
+            for p in (brain.pillars if brain else [])
+        ],
     }
 
 

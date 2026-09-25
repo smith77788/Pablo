@@ -84,6 +84,16 @@ function _edRender(p) {
       '<div class="field-err" id="edErr"></div>' +
       '<button class="btn btn-p" id="edSaveBtn" onclick="saveEditorialRules()" style="width:100%;margin-top:4px">💾 Сохранить правила</button>' +
     '</div>' +
+    '<div class="sec">Рубрики канала</div>' +
+    '<div class="lst" style="padding:14px">' +
+      '<div class="field"><label>Одна рубрика на строку, доля через двоеточие</label>' +
+        '<textarea id="edPillars" rows="4" placeholder="Новости: 3&#10;Полезное: 2&#10;Реклама: 1">' +
+          esc((p.pillars || []).map(function (x) { return x.name + ': ' + x.weight; }).join('\n')) +
+        '</textarea>' +
+        '<div class="field-note">Доля — от 1 до 10: «Новости: 3, Реклама: 1» значит новостей втрое больше. ' +
+          'Редактор подскажет, какую рубрику публиковать следующей, и не даст поставить три рекламы подряд. До 12 рубрик.</div></div>' +
+      '<button class="btn btn-p" onclick="saveEditorialRules()" style="width:100%">💾 Сохранить правила</button>' +
+    '</div>' +
     '<div class="sec">Проверить текст</div>' +
     '<div class="lst" style="padding:14px">' +
       '<div class="field"><textarea id="edTry" rows="4" maxlength="4096" placeholder="Вставьте пост — редактор скажет, что бы он поправил"></textarea></div>' +
@@ -110,6 +120,7 @@ async function saveEditorialRules() {
     max_chars: v('edMax'),
     forbidden_words: _edWords('edWords'),
     banned_openings: _edWords('edOpenings'),
+    pillars: document.getElementById('edPillars').value || '',
   };
   btn.disabled = true; btn.textContent = '⏳ Сохраняю…';
   try {
@@ -163,4 +174,24 @@ async function editorialReviewForConfirm(text) {
   } catch (e) {
     return null;
   }
+}
+
+// Рубрика в массовой публикации: список из правил редактора, подсказка
+// «следующей лучше …» выбрана заранее. Нет рубрик — поля не видно.
+async function loadMpPillars() {
+  const wrap = document.getElementById('mpPillarWrap');
+  const sel = document.getElementById('mpPillar');
+  if (!wrap || !sel) return;
+  wrap.style.display = 'none';
+  sel.innerHTML = '';
+  let d;
+  try { d = await api('/api/miniapp/editorial/policy'); } catch (e) { return; }
+  const list = ((d && d.policy && d.policy.pillars) || []).map(function (x) { return x.name; });
+  if (!list.length) return;
+  const next = d.next_pillar || '';
+  sel.innerHTML = '<option value="">Без рубрики</option>' + list.map(function (n) {
+    return '<option value="' + esc(n) + '"' + (n === next ? ' selected' : '') + '>' + esc(n) +
+      (n === next ? ' — советует редактор' : '') + '</option>';
+  }).join('');
+  wrap.style.display = 'block';
 }

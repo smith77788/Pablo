@@ -3965,6 +3965,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
         <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
       </div>
+      <div class="field" id="mpPillarWrap" style="margin-bottom:12px;display:none">
+        <label>Рубрика</label>
+        <select id="mpPillar"></select>
+        <div class="field-note">Из правил редактора: по рубрикам он следит, чтобы в канале не шли три рекламы подряд.</div>
+      </div>
       <div class="field" style="margin-bottom:12px">
         <label>Задержка между постами</label>
         <select id="mpDelay">
@@ -13045,6 +13050,7 @@ function openMassPub() {
   push('s-masspub');
   loadMpTargets();
   loadMpOps();
+  if (typeof loadMpPillars === 'function') loadMpPillars();
 }
 
 // Масштаб массового действия ДО нажатия. Возвращает {total, sample} либо null,
@@ -13282,6 +13288,7 @@ async function sendMassPublish() {
   try {
     const payload = {text, delay};
     if (channel_ids) payload.channel_ids = channel_ids;
+    { const _p=document.getElementById('mpPillar'); if (_p && _p.value) payload.pillar = _p.value; }
     if (scheduled_for) payload.scheduled_for = scheduled_for;
     const d = await api('/api/miniapp/mass_publish', {method:'POST', body: JSON.stringify(payload)});
     document.getElementById('mpText').value='';
