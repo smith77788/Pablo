@@ -8903,7 +8903,7 @@ async function showDiscoveredBots() {
     const pending = (d.total||0) - (d.connected||0);
     txt('foundBotsStats', `
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Найдено</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.connected||0}</div><div class="kpi-lbl">Подключено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.connected,'green')}">${d.connected||0}</div><div class="kpi-lbl">Подключено</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:${pending?'var(--orange,#f59e0b)':'var(--hint)'}">${pending}</div><div class="kpi-lbl">Осталось</div></div>`);
     if (!bots.length) {
       txt('foundBotsList', empty('🤖','Найденных ботов пока нет','Запустите скан флота — Infragram спросит @BotFather на каждом аккаунте',{label:'🔍 Найти на флоте',fn:'scanFleetBots()'}));
@@ -15126,8 +15126,8 @@ async function openInfra() {
   try {
     const d = await api('/api/miniapp/infra');
     txt('infraStats',`
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.active_accounts||0}</div><div class="kpi-lbl">Активных акк</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--orange)">${d.flood_24h||0}</div><div class="kpi-lbl">Флуд 24ч</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active_accounts,'green')}">${d.active_accounts||0}</div><div class="kpi-lbl">Активных акк</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.flood_24h,'orange')}">${d.flood_24h||0}</div><div class="kpi-lbl">Флуд 24ч</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.ops_24h||0}</div><div class="kpi-lbl">Операций 24ч</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.warmup_active||0}</div><div class="kpi-lbl">На прогреве</div></div>
     `);
@@ -15411,7 +15411,7 @@ async function runDiag() {
     </div>`;
     html += `<div class="sec">Очередь операций</div><div class="lst">
       <div class="row"><div class="row-body"><div class="row-name">Ожидают / выполняются</div></div><div class="row-right">${q.pending||0} / ${q.running||0}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">За 24ч: успешно / ошибок</div></div><div class="row-right"><span style="color:var(--green)">${q.done_24h||0}</span> / <span style="color:var(--red)">${q.failed_24h||0}</span></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">За 24ч: успешно / ошибок</div></div><div class="row-right"><span style="${kpiTone(q.done_24h,'green')}">${q.done_24h||0}</span> / <span style="${kpiTone(q.failed_24h,'red')}">${q.failed_24h||0}</span></div></div>
     </div>`;
     html += `<div class="sec">Живой тест подключения</div><div class="lst">
       <div class="row"><div class="row-ico" style="background:${lt.ok?'rgba(52,211,153,.16)':'rgba(248,113,113,.16)'}">${lt.ok?'✅':'⚠️'}</div>
@@ -17777,7 +17777,7 @@ async function openBotFactory() {
     const d = await api('/api/miniapp/bot_factory');
     txt('botFactoryStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего ботов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active,'green')}">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
     `);
     txt('m-botfactory-val',`${d.total||0} ботов · ${d.active||0} активных`);
     const recent = d.recent||[];
@@ -17948,7 +17948,7 @@ async function openAutoreg() {
     const d = await api('/api/miniapp/autoreg');
     txt('autoregStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total_accounts||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--orange)">${d.pending_registrations||0}</div><div class="kpi-lbl">В очереди</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.pending_registrations,'orange')}">${d.pending_registrations||0}</div><div class="kpi-lbl">В очереди</div></div>
     `);
     txt('m-autoreg-val',`${d.total_accounts||0} аккаунтов`);
     const recent = d.recent||[];
@@ -18043,7 +18043,7 @@ async function openReferral() {
       txt('referralCode',`
         <div class="lst">
           <div class="row"><div class="row-body"><div class="row-name">Ваш реферальный код</div><div class="row-val" style="color:var(--purple-light);font-size:16px;font-weight:600">${esc(d.ref_code)}</div></div></div>
-          <div class="row"><div class="row-body"><div class="row-name">Комиссия</div></div><div class="row-right" style="color:var(--green)">${d.commission_rate||0}%</div></div>
+          <div class="row"><div class="row-body"><div class="row-name">Комиссия</div></div><div class="row-right" style="${kpiTone(d.commission_rate,'green')}">${d.commission_rate||0}%</div></div>
         </div>
       `);
     }
@@ -18335,7 +18335,7 @@ async function openGifts() {
     const d = await api('/api/miniapp/gifts');
     txt('giftsStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего подарков</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.transferable||0}</div><div class="kpi-lbl">Передаваемых</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.transferable,'green')}">${d.transferable||0}</div><div class="kpi-lbl">Передаваемых</div></div>
     `);
     txt('m-gifts-val',`${d.total||0} подарков · ${d.transferable||0} передаваемых`);
     const items = d.items||[];
@@ -18621,7 +18621,7 @@ async function openStars() {
     txt('starsStats',`
       <div class="kpi-card"><div class="kpi-val">⭐${d.total_revenue||0}</div><div class="kpi-lbl">Заработано</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.total_conversions||0}</div><div class="kpi-lbl">Конверсий</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.active_exps||0}</div><div class="kpi-lbl">Активных A/B</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active_exps,'green')}">${d.active_exps||0}</div><div class="kpi-lbl">Активных A/B</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.total_exps||0}</div><div class="kpi-lbl">Всего тестов</div></div>
     `);
     txt('m-stars-val',`⭐${d.total_revenue||0} · ${d.active_exps||0} активных`);
@@ -19231,7 +19231,7 @@ async function openWarmup() {
     const att = d.attention||0;
     txt('warmupStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего планов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active,'green')}">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:${att?'var(--orange,#f59e0b)':'var(--hint)'}">${att}</div><div class="kpi-lbl">Требуют внимания</div></div>
     `);
     txt('m-warmup-val',`${d.active||0} активных · ${d.total||0} планов${att?' · '+att+' ⚠️':''}`);
@@ -19543,7 +19543,7 @@ async function openRehab() {
     const d = await api('/api/miniapp/rehab');
     txt('rehabStats',`
       <div class="kpi-card"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${d.in_progress||0}</div><div class="kpi-lbl">Восстанавливаются</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.freed||0}</div><div class="kpi-lbl">Возвращены</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.freed,'green')}">${d.freed||0}</div><div class="kpi-lbl">Возвращены</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${d.stuck||0}</div><div class="kpi-lbl">Нужен разбор</div></div>
     `);
     txt('m-rehab-val', (d.in_progress||0) ? `${d.in_progress} в работе${(d.stuck||0)?' · '+d.stuck+' ⚠️':''}` : ((d.stuck||0)?`${d.stuck} ждут разбора`:'нет ограниченных'));
@@ -19621,7 +19621,7 @@ async function openWarmupLog(planId) {
       <div style="background:var(--bg2);border-left:3px solid ${col};border-radius:8px;padding:11px 13px">
         <div style="font-weight:600;font-size:14px">${esc(h.label||'')} · День ${p.current_day||0}/${p.target_days||0}</div>
         ${h.hint?`<div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.4">${esc(h.hint)}</div>`:''}
-        <div style="font-size:12px;margin-top:7px">За 7 дней: <b style="color:var(--green)">${w.ok||0}</b> успешных · <b style="color:${(w.fail||0)?'var(--red,#ef4444)':'var(--hint)'}">${w.fail||0}</b> неудачных</div>
+        <div style="font-size:12px;margin-top:7px">За 7 дней: <b style="${kpiTone(w.ok,'green')}">${w.ok||0}</b> успешных · <b style="color:${(w.fail||0)?'var(--red,#ef4444)':'var(--hint)'}">${w.fail||0}</b> неудачных</div>
         ${p.last_action_at?`<div style="font-size:11px;color:var(--hint);margin-top:3px">Последнее действие: ${esc(ago(p.last_action_at))}</div>`:'<div style="font-size:11px;color:var(--hint);margin-top:3px">Действий ещё не было</div>'}
         ${c.size?`<div style="font-size:11px;color:var(--hint);margin-top:5px;line-height:1.4">Круг каналов: <b>${c.size}</b>${c.found?` · нашёл сам: <b>${c.found}</b>`:''}${(c.examples&&c.examples.length)?`<br>${esc(c.examples.join(', '))}`:''}</div>`:''}
       </div>`);
@@ -19791,14 +19791,14 @@ async function openHealth() {
   try {
     const d = await api('/api/miniapp/health');
     const risk = d.banned>0||d.low_trust>0?'⚠️ Есть угрозы':'✅ Норма';
-    const riskColor = d.banned>0||d.low_trust>0?'#f59e0b':'#22c55e';
+    const riskColor = d.banned>0||d.low_trust>0?'var(--orange)':'var(--green)';
     txt('healthStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--red)">${d.banned||0}</div><div class="kpi-lbl">Забанено</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--orange)">${d.cooling||0}</div><div class="kpi-lbl">В кулдауне</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--red)">${d.low_trust||0}</div><div class="kpi-lbl">Низкий траст</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--orange)">${d.flood_7d||0}</div><div class="kpi-lbl">Флуд 7д</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active,'green')}">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.banned,'red')}">${d.banned||0}</div><div class="kpi-lbl">Забанено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.cooling,'orange')}">${d.cooling||0}</div><div class="kpi-lbl">В кулдауне</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.low_trust,'red')}">${d.low_trust||0}</div><div class="kpi-lbl">Низкий траст</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.flood_7d,'orange')}">${d.flood_7d||0}</div><div class="kpi-lbl">Флуд 7д</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.warmup_active||0}</div><div class="kpi-lbl">На прогреве</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:${riskColor}">${risk}</div><div class="kpi-lbl">Статус</div></div>
     `);
@@ -23246,6 +23246,11 @@ function num(v) {
   return String(v);
 }
 // Русское склонение по числу: «1 канал», «2 канала», «5 каналов».
+// Цвет тревоги — только когда есть о чём тревожиться. Красный ноль читается
+// как проблема, хотя «0 забанено» — лучшая новость на экране. Возвращает
+// объявление стиля или пустую строку (тогда число берёт обычный цвет текста).
+function kpiTone(n, tone) { return Number(n) > 0 ? 'color:var(--' + tone + ')' : ''; }
+
 function plural(n, one, few, many) {
   n = Math.abs(Math.trunc(Number(n) || 0));
   const d = n % 10, h = n % 100;
@@ -23348,11 +23353,14 @@ function empty(ico,txt2,sub,action) {
   } else if (isErr && atRoot) {
     // Ошибка загрузки корневой вкладки → один тап, чтобы повторить запрос.
     btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="reloadView()">↻ Повторить</button>`;
-  } else if (typeof STACK !== 'undefined' && STACK.length) {
+  } else if (isErr && typeof STACK !== 'undefined' && STACK.length) {
     // `STACK.length`, а не `> 1`: подэкран, открытый с вкладки, лежит в стеке
     // один, и при `> 1` кнопки не появлялось вовсе — тот же тупик, что в errHtml.
-    btn = `<button class="btn" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">◀️ Назад</button>`;
+    btn = `<button class="btn btn-s" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">◀️ Назад</button>`;
   } else {
+    // Спокойное пустое состояние — не ошибка и не тупик: «Нет флуд-событий за
+    // 7 дней» это ХОРОШАЯ новость внутри раздела, где вокруг есть содержимое, а
+    // в шапке есть стрелка назад. Кнопка «Назад» здесь только шумит.
     btn = '';
   }
   // Текст экранируем: сюда приходит и сообщение об ошибке от сервера, и
