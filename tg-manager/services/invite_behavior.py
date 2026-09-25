@@ -34,6 +34,22 @@ import random
 
 log = logging.getLogger(__name__)
 
+# Потолки запросов к Telegram.
+#
+# Этот модуль не фоновый, вопреки названию: `humanize()` зовёт
+# `_exec_mass_invite` ПРЯМО в цикле инвайта (op_worker), между приглашениями.
+# Значит повисший здесь запрос (мёртвый прокси отдаёт half-open сокет: TCP
+# есть, ответа нет и не будет) останавливает не «имитацию поведения», а самую
+# баноопасную операцию продукта — вместе со всем арендованным под неё флотом,
+# слотом параллельности и счётчиком, который владелец видит замершим.
+#
+# 45 секунд — щедро: живой Telegram отвечает за секунды. Коннекту дают больше,
+# как и `account_manager._CONNECT_TIMEOUT`: рукопожатие через цепочку прокси
+# законно медленнее одиночного запроса.
+_TG_TIMEOUT = 45
+_CONNECT_TIMEOUT = 30
+
+
 # Вероятность, что пауза будет чем-то заполнена. Не 100%: человек тоже не делает
 # одно и то же между каждой парой действий, а ровное «после каждого инвайта —
 # ровно одно действие» — такой же машинный признак, как ровная задержка.
@@ -68,20 +84,20 @@ async def _act_presence(client) -> None:
 
     went_online = False
     try:
-        await client(UpdateStatusRequest(offline=False))
+        await asyncio.wait_for(client(UpdateStatusRequest(offline=False)), timeout=_TG_TIMEOUT)
         went_online = True
         await asyncio.sleep(random.uniform(1.5, 4.0))
     finally:
         if went_online:
             try:
-                await client(UpdateStatusRequest(offline=True))
+                await asyncio.wait_for(client(UpdateStatusRequest(offline=True)), timeout=_TG_TIMEOUT)
             except Exception:
                 log.debug("invite_behavior: offline reset failed")
 
 
 async def _act_dialogs(client) -> None:
     """Открыть список диалогов — самый обычный запрос любого клиента."""
-    await client.get_dialogs(limit=random.randint(5, 15))
+    await asyncio.wait_for(client.get_dialogs(limit=random.randint(5, 15)), timeout=_TG_TIMEOUT)
     await asyncio.sleep(random.uniform(0.8, 2.5))
 
 
@@ -91,11 +107,11 @@ async def _act_read(client) -> None:
     Ходим только по собственным диалогам аккаунта: чужие ресурсы — это уже
     другой риск и другие лимиты.
     """
-    dialogs = await client.get_dialogs(limit=10)
+    dialogs = await asyncio.wait_for(client.get_dialogs(limit=10), timeout=_TG_TIMEOUT)
     if not dialogs:
         return
     d = random.choice(list(dialogs))
-    await client.get_messages(d, limit=random.randint(3, 10))
+    await asyncio.wait_for(client.get_messages(d, limit=random.randint(3, 10)), timeout=_TG_TIMEOUT)
     await asyncio.sleep(random.uniform(0.8, 2.0))
 
 
@@ -132,7 +148,7 @@ async def _run(session: str, acc: dict, action: str) -> str | None:
 
     client = _make_client(session, dict(acc or {}))
     try:
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         await _HANDLERS[action](client)
         return action
     finally:

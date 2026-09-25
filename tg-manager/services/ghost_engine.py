@@ -22,10 +22,27 @@ from telethon.errors import (
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.types import ReactionEmoji
 
-from services.account_manager import _make_client
+from services.account_manager import _connect_and_track, _make_client
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
+
+# Потолок одиночного запроса к Telegram в этом фоновом цикле.
+#
+# Здесь он не «на всякий случай»: цикл держит аккаунт через единый арбитр
+# op_worker.try_claim_account, а отпускает его в finally. Повисший запрос
+# (мёртвый прокси отдаёт half-open сокет: TCP есть, ответа нет и не будет) из
+# finally не возвращается НИКОГДА, поэтому аккаунт остаётся в
+# op_worker._accounts_in_use, а renew_leases() продлевает его аренду каждые
+# 30 секунд — вечно. Реконсилер такую строку не чистит намеренно: для него
+# живая память держателя и есть доказательство занятости. Итог — аккаунт
+# навсегда «занят операцией»: он выпадает и из операций владельца, и из
+# прогрева, и из призрака, и заметить это можно только по счётчику флота.
+#
+# 45 секунд — щедро: живой Telegram отвечает за секунды. Занижать нельзя,
+# ложный таймаут уводит действие в повтор, то есть в лишний запрос по Telegram.
+_TG_TIMEOUT = 45
+
 
 _LOOP_INTERVAL = 200        # seconds between full sweeps
 _STAGGER_MIN   = 4          # seconds between individual account actions
@@ -132,19 +149,19 @@ async def _log_action(
 
 
 async def _act_update_status(client, pool, profile_id, account_id) -> None:
-    await client(UpdateStatusRequest(offline=False))
+    await asyncio.wait_for(client(UpdateStatusRequest(offline=False)), timeout=_TG_TIMEOUT)
     await asyncio.sleep(random.uniform(4, 12))
-    await client(UpdateStatusRequest(offline=True))
+    await asyncio.wait_for(client(UpdateStatusRequest(offline=True)), timeout=_TG_TIMEOUT)
     await _log_action(pool, profile_id, account_id, "update_status", None, "ok")
 
 
 async def _act_read_dialogs(client, pool, profile_id, account_id) -> None:
-    dialogs = await client.get_dialogs(limit=random.randint(5, 12))
+    dialogs = await asyncio.wait_for(client.get_dialogs(limit=random.randint(5, 12)), timeout=_TG_TIMEOUT)
     targets = []
     sample = random.sample(dialogs, min(random.randint(1, 3), len(dialogs)))
     for d in sample:
         try:
-            await client.send_read_acknowledge(d.entity)
+            await asyncio.wait_for(client.send_read_acknowledge(d.entity), timeout=_TG_TIMEOUT)
             t = getattr(d.entity, "title", None) or getattr(d.entity, "username", None)
             if t:
                 targets.append(t)
@@ -155,7 +172,7 @@ async def _act_read_dialogs(client, pool, profile_id, account_id) -> None:
 
 
 async def _act_react(client, pool, profile_id, account_id) -> None:
-    dialogs = await client.get_dialogs(limit=25)
+    dialogs = await asyncio.wait_for(client.get_dialogs(limit=25), timeout=_TG_TIMEOUT)
     channels = [
         d for d in dialogs
         if hasattr(d.entity, "broadcast") and d.entity.broadcast
@@ -164,7 +181,7 @@ async def _act_react(client, pool, profile_id, account_id) -> None:
         await _log_action(pool, profile_id, account_id, "react", None, "skip", "no_channels")
         return
     ch = random.choice(channels[:15])
-    msgs = await client.get_messages(ch.entity, limit=8)
+    msgs = await asyncio.wait_for(client.get_messages(ch.entity, limit=8), timeout=_TG_TIMEOUT)
     if not msgs:
         await _log_action(pool, profile_id, account_id, "react", None, "skip", "no_messages")
         return
@@ -172,11 +189,11 @@ async def _act_react(client, pool, profile_id, account_id) -> None:
     emoji = random.choice(_SAFE_REACTIONS)
     try:
         from telethon.tl.functions.messages import SendReactionRequest
-        await client(SendReactionRequest(
+        await asyncio.wait_for(client(SendReactionRequest(
             peer=ch.entity,
             msg_id=msg.id,
             reaction=[ReactionEmoji(emoticon=emoji)],
-        ))
+        )), timeout=_TG_TIMEOUT)
         target = getattr(ch.entity, "title", None) or getattr(ch.entity, "username", None) or "?"
         await _log_action(pool, profile_id, account_id, "react", target, "ok")
     except (ChatWriteForbiddenError, PeerFloodError) as e:
@@ -186,7 +203,7 @@ async def _act_react(client, pool, profile_id, account_id) -> None:
 
 
 async def _act_forward_saved(client, pool, profile_id, account_id) -> None:
-    dialogs = await client.get_dialogs(limit=25)
+    dialogs = await asyncio.wait_for(client.get_dialogs(limit=25), timeout=_TG_TIMEOUT)
     channels = [
         d for d in dialogs
         if hasattr(d.entity, "broadcast") and d.entity.broadcast
@@ -195,13 +212,13 @@ async def _act_forward_saved(client, pool, profile_id, account_id) -> None:
         await _log_action(pool, profile_id, account_id, "forward_saved", None, "skip", "no_channels")
         return
     ch = random.choice(channels[:15])
-    msgs = await client.get_messages(ch.entity, limit=12)
+    msgs = await asyncio.wait_for(client.get_messages(ch.entity, limit=12), timeout=_TG_TIMEOUT)
     if not msgs:
         await _log_action(pool, profile_id, account_id, "forward_saved", None, "skip", "no_messages")
         return
     msg = random.choice(msgs)
     try:
-        await client.forward_messages("me", msg.id, ch.entity)
+        await asyncio.wait_for(client.forward_messages("me", msg.id, ch.entity), timeout=_TG_TIMEOUT)
         target = getattr(ch.entity, "title", None) or getattr(ch.entity, "username", None) or "?"
         await _log_action(pool, profile_id, account_id, "forward_saved", target, "ok")
     except Exception as e:
@@ -306,8 +323,18 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
 
     try:
         client = _make_client(session, acc_dict)
-        async with client:
+        # Коннект — через канонический помощник account_manager: у `async with client`
+        # потолка нет вовсе (он зовёт client.start()), а аккаунт здесь уже захвачен
+        # у арбитра op_worker — повисшее рукопожатие держало бы его занятым вечно.
+        # Бонусом помощник пишет успех прокси в infra_memory, чего `async with` не делал.
+        await _connect_and_track(client, acc_dict, "ghost")
+        try:
             await fn(client, pool, profile_id, account_id)
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                log.debug("Ghost Engine: disconnect failed")
     except FloodWaitError as e:
         # Пропустить цикл мало: без записи в пульс аккаунт остаётся спокойным
         # для операций, разбора аудитории и рассылки.

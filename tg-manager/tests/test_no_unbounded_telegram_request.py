@@ -30,18 +30,27 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Модули вне пути операций: фоновые циклы со своим расписанием. Зависание там
-# останавливает СВОЙ цикл, а не операцию владельца, слот и арендованный флот.
-# Это не «можно не чинить», а «чинится отдельной задачей со своими потолками».
+# Модули, которые пока не пройдены целиком.
+#
+# Прежняя формулировка этого списка звучала «фоновый цикл — зависание там
+# останавливает СВОЙ цикл, а не операцию владельца». Она была НЕВЕРНА и стоила
+# продукту флота. Фоновые циклы берут аккаунт у ТОГО ЖЕ арбитра
+# (op_worker.try_claim_account) и отпускают его в finally. Повисший запрос из
+# finally не возвращается никогда, аккаунт остаётся в
+# op_worker._accounts_in_use, renew_leases() продлевает аренду вечно, а
+# реконсилер такую строку намеренно не чистит — для него живая память и есть
+# доказательство занятости. Аккаунт выпадал из ВСЕГО до рестарта процесса.
+# Поэтому прогрев, призрак, активность, сетка контента, прогрев чатов и консоль
+# аккаунта из списка убраны и пройдены; держит их
+# tests/test_background_hang_releases_account.py. Оттуда же ушёл
+# invite_behavior: он вообще не фоновый — `humanize()` зовут прямо из
+# `_exec_mass_invite`.
+#
+# Остались два класса. Первый — путь HTTP-запроса: там у шлюза есть свой
+# таймаут, ответ владельцу не зависнет навсегда, и аккаунт эти модули у арбитра
+# не берут. Второй — фоновая уборка, которая тоже ничего не держит.
 ALLOWED_MODULES = {
-    "account_warmer": "фоновый прогрев со своим циклом и расписанием",
-    "activity_engine": "фоновая имитация активности",
-    "ghost_engine": "фоновый призрак (присутствие аккаунтов)",
-    "invite_behavior": "фоновое поведение вокруг инвайта",
-    "chat_warmup": "фоновый прогрев чатов",
-    "account_cleaner": "фоновая уборка аккаунта",
-    "content_mesh": "фоновая доставка контента по сетке",
-    "account_console": "консоль аккаунта: путь HTTP-запроса, у шлюза свой таймаут",
+    "account_cleaner": "фоновая уборка аккаунта, аккаунт у арбитра не берёт",
     "rest_api": "внешний REST: путь HTTP-запроса, у шлюза свой таймаут",
     "session_importer": "импорт сессий: путь HTTP-запроса",
     "entity_analyzer": "анализ сущности: путь HTTP-запроса",
@@ -77,6 +86,21 @@ def _is_wait_for(node) -> bool:
            (isinstance(f, ast.Name) and f.id == "wait_for")
 
 
+def _is_client_context(node) -> bool:
+    """`async with client:` — коннект без потолка, который детектор долго не видел.
+
+    Менеджер контекста телетона зовёт `client.start()`: коннект плюс запрос
+    getMe. Обернуть это в `asyncio.wait_for` по месту нельзя — обёртки требует
+    сама форма записи, поэтому такая строка считается голой всегда. Канонический
+    путь — `account_manager._connect_and_track`, у него есть `_CONNECT_TIMEOUT`,
+    и он же пишет успех прокси в infra_memory.
+    """
+    if not isinstance(node, ast.AsyncWith):
+        return False
+    return any(isinstance(it.context_expr, ast.Name)
+               and it.context_expr.id in _CLIENT_NAMES for it in node.items)
+
+
 def naked_in_scope(scope) -> list[int]:
     """Строки запросов к Telegram внутри узла, не обёрнутых в asyncio.wait_for."""
     wrapped: set[int] = set()
@@ -85,9 +109,10 @@ def naked_in_scope(scope) -> list[int]:
             for sub in ast.walk(n.args[0]):
                 if _is_client_call(sub):
                     wrapped.add(id(sub))
-    return sorted(n.lineno for n in ast.walk(scope)
-                  if isinstance(n, ast.Await) and _is_client_call(n.value)
-                  and id(n.value) not in wrapped)
+    return sorted([n.lineno for n in ast.walk(scope)
+                   if isinstance(n, ast.Await) and _is_client_call(n.value)
+                   and id(n.value) not in wrapped]
+                  + [n.lineno for n in ast.walk(scope) if _is_client_context(n)])
 
 
 def naked_requests(src: str) -> list[int]:
@@ -143,6 +168,14 @@ def test_detector_accepts_a_wrapped_request():
         "    return await asyncio.wait_for(client.get_entity('x'), timeout=45)\n") == []
 
 
+def test_detector_catches_async_with_client():
+    """`async with client` прятался от детектора и стоил трёх мест в продукте."""
+    assert naked_requests(
+        "async def f(client):\n"
+        "    async with client:\n"
+        "        pass\n") == [2]
+
+
 def test_detector_ignores_local_calls():
     """disconnect закрывает сокет локально — ждать там нечего."""
     assert naked_requests(
@@ -170,6 +203,12 @@ def test_allowlist_has_no_clean_entries():
 @pytest.mark.parametrize("mod,const", [
     ("account_manager", "_OP_TIMEOUT"),
     ("parser", "_OP_TIMEOUT"),
+    ("account_warmer", "_TG_TIMEOUT"),
+    ("activity_engine", "_TG_TIMEOUT"),
+    ("ghost_engine", "_TG_TIMEOUT"),
+    ("content_mesh", "_TG_TIMEOUT"),
+    ("chat_warmup", "_TG_TIMEOUT"),
+    ("invite_behavior", "_TG_TIMEOUT"),
 ])
 def test_single_request_timeout_is_generous(mod, const):
     """Занижение опаснее отсутствия: ложный таймаут уводит цель в лишний повтор."""

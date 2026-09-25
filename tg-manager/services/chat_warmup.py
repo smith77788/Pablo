@@ -26,12 +26,30 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import random
 import re
 
 log = logging.getLogger(__name__)
+
+# Потолок одиночного запроса к Telegram в этом фоновом цикле.
+#
+# Здесь он не «на всякий случай»: цикл держит аккаунт через единый арбитр
+# op_worker.try_claim_account, а отпускает его в finally. Повисший запрос
+# (мёртвый прокси отдаёт half-open сокет: TCP есть, ответа нет и не будет) из
+# finally не возвращается НИКОГДА, поэтому аккаунт остаётся в
+# op_worker._accounts_in_use, а renew_leases() продлевает его аренду каждые
+# 30 секунд — вечно. Реконсилер такую строку не чистит намеренно: для него
+# живая память держателя и есть доказательство занятости. Итог — аккаунт
+# навсегда «занят операцией»: он выпадает и из операций владельца, и из
+# прогрева, и из призрака, и заметить это можно только по счётчику флота.
+#
+# 45 секунд — щедро: живой Telegram отвечает за секунды. Занижать нельзя,
+# ложный таймаут уводит действие в повтор, то есть в лишний запрос по Telegram.
+_TG_TIMEOUT = 45
+
 
 MODES = ("seed", "engage", "mixed")
 
@@ -387,17 +405,17 @@ async def _resolve_and_join(client, chat_ref: str):
         from telethon.tl.functions.messages import ImportChatInviteRequest
         from telethon.errors import UserAlreadyParticipantError
         try:
-            upd = await client(ImportChatInviteRequest(m.group(1)))
+            upd = await asyncio.wait_for(client(ImportChatInviteRequest(m.group(1))), timeout=_TG_TIMEOUT)
             return upd.chats[0]
         except UserAlreadyParticipantError:
             from telethon.tl.functions.messages import CheckChatInviteRequest
-            inv = await client(CheckChatInviteRequest(m.group(1)))
+            inv = await asyncio.wait_for(client(CheckChatInviteRequest(m.group(1))), timeout=_TG_TIMEOUT)
             return getattr(inv, "chat", None)
     # Публичный @username / ссылка / id.
-    entity = await client.get_entity(ref)
+    entity = await asyncio.wait_for(client.get_entity(ref), timeout=_TG_TIMEOUT)
     from telethon.tl.functions.channels import JoinChannelRequest
     try:
-        await client(JoinChannelRequest(entity))
+        await asyncio.wait_for(client(JoinChannelRequest(entity)), timeout=_TG_TIMEOUT)
     except Exception as e:
         # Здесь стоял голый `pass`: уже участник, базовая группа или нет прав —
         # всё это действительно не мешает читать и писать. Но тем же `pass`
@@ -503,7 +521,7 @@ async def _process_session(pool, session: dict) -> None:
         entity = await _resolve_and_join(client, session["chat_ref"])
         if entity is None:
             return
-        raw = await client.get_messages(entity, limit=CONTEXT_WINDOW)
+        raw = await asyncio.wait_for(client.get_messages(entity, limit=CONTEXT_WINDOW), timeout=_TG_TIMEOUT)
         recent = [_msg_to_dict(m, own_tg) for m in reversed(list(raw))]  # старые → новые
         plan = plan_turn(recent, account_ids, mode, session.get("last_speaker"),
                          int(session.get("last_seen_msg") or 0))
@@ -517,9 +535,9 @@ async def _process_session(pool, session: dict) -> None:
             try:
                 from telethon.tl.functions.messages import SendReactionRequest
                 from telethon.tl.types import ReactionEmoji
-                await client(SendReactionRequest(
+                await asyncio.wait_for(client(SendReactionRequest(
                     peer=entity, msg_id=int(plan["reply_to_id"]),
-                    reaction=[ReactionEmoji(emoticon=pick_reaction())]))
+                    reaction=[ReactionEmoji(emoticon=pick_reaction())])), timeout=_TG_TIMEOUT)
                 sent = True
             except Exception as e:
                 log.debug("chat_warmup s=%d: реакция не удалась: %s", sid, e)
@@ -538,7 +556,7 @@ async def _process_session(pool, session: dict) -> None:
                     import asyncio as _a
                     await _a.sleep(random.uniform(2.0, 6.0))  # имитация набора
                     reply_to = plan["reply_to_id"] if plan["kind"] == "reply" else None
-                    await client.send_message(entity, reply, reply_to=reply_to)
+                    await asyncio.wait_for(client.send_message(entity, reply, reply_to=reply_to), timeout=_TG_TIMEOUT)
                     sent = True
             # reply пусто (LLM недоступен) → тихо пропускаем ход (без мусора)
     except Exception as e:

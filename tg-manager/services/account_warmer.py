@@ -34,6 +34,23 @@ from services import warmup_actions as _wa
 
 log = logging.getLogger(__name__)
 
+# Потолок одиночного запроса к Telegram в этом фоновом цикле.
+#
+# Здесь он не «на всякий случай»: цикл держит аккаунт через единый арбитр
+# op_worker.try_claim_account, а отпускает его в finally. Повисший запрос
+# (мёртвый прокси отдаёт half-open сокет: TCP есть, ответа нет и не будет) из
+# finally не возвращается НИКОГДА, поэтому аккаунт остаётся в
+# op_worker._accounts_in_use, а renew_leases() продлевает его аренду каждые
+# 30 секунд — вечно. Реконсилер такую строку не чистит намеренно: для него
+# живая память держателя и есть доказательство занятости. Итог — аккаунт
+# навсегда «занят операцией»: он выпадает и из операций владельца, и из
+# прогрева, и из призрака, и заметить это можно только по счётчику флота.
+#
+# 45 секунд — щедро: живой Telegram отвечает за секунды. Занижать нельзя,
+# ложный таймаут уводит действие в повтор, то есть в лишний запрос по Telegram.
+_TG_TIMEOUT = 45
+
+
 # Публичные каналы/группы для "прогрева" (вступление, чтение)
 # Используем только проверенные публичные каналы
 _WARMUP_PUBLIC_CHANNELS = [
@@ -980,9 +997,9 @@ async def _get_session_lock(session_id: int) -> asyncio.Lock:
 async def _perform_read_channel(client, channel_ref: str) -> bool:
     """Читаем канал: получаем последние 10-15 сообщений, имитируем скролл."""
     try:
-        entity = await client.get_entity(channel_ref)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
         limit = random.randint(10, 15)
-        msgs = await client.get_messages(entity, limit=limit)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=limit), timeout=_TG_TIMEOUT)
         if not msgs:
             return False
         # Имитируем поочерёдное "чтение" каждого сообщения
@@ -1003,8 +1020,8 @@ async def _perform_view_profile(client, channel_ref: str) -> bool:
     try:
         from telethon.tl.functions.channels import GetFullChannelRequest
 
-        entity = await client.get_entity(channel_ref)
-        await client(GetFullChannelRequest(entity))
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
+        await asyncio.wait_for(client(GetFullChannelRequest(entity)), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(3, 8))
         return True
     except Exception as e:
@@ -1018,7 +1035,7 @@ async def _perform_view_profile(client, channel_ref: str) -> bool:
 async def _perform_open_chat(client, channel_ref: str) -> bool:
     """Открываем чат и просматриваем сообщения (симуляция скролла)."""
     try:
-        entity = await client.get_entity(channel_ref)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
         count = random.randint(8, 20)
         async for _msg in client.iter_messages(entity, limit=count):
             await asyncio.sleep(random.uniform(0.5, 1.8))
@@ -1038,19 +1055,19 @@ async def _perform_send_reaction(client, channel_ref: str) -> bool:
         from telethon.tl.functions.messages import SendReactionRequest
         from telethon.tl.types import ReactionEmoji
 
-        entity = await client.get_entity(channel_ref)
-        msgs = await client.get_messages(entity, limit=10)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=10), timeout=_TG_TIMEOUT)
         if not msgs:
             return False
         msg = random.choice(list(msgs))
         emoticon = random.choice(_WARMUP_REACTIONS)
-        await client(
+        await asyncio.wait_for(client(
             SendReactionRequest(
                 peer=entity,
                 msg_id=msg.id,
                 reaction=[ReactionEmoji(emoticon=emoticon)],
             )
-        )
+        ), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(1, 4))
         return True
     except Exception as e:
@@ -1065,8 +1082,8 @@ async def _perform_dm_bot(client) -> bool:
     """Открываем официального бота и отправляем /start."""
     try:
         bot_handle = random.choice(_WARMUP_BOTS)
-        entity = await client.get_entity(bot_handle)
-        await client.send_message(entity, "/start")
+        entity = await asyncio.wait_for(client.get_entity(bot_handle), timeout=_TG_TIMEOUT)
+        await asyncio.wait_for(client.send_message(entity, "/start"), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(5, 15))
         return True
     except Exception as e:
@@ -1082,8 +1099,8 @@ async def _perform_join_channel(client, channel_ref: str) -> bool:
     try:
         from telethon.tl.functions.channels import JoinChannelRequest
 
-        entity = await client.get_entity(channel_ref)
-        await client(JoinChannelRequest(entity))
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
+        await asyncio.wait_for(client(JoinChannelRequest(entity)), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(3, 8))
         return True
     except Exception as e:
@@ -1111,7 +1128,7 @@ async def _perform_search(client, query: str, found: list | None = None) -> bool
     try:
         from telethon.tl.functions.contacts import SearchRequest
 
-        res = await client(SearchRequest(q=query, limit=5))
+        res = await asyncio.wait_for(client(SearchRequest(q=query, limit=5)), timeout=_TG_TIMEOUT)
         _wa._collect(
             found,
             [
@@ -1135,10 +1152,10 @@ async def _perform_mark_read(client, channel_ref: str) -> bool:
     try:
         from telethon.tl.functions.messages import ReadHistoryRequest
 
-        entity = await client.get_entity(channel_ref)
-        msgs = await client.get_messages(entity, limit=5)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=5), timeout=_TG_TIMEOUT)
         if msgs:
-            await client(ReadHistoryRequest(peer=entity, max_id=msgs[0].id))
+            await asyncio.wait_for(client(ReadHistoryRequest(peer=entity, max_id=msgs[0].id)), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(2, 5))
         return True
     except Exception as e:
@@ -1159,7 +1176,7 @@ async def _perform_update_presence(client) -> bool:
 
     went_online = False
     try:
-        await client(UpdateStatusRequest(offline=False))
+        await asyncio.wait_for(client(UpdateStatusRequest(offline=False)), timeout=_TG_TIMEOUT)
         went_online = True
         await asyncio.sleep(random.uniform(10, 30))
         return True
@@ -1172,7 +1189,7 @@ async def _perform_update_presence(client) -> bool:
     finally:
         if went_online:
             try:
-                await client(UpdateStatusRequest(offline=True))
+                await asyncio.wait_for(client(UpdateStatusRequest(offline=True)), timeout=_TG_TIMEOUT)
             except Exception:
                 log_exc_swallow(log, "warmup update_presence offline reset")
 
@@ -1180,7 +1197,7 @@ async def _perform_update_presence(client) -> bool:
 async def _perform_browse_dialogs(client) -> bool:
     """GetDialogs — симуляция открытия списка диалогов."""
     try:
-        dialogs = await client.get_dialogs(limit=random.randint(10, 20))
+        dialogs = await asyncio.wait_for(client.get_dialogs(limit=random.randint(10, 20)), timeout=_TG_TIMEOUT)
         for _ in dialogs[: random.randint(3, 7)]:
             await asyncio.sleep(random.uniform(0.5, 1.5))
         await asyncio.sleep(random.uniform(3, 8))
@@ -1196,13 +1213,13 @@ async def _perform_browse_dialogs(client) -> bool:
 async def _perform_forward_to_saved(client, channel_ref: str) -> bool:
     """Пересылаем интересный пост в Saved Messages."""
     try:
-        entity = await client.get_entity(channel_ref)
-        msgs = await client.get_messages(entity, limit=20)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=20), timeout=_TG_TIMEOUT)
         if not msgs:
             return False
         candidates = [m for m in msgs if m.media or (m.text and len(m.text or "") > 50)]
         msg = random.choice(candidates if candidates else list(msgs))
-        await client.forward_messages("me", msg)
+        await asyncio.wait_for(client.forward_messages("me", msg), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(2, 6))
         return True
     except Exception as e:
@@ -1219,8 +1236,8 @@ async def _perform_vote_poll(client, channel_ref: str) -> bool:
         from telethon.tl.functions.messages import SendVoteRequest
         from telethon.tl.types import MessageMediaPoll
 
-        entity = await client.get_entity(channel_ref)
-        msgs = await client.get_messages(entity, limit=30)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=30), timeout=_TG_TIMEOUT)
         poll_msgs = [
             m
             for m in msgs
@@ -1235,9 +1252,9 @@ async def _perform_vote_poll(client, channel_ref: str) -> bool:
         if not options:
             return False
         chosen = random.choice(options)
-        await client(
+        await asyncio.wait_for(client(
             SendVoteRequest(peer=entity, msg_id=msg.id, options=[chosen.option])
-        )
+        ), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(2, 5))
         return True
     except Exception as e:
@@ -1253,21 +1270,21 @@ async def _perform_send_comment(client, channel_ref: str, account_id: int | None
     try:
         from telethon.tl.functions.channels import GetFullChannelRequest
 
-        entity = await client.get_entity(channel_ref)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
         if not hasattr(entity, "broadcast") or not entity.broadcast:
             return False  # only channels have discussions
-        full = await client(GetFullChannelRequest(entity))
+        full = await asyncio.wait_for(client(GetFullChannelRequest(entity)), timeout=_TG_TIMEOUT)
         linked_id = getattr(full.full_chat, "linked_chat_id", None)
         if not linked_id:
             return False
-        msgs = await client.get_messages(entity, limit=20)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=20), timeout=_TG_TIMEOUT)
         msg_with_replies = [m for m in msgs if m.replies and m.replies.replies > 0]
         if not msg_with_replies:
             return False
         post = random.choice(msg_with_replies[:5])
         comment = _warm_comment_text(account_id, salt=getattr(post, 'id', ''))
-        discussion = await client.get_entity(linked_id)
-        await client.send_message(discussion, comment, comment_to=post.id)
+        discussion = await asyncio.wait_for(client.get_entity(linked_id), timeout=_TG_TIMEOUT)
+        await asyncio.wait_for(client.send_message(discussion, comment, comment_to=post.id), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(5, 15))
         return True
     except Exception as e:
@@ -1281,11 +1298,11 @@ async def _perform_send_comment(client, channel_ref: str, account_id: int | None
 async def _perform_smart_bot_cmd(client, bot_ref: str, command: str = "/start") -> bool:
     """Отправляем команду боту, читаем ответ — умная имитация пользователя."""
     try:
-        entity = await client.get_entity(bot_ref)
-        await client.send_message(entity, command)
+        entity = await asyncio.wait_for(client.get_entity(bot_ref), timeout=_TG_TIMEOUT)
+        await asyncio.wait_for(client.send_message(entity, command), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(3, 10))
         # Читаем ответ бота
-        await client.get_messages(entity, limit=3)
+        await asyncio.wait_for(client.get_messages(entity, limit=3), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(2, 5))
         return True
     except Exception as e:
@@ -1305,25 +1322,25 @@ async def _perform_own_channel_read(client, channel_ref: str) -> bool:
         )
         from telethon.tl.types import ReactionEmoji
 
-        entity = await client.get_entity(channel_ref)
-        msgs = await client.get_messages(entity, limit=10)
+        entity = await asyncio.wait_for(client.get_entity(channel_ref), timeout=_TG_TIMEOUT)
+        msgs = await asyncio.wait_for(client.get_messages(entity, limit=10), timeout=_TG_TIMEOUT)
         if not msgs:
             return False
         # Mark as read
-        await client(ReadHistoryRequest(peer=entity, max_id=msgs[0].id))
+        await asyncio.wait_for(client(ReadHistoryRequest(peer=entity, max_id=msgs[0].id)), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(3, 8))
         # With 40% chance add reaction
         if random.random() < 0.4:
             msg = random.choice(list(msgs))
             emoticon = random.choice(_WARMUP_REACTIONS)
             try:
-                await client(
+                await asyncio.wait_for(client(
                     SendReactionRequest(
                         peer=entity,
                         msg_id=msg.id,
                         reaction=[ReactionEmoji(emoticon=emoticon)],
                     )
-                )
+                ), timeout=_TG_TIMEOUT)
                 await asyncio.sleep(random.uniform(1, 3))
             except Exception:
                 log_exc_swallow(log, "warmup: send reaction failed")
@@ -1342,7 +1359,7 @@ async def _perform_story_view(client) -> bool:
         try:
             from telethon.tl.functions.stories import GetAllStoriesRequest
 
-            await client(GetAllStoriesRequest(next=False, hidden=False))
+            await asyncio.wait_for(client(GetAllStoriesRequest(next=False, hidden=False)), timeout=_TG_TIMEOUT)
             await asyncio.sleep(random.uniform(4, 12))
         except (ImportError, AttributeError):
             # Stories API not available on this client version - skip gracefully
@@ -1362,7 +1379,7 @@ async def _perform_check_notifications(client) -> bool:
     try:
         from telethon.tl.functions.updates import GetStateRequest
 
-        await client(GetStateRequest())
+        await asyncio.wait_for(client(GetStateRequest()), timeout=_TG_TIMEOUT)
         await asyncio.sleep(random.uniform(2, 6))
         return True
     except Exception as e:

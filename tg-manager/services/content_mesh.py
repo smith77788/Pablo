@@ -20,9 +20,29 @@ from telethon.errors import (
     UserNotParticipantError,
 )
 
-from services.account_manager import _make_client
+from services.account_manager import _connect_and_track, _make_client
 
 log = logging.getLogger(__name__)
+
+# Потолок одиночного запроса к Telegram в этом фоновом цикле.
+#
+# Здесь он не «на всякий случай»: цикл держит аккаунт через единый арбитр
+# op_worker.try_claim_account, а отпускает его в finally. Повисший запрос
+# (мёртвый прокси отдаёт half-open сокет: TCP есть, ответа нет и не будет) из
+# finally не возвращается НИКОГДА, поэтому аккаунт остаётся в
+# op_worker._accounts_in_use, а renew_leases() продлевает его аренду каждые
+# 30 секунд — вечно. Реконсилер такую строку не чистит намеренно: для него
+# живая память держателя и есть доказательство занятости. Итог — аккаунт
+# навсегда «занят операцией»: он выпадает и из операций владельца, и из
+# прогрева, и из призрака, и заметить это можно только по счётчику флота.
+#
+# 45 секунд — щедро: живой Telegram отвечает за секунды. Занижать нельзя,
+# ложный таймаут уводит действие в повтор, то есть в лишний запрос по Telegram.
+_TG_TIMEOUT = 45
+
+# Перенос медиа — отдельный случай: видео законно едет минутами, общий потолок
+# обрывал бы здоровую загрузку.
+_MEDIA_TIMEOUT = 300
 
 _LOOP_INTERVAL = 120    # seconds between full sweeps
 _MAX_NEW_PER_CYCLE = 10 # max new source messages to enqueue per cycle per mesh
@@ -81,9 +101,14 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
     acc_dict = dict(acc)
     try:
         client = _make_client(session, acc_dict)
-        async with client:
-            entity = await client.get_entity(source_channel)
-            messages = await client.get_messages(entity, limit=_MAX_NEW_PER_CYCLE, min_id=last_id)
+        # Коннект — через канонический помощник account_manager: у `async with client`
+        # потолка нет вовсе (он зовёт client.start()), а аккаунт здесь уже захвачен
+        # у арбитра op_worker — повисшее рукопожатие держало бы его занятым вечно.
+        # Бонусом помощник пишет успех прокси в infra_memory, чего `async with` не делал.
+        await _connect_and_track(client, acc_dict, "mesh_poll")
+        try:
+            entity = await asyncio.wait_for(client.get_entity(source_channel), timeout=_TG_TIMEOUT)
+            messages = await asyncio.wait_for(client.get_messages(entity, limit=_MAX_NEW_PER_CYCLE, min_id=last_id), timeout=_TG_TIMEOUT)
 
             if not messages:
                 return
@@ -122,6 +147,11 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
                     "UPDATE content_meshes SET last_post_id=$1, updated_at=NOW() WHERE id=$2",
                     new_max_id, mesh_id,
                 )
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                log.debug("Content Mesh: disconnect failed")
 
     except FloodWaitError as e:
         from services import flood_engine as _fe
@@ -219,10 +249,16 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
         return
 
     try:
-        client = _make_client(session, dict(acc))
-        async with client:
-            source_entity = await client.get_entity(mesh["source_channel"])
-            source_msgs = await client.get_messages(source_entity, ids=item["source_msg_id"])
+        acc_dict = dict(acc)
+        client = _make_client(session, acc_dict)
+        # Коннект — через канонический помощник account_manager: у `async with client`
+        # потолка нет вовсе (он зовёт client.start()), а аккаунт здесь уже захвачен
+        # у арбитра op_worker — повисшее рукопожатие держало бы его занятым вечно.
+        # Бонусом помощник пишет успех прокси в infra_memory, чего `async with` не делал.
+        await _connect_and_track(client, acc_dict, "mesh_deliver")
+        try:
+            source_entity = await asyncio.wait_for(client.get_entity(mesh["source_channel"]), timeout=_TG_TIMEOUT)
+            source_msgs = await asyncio.wait_for(client.get_messages(source_entity, ids=item["source_msg_id"]), timeout=_TG_TIMEOUT)
             if not source_msgs:
                 await pool.execute(
                     "UPDATE mesh_queue SET status='error', error_msg='source_msg_not_found', sent_at=NOW() WHERE id=$1",
@@ -238,7 +274,7 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
                 )
                 return
 
-            target_entity = await client.get_entity(target["target_channel"])
+            target_entity = await asyncio.wait_for(client.get_entity(target["target_channel"]), timeout=_TG_TIMEOUT)
 
             # Build text with optional CTA
             text = msg.text or ""
@@ -246,11 +282,16 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
                 text = (text + "\n\n" + mesh["append_text"]).strip()
 
             if msg.media and not text:
-                await client.send_file(target_entity, msg.media)
+                await asyncio.wait_for(client.send_file(target_entity, msg.media), timeout=_MEDIA_TIMEOUT)
             elif msg.media:
-                await client.send_file(target_entity, msg.media, caption=text)
+                await asyncio.wait_for(client.send_file(target_entity, msg.media, caption=text), timeout=_MEDIA_TIMEOUT)
             else:
-                await client.send_message(target_entity, text)
+                await asyncio.wait_for(client.send_message(target_entity, text), timeout=_TG_TIMEOUT)
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                log.debug("Content Mesh: disconnect failed")
 
         await pool.execute(
             "UPDATE mesh_queue SET status='sent', sent_at=NOW() WHERE id=$1", item["id"]

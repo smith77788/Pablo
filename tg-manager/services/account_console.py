@@ -186,16 +186,16 @@ async def _warm_entity(client: Any, peer: int | str,
         from telethon.tl.types import InputPeerUser
         return InputPeerUser(peer, int(access_hash))
     try:
-        return await client.get_input_entity(peer)
+        return await asyncio.wait_for(client.get_input_entity(peer), timeout=_ACTION_TIMEOUT)
     except (ValueError, TypeError):
         await asyncio.wait_for(client.get_dialogs(limit=200), timeout=_ACTION_TIMEOUT)
         try:
-            return await client.get_input_entity(peer)
+            return await asyncio.wait_for(client.get_input_entity(peer), timeout=_ACTION_TIMEOUT)
         except (ValueError, TypeError):
             from telethon.tl.functions.contacts import GetContactsRequest
             await asyncio.wait_for(client(GetContactsRequest(hash=0)),
                                    timeout=_ACTION_TIMEOUT)
-            return await client.get_input_entity(peer)
+            return await asyncio.wait_for(client.get_input_entity(peer), timeout=_ACTION_TIMEOUT)
 
 
 async def _claim(acc: dict | None) -> "tuple[int | None, bool]":
@@ -331,7 +331,7 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
                                         timeout=_ACTION_TIMEOUT)
         peer_name = None
         try:
-            ent_obj = await client.get_entity(entity)
+            ent_obj = await asyncio.wait_for(client.get_entity(entity), timeout=_ACTION_TIMEOUT)
             peer_name = getattr(ent_obj, "title", None) or " ".join(
                 x for x in (getattr(ent_obj, "first_name", None),
                             getattr(ent_obj, "last_name", None)) if x) or None
