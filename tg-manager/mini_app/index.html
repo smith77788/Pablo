@@ -8935,7 +8935,10 @@ async function showDiscoveredBots() {
             : `<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="connectOneBot('${esc(b.username)}')">🔌 Подключить</button>`}
         </div>
       </div>`).join(''));
-  } catch(e) { txt('foundBotsList', empty('⚠️','Ошибка',e.message)); }
+  } catch(e) {
+    txt('foundBotsList', empty('⚠️','Ошибка',e.message));
+    txt('foundBotsStats', '');
+  }
 }
 // Подключить одного конкретного бота из найденных.
 async function connectOneBot(uname) {
@@ -12164,7 +12167,12 @@ async function loadAnalytics() {
     }).join('') : empty('🔍','Нет ключевых слов','Добавьте через меню бота'));
     txt('kw-val', kws.length ? kws.length+' ключей отслеживается' : '—');
   } catch(e) {
-    txt('topBots', errHtml(e.message,'loadPromoData()'));
+    // Экран ставит ДВА спиннера, а ошибка снимала один: список ключевых слов
+    // оставался крутиться навсегда. И повтор звал loadPromoData() — функции с
+    // таким именем в приложении нет, то есть кнопка бросала ReferenceError.
+    txt('topBots', errHtml(e.message,'loadAnalytics()'));
+    txt('kwList', empty('🔍','Не загрузилось',''));
+    txt('growthChart', '');
   }
 }
 
@@ -14147,6 +14155,7 @@ async function loadBroadcastSchedule() {
     renderBcAnalytics(all);
   } catch(e) {
     txt('bcSchedList', errHtml(e.message,'loadBroadcastSchedule()'));
+    txt('bcAbList', empty('🧪','Не загрузилось',''));
   }
 }
 function renderBcScheduleList(items) {
@@ -14292,6 +14301,7 @@ async function loadAutoregPro() {
     loadAutoregProProxyList();
   } catch(e) {
     txt('autoregProList', errHtml(e.message,'loadAutoregPro()'));
+    txt('autoregProHistory', empty('📜','Не загрузилось',''));
   }
 }
 function renderAutoregProBars(items) {
@@ -21130,7 +21140,10 @@ async function openPpDetail(packId, packName) {
     txt('ppDetailGroups', groups.length ? groups.map(c=>rowHtml(c,PP_GR_SEL,'gr')).join('') : empty('👥','Нет групп',''));
     txt('ppChCount', PP_CH_SEL.size);
     txt('ppGrCount', PP_GR_SEL.size);
-  } catch(e) { txt('ppDetailChannels', empty('⚠️','Ошибка',e.message)); }
+  } catch(e) {
+    txt('ppDetailChannels', empty('⚠️','Ошибка',e.message));
+    txt('ppDetailBot', empty('🤖','Не загрузилось',''));
+  }
 }
 function _ppPickBot(botId) {
   PP_BOT_SEL = botId;
@@ -24576,7 +24589,8 @@ async function loadAudienceAnalytics() {
     renderAudHeatmap(d.heatmap || []);
     renderAudSegChart(segments);
   } catch(e) {
-    txt('audSegmentsList', errHtml(e.message));
+    txt('audSegmentsList', errHtml(e.message,'loadAudienceAnalytics()'));
+    txt('audInsightsList', empty('💡','Не загрузилось',''));
   }
 }
 
