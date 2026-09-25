@@ -11149,6 +11149,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "entity_id": p.get("entity_id"),
                     "at": e["at"].isoformat() if e.get("at") else None,
                 })
+            # Лента говорила «🔥 Намерение купить · #<uuid>» — по такой строке
+            # не понять, о ком речь. Имена берём одной пачкой на весь список.
+            names = await _vl.resolve_names(pool, uid, events)
+            for e in events:
+                name = names.get(str(e.get("entity_id")))
+                if name:
+                    e["name"] = name
         except Exception:
             log.debug("vlayer_overview events failed uid=%s", uid)
         return _json_resp({"ok": True, "funnel": ov["funnel"], "hot": ov["hot"],

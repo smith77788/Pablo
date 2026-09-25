@@ -19359,8 +19359,8 @@ async function openVLayer() {
       html += '<div class="sec">🔥 Дожать в первую очередь</div><div class="lst">';
       html += hot.slice(0, 20).map(h => `<div class="row" onclick="openVLayerEntity('${esc(String(h.entity_type||'user'))}','${esc(String(h.entity_id))}')" style="cursor:pointer">
         <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">🔥</div>
-        <div class="row-body"><div class="row-name">${esc(h.label)} · #${esc(String(h.entity_id))}</div>
-          <div class="row-val">уверенность ${Math.round((h.confidence||0)*100)}% · история →</div></div>
+        <div class="row-body"><div class="row-name">${esc(h.name || _vlWho(h))}</div>
+          <div class="row-val">${esc(h.label)} · уверенность ${Math.round((h.confidence||0)*100)}% · история →</div></div>
       </div>`).join('');
       html += '</div>';
     }
@@ -19369,14 +19369,28 @@ async function openVLayer() {
     if (!events.length) {
       html += '<div style="padding:10px;color:var(--hint);font-size:13px">Пока тихо</div>';
     } else {
-      html += '<div class="lst">' + events.map(e => `<div class="row">
+      html += '<div class="lst">' + events.map(e => {
+        const open = e.entity_id
+          ? ` onclick="openVLayerEntity('${esc(String(e.entity_type||'user'))}','${esc(String(e.entity_id))}')" style="cursor:pointer"`
+          : '';
+        const who = e.entity_id ? (e.name || _vlWho(e)) : '';
+        return `<div class="row"${open}>
         <div class="row-body"><div class="row-name">${esc(e.label)}</div>
-          <div class="row-val">${e.entity_id?('#'+esc(String(e.entity_id))+' · '):''}${e.at?new Date(e.at).toLocaleString('ru'):''}</div></div>
-      </div>`).join('') + '</div>';
+          <div class="row-val">${who?esc(who)+' · ':''}${e.at?new Date(e.at).toLocaleString('ru'):''}</div></div>
+      </div>`; }).join('') + '</div>';
     }
     html += '<div style="height:16px"></div>';
     txt('vlayerBody', html);
   } catch(e) { txt('vlayerBody', errHtml(e.message, 'openVLayer()')); }
+}
+
+// Подпись сущности, у которой имени нет: человека могли видеть только по id,
+// но показывать сырой uuid всё равно нельзя — по нему ничего не понять.
+function _vlWho(x) {
+  const t = { user:'Контакт', bot:'Бот', campaign:'Кампания',
+              conversation:'Диалог', network:'Сеть' }[x && x.entity_type] || 'Сущность';
+  const id = String((x && x.entity_id) || '');
+  return t + ' ' + (id.length > 10 ? id.slice(0, 8) + '…' : id);
 }
 
 // История переходов одной сущности: текущее значение не отвечает на вопрос
@@ -19387,7 +19401,7 @@ async function openVLayerEntity(entityType, entityId) {
   try {
     const d = await api('/api/miniapp/vlayer/entity/' + encodeURIComponent(entityType)
       + '/' + encodeURIComponent(entityId));
-    const who = d.name || ('#' + entityId);
+    const who = d.name || _vlWho({entity_type: entityType, entity_id: entityId});
     const cur = d.current || {};
     let html = `<div class="row" onclick="openVLayer()" style="cursor:pointer">
       <div class="row-body"><div class="row-name">← К сводке модели</div></div></div>`;
@@ -19397,6 +19411,12 @@ async function openVLayerEntity(entityType, entityId) {
         ${cur.label ? esc(cur.label) : 'Состояние не записано'}${cur.confidence != null ? ' · уверенность ' + Math.round(cur.confidence * 100) + '%' : ''}</div>
       <div style="font-size:13px;margin-top:6px">${esc(d.pattern_label || '')}</div>
     </div>`;
+    // История отвечает «как пришёл», но действовать по ней было нечем:
+    // человек виден, а открыть его карточку и написать неоткуда.
+    if (entityType === 'user') {
+      html += `<button class="btn btn-p" style="width:100%;margin-bottom:10px"
+        onclick="openContactDetail('${esc(String(entityId))}')">👤 Открыть карточку контакта</button>`;
+    }
     const tr = d.transitions || [];
     html += '<div class="sec">История переходов</div>';
     if (!tr.length) {

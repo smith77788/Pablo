@@ -681,6 +681,49 @@ async def _entity_name(pool, owner_id: int, entity_type: str, eid: str):
     return None
 
 
+async def resolve_names(pool, owner_id: int, items: list[dict]) -> dict[str, str]:
+    """Имена пачкой для списка сущностей: {entity_id: имя}.
+
+    То же, что `_entity_name`, но одним запросом на тип. Списки на экране —
+    до полусотни строк, и запрос на каждую строку это ровно тот N+1, которым
+    экран сводки и так нагружает базу на каждом открытии.
+
+    id контакта — uuid, а в состояниях он лежит текстом, поэтому сравнение
+    приводим в самом запросе: на мусорном значении asyncpg иначе падает на
+    связывании, а мусор сюда приходит из адреса.
+    """
+    users = sorted({str(i["entity_id"]) for i in items
+                    if i.get("entity_type") == USER and i.get("entity_id")})
+    bots = sorted({str(i["entity_id"]) for i in items
+                   if i.get("entity_type") == BOT and i.get("entity_id")})
+    out: dict[str, str] = {}
+    if users:
+        try:
+            rows = await pool.fetch(
+                "SELECT id::text AS eid, "
+                "COALESCE(display_name, first_name, username) AS name "
+                "FROM unified_contacts WHERE owner_id=$1 AND id::text = ANY($2::text[])",
+                owner_id, users)
+            out.update({r["eid"]: r["name"] for r in rows if r["name"]})
+        except Exception:
+            log.debug("virtual_layer.resolve_names users failed owner=%s", owner_id)
+    if bots:
+        try:
+            rows = await pool.fetch(
+                "SELECT bot_id::text AS eid, "
+                "COALESCE(username, first_name) AS name FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id::text = ANY($2::text[])",
+                owner_id, bots)
+            for r in rows:
+                name = r["name"]
+                if name:
+                    out[r["eid"]] = (name if str(name).startswith("@")
+                                     else f"@{name}")
+        except Exception:
+            log.debug("virtual_layer.resolve_names bots failed owner=%s", owner_id)
+    return out
+
+
 async def overview(pool, owner_id: int, *, entity_type: str = USER,
                    state_key: str = "funnel") -> dict:
     """Сводка слоя для экрана: распределение воронки + «горячие» сущности.
@@ -716,6 +759,14 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
              "value": r["value"], "label": VALUE_LABEL.get(r["value"], r["value"]),
              "confidence": round(float(r["confidence"] or 0), 2)}
             for r in hot_rows]
+        # Строка «Готов · #7b1f…-uuid» не говорит, КТО это, а список называется
+        # «кого дожимать первыми»: без имени по нему нельзя работать, хотя имя
+        # лежит в контактах ровно по этому идентификатору.
+        names = await resolve_names(pool, owner_id, out["hot"])
+        for h in out["hot"]:
+            name = names.get(str(h["entity_id"]))
+            if name:
+                h["name"] = name
     except Exception:
         log.debug("virtual_layer.overview hot failed owner=%s", owner_id)
     # Температура аудитории (каскад): hot|warm|None.
