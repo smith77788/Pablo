@@ -361,3 +361,112 @@ def test_all_queries_come_back_on_a_real_connection(pool):
     queries = [(f"SELECT {i} AS n", ()) for i in range(6)]
     res = _run(run_queries_on_one_connection(pool, queries))
     assert [r[0]["n"] for r in res] == list(range(6))
+
+
+def test_inline_migrations_skip_themselves_on_the_second_start(pool):
+    """Журнал наката проверяем на ЖИВОЙ базе, а не на заглушке.
+
+    Заглушка пула подтвердила бы любую арифметику. Смысл же в том, что ALTER
+    TABLE на второй раз НЕ выполняется вовсе — а это видно только там, где
+    ALTER настоящий и берёт настоящую блокировку.
+    """
+    from services.mini_app_api import apply_inline_migrations, inline_migration_key
+
+    stmts = [
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS _t_inline_a TEXT",
+        "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS _t_inline_b TEXT",
+    ]
+    keys = [inline_migration_key(s) for s in stmts]
+
+    async def _clean():
+        await pool.execute(
+            "DELETE FROM schema_migrations WHERE filename = ANY($1::text[])", keys)
+        for col in ("_t_inline_a", "_t_inline_b"):
+            await pool.execute(f"ALTER TABLE tg_accounts DROP COLUMN IF EXISTS {col}")
+
+    _run(_clean())
+    try:
+        first = _run(apply_inline_migrations(pool, stmts))
+        assert first == {"applied": 2, "skipped": 0, "failed": 0}, first
+
+        cols = _run(pool.fetch(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='tg_accounts' AND column_name = ANY($1::text[])",
+            ["_t_inline_a", "_t_inline_b"]))
+        assert len(cols) == 2, "колонки не создались — накат ничего не сделал"
+
+        journal = _run(pool.fetch(
+            "SELECT filename, status FROM schema_migrations "
+            "WHERE filename = ANY($1::text[])", keys))
+        assert {r["status"] for r in journal} == {"ok"}
+        assert len(journal) == 2, "в журнал попало не всё применённое"
+
+        second = _run(apply_inline_migrations(pool, stmts))
+        assert second == {"applied": 0, "skipped": 2, "failed": 0}, second
+    finally:
+        _run(_clean())
+
+
+def test_inline_migration_replay_ignores_the_journal(pool):
+    """Ручное лечение схемы: колонку снесли — накат обязан её вернуть."""
+    from services.mini_app_api import apply_inline_migrations, inline_migration_key
+
+    stmt = "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS _t_inline_c TEXT"
+    key = inline_migration_key(stmt)
+
+    async def _clean():
+        await pool.execute("DELETE FROM schema_migrations WHERE filename=$1", key)
+        await pool.execute("ALTER TABLE tg_accounts DROP COLUMN IF EXISTS _t_inline_c")
+
+    _run(_clean())
+    try:
+        _run(apply_inline_migrations(pool, [stmt]))
+        # Колонку снесли руками, а в журнале оператор числится применённым.
+        _run(pool.execute("ALTER TABLE tg_accounts DROP COLUMN IF EXISTS _t_inline_c"))
+        assert _run(apply_inline_migrations(pool, [stmt]))["skipped"] == 1
+
+        os.environ["INFRAGRAM_INLINE_REPLAY"] = "1"
+        try:
+            assert _run(apply_inline_migrations(pool, [stmt]))["applied"] == 1
+        finally:
+            os.environ.pop("INFRAGRAM_INLINE_REPLAY", None)
+
+        back = _run(pool.fetchval(
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_name='tg_accounts' AND column_name='_t_inline_c'"))
+        assert back == 1, "колонка не вернулась, лечить схему нечем"
+    finally:
+        _run(_clean())
+
+
+def test_a_noop_alter_still_locks_the_whole_table(pool):
+    """Предпосылка, на которой держится журнал наката.
+
+    Пропускать применённые операторы стоит того только если ALTER, которому
+    нечего делать, всё равно берёт эксклюзивную блокировку таблицы. Проверяем
+    это у самой базы, а не по памяти: если Postgres когда-нибудь перестанет так
+    делать, рассуждение надо пересматривать, и лучше узнать об этом из теста.
+    """
+    async def _probe():
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS _t_lockprobe TEXT")
+            tr = conn.transaction()
+            await tr.start()
+            try:
+                # Второй раз делать нечего — колонка уже есть.
+                await conn.execute(
+                    "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS _t_lockprobe TEXT")
+                rows = await conn.fetch(
+                    """SELECT l.mode FROM pg_locks l
+                       JOIN pg_class c ON c.oid = l.relation
+                       WHERE c.relname = 'tg_accounts' AND l.pid = pg_backend_pid()""")
+                return sorted({r["mode"] for r in rows})
+            finally:
+                await tr.rollback()
+                await conn.execute(
+                    "ALTER TABLE tg_accounts DROP COLUMN IF EXISTS _t_lockprobe")
+
+    assert "AccessExclusiveLock" in _run(_probe()), (
+        "ALTER, которому нечего делать, больше не блокирует таблицу — "
+        "перечитайте обоснование журнала инлайн-миграций")
