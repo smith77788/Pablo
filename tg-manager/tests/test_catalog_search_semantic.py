@@ -62,11 +62,16 @@ def test_keyword_keys_point_at_real_tiles():
 
 
 def test_strike_is_findable_by_zhaloba():
-    """Точечная защита самого показательного случая: STRIKE (массовые жалобы) не
-    находился по слову «жалоба» — а это его прямое назначение."""
+    """Точечная защита самого показательного случая: модуль массовых жалоб не
+    находился по слову «жалоба» — а это его прямое назначение.
+
+    Плитка называлась STRIKE и переименована в «Массовые жалобы»; старое имя
+    оставлено синонимом, чтобы поиск по нему продолжал работать."""
     m = re.search(r"const MODULE_KEYWORDS = \{(.*?)\n\};", HTML, re.DOTALL)
     kw = dict(re.findall(r"'([^']+)':'([^']+)'", m.group(1)))
-    assert "жалоб" in kw.get("STRIKE", "").lower()
+    syn = kw.get("Массовые жалобы", "").lower()
+    assert "жалоб" in syn
+    assert "strike" in syn and "страйк" in syn
 
 
 def test_empty_query_still_shows_everything():

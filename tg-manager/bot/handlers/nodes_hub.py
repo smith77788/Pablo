@@ -6,7 +6,7 @@ Flows:
   view        → статистика воркспейса + кнопки действий
   threads     → список активных топиков
   provision   → FSM: entity_type → entity_id → topic_name → create topic
-  broadcast   → FSM: text → confirm → STRIKE отправка всем топикам
+  broadcast   → FSM: text → confirm → массовая отправка всем топикам
   bulk_close  → закрыть все открытые топики воркспейса
   thread_close→ закрыть один топик
   enable_forum→ включить форум-режим через Telethon
@@ -295,7 +295,7 @@ async def cb_nodes_view(
         callback_data=NodesCb(action="provision", node_id=node["id"]),
     )
     kb.button(
-        text="⚡ STRIKE: Массовое создание",
+        text="⚡ Массовое создание",
         callback_data=NodesCb(action="bulk_create", node_id=node["id"]),
     )
     kb.button(
@@ -612,7 +612,7 @@ async def cb_nodes_bulk_create(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        "<b>⚡ STRIKE: Массовое создание топиков</b>\n\n"
+        "<b>⚡ Массовое создание топиков</b>\n\n"
         "Шаг 1/2 — Выберите тип сущностей:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -641,7 +641,7 @@ async def cb_bulk_etype(
     await state.set_state(NodesBulkFSM.waiting_ids)
 
     await callback.message.edit_text(
-        f"<b>⚡ STRIKE: Массовое создание — шаг 2/2</b>\n\n"
+        f"<b>⚡ Массовое создание — шаг 2/2</b>\n\n"
         f"Тип: {html.escape(ENTITY_LABELS[entity_type])}\n\n"
         "Введите <b>список ID</b> через запятую:\n"
         "<code>101, 102, 103, 104, 105</code>\n\n"
@@ -690,7 +690,7 @@ async def msg_bulk_ids(
 
     entity_label = ENTITY_LABELS.get(entity_type, entity_type)
     await message.answer(
-        f"⚡ <b>STRIKE запущен</b> — создаю {len(ids)} топиков для {html.escape(entity_label)}…\n"
+        f"⚡ <b>Создание запущено</b> — создаю {len(ids)} топиков для {html.escape(entity_label)}…\n"
         "Это займёт несколько секунд.",
         parse_mode="HTML",
     )
@@ -709,7 +709,7 @@ async def msg_bulk_ids(
     kb.adjust(1)
 
     await message.answer(
-        f"✅ <b>STRIKE завершён</b>\n\n"
+        f"✅ <b>Создание завершено</b>\n\n"
         f"Создано топиков: <b>{len(created)}</b>\n"
         f"Ошибок: <b>{errors}</b>\n"
         f"Всего запрошено: <b>{len(ids)}</b>",

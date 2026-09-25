@@ -790,7 +790,7 @@ def _build_strike_intelligence_text(state_dict: dict, capacity_dict: dict) -> st
     success_pct = max(10, 100 - score) if available > 0 else 0
 
     lines = [
-        "🎯 <b>Анализ операции STRIKE</b>",
+        "🎯 <b>Анализ массовых жалоб</b>",
         f"📊 Инфраструктура: {emoji} {label} ({score}/100)",
         f"👥 Аккаунты: ✅ {available}  ⏳ {cooling}  📱 {total}",
     ]

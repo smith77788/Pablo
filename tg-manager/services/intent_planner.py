@@ -393,13 +393,13 @@ async def _build_sync_plan(pool, owner_id, description, resources):
 async def _build_strike_plan(pool, owner_id, description, resources):
     return {
         "intent_type": "strike",
-        "goal": "Эшелонированная жалоба через STRIKE",
+        "goal": "Эшелонированная жалоба через массовые жалобы",
         "n_accounts_available": resources["accounts_available"],
         "steps": [
             "1. Выбор цели (канал/бот/пользователь)",
             "2. Подбор аккаунтов для жалоб",
             "3. Настройка интенсивности (normal/fast)",
-            "4. Запуск через STRIKE Engine",
+            "4. Запуск через модуль массовых жалоб",
         ],
         "risks": [
             "⚠️ Используйте только против нарушителей правил",
