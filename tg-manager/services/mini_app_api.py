@@ -14539,6 +14539,68 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("mass_publish uid=%d", uid)
             return _err("Failed to enqueue mass publish", 500)
 
+    # ── Редактор канала (Virtual Channel Administrator) ────────────────────
+    # Правила редактора задавались только в коде (save_profile), а подсказка
+    # перед публикацией жила лишь в боте: в Mini App — главном интерфейсе —
+    # пост уходил во все каналы без единой проверки на повтор и правила.
+
+    async def editorial_policy_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import channel_brain_store as _cbs
+        brain = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+        return _json_resp({"ok": True, "policy": _cbs.to_public(brain)})
+
+    async def editorial_policy_save(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        from services import channel_brain_store as _cbs
+        clean, errors = _cbs.validate_policy(body)
+        if errors:
+            return _err("; ".join(errors[:5]), 400)
+        # Рубрики, микс и режим автономности этим экраном не задаются —
+        # сохраняем их как были, а не затираем значениями по умолчанию.
+        prev = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+        row_id = await _cbs.save_profile(
+            pool, uid, _cbs.OWNER_DEFAULT_KEY,
+            brand_rules=clean["brand_rules"],
+            dup_threshold=clean["dup_threshold"],
+            pillars=prev.pillars if prev else None,
+            mix_weights=prev.mix_weights if prev else None,
+            autonomy_mode=prev.autonomy_mode if prev else "manual",
+            max_streak=prev.max_streak if prev else 2,
+        )
+        if row_id is None:
+            log.warning("editorial_policy_save failed uid=%s", uid)
+            return _err("Не удалось сохранить правила, попробуйте ещё раз", 500)
+        log.info("editorial policy saved uid=%s words=%d openings=%d",
+                 uid, len(clean["brand_rules"]["forbidden_words"]),
+                 len(clean["brand_rules"]["banned_openings"]))
+        brain = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+        return _json_resp({"ok": True, "policy": _cbs.to_public(brain)})
+
+    async def editorial_review_draft(request: web.Request) -> web.Response:
+        """Совет редактора по черновику перед публикацией. Не блокирует её."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        text = validate_string(body.get("text"), max_len=4096)
+        if not text:
+            return _err("Нужен текст")
+        from services import editorial_review as _er
+        verdict = await _er.review_draft(pool, uid, text)
+        return _json_resp({"ok": True, **_er.verdict_to_public(verdict)})
+
     # ── Proxies ──────────────────────────────────────────────────────────────
 
     async def proxies(request: web.Request) -> web.Response:
@@ -17614,6 +17676,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Mass Publish
     app.router.add_get("/api/miniapp/mass_publish/targets", mass_publish_targets)
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
+    app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
+    app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
+    app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)
     app.router.add_post("/api/miniapp/schedule_post", schedule_post)
     # Proxies
     app.router.add_get("/api/miniapp/proxies", proxies)

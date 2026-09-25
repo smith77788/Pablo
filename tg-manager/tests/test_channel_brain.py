@@ -111,4 +111,19 @@ def test_gate_reports_brand_violation():
     rules = cb.BrandRules(max_cta=0)
     v = cb.editorial_gate("Купите сейчас со скидкой", rules=rules, recent_texts=[])
     assert v.needs_review is True
-    assert any("бренд" in r for r in v.reasons)
+    assert any("призывов к действию" in r for r in v.reasons)
+
+
+def test_gate_reasons_are_russian_not_codes():
+    """Причины видит владелец: сырой код правила (too_many_emoji) — это английский в UI."""
+    import re
+    rules = cb.BrandRules(min_chars=500, max_emoji=0, max_cta=0,
+                          forbidden_words=("халява",), banned_openings=("друзья",))
+    v = cb.editorial_gate("Друзья, халява! Купите 🔥", rules=rules,
+                          recent_texts=["Друзья, халява! Купите 🔥"])
+    assert len(v.reasons) >= 6
+    for r in v.reasons:
+        assert not re.search(r"[A-Za-z_]{3,}", r), r
+    assert any("совпадает на 100%" in r for r in v.reasons)
+    # код для машин не теряется
+    assert {x["code"] for x in v.brand["violations"]} >= {"too_short", "too_many_emoji"}

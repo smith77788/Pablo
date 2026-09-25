@@ -1,9 +1,9 @@
 """Channel Brain Store — персистентная редакционная политика канала.
 
 ПОДКЛЮЧЕНО. Политику читает services/editorial_review.review_draft, который зовёт
-предпросмотр массовой публикации (bot/handlers/mass_publish.py) — как советующий
-редакционный гейт перед подтверждением. Экран «Правила» в mini-app для РЕДАКТИРОВАНИЯ
-политики — отдельный срез; сейчас политика применяется, если заведена (save_profile).
+предпросмотр массовой публикации (в боте и в Mini App) — как советующий редакционный
+гейт перед подтверждением. Задаётся на экране «Правила редактора» в Mini App
+(/api/miniapp/editorial/policy, общая политика владельца под OWNER_DEFAULT_KEY).
 
 Читает/пишет va_channel_brain (schema_v222) и связывает сохранённую политику с
 чистой логикой контроля качества из services/channel_brain: даёт готовую
@@ -25,6 +25,20 @@ from services import channel_brain as cb
 log = logging.getLogger(__name__)
 
 _ALLOWED_AUTONOMY = ("manual", "semi", "autonomous")
+
+# Политика владельца «для всех каналов». Массовая публикация идёт сразу во все
+# каналы, и у неё нет одного channel_key — без общей политики правила, заданные
+# владельцем, не применялись бы ни к одной массовой публикации.
+OWNER_DEFAULT_KEY = "*"
+
+# Границы правил, которые владелец задаёт из Mini App. Лимит Telegram на текст
+# сообщения — 4096; списки слов ограничены, чтобы проверка каждого черновика не
+# превращалась в перебор тысяч подстрок.
+_MAX_TEXT = 4096
+_MAX_WORDS = 100
+_MAX_OPENINGS = 50
+_MAX_WORD_LEN = 60
+_DUP_MIN, _DUP_MAX = 0.3, 1.0
 
 
 def brand_rules_from_dict(d: Optional[dict]) -> cb.BrandRules:
@@ -99,7 +113,11 @@ def _row_to_brain(row) -> ChannelBrain:
 
 
 async def get_profile(pool, owner_id: int, channel_key: str) -> Optional[ChannelBrain]:
-    """Политика канала или None. Fail-soft: сбой БД → None (не роняем вызывающего)."""
+    """Политика канала или None. Fail-soft: сбой БД → None (не роняем вызывающего).
+
+    Разбор строки — тоже внутри try: руками поправленный JSONB с мусором
+    («max_emoji": "много») иначе ронял бы каждого вызывающего.
+    """
     try:
         row = await pool.fetchrow(
             "SELECT owner_id, channel_key, brand_rules, pillars, mix_weights, "
@@ -107,10 +125,109 @@ async def get_profile(pool, owner_id: int, channel_key: str) -> Optional[Channel
             "FROM va_channel_brain WHERE owner_id=$1 AND channel_key=$2",
             owner_id, channel_key,
         )
+        return _row_to_brain(row) if row else None
     except Exception:
-        log.debug("channel_brain_store.get_profile failed owner=%s", owner_id, exc_info=True)
+        log.warning("channel_brain_store.get_profile failed owner=%s ch=%s",
+                    owner_id, channel_key, exc_info=True)
         return None
-    return _row_to_brain(row) if row else None
+
+
+def _clean_words(raw: Any, cap: int, label: str, errors: list[str]) -> list[str]:
+    """Список слов/фраз: строка через запятую/перенос или массив → нижний регистр,
+    без пустых и повторов, в пределах лимитов."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        items = raw.replace("\n", ",").split(",")
+    elif isinstance(raw, (list, tuple)):
+        items = raw
+    else:
+        errors.append(f"{label}: нужен список")
+        return []
+    out: list[str] = []
+    for it in items:
+        w = " ".join(str(it).split()).lower()
+        if not w or w in out:
+            continue
+        if len(w) > _MAX_WORD_LEN:
+            errors.append(f"{label}: «{w[:20]}…» длиннее {_MAX_WORD_LEN} символов")
+            continue
+        out.append(w)
+    if len(out) > cap:
+        errors.append(f"{label}: не больше {cap}, сейчас {len(out)}")
+        out = out[:cap]
+    return out
+
+
+def _opt_int(raw: Any, lo: int, hi: int, label: str, errors: list[str]) -> Optional[int]:
+    """Необязательный целый лимит: пусто → None (без ограничения)."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        errors.append(f"{label}: нужно целое число")
+        return None
+    if isinstance(raw, float) and raw != v:
+        errors.append(f"{label}: нужно целое число")
+        return None
+    if not lo <= v <= hi:
+        errors.append(f"{label}: от {lo} до {hi}")
+        return None
+    return v
+
+
+def validate_policy(payload: Any) -> tuple[dict, list[str]]:
+    """Правила из Mini App → (чистые поля для save_profile, ошибки по-русски).
+
+    Возвращает brand_rules (dict для JSONB) и dup_threshold. Ошибки не
+    «исправляются молча»: при любой ошибке вызывающий должен отказать с
+    перечнем, а не сохранять полуправильную политику.
+    """
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        return {}, ["Ожидался объект с правилами"]
+    min_chars = _opt_int(payload.get("min_chars"), 0, _MAX_TEXT, "Минимальная длина", errors)
+    max_chars = _opt_int(payload.get("max_chars"), 1, _MAX_TEXT, "Максимальная длина", errors)
+    if min_chars is not None and max_chars is not None and min_chars > max_chars:
+        errors.append("Минимальная длина больше максимальной")
+    rules: dict = {
+        "min_chars": min_chars or 0,
+        "max_chars": max_chars or _MAX_TEXT,
+        "max_emoji": _opt_int(payload.get("max_emoji"), 0, 100, "Эмодзи в посте", errors),
+        "max_cta": _opt_int(payload.get("max_cta"), 0, 20, "Призывов к действию", errors),
+        "forbidden_words": _clean_words(payload.get("forbidden_words"), _MAX_WORDS,
+                                        "Запрещённые слова", errors),
+        "banned_openings": _clean_words(payload.get("banned_openings"), _MAX_OPENINGS,
+                                        "Запрещённые начала", errors),
+    }
+    dup_raw = payload.get("dup_threshold", 0.6)
+    try:
+        dup = float(dup_raw)
+        if dup > 1.0:          # из UI может прийти процент
+            dup = dup / 100.0
+        if not _DUP_MIN <= dup <= _DUP_MAX:
+            errors.append("Порог повтора: от 30 до 100%")
+            dup = 0.6
+    except (TypeError, ValueError):
+        errors.append("Порог повтора: нужно число")
+        dup = 0.6
+    return {"brand_rules": rules, "dup_threshold": round(dup, 3)}, errors
+
+
+def to_public(brain: Optional[ChannelBrain]) -> dict:
+    """Политика → JSON для Mini App. Нет политики → значения по умолчанию."""
+    r = brain.brand_rules if brain else cb.BrandRules()
+    return {
+        "configured": brain is not None,
+        "min_chars": r.min_chars,
+        "max_chars": r.max_chars,
+        "max_emoji": r.max_emoji,
+        "max_cta": r.max_cta,
+        "forbidden_words": list(r.forbidden_words),
+        "banned_openings": list(r.banned_openings),
+        "dup_threshold": brain.dup_threshold if brain else 0.6,
+    }
 
 
 async def save_profile(

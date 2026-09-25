@@ -149,19 +149,23 @@ def brand_check(draft: str, rules: BrandRules) -> dict:
 
     n = len(text)
     if n < rules.min_chars:
-        violations.append({"code": "too_short", "detail": f"{n} < {rules.min_chars} символов"})
+        violations.append({"code": "too_short", "detail": f"{n} < {rules.min_chars} символов",
+                           "value": n, "limit": rules.min_chars})
     if n > rules.max_chars:
-        violations.append({"code": "too_long", "detail": f"{n} > {rules.max_chars} символов"})
+        violations.append({"code": "too_long", "detail": f"{n} > {rules.max_chars} символов",
+                           "value": n, "limit": rules.max_chars})
 
     if rules.max_emoji is not None:
         e = emoji_count(text)
         if e > rules.max_emoji:
-            violations.append({"code": "too_many_emoji", "detail": f"{e} > {rules.max_emoji}"})
+            violations.append({"code": "too_many_emoji", "detail": f"{e} > {rules.max_emoji}",
+                               "value": e, "limit": rules.max_emoji})
 
     if rules.max_cta is not None:
         c = cta_count(text, rules.cta_markers)
         if c > rules.max_cta:
-            violations.append({"code": "too_many_cta", "detail": f"{c} > {rules.max_cta}"})
+            violations.append({"code": "too_many_cta", "detail": f"{c} > {rules.max_cta}",
+                               "value": c, "limit": rules.max_cta})
 
     for w in rules.forbidden_words:
         if w and w.lower() in low:
@@ -236,6 +240,27 @@ def _trailing_streak(seq: list[str]) -> list[str]:
     return out
 
 
+# Причины видит владелец, а он не читает по-английски: раньше в подсказку уходил
+# сырой код («бренд: too_many_emoji (5 > 3)»). Код остаётся в brand.violations
+# для машин, человеку — фраза.
+def violation_text(v: dict) -> str:
+    code, detail = v.get("code"), str(v.get("detail", ""))
+    have, limit = v.get("value"), v.get("limit")
+    if code == "too_short":
+        return f"слишком короткий: {have} символов, нужно от {limit}"
+    if code == "too_long":
+        return f"слишком длинный: {have} символов, можно до {limit}"
+    if code == "too_many_emoji":
+        return f"много эмодзи: {have}, можно до {limit}"
+    if code == "too_many_cta":
+        return f"много призывов к действию: {have}, можно до {limit}"
+    if code == "forbidden_word":
+        return f"запрещённое слово: «{detail}»"
+    if code == "banned_opening":
+        return f"запрещённое начало поста: «{detail}»"
+    return f"нарушено правило канала: {detail}"
+
+
 # ── Единый quality gate (spec §89) ───────────────────────────────────────────────
 
 @dataclass
@@ -267,11 +292,12 @@ def editorial_gate(
 
     reasons: list[str] = []
     if rep["is_duplicate"]:
-        reasons.append(f"почти-повтор недавнего поста (похожесть {rep['max_similarity']})")
+        pct = int(round(rep["max_similarity"] * 100))
+        reasons.append(f"почти повторяет недавний пост (совпадает на {pct}%)")
     if rep["opening_repeat"]:
-        reasons.append("одинаковое вступление с недавним постом")
+        reasons.append("начинается так же, как недавний пост")
     for v in br["violations"]:
-        reasons.append(f"бренд: {v['code']} ({v['detail']})")
+        reasons.append(violation_text(v))
 
     needs_review = bool(reasons)
     return EditorialVerdict(

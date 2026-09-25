@@ -51,7 +51,7 @@ async def test_review_channel_mode_applies_brand_rules():
     pool = FakePool(fetchrow=profile, fetch=[])
     verdict = await er.review_draft(pool, 42, "Огонь 🔥🔥🔥", channel_key="@brand")
     assert verdict.needs_review is True
-    assert any("too_many_emoji" in r for r in verdict.reasons)
+    assert any("эмодзи" in r for r in verdict.reasons)
 
 
 @pytest.mark.asyncio

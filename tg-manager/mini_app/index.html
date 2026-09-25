@@ -3980,9 +3980,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="datetime-local" id="mpSchedule">
         <div class="field-note">Пусто = опубликовать сейчас. Время — ваше локальное. Запланированное видно и отменяемо в «Очереди операций» до срабатывания.</div>
       </div>
+      <!-- Совет редактора (screens/editorial.js): повтор недавнего поста и
+           правила канала. Появляется на подтверждении, публикацию не блокирует. -->
+      <div id="mpEditorial" style="margin-bottom:10px;font-size:13px"></div>
       <div class="field-err" id="mpErr"></div>
       <button class="btn btn-p" id="mpBtn" onclick="sendMassPublish()" style="width:100%;margin-top:4px">📡 Опубликовать</button>
     </div>
+    <div class="lst"><div class="li tap" onclick="openEditorialRules()"><div class="ava ava-purple">✍️</div><div class="li-body"><div class="li-name">Правила редактора</div><div class="li-sub">Проверка на повторы и голос канала перед публикацией</div></div><span class="chev">›</span></div></div>
     <div class="sec" style="margin-top:4px">Последние операции публикации</div>
     <div class="lst" id="mpOpsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -13030,6 +13034,7 @@ function openMassPub() {
   { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
   { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
   { const _n=document.getElementById('mpCanaryNote'); if(_n) _n.style.display='none'; }
+  { const _e=document.getElementById('mpEditorial'); if(_e) _e.innerHTML=''; }
   document.getElementById('mpErr').style.display='none';
   document.getElementById('mpBtn').disabled=false;
   push('s-masspub');
@@ -13207,6 +13212,25 @@ async function sendMassPublish() {
     if (_d.getTime() <= Date.now()) { errEl.textContent='Время публикации должно быть в будущем'; errEl.style.display='block'; return; }
     scheduled_for = _d.toISOString();
   }
+  // Совет редактора: повтор недавнего поста и правила канала. Это подсказка,
+  // а не запрет — она дописывается в подтверждение, решает человек.
+  const _edBox = document.getElementById('mpEditorial');
+  if (_edBox) _edBox.innerHTML = '';
+  let edNote = '';
+  // Пока редактор смотрит текст, кнопка занята: иначе второе нажатие
+  // запускает второй круг проверки и два подтверждения подряд.
+  const _mpB = document.getElementById('mpBtn');
+  if (_mpB) { _mpB.disabled = true; _mpB.textContent = '✍️ Редактор смотрит текст…'; }
+  let _edR = null;
+  try {
+    _edR = (typeof editorialReviewForConfirm === 'function') ? await editorialReviewForConfirm(text) : null;
+  } finally {
+    if (_mpB) { _mpB.disabled = false; renderMpBtn(); }
+  }
+  if (_edR && _edR.needs_review && (_edR.reasons||[]).length) {
+    if (_edBox) _edBox.innerHTML = editorialAdviceHtml(_edR);
+    edNote = '✍️ Редактор советует проверить:\n' + _edR.reasons.map(function(x){return '• '+x;}).join('\n') + '\n\n';
+  }
   // Канарейка: публикуем в первые N каналов (backend поддерживает channel_ids).
   // Полная публикация во ВСЕ каналы необратима → подтверждение, которое обязано
   // назвать число адресатов. Раньше оно спрашивало «во ВСЕ ваши каналы?», и
@@ -13234,7 +13258,7 @@ async function sendMassPublish() {
       renderMpCanaryNote();
       return;
     }
-    if (!(await askConfirm('Тест-публикация в '+ids.length+' '+plural(ids.length,'канал','канала','каналов')+':\n\n'
+    if (!(await askConfirm(edNote+'Тест-публикация в '+ids.length+' '+plural(ids.length,'канал','канала','каналов')+':\n\n'
         + _mpChList(sample, 6) + '\n\nОстальные '+(MP_TOTAL-ids.length)+' не затронуты. Отменить публикацию после старта нельзя.'))) return;
     channel_ids = ids;
   } else {
@@ -13246,7 +13270,7 @@ async function sendMassPublish() {
       : '\n\nПосле старта публикацию нельзя отменить. Совет: сначала протестируйте на нескольких.';
     // Отложенная публикация раньше уходила вообще без подтверждения: достаточно
     // было заполнить дату — и пост уезжал во все каналы с одного нажатия.
-    if (!(await askConfirm('Опубликовать '+whereTo+'?'+when))) return;
+    if (!(await askConfirm(edNote+'Опубликовать '+whereTo+'?'+when))) return;
   }
   const btn = document.getElementById('mpBtn');
   btn.disabled=true; btn.textContent='⏳ Добавление в очередь...';
@@ -13258,6 +13282,7 @@ async function sendMassPublish() {
     document.getElementById('mpText').value='';
     document.getElementById('mpLen').textContent='0';
     { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
+    { const _e=document.getElementById('mpEditorial'); if(_e) _e.innerHTML=''; }
     tg.HapticFeedback?.notificationOccurred('success');
     const _when = scheduled_for ? (' на '+new Date(scheduled_for).toLocaleString('ru')) : '';
     toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+d.total+' '+plural(d.total,'канал','канала','каналов')+' · операция #'+d.op_id);
@@ -24844,5 +24869,6 @@ function renderAudSegChart(segments) {
 <script src="screens/contact_invite_link.js"></script>
 <script src="screens/sales_manager.js"></script>
 <script src="screens/flood_guard.js"></script>
+<script src="screens/editorial.js"></script>
 </body>
 </html>

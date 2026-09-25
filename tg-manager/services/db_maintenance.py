@@ -52,6 +52,9 @@ _RETENTION: list[tuple[str, str, str]] = [
     ("operation_audit", "occurred_at", "60 days"),
     # Activity log (UI events) — keep 14 days
     ("activity_log", "occurred_at", "14 days"),
+    # История постов редактора канала: антиповтору нужны десятки последних
+    # постов, а тело каждого поста на каждый канал весит до 8 КБ.
+    ("va_channel_posts", "published_at", "90 days"),
 ]
 
 _OPERATION_QUEUE_RETENTION = "30 days"
