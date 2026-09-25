@@ -36,9 +36,16 @@ async def snapshot(pool, owner_id: int) -> dict:
 
 
 async def _vlayer(pool, owner_id: int) -> dict:
-    """Модель поведения: сколько контактов «готовы купить» и температура
-    аудитории — чтобы мозг мог толкнуть «дожмите горячих», пока они горячие."""
-    out = {"ready": 0, "hot": 0, "audience": None}
+    """Модель поведения: что слой НАСЧИТАЛ и что он ТОЛЬКО ЧТО ПОНЯЛ.
+
+    Счётчики состояний («сколько всего готовых») отвечают на вопрос «как дела»,
+    но не меняются от того, что человек дошёл до решения минуту назад. Поэтому
+    рядом — виртуальные события за сутки: они и есть момент, ради которого слой
+    строился. На событие мозг реагирует один раз и вовремя, а не повторяет одно
+    и то же про один и тот же остывающий список.
+    """
+    out = {"ready": 0, "hot": 0, "audience": None,
+           "became_ready_24h": 0, "cooled_24h": 0, "hot_bot": None}
     try:
         r = await pool.fetchrow(
             "SELECT COUNT(*) FILTER (WHERE value='ready') AS ready, "
@@ -55,6 +62,30 @@ async def _vlayer(pool, owner_id: int) -> dict:
         out["audience"] = aud
     except Exception:
         log.debug("world._vlayer failed owner=%s", owner_id)
+
+    try:
+        rows = await pool.fetch(
+            "SELECT kind, COUNT(*) AS c FROM organism_events "
+            "WHERE owner_id=$1 AND created_at > now() - interval '24 hours' "
+            "AND kind = ANY($2::text[]) GROUP BY kind",
+            owner_id, ["purchase_intent_detected", "user_lost_interest"])
+        counts = {r["kind"]: int(r["c"] or 0) for r in rows}
+        out["became_ready_24h"] = counts.get("purchase_intent_detected", 0)
+        out["cooled_24h"] = counts.get("user_lost_interest", 0)
+    except Exception:
+        log.debug("world._vlayer events failed owner=%s", owner_id)
+
+    # Самый горячий бот: по состоянию, посчитанному каскадом «бот ← люди».
+    try:
+        out["hot_bot"] = await pool.fetchval(
+            "SELECT COALESCE(mb.username, mb.first_name, 'id'||vs.entity_id) "
+            "FROM virtual_states vs "
+            "LEFT JOIN managed_bots mb ON mb.bot_id::text = vs.entity_id "
+            "WHERE vs.owner_id=$1 AND vs.entity_type='bot' "
+            "AND vs.state_key='funnel' AND vs.value='hot' "
+            "ORDER BY vs.updated_at DESC LIMIT 1", owner_id)
+    except Exception:
+        log.debug("world._vlayer hot bot failed owner=%s", owner_id)
     return out
 
 
