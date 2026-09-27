@@ -7266,7 +7266,29 @@ async function _reAuth() {
   } catch(_) {}
   _reAuthPending = false;
 }
+// Двойной тап по кнопке отправлял ДВА одинаковых запроса. Гасить это по кнопкам
+// пришлось бы в 81 месте, и каждое новое место снова забывали бы, поэтому дедуп
+// живёт здесь: пока один изменяющий запрос в полёте, второй точно такой же не
+// уходит, а получает тот же результат. Ключ — метод, путь и тело целиком, так
+// что два РАЗНЫХ действия друг другу не мешают, а окно совпадает ровно со
+// временем ответа сервера: осознанный повтор через секунду пройдёт как обычно.
+// Чтения (GET) не трогаем — они безвредны. Загрузку файла тоже: тело FormData
+// не сравнить строкой, а два файла подряд — обычное дело.
+const _API_INFLIGHT = new Map();
+
 async function api(path, opts={}) {
+  const _m = String(opts.method || 'GET').toUpperCase();
+  const _isFormBody = (typeof FormData !== 'undefined' && opts.body instanceof FormData);
+  if (_m === 'GET' || _isFormBody) return _apiRaw(path, opts);
+  const _key = _m + ' ' + path + ' ' + (typeof opts.body === 'string' ? opts.body : '');
+  const _running = _API_INFLIGHT.get(_key);
+  if (_running) return _running;
+  const _p = _apiRaw(path, opts).finally(() => { _API_INFLIGHT.delete(_key); });
+  _API_INFLIGHT.set(_key, _p);
+  return _p;
+}
+
+async function _apiRaw(path, opts={}) {
   let r;
   // FormData (загрузка файла) — НЕ ставим Content-Type: браузер сам выставит
   // multipart с boundary. JSON — как раньше.
