@@ -70,7 +70,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
         callback_data=ParserCb(action="start_comments"),
     )
     kb.button(
-        text="📍 Гео-парсинг (Nearby)",
+        text="📍 Гео-парсинг (поблизости)",
         callback_data=ParserCb(action="start_geo"),
     )
     kb.button(text="📋 История запусков", callback_data=ParserCb(action="runs"))

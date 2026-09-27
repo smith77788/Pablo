@@ -38,7 +38,7 @@ async def _get_funnel(pool, funnel_id: int, owner_id: int):
 
 def _back_to_menu():
     return InlineKeyboardBuilder().button(
-        text="◀️ К Auto-Funnel", callback_data=AutoFunnelCb(action="menu")
+        text="◀️ К авто-воронкам", callback_data=AutoFunnelCb(action="menu")
     ).as_markup()
 
 
@@ -263,7 +263,7 @@ async def _show_funnel(msg_or_cb, pool, funnel, edit: bool = True) -> None:
     kb.button(text="🚀 Запустить",       callback_data=AutoFunnelCb(action="launch", funnel_id=fid))
     kb.button(text="📊 Статистика",      callback_data=AutoFunnelCb(action="stats", funnel_id=fid))
     kb.button(text="🗑 Удалить",         callback_data=AutoFunnelCb(action="del", funnel_id=fid))
-    kb.button(text="◀️ К Auto-Funnel",  callback_data=AutoFunnelCb(action="menu"))
+    kb.button(text="◀️ К авто-воронкам",  callback_data=AutoFunnelCb(action="menu"))
     kb.adjust(2, 2, 1, 1)
 
     if edit:

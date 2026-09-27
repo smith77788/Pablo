@@ -425,7 +425,7 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     if has_acc:
         log.info("strike check_pay: already active user=%s", callback.from_user.id)
         kb = InlineKeyboardBuilder()
-        kb.button(text="⚔️ Открыть Strike", callback_data=StrikeCb(action="menu"))
+        kb.button(text="⚔️ Открыть массовые жалобы", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
             "✅ <b>Strike Module активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
             parse_mode="HTML",
@@ -476,7 +476,7 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         except Exception:
             log_exc_swallow(log, "cb_strike_check_pay: strike_access insert failed")
         kb_open = InlineKeyboardBuilder()
-        kb_open.button(text="⚔️ Открыть Strike", callback_data=StrikeCb(action="menu"))
+        kb_open.button(text="⚔️ Открыть массовые жалобы", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
             "✅ <b>Strike Module активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
             parse_mode="HTML",
@@ -717,8 +717,8 @@ async def cb_strike_rerun(
     if not active:
         _kb_na = InlineKeyboardBuilder()
         _kb_na.button(text="📱 Перейти к аккаунтам", callback_data=AccCb(action="menu"))
-        _kb_na.button(text="◀️ История Strike", callback_data=StrikeCb(action="history"))
-        _kb_na.button(text="⚔️ Меню Strike", callback_data=StrikeCb(action="menu"))
+        _kb_na.button(text="◀️ История жалоб", callback_data=StrikeCb(action="history"))
+        _kb_na.button(text="⚔️ Меню жалоб", callback_data=StrikeCb(action="menu"))
         _kb_na.adjust(1)
         await callback.message.edit_text(
             "⚠️ <b>Нет активных аккаунтов</b>\n\n"
@@ -1176,7 +1176,7 @@ async def cb_mini_strike_run(
         log_exc_swallow(log, "cb_mini_strike_run: execute failed")
         _err_kb = InlineKeyboardBuilder()
         _err_kb.button(text="🔁 Попробовать снова", callback_data=StrikeCb(action="mini"))
-        _err_kb.button(text="◀️ Меню Strike", callback_data=StrikeCb(action="menu"))
+        _err_kb.button(text="◀️ Меню жалоб", callback_data=StrikeCb(action="menu"))
         _err_kb.adjust(1)
         await msg.edit_text(
             f"❌ <b>Ошибка выполнения страйка</b>\n\n<code>{str(e)[:200]}</code>",
@@ -1195,7 +1195,7 @@ async def cb_mini_strike_run(
     kb = InlineKeyboardBuilder()
     kb.button(text="🔁 Ещё один страйк", callback_data=StrikeCb(action="mini"))
     kb.button(text="📜 История", callback_data=StrikeCb(action="history"))
-    kb.button(text="◀️ Меню Strike", callback_data=StrikeCb(action="menu"))
+    kb.button(text="◀️ Меню жалоб", callback_data=StrikeCb(action="menu"))
     kb.adjust(1)
 
     await msg.edit_text(report_text, parse_mode="HTML", reply_markup=kb.as_markup())
@@ -1534,7 +1534,7 @@ async def msg_password_input(
             text="➕ Добавить ещё", callback_data=StrikeCb(action="email_add")
         )
         _kb_ok.button(text="◀️ Список email", callback_data=StrikeCb(action="emails"))
-        _kb_ok.button(text="⚔️ Меню Strike", callback_data=StrikeCb(action="menu"))
+        _kb_ok.button(text="⚔️ Меню жалоб", callback_data=StrikeCb(action="menu"))
         _kb_ok.adjust(1)
         await status_msg.edit_text(
             f"✅ <b>Email добавлен: {email}</b>\n\n"

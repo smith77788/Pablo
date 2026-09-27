@@ -163,10 +163,10 @@ async def _show_hc_menu(
         )
     kb.button(text="📋 Восстановления", callback_data=InfraHCCb(action="recoveries"))
     kb.button(
-        text="🔄 Запустить Recovery", callback_data=InfraHCCb(action="run_recovery")
+        text="🔄 Запустить восстановление", callback_data=InfraHCCb(action="run_recovery")
     )
     kb.button(text="📊 Тренд здоровья", callback_data=InfraHCCb(action="health_trend"))
-    kb.button(text="🔍 Copilot анализ", callback_data=InfraHCCb(action="copilot"))
+    kb.button(text="🔍 Анализ ИИ-аналитика", callback_data=InfraHCCb(action="copilot"))
     kb.button(text="◀️ Главное меню", callback_data=InfraHCCb(action="back"))
     kb.adjust(2, 2, 1, 1)
 
@@ -242,7 +242,7 @@ async def cb_hc_anomalies(
         kb.button(
             text="След. ▶️", callback_data=InfraHCCb(action="anomalies", page=page + 1)
         )
-    kb.button(text="🔄 Recovery Engine", callback_data=InfraHCCb(action="run_recovery"))
+    kb.button(text="🔄 Восстановление", callback_data=InfraHCCb(action="run_recovery"))
     kb.button(text="◀️ Назад", callback_data=InfraHCCb(action="menu"))
     kb.adjust(1)
 

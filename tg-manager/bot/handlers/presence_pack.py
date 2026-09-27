@@ -547,7 +547,7 @@ async def _build_preview_text(sd: dict, pool: asyncpg.Pool | None = None) -> str
 
 def _preview_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Создать pack", callback_data=PackCb(action="confirm_create"))
+    kb.button(text="✅ Создать набор", callback_data=PackCb(action="confirm_create"))
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     kb.adjust(1)
     return kb
@@ -614,7 +614,7 @@ async def cb_pack_confirm_create(
         callback_data=PackCb(action="seed", pack_id=pack_id),
     )
     kb.button(
-        text="👑 Назначить бота admin",
+        text="👑 Назначить бота администратором",
         callback_data=PackCb(action="promote", pack_id=pack_id),
     )
     kb.button(
@@ -708,7 +708,7 @@ async def cb_pack_view(
     kb = InlineKeyboardBuilder()
     if not pack["bot_promoted"] and pack.get("bot_id"):
         kb.button(
-            text="👑 Назначить бота admin",
+            text="👑 Назначить бота администратором",
             callback_data=PackCb(action="promote", pack_id=pack_id),
         )
     kb.button(

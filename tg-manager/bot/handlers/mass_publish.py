@@ -103,7 +103,7 @@ async def cb_mpub_back_factory(callback: CallbackQuery) -> None:
     from bot.callbacks import ChanFactCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📡 Channel Factory", callback_data=ChanFactCb(action="menu"))
+    kb.button(text="📡 Фабрика каналов", callback_data=ChanFactCb(action="menu"))
     await callback.message.edit_text(
         "◀️ Вернитесь в Channel Factory или воспользуйтесь /ops",
         parse_mode="HTML",

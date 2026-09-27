@@ -2343,7 +2343,7 @@ async def cb_gp_launch_stale(callback: CallbackQuery, state: FSMContext) -> None
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🌍 Открыть Global Presence", callback_data=GeoPresenceCb(action="menu")
+        text="🌍 Открыть гео-сеть", callback_data=GeoPresenceCb(action="menu")
     )
     kb.adjust(1)
     await callback.answer(

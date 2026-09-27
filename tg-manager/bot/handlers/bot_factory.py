@@ -105,7 +105,7 @@ async def cb_factory_create(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
         await callback.message.edit_text(
             "⚠️ <b>Нет активных аккаунтов</b>\n\n"
             "Для создания ботов через BotFather нужен хотя бы один активный "
@@ -308,7 +308,7 @@ async def cb_factory_do_create_bots(
 
     if not acc_id:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
         await callback.message.edit_text(
             "⚠️ Сессия истекла. Начните заново.",
             parse_mode="HTML",
@@ -320,7 +320,7 @@ async def cb_factory_do_create_bots(
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
         await callback.message.edit_text(
             "🔒 <b>Bot Factory — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
@@ -344,7 +344,7 @@ async def cb_factory_do_create_bots(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
     await callback.message.edit_text(
         f"🤖 <b>Создание ботов поставлено в очередь</b>\n\n"
         f"Ботов: <b>{count}</b>\n"
@@ -521,7 +521,7 @@ async def cb_import_save(
                 action="list", object_type="bot", object_id=first_saved_id
             ),
         )
-    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>Импорт завершён</b>\n\n"
@@ -607,7 +607,7 @@ async def msg_validate_tokens(
         lines.append(f"  • <code>{_safe(t[:40])}</code>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
     await info_msg.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
@@ -700,7 +700,7 @@ async def cb_factory_clone(
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
         await callback.message.edit_text(
             "❌ У вас нет добавленных ботов.",
             parse_mode="HTML",
@@ -918,7 +918,7 @@ async def cb_clone_confirm(
     if not any([src_name, src_desc, src_short, src_commands]):
         await state.clear()
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
         await callback.message.edit_text(
             "⚠️ <b>Нечего копировать</b>\n\n"
             "У бота-источника выбранные поля пусты "
@@ -980,7 +980,7 @@ async def cb_clone_confirm(
 
     await state.clear()
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
     skip_line = f"\nПропущено (нечего применять): <b>{skipped_count}</b>" if skipped_count else ""
     await callback.message.edit_text(
         f"✅ <b>Клонирование завершено</b>\n\n"
@@ -1031,7 +1031,7 @@ async def cb_factory_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         total_users = row["total_users"] or 0
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
     await callback.message.edit_text(
         f"📊 <b>Статистика ботов</b>\n\n"
         f"Всего ботов: <b>{total_bots}</b>\n"

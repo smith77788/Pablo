@@ -27,7 +27,7 @@ router = Router()
 def _back_to_dna(bot_id: int) -> InlineKeyboardMarkup:
     return (
         InlineKeyboardBuilder()
-        .button(text="◀️ К DNA-отчёту", callback_data=DnaCb(action="report", bot_id=bot_id))
+        .button(text="◀️ К отчёту ДНК", callback_data=DnaCb(action="report", bot_id=bot_id))
         .as_markup()
     )
 
@@ -148,7 +148,7 @@ async def cb_dna_report(
             callback_data=DnaCb(action="history", bot_id=callback_data.bot_id),
         )
     kb.button(
-        text="🔄 Пересчитать DNA",
+        text="🔄 Пересчитать ДНК",
         callback_data=DnaCb(action="compute", bot_id=callback_data.bot_id),
     )
     kb.button(text="◀️ К списку ботов", callback_data=DnaCb(action="menu"))
@@ -196,7 +196,7 @@ async def cb_dna_recs(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="◀️ К DNA-отчёту",
+        text="◀️ К отчёту ДНК",
         callback_data=DnaCb(action="report", bot_id=callback_data.bot_id),
     )
     kb.adjust(1)
@@ -320,7 +320,7 @@ async def cb_dna_history(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="◀️ К DNA-отчёту",
+        text="◀️ К отчёту ДНК",
         callback_data=DnaCb(action="report", bot_id=callback_data.bot_id),
     )
     kb.adjust(1)

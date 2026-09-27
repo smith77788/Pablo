@@ -367,19 +367,19 @@ async def cb_dm_target_cohort_pick(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=f"🔥 Hot (24ч): {cohort_stats.get('hot', 0)} чел.",
+        text=f"🔥 Горячие (24ч): {cohort_stats.get('hot', 0)} чел.",
         callback_data=DmCb(action="target_cohort_set", campaign_id=0),
     )
     kb.button(
-        text=f"🟡 Warm (7д): {cohort_stats.get('warm', 0)} чел.",
+        text=f"🟡 Тёплые (7д): {cohort_stats.get('warm', 0)} чел.",
         callback_data=DmCb(action="target_cohort_set", campaign_id=1),
     )
     kb.button(
-        text=f"🧊 Cold (30д): {cohort_stats.get('cold', 0)} чел.",
+        text=f"🧊 Холодные (30д): {cohort_stats.get('cold', 0)} чел.",
         callback_data=DmCb(action="target_cohort_set", campaign_id=2),
     )
     kb.button(
-        text=f"💀 Lost (30д+): {cohort_stats.get('lost', 0)} чел.",
+        text=f"💀 Потерянные (30д+): {cohort_stats.get('lost', 0)} чел.",
         callback_data=DmCb(action="target_cohort_set", campaign_id=3),
     )
     kb.button(text="◀️ Назад", callback_data=DmCb(action="target_cohort_bot"))

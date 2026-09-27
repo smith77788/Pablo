@@ -299,11 +299,11 @@ async def cb_user_actions(
         callback_data=AdminUserCb(action="revoke_plan", user_id=user_id),
     )
     kb.button(
-        text="⚔️ Выдать Strike",
+        text="⚔️ Выдать доступ к жалобам",
         callback_data=AdminUserCb(action="grant_strike", user_id=user_id),
     )
     kb.button(
-        text="⚔️ Забрать Strike",
+        text="⚔️ Забрать доступ к жалобам",
         callback_data=AdminUserCb(action="revoke_strike", user_id=user_id),
     )
 
@@ -614,11 +614,11 @@ async def cb_ban(
         callback_data=AdminUserCb(action="revoke_plan", user_id=user_id),
     )
     kb.button(
-        text="⚔️ Выдать Strike",
+        text="⚔️ Выдать доступ к жалобам",
         callback_data=AdminUserCb(action="grant_strike", user_id=user_id),
     )
     kb.button(
-        text="⚔️ Забрать Strike",
+        text="⚔️ Забрать доступ к жалобам",
         callback_data=AdminUserCb(action="revoke_strike", user_id=user_id),
     )
     kb.button(
@@ -678,11 +678,11 @@ async def cb_unban(
         callback_data=AdminUserCb(action="revoke_plan", user_id=user_id),
     )
     kb.button(
-        text="⚔️ Выдать Strike",
+        text="⚔️ Выдать доступ к жалобам",
         callback_data=AdminUserCb(action="grant_strike", user_id=user_id),
     )
     kb.button(
-        text="⚔️ Забрать Strike",
+        text="⚔️ Забрать доступ к жалобам",
         callback_data=AdminUserCb(action="revoke_strike", user_id=user_id),
     )
     kb.button(

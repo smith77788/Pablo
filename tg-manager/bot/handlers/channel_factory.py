@@ -291,7 +291,7 @@ async def cb_chanf_mass_pub_redirect(callback: CallbackQuery) -> None:
     from bot.callbacks import MassPubCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Открыть Mass Publish", callback_data=MassPubCb(action="menu"))
+    kb.button(text="📤 Открыть массовую публикацию", callback_data=MassPubCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(

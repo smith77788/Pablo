@@ -324,10 +324,10 @@ async def cb_eco_view(
     kb.button(text="📋 История", callback_data=EcoCb(action="history", eco_id=eco_id))
     kb.button(text="💡 Рекомендации", callback_data=EcoCb(action="recs", eco_id=eco_id))
     kb.button(text="🔃 Синхр.", callback_data=EcoCb(action="sync", eco_id=eco_id))
-    kb.button(text="🧬 DNA", callback_data=EcoCb(action="dna_menu", eco_id=eco_id))
+    kb.button(text="🧬 ДНК", callback_data=EcoCb(action="dna_menu", eco_id=eco_id))
     kb.button(text="♻️ Клон", callback_data=EcoCb(action="clone_start", eco_id=eco_id))
     kb.button(text="🏭 Фабрика", callback_data=EcoCb(action="factory", eco_id=eco_id))
-    kb.button(text="🌍 Global Presence", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="🌍 Гео-сеть", callback_data=GeoPresenceCb(action="menu"))
     _am = await _eb.is_auto_manage_enabled(pool, eco_id, callback.from_user.id)
     kb.button(
         text=f"🤖 Автоуправление: {'ВКЛ' if _am else 'ВЫКЛ'}",
@@ -381,7 +381,7 @@ async def cb_eco_factory(
     kb.button(text="📡 Создать канал", callback_data=ChanFactCb(action="create"))
     kb.button(text="👥 Создать группу", callback_data=GroupFCb(action="create"))
     kb.button(text="🤖 Добавить бота", callback_data=BotFactCb(action="import_tokens"))
-    kb.button(text="🌍 Global Presence", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="🌍 Гео-сеть", callback_data=GeoPresenceCb(action="menu"))
     kb.button(
         text="🔍 Автообнаружение",
         callback_data=EcoCb(action="autodiscover", eco_id=eco_id),
@@ -398,7 +398,7 @@ async def cb_eco_factory(
         f"«🌐 Добавить в экосистему»\n"
         f"<b>👥 Группы</b> — создать группу/сообщество\n"
         f"<b>🤖 Боты</b> — импортировать токен бота\n"
-        f"<b>🌍 Global Presence</b> — пакетное развёртывание по гео\n"
+        f"<b>🌍 Гео-сеть</b> — пакетное развёртывание по гео\n"
         f"<b>🔍 Автообнаружение</b> — добавить все ваши активы автоматически"
     )
     try:
@@ -1685,7 +1685,7 @@ async def cb_eco_dna_menu(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="📸 Снять DNA с этой экосистемы",
+        text="📸 Снять ДНК с этой экосистемы",
         callback_data=EcoCb(action="dna_capture", eco_id=eco_id),
     )
     for d in dna_list[:8]:
@@ -1793,7 +1793,7 @@ async def fsm_eco_dna_name(
         )
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="🧬 DNA-шаблоны", callback_data=EcoCb(action="dna_menu", eco_id=eco_id)
+            text="🧬 Шаблоны ДНК", callback_data=EcoCb(action="dna_menu", eco_id=eco_id)
         )
         kb.button(
             text="◀️ Экосистема", callback_data=EcoCb(action="view", eco_id=eco_id)
@@ -1855,11 +1855,11 @@ async def cb_eco_dna_view(
     )
     if is_mine:
         kb.button(
-            text="🗑 Удалить DNA",
+            text="🗑 Удалить ДНК",
             callback_data=EcoCb(action="dna_delete", eco_id=eco_id, page=dna_id),
         )
     kb.button(
-        text="◀️ Назад к DNA", callback_data=EcoCb(action="dna_menu", eco_id=eco_id)
+        text="◀️ Назад к ДНК", callback_data=EcoCb(action="dna_menu", eco_id=eco_id)
     )
     kb.adjust(1)
     await _edit(callback, text, markup=kb.as_markup())
@@ -1907,7 +1907,7 @@ async def cb_eco_dna_delete(
     dna_list = await _eb.list_dna(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="📸 Снять DNA с этой экосистемы",
+        text="📸 Снять ДНК с этой экосистемы",
         callback_data=EcoCb(action="dna_capture", eco_id=eco_id),
     )
     for d in dna_list[:8]:

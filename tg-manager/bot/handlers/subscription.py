@@ -493,7 +493,7 @@ async def cb_choose_period(
         kb = InlineKeyboardBuilder()
         if sub_utils.is_platform_admin(callback.from_user.id):
             kb.button(
-                text="🎁 Активировать себе (Admin)",
+                text="🎁 Активировать себе (админ)",
                 callback_data=SubCb(action="admin_grant", plan=plan, months=months),
             )
             kb.button(

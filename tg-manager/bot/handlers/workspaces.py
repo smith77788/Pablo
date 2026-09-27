@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 def _ws_main_kb() -> ...:
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Создать workspace", callback_data=WorkspaceCb(action="create"))
+    kb.button(text="➕ Создать пространство", callback_data=WorkspaceCb(action="create"))
     kb.button(text="🔗 Войти по коду", callback_data=WorkspaceCb(action="join"))
     kb.button(text="⬅️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
@@ -78,7 +78,7 @@ async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
             text=f"{role_icon} {ws['name']} ({ws['member_count']} участ.)",
             callback_data=WorkspaceCb(action="view", ws_id=ws["id"]),
         )
-    kb.button(text="➕ Создать workspace", callback_data=WorkspaceCb(action="create"))
+    kb.button(text="➕ Создать пространство", callback_data=WorkspaceCb(action="create"))
     kb.button(text="🔗 Войти по коду", callback_data=WorkspaceCb(action="join"))
     kb.button(text="⬅️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
@@ -247,7 +247,7 @@ async def msg_ws_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     ws_id = await db.create_workspace(pool, message.from_user.id, name, description)
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🏢 Открыть workspace",
+        text="🏢 Открыть пространство",
         callback_data=WorkspaceCb(action="view", ws_id=ws_id),
     )
     kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
@@ -270,7 +270,7 @@ async def cb_ws_skip_desc(
     ws_id = await db.create_workspace(pool, callback.from_user.id, name, "")
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🏢 Открыть workspace",
+        text="🏢 Открыть пространство",
         callback_data=WorkspaceCb(action="view", ws_id=ws_id),
     )
     kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
@@ -322,7 +322,7 @@ async def msg_ws_invite_code(
         return
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🏢 Открыть workspace",
+        text="🏢 Открыть пространство",
         callback_data=WorkspaceCb(action="view", ws_id=ws_id),
     )
     kb.adjust(1)

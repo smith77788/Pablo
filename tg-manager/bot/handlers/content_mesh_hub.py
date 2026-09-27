@@ -23,7 +23,7 @@ router = Router()
 
 def _back_to_menu():
     return InlineKeyboardBuilder().button(
-        text="◀️ К Content Mesh", callback_data=ContentMeshCb(action="menu")
+        text="◀️ К сети контента", callback_data=ContentMeshCb(action="menu")
     ).as_markup()
 
 
@@ -80,7 +80,7 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             text=f"{status} {html.escape(m['name'])} ← {html.escape(src)}",
             callback_data=ContentMeshCb(action="view", mesh_id=m["id"]),
         )
-    kb.button(text="➕ Создать Mesh", callback_data=ContentMeshCb(action="create"))
+    kb.button(text="➕ Создать сеть", callback_data=ContentMeshCb(action="create"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
     kb.adjust(1)
 
@@ -583,5 +583,5 @@ async def cb_mesh_del_confirm(
     )
     await callback.answer("🗑 Удалено")
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ К Content Mesh", callback_data=ContentMeshCb(action="menu"))
+    kb.button(text="◀️ К сети контента", callback_data=ContentMeshCb(action="menu"))
     await callback.message.edit_text("✅ Mesh удалена.", parse_mode="HTML", reply_markup=kb.as_markup())

@@ -543,7 +543,7 @@ async def cb_topo_chan_view(
 @router.message(Command("topology"))
 async def cmd_topology(message: Message) -> None:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🗺️ Открыть Topology Map", callback_data=TopoCb(action="menu"))
+    kb.button(text="🗺️ Открыть топологию", callback_data=TopoCb(action="menu"))
     await message.answer(
         "🗺️ <b>Topology Map</b>\n\n"
         "Граф связей между аккаунтами, каналами, группами и ботами.\n"

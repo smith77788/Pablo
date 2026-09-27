@@ -151,9 +151,9 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         callback_data=InfraCb(action="rebalance_preview"),
     )
     kb.button(text="🎯 Советник", callback_data=InfraCb(action="advisor"))
-    kb.button(text="🧠 Copilot", callback_data=InfraCb(action="copilot"))
+    kb.button(text="🧠 ИИ-аналитик", callback_data=InfraCb(action="copilot"))
     kb.button(
-        text="🔬 Intelligence Report", callback_data=InfraCb(action="intelligence")
+        text="🔬 Аналитический отчёт", callback_data=InfraCb(action="intelligence")
     )
     kb.button(text="🚀 Развёртка аккаунтов", callback_data=InfraCb(action="deploy"))
     kb.button(
@@ -1132,7 +1132,7 @@ async def cb_copilot_snooze(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Снять снуз", callback_data=InfraCb(action="snooze_clear"))
-    kb.button(text="🔍 Copilot", callback_data=InfraCb(action="copilot"))
+    kb.button(text="🔍 ИИ-аналитик", callback_data=InfraCb(action="copilot"))
     kb.adjust(2)
 
     await callback.answer(f"😴 Уведомления отложены на {hours}ч", show_alert=False)
@@ -1160,7 +1160,7 @@ async def cb_copilot_snooze_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
     kb.button(text="😴 1ч", callback_data=InfraCb(action="snooze", page=1))
     kb.button(text="😴 6ч", callback_data=InfraCb(action="snooze", page=6))
     kb.button(text="😴 24ч", callback_data=InfraCb(action="snooze", page=24))
-    kb.button(text="🔍 Copilot", callback_data=InfraCb(action="copilot"))
+    kb.button(text="🔍 ИИ-аналитик", callback_data=InfraCb(action="copilot"))
     kb.adjust(3, 1)
 
     await callback.answer("✅ Уведомления возобновлены", show_alert=False)

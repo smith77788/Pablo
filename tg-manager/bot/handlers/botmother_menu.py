@@ -214,8 +214,8 @@ def _operations_kb(plan: str = "free"):
     from bot.callbacks import PackCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"{_lock(plan,'enterprise')}⚔️ Strike (зачистка)", callback_data=StrikeCb(action="menu"))
-    kb.button(text="🖥️ Host-Server (аренда)", callback_data=HostCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'enterprise')}⚔️ Массовые жалобы", callback_data=StrikeCb(action="menu"))
+    kb.button(text="🖥️ Аренда сервера", callback_data=HostCb(action="menu"))
     kb.button(text=f"{_lock(plan,'enterprise')}🌍 Гео-сеть: создать", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}📤 Публикация", callback_data=MassPubCb(action="menu"))
     kb.button(text=f"{_lock(plan,'starter')}✍️ Быстрый пост", callback_data=QuickPostCb(action="start"))
@@ -254,8 +254,8 @@ def _analytics_kb(plan: str = "free"):
     kb.button(text="📊 Позиции в поиске", callback_data=VisCb(action="dashboard"))
     kb.button(text="🏆 Конкуренты", callback_data=CompCb(action="menu"))
     kb.button(text="📈 SEO-аудит", callback_data=ChanFactCb(action="seo_pick"))
-    kb.button(text="🎯 Ad Intelligence", callback_data=AdIntelCb(action="menu"))
-    kb.button(text="🧬 Audience DNA", callback_data=DnaCb(action="menu"))
+    kb.button(text="🎯 Разведка рекламы", callback_data=AdIntelCb(action="menu"))
+    kb.button(text="🧬 ДНК аудитории", callback_data=DnaCb(action="menu"))
     kb.button(text="🕸️ Граф связей", callback_data=TopoCb(action="menu"))
     kb.button(text="🌐 Граф аудитории", callback_data=GraphCb(action="menu"))
     kb.button(text="📅 Анализ регистраций", callback_data=RegCb(action="analyze_start"))
@@ -280,10 +280,10 @@ def _monitoring_kb():
     kb.button(text="🚨 Репортер", callback_data=ReporterCb(action="menu"))
     kb.button(text="🌐 Прокси", callback_data=ProxyCb(action="menu"))
     kb.button(text="📊 Инфра-аналитика", callback_data=InfraCb(action="menu"))
-    kb.button(text="👻 Ghost Engine", callback_data=GhostCb(action="menu"))
-    kb.button(text="⚛️ Physics Engine", callback_data=PhysicsCb(action="menu"))
-    kb.button(text="🛡️ Account Shield", callback_data=ShieldCb(action="menu"))
-    kb.button(text="📡 Nodes (форум-воркспейс)", callback_data=NodesCb(action="menu"))
+    kb.button(text="👻 Призрак", callback_data=GhostCb(action="menu"))
+    kb.button(text="⚛️ Физика", callback_data=PhysicsCb(action="menu"))
+    kb.button(text="🛡️ Щит аккаунтов", callback_data=ShieldCb(action="menu"))
+    kb.button(text="📡 Ноды (форум-пространство)", callback_data=NodesCb(action="menu"))
     kb.button(text="🤖 Авторег (SMS API)", callback_data=AutoRegCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
@@ -300,8 +300,8 @@ def _settings_kb(plan: str = "free"):
     kb.button(text=f"{_lock(plan,'starter')}📄 Шаблоны", callback_data=AssetTplCb(action="menu"))
     kb.button(text=f"{_lock(plan,'enterprise')}🏢 Пространства", callback_data=WorkspaceCb(action="menu"))
     kb.button(text="🔑 API доступ", callback_data=ApiHubCb(action="menu"))
-    kb.button(text="🎭 Persona Ecosystem", callback_data=PersonaCb(action="menu"))
-    kb.button(text="🧠 Semantic Memory", callback_data=MemCb(action="menu", bot_id=0))
+    kb.button(text="🎭 Персоны", callback_data=PersonaCb(action="menu"))
+    kb.button(text="🧠 ИИ Память", callback_data=MemCb(action="menu", bot_id=0))
     kb.button(text="🐛 Сообщить об ошибке", callback_data=ErrorReportCb(action="start"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 2, 2, 2, 1)
@@ -313,12 +313,12 @@ def _growth_kb(plan: str = "free"):
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Продвижение ботов", callback_data=PromoCb(action="menu"))
-    kb.button(text="⭐ Stars Optimizer", callback_data=StarsCb(action="menu"))
-    kb.button(text="🕸️ Content Mesh", callback_data=ContentMeshCb(action="menu"))
-    kb.button(text="⚡ Auto-Funnel", callback_data=AutoFunnelCb(action="menu"))
-    kb.button(text="📖 Narrative Hub", callback_data=NarrCb(action="menu"))
-    kb.button(text="🔀 Clone & Adapt", callback_data=CloneAdaptCb(action="menu"))
-    kb.button(text="🌱 Growth Agent", callback_data=GrowthCb(action="menu"))
+    kb.button(text="⭐ Звёзды", callback_data=StarsCb(action="menu"))
+    kb.button(text="🕸️ Сеть контента", callback_data=ContentMeshCb(action="menu"))
+    kb.button(text="⚡ Авто-воронки", callback_data=AutoFunnelCb(action="menu"))
+    kb.button(text="📖 Нарратив", callback_data=NarrCb(action="menu"))
+    kb.button(text="🔀 Клон и адаптация", callback_data=CloneAdaptCb(action="menu"))
+    kb.button(text="🌱 Агент роста", callback_data=GrowthCb(action="menu"))
     kb.button(text="📣 Самопиар", callback_data=SelfPromoCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 2, 1)
@@ -342,10 +342,10 @@ def _bulk_ops_kb(plan: str = "free"):
     kb = InlineKeyboardBuilder()
     kb.button(text=f"{_lock(plan,'pro')}🤖 Боты (массово)", callback_data=NetworkCb(action="menu"))
     kb.button(
-        text=f"{_lock(plan,'starter')}📡 Каналы (bulk join/leave)", callback_data=ChanCb(action="bulk_menu")
+        text=f"{_lock(plan,'starter')}📡 Каналы: вступить и выйти массово", callback_data=ChanCb(action="bulk_menu")
     )
     kb.button(text=f"{_lock(plan,'starter')}📤 Публикация в каналы", callback_data=MassPubCb(action="menu"))
-    kb.button(text="📱 Аккаунты (bulk)", callback_data=MassOpCb(action="menu"))
+    kb.button(text="📱 Аккаунты (массово)", callback_data=MassOpCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
     kb.adjust(2, 2, 1)
     return kb.as_markup()
@@ -361,12 +361,12 @@ def _wip_kb(back_action: str = "main"):
 _MAIN_MENU_TEXT = (
     "🏠 <b>Infragram OS</b>\n\n"
     "🎯 <b>Умные цели</b> — скажи что нужно, ИИ выберет инструмент\n"
-    "🏗 <b>Активы & Сети</b> — аккаунты, боты, каналы, группы, кластеры\n"
-    "⚡ <b>Операции</b> — Strike, присутствие, публикация, массовые действия\n"
-    "📢 <b>Рассылки & Связь</b> — рассылки, личные сообщения, авто-ответы\n"
+    "🏗 <b>Активы и сети</b> — аккаунты, боты, каналы, группы, кластеры\n"
+    "⚡ <b>Операции</b> — жалобы, присутствие, публикация, массовые действия\n"
+    "📢 <b>Рассылки и связь</b> — рассылки, личные сообщения, авто-ответы\n"
     "📊 <b>Аналитика</b> — позиции, SEO, конкуренты, поведение аудитории\n"
-    "🛡️ <b>Мониторинг & Защита</b> — прогрев, прокси, Ghost/Physics/Shield\n"
-    "🚀 <b>Рост & Продвижение</b> — SMM, Growth Agent, Stars, контент-движки\n"
+    "🛡️ <b>Мониторинг и защита</b> — прогрев, прокси, Призрак, Физика, Щит\n"
+    "🚀 <b>Рост и продвижение</b> — продвижение, Агент роста, Звёзды, сети контента\n"
     "⚙️ <b>Настройки</b> — подписка, ИИ, шаблоны, API, персоны"
 )
 
@@ -519,7 +519,7 @@ async def cb_assets(
     )
     await _edit(
         callback,
-        "🏗 <b>Активы & Сети — ваша инфраструктура</b>\n\n"
+        "🏗 <b>Активы и сети — ваша инфраструктура</b>\n\n"
         "📱 <b>Аккаунты</b> — Telegram-аккаунты для операций\n"
         "🤖 <b>Мои боты</b> — боты с аудиторией, рассылками, воронками\n"
         "📡 <b>Каналы</b> — создание, импорт, публикация\n"
@@ -543,7 +543,7 @@ async def cb_infrastructure(
     )
     await _edit(
         callback,
-        "🏗 <b>Активы & Сети — ваша инфраструктура</b>\n\n"
+        "🏗 <b>Активы и сети — ваша инфраструктура</b>\n\n"
         "📱 <b>Аккаунты</b> — Telegram-аккаунты для операций\n"
         "🤖 <b>Мои боты</b> — боты с аудиторией, рассылками, воронками\n"
         "📡 <b>Каналы</b> — создание, импорт, публикация\n"
@@ -573,8 +573,8 @@ async def cb_analytics(
         "📊 <b>Позиции</b> — история позиций в поиске Telegram\n"
         "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
         "📈 <b>SEO-аудит</b> — оптимизация каналов под поиск\n"
-        "🎯 <b>Ad Intelligence</b> — анализ рекламы и таргетинга\n"
-        "🧬 <b>Audience DNA</b> — поведенческий профиль аудитории\n"
+        "🎯 <b>Разведка рекламы</b> — анализ рекламы и таргетинга\n"
+        "🧬 <b>ДНК аудитории</b> — поведенческий профиль\n"
         "🕸️ <b>Граф связей</b> — топология ваших активов\n"
         "📅 <b>Анализ регистраций</b> — возраст аккаунтов в аудитории\n"
         "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
@@ -600,7 +600,7 @@ async def cb_visibility(
         "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
         "📈 <b>SEO</b> — оптимизация каналов под поиск\n"
         "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
-        "🧠 <b>Поведение</b> — attention/habit/ecosystem scoring [enterprise]\n"
+        "🧠 <b>Поведение</b> — внимание, привычки, связи в экосистеме [enterprise]\n"
         "🗺️ <b>Топология</b> — граф связей активов",
         _analytics_kb(user_plan),
     )
@@ -651,12 +651,12 @@ async def cb_operations(
 
     await _edit(
         callback,
-        "⚡ <b>Операции — Strike, публикация, массовые действия</b>\n\n"
-        "⚔️ <b>Strike</b> — целевые зачистки по каналам/группам [enterprise]\n"
+        "⚡ <b>Операции — жалобы, публикация, массовые действия</b>\n\n"
+        "⚔️ <b>Массовые жалобы</b> — целевые зачистки по каналам и группам [enterprise]\n"
         "🌍 <b>Гео-сеть: создать</b> — массово СОЗДАЁТ новые каналы/группы/боты по городам [enterprise]\n"
         "📤 <b>Публикация</b> — массовая публикация во все каналы\n"
         "✍️ <b>Быстрый пост</b> — пошаговый мастер публикации\n"
-        "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"
+        "⚡ <b>Массовые действия</b> — вступление и выход, массовая правка, инвайт\n"
         "🔗 <b>Связки (бот+каналы)</b> — объединяет ВАШИ бота+каналы+группы в одну воронку\n"
         "🎁 <b>Подарки</b> — перевод подарков между аккаунтами\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"
@@ -841,7 +841,7 @@ async def cb_comms(
         return
     await _edit(
         callback,
-        "📢 <b>Рассылки & Связь</b>\n\n"
+        "📢 <b>Рассылки и связь</b>\n\n"
         "📢 <b>Рассылка по боту</b> — разослать сообщение всем подписчикам бота\n"
         "🌐 <b>Сетевая рассылка</b> — рассылка через несколько ботов одновременно\n"
         "📨 <b>Личные сообщения</b> — писать напрямую через Telegram-аккаунты\n"
@@ -870,7 +870,7 @@ async def cb_broadcasts(
         return
     await _edit(
         callback,
-        "📢 <b>Рассылки & Связь</b>\n\n"
+        "📢 <b>Рассылки и связь</b>\n\n"
         "📢 <b>Рассылка по боту</b> — разослать сообщение всем подписчикам бота\n"
         "🌐 <b>Сетевая рассылка</b> — рассылка через несколько ботов одновременно\n"
         "📨 <b>Личные сообщения</b> — писать напрямую через Telegram-аккаунты\n"
@@ -893,13 +893,13 @@ async def cb_inbox(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await _edit(
             callback,
-            locked_text("Inbox и диалоги", "starter"),
+            locked_text("Входящие и диалоги", "starter"),
             subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
     await _edit(
         callback,
-        "📢 <b>Рассылки & Связь</b>\n\n"
+        "📢 <b>Рассылки и связь</b>\n\n"
         "💬 <b>Диалоги с ботом</b> — отвечать пользователям от имени бота\n"
         "📢 <b>Авто-ответы</b> — автоматические ответы по ключевым словам\n"
         "🔗 <b>Воронки</b> — автоматические цепочки сообщений",
@@ -915,16 +915,16 @@ async def cb_monitoring(callback: CallbackQuery, callback_data: BmCb) -> None:
     await safe_answer(callback)
     await _edit(
         callback,
-        "🛡️ <b>Мониторинг & Защита — состояние, прокси, движки</b>\n\n"
+        "🛡️ <b>Мониторинг и защита — состояние, прокси, движки</b>\n\n"
         "❤️ <b>Здоровье</b> — статистика и состояние аккаунтов\n"
         "🔥 <b>Прогрев</b> — подготовка новых аккаунтов к работе\n"
         "👥 <b>Парсер аудитории</b> — сбор участников из каналов и групп\n"
         "🧹 <b>Очиститель</b> — сброс аккаунта перед переназначением\n"
         "🌐 <b>Прокси</b> — управление прокси для аккаунтов\n"
         "📊 <b>Инфра-аналитика</b> — расширенная статистика инфраструктуры\n"
-        "👻 <b>Ghost Engine</b> — невидимые операции без следов активности\n"
-        "⚛️ <b>Physics Engine</b> — физические паттерны поведения аккаунтов\n"
-        "🛡️ <b>Account Shield</b> — защита аккаунтов от ограничений",
+        "👻 <b>Призрак</b> — невидимые операции без следов активности\n"
+        "⚛️ <b>Физика</b> — живые повадки аккаунтов вместо ровных интервалов\n"
+        "🛡️ <b>Щит аккаунтов</b> — защита от ограничений",
         _monitoring_kb(),
     )
 
@@ -940,14 +940,14 @@ async def cb_growth(
     user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
-        "🚀 <b>Рост & Продвижение</b>\n\n"
-        "🚀 <b>Продвижение ботов</b> — вывод в топ Telegram Search\n"
-        "   <i>Склад ботов → 21 день созревания → SMM-накрутка → топ</i>\n\n"
-        "⭐ <b>Stars Optimizer</b> — A/B тесты и монетизация через Stars\n"
-        "🕸️ <b>Content Mesh</b> — сетка контента по расписанию\n"
-        "⚡ <b>Auto-Funnel</b> — автоматические воронки привлечения\n"
-        "📖 <b>Narrative Hub</b> — нарративные кампании\n"
-        "🔀 <b>Clone & Adapt</b> — копирование и адаптация контента",
+        "🚀 <b>Рост и продвижение</b>\n\n"
+        "🚀 <b>Продвижение ботов</b> — вывод в топ поиска Telegram\n"
+        "   <i>Склад ботов → 21 день созревания → накрутка → топ</i>\n\n"
+        "⭐ <b>Звёзды</b> — A/B тесты и заработок на Telegram Stars\n"
+        "🕸️ <b>Сеть контента</b> — сетка контента по расписанию\n"
+        "⚡ <b>Авто-воронки</b> — автоматические воронки привлечения\n"
+        "📖 <b>Нарратив</b> — сюжетные кампании\n"
+        "🔀 <b>Клон и адаптация</b> — копирование и адаптация контента",
         _growth_kb(user_plan),
     )
 
@@ -1024,7 +1024,7 @@ async def cb_settings(
     await _edit(
         callback,
         "⚙️ <b>Настройки</b>\n\n"
-        "💳 <b>Подписка & Тариф</b> — тарифный план, оплата, активация\n"
+        "💳 <b>Подписка и тариф</b> — тарифный план, оплата, активация\n"
         "👥 <b>Рефералы</b> — приглашайте друзей и получайте бонусы\n"
         "🤖 <b>ИИ-ассистент</b> — нейросеть для создания контента [enterprise]\n"
         "🔔 <b>Уведомления</b> — алерты, позиции, ошибки\n"
@@ -1032,8 +1032,8 @@ async def cb_settings(
         "📄 <b>Шаблоны</b> — сохранённые конфигурации операций\n"
         "🏢 <b>Пространства</b> — совместная работа в команде [enterprise]\n"
         "🔑 <b>API доступ</b> — ключи и подключения к внешним системам\n"
-        "🎭 <b>Persona Ecosystem</b> — цифровые персоны и их конфигурация\n"
-        "🧠 <b>Semantic Memory</b> — память системы по каждому боту",
+        "🎭 <b>Персоны</b> — цифровые персоны и их настройка\n"
+        "🧠 <b>ИИ Память</b> — память системы по каждому боту",
         _settings_kb(user_plan),
     )
 
@@ -1052,7 +1052,7 @@ async def cb_bulk_ops(
         "⚡ <b>Массовые действия</b>\n\n"
         "Массовые операции позволяют управлять множеством объектов одновременно.\n\n"
         "🤖 <b>Боты</b> — массовое редактирование, клонирование настроек\n"
-        "📡 <b>Каналы</b> — bulk-join, bulk-leave, приглашение участников\n"
+        "📡 <b>Каналы</b> — массовое вступление и выход, приглашение участников\n"
         "📱 <b>Аккаунты</b> — операции через Telegram-аккаунты\n\n"
         "<i>Все операции выполняются с умными задержками для защиты аккаунтов.</i>\n\n"
         "Выберите тип:",

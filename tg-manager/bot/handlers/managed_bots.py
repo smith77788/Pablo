@@ -35,7 +35,7 @@ class ManagedBotFSM(StatesGroup):
 def _menu_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="🪄 Создать бота в 1 тап", callback_data=ManagedBotCb(action="new"))
-    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
     kb.adjust(1)
     return kb.as_markup()
 

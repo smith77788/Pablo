@@ -196,7 +196,7 @@ async def cb_seo_menu(
         callback_data=SeoCb(action="momentum", bot_id=callback_data.bot_id),
     )
     kb.button(
-        text="📊 Keyword Gap",
+        text="📊 Разрыв по ключевым словам",
         callback_data=SeoCb(action="content_gap", bot_id=callback_data.bot_id),
     )
     kb.button(
@@ -739,7 +739,7 @@ async def cb_seo_chan_menu(
         callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
-        text="📊 Keyword Gap",
+        text="📊 Разрыв по ключевым словам",
         callback_data=SeoCb(action="chan_content_gap", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(

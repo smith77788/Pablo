@@ -530,7 +530,7 @@ async def _execute_audit_intent(
             {"critical": len(critical), "warnings": len(warnings), "infos": len(infos)},
         )
         kb = InlineKeyboardBuilder()
-        kb.button(text="🩺 Health Center", callback_data=HealthCb(action="menu"))
+        kb.button(text="🩺 Здоровье инфры", callback_data=HealthCb(action="menu"))
         kb.button(text="📍 Навигатор", callback_data=IntentCb(action="menu"))
         kb.adjust(1)
         if callback.message:
@@ -611,7 +611,7 @@ async def _execute_visibility_intent(
         pool, intent_id, owner_id, {"keywords_cnt": keywords_cnt}
     )
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔎 Rankings", callback_data=VisCb(action="dashboard"))
+    kb.button(text="🔎 Позиции в поиске", callback_data=VisCb(action="dashboard"))
     kb.button(text="📍 Навигатор", callback_data=IntentCb(action="menu"))
     kb.adjust(1)
     if callback.message:

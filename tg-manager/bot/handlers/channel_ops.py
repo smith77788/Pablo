@@ -385,7 +385,7 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     # ── Создание
     kb.button(
-        text="📢 Создать канал/группу (bulk)",
+        text="📢 Создать канал/группу (массово)",
         callback_data=ChanCb(action="bulk_create"),
     )
     # ── Вступление / выход / инвайт
@@ -413,22 +413,22 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="✉️ DM по username-списку", callback_data=ChanCb(action="bulk_dm"))
     # ── Массовое управление каналами
     kb.button(
-        text="🔤 Username каналам (bulk)",
+        text="🔤 Username каналам (массово)",
         callback_data=ChanCb(action="bulk_chan_uname"),
     )
     kb.button(
-        text="📄 Описание каналам (bulk)",
+        text="📄 Описание каналам (массово)",
         callback_data=ChanCb(action="bulk_chan_about"),
     )
     # ── Профиль аккаунтов
     kb.button(
-        text="✏️ Имя аккаунта (bulk)", callback_data=ChanCb(action="bulk_prof_name")
+        text="✏️ Имя аккаунта (массово)", callback_data=ChanCb(action="bulk_prof_name")
     )
     kb.button(
-        text="📝 Bio аккаунта (bulk)", callback_data=ChanCb(action="bulk_prof_bio")
+        text="📝 Bio аккаунта (массово)", callback_data=ChanCb(action="bulk_prof_bio")
     )
     kb.button(
-        text="🔤 Username аккаунта (bulk)",
+        text="🔤 Username аккаунта (массово)",
         callback_data=ChanCb(action="bulk_prof_uname"),
     )
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
@@ -455,8 +455,8 @@ _BULK_OP_LABELS = {
     "prof_name": "✏️ Изменить имя",
     "prof_bio": "📝 Изменить bio",
     "prof_uname": "🔤 Изменить username",
-    "chan_uname": "🔤 Username каналам (bulk)",
-    "chan_about": "📄 Описание каналам (bulk)",
+    "chan_uname": "🔤 Username каналам (массово)",
+    "chan_about": "📄 Описание каналам (массово)",
 }
 
 
@@ -3766,7 +3766,7 @@ async def cb_bulk_report_start(
 
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="⚔️ Купить Strike Module — $250 USDT",
+            text="⚔️ Купить модуль «Массовые жалобы» — $250 USDT",
             callback_data=StrikeCb(action="buy"),
         )
         kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
@@ -4524,7 +4524,7 @@ async def cb_bulk_confirm_selection(
             proxy_count = 0
         kb = InlineKeyboardBuilder()
         kb.button(text="🔐 Через прокси аккаунтов", callback_data="chan:bjproxy:bound")
-        kb.button(text="☁️ Через CF relay (без прокси)", callback_data="chan:bjproxy:relay")
+        kb.button(text="☁️ Через релей CF (без прокси)", callback_data="chan:bjproxy:relay")
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
         kb.adjust(1)
         proxy_note = (
@@ -4561,7 +4561,7 @@ async def cb_bulk_confirm_selection(
             proxy_count = 0
         kb = InlineKeyboardBuilder()
         kb.button(text="🔐 Через прокси аккаунтов", callback_data="chan:blproxy:bound")
-        kb.button(text="☁️ Через CF relay (без прокси)", callback_data="chan:blproxy:relay")
+        kb.button(text="☁️ Через релей CF (без прокси)", callback_data="chan:blproxy:relay")
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
         kb.adjust(1)
         proxy_note = (
@@ -5324,7 +5324,7 @@ async def fsm_bulk_chan_value(
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     kb.adjust(2)
     await message.answer(
-        f"<b>{op_label} каналам (bulk) — Предпросмотр</b>\n\n"
+        f"<b>{op_label} каналам (массово) — Предпросмотр</b>\n\n"
         f"Значение: <code>{value_preview}</code>\n"
         f"Каналов: <b>{chan_count}</b>\n"
         f"Аккаунтов: <b>{acc_count}</b>\n"
@@ -5417,7 +5417,7 @@ async def cb_bulk_chan_exec(
         total_items=total,
     )
     await callback.message.edit_text(
-        f"✅ <b>{op_label} каналам (bulk) поставлено в очередь</b>\n\n"
+        f"✅ <b>{op_label} каналам (массово) поставлено в очередь</b>\n\n"
         f"Каналов: <b>{total}</b> | Аккаунтов: <b>{len(accounts)}</b>\n\n"
         f"ID операции: <code>{op_id}</code>\n"
         "Прогресс: /ops",

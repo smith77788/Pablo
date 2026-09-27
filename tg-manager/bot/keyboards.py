@@ -112,14 +112,14 @@ def network_ops_menu() -> InlineKeyboardMarkup:
     kb.button(text="🔄 Клонировать настройки", callback_data=NetworkCb(action="clone"))
     # ── Массовые операции ──
     kb.button(text="✏️ Имя всем", callback_data=NetworkCb(action="bulk_name"))
-    kb.button(text="🌍 Имя по GEO", callback_data=NetworkCb(action="bulk_name_lang"))
+    kb.button(text="🌍 Имя по гео", callback_data=NetworkCb(action="bulk_name_lang"))
     kb.button(text="📄 Описание всем", callback_data=NetworkCb(action="bulk_desc"))
-    kb.button(text="🌍 Описание GEO", callback_data=NetworkCb(action="bulk_desc_lang"))
+    kb.button(text="🌍 Описание по гео", callback_data=NetworkCb(action="bulk_desc_lang"))
     kb.button(text="📃 Краткое всем", callback_data=NetworkCb(action="bulk_short"))
-    kb.button(text="🌍 Краткое GEO", callback_data=NetworkCb(action="bulk_short_lang"))
+    kb.button(text="🌍 Краткое по гео", callback_data=NetworkCb(action="bulk_short_lang"))
     kb.button(text="🤖 Команды всем", callback_data=NetworkCb(action="bulk_commands"))
     kb.button(
-        text="🌍 Команды GEO", callback_data=NetworkCb(action="bulk_commands_lang")
+        text="🌍 Команды по гео", callback_data=NetworkCb(action="bulk_commands_lang")
     )
     kb.button(text="🔍 Проверить токены", callback_data=NetworkCb(action="bulk_check"))
     kb.button(text="📥 Импорт ботов", callback_data=NetworkCb(action="bulk_import"))
@@ -194,13 +194,13 @@ def net_broadcast_lang_menu() -> InlineKeyboardMarkup:
 def bulk_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="✏️ Имя всем", callback_data=BulkCb(action="name"))
-    kb.button(text="🌍 Имя по GEO", callback_data=BulkCb(action="name_lang"))
+    kb.button(text="🌍 Имя по гео", callback_data=BulkCb(action="name_lang"))
     kb.button(text="📄 Описание всем", callback_data=BulkCb(action="desc"))
-    kb.button(text="🌍 Описание по GEO", callback_data=BulkCb(action="desc_lang"))
+    kb.button(text="🌍 Описание по гео", callback_data=BulkCb(action="desc_lang"))
     kb.button(text="📃 Краткое всем", callback_data=BulkCb(action="short"))
-    kb.button(text="🌍 Краткое по GEO", callback_data=BulkCb(action="short_lang"))
+    kb.button(text="🌍 Краткое по гео", callback_data=BulkCb(action="short_lang"))
     kb.button(text="🤖 Команды всем", callback_data=BulkCb(action="commands"))
-    kb.button(text="🌍 Команды по GEO", callback_data=BulkCb(action="commands_lang"))
+    kb.button(text="🌍 Команды по гео", callback_data=BulkCb(action="commands_lang"))
     kb.button(text="🔍 Проверить токены", callback_data=BulkCb(action="check"))
     kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(2, 2, 2, 2, 1, 1)
@@ -271,7 +271,7 @@ def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
     kb.button(text="📊 Статистика", callback_data=StatsCb(action="menu", bot_id=bot_id))
     kb.button(text="🏷 CRM", callback_data=CrmCb(action="menu", bot_id=bot_id))
     kb.button(text="📝 Заметка", callback_data=NoteCb(action="edit", bot_id=bot_id))
-    kb.button(text="🧬 Swarm", callback_data=SwarmCb(action="menu", bot_id=bot_id))
+    kb.button(text="🧬 Рой", callback_data=SwarmCb(action="menu", bot_id=bot_id))
     kb.button(
         text="🧪 A/B Тесты", callback_data=ExperimentCb(action="list", bot_id=bot_id)
     )
@@ -691,11 +691,11 @@ def multigeo_menu(bot_id: int) -> InlineKeyboardMarkup:
         callback_data=MultigeoCb(action="names", bot_id=bot_id),
     )
     kb.button(
-        text="📋 Мультигео about",
+        text="📋 Мультигео: «о себе»",
         callback_data=MultigeoCb(action="short", bot_id=bot_id),
     )
     kb.button(
-        text="📄 Мультигео description",
+        text="📄 Мультигео: описание",
         callback_data=MultigeoCb(action="desc", bot_id=bot_id),
     )
     kb.button(text="◀️ Назад", callback_data=EditCb(action="menu", bot_id=bot_id))
@@ -837,7 +837,7 @@ def relay_session_view(
             action="close_session", bot_id=bot_id, session_id=session_id
         ),
     )
-    kb.button(text="◀️ К Inbox", callback_data=RelayCb(action="menu", bot_id=bot_id))
+    kb.button(text="◀️ Ко входящим", callback_data=RelayCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -994,7 +994,7 @@ def swarm_menu(bot_id: int, row) -> InlineKeyboardMarkup:
             callback_data=SwarmCb(action=f"role_{r}", bot_id=bot_id),
         )
     kb.button(
-        text="📊 Routing Stats", callback_data=SwarmCb(action="stats", bot_id=bot_id)
+        text="📊 Статистика маршрутизации", callback_data=SwarmCb(action="stats", bot_id=bot_id)
     )
     kb.button(
         text="🌐 Системный режим",
@@ -1108,7 +1108,7 @@ def automation_action_menu(bot_id: int) -> InlineKeyboardMarkup:
         callback_data=AutoCb(action="act_deal", bot_id=bot_id),
     )
     kb.button(
-        text="🌐 Webhook",
+        text="🌐 Вебхук",
         callback_data=AutoCb(action="act_webhook", bot_id=bot_id),
     )
     kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
@@ -1235,7 +1235,7 @@ def deeplinks_menu(bot_id: int, links: list) -> InlineKeyboardMarkup:
         callback_data=DeepLinkCb(action="create", bot_id=bot_id),
     )
     kb.button(
-        text="🏆 Рефeral лидерборд",
+        text="🏆 Реферальный рейтинг",
         callback_data=DeepLinkCb(action="leaders", bot_id=bot_id),
     )
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
@@ -1285,7 +1285,7 @@ def engagement_menu(bot_id: int, segs: dict) -> InlineKeyboardMarkup:
         callback_data=EngageCb(action="top_users", bot_id=bot_id),
     )
     kb.button(
-        text="🏷 Авто-теги (hot/warm/cold/lost)",
+        text="🏷 Авто-теги (горячий/тёплый/холодный/потерян)",
         callback_data=EngageCb(action="autotag", bot_id=bot_id),
     )
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
@@ -1347,23 +1347,23 @@ def network_clusters_menu(clusters: list) -> InlineKeyboardMarkup:
 def network_cluster_view(cluster: str, bots: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🟢 Swarm ON для всех",
+        text="🟢 Рой: включить всем",
         callback_data=ClusterCb(action="bulk_swarm_on", cluster=cluster),
     )
     kb.button(
-        text="⚫ Swarm OFF для всех",
+        text="⚫ Рой: выключить всем",
         callback_data=ClusterCb(action="bulk_swarm_off", cluster=cluster),
     )
     kb.button(
-        text="🚪 Роль: Entry всем",
+        text="🚪 Роль всем: вход",
         callback_data=ClusterCb(action="bulk_role_entry", cluster=cluster),
     )
     kb.button(
-        text="💰 Роль: Conversion всем",
+        text="💰 Роль всем: продажа",
         callback_data=ClusterCb(action="bulk_role_conversion", cluster=cluster),
     )
     kb.button(
-        text="🔄 Роль: Retention всем",
+        text="🔄 Роль всем: удержание",
         callback_data=ClusterCb(action="bulk_role_retention", cluster=cluster),
     )
     kb.button(

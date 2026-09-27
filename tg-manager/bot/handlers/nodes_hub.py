@@ -299,7 +299,7 @@ async def cb_nodes_view(
         callback_data=NodesCb(action="bulk_create", node_id=node["id"]),
     )
     kb.button(
-        text="📢 Broadcast в все топики",
+        text="📢 Рассылка во все топики",
         callback_data=NodesCb(action="broadcast", node_id=node["id"]),
     )
     kb.button(

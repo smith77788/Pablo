@@ -202,7 +202,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
         text="📤 Массовая публикация", callback_data=MassOpCb(action="mass_publish")
     )
     kb.button(
-        text="🔗 Массовый join каналов", callback_data=MassOpCb(action="bulk_join")
+        text="🔗 Массовое вступление в каналы", callback_data=MassOpCb(action="bulk_join")
     )
     kb.button(
         text="🚪 Массовый выход из каналов", callback_data=MassOpCb(action="bulk_leave")
@@ -212,7 +212,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
         callback_data=MassOpCb(action="bulk_bot_edit"),
     )
     kb.button(
-        text="🔍 Предпросмотр (Dry Run)", callback_data=MassOpCb(action="dry_run")
+        text="🔍 Предпросмотр (пробный прогон)", callback_data=MassOpCb(action="dry_run")
     )
     kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
@@ -608,7 +608,7 @@ async def cb_mp_timing(
     await state.set_state(MassPublishFSM.confirming)
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запустить", callback_data=MassOpCb(action="mp_confirm"))
-    kb.button(text="🔍 Dry Run", callback_data=MassOpCb(action="dry_run"))
+    kb.button(text="🔍 Пробный прогон", callback_data=MassOpCb(action="dry_run"))
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 1)
     await safe_edit(
@@ -2027,7 +2027,7 @@ async def cb_bulk_join_delay(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Запустить join", callback_data=MassOpCb(action="bj_confirm"))
+    kb.button(text="✅ Запустить вступление", callback_data=MassOpCb(action="bj_confirm"))
     kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bj_redelay"))
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
@@ -2392,7 +2392,7 @@ async def cb_bulk_leave_delay(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Запустить leave", callback_data=MassOpCb(action="bl_confirm"))
+    kb.button(text="✅ Запустить выход", callback_data=MassOpCb(action="bl_confirm"))
     kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bl_redelay"))
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)

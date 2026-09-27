@@ -243,7 +243,7 @@ def _acc_detail_markup(
         text="🆘 Активы аккаунта", callback_data=AccCb(action="assets", acc_id=acc_id)
     )
     kb.button(
-        text="📸 Опубликовать Story",
+        text="📸 Опубликовать сторис",
         callback_data=AccCb(action="post_story", acc_id=acc_id),
     )
     kb.button(
@@ -518,7 +518,7 @@ async def _show_accounts_menu(
                     callback_data=AccCb(action="reauth_list").pack(),
                 ),
                 InlineKeyboardButton(
-                    text=f"🧹 Удалить expired ({expired_cnt})",
+                    text=f"🧹 Удалить просроченные ({expired_cnt})",
                     callback_data=AccCb(action="purge_expired").pack(),
                 ),
             )

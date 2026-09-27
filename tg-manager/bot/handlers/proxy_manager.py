@@ -52,7 +52,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="🌍 Определить гео", callback_data=ProxyCb(action="detect_geo"))
     kb.button(text="🔍 Проверить уникальность IP", callback_data=ProxyCb(action="check_ip_unique"))
     kb.button(text="🔄 Ротация IP", callback_data=ProxyCb(action="rotate"))
-    kb.button(text="🚑 Failover на резерв", callback_data=ProxyCb(action="failover"))
+    kb.button(text="🚑 Переключить на резерв", callback_data=ProxyCb(action="failover"))
     kb.button(text="🧹 Удалить мёртвые", callback_data=ProxyCb(action="cleanup_dead"))
     kb.button(text="🆓 Бесплатный пул", callback_data=ProxyCb(action="free_pool"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))

@@ -411,7 +411,7 @@ TRIGGER_LABELS_EXT = {
 }
 
 ACTION_LABELS_EXT = {
-    "webhook": "🔗 Webhook",
+    "webhook": "🔗 Вебхук",
     "send_ai_reply": "🤖 AI-ответ",
 }
 
@@ -458,7 +458,7 @@ async def msg_inactivity_days(message: Message, state: FSMContext) -> None:
         callback_data=AutoCb(action="ext_act_send", bot_id=bot_id),
     )
     kb.button(
-        text="🔗 Webhook", callback_data=AutoCb(action="ext_act_webhook", bot_id=bot_id)
+        text="🔗 Вебхук", callback_data=AutoCb(action="ext_act_webhook", bot_id=bot_id)
     )
     kb.button(
         text="◀️ Назад", callback_data=AutoCb(action="trig_inactivity", bot_id=bot_id)

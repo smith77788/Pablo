@@ -192,7 +192,7 @@ async def cb_ghost_pick_acc(
         await callback.message.edit_text(
             "✅ Профиль создан!", parse_mode="HTML",
             reply_markup=InlineKeyboardBuilder().button(
-                text="◀️ К Ghost Engine", callback_data=GhostCb(action="menu")
+                text="◀️ К «Призраку»", callback_data=GhostCb(action="menu")
             ).as_markup(),
         )
 
@@ -254,7 +254,7 @@ async def _show_profile(
     kb.button(text="🔢 Лимит/кулдаун", callback_data=GhostCb(action="cap", profile_id=profile_id))
     kb.button(text="📋 Логи", callback_data=GhostCb(action="logs", profile_id=profile_id))
     kb.button(text="🗑 Удалить", callback_data=GhostCb(action="del", profile_id=profile_id))
-    kb.button(text="◀️ К Ghost Engine", callback_data=GhostCb(action="menu"))
+    kb.button(text="◀️ К «Призраку»", callback_data=GhostCb(action="menu"))
     kb.adjust(2, 2, 2, 1)
 
     if edit:
@@ -553,7 +553,7 @@ async def cb_ghost_del_confirm(
         callback.from_user.id,
     )
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ К Ghost Engine", callback_data=GhostCb(action="menu"))
+    kb.button(text="◀️ К «Призраку»", callback_data=GhostCb(action="menu"))
     await callback.message.edit_text(
         "✅ Ghost профиль удалён.",
         parse_mode="HTML",

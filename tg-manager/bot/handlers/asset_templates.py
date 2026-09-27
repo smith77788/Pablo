@@ -1067,7 +1067,7 @@ async def _apply_bot_template_data(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔧 Admin панель бота", callback_data=BotAdminCb(action="panel", bot_id=bot_id))
+    kb.button(text="🔧 Админ-панель бота", callback_data=BotAdminCb(action="panel", bot_id=bot_id))
     kb.button(text="💬 Авто-ответы бота", callback_data=BotAdminCb(action="list_replies", bot_id=bot_id))
     kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
     kb.adjust(1)

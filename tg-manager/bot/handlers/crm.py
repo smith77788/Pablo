@@ -445,7 +445,7 @@ ACTION_LABELS = {
     "remove_tag": "🗑 Удалить тег",
     "subscribe_funnel": "🔗 Подписать на цепочку",
     "create_deal": "📋 Создать сделку CRM",
-    "webhook": "🌐 Webhook",
+    "webhook": "🌐 Вебхук",
 }
 
 

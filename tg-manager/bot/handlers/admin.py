@@ -148,19 +148,19 @@ def _legacy_admin_main_kb(new_error_reports: int = 0):
         text=f"🔔 Уведомления о новых {_notify_icon}", callback_data="adm:notify_toggle"
     )
     _free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
-    kb.button(text=f"🆓 Free Mode: {_free_icon}", callback_data="adm:free_mode_toggle")
+    kb.button(text=f"🆓 Бесплатный режим: {_free_icon}", callback_data="adm:free_mode_toggle")
     kb.button(text="🚫 Заблокировать юзера", callback_data="adm:block_ask")
     kb.button(text="✅ Разблокировать юзера", callback_data="adm:unblock_ask")
     kb.button(text="🗑 Удалить данные юзера", callback_data="adm:delete_ask")
     kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
     kb.button(text="❌ Забрать подписку", callback_data="adm:revoke_ask")
-    kb.button(text="💰 Bulk-выдача подписок", callback_data="adm:bulk_grant_ask")
-    kb.button(text="⚔️ Выдать Strike доступ", callback_data="adm:strike_grant_ask")
-    kb.button(text="⚔️ Забрать Strike доступ", callback_data="adm:strike_revoke_ask")
+    kb.button(text="💰 Массовая выдача подписок", callback_data="adm:bulk_grant_ask")
+    kb.button(text="⚔️ Выдать доступ к жалобам", callback_data="adm:strike_grant_ask")
+    kb.button(text="⚔️ Забрать доступ к жалобам", callback_data="adm:strike_revoke_ask")
     kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
     kb.button(text="📋 Экспорт юзеров (CSV)", callback_data="adm:users_csv")
     kb.button(text="🔍 Поиск юзера", callback_data="adm:find_user")
-    kb.button(text="⚙️ Системный режим Swarm", callback_data="adm:swarm_mode")
+    kb.button(text="⚙️ Системный режим «Рой»", callback_data="adm:swarm_mode")
     kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
     kb.button(text="🤖 AI-ключи (провайдеры)", callback_data="adm:ai_keys")
     kb.button(text="📊 Лимит действий/сутки", callback_data="adm:budget")
@@ -219,7 +219,7 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="💳 Активные подписки", callback_data="adm:subs")
         kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
         kb.button(text="❌ Забрать подписку", callback_data="adm:revoke_ask")
-        kb.button(text="💰 Bulk-выдача", callback_data="adm:bulk_grant_ask")
+        kb.button(text="💰 Массовая выдача", callback_data="adm:bulk_grant_ask")
         kb.button(text="💵 Цены", callback_data="adm:prices")
         kb.button(text="⚙️ Методы оплаты", callback_data="adm:pay_cfg")
         kb.button(text="🏠 Админка", callback_data="adm:main")
@@ -227,8 +227,8 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
     elif section == "assets":
         kb.button(text="🤖 Все боты", callback_data="adm:bots")
         kb.button(text="📁 Экспорт токенов", callback_data="adm:tokens_file")
-        kb.button(text="⚔️ Выдать Strike", callback_data="adm:strike_grant_ask")
-        kb.button(text="⚔️ Забрать Strike", callback_data="adm:strike_revoke_ask")
+        kb.button(text="⚔️ Выдать доступ к жалобам", callback_data="adm:strike_grant_ask")
+        kb.button(text="⚔️ Забрать доступ к жалобам", callback_data="adm:strike_revoke_ask")
         kb.button(text="🏠 Админка", callback_data="adm:main")
         kb.adjust(2, 2, 1)
     elif section == "ops":
@@ -242,21 +242,21 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
     elif section == "ai":
         kb.button(text="🧠 Статус AI", callback_data="adm:ai_status")
         kb.button(text="🔑 Переменные AI", callback_data="adm:env_list")
-        kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
+        kb.button(text="⚙️ Режим «Рой»", callback_data="adm:swarm_mode")
         kb.button(text="🏠 Админка", callback_data="adm:main")
         kb.adjust(1)
     elif section == "system":
         free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
         notify_icon = "✅" if _NOTIFY_NEW_USERS else "❌"
         kb.button(
-            text=f"🆓 Free Mode: {free_icon}", callback_data="adm:free_mode_toggle"
+            text=f"🆓 Бесплатный режим: {free_icon}", callback_data="adm:free_mode_toggle"
         )
         kb.button(
             text=f"🔔 Новые пользователи: {notify_icon}",
             callback_data="adm:notify_toggle",
         )
-        kb.button(text="🔑 Railway env", callback_data="adm:env_list")
-        kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
+        kb.button(text="🔑 Переменные Railway", callback_data="adm:env_list")
+        kb.button(text="⚙️ Режим «Рой»", callback_data="adm:swarm_mode")
         _gate_icon = "✅ ВКЛ" if get_gate_enabled() else "❌ ВЫКЛ"
         kb.button(text=f"🔒 Подписка-гейт: {_gate_icon}", callback_data="adm:gate")
         err_label = (

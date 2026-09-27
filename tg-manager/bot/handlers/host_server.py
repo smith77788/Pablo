@@ -144,7 +144,7 @@ async def cb_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     uid = callback.from_user.id
     if await hs.has_access(pool, uid):
         kb = InlineKeyboardBuilder()
-        kb.button(text="🖥️ Открыть Host-Server", callback_data=HostCb(action="menu"))
+        kb.button(text="🖥️ Открыть аренду сервера", callback_data=HostCb(action="menu"))
         await callback.message.edit_text(
             "✅ <b>Модуль Host-Server активирован!</b>\n\nДоступ открыт.",
             parse_mode="HTML", reply_markup=kb.as_markup())
