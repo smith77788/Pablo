@@ -3469,6 +3469,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         for _t in op_type_filter:
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", _t):
                 return _err("Неизвестный тип операции: " + _t[:40], 400)
+        # Поиск по названию операции. У владельца с сотнями операций «тот самый
+        # инвайт во вторник» искался перелистыванием: фильтры были только по
+        # статусу и по типу, а типов у продукта больше тридцати. Ищем по label
+        # (подпись, которую человек и видит в списке) и по op_type — по нему
+        # находится вся семья операций, если подписи разные.
+        _q = (request.query.get("q") or "").strip()[:64]
         # err_cnt — число упавших под-элементов (каналов) для показа кнопки
         # «повтор неудавшихся» даже у операций со статусом 'done' (partial-fail).
         _err_sub = ("(SELECT COUNT(*) FROM operation_log ol "
@@ -3495,18 +3501,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Считаем ДО выборки строк: гейт на фильтр статуса смотрит на последний
         # запрос к operation_queue, и агрегат, вставший после, читался бы там как
         # «фильтр не дошёл до запроса».
+        # Счётчики считаются под ТЕМ ЖЕ срезом, что и список. Иначе плитки
+        # «Всего / Готово / Ошибки» отвечали бы на другой вопрос, чем список под
+        # ними: ищешь «инвайт», видишь три строки и «Всего 214».
         counts: dict = {}
+        _cwhere = "owner_id=$1"
+        _cargs: list = [uid]
+        if op_type_filter:
+            _cargs.append(op_type_filter)
+            _cwhere += f" AND op_type = ANY(${len(_cargs)}::text[])"
+        if _q:
+            _cargs.append(f"%{_q}%")
+            _cwhere += (f" AND (label ILIKE ${len(_cargs)} "
+                        f"OR op_type ILIKE ${len(_cargs)})")
         try:
-            if op_type_filter:
-                _cnt_rows = await pool.fetch(
-                    """SELECT status, COUNT(*) AS n FROM operation_queue
-                       WHERE owner_id=$1 AND op_type = ANY($2::text[])
-                       GROUP BY status""",
-                    uid, op_type_filter)
-            else:
-                _cnt_rows = await pool.fetch(
-                    """SELECT status, COUNT(*) AS n FROM operation_queue
-                       WHERE owner_id=$1 GROUP BY status""", uid)
+            _cnt_rows = await pool.fetch(
+                f"""SELECT status, COUNT(*) AS n FROM operation_queue
+                    WHERE {_cwhere} GROUP BY status""", *_cargs)
             for r in _cnt_rows:
                 counts[str(r["status"])] = int(r["n"] or 0)
         except Exception:
@@ -3523,6 +3534,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if op_type_filter:
             _wargs.append(op_type_filter)
             _where += f" AND oq.op_type = ANY(${len(_wargs)}::text[])"
+        if _q:
+            _wargs.append(f"%{_q}%")
+            _where += (f" AND (oq.label ILIKE ${len(_wargs)} "
+                       f"OR oq.op_type ILIKE ${len(_wargs)})")
         rows = await _safe_fetch(pool,
             f"""SELECT {_cols}
                FROM operation_queue oq WHERE {_where}
@@ -3536,6 +3551,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total": int(total or 0),
             "counts": counts,
             "op_type": (",".join(op_type_filter) if op_type_filter else None),
+            "q": (_q or None),
             "page": {"offset": offset, "limit": limit,
                      "has_more": (offset + len(rows or [])) < int(total or 0)},
         })

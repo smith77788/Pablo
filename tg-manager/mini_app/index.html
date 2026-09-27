@@ -3578,6 +3578,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div id="opsKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
+    <input class="inp lst-search" id="opsSearch" type="text" oninput="onOpsSearch(this.value)"
+           placeholder="🔍 Поиск: название или тип операции" autocomplete="off"
+           aria-label="Поиск по операциям">
     <div class="seg" id="ops-seg">
       <div class="seg-opt on" onclick="filterOps(null,this)">Все</div>
       <div class="seg-opt" onclick="filterOps('running',this)">🟢 Работают</div>
@@ -11807,9 +11810,38 @@ const OPS_MAX = 200;            // потолок одной выдачи на �
 function _opsQuery(offset, limit) {
   const p = new URLSearchParams();
   if (OPS_FILTER) p.set('status', OPS_FILTER);
+  // Поиск считает СЕРВЕР. Фильтровать загруженную страницу бессмысленно: на
+  // экране тридцать операций из двух сотен, и «ничего не найдено» означало бы
+  // всего лишь «нет среди этих тридцати».
+  if (OPS_SEARCH) p.set('q', OPS_SEARCH);
   p.set('limit', Math.min(limit || OPS_PAGE, OPS_MAX)); p.set('offset', offset);
   return '/api/miniapp/operations?' + p.toString();
 }
+
+let OPS_SEARCH = '';
+let _opsSearchT = null;
+function onOpsSearch(v) {
+  OPS_SEARCH = (v || '').trim();
+  clearTimeout(_opsSearchT);
+  _opsSearchT = setTimeout(() => {
+    // Новый срез — новая страница: смешивать «Загрузить ещё» от прошлого
+    // запроса с результатами нового нельзя, список пришёл бы вперемешку.
+    OPS_ROWS = []; OPS_OFFSET = 0; OPS_TOTAL = 0;
+    const box = document.getElementById('opsLoadMore'); if (box) box.innerHTML = '';
+    txt('opsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+    loadOps();
+  }, 350);
+}
+function resetOpsFilters() {
+  OPS_SEARCH = ''; OPS_FILTER = null;
+  const i = document.getElementById('opsSearch'); if (i) i.value = '';
+  document.querySelectorAll('#ops-seg .seg-opt').forEach((o, n) => o.classList.toggle('on', n === 0));
+  OPS_ROWS = []; OPS_OFFSET = 0; OPS_TOTAL = 0;
+  const box = document.getElementById('opsLoadMore'); if (box) box.innerHTML = '';
+  txt('opsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  loadOps();
+}
+
 function renderOpsLoadMore() {
   const box = document.getElementById('opsLoadMore');
   if (!box) return;
@@ -11873,7 +11905,16 @@ async function loadOps() {
 function renderOps() {
   const ops = OPS_ROWS;
   if (!ops.length) {
-    txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?('По фильтру «'+OPS_STATUS_RU(OPS_FILTER)+'»'):''))); 
+    // «Нет операций» при активном поиске читается как «у вас их нет» — а их
+    // сотни, просто ни одна не подходит под запрос. Называем причину и даём
+    // выход одним тапом.
+    const _why = [];
+    if (OPS_SEARCH) _why.push('по запросу «' + OPS_SEARCH + '»');
+    if (OPS_FILTER) _why.push('по фильтру «' + OPS_STATUS_RU(OPS_FILTER) + '»');
+    txt('opsList', (OPS_SEARCH || OPS_FILTER)
+      ? empty('🔍','Ничего не найдено', _why.join(' и '),
+              {label:'✖️ Сбросить поиск и фильтр', fn:'resetOpsFilters()'})
+      : empty('⚙️','Нет операций','Запущенные задачи появятся здесь'));
     renderOpsLoadMore();
     return;
   }
