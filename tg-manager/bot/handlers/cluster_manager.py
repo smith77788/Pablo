@@ -445,6 +445,7 @@ async def cb_cluster_delete(
     except Exception:
         log_exc_swallow(log, "cb_cluster_delete: detach bots failed")
 
+    deleted = True
     try:
         await pool.execute(
             "DELETE FROM clusters WHERE owner_id=$1 AND name=$2",
@@ -453,9 +454,15 @@ async def cb_cluster_delete(
         )
     except Exception:
         log_exc_swallow(log, "cb_cluster_delete: delete cluster row failed")
+        deleted = False
 
+    # Раньше «✅ удалён» печаталось независимо от результата: при упавшем
+    # запросе кластер оставался в списке, и человек возвращался к нему снова.
     await callback.message.edit_text(
-        f"✅ Кластер <b>{_html.escape(cluster_name)}</b> удалён.",
+        f"✅ Кластер <b>{_html.escape(cluster_name)}</b> удалён."
+        if deleted
+        else f"❌ Не удалось удалить кластер <b>{_html.escape(cluster_name)}</b>. "
+             f"Боты от него уже отвязаны — попробуйте удалить ещё раз.",
         parse_mode="HTML",
         reply_markup=_menu_kb().as_markup(),
     )

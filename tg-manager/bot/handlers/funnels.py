@@ -973,7 +973,11 @@ async def cb_fn_step_delete(
     step_to_delete = callback_data.step
     steps = await db.get_funnel_steps(pool, funnel_id)
 
-    # Удаляем шаг и перенумеровываем
+    # Удаляем шаг и перенумеровываем. Ошибку записи глотаем в лог, но НЕ в
+    # ответ пользователю: раньше при упавшем DELETE всё равно говорилось «шаг
+    # удалён», человек уходил с экрана, а шаг оставался в воронке и продолжал
+    # писать подписчикам.
+    failed = False
     try:
         await pool.execute(
             "DELETE FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
@@ -982,7 +986,9 @@ async def cb_fn_step_delete(
         )
     except Exception:
         log_exc_swallow(log, "step_delete execute failed")
+        failed = True
     # Сдвинуть все шаги после удалённого на -1
+    renumber_failed = False
     for s in steps:
         if s["step_order"] > step_to_delete:
             try:
@@ -994,8 +1000,20 @@ async def cb_fn_step_delete(
                 )
             except Exception:
                 log_exc_swallow(log, "step_delete renumber execute failed")
+                renumber_failed = True
 
-    await callback.answer(f"🗑 Шаг {step_to_delete + 1} удалён", show_alert=False)
+    if failed:
+        await callback.answer(
+            "❌ Не удалось удалить шаг — попробуйте ещё раз.", show_alert=True
+        )
+    elif renumber_failed:
+        await callback.answer(
+            f"⚠️ Шаг {step_to_delete + 1} удалён, но нумерация остальных сбилась. "
+            "Проверьте порядок шагов.",
+            show_alert=True,
+        )
+    else:
+        await callback.answer(f"🗑 Шаг {step_to_delete + 1} удалён", show_alert=False)
     # Обновить экран управления шагами (не вызываем cb_fn_steps_manage чтобы не задвоить answer)
     await _render_steps_manage(callback, callback_data, pool)
 

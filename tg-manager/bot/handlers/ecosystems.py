@@ -822,6 +822,10 @@ async def cb_eco_members_clear_do(
     callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
 ) -> None:
     eco_id = callback_data.eco_id
+    # Ошибка записи уходит в лог, но не в ответ пользователю: раньше «✅ Все
+    # участники удалены» печаталось и тогда, когда запрос упал, и человек
+    # уходил с экрана, считая состав очищенным.
+    cleared = True
     try:
         await pool.execute(
             "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND owner_id=$2",
@@ -830,6 +834,12 @@ async def cb_eco_members_clear_do(
         )
     except Exception:
         log_exc_swallow(log, "cb_eco_members_clear: execute failed")
+        cleared = False
+    if not cleared:
+        await callback.answer(
+            "❌ Не удалось очистить состав — попробуйте ещё раз.", show_alert=True
+        )
+        return
     await callback.answer("✅ Все участники удалены", show_alert=True)
     from services import ecosystem_brain as _eb
 

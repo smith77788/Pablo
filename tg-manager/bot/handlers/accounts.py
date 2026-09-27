@@ -2957,6 +2957,9 @@ async def cb_del_dead_accounts_do(
         return
     await callback.answer("🗑 Удаляю...")
 
+    # Считаем реально удалённые: раньше в отчёте стояло len(dead_ids), то есть
+    # «Удалено 7» печаталось и когда семь запросов из семи упали.
+    deleted = 0
     for acc_id in dead_ids:
         try:
             await pool.execute(
@@ -2964,6 +2967,7 @@ async def cb_del_dead_accounts_do(
             )
             await db.record_manual_action(
                 pool, uid, "account_delete", target=str(acc_id))
+            deleted += 1
         except Exception:
             log_exc_swallow(
                 log, "Ошибка удаления мёртвого аккаунта из БД", account_id=acc_id
@@ -2973,12 +2977,26 @@ async def cb_del_dead_accounts_do(
     kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
     kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
+    failed = len(dead_ids) - deleted
+    if not deleted:
+        text = (
+            f"❌ <b>Не удалось удалить ни один из {len(dead_ids)} аккаунтов</b>\n\n"
+            f"Записи остались на месте — попробуйте ещё раз."
+        )
+    elif failed:
+        text = (
+            f"⚠️ <b>Удалено {deleted} из {len(dead_ids)}</b>\n\n"
+            f"Не удалось удалить: <b>{failed}</b> — они остались в списке.\n"
+            f"Попробуйте повторить проверку."
+        )
+    else:
+        text = (
+            f"🗑 <b>Удалено {deleted} мёртвых аккаунтов</b>\n\n"
+            f"Ключи сессий были отозваны Telegram.\n"
+            f"Добавьте аккаунты заново через QR-код или номер телефона."
+        )
     await callback.message.edit_text(
-        f"🗑 <b>Удалено {len(dead_ids)} мёртвых аккаунтов</b>\n\n"
-        f"Ключи сессий были отозваны Telegram.\n"
-        f"Добавьте аккаунты заново через QR-код или номер телефона.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
     )
 
 
