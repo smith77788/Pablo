@@ -16420,7 +16420,16 @@ async function reloadVaultChat() {
     const qs = VAULT_FILTER !== 'all' ? ('?'+VAULT_FILTER+'=1') : '';
     const d = await api('/api/miniapp/vault/chat/'+VAULT_CHAT+'/messages'+qs);
     const msgs = d.messages || [];
-    if (!msgs.length) { body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:30px 12px">Нет сохранённых сообщений</div>'; return; }
+    if (!msgs.length) {
+      // Под срезом «пусто» и «в чате ничего нет» — разные вещи: человек включил
+      // «только избранное», увидел «нет сохранённых сообщений» и решил, что
+      // архив пуст, хотя в нём тысяча сообщений без звёздочки.
+      body.innerHTML = VAULT_FILTER !== 'all'
+        ? empty('🔍','По этому срезу пусто','Сообщения в чате есть — снимите срез, чтобы их увидеть',
+                {label:'Показать все', fn:"setVaultFilter('all')"})
+        : empty('💾','Нет сохранённых сообщений','Сообщения появятся здесь, когда бот их сохранит');
+      return;
+    }
     VAULT_CHAT_OFFSET = msgs.length;
     const older = d.has_more
       ? `<div id="vchatMore" style="text-align:center;padding:8px"><button class="btn btn-s" style="font-size:12px" onclick="loadOlderVaultMessages()">↑ Показать более ранние</button></div>`
@@ -21062,7 +21071,17 @@ async function loadDeals() {
       return c>0?`<div class="kpi-card" style="min-width:70px;text-align:center"><div style="font-size:16px;font-weight:700">${c}</div><div style="font-size:10px;color:var(--hint)">${STAGE_LABELS[s].split(' ')[1]||s}</div></div>`:''
     }).join(''));
     txt('m-deal-cnt', DEALS_DATA.length+' сделок');
-    if (!DEALS_DATA.length) { txt('dealList', empty('💼','Нет сделок','Создайте первую сделку',{label:'➕ Создать сделку',fn:'openDealModal()'})); return; }
+    if (!DEALS_DATA.length) {
+      // Под выбранным этапом сделок нет — это НЕ «сделок нет вообще». Предлагать
+      // здесь «создайте первую» значит врать человеку, у которого их сорок на
+      // других этапах, и уводить его создавать дубль. Тот же приём, что у
+      // рассылок (renderBcasts): под срезом зовём снять срез, а не создавать.
+      txt('dealList', DEALS_FILTER
+        ? empty('🔍','На этом этапе пусто','Сделки есть на других этапах — снимите срез, чтобы увидеть их',
+                {label:'Показать все', fn:"filterDeals(null,document.getElementById('dealFilterAll'))"})
+        : empty('💼','Нет сделок','Создайте первую сделку',{label:'➕ Создать сделку',fn:'openDealModal()'}));
+      return;
+    }
     const STAGE_NEXT = {lead:'contact',contact:'proposal',proposal:'negotiation',negotiation:'won'};
     txt('dealList', DEALS_DATA.map(d2=>{
       const nextStage = STAGE_NEXT[d2.stage];
