@@ -100,15 +100,6 @@ async def _show_hc_menu(
     warning_count = sum(1 for a in anomalies if a.get("severity") == "warning")
 
     try:
-        alerts_row = await pool.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM infrastructure_alerts WHERE owner_id=$1 AND is_active=TRUE",
-            owner_id,
-        )
-        active_alerts = (alerts_row["cnt"] if alerts_row else 0) or 0
-    except Exception:
-        active_alerts = 0
-
-    try:
         recoveries_row = await pool.fetchrow(
             """SELECT COUNT(*) AS cnt FROM recovery_events
                WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '24 hours'""",
@@ -120,9 +111,9 @@ async def _show_hc_menu(
 
     score_icon = _score_emoji(score)
     lines = [
-        "🏥 <b>Infrastructure Health Center</b>",
+        "🏥 <b>Здоровье инфраструктуры</b>",
         "",
-        f"{score_icon} <b>Health Score: {_score_bar(score)}</b>",
+        f"{score_icon} <b>Оценка здоровья: {_score_bar(score)}</b>",
         "",
     ]
 
@@ -130,12 +121,10 @@ async def _show_hc_menu(
         lines.append(f"🔴 Критических аномалий: <b>{critical_count}</b>")
     if warning_count:
         lines.append(f"🟡 Предупреждений: <b>{warning_count}</b>")
-    if active_alerts:
-        lines.append(f"🚨 Активных алертов: <b>{active_alerts}</b>")
     if recent_recoveries:
         lines.append(f"🔄 Восстановлений за 24ч: <b>{recent_recoveries}</b>")
 
-    if not critical_count and not warning_count and not active_alerts:
+    if not critical_count and not warning_count:
         lines.append("✅ <b>Инфраструктура в норме — аномалий нет</b>")
 
     if health.get("accounts_total") is not None:
@@ -144,7 +133,7 @@ async def _show_hc_menu(
         avg_trust = health.get("avg_trust_score", 0)
         lines.append("")
         lines.append(f"📱 Аккаунтов: <b>{acc_ready}/{acc_total}</b> готовы")
-        lines.append(f"🛡 Trust: <b>{round(float(avg_trust or 0) * 100)}%</b>")
+        lines.append(f"🛡 Доверие: <b>{round(float(avg_trust or 0) * 100)}%</b>")
         ops_f = health.get("ops_failed_24h", 0) or 0
         ops_d = health.get("ops_done_24h", 0) or 0
         if ops_f + ops_d > 0:

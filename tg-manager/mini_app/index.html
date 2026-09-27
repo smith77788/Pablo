@@ -21575,7 +21575,8 @@ async function openInfraHealth() {
           <div class="row-ico" style="background:var(--bg-red-16)">⚠️</div>
           <div class="row-body">
             <div class="row-name"><span class="badge ${sevCls[a.severity]||'b-gy'}">${esc(sevRu(a.severity))}</span> ${esc(a.title)}</div>
-            <div class="row-val">${esc(a.alert_type)}${a.target_type?' · '+esc(a.target_type):''}</div>
+            ${a.description?`<div class="row-val" style="white-space:normal;line-height:1.35">${esc(a.description)}</div>`:''}
+            <div class="row-val">${esc(a.alert_type)}${a.target_type?' · '+esc(a.target_type):''}${a.affected_count?' · затронуто: '+num(a.affected_count):''}</div>
             <div class="row-val" style="color:var(--hint)">${ago(a.first_seen_at)}</div>
           </div>
         </div>

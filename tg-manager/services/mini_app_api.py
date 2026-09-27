@@ -15438,17 +15438,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        # Раньше экран читал только infrastructure_alerts. Эту таблицу в
+        # продукте НИКТО не заполняет: её создают (schema_v84), читают и чистят
+        # по сроку, а INSERT в неё нет ни одного. Настоящие находки копит
+        # anomaly_detector в anomaly_events — каждые пять минут фоновым циклом,
+        # и бот в «Здоровье инфраструктуры» показывает именно их. Поэтому
+        # мини-апп писал «Инфраструктура работает нормально» ровно тогда, когда
+        # бот на том же материале показывал критические аномалии.
+        alerts: list[dict] = []
         try:
-            alerts = await pool.fetch(
-                "SELECT id, alert_type, severity, title, description, target_type, "
-                "is_active, first_seen_at, resolved_at "
-                "FROM infrastructure_alerts WHERE owner_id=$1 AND is_active=TRUE "
-                "ORDER BY first_seen_at DESC LIMIT 20",
-                uid,
-            )
+            from services import anomaly_detector
+
+            for a in await anomaly_detector.get_active_anomalies(pool, uid):
+                alerts.append({
+                    "id": a.get("id"),
+                    "alert_type": a.get("anomaly_type") or "anomaly",
+                    "severity": a.get("severity") or "warning",
+                    "title": a.get("title") or "",
+                    "description": a.get("description") or "",
+                    "target_type": a.get("detector"),
+                    "affected_count": a.get("affected_count"),
+                    "is_active": True,
+                    "first_seen_at": a.get("detected_at"),
+                    "resolved_at": None,
+                })
         except Exception:
-            log.exception("infra_health_overview alerts uid=%d", uid)
-            alerts = []
+            log.exception("infra_health_overview anomalies uid=%d", uid)
         try:
             recovery = await pool.fetch(
                 "SELECT id, recovery_type, target_type, trigger, action, status, "
@@ -15461,7 +15476,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("infra_health_overview recovery uid=%d", uid)
             recovery = []
         return _json_resp({
-            "alerts": [dict(a) for a in alerts],
+            "alerts": alerts,
             "recovery": [dict(r) for r in recovery],
         })
 
