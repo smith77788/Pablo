@@ -982,7 +982,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div id="navOverlay" onclick="closeDrawer()"></div>
 <nav id="navDrawer">
   <div class="nav-head">
-    <div class="hdr-burger" onclick="closeDrawer()">✕</div>
+    <div class="hdr-burger" onclick="closeDrawer()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="nav-head-t">⚡ Infragram</div>
   </div>
   <div class="nav-body" id="navBody"><!-- заполняется buildDrawer() --></div>
@@ -993,7 +993,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ HOME ══════════════════════ -->
 <div class="screen show" id="s-home">
   <div class="hdr">
-    <div class="hdr-burger" onclick="openDrawer()">☰</div>
+    <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">⚡ Infragram</div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome();toast('🔄 Обновлено')">🔄</div>
     <div class="hdr-meta">
@@ -1092,7 +1092,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:0 0 8px">
       <div style="display:flex;gap:8px">
         <input type="text" id="quickChLink" placeholder="https://t.me/channel или @username" style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px">
-        <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0 0 auto;padding:10px 16px">➕</button>
+        <button class="btn btn-p" onclick="submitQuickChannel()" style="flex:0 0 auto;padding:10px 16px" aria-label="Отправить">➕</button>
       </div>
       <div id="quickChErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
     </div>
@@ -1104,7 +1104,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:0 0 8px">
       <div style="display:flex;gap:8px">
         <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx..." style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
-        <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0 0 auto;padding:10px 16px">➕</button>
+        <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0 0 auto;padding:10px 16px" aria-label="Отправить">➕</button>
       </div>
       <div id="quickBotErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
     </div>
@@ -1114,7 +1114,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BOTS LIST ══════════════════════ -->
 <div class="screen" id="s-bots">
   <div class="hdr">
-    <div class="hdr-burger" onclick="openDrawer()">☰</div>
+    <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">🤖 Мои боты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
       <span class="hdr-user" id="bots-cnt"></span>
@@ -1174,7 +1174,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: РАССЫЛКА ВЫБРАННЫМ БОТАМ ══════════════════════ -->
 <div class="mbg" id="mo-bot-broadcast" onclick="if(event.target===this)closeModal('mo-bot-broadcast')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-bot-broadcast')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-bot-broadcast')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📢 Рассылка выбранным ботам</div>
     <div id="bbHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
     <textarea id="bbText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
@@ -1187,7 +1187,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BOT DETAIL ══════════════════════ -->
 <div class="screen" id="s-botdetail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bd-name">Бот</div>
   </div>
   <div class="sub-sb" id="bd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1196,7 +1196,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ AUTO-REPLIES ══════════════════════ -->
 <div class="screen" id="s-autoreplies">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="ar-name">Авто-ответы</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openArModal()">+ Добавить</button></div>
   </div>
@@ -1211,7 +1211,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BOT FUNNELS ══════════════════════ -->
 <div class="screen" id="s-botfunnels">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bf-name">Воронки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openFunnelModal()">+ Создать</button></div>
   </div>
@@ -1224,7 +1224,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ACCOUNTS ══════════════════════ -->
 <div class="screen" id="s-accounts">
   <div class="hdr">
-    <div class="hdr-burger" onclick="openDrawer()">☰</div>
+    <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📱 Аккаунты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
       <div class="hdr-user" id="acc-cnt"></div>
@@ -1311,7 +1311,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ACCOUNT DETAIL ══════════════════════ -->
 <div class="screen" id="s-accdetail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="acd-name">Аккаунт</div>
   </div>
   <div class="sub-sb" id="acd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1320,7 +1320,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════ КОНСОЛЬ АККАУНТА: ДИАЛОГИ ══════════ -->
 <div class="screen" id="s-accdialogs">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">💬 Диалоги</div>
     <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="openAccountContacts(ACC_CONSOLE_ID)" title="Контакты аккаунта" aria-label="Контакты аккаунта">📇</span></div>
   </div>
@@ -1330,7 +1330,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════ КОНСОЛЬ АККАУНТА: ЧАТ ══════════ -->
 <div class="screen" id="s-accchat">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="achat-title">Чат</div>
     <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="reloadAccountChat()" title="Обновить" aria-label="Обновить">🔄</span></div>
   </div>
@@ -1340,7 +1340,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input id="achatFile" type="file" style="display:none" onchange="sendAccountFile(this)">
       <button class="btn btn-s" style="padding:10px 12px;flex:0 0 auto" onclick="document.getElementById('achatFile').click()" title="Прикрепить файл (фото/документ)">📎</button>
       <input id="achatInput" type="text" placeholder="Сообщение..." class="input-flex" onkeydown="if(event.key==='Enter')sendAccountChat()">
-      <button class="btn btn-p" style="padding:10px 16px;flex:0 0 auto" onclick="sendAccountChat()">➤</button>
+      <button class="btn btn-p" style="padding:10px 16px;flex:0 0 auto" onclick="sendAccountChat()" aria-label="Отправить">➤</button>
     </div>
   </div>
 </div>
@@ -1348,7 +1348,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════ РЕСУРСЫ АККАУНТА: КАНАЛЫ И ЧАТЫ ══════════ -->
 <div class="screen" id="s-accchannels">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📡 Каналы и чаты аккаунта</div>
   </div>
   <div class="sub-sb">
@@ -1363,7 +1363,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════ РЕСУРСЫ АККАУНТА: БОТЫ ══════════ -->
 <div class="screen" id="s-accbots">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🤖 Боты аккаунта</div>
   </div>
   <div class="sub-sb">
@@ -1377,7 +1377,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════ КОНСОЛЬ АККАУНТА: КОНТАКТЫ ══════════ -->
 <div class="screen" id="s-acccontacts">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📇 Контакты аккаунта</div>
     <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" id="accContSelBtn" onclick="toggleAccContSelect()" title="Выбрать несколько" aria-label="Выбрать несколько">☑️</span></div>
   </div>
@@ -1394,7 +1394,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Компоуз для массовой отправки выбранным контактам (через безопасный DM-движок) -->
 <div class="mbg" id="mo-acccont-msg" onclick="if(event.target===this)closeModal('mo-acccont-msg')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-acccont-msg')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-acccont-msg')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">✍️ Написать выбранным</div>
     <div id="accContMsgHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
     <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
@@ -1406,7 +1406,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Написать контакту в ЛС с выбранных аккаунтов (безопасный DM-движок) -->
 <div class="mbg" id="mo-contact-write" onclick="if(event.target===this)closeModal('mo-contact-write')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-contact-write')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-contact-write')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title" id="ccwTitle">✍️ Написать контакту</div>
     <div id="ccwPreview" style="display:none;font-size:12px;background:var(--bg2);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.4"></div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выберите, с каких аккаунтов отправить. Отправка идёт с защитой от бана (темп/флуд-контроль).</div>
@@ -1431,7 +1431,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Пригласить контакт в канал/чат выбранными аккаунтами -->
 <div class="mbg" id="mo-contact-invite" onclick="if(event.target===this)closeModal('mo-contact-invite')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-contact-invite')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-contact-invite')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title" id="cciTitle">➕ Пригласить контакт</div>
     <div id="cciPreview" style="display:none;font-size:12px;background:var(--bg2);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.4"></div>
     <input type="text" id="cciGroup" placeholder="@канал_или_чат или ссылка t.me/..." class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
@@ -1454,7 +1454,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </style>
 <div class="screen" id="s-vault">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🗄 Хранилище</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:8px"><span class="hdr-user" id="vaultCnt"></span><span class="icon-btn" role="button" tabindex="0" onclick="openVaultSettings()" title="Уведомления" aria-label="Уведомления">🔔</span></div>
   </div>
@@ -1477,7 +1477,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-vaultrecent">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="vrecent-title">🗑 Удалённые</div>
     <div class="hdr-meta"></div>
   </div>
@@ -1488,7 +1488,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="mbg" id="mo-vault-settings" onclick="if(event.target===this)closeModal('mo-vault-settings')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-vault-settings')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-vault-settings')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔔 Уведомления «ловца»</div>
     <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;font-size:14px">
       <span>🗑 Собеседник удалил сообщение</span>
@@ -1507,7 +1507,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-vaultchat">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="vchat-title">Диалог</div>
     <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" onclick="downloadVaultExport('html', VAULT_CHAT)" title="Экспорт чата" aria-label="Экспорт чата">⬇️</span></div>
   </div>
@@ -1520,14 +1520,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div id="vchatBody" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px"></div>
   <div id="vchatComposer" style="display:none;padding:8px 10px;border-top:1px solid var(--sep);gap:8px;align-items:flex-end">
     <textarea id="vchatInput" rows="1" placeholder="Ответить от вашего имени..." style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
-    <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()">➤</button>
+    <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()" aria-label="Отправить">➤</button>
   </div>
 </div>
 
 <!-- ══════════════════════ CHANNELS LIST ══════════════════════ -->
 <div class="screen" id="s-channels">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📡 Каналы и чаты</div>
     <div class="hdr-meta"><div class="hdr-user" id="ch-cnt"></div></div>
   </div>
@@ -1580,7 +1580,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: МАСС. ДЕЙСТВИЕ ПО КАНАЛАМ ══════════════════════ -->
 <div class="mbg" id="mo-chan-mass" onclick="if(event.target===this)closeModal('mo-chan-mass')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-chan-mass')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-chan-mass')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title" id="chmTitle">Массовое действие</div>
     <div id="chmHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
     <textarea id="chmValue" rows="4" placeholder="" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
@@ -1592,7 +1592,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ CHANNEL DETAIL ══════════════════════ -->
 <div class="screen" id="s-chdetail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="chd-name">Канал</div>
   </div>
   <div class="sub-sb" id="chd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -1601,7 +1601,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BROADCASTS ══════════════════════ -->
 <div class="screen" id="s-broadcasts">
   <div class="hdr">
-    <div class="hdr-burger" onclick="openDrawer()">☰</div>
+    <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📨 Рассылки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
@@ -1629,7 +1629,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BROADCAST SCHEDULE (Mass Messaging Pro) ══════════════════════ -->
 <div class="screen" id="s-broadcast-schedule">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📅 Расписание рассылок</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openBcScheduleModal()">+ Новая</button></div>
   </div>
@@ -1657,7 +1657,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: New Broadcast Schedule -->
 <div class="mbg" id="mo-bc-schedule" onclick="if(event.target===this)closeModal('mo-bc-schedule')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-bc-schedule')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-bc-schedule')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📅 Новая запланированная рассылка</div>
     <div class="field"><label>Бот</label><select id="bs-bot" class="sel"></select></div>
     <div class="field"><label>Текст сообщения</label><textarea id="bs-text" rows="4" maxlength="4096" class="input-bc" placeholder="Введите текст..."></textarea></div>
@@ -1688,7 +1688,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ PROXY POOL (Proxy Pool Manager) ══════════════════════ -->
 <div class="screen" id="s-proxy-pool">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌐 Пул прокси</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
   </div>
@@ -1724,7 +1724,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ AUTOREG PRO (Auto-Registration Pro) ══════════════════════ -->
 <div class="screen" id="s-autoreg-pro">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📱 Авторег Pro</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAutoregProModal()">+ Пакет</button></div>
   </div>
@@ -1760,7 +1760,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Autoreg Pro Batch -->
 <div class="mbg" id="mo-autoreg-pro" onclick="if(event.target===this)closeModal('mo-autoreg-pro')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-autoreg-pro')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-autoreg-pro')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📱 Пакетная регистрация</div>
     <div class="field"><label>Количество (1–100)</label><input type="number" id="arp-count" value="10" min="1" max="100" class="inp"></div>
     <div class="field"><label>Страна</label><select id="arp-country" class="sel">
@@ -1783,7 +1783,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ MORE ══════════════════════ -->
 <div class="screen" id="s-more">
-  <div class="hdr"><div class="hdr-burger" onclick="openDrawer()">☰</div><div class="hdr-title">⚙️ Ещё</div></div>
+  <div class="hdr"><div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div><div class="hdr-title">⚙️ Ещё</div></div>
   <div class="sb">
 
     <!-- Статус аккаунта -->
@@ -2346,7 +2346,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ADMIN STATS ══════════════════════ -->
 <div class="screen" id="s-admin-stats">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📊 Статистика</div>
   </div>
   <div class="sb" id="adm-stats-body"></div>
@@ -2355,7 +2355,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ADMIN USERS ══════════════════════ -->
 <div class="screen" id="s-admin-users">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👥 Пользователи</div>
   </div>
   <div class="sb" id="adm-users-body"></div>
@@ -2364,7 +2364,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ADMIN USER DETAIL ══════════════════════ -->
 <div class="screen" id="s-admin-user-detail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👤 Детали</div>
   </div>
   <div class="sb" id="adm-ud-body"></div>
@@ -2373,7 +2373,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ADMIN BROADCAST ══════════════════════ -->
 <div class="screen" id="s-admin-broadcast">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📢 Рассылка</div>
   </div>
   <div class="sb">
@@ -2386,7 +2386,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ASSET TEMPLATES ══════════════════════ -->
 <div class="screen" id="s-assettemplates">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📐 Шаблоны ассетов</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAssetTplModal()">+ Создать</button></div>
   </div>
@@ -2404,7 +2404,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ INFRA HEALTH CENTER ══════════════════════ -->
 <div class="screen" id="s-infrahealth">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🏥 Здоровье инфры</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🏥 Здоровье инфры</div></div>
   <div class="sub-sb">
     <div class="sec">Активные оповещения</div>
     <div class="lst" id="ihAlerts"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2415,7 +2415,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ PULSE DIGEST ══════════════════════ -->
 <div class="screen" id="s-digest">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📈 Пульс-отчёт</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📈 Пульс-отчёт</div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="openDigest()">🔄</div></div>
   <div class="sub-sb">
     <!-- Обёртку заполняет JS карточками с инлайновым стилем и без своих
@@ -2426,14 +2426,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ FLEET DOCTOR ══════════════════════ -->
 <div class="screen" id="s-fleetdoctor">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🩺 Диагностика флота</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🩺 Диагностика флота</div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" style="margin-left:auto" onclick="openFleetDoctor()">🔄</div></div>
   <div class="sub-sb"><div id="fleetDoctorBody" style="padding:0 16px"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <!-- ══════════════════════ CHAT WARMUP ══════════════════════ -->
 <div class="screen" id="s-chatwarmup">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">💬 Разогрев чата</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">💬 Разогрев чата</div></div>
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:10px">
       Флот вступает в указанный чат и ведёт <b>осмысленный</b> диалог: между собой по темам и/или реагируя на реальных участников (ИИ понимает контекст). Темп человеческий, сессии защищены.
@@ -2468,7 +2468,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ SWARM ══════════════════════ -->
 <div class="screen" id="s-swarm">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🐝 Рой</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🐝 Рой</div></div>
   <div class="sub-sb">
     <div class="sec">Метрики ботов</div>
     <div class="lst" id="swarmList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2478,7 +2478,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ PRESENCE PACKS ══════════════════════ -->
 <div class="screen" id="s-presencepacks">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔗 Связки (бот+каналы)</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openPresencePackModal()">+ Создать</button></div>
   </div>
@@ -2496,7 +2496,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ PRESENCE PACK — DETAIL/EDIT ══════════════════════ -->
 <div class="screen" id="s-pp-detail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="ppDetail-name">Связка</div>
   </div>
   <div class="sub-sb">
@@ -2519,7 +2519,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
 <div class="screen" id="s-globalpresence">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🌍 Гео-сеть: создать</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openGpCreateModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
@@ -2536,7 +2536,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════ КАРТА ПРИСУТСТВИЯ ══════════ -->
 <div class="screen" id="s-presencemap">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🗺️ Карта присутствия</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🗺️ Карта присутствия</div></div>
   <div class="sub-sb">
     <div id="pmTotals" style="display:flex;gap:8px;padding:6px 16px 4px;flex-wrap:wrap"></div>
     <div class="sec">Флот по странам</div>
@@ -2548,14 +2548,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ GLOBAL PRESENCE DETAIL ══════════════════════ -->
 <div class="screen" id="s-gpdetail">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="gpdetail-name">План</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="gpdetail-name">План</div></div>
   <div class="sub-sb" id="gpdetail-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ GP CREATE MODAL ══════════════════════ -->
 <div class="mbg" id="mo-gp-create" onclick="if(event.target===this)closeModal('mo-gp-create')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-gp-create')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-gp-create')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌍 Создать гео-сеть</div>
     <div>
       <div style="font-size:12px;color:var(--hint);margin-bottom:12px">Создайте новые каналы/группы/боты по городам с локализованными названиями.</div>
@@ -2629,7 +2629,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ MASS OPS ══════════════════════ -->
 <div class="screen" id="s-massops">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚡ Массовые операции</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚡ Массовые операции</div></div>
   <div class="sub-sb">
     <!-- Мягкие предупреждения перед запуском (давление флота, непрогретые
          аккаунты). Раньше показывались только в боте — мини-апп запускал
@@ -2726,7 +2726,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ ECOSYSTEMS ══════════════════════ -->
 <div class="screen" id="s-ecosystems">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌐 Экосистемы</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openEcosystemModal()">+ Создать</button></div>
   </div>
@@ -2738,13 +2738,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ ECOSYSTEM DETAIL ══════════════════════ -->
 <div class="screen" id="s-ecodetail">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="ecodetail-name">Экосистема</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="ecodetail-name">Экосистема</div></div>
   <div class="sub-sb" id="ecodetail-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ CHANNEL FACTORY ══════════════════════ -->
 <div class="screen" id="s-chanfactory">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📢 Фабрика каналов</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📢 Фабрика каналов</div></div>
   <div class="sub-sb">
     <div class="sec">Создать каналы / группы массово</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
@@ -2800,7 +2800,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ ПОЗИЦИИ В ПОИСКЕ ══════════════════════ -->
 <div class="screen" id="s-chranks">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📈 Позиции в поиске</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📈 Позиции в поиске</div></div>
   <div class="sub-sb">
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <div style="font-size:12px;color:var(--hint);line-height:1.45;margin-bottom:8px">
@@ -2823,7 +2823,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ GROUP FACTORY ══════════════════════ -->
 <div class="screen" id="s-groupfactory">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">👥 Фабрика групп</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">👥 Фабрика групп</div></div>
   <div class="sub-sb">
     <div class="sec">Создать группу</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
@@ -2844,7 +2844,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ PHYSICS HUB ══════════════════════ -->
 <div class="screen" id="s-physics">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚛️ Физика</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚛️ Физика</div></div>
   <div class="sub-sb">
     <div class="sec">Риски аккаунтов</div>
     <div class="lst" id="physicsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2853,7 +2853,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ GRAPH HUB ══════════════════════ -->
 <div class="screen" id="s-graph">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🕸 Граф-хаб</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🕸 Граф-хаб</div></div>
   <div class="sub-sb">
     <div class="sec">Статистика графа</div>
     <div class="lst" id="graphStats"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2864,7 +2864,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ COMPLIANCE HUB ══════════════════════ -->
 <div class="screen" id="s-compliance">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">✅ Комплаенс</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">✅ Комплаенс</div></div>
   <div class="sub-sb">
     <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()">Выгрузить отчёт →</span></div>
     <div class="lst" id="complianceStats"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -2876,7 +2876,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MULTIGEO ══════════════════════ -->
 <div class="screen" id="s-multigeo">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌍 Мультигео</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMultigeoSetModal()">✏️ Изменить</button></div>
   </div>
@@ -2895,7 +2895,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Multigeo Set -->
 <div class="mbg" id="mo-multigeo" onclick="if(event.target===this)closeModal('mo-multigeo')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-multigeo')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-multigeo')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌍 Настроить профиль бота</div>
     <div class="field"><label>Язык</label><select id="mg-lang" class="sel">
       <option value="">🌐 По умолчанию (все языки)</option>
@@ -2922,7 +2922,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ CONTENT CLONER ══════════════════════ -->
 <div class="screen" id="s-contentcloner">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📋 Клонер контента</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📋 Клонер контента</div></div>
   <div class="sub-sb">
     <div class="sec">Клонирование контента</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
@@ -2938,7 +2938,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ CLONE ADAPT ══════════════════════ -->
 <div class="screen" id="s-cloneadapt">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔄 Клон и адаптация</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCloneModal()">+ Клонировать</button></div>
   </div>
@@ -2951,7 +2951,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Add Bot -->
 <div class="mbg" id="mo-bot-add" onclick="if(event.target===this)closeModal('mo-bot-add')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-bot-add')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-bot-add')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🤖 Добавить бота</div>
     <div class="field">
       <label>Токен бота *</label>
@@ -2966,7 +2966,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Bot Profile (имя/описание бота) -->
 <div class="mbg" id="mo-bot-profile" onclick="if(event.target===this)closeModal('mo-bot-profile')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-bot-profile')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-bot-profile')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">⚙️ Профиль бота</div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Меняется через Bot API. Заполните только нужные поля.</div>
     <div class="field">
@@ -2997,7 +2997,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Add Node -->
 <div class="mbg" id="mo-node" onclick="if(event.target===this)closeModal('mo-node')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-node')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-node')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🖥 Добавить ноду</div>
     <div class="field">
       <label>Chat ID форум-группы *</label>
@@ -3025,7 +3025,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Add CRM Contact -->
 <div class="mbg" id="mo-crm-contact" onclick="if(event.target===this)closeModal('mo-crm-contact')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-crm-contact')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-crm-contact')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">👤 Новый контакт</div>
     <div class="field">
       <label>Имя *</label>
@@ -3059,7 +3059,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Create Self Promo Template -->
 <div class="mbg" id="mo-self-promo" onclick="if(event.target===this)closeModal('mo-self-promo')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-self-promo')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-self-promo')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📣 Новый шаблон</div>
     <div class="field">
       <label>Стиль</label>
@@ -3092,7 +3092,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Account Profile -->
 <div class="mbg" id="mo-acc-profile" onclick="if(event.target===this)closeModal('mo-acc-profile')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-acc-profile')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-acc-profile')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🎨 Профиль аккаунта</div>
     <div class="field">
       <label>Что меняем</label>
@@ -3155,7 +3155,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Account Proxy -->
 <div class="mbg" id="mo-acc-proxy" onclick="if(event.target===this)closeModal('mo-acc-proxy')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-acc-proxy')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-acc-proxy')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌐 Прокси аккаунта</div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Через какой прокси аккаунт выходит в сеть. Влияет на IP/гео и безопасность.</div>
     <div class="field">
@@ -3170,7 +3170,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Account Note -->
 <div class="mbg" id="mo-acc-note" onclick="if(event.target===this)closeModal('mo-acc-note')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-acc-note')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-acc-note')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📝 Заметка к аккаунту</div>
     <div class="field">
       <textarea id="antText" rows="4" maxlength="500" placeholder="Пометка для себя: назначение, кластер, статус…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
@@ -3183,7 +3183,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Account Cluster / Label -->
 <div class="mbg" id="mo-acc-meta" onclick="if(event.target===this)closeModal('mo-acc-meta')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-acc-meta')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-acc-meta')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🏷 Кластер и метка</div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Метка — отображаемое имя аккаунта. Кластер группирует аккаунты для массовых операций.</div>
     <div class="field">
@@ -3215,7 +3215,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Mass stage move -->
 <div class="mbg" id="mo-acc-stage" onclick="if(event.target===this)closeModal('mo-acc-stage')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-acc-stage')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-acc-stage')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📂 Переместить в статус</div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Массовое перемещение выбранных аккаунтов в статус жизненного цикла.</div>
     <div class="field">
@@ -3239,7 +3239,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Channel Edit -->
 <div class="mbg" id="mo-chan-edit" onclick="if(event.target===this)closeModal('mo-chan-edit')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-chan-edit')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-chan-edit')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">✏️ Редактировать канал</div>
     <div class="field">
       <label>Что меняем</label>
@@ -3258,7 +3258,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Asset Template Create -->
 <div class="mbg" id="mo-asset-tpl" onclick="if(event.target===this)closeModal('mo-asset-tpl')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-asset-tpl')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-asset-tpl')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📐 Новый шаблон</div>
     <div class="field"><label>Название</label><input id="at-name" type="text" placeholder="Шаблон приветствия" class="inp"></div>
     <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона..." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
@@ -3273,7 +3273,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Auto-funnel Create -->
 <div class="mbg" id="mo-autofunnel" onclick="if(event.target===this)closeModal('mo-autofunnel')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-autofunnel')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-autofunnel')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔀 Новая авто-воронка</div>
     <div class="field"><label>Бот</label><select id="af-bot" class="sel"><option value="">Загрузка...</option></select></div>
     <div class="field"><label>Название</label><input id="af-name" type="text" placeholder="Onboarding воронка" class="inp"></div>
@@ -3295,7 +3295,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Presence Pack Create -->
 <div class="mbg" id="mo-presence-pack" onclick="if(event.target===this)closeModal('mo-presence-pack')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-presence-pack')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-presence-pack')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔗 Новая связка</div>
     <div class="field"><label>Название</label><input id="pp-name" type="text" placeholder="Моя связка" class="inp"></div>
     <div class="field"><label>Описание</label><input id="pp-desc" type="text" placeholder="Краткое описание..." class="inp"></div>
@@ -3312,7 +3312,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Ecosystem Create -->
 <div class="mbg" id="mo-ecosystem" onclick="if(event.target===this)closeModal('mo-ecosystem')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-ecosystem')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-ecosystem')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌐 Новая экосистема</div>
     <div class="field"><label>Название</label><input id="eco-name" type="text" placeholder="Моя экосистема" class="inp"></div>
     <div class="field"><label>Описание</label><input id="eco-desc" type="text" placeholder="Краткое описание..." class="inp"></div>
@@ -3335,7 +3335,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Clone Adapt -->
 <div class="mbg" id="mo-clone" onclick="if(event.target===this)closeModal('mo-clone')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-clone')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-clone')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔄 Клонировать профиль бота</div>
     <div class="field"><label>Источник (откуда)</label><select id="clSrc" class="sel"><option value="">Загрузка...</option></select></div>
     <div class="field"><label>Цель (куда)</label><select id="clTgt" class="sel"><option value="">Загрузка...</option></select></div>
@@ -3359,7 +3359,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ CONTENT MESH ══════════════════════ -->
 <div class="screen" id="s-contentmesh">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🕸 Сеть контента</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openMeshModal()">+ Создать</button></div>
   </div>
@@ -3372,7 +3372,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Content Mesh Create -->
 <div class="mbg" id="mo-mesh" onclick="if(event.target===this)closeModal('mo-mesh')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-mesh')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-mesh')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🕸 Новая Content Mesh</div>
     <div class="field"><label>Название сети</label><input id="mc-name" type="text" placeholder="Моя сеть репостинга" class="inp"></div>
     <div class="field"><label>Источник (канал)</label><input id="mc-src" type="text" placeholder="@username или -100xxx" class="inp"></div>
@@ -3391,12 +3391,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Mesh Targets -->
 <div class="mbg" id="mo-mesh-targets" onclick="if(event.target===this)closeModal('mo-mesh-targets')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-mesh-targets')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-mesh-targets')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🎯 Цели меша: <span id="mt-mesh-name"></span></div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Каналы, в которые репостится источник. Без целей меш не работает.</div>
     <div class="field" style="display:flex;gap:6px">
       <input id="mt-input" type="text" placeholder="@channel или -100xxx" class="input-flex">
-      <button class="btn btn-p" style="flex:0 0 auto;padding:10px 14px" onclick="addMeshTarget()">➕</button>
+      <button class="btn btn-p" style="flex:0 0 auto;padding:10px 14px" onclick="addMeshTarget()" aria-label="Добавить">➕</button>
     </div>
     <div class="lst" id="mt-list" style="max-height:280px;overflow-y:auto"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -3405,7 +3405,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ NARRATIVE ENGINE ══════════════════════ -->
 <div class="screen" id="s-narrative">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📖 Движок нарратива</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNarrativeModal()">+ Создать</button></div>
   </div>
@@ -3418,7 +3418,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Narrative Create -->
 <div class="mbg" id="mo-narrative" onclick="if(event.target===this)closeModal('mo-narrative')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-narrative')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-narrative')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📖 Новая нарратив-кампания</div>
     <div class="field"><label>Тема / заголовок</label><input id="nc-topic" type="text" placeholder="Запуск нового продукта" class="inp"></div>
     <div class="field"><label>Ключевое послание</label><textarea id="nc-message" rows="3" placeholder="Чего вы хотите донести до аудитории" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
@@ -3443,14 +3443,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ NARRATIVE DETAIL ══════════════════════ -->
 <div class="screen" id="s-narrativedetail">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="narr-name">Кампания</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="narr-name">Кампания</div></div>
   <div class="sub-sb" id="narr-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ SELF PROMO ══════════════════════ -->
 <div class="screen" id="s-selfpromo">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📣 Самопиар</div>
     <div class="hdr-meta">
       <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openSelfPromoCreateModal()">+ Создать</button>
@@ -3463,7 +3463,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Рассылка идёт подписчикам ваших ботов. Ссылка ведёт на системного бота с вашим реферальным кодом — все приглашённые засчитываются вам.</div>
       <div style="display:flex;align-items:center;gap:8px">
         <code id="spRefLink" style="flex:1;font-size:11px;background:var(--bg);padding:8px;border-radius:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</code>
-        <button class="mini-btn" onclick="copySpRefLink()">📋</button>
+        <button class="mini-btn" onclick="copySpRefLink()" aria-label="Копировать">📋</button>
       </div>
     </div>
     <div class="sec">Шаблоны самопиара</div>
@@ -3473,7 +3473,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ SEMANTIC MEMORY ══════════════════════ -->
 <div class="screen" id="s-semantic">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧬 Семантическая память</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧬 Семантическая память</div></div>
   <div class="sub-sb">
     <div class="sec">Память по ботам</div>
     <div class="lst" id="semList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3482,7 +3482,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ SEMANTIC FACTS ══════════════════════ -->
 <div class="screen" id="s-semfacts">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="semfacts-name">Факты</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="semfacts-name">Факты</div></div>
   <div class="sub-sb">
     <div class="lst" id="semfactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -3490,13 +3490,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ GLOBAL SEARCH ══════════════════════ -->
 <div class="screen" id="s-gsearch">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌐 Глобальный поиск</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🌐 Глобальный поиск</div></div>
   <div class="sub-sb">
     <div class="sec">Поиск публичных каналов, групп, ботов и пользователей</div>
     <div style="display:flex;gap:8px;margin:8px 0">
       <input id="gsQuery" placeholder="Например: доставка москва" style="flex:1"
              onkeydown="if(event.key==='Enter')submitGlobalSearch()">
-      <button class="btn btn-p" style="flex:0 0 auto;padding:9px 16px" onclick="submitGlobalSearch()">🔍</button>
+      <button class="btn btn-p" style="flex:0 0 auto;padding:9px 16px" onclick="submitGlobalSearch()" aria-label="Отправить">🔍</button>
     </div>
     <div class="lst" id="gsResults"><div class="hint" style="padding:12px">Введите запрос и нажмите 🔍</div></div>
 
@@ -3528,7 +3528,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ AUDIENCE DNA ══════════════════════ -->
 <div class="screen" id="s-dna">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧬 ДНК аудитории</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧬 ДНК аудитории</div></div>
   <div class="sub-sb">
     <div class="sec">ДНК аудитории по ботам</div>
     <div class="lst" id="dnaList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3538,7 +3538,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ AUDIENCE DNA — DETAIL ══════════════════════ -->
 <div class="screen" id="s-dna-detail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="dnaDetail-name">ДНК</div>
     <div class="hdr-meta">
       <button class="btn btn-p" id="dnaRecomputeBtn" style="padding:7px 14px;font-size:13px" onclick="recomputeDna()">🔄 Пересчитать</button>
@@ -3552,7 +3552,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ AUTO FUNNELS ══════════════════════ -->
 <div class="screen" id="s-autofunnels">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔀 Авто-воронки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAutofunnelModal()">+ Создать</button></div>
   </div>
@@ -3564,13 +3564,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ FUNNEL STEPS ══════════════════════ -->
 <div class="screen" id="s-afsteps">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="afsteps-name">Воронка</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="afsteps-name">Воронка</div></div>
   <div class="sub-sb" id="afsteps-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Диспетчер задач</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚙️ Диспетчер задач</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
       <button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="openOpCreate()">+ Создать</button>
@@ -3610,13 +3610,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ ДЕТАЛИ ОПЕРАЦИИ ══════════════════════ -->
 <div class="screen" id="s-opdetail">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="opdetTitle">Операция</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="opdetTitle">Операция</div></div>
   <div class="sub-sb" id="opdetBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ СОЗДАТЬ ОПЕРАЦИЮ ══════════════════════ -->
 <div class="screen" id="s-opcreate">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">➕ Создать операцию</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">➕ Создать операцию</div></div>
   <div class="sub-sb">
     <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Выберите тип операции — все они исполняются через ваши аккаунты и попадают в очередь.</div>
     <div id="opCreateList"></div>
@@ -3625,7 +3625,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ UNIFIED CONTACTS HUB ══════════════════════ -->
 <div class="screen" id="s-contacts">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📇 Контакты</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="openUchAI()" title="ИИ-ассистент" aria-label="ИИ-ассистент">🤖</span>
       <span class="icon-btn" role="button" tabindex="0" onclick="toggleContactSelect()" title="Выбор" aria-label="Выбор" id="contactSelectBtn">☑️</span>
@@ -3692,7 +3692,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════ СОХРАНЁННЫЕ СЕГМЕНТЫ ══════════ -->
 <div class="screen" id="s-segments">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📂 Сегменты</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📂 Сегменты</div></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
       Умный срез контактов как сущность («Горячие», «Молчуны 30д»). Один сегмент —
@@ -3704,7 +3704,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════ СЕНСОР НАМЕРЕНИЙ (Vault → CRM) ══════════ -->
 <div class="screen" id="s-intent">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🎯 Сенсор намерений</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🎯 Сенсор намерений</div></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
       Ключевая фраза во <b>входящем ЛС</b> (из Хранилища) → авто-стадия CRM + тег + оповещение.
@@ -3743,7 +3743,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <div class="screen" id="s-contactdetail">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cdTitle">Контакт</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="cdTitle">Контакт</div>
     <div class="hdr-meta" style="display:flex;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="editContact()" title="Редактировать" aria-label="Редактировать">✏️</span>
       <span class="icon-btn" role="button" tabindex="0" onclick="toggleContactFavorite()" title="Избранное" id="cdFavBtn" aria-label="Избранное">⭐</span>
@@ -3753,73 +3753,73 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <div class="screen" id="s-contactedit">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">Редактировать контакт</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">Редактировать контакт</div></div>
   <div class="sub-sb" id="ceBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-contactstats">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📊 Статистика контактов</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📊 Статистика контактов</div></div>
   <div class="sub-sb" id="csBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchduplicates">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔍 Возможные дубликаты</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔍 Возможные дубликаты</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="detectDuplicates()">🔄 Проверить</button></div>
   </div>
   <div class="sub-sb" id="dupBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchconflicts">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚠️ Конфликты данных</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚠️ Конфликты данных</div></div>
   <div class="sub-sb" id="confBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchsmarttags">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🏷 Умные теги</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🏷 Умные теги</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="applySmartTags()">⚡ Применить</button></div>
   </div>
   <div class="sub-sb" id="stBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchexport">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📤 Экспорт контактов</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📤 Экспорт контактов</div></div>
   <div class="sub-sb" id="expBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchcleanup">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧹 Чистка / личные</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧹 Чистка / личные</div></div>
   <div class="sub-sb" id="uchCleanBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-cloud">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">☁️ Облако</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">☁️ Облако</div></div>
   <div class="sub-sb" id="cloudBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchgraph">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🕸 Граф связей</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🕸 Граф связей</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="computeGraph()">🔄 Рассчитать</button></div>
   </div>
   <div class="sub-sb" id="graphBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchreminders">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⏰ Напоминания</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⏰ Напоминания</div></div>
   <div class="sub-sb" id="remBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchsynccenter">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔄 Центр синхронизации</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔄 Центр синхронизации</div></div>
   <div class="sub-sb" id="syncBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <div class="screen" id="s-uchai">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🤖 ИИ-ассистент</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🤖 ИИ-ассистент</div></div>
   <div class="sub-sb">
     <div id="aiChat" style="padding:12px 16px;height:calc(100vh - 180px);overflow-y:auto"></div>
     <div style="padding:8px 16px;display:flex;gap:8px;border-top:1px solid var(--sep);background:var(--bg)">
       <input id="aiInput" type="text" placeholder="Спросите о контактах..." onkeydown="if(event.key==='Enter')sendAiQuery()" class="input-flex">
-      <button class="btn btn-p" onclick="sendAiQuery()" style="padding:10px 16px">➤</button>
+      <button class="btn btn-p" onclick="sendAiQuery()" style="padding:10px 16px" aria-label="Отправить">➤</button>
     </div>
     <div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
       <span class="chip" onclick="quickAi('Сколько контактов?')">📊 Статистика</span>
@@ -3834,7 +3834,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
 <div class="screen" id="s-botsubs">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bs-name">Подписчики</div>
     <div class="hdr-meta"><div class="hdr-user" id="bs-cnt"></div></div>
   </div>
@@ -3848,7 +3848,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ ANALYTICS ══════════════════════ -->
 <div class="screen" id="s-analytics">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📊 Аналитика</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📊 Аналитика</div></div>
   <div class="sub-sb">
     <div class="sec">Рост подписчиков (7 дней)</div>
     <div class="lst" style="padding:14px 14px 10px;margin:0 16px">
@@ -3865,7 +3865,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ FUNNEL DETAIL ══════════════════════ -->
 <div class="screen" id="s-funneldetail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="fd-name">Воронка</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="toggleFunnelFromDetail()">Вкл/Выкл</button></div>
   </div>
@@ -3875,7 +3875,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ COMPETITORS ══════════════════════ -->
 <div class="screen" id="s-competitors">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📈 Конкуренты</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCompModal()">+ Добавить</button></div>
   </div>
@@ -3887,7 +3887,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ CRM CONTACTS ══════════════════════ -->
 <div class="screen" id="s-crm">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👤 CRM — Контакты</div>
     <div class="hdr-meta">
       <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCrmContactModal()">+ Добавить</button>
@@ -3908,7 +3908,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BOT AUDIENCE ══════════════════════ -->
 <div class="screen" id="s-audience">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="aud-name">Аудитория</div>
   </div>
   <div class="sub-sb" id="aud-body"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -3917,7 +3917,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ KEYWORDS ══════════════════════ -->
 <div class="screen" id="s-keywords">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔍 Позиции в поиске</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openKwModal()">+ Добавить</button></div>
   </div>
@@ -3929,7 +3929,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ BOT SCHEDULE ══════════════════════ -->
 <div class="screen" id="s-schedule">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="sch-name">Расписание</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openSchModal()">+ Запланировать</button></div>
   </div>
@@ -3941,7 +3941,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ TEMPLATES ══════════════════════ -->
 <div class="screen" id="s-templates">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📝 Шаблоны</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openTplModal()">+ Создать</button></div>
   </div>
@@ -3953,7 +3953,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MASS PUBLISH ══════════════════════ -->
 <div class="screen" id="s-masspub">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📡 Массовая публикация</div>
   </div>
   <div class="sub-sb">
@@ -4008,7 +4008,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ PROXIES ══════════════════════ -->
 <div class="screen" id="s-proxies">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌐 Прокси</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
   </div>
@@ -4085,7 +4085,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: DEEPLINKS ══════════════════════ -->
 <div class="screen" id="s-deeplinks">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔗 Диплинки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openDlModal()">+ Создать</button></div>
   </div>
@@ -4099,7 +4099,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: ENGAGEMENT ══════════════════════ -->
 <div class="screen" id="s-engagement">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔥 Активность аудитории</div>
   </div>
   <div class="sub-sb">
@@ -4118,7 +4118,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: BOT NOTE ══════════════════════ -->
 <div class="screen" id="s-botnote">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📝 Заметка к боту</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="saveBotNote()">Сохранить</button></div>
   </div>
@@ -4135,7 +4135,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: BOT COMMANDS ══════════════════════ -->
 <div class="screen" id="s-botcommands">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⌨️ Команды бота</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCmdModal()">+ Добавить</button></div>
   </div>
@@ -4154,7 +4154,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: BOT STATS ══════════════════════ -->
 <div class="screen" id="s-botstats">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bstats-title">📊 Статистика</div>
   </div>
   <div class="sub-sb">
@@ -4169,7 +4169,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: PROFILE SETTER ══════════════════════ -->
 <div class="screen" id="s-profilesetter">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🎨 Сеттер профилей</div>
   </div>
   <div class="sub-sb">
@@ -4208,7 +4208,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: ACCOUNT CLEANER ══════════════════════ -->
 <div class="screen" id="s-cleaner">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🧹 Очистка аккаунтов</div>
   </div>
   <div class="sub-sb">
@@ -4230,7 +4230,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: TOPOLOGY MAP ══════════════════════ -->
 <div class="screen" id="s-topology">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🗺 Карта топологии</div>
   </div>
   <div class="sub-sb">
@@ -4242,7 +4242,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: INFRA ANALYTICS ══════════════════════ -->
 <div class="screen" id="s-infra">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚡ Инфраструктура</div>
   </div>
   <div class="sub-sb">
@@ -4257,7 +4257,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: REPORTER ══════════════════════ -->
 <div class="screen" id="s-reporter">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🚨 Репортинг</div>
   </div>
   <div class="sub-sb">
@@ -4297,7 +4297,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: BOOST (Накрутка) ══════════════════════ -->
 <div class="screen" id="s-boost">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🚀 Накрутка</div>
   </div>
   <div class="sub-sb">
@@ -4337,7 +4337,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: ДИАГНОСТИКА ══════════════════════ -->
 <div class="screen" id="s-diag">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🩺 Диагностика</div>
   </div>
   <div class="sub-sb">
@@ -4350,7 +4350,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: НОВЫЕ ПОДПИСЧИКИ ══════════════════════ -->
 <div class="screen" id="s-newusers">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🆕 Новые пользователи</div>
   </div>
   <div class="sub-sb">
@@ -4384,7 +4384,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: GROWTH AGENT ══════════════════════ -->
 <!-- ══════════ МОТОР РОСТА (единый хаб) ══════════ -->
 <div class="screen" id="s-growthhub">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📈 Мотор роста</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📈 Мотор роста</div></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 4px">
       Единый взгляд на продвижение: активность инструментов и прирост каналов за период.
@@ -4406,7 +4406,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-growth">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌿 Агент роста</div>
   </div>
   <div class="sub-sb">
@@ -4446,7 +4446,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: QUICK POST ══════════════════════ -->
 <div class="screen" id="s-quickpost">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">✍️ Быстрый пост</div>
   </div>
   <div class="sub-sb">
@@ -4489,7 +4489,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: SPINTAX ══════════════════════ -->
 <div class="screen" id="s-spintax">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🎲 Spintax</div>
   </div>
   <div class="sub-sb">
@@ -4508,7 +4508,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: SEO ══════════════════════ -->
 <div class="screen" id="s-seo">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔍 SEO-оптимизация</div>
   </div>
   <div class="sub-sb">
@@ -4534,7 +4534,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: BOT FACTORY ══════════════════════ -->
 <div class="screen" id="s-botfactory">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🏭 Фабрика ботов</div>
   </div>
   <div class="sub-sb">
@@ -4618,7 +4618,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: PERSONA HUB ══════════════════════ -->
 <div class="screen" id="s-personas">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🎭 Персоны</div>
   </div>
   <div class="sub-sb">
@@ -4665,7 +4665,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: AUTO REGISTRAR ══════════════════════ -->
 <div class="screen" id="s-autoreg">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📱 Авторег</div>
   </div>
   <div class="sub-sb">
@@ -4705,7 +4705,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: PHONE CHECKER ══════════════════════ -->
 <div class="screen" id="s-phonechecker">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📞 Проверка номеров</div>
   </div>
   <div class="sub-sb">
@@ -4723,7 +4723,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: REFERRAL ══════════════════════ -->
 <div class="screen" id="s-referral">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🤝 Реферальная программа</div>
   </div>
   <div class="sub-sb">
@@ -4737,7 +4737,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: AI MEMORY ══════════════════════ -->
 <div class="screen" id="s-aimemory">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🧠 ИИ Память</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAiMemoryModal()">+ Запись</button></div>
   </div>
@@ -4749,7 +4749,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: NODES HUB ══════════════════════ -->
 <div class="screen" id="s-nodes">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🖥 Ноды</div>
     <div class="hdr-meta">
       <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNodeModal()">+ Добавить</button>
@@ -4771,7 +4771,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: NODE THREADS ══════════════════════ -->
 <div class="screen" id="s-nodethreads">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="nodethreads-title">🖥 Топики</div>
   </div>
   <div class="sub-sb">
@@ -4782,7 +4782,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════ КОМЬЮНИТИ (mini-Discord ноды) ══════════ -->
 <div class="screen" id="s-community">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🏛 Комьюнити</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCommunityCreate()">+ Создать</button></div>
   </div>
@@ -4796,7 +4796,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <div class="screen" id="s-communitynode">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="cnodeTitle">🏛 Сообщество</div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="cnodeTitle">🏛 Сообщество</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="addCommunityChannel()">+ Канал</button></div>
   </div>
   <div class="sub-sb">
@@ -4807,7 +4807,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <div class="screen" id="s-communitymembers">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🛡 Участники и роли</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🛡 Участники и роли</div></div>
   <div class="sub-sb">
     <div id="cmembersStats" style="display:flex;gap:8px;padding:6px 16px"></div>
     <div class="hint" style="font-size:12px;color:var(--hint);padding:0 16px 6px">Участники-флот ноды. «Назначить стаффом» — промоут аккаунтов в модераторы/админы.</div>
@@ -4819,7 +4819,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Модалка: создать ноду-сообщество -->
 <div class="mbg" id="mo-community-create" onclick="if(event.target===this)closeModal('mo-community-create')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-community-create')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-community-create')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🏛 Новое сообщество</div>
     <input type="text" id="ccTitle" placeholder="Название сообщества" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     <input type="text" id="ccChatId" placeholder="ID чата (-1001234567890)" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
@@ -4832,7 +4832,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: GIFTS ══════════════════════ -->
 <div class="screen" id="s-gifts">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🎁 Перевод подарков</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="scanGifts()">📡 Скан</button></div>
   </div>
@@ -4845,7 +4845,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: MASS INVITER ══════════════════════ -->
 <!-- ══════════ SEO-СОВЕТНИК ══════════ -->
 <div class="screen" id="s-seoobj">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔎 SEO объекта</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔎 SEO объекта</div></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
       Оценка находимости канала/бота/группы в поиске Telegram + конкретные советы.
@@ -4864,7 +4864,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════ A/B РЕЗУЛЬТАТЫ РАССЫЛКИ ══════════ -->
 <div class="screen" id="s-abresults">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧪 A/B результаты</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🧪 A/B результаты</div></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
       Последний A/B-тест рассылки: доставка по вариантам. Победитель определяется
@@ -4876,7 +4876,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════ ПЛАНИРОВЩИК КАМПАНИИ (цель → план) ══════════ -->
 <div class="screen" id="s-campaign">
-  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🎯 Планировщик кампании</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🎯 Планировщик кампании</div></div>
   <div class="sub-sb">
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
       Задай исход — планировщик посчитает по <b>реальной ёмкости флота</b>: реально
@@ -4905,7 +4905,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-massinvite">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📨 Массовый инвайт</div>
   </div>
   <div class="sub-sb">
@@ -5135,7 +5135,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════ SCREEN: КАРТОЧКА АККАУНТА (ИНВАЙТ) ══════════════════ -->
 <div class="screen" id="s-invacc">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👤 Аккаунт в инвайте</div>
   </div>
   <div class="sub-sb">
@@ -5146,7 +5146,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: STARS HUB ══════════════════════ -->
 <div class="screen" id="s-stars">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⭐ Звёзды</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openStarsExpModal()">+ A/B тест</button></div>
   </div>
@@ -5160,7 +5160,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Stars Experiment -->
 <div class="mbg" id="mo-starsexp" onclick="if(event.target===this)closeModal('mo-starsexp')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-starsexp')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-starsexp')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">⭐ Новый A/B тест Stars</div>
     <div class="field"><label>Бот</label><select id="se-bot" class="sel"><option value="">Загрузка...</option></select></div>
     <div class="field"><label>Название теста</label><input id="se-name" type="text" placeholder="Тест цены на контент" class="inp"></div>
@@ -5185,7 +5185,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: GHOST ENGINE ══════════════════════ -->
 <div class="screen" id="s-ghost">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👻 Призрачный движок</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openGhostModal()">+ Создать</button></div>
   </div>
@@ -5197,7 +5197,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Ghost Create -->
 <div class="mbg" id="mo-ghost" onclick="if(event.target===this)closeModal('mo-ghost')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-ghost')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-ghost')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">👻 Новый призрачный профиль</div>
     <div class="field"><label>Аккаунт</label><select id="gc-account" class="sel"><option value="">Загрузка...</option></select></div>
     <div class="field"><label>Персонаж</label><select id="gc-personality" class="sel">
@@ -5224,7 +5224,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: REG CHECKER ══════════════════════ -->
 <div class="screen" id="s-regcheck">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📅 Дата регистрации</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openRegCheckModal()">Проверить</button></div>
   </div>
@@ -5236,7 +5236,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: DM CAMPAIGNS ══════════════════════ -->
 <div class="screen" id="s-dmcampaigns">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">✉️ DM-кампании</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCmpModal()">+ Новая</button></div>
   </div>
@@ -5249,7 +5249,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: DM CAMPAIGN REPORT ══════════════════════ -->
 <div class="screen" id="s-dmreport">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📊 Отчёт кампании</div>
     <div class="hdr-meta"><div class="hdr-user" id="dmr-title"></div></div>
   </div>
@@ -5261,7 +5261,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: ACCOUNT WARMUP ══════════════════════ -->
 <div class="screen" id="s-warmup">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌱 Прогрев аккаунтов</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWarmupModal()">+ Запустить</button></div>
   </div>
@@ -5276,7 +5276,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-rehab">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🩹 Восстановление аккаунтов</div>
   </div>
   <div class="sub-sb">
@@ -5292,7 +5292,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-vlayer">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🧠 Модель поведения</div>
   </div>
   <div class="sub-sb">
@@ -5307,7 +5307,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-notary">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚖️ Нотариус</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNotaryNew()">+ Заверить</button></div>
   </div>
@@ -5323,7 +5323,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-notarynew">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚖️ Новое заверение</div>
   </div>
   <div class="sub-sb">
@@ -5346,7 +5346,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-notarycert">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚖️ Протокол</div>
   </div>
   <div class="sub-sb"><div id="notaryCert"><div class="spin-wrap"><div class="spin"></div></div></div></div>
@@ -5354,7 +5354,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-folders">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📁 Общие папки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openFolderCompose()">+ Собрать</button></div>
   </div>
@@ -5370,7 +5370,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-foldercompose">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📁 Новая папка</div>
   </div>
   <div class="sub-sb">
@@ -5387,7 +5387,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-foundbots">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🤖 Найденные боты</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="connectDiscoveredBots()">🔌 Подключить всех</button></div>
   </div>
@@ -5403,7 +5403,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="screen" id="s-warmuplog">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌱 Что делает аккаунт</div>
   </div>
   <div class="sub-sb">
@@ -5416,7 +5416,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: A/B EXPERIMENTS ══════════════════════ -->
 <div class="screen" id="s-experiments">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🧪 A/B Эксперименты</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openExpModal()">+ Создать</button></div>
   </div>
@@ -5428,7 +5428,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: Experiment Create -->
 <div class="mbg" id="mo-exp" onclick="if(event.target===this)closeModal('mo-exp')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-exp')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-exp')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🧪 Новый A/B эксперимент</div>
     <div class="field"><label>Бот</label><select id="ec-bot" class="sel"><option value="">Загрузка...</option></select></div>
     <div class="field"><label>Название</label><input id="ec-name" type="text" placeholder="Тест приветствия" class="inp"></div>
@@ -5454,7 +5454,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: EXPERIMENT DETAIL ══════════════════════ -->
 <div class="screen" id="s-expdetail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="expdetail-title">🧪 Эксперимент</div>
   </div>
   <div class="sub-sb">
@@ -5465,7 +5465,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: HEALTH DASHBOARD ══════════════════════ -->
 <div class="screen" id="s-health">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">❤️ Дэшборд здоровья</div>
   </div>
   <div class="sub-sb">
@@ -5478,7 +5478,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: ACCOUNT SHIELD ══════════════════════ -->
 <div class="screen" id="s-shield">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🛡 Щит аккаунтов</div>
   </div>
   <div class="sub-sb">
@@ -5493,7 +5493,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: AD INTELLIGENCE ══════════════════════ -->
 <div class="screen" id="s-adintel">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📡 Разведка рекламы</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
   </div>
@@ -5509,7 +5509,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: NETWORK OVERVIEW ══════════════════════ -->
 <div class="screen" id="s-network">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🕸 Сеть ботов</div>
   </div>
   <div class="sub-sb">
@@ -5521,7 +5521,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: BOT WEBHOOK ══════════════════════ -->
 <div class="screen" id="s-webhook">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="webhook-title">🔗 Вебхук</div>
   </div>
   <div class="sub-sb">
@@ -5532,7 +5532,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: RELAY SESSIONS ══════════════════════ -->
 <div class="screen" id="s-relay">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="relay-title">💬 Входящие</div>
     <div class="hdr-meta" id="relay-toggle"></div>
   </div>
@@ -5544,7 +5544,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: RELAY MESSAGES ══════════════════════ -->
 <div class="screen" id="s-relaymsgs">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="relaymsgs-title">💬 Диалог</div>
   </div>
   <div class="sub-sb" id="relayMsgBody" style="padding:12px;display:flex;flex-direction:column;gap:8px">
@@ -5555,7 +5555,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: API KEYS ══════════════════════ -->
 <div class="screen" id="s-apikeys">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔑 API Ключи</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openApiKeyModal()">+ Создать</button></div>
   </div>
@@ -5572,7 +5572,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Modal: API Key Create -->
 <div class="mbg" id="mo-apikey" onclick="if(event.target===this)closeModal('mo-apikey')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-apikey')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-apikey')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔑 Новый API ключ</div>
     <div class="field"><label>Название ключа</label><input id="ak-name" type="text" maxlength="64" placeholder="Мой сервис" class="inp"></div>
     <div id="ak-result" style="display:none;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.3);border-radius:10px;padding:12px;margin:10px 0">
@@ -5591,7 +5591,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: STRIKE ══════════════════════ -->
 <div class="screen" id="s-strike">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚔️ Массовые жалобы</div>
     <div class="hdr-meta" id="strikeHdrBtn"></div>
   </div>
@@ -5606,7 +5606,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: STRIKE LAUNCH ══════════════════════ -->
 <div class="mbg" id="mo-strike" onclick="if(event.target===this)closeStrikeModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeStrikeModal()">✕</div>
+    <div class="modal-x" onclick="closeStrikeModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title" id="strikeMTitle">⚔️ Новый Strike — Шаг 1/3</div>
     <!-- Step 1: Target -->
     <div id="strikeStep1">
@@ -5675,7 +5675,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: TAKEDOWN KIT ══════════════════════ -->
 <div class="mbg" id="mo-takedown" onclick="if(event.target===this)closeTakedownKit()">
   <div class="modal">
-    <div class="modal-x" onclick="closeTakedownKit()">✕</div>
+    <div class="modal-x" onclick="closeTakedownKit()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📋 Пакет жалобы</div>
     <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:10px">
       Честно: авто-подача в Apple/Google невозможна (вход+captcha). Но именно эти
@@ -5690,7 +5690,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: AUDIENCE PARSER ══════════════════════ -->
 <div class="screen" id="s-parser">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔭 Парсер аудитории</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openParserModal()">▶ Запустить</button></div>
   </div>
@@ -5714,7 +5714,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: CRM DEALS ══════════════════════ -->
 <div class="screen" id="s-crmdeals">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">💼 CRM — Сделки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openDealModal()">+ Сделка</button></div>
   </div>
@@ -5734,7 +5734,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: WORKSPACES ══════════════════════ -->
 <div class="screen" id="s-workspaces">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🏢 Рабочие пространства</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWsModal()">+ Создать</button></div>
   </div>
@@ -5749,7 +5749,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: PROMO PLATFORM ══════════════════════ -->
 <div class="screen" id="s-promo">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🚀 Продвижение в топ</div>
   </div>
   <div class="sub-sb">
@@ -5787,7 +5787,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: SETTINGS ══════════════════════ -->
 <div class="screen" id="s-settings">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚙️ Настройки</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="saveSettings()">Сохранить</button></div>
   </div>
@@ -5842,7 +5842,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: BILLING ══════════════════════ -->
 <div class="screen" id="s-billing">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">💳 Тариф и оплата</div>
   </div>
   <div class="sub-sb">
@@ -5870,7 +5870,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: ERROR REPORT ══════════════════════ -->
 <div class="screen" id="s-errreport">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🐛 Баг-репорт</div>
   </div>
   <div class="sub-sb" style="padding:12px 0">
@@ -5905,7 +5905,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: BROADCAST ══════════════════════ -->
 <div class="mbg" id="bcastMbg" onclick="if(event.target===this)closeBcast()">
   <div class="modal">
-    <div class="modal-x" onclick="closeBcast()">✕</div>
+    <div class="modal-x" onclick="closeBcast()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📢 Новая рассылка</div>
     <div class="field">
       <label>Бот</label>
@@ -5953,7 +5953,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: AUTO-REPLY ══════════════════════ -->
 <div class="mbg" id="arMbg" onclick="if(event.target===this)closeArModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeArModal()">✕</div>
+    <div class="modal-x" onclick="closeArModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">💬 Новый авто-ответ</div>
     <div class="field">
       <label>Тип триггера</label>
@@ -6011,7 +6011,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: CREATE FUNNEL ══════════════════════ -->
 <div class="mbg" id="funnelMbg" onclick="if(event.target===this)closeFunnelModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeFunnelModal()">✕</div>
+    <div class="modal-x" onclick="closeFunnelModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔄 Новая воронка</div>
     <div class="field">
       <label>Название</label>
@@ -6040,7 +6040,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: COMPETITOR ══════════════════════ -->
 <div class="mbg" id="compMbg" onclick="if(event.target===this)closeCompModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeCompModal()">✕</div>
+    <div class="modal-x" onclick="closeCompModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📈 Добавить конкурента</div>
     <div class="field">
       <label>Username канала</label>
@@ -6058,7 +6058,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: NETWORK BROADCAST ══════════════════════ -->
 <div class="mbg" id="netbcMbg" onclick="if(event.target===this)closeNetBc()">
   <div class="modal">
-    <div class="modal-x" onclick="closeNetBc()">✕</div>
+    <div class="modal-x" onclick="closeNetBc()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📣 Рассылка по всем ботам</div>
     <div class="field">
       <label>Текст сообщения</label>
@@ -6073,7 +6073,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: NETWORK ROLE ══════════════════════ -->
 <div class="mbg" id="netRoleMbg" onclick="if(event.target===this)closeNetRoleModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeNetRoleModal()">✕</div>
+    <div class="modal-x" onclick="closeNetRoleModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">✏️ Роль бота</div>
     <div class="field"><label>Бот</label><div id="netRoleBotName" style="color:var(--accent);font-weight:600"></div></div>
     <div class="field">
@@ -6093,7 +6093,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: KEYWORD ══════════════════════ -->
 <div class="mbg" id="kwMbg" onclick="if(event.target===this)closeKwModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeKwModal()">✕</div>
+    <div class="modal-x" onclick="closeKwModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔍 Добавить ключевое слово</div>
     <div class="field">
       <label>Бот</label>
@@ -6112,7 +6112,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: SCHEDULE ══════════════════════ -->
 <div class="mbg" id="schMbg" onclick="if(event.target===this)closeSchModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeSchModal()">✕</div>
+    <div class="modal-x" onclick="closeSchModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">⏰ Запланировать рассылку</div>
     <div class="field">
       <label>Текст сообщения</label>
@@ -6140,7 +6140,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: TEMPLATE ══════════════════════ -->
 <div class="mbg" id="tplMbg" onclick="if(event.target===this)closeTplModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeTplModal()">✕</div>
+    <div class="modal-x" onclick="closeTplModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📝 Новый шаблон</div>
     <div class="field">
       <label>Название шаблона</label>
@@ -6159,7 +6159,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: PROXY ══════════════════════ -->
 <div class="mbg" id="proxyMbg" onclick="if(event.target===this)closeProxyModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeProxyModal()">✕</div>
+    <div class="modal-x" onclick="closeProxyModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌐 Добавить прокси</div>
     <div class="field">
       <label>URL прокси</label>
@@ -6177,7 +6177,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="mbg" id="accImportMbg" onclick="if(event.target===this)closeAccImportModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeAccImportModal()">✕</div>
+    <div class="modal-x" onclick="closeAccImportModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📱 Добавить аккаунт</div>
     <!-- Переключатель способа входа: как в боте (строка / номер / QR) -->
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
@@ -6275,7 +6275,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: DEEPLINK ══════════════════════ -->
 <div class="mbg" id="dlMbg" onclick="if(event.target===this)closeDlModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeDlModal()">✕</div>
+    <div class="modal-x" onclick="closeDlModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔗 Новый Deep Link</div>
     <div class="field">
       <label>Название</label>
@@ -6294,7 +6294,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: BOT COMMAND ══════════════════════ -->
 <div class="mbg" id="cmdMbg" onclick="if(event.target===this)closeCmdModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeCmdModal()">✕</div>
+    <div class="modal-x" onclick="closeCmdModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">⌨️ Добавить команду</div>
     <div class="field">
       <label>Команда (без /)</label>
@@ -6313,7 +6313,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- AI Memory modal -->
 <div class="mbg" id="aiMemMbg" onclick="if(event.target===this)closeAiMemoryModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeAiMemoryModal()">✕</div>
+    <div class="modal-x" onclick="closeAiMemoryModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🧠 Новая запись в памяти</div>
     <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" placeholder="Краткое описание"></div>
     <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для ИИ-ассистента…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
@@ -6325,7 +6325,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Reg Check modal -->
 <div class="mbg" id="regCheckMbg" onclick="if(event.target===this)closeRegCheckModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeRegCheckModal()">✕</div>
+    <div class="modal-x" onclick="closeRegCheckModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📅 Проверить дату регистрации</div>
     <div class="field"><label>Username, @username, ссылка или ID</label><input type="text" id="regCheckTarget" placeholder="@username или t.me/group"></div>
     <div class="field-note">Определяет примерную дату регистрации аккаунта или создания группы/канала</div>
@@ -6337,7 +6337,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- Warmup modal -->
 <div class="mbg" id="warmupMbg" onclick="if(event.target===this)closeWarmupModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeWarmupModal()">✕</div>
+    <div class="modal-x" onclick="closeWarmupModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌱 Запустить прогрев</div>
     <div class="field"><label>Аккаунт</label><select id="warmupAccSel"><option value="">Загрузка...</option></select></div>
     <div class="field">
@@ -6395,7 +6395,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <div class="mbg" id="adIntelMbg" onclick="if(event.target===this)closeAdIntelModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeAdIntelModal()">✕</div>
+    <div class="modal-x" onclick="closeAdIntelModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📡 Добавить канал для анализа</div>
     <div class="field"><label>Username канала (без @)</label><input type="text" id="adIntelCh" placeholder="target_channel"></div>
     <div class="field-note">ИИ просканирует рекламу в канале и оценит качество аудитории</div>
@@ -6407,7 +6407,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: PARSER ══════════════════════ -->
 <div class="mbg" id="parserMbg" onclick="if(event.target===this)closeParserModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeParserModal()">✕</div>
+    <div class="modal-x" onclick="closeParserModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔭 Запустить парсинг</div>
     <div class="field"><label>Источник (@username или ссылка)</label><input type="text" id="parserSrc" placeholder="@channel или t.me/channel"></div>
     <div class="field">
@@ -6432,7 +6432,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: CRM DEAL ══════════════════════ -->
 <div class="mbg" id="dealMbg" onclick="if(event.target===this)closeDealModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeDealModal()">✕</div>
+    <div class="modal-x" onclick="closeDealModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">💼 Новая сделка</div>
     <div class="field"><label>Название</label><input type="text" id="dealTitle" maxlength="200" placeholder="Напр: Продажа подписки"></div>
     <div class="field"><label>Контакт</label><input type="text" id="dealContact" maxlength="200" placeholder="@username или имя"></div>
@@ -6457,7 +6457,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: WORKSPACE ══════════════════════ -->
 <div class="mbg" id="wsMbg" onclick="if(event.target===this)closeWsModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeWsModal()">✕</div>
+    <div class="modal-x" onclick="closeWsModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🏢 Новое пространство</div>
     <div class="field"><label>Название</label><input type="text" id="wsName" maxlength="100" placeholder="Напр: Команда продаж"></div>
     <div class="field"><label>Описание (необязательно)</label><input type="text" id="wsDesc" maxlength="500" placeholder="Описание..."></div>
@@ -6469,7 +6469,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: PROMO ORDER ══════════════════════ -->
 <div class="mbg" id="promoOrderMbg" onclick="if(event.target===this)closePromoOrderModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closePromoOrderModal()">✕</div>
+    <div class="modal-x" onclick="closePromoOrderModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📋 Новый заказ</div>
     <div class="field"><label>Ключевое слово</label><input type="text" id="promoKw" placeholder="Напр: игровой бот"></div>
     <div class="field"><label>Целевая позиция (1-50)</label><input type="number" id="promoPos" min="1" max="50" value="1"></div>
@@ -6485,7 +6485,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: PROMO BOT ══════════════════════ -->
 <div class="mbg" id="promoBotMbg" onclick="if(event.target===this)closePromoBotModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closePromoBotModal()">✕</div>
+    <div class="modal-x" onclick="closePromoBotModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📦 Добавить бот в склад</div>
     <div class="field"><label>Username бота (без @)</label><input type="text" id="promoBotUsername" placeholder="my_bot" oninput="this.value=this.value.replace(/^@/,'')"></div>
     <div class="field-note">Бот будет «созревать» 21 день перед продвижением</div>
@@ -6497,7 +6497,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: DM CAMPAIGN ══════════════════════ -->
 <div class="mbg" id="cmpMbg" onclick="if(event.target===this)closeCmpModal()">
   <div class="modal">
-    <div class="modal-x" onclick="closeCmpModal()">✕</div>
+    <div class="modal-x" onclick="closeCmpModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📨 Новая DM-кампания</div>
     <div class="field">
       <label>Название кампании</label>
@@ -6584,7 +6584,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: POST TO CHANNEL ══════════════════════ -->
 <div class="mbg" id="chPostMbg" onclick="if(event.target===this)closeChPost()">
   <div class="modal">
-    <div class="modal-x" onclick="closeChPost()">✕</div>
+    <div class="modal-x" onclick="closeChPost()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📝 Публикация в канал</div>
     <div class="field">
       <label>Текст поста</label>
@@ -6610,7 +6610,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: REFERRAL ══════════════════════ -->
 <div class="mbg" id="refMbg" onclick="if(event.target===this)closeRef()">
   <div class="modal">
-    <div class="modal-x" onclick="closeRef()">✕</div>
+    <div class="modal-x" onclick="closeRef()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🎁 Реферальная программа</div>
     <div id="refBody" style="text-align:center;padding:8px 0 16px">
       <div class="spin-wrap"><div class="spin"></div></div>
@@ -6622,7 +6622,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: RANKING ENGINE ══════════════════════ -->
 <div class="screen" id="s-ranking">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🏆 Рейтинг — позиции</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openRankingAddModal()">+ Ключевое слово</button></div>
   </div>
@@ -6654,7 +6654,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: ADD RANKING KEYWORD ══════════════════════ -->
 <div class="mbg" id="mo-ranking-add" onclick="if(event.target===this)closeModal('mo-ranking-add')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-ranking-add')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-ranking-add')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔍 Добавить ключевое слово</div>
     <div class="field">
       <label>Ключевое слово *</label>
@@ -6681,7 +6681,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: NETWORK BUILDER ══════════════════════ -->
 <div class="screen" id="s-network-builder">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🕸️ Сетки — конструктор</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openNetBuilderCreateModal()">+ Новая сеть</button></div>
   </div>
@@ -6738,7 +6738,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: CREATE NETWORK ══════════════════════ -->
 <div class="mbg" id="mo-net-create" onclick="if(event.target===this)closeModal('mo-net-create')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-net-create')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-net-create')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🕸️ Новая сеть</div>
     <div class="field">
       <label>Название *</label>
@@ -6766,7 +6766,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: ADD NODE ══════════════════════ -->
 <div class="mbg" id="mo-net-node" onclick="if(event.target===this)closeModal('mo-net-node')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-net-node')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-net-node')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">➕ Добавить узел</div>
     <div class="field">
       <label>Тип узла *</label>
@@ -6793,7 +6793,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: ADD EDGE ══════════════════════ -->
 <div class="mbg" id="mo-net-edge" onclick="if(event.target===this)closeModal('mo-net-edge')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-net-edge')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-net-edge')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔗 Добавить ребро</div>
     <div class="field">
       <label>Из узла *</label>
@@ -6820,7 +6820,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: WORKFLOWS ══════════════════════ -->
 <div class="screen" id="s-workflows">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔄 Воркфлоу</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWorkflowCreateModal()">+ Создать</button></div>
   </div>
@@ -6858,7 +6858,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: CREATE WORKFLOW ══════════════════════ -->
 <div class="mbg" id="mo-wf-create" onclick="if(event.target===this)closeModal('mo-wf-create')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-wf-create')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-wf-create')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔄 Новый воркфлоу</div>
     <div class="field">
       <label>Название *</label>
@@ -6880,7 +6880,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: WORKFLOW DETAIL ══════════════════════ -->
 <div class="screen" id="s-workflow-detail">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="wfd-name">Воркфлоу</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openWfAddStepModal()">+ Шаг</button></div>
   </div>
@@ -6890,7 +6890,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ MODAL: ADD WORKFLOW STEP ══════════════════════ -->
 <div class="mbg" id="mo-wf-step" onclick="if(event.target===this)closeModal('mo-wf-step')">
   <div class="modal">
-    <div class="modal-x" onclick="closeModal('mo-wf-step')">✕</div>
+    <div class="modal-x" onclick="closeModal('mo-wf-step')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">➕ Добавить шаг</div>
     <div class="field">
       <label>Тип шага *</label>
@@ -6928,7 +6928,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <!-- ══════════════════════ SCREEN: AUDIENCE ANALYTICS ══════════════════════ -->
 <div class="screen" id="s-audience-analytics">
   <div class="hdr">
-    <div class="back" onclick="back()">←</div>
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👥 Аудитория+ — анализ</div>
   </div>
   <div class="sub-sb">
@@ -7552,7 +7552,7 @@ function showOpCompleteBatch(list) {
   const names = list.slice(0, 3)
     .map(o => (o.label || o.op_type || 'операция')).join(', ');
   const tail = list.length > 3 ? ` и ещё ${list.length - 3}` : '';
-  el.innerHTML = `<span class="od-x" onclick="event.stopPropagation();hideOpDone()">×</span>
+  el.innerHTML = `<span class="od-x" onclick="event.stopPropagation();hideOpDone()" role="button" tabindex="0" aria-label="Закрыть">×</span>
     <div class="od-title">${esc(head)}</div>
     <div class="od-sum">${esc(parts.join(' · '))}\n${esc(names + tail)}</div>
     <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
@@ -7581,7 +7581,7 @@ function showOpComplete(op) {
   // Плашка исхода — точка действия, а не тупик: при ошибке даём ПОВТОР в один
   // тап прямо здесь (без похода в «Операции» → меньше переходов). Кнопки со
   // stopPropagation, чтобы не открывать детали случайно.
-  el.innerHTML = `<span class="od-x" onclick="event.stopPropagation();hideOpDone()">×</span>
+  el.innerHTML = `<span class="od-x" onclick="event.stopPropagation();hideOpDone()" role="button" tabindex="0" aria-label="Закрыть">×</span>
     <div class="od-title">${head}</div>
     <div class="od-sum">${esc(body)}</div>
     <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
@@ -8185,7 +8185,7 @@ async function loadOrganismPulse() {
               <div style="font-size:13px;font-weight:600">${sv.e} ${esc(s.title)}</div>
               <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
             </div>
-            <span onclick="dismissPulse('${esc(s.id)}')" style="cursor:pointer;color:var(--hint);font-size:13px;padding:2px">✕</span>
+            <span onclick="dismissPulse('${esc(s.id)}')" style="cursor:pointer;color:var(--hint);font-size:13px;padding:2px" role="button" tabindex="0" aria-label="Закрыть">✕</span>
           </div>
           <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
@@ -8322,11 +8322,11 @@ async function cwLoad(){
       const badge=st==='active'?'🟢 активен':(st==='paused'?'⏸ пауза':'⏹ остановлен');
       const modeLbl=({mixed:'смешанный',engage:'вовлечение',seed:'оживление'})[x.mode]||x.mode;
       const ctrl=st==='stopped'?'':(st==='active'
-        ?`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'paused')">⏸</button>`
-        :`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'active')">▶</button>`);
+        ?`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'paused')" aria-label="Приостановить">⏸</button>`
+        :`<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'active')" aria-label="Возобновить">▶</button>`);
       return `<div class="li"><div class="li-body"><div class="li-name">${esc(x.chat_ref)}</div>
         <div class="li-sub">${badge} · ${esc(modeLbl)} · отправлено ${x.messages_sent||0}</div></div>
-        <div style="display:flex;gap:5px">${ctrl}<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'stopped')">⏹</button></div></div>`;
+        <div style="display:flex;gap:5px">${ctrl}<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="cwStatus(${x.id},'stopped')" aria-label="Остановить">⏹</button></div></div>`;
     }).join('');
   }catch(e){el.innerHTML=errHtml(e.message,'cwLoad()');}
 }
@@ -8549,7 +8549,7 @@ function renderNextActions(actions) {
         <div class="copilot-reason">${esc(a.reason||'')}</div>
         ${footer}
       </div>
-      <div class="copilot-x" onclick="event.stopPropagation();copilotDismiss('${a.id}')" title="Отложить">✕</div>
+      <div class="copilot-x" onclick="event.stopPropagation();copilotDismiss('${a.id}')" title="Отложить" role="button" tabindex="0">✕</div>
     </div>`;
   }).join('');
   lists.forEach(l => { l.innerHTML = html; const w = l.closest('.copilot-wrap'); if (w) w.style.display='block'; });
@@ -10622,7 +10622,7 @@ function renderAccountContacts(list) {
     // Обычный режим: написать можно ЛЮБОМУ контакту (по @username или по id+hash).
     return `<div class="li"><div class="row-ico" style="background:var(--bg-green-16)">${ico}</div>
       <div class="li-body"><div class="li-name">${esc(c.name)}${c.premium?' ⭐':''}</div><div class="li-sub">${sub}</div></div>
-      <div class="li-right"><button class="btn btn-s" style="padding:5px 12px;font-size:12px" onclick="event.stopPropagation();writeContact(${c.id})">✍️</button></div></div>`;
+      <div class="li-right"><button class="btn btn-s" style="padding:5px 12px;font-size:12px" onclick="event.stopPropagation();writeContact(${c.id})" aria-label="Написать">✍️</button></div></div>`;
   }).join(''));
 }
 
@@ -12788,7 +12788,7 @@ async function loadCRM(append) {
           <div class="li-sub">${c.phone?esc(c.phone)+' · ':''} ${tags||'без тегов'} ${c.source?`· <span class="badge b-gy" style="font-size:10px">${esc(c.source)}</span>`:''}</div>
         </div>
         <div class="li-right">
-          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteCrmContact(${c.id})">🗑</button>
+          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteCrmContact(${c.id})" aria-label="Удалить">🗑</button>
         </div>
       </div>`;
     }).join('');
@@ -14995,7 +14995,7 @@ async function loadDeeplinks() {
           <div class="row-name">${esc(l.name)}</div>
           <div class="row-val">?start=${esc(l.start_param)} · ${num(l.click_count)} кликов · ${num(l.unique_users)} уник.</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${l.id})">✕</button></div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${l.id})" aria-label="Удалить">✕</button></div>
       </div>
     `).join(''));
   } catch(e) { txt('dlList', empty('⚠️','Ошибка загрузки',e.message)); }
@@ -15142,7 +15142,7 @@ async function loadBotCommands() {
           <div class="row-name">/${esc(c.command)}</div>
           <div class="row-val">${esc(c.description)}</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteCmd(${i})">✕</button></div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteCmd(${i})" aria-label="Удалить">✕</button></div>
       </div>
     `).join(''));
   } catch(e) { txt('cmdList', empty('⚠️','Ошибка',e.message)); }
@@ -16826,7 +16826,7 @@ async function openSavedSegments() {
       <div style="display:flex;align-items:center;gap:8px">
         <div class="li-body"><div class="li-name">${esc(s.name)}</div>
           <div class="li-sub">${s.count!=null?('👥 '+num(s.count)+' контактов'):'—'}</div></div>
-        <span style="cursor:pointer;color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id})">🗑</span>
+        <span style="cursor:pointer;color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id})" role="button" tabindex="0" aria-label="Удалить">🗑</span>
       </div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-p" style="flex:1 1 auto;font-size:12px" onclick="segmentActFromSaved(${s.id},'write')">✍️ Написать</button>
@@ -16971,10 +16971,10 @@ async function loadIntentRules() {
           <div class="li-sub">${act||'— без действия —'} · сработ.: ${r.hits||0}</div>
         </div>
         <div class="li-right" style="display:flex;gap:8px;align-items:center">
-          ${r.hits ? `<span style="cursor:pointer;font-size:15px" onclick="openIntentHits(${r.id})" title="Показать, на что сработало">📜</span>` : ''}
-          <span style="cursor:pointer;font-size:15px" onclick="editIntentRule(${r.id})" title="Изменить">✏️</span>
+          ${r.hits ? `<span style="cursor:pointer;font-size:15px" onclick="openIntentHits(${r.id})" title="Показать, на что сработало" role="button" tabindex="0">📜</span>` : ''}
+          <span style="cursor:pointer;font-size:15px" onclick="editIntentRule(${r.id})" title="Изменить" role="button" tabindex="0">✏️</span>
           <span style="cursor:pointer;font-size:15px" onclick="toggleIntentRule(${r.id})" title="Вкл/выкл">${r.is_active?'⏸':'▶️'}</span>
-          <span style="cursor:pointer;font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id})" title="Удалить">🗑</span>
+          <span style="cursor:pointer;font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id})" title="Удалить" role="button" tabindex="0">🗑</span>
         </div>
       </div>`;
     }).join('');
@@ -18122,7 +18122,7 @@ async function openPersonas() {
         </div>
         <div class="row-right" style="display:flex;gap:6px">
           <button class="btn ${p.is_active?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="togglePersona(${p.id},${p.is_active})">${p.is_active?'Выкл':'Вкл'}</button>
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deletePersona(${p.id})">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deletePersona(${p.id})" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -18344,7 +18344,7 @@ async function openAiMemory() {
           <div class="row-val">${m.title?esc(m.body.slice(0,60)):''} ${(m.tags||[]).map(t=>'#'+esc(t)).join(' ')}</div>
         </div>
         <div class="row-right">
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteAiMem(${m.id})">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteAiMem(${m.id})" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -18531,8 +18531,8 @@ async function openNodes() {
           <div class="row-val">${n.open_threads||0} открытых топиков · ${n.total_threads||0} всего</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
-          <span class="chev" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">›</span>
-          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteNode(${n.id})">🗑</button>
+          <span class="chev" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')" role="button" tabindex="0" aria-label="Открыть ветки">›</span>
+          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteNode(${n.id})" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -18947,7 +18947,7 @@ async function openGhost() {
         </div>
         <div class="row-right" style="display:flex;gap:6px">
           <button class="btn ${p.enabled?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleGhost(${p.id},${p.enabled})">${p.enabled?'Выкл':'Вкл'}</button>
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteGhost(${p.id})">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteGhost(${p.id})" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -19227,7 +19227,7 @@ async function openDmCampaigns() {
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
           ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↻ Повторить</button>`:''}
           ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick="editDm(${c.id})">✏️</button>`:''}
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}')">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}')" aria-label="Удалить">🗑</button>
         </div>
       </div>`;
     }).join(''));
@@ -19495,10 +19495,10 @@ async function openWarmup() {
         </div>
         <div class="row-right" style="display:flex;gap:5px">
           ${p.pause_reason==='restricted'?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openRehab()" title="Восстановление">🩹</button>`:''}
-          ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})">⏸</button>`:''}
-          ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})">▶</button>`:''}
-          ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})">⏹</button>`:''}
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id})">🗑</button>
+          ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})" aria-label="Приостановить прогрев">⏸</button>`:''}
+          ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})" aria-label="Возобновить прогрев">▶</button>`:''}
+          ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})" aria-label="Остановить">⏹</button>`:''}
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id})" aria-label="Удалить">🗑</button>
         </div>
       </div>`;
     }).join(''));
@@ -19801,7 +19801,7 @@ async function openFolders() {
           <div class="row-name">${esc(f.title)} · ${f.chat_count} чат(ов)${f.join_count?' · добавили '+f.join_count:''}</div>
           <div class="row-val" style="word-break:break-all">${esc(String(line).substring(0,90))}</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id})">🗑</button></div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id})" aria-label="Удалить">🗑</button></div>
       </div>`;
     }).join(''));
   } catch(e) { txt('foldersList', empty('⚠️','Ошибка',e.message)); }
@@ -19880,9 +19880,9 @@ async function openRehab() {
           ${s.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(s.hint)}</div>`:''}
         </div>
         <div class="row-right" style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
-          ${s.active?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'now')">⏩</button>`:''}
-          ${s.active?`<button class="btn btn-o" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'off')">⏹</button>`:''}
-          ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')">🔁</button>`:''}
+          ${s.active?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'now')" aria-label="Пропустить шаг">⏩</button>`:''}
+          ${s.active?`<button class="btn btn-o" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'off')" aria-label="Остановить">⏹</button>`:''}
+          ${s.restartable?`<button class="btn btn-g" style="padding:5px 9px;font-size:12px;min-width:0" onclick="rehabAct(${a.acc_id},'restart')" aria-label="Повторить шаг">🔁</button>`:''}
         </div>
       </div>`;
     }).join(''));
@@ -20865,7 +20865,7 @@ async function loadDeals() {
         </div>
         <div class="row-right" style="display:flex;gap:5px;flex-direction:column">
           ${nextStage?`<button class="btn btn-p" style="padding:4px 8px;min-width:0;font-size:11px" onclick="advanceDeal(${d2.id},'${nextStage}')">→ ${(STAGE_LABELS[nextStage]||nextStage).split(' ')[1]||nextStage}</button>`:''}
-          <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id})">✕</button>
+          <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id})" aria-label="Удалить">✕</button>
         </div>
       </div>`;
     }).join(''));
@@ -21026,8 +21026,8 @@ function renderPromoTab(tab) {
         <div class="row-val" style="color:var(--hint)">${ago(o.created_at)}</div>
       </div>
       <div class="row-right" style="display:flex;gap:6px">
-        ${o.status==='waiting'&&o.bot_id&&o.smm_panel_id?`<button class="btn btn-p" style="padding:5px 10px;min-width:0;font-size:12px" onclick="boostPromoOrder(${o.id})">🚀</button>`:''}
-        ${o.status!=='cancelled'&&o.status!=='transferred'?`<button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="cancelPromoOrder(${o.id})">✕</button>`:''}
+        ${o.status==='waiting'&&o.bot_id&&o.smm_panel_id?`<button class="btn btn-p" style="padding:5px 10px;min-width:0;font-size:12px" onclick="boostPromoOrder(${o.id})" aria-label="Заказать продвижение">🚀</button>`:''}
+        ${o.status!=='cancelled'&&o.status!=='transferred'?`<button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="cancelPromoOrder(${o.id})" aria-label="Остановить">✕</button>`:''}
       </div>
     </div>
   `).join(''));
@@ -21254,7 +21254,7 @@ async function loadAssetTpl(type) {
           <div class="row-val">${r.asset_type} · ${ago(r.created_at)}</div>
         </div>
         <div class="row-right">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="deleteAssetTpl(${r.id},this)">✕</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="deleteAssetTpl(${r.id},this)" aria-label="Удалить">✕</button>
         </div>
       </div>
     `).join(''));
@@ -21383,7 +21383,7 @@ async function openPresencePacks() {
           ${r.target_url?`<div class="row-val" style="color:var(--hint)">${esc(r.target_url)}</div>`:''}
         </div>
         <div class="row-right">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="event.stopPropagation();deletePresencePack(${r.id},this)">✕</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="event.stopPropagation();deletePresencePack(${r.id},this)" aria-label="Удалить">✕</button>
           <span class="chev">›</span>
         </div>
       </div>
@@ -22152,7 +22152,7 @@ async function openEcosystems() {
           ${r.region?`<div class="row-val" style="color:var(--hint)">📍 ${esc(r.region)}</div>`:''}
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="event.stopPropagation();deleteEcosystem(${r.id},this)">✕</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="event.stopPropagation();deleteEcosystem(${r.id},this)" aria-label="Удалить">✕</button>
           <span class="chev">›</span>
         </div>
       </div>
@@ -22365,7 +22365,7 @@ async function loadChannelRanks() {
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="font-size:15px;font-weight:700;color:${posColor};white-space:nowrap">${posLabel}${trend}</div>
-          <div class="back" style="width:32px;height:32px;font-size:16px" onclick="removeChannelKeyword(${k.id})">🗑</div>
+          <div class="back" style="width:32px;height:32px;font-size:16px" onclick="removeChannelKeyword(${k.id})" role="button" tabindex="0" aria-label="Удалить">🗑</div>
         </div>
       </div>`;
     }).join(''));
@@ -22612,7 +22612,7 @@ async function loadMultigeo() {
           ${p.short_description?`<div class="row-val">💬 ${esc(p.short_description)}</div>`:''}
         </div>
         <div class="row-right">
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="openMultigeoSetModal('${p.lang}','${esc(p.name||'')}','${esc(p.description||'')}','${esc(p.short_description||'')}')">✏️</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="openMultigeoSetModal('${p.lang}','${esc(p.name||'')}','${esc(p.description||'')}','${esc(p.short_description||'')}')" aria-label="Изменить">✏️</button>
         </div>
       </div>
     `).join(''));
@@ -23036,7 +23036,7 @@ async function openSelfPromo() {
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleSelfPromo(${r.id},this)">${r.is_active?'Выкл':'Вкл'}</button>
           ${r.is_active?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="launchSelfPromo(${r.id},this)">▶ Запуск</button>`:''}
-          ${r.is_mine?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteSelfPromoTemplate(${r.id})">🗑</button>`:''}
+          ${r.is_mine?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteSelfPromoTemplate(${r.id})" aria-label="Удалить">🗑</button>`:''}
         </div>
       </div>
     `).join(''));
@@ -23399,7 +23399,7 @@ async function openAutoFunnels() {
         </div>
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="event.stopPropagation();toggleAutoFunnel(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
-          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="event.stopPropagation();deleteAutoFunnel(${r.id},this)">✕</button>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="event.stopPropagation();deleteAutoFunnel(${r.id},this)" aria-label="Удалить">✕</button>
           <span class="chev">›</span>
         </div>
       </div>
@@ -24563,7 +24563,7 @@ function renderNetNodesEdges(d) {
       <div class="li-name">${esc(n.label || n.type + ' #' + n.object_id)}</div>
       <div class="li-sub">${esc(objRu(n.type))} · ID: ${n.object_id}</div>
     </div>
-    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetNode(${n.id})">🗑</span></div>
+    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetNode(${n.id})" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
   </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет узлов</div>');
 
   txt('netEdgesList', edges.map(e => `<div class="li">
@@ -24572,7 +24572,7 @@ function renderNetNodesEdges(d) {
       <div class="li-name">${e.from_label || '#'} → ${e.to_label || '#'}</div>
       <div class="li-sub">${esc(objRu(e.type || 'forward'))}</div>
     </div>
-    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetEdge(${e.id})">🗑</span></div>
+    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetEdge(${e.id})" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
   </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет рёбер</div>');
 }
 
@@ -24788,7 +24788,7 @@ async function openWorkflowDetail(wfId, wfName) {
 
     html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
-      <button class="btn btn-r" onclick="deleteWorkflow(${wfId})" style="flex:0 0 auto;padding:8px 14px;font-size:13px">🗑</button>
+      <button class="btn btn-r" onclick="deleteWorkflow(${wfId})" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
     </div>`;
 
     if (!steps.length) {
