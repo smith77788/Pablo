@@ -14,6 +14,7 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ApiHubCb, BmCb
+from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import ApiKeyFSM
 from bot.utils.op_helpers import safe_answer
@@ -72,7 +73,8 @@ def _menu_text(keys: list[dict]) -> str:
         )
     else:
         lines.append("Активные ключи:")
-        for k in keys:
+        _shown_t = _cap_text(keys)
+        for k in _shown_t:
             created = k["created_at"].strftime("%d.%m.%Y")
             last    = k["last_used_at"].strftime("%d.%m %H:%M") if k.get("last_used_at") else "—"
             reqs    = int(k["requests_total"] or 0)
@@ -80,6 +82,7 @@ def _menu_text(keys: list[dict]) -> str:
                 f"\n• <code>bm_{k['key_prefix']}...</code> «{k['name']}»\n"
                 f"  Создан: {created} · Использован: {last} · Запросов: {reqs}"
             )
+        _cap_text_note(lines, keys, _shown_t, "ключей")
         lines.append(
             "\n\n<b>API:</b> <code>POST /api/v1/my/operations</code>\n"
             "<b>Аутентификация:</b> <code>X-Api-Key: bm_xxxxxxxx...</code>"

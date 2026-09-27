@@ -15,6 +15,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ClustMCb, BotCb, NetBcCb, BmCb
+from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.keyboards import subscription_locked_markup
 from services.logger import log_exc_swallow
 from bot.states import CreateClusterFSM
@@ -106,7 +107,8 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         kb.button(text="➕ Создать кластер", callback_data=ClustMCb(action="create"))
     else:
-        for row in rows:
+        _shown_t = _cap_text(rows)
+        for row in _shown_t:
             cluster_name = row["cluster"]
             bot_count = row["bot_count"]
             lines.append(
@@ -116,6 +118,7 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 text=f"🔗 {cluster_name} ({bot_count})",
                 callback_data=ClustMCb(action="view", cluster_name=cluster_name),
             )
+        _cap_text_note(lines, rows, _shown_t, "записей")
 
     kb.button(text="◀️ Назад", callback_data=ClustMCb(action="menu"))
     kb.adjust(1)
@@ -162,12 +165,14 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "Создайте кластер и назначьте ботов через раздел <b>Мои боты</b>."
         )
     else:
-        for row in rows:
+        _shown_t = _cap_text(rows)
+        for row in _shown_t:
             lines.append(
                 f"🔗 <b>{_html.escape(row['cluster'])}</b>\n"
                 f"   Ботов: {row['bot_count']} | "
                 f"Пользователей: {row['total_users']:,}"
             )
+        _cap_text_note(lines, rows, _shown_t, "записей")
 
     kb = _back_kb()
     kb.adjust(1)
@@ -317,7 +322,8 @@ async def cb_cluster_view(
             "Нажмите <b>➕ Добавить бота</b> чтобы прикрепить ботов к кластеру."
         )
     else:
-        for bot_rec in rows:
+        _shown_t = _cap_text(rows)
+        for bot_rec in _shown_t:
             name = (
                 bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
             )
@@ -326,6 +332,7 @@ async def cb_cluster_view(
                 text=f"➖ @{name}",
                 callback_data=ClustMCb(action="remove_bot", cluster_name=cluster_name, bot_id=bot_rec["bot_id"]),
             )
+        _cap_text_note(lines, rows, _shown_t, "записей")
 
     kb.button(
         text="➕ Добавить бота в кластер",

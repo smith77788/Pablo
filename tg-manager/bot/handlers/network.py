@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import NetworkCb, ClusterCb, BmCb
+from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.keyboards import (
     network_ops_menu,
     network_clusters_menu,
@@ -182,13 +183,15 @@ async def cb_cluster_view(
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
-    for b in bots:
+    _shown_t = _cap_text(bots)
+    for b in _shown_t:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
         lines.append(
             f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз. | score {b['score']:.3f}"
         )
+    _cap_text_note(lines, bots, _shown_t, "ботов")
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -214,11 +217,13 @@ async def cb_bulk_swarm_on(
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
-    for b in bots:
+    _shown_t = _cap_text(bots)
+    for b in _shown_t:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
         lines.append(f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз.")
+    _cap_text_note(lines, bots, _shown_t, "ботов")
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
@@ -241,9 +246,11 @@ async def cb_bulk_swarm_off(
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
-    for b in bots:
+    _shown_t = _cap_text(bots)
+    for b in _shown_t:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         lines.append(f"  ⚫ {label} — swarm off")
+    _cap_text_note(lines, bots, _shown_t, "ботов")
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
@@ -328,10 +335,12 @@ async def cb_cluster_assign_confirm(
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
-    for b in bots:
+    _shown_t = _cap_text(bots)
+    for b in _shown_t:
         lbl = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         lines.append(f"  {swarm_icon} {lbl} — {b['audience_count']:,} юз.")
+    _cap_text_note(lines, bots, _shown_t, "ботов")
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
+from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 import logging
 import os
 import time
@@ -82,10 +83,12 @@ def _gate_markup(channels: list[dict]):
 
 def _gate_text(channels: list[dict]) -> str:
     lines = []
-    for ch in channels:
+    _shown_t = _cap_text(channels)
+    for ch in _shown_t:
         title = ch.get("channel_title") or ch["channel_username"]
         url = "https://t.me/" + ch["channel_username"].lstrip("@")
         lines.append(f'• <a href="{url}">{title}</a>')
+    _cap_text_note(lines, channels, _shown_t, "каналов")
     body = "\n".join(lines)
     return (
         "👋 <b>Добро пожаловать!</b>\n\n"

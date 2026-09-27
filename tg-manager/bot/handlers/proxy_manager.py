@@ -20,6 +20,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ProxyCb, BmCb
+from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.keyboards import subscription_locked_markup
 from bot.states import AddProxyFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -698,7 +699,8 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     updated = 0
     lines = ["🌍 <b>Гео прокси</b>\n"]
-    for row in rows:
+    _shown_t = _cap_text(rows)
+    for row in _shown_t:
         geo = await _detect_proxy_geo(proxy_plain_url(row["proxy_url"]))
         label = html.escape(proxy_display(row["proxy_url"], row["label"]))
         if geo:
@@ -719,6 +721,7 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             updated += 1
         else:
             lines.append(f"• {label} → ❓ не определено")
+    _cap_text_note(lines, rows, _shown_t, "записей")
 
     lines.append(f"\nОпределено: {updated}/{len(rows)}")
     await callback.message.edit_text(

@@ -24,6 +24,7 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb, BmCb
+from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from services import infra_pressure
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
@@ -1210,7 +1211,8 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     skipped = 0
     errors = 0
 
-    for acc in accounts:
+    _shown_t = _cap_text(accounts)
+    for acc in _shown_t:
         acc_id = acc["id"]
         status = acc.get("acc_status") or "active"
         trust = float(acc.get("trust_score") or 0.0)
@@ -1292,6 +1294,7 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         except Exception as exc:
             log.warning("infra deploy: acc=%d error=%s", acc_id, exc)
             errors += 1
+    _cap_text_note(updates, accounts, _shown_t, "аккаунтов")
 
     from services import infra_orchestrator
     state = await infra_orchestrator.get_state(pool, uid)

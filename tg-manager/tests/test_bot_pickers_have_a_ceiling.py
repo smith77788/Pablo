@@ -169,3 +169,99 @@ def test_notice_knows_every_section_code():
         f"подпись ссылается на разделы, которых обработчик не знает: {sorted(unknown)} "
         f"— человек увидит расплывчатое «объектов»"
     )
+
+
+# ── То же самое, но в тексте сообщения ────────────────────────────────────────
+#
+# Telegram отвергает сообщение длиннее 4096 символов. Экран, клеящий строку на
+# каждый объект, перестаёт открываться ровно так же, как клавиатура: у человека
+# с двумя сотнями ботов в кластере «Сеть» просто не открывалась.
+
+_ACCUMULATES = re.compile(r"\b\w+\s*\+=\s*[f\"']|\.append\(\s*f?[\"']")
+_TEXT_BOUND = re.compile(
+    r"\[:\s*\d+\s*\]|islice\(|\bLIMIT\s+\d+|_cap_text\(|_cap\(|"
+    r"\blimit\s*=\s*\d+|\blimit\s*=\s*\w*(?:PAGE|SIZE|LIMIT)\w*|4096|3900|3500",
+    re.I,
+)
+
+
+def test_message_text_does_not_grow_without_bound():
+    """Ни один экран не клеит строку на каждый элемент растущей коллекции."""
+    bad = []
+    for path in sorted(BOT.rglob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:  # pragma: no cover
+            continue
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            fsrc = ast.get_source_segment(src, fn) or ""
+            if _TEXT_BOUND.search(fsrc):
+                continue
+            if re.search(r"if\s+len\([^)]+\)\s*>\s*\w+\s*:\s*\n\s*return", fsrc):
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, (ast.For, ast.AsyncFor)):
+                    continue
+                it = (ast.get_source_segment(src, node.iter) or "").strip()
+                if it not in GROWING:
+                    continue
+                body = ast.get_source_segment(src, node) or ""
+                if not _ACCUMULATES.search(body):
+                    continue
+                bad.append(
+                    f"    {path.relative_to(ROOT)}:{node.lineno}: {fn.name}() "
+                    f"клеит строку на каждый элемент {it}"
+                )
+    assert not bad, (
+        "сообщение перерастёт предел Telegram в 4096 символов:\n" + "\n".join(bad)
+    )
+
+
+def test_text_ceiling_keeps_the_message_sendable():
+    """Мера: длина сообщения при потолке не зависит от числа объектов."""
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from bot.utils.picker_cap import TEXT_LIMIT, cap_text, cap_text_append  # noqa: WPS433
+
+    assert TEXT_LIMIT <= 40, f"{TEXT_LIMIT} строк — это уже тысячи символов"
+
+    def length(total: int) -> int:
+        items = list(range(total))
+        shown = cap_text(items)
+        lines = ["🌐 <b>Кластер: main</b>", "<b>Боты:</b>"]
+        for i in shown:
+            lines.append(f"  🟢 @bot_with_a_longish_name_{i} [⚙️] — 12 345 юз.")
+        cap_text_append(lines, items, shown, "ботов")
+        return len("\n".join(lines))
+
+    assert length(10_000) < 4096, f"сообщение всё ещё {length(10_000)} символов"
+    assert abs(length(10_000) - length(1000)) <= 8, "длина зависит от числа объектов"
+
+
+def test_capped_text_says_so():
+    """Обрезали текст — сказали. Молчаливо укороченный список хуже длинного:
+    человек видит тридцать ботов и думает, что их тридцать."""
+    bad = []
+    for path in sorted(BOT.rglob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        if "_cap_text(" not in src:
+            continue
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:  # pragma: no cover
+            continue
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            fsrc = ast.get_source_segment(src, fn) or ""
+            for m in re.finditer(r"_shown_t\s*=\s*_cap_text\((\w+)\)", fsrc):
+                coll = m.group(1)
+                if not re.search(rf"_cap_text_note\(\s*\w+\s*,\s*{coll}\s*,", fsrc):
+                    bad.append(
+                        f"    {path.relative_to(ROOT)}: {fn.name}() режет {coll} молча"
+                    )
+    assert not bad, "срез текста без строки об остатке:\n" + "\n".join(bad)

@@ -76,3 +76,53 @@ def cap_note_button(kb, items: Sequence[T], shown: Sequence[T], what: str = "acc
         callback_data=CapCb(total=total, shown=n, what=what),
     )
     return True
+
+
+# Та же болезнь, что с клавиатурой, но в тексте: Telegram отвергает сообщение
+# длиннее 4096 символов. Экран, клеящий строку на каждый объект, перестаёт
+# открываться, когда объектов много. Строка ~60–80 символов, шапка съедает
+# часть, поэтому 30 строк — с запасом, и ровно столько человек прочитает.
+TEXT_LIMIT = 30
+
+
+def cap_text(items: Sequence[T], limit: int = TEXT_LIMIT) -> Sequence[T]:
+    """Первые ``limit`` элементов — то, по чему клеятся строки сообщения."""
+    return items[:limit]
+
+
+def cap_text_note(
+    items: Sequence[T],
+    shown: Sequence[T],
+    what: str = "объектов",
+) -> str:
+    """Строка об остатке для вклейки в конец сообщения. Пустая, если не резали.
+
+    В отличие от клавиатуры, тут подпись некуда нажать, поэтому она сразу
+    говорит и сколько скрыто, и куда идти за полным списком.
+    """
+    total, n = len(items), len(shown)
+    if total <= n:
+        return ""
+    return (
+        f"\n<i>… и ещё {total - n} {what} — показаны первые {n}. "
+        f"Полный список с поиском — в мини-аппе.</i>"
+    )
+
+
+def cap_text_append(
+    lines: list,
+    items: Sequence[T],
+    shown: Sequence[T],
+    what: str = "объектов",
+) -> bool:
+    """Дописать строку об остатке в список строк сообщения, если резали.
+
+    Отдельная функция, а не голый ``lines.append(cap_text_note(...))``: та
+    вернула бы пустую строку на коротком списке, и в сообщении появился бы
+    висячий перенос.
+    """
+    note = cap_text_note(items, shown, what)
+    if not note:
+        return False
+    lines.append(note)
+    return True
