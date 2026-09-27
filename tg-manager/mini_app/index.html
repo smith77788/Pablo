@@ -242,6 +242,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #navDrawer{position:fixed;top:0;left:0;bottom:0;width:80%;max-width:320px;background:var(--bg);border-right:1px solid var(--sep);transform:translateX(-102%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:121;display:flex;flex-direction:column;box-shadow:2px 0 20px rgba(0,0,0,.35)}
 #navDrawer.on{transform:translateX(0)}
 .nav-head{padding:calc(var(--safe-t) + 14px) 16px 12px;border-bottom:1px solid var(--sep);display:flex;align-items:center;gap:10px}
+.nav-find{padding:10px 12px;border-bottom:1px solid var(--sep)}
+.nav-find input{width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none}
+.nav-empty{padding:18px 16px;color:var(--hint);font-size:13px;text-align:center}
+
 .nav-head-t{font-size:17px;font-weight:700;letter-spacing:-.3px}
 .nav-body{flex:1;overflow-y:auto;padding:6px 0 20px}
 .nav-cat{padding:12px 16px 4px;font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--hint)}
@@ -992,7 +996,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-burger" onclick="closeDrawer()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="nav-head-t">⚡ Infragram</div>
   </div>
+  <!-- Поле поиска стоит в РАЗМЕТКЕ, а не строится вместе со списком: каталог
+       перерисовывается, и input вместе с ним терял бы фокус после первой буквы. -->
+  <div class="nav-find">
+    <input type="text" id="navFind" placeholder="🔍 Найти раздел" aria-label="Поиск раздела" autocomplete="off" oninput="navFilter(this.value)">
+  </div>
   <div class="nav-body" id="navBody"><!-- заполняется buildDrawer() --></div>
+  <div class="nav-empty" id="navFindEmpty" style="display:none">Ничего не найдено. Попробуйте другое слово, например «аккаунт» или «рассылка».</div>
 </nav>
 <div id="app">
 <div id="content">
@@ -8050,6 +8060,41 @@ function buildDrawer() {
   body.innerHTML = html;
   body.dataset.built = '1';
 }
+// Каталог — 82 раздела в 11 категориях, больше шести экранов прокрутки на
+// телефоне. Найти в нём «Прогрев» или «Нотариус» можно было только глазами.
+// Фильтр ищет и по названию, и по пояснению («бан» находит «Дэшборд
+// здоровья» по строке «риски бана»), поэтому раздел находится по задаче, а не
+// по точному имени. Регистр и «ё» не мешают.
+// Запрос и текст пункта приводятся к одному виду ОДНОЙ функцией: разъедься
+// они, поиск молча перестал бы находить по регистру или по «ё».
+function navNorm(s) { return (s || '').toLowerCase().replace(/ё/g, 'е').trim(); }
+function navFilter(v) {
+  const body = document.getElementById('navBody');
+  if (!body) return;
+  const q = navNorm(v);
+  const items = [...body.querySelectorAll('.nav-item')];
+  let shown = 0;
+  items.forEach(el => {
+    const hay = navNorm(el.textContent);
+    const hit = !q || hay.indexOf(q) >= 0;
+    el.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  // Заголовок категории без единого видимого пункта — пустая строка на экране.
+  body.querySelectorAll('.nav-cat').forEach(cat => {
+    let n = cat.nextElementSibling, any = false;
+    while (n && !n.classList.contains('nav-cat')) {
+      if (n.classList.contains('nav-item') && n.style.display !== 'none') { any = true; break; }
+      n = n.nextElementSibling;
+    }
+    cat.style.display = any ? '' : 'none';
+  });
+  // Строка «ничего не найдено» лежит в разметке и только показывается: так
+  // её видно при чтении HTML, и она не зависит от порядка выполнения.
+  const none = document.getElementById('navFindEmpty');
+  if (none) none.style.display = shown ? 'none' : '';
+}
+
 function markDrawerActive() {
   document.querySelectorAll('#navBody .nav-item[data-tab]').forEach(el=>{
     el.classList.toggle('on', el.dataset.tab === (typeof CUR!=='undefined'?CUR:'home'));
@@ -8057,6 +8102,10 @@ function markDrawerActive() {
 }
 function openDrawer() {
   buildDrawer(); markDrawerActive();
+  // Фильтр не переживает закрытие: иначе меню откроется с одним пунктом от
+  // прошлого поиска, и это выглядит как пропавший каталог.
+  const f = document.getElementById('navFind');
+  if (f) { f.value = ''; navFilter(''); }
   document.getElementById('navOverlay')?.classList.add('on');
   document.getElementById('navDrawer')?.classList.add('on');
   try { tg.HapticFeedback?.impactOccurred('light'); } catch(_) {}
