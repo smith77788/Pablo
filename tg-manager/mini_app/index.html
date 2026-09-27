@@ -7491,8 +7491,49 @@ function _flushOpComplete() {
   const batch = _opDoneBatch;
   _opDoneBatch = [];
   if (!batch.length) return;
+  liveOpFinished(batch);
   if (batch.length === 1) { showOpComplete(batch[0]); return; }
   showOpCompleteBatch(batch);
+}
+
+// Плашка «завершилась» появлялась поверх списка, в котором та же операция
+// по-прежнему «Выполняется» со стоящим счётчиком: два утверждения об одном и том
+// же на одном экране, и человек шёл перезаходить, чтобы понять, какое верно.
+// Завершение — событие редкое и разовое, поэтому там, где перечитать список
+// безопасно, перечитываем целиком: вместе со статусом обновятся и доступные
+// действия («Отмена» у завершённой операции нечего делать), и итог, и время.
+function liveOpFinished(list) {
+  const top = (typeof STACK !== 'undefined' && STACK.length) ? STACK[STACK.length - 1] : '';
+  if (top === 's-ops') { try { loadOps(); } catch(_) {} return; }
+  if (top === 's-opdetail' && OPLOG_ID
+      && (list || []).some(o => Number(o.id) === Number(OPLOG_ID))) {
+    // push() для экрана, который уже наверху, — обновление на месте, лишнего
+    // шага «назад» не добавляет.
+    try { openOpDetail(OPLOG_ID); } catch(_) {}
+    return;
+  }
+  // Экран массовых операций перечитывать нельзя: вместе со списком перечитается
+  // выбор аккаунтов, и отмеченные человеком галочки пропадут посреди настройки
+  // операции. Там правим саму строку — действий в ней нет, устареть нечему.
+  (list || []).forEach(o => {
+    const id = Number(o.id) || 0;
+    if (!id) return;
+    const st = stb(o.status);
+    document.querySelectorAll('[data-op-badge="' + id + '"]').forEach(el => {
+      el.className = 'badge ' + st[0];
+      el.textContent = st[1];
+    });
+    // Операции без известного объёма список рисует прочерком — не подменяем его
+    // на «0/0», это не прогресс, а его отсутствие.
+    const total = Number(o.total) || 0;
+    if (!total) return;
+    const done = Math.min(Number(o.done) || 0, total);
+    document.querySelectorAll('[data-op-cnt="' + id + '"]').forEach(el => {
+      el.textContent = (el.textContent || '').indexOf(' / ') >= 0
+        ? num(done) + ' / ' + num(total)
+        : num(done) + '/' + num(total);
+    });
+  });
 }
 function showOpCompleteBatch(list) {
   const el = document.getElementById('opDone');
@@ -22031,7 +22072,7 @@ async function openMassOps(focusId) {
         <div class="row" id="massop-${r.id}">
           <div class="row-body">
             <div class="row-name">#${r.id} ${opName}</div>
-            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · Прогресс: <span data-op-cnt="${r.id}">${progress}</span></div>
+            <div class="row-val"><span class="badge ${cls}" data-op-badge="${r.id}">${lbl}</span> · Прогресс: <span data-op-cnt="${r.id}">${progress}</span></div>
             <div class="row-val" style="color:var(--hint)">${ago(r.created_at)} ${r.finished_at?'→ '+ago(r.finished_at):''}</div>
           </div>
         </div>

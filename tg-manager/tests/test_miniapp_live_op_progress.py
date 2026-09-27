@@ -90,6 +90,40 @@ def test_updater_clamps_the_numbers():
     assert "Math.max(0, Math.min(100," in body, "процент не зажат в 0..100"
 
 
+def test_finished_operation_updates_the_open_screen():
+    """Плашка «завершилась» поверх строки «Выполняется» — два утверждения об
+    одном и том же на одном экране."""
+    flush = _body("_flushOpComplete")
+    assert "liveOpFinished(" in flush, (
+        "итог операции не доходит до открытого экрана: строка так и останется "
+        "«Выполняется» со стоящим счётчиком"
+    )
+    body = _body("liveOpFinished")
+    assert "loadOps()" in body, "открытый список операций не перечитывается по итогу"
+    assert "openOpDetail(OPLOG_ID)" in body, "открытая карточка операции не обновляется"
+    assert "OPLOG_ID" in body and "some(" in body, (
+        "карточку нужно обновлять только если завершилась именно ОНА"
+    )
+    assert "data-op-badge" in body, "статус в строке массовых операций не меняется"
+
+
+def test_massops_screen_is_not_reloaded_wholesale():
+    """Перечитывание этого экрана стирает галочки, которые человек уже проставил."""
+    body = _body("liveOpFinished")
+    assert "openMassOps(" not in body, (
+        "перечитывание экрана массовых операций сотрёт выбор аккаунтов посреди "
+        "настройки операции"
+    )
+
+
+def test_operation_without_a_known_total_keeps_its_dash():
+    body = _body("liveOpFinished")
+    assert "if (!total) return;" in body, (
+        "операция без известного объёма получит «0/0» вместо прочерка — это не "
+        "прогресс, а его отсутствие"
+    )
+
+
 def test_updater_does_not_redraw_whole_lists():
     """Перерисовка на каждом событии рвала бы прокрутку под пальцем."""
     body = _body("liveOpRows")
