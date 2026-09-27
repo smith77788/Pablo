@@ -12806,11 +12806,15 @@ function openCompetitors() {
   loadCompetitors();
 }
 
-async function loadCompetitors() {
+let COMP_LIMIT = 50;
+async function loadCompetitors(more) {
+  COMP_LIMIT = more ? COMP_LIMIT + 200 : 50;
   try {
-    const d = await api('/api/miniapp/competitors');
-    const items = d.competitors||[];
-    txt('m-comp-cnt', items.length ? items.length+' конкурентов' : 'Нет');
+    const d = await api('/api/miniapp/competitors?limit='+COMP_LIMIT);
+    const items = listOf(d,'competitors');
+    const total = totalOf(d, items);
+    // Плитка называет ВСЁ число, а не длину показанной страницы.
+    txt('m-comp-cnt', total ? total+' конкурентов' : 'Нет');
     if (!items.length) { txt('compList', empty('📈','Нет конкурентов','Добавьте канал для мониторинга')); return; }
     txt('compList', items.map(c=>{
       const members = c.last_members!=null?num(c.last_members)+' участников':'не проверен';
@@ -12826,7 +12830,7 @@ async function loadCompetitors() {
           <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить конкурента" onclick="deleteComp(${c.id}, this)">🗑</span>
         </div>
       </div>`;
-    }).join(''));
+    }).join('') + moreBtn(items.length, total, 'loadCompetitors(1)'));
   } catch(e) {
     txt('compList', errHtml(e.message,'loadCompetitors()'));
   }
@@ -13041,10 +13045,13 @@ function openKeywordsScreen() {
 // Keep old openKeywords for analytics
 function openKeywords() { push('s-analytics'); loadAnalytics(); }
 
-async function loadKeywords() {
+let KW_LIMIT = 50;
+async function loadKeywords(more) {
+  KW_LIMIT = more ? KW_LIMIT + 200 : 50;
   try {
-    const d = await api('/api/miniapp/keywords');
-    const items = d.keywords||[];
+    const d = await api('/api/miniapp/keywords?limit='+KW_LIMIT);
+    const items = listOf(d,'keywords');
+    const total = totalOf(d, items);
     if (!items.length) { txt('kwTrackList', empty('🔍','Нет отслеживаемых слов','Нажмите + Добавить')); return; }
     txt('kwTrackList', items.map(k=>{
       const pos = k.last_position;
@@ -13063,7 +13070,7 @@ async function loadKeywords() {
           <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить ключевое слово" onclick="deleteKw(${k.id}, this)">🗑</span>
         </div>
       </div>`;
-    }).join(''));
+    }).join('') + moreBtn(items.length, total, 'loadKeywords(1)'));
   } catch(e) {
     txt('kwTrackList', errHtml(e.message,'loadKeywords()'));
   }
@@ -15762,14 +15769,19 @@ function nuSwitch(which) {
   if (!onBots) loadPlatformUsers();
 }
 
-async function openNewUsers() {
-  push('s-newusers');
-  nuSwitch('bots');
-  txt('newUsersList','<div class="spin-wrap"><div class="spin"></div></div>');
+let NU_LIMIT = 100;
+// «Показать ещё» на ленте подписчиков: экран уже открыт, поэтому повторно
+// push() делать нельзя — иначе в стеке появится второй такой же экран.
+async function openNewUsersMore() { NU_LIMIT += 400; await openNewUsers(true); }
+async function openNewUsers(keep) {
+  if (!keep) { NU_LIMIT = 100; push('s-newusers'); }
+  if (!keep) nuSwitch('bots');
+  if (!keep) txt('newUsersList','<div class="spin-wrap"><div class="spin"></div></div>');
   // Подписчики ботов
   try {
-    const d = await api('/api/miniapp/new_users');
-    const us = d.users||[];
+    const d = await api('/api/miniapp/new_users?limit='+NU_LIMIT);
+    const us = listOf(d,'users');
+    const nuTotal = totalOf(d, us);
     if (!us.length) { txt('newUsersList', empty('🆕','Пока нет подписчиков','Появятся, как только кто-то напишет вашим ботам')); }
     else txt('newUsersList', us.map(u=>{
       const nm = u.first_name || (u.username?'@'+u.username:'User #'+u.user_id);
@@ -15780,7 +15792,7 @@ async function openNewUsers() {
           <div class="row-val" style="color:var(--hint)">${u.bot_username?'@'+esc(u.bot_username):''} · ${u.first_seen?ago(u.first_seen):''}</div>
         </div>
       </div>`;
-    }).join(''));
+    }).join('') + moreBtn(us.length, nuTotal, 'openNewUsersMore()'));
   } catch(e) { txt('newUsersList', empty('⚠️','Ошибка',e.message)); }
   // Проверяем доступ к ленте платформы (только админ) — показываем вкладку, если есть
   try {
@@ -18563,13 +18575,17 @@ async function submitAiMemory() {
   finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
 }
 const MEM_KIND = {note:'📝',instruction:'📋',fact:'💡',rule:'⚙️'};
-async function openAiMemory() {
-  push('s-aimemory');
-  txt('aiMemoryList','<div class="spin-wrap"><div class="spin"></div></div>');
+let AIMEM_LIMIT = 50;
+async function openAiMemoryMore() { AIMEM_LIMIT += 200; await openAiMemory(true); }
+async function openAiMemory(keep) {
+  if (!keep) { AIMEM_LIMIT = 50; push('s-aimemory'); }
+  if (!keep) txt('aiMemoryList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/ai_memory');
-    const mems = d.memories||[];
-    txt('m-aimem-val',`${mems.length} записей`);
+    const d = await api('/api/miniapp/ai_memory?limit='+AIMEM_LIMIT);
+    const mems = listOf(d,'memories');
+    const memTotal = totalOf(d, mems);
+    // Плитка называет ВСЁ число записей, а не длину показанной страницы.
+    txt('m-aimem-val',`${num(memTotal)} записей`);
     if (!mems.length) { txt('aiMemoryList', empty('🧠','Нет записей','Добавьте заметки для ИИ-ассистента')); return; }
     txt('aiMemoryList', mems.map(m=>`
       <div class="row">
@@ -18582,7 +18598,7 @@ async function openAiMemory() {
           <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteAiMem(${m.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>
-    `).join(''));
+    `).join('') + moreBtn(mems.length, memTotal, 'openAiMemoryMore()'));
   } catch(e) {
     txt('aiMemoryList', empty('⚠️','Ошибка',e.message));
   }
@@ -19896,14 +19912,18 @@ async function openVLayerEntity(entityType, entityId) {
 
 // ── «Нотариус»: заверение рекламных размещений ───────────────────────────
 let NOTARY_WATCHES = [];
-async function openNotary() {
-  push('s-notary');
-  txt('notaryList', '<div class="spin-wrap"><div class="spin"></div></div>');
+let NOTARY_LIMIT = 100;
+async function openNotaryMore() { NOTARY_LIMIT += 400; await openNotary(true); }
+async function openNotary(keep) {
+  if (!keep) { NOTARY_LIMIT = 100; push('s-notary'); }
+  if (!keep) txt('notaryList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/notary');
-    NOTARY_WATCHES = d.watches || [];
+    const d = await api('/api/miniapp/notary?limit='+NOTARY_LIMIT);
+    NOTARY_WATCHES = listOf(d,'watches');
+    const notaryTotal = totalOf(d, NOTARY_WATCHES);
     const el = document.getElementById('m-notary-val');
-    if (el) el.textContent = NOTARY_WATCHES.length ? NOTARY_WATCHES.length + ' под наблюдением' : '';
+    // Плитка называет ВСЁ число наблюдений, а не длину показанной страницы.
+    if (el) el.textContent = notaryTotal ? notaryTotal + ' под наблюдением' : '';
     if (!NOTARY_WATCHES.length) {
       txt('notaryList', empty('⚖️','Нет заверений',
         'Поставьте купленное размещение под наблюдение — получите протокол с хронологией',
@@ -19918,7 +19938,7 @@ async function openNotary() {
           <div class="li-sub">${esc(w.verdict_label||'')} · проверок ${num(w.checks_done||0)}${w.signed?' · 🔏 подписан':''}</div>
         </div>
         <span class="chev">›</span>
-      </div>`).join(''));
+      </div>`).join('') + moreBtn(NOTARY_WATCHES.length, notaryTotal, 'openNotaryMore()'));
   } catch(e) { txt('notaryList', errHtml(e.message,'openNotary()')); }
 }
 
@@ -20020,12 +20040,15 @@ async function notaryCancel(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 
-async function openFolders() {
-  push('s-folders');
-  txt('foldersList','<div class="spin-wrap"><div class="spin"></div></div>');
+let FOLDERS_LIMIT = 100;
+async function openFoldersMore() { FOLDERS_LIMIT += 400; await openFolders(true); }
+async function openFolders(keep) {
+  if (!keep) { FOLDERS_LIMIT = 100; push('s-folders'); }
+  if (!keep) txt('foldersList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/chatlist_folders');
-    const fs = d.folders||[];
+    const d = await api('/api/miniapp/chatlist_folders?limit='+FOLDERS_LIMIT);
+    const fs = listOf(d,'folders');
+    const foldersTotal = totalOf(d, fs);
     if (!fs.length) { txt('foldersList', empty('📁','Пока нет папок','Соберите подборку своих каналов и раздайте одну ссылку')); return; }
     txt('foldersList', fs.map(f=>{
       const st = f.status;
@@ -20040,7 +20063,7 @@ async function openFolders() {
         </div>
         <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить">🗑</button></div>
       </div>`;
-    }).join(''));
+    }).join('') + moreBtn(fs.length, foldersTotal, 'openFoldersMore()'));
   } catch(e) { txt('foldersList', empty('⚠️','Ошибка',e.message)); }
 }
 async function deleteFolder(id, _el){
@@ -21526,11 +21549,17 @@ function filterAssetTpl(type, btn) {
   if (btn) btn.classList.add('btn-p');
   loadAssetTpl(type);
 }
-async function loadAssetTpl(type) {
-  txt('atList','<div class="spin-wrap"><div class="spin"></div></div>');
+let AT_LIMIT = 50, AT_TYPE = null;
+async function loadAssetTplMore() { AT_LIMIT += 200; await loadAssetTpl(AT_TYPE, true); }
+async function loadAssetTpl(type, keep) {
+  AT_TYPE = type || null;
+  if (!keep) { AT_LIMIT = 50; txt('atList','<div class="spin-wrap"><div class="spin"></div></div>'); }
   try {
-    const url = '/api/miniapp/asset_templates'+(type?`?type=${encodeURIComponent(type)}`:'');
-    const rows = await api(url);
+    const url = '/api/miniapp/asset_templates?limit='+AT_LIMIT
+              + (type?`&type=${encodeURIComponent(type)}`:'');
+    const d = await api(url);
+    const rows = listOf(d,'items');
+    const atTotal = totalOf(d, rows);
     if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Нажмите + Создать')); return; }
     const typeIco={bot:'🤖',channel:'📢',group:'👥',post:'📝'};
     txt('atList', rows.map(r=>`
@@ -21544,8 +21573,9 @@ async function loadAssetTpl(type) {
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)" onclick="deleteAssetTpl(${r.id},this)" aria-label="Удалить">✕</button>
         </div>
       </div>
-    `).join(''));
-    document.getElementById('m-at-val').textContent = rows.length+' шаблонов';
+    `).join('') + moreBtn(rows.length, atTotal, 'loadAssetTplMore()'));
+    // Плитка называет ВСЁ число шаблонов, а не длину показанной страницы.
+    document.getElementById('m-at-val').textContent = num(atTotal)+' шаблонов';
   } catch(e) { txt('atList', empty('⚠️','Ошибка',e.message)); }
 }
 async function deleteAssetTpl(id, btn) {
@@ -21655,11 +21685,15 @@ async function openSwarm() {
 }
 
 // ── Presence Packs ──────────────────────────────────────
-async function openPresencePacks() {
-  push('s-presencepacks');
-  txt('ppList','<div class="spin-wrap"><div class="spin"></div></div>');
+let PP_LIMIT = 30;
+async function openPresencePacksMore() { PP_LIMIT += 200; await openPresencePacks(true); }
+async function openPresencePacks(keep) {
+  if (!keep) { PP_LIMIT = 30; push('s-presencepacks'); }
+  if (!keep) txt('ppList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const rows = await api('/api/miniapp/presence_packs');
+    const d = await api('/api/miniapp/presence_packs?limit='+PP_LIMIT);
+    const rows = listOf(d,'items');
+    const ppTotal = totalOf(d, rows);
     if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Нажмите + Создать')); return; }
     txt('ppList', rows.map(r=>`
       <div class="row tap" onclick="openPpDetail(${r.id},'${esc(r.name)}')">
@@ -21675,8 +21709,9 @@ async function openPresencePacks() {
           <span class="chev">›</span>
         </div>
       </div>
-    `).join(''));
-    document.getElementById('m-pp-val').textContent = rows.length+' пакетов';
+    `).join('') + moreBtn(rows.length, ppTotal, 'openPresencePacksMore()'));
+    // Плитка называет ВСЁ число пакетов, а не длину показанной страницы.
+    document.getElementById('m-pp-val').textContent = num(ppTotal)+' пакетов';
   } catch(e) { txt('ppList', empty('⚠️','Ошибка',e.message)); }
 }
 
@@ -23200,11 +23235,15 @@ async function submitMeshCreate() {
 }
 
 // ── Narrative Engine ────────────────────────────────────
-async function openNarrative() {
-  push('s-narrative');
-  txt('narrativeList', '<div class="spin-wrap"><div class="spin"></div></div>');
+let NARR_LIMIT = 30;
+async function openNarrativeMore() { NARR_LIMIT += 200; await openNarrative(true); }
+async function openNarrative(keep) {
+  if (!keep) { NARR_LIMIT = 30; push('s-narrative'); }
+  if (!keep) txt('narrativeList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const rows = await api('/api/miniapp/narrative');
+    const d = await api('/api/miniapp/narrative?limit='+NARR_LIMIT);
+    const rows = listOf(d,'items');
+    const narrTotal = totalOf(d, rows);
     if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Нажмите + Создать')); return; }
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
     const statusCls = {draft:'b-gy',active:'b-gr',paused:'b-or',completed:'b-bl',cancelled:'b-gy'};
@@ -23218,8 +23257,9 @@ async function openNarrative() {
         </div>
         <div class="row-right chev">›</div>
       </div>
-    `).join(''));
-    document.getElementById('m-narr-val').textContent = rows.length+' кампаний';
+    `).join('') + moreBtn(rows.length, narrTotal, 'openNarrativeMore()'));
+    // Плитка называет ВСЁ число кампаний, а не длину показанной страницы.
+    document.getElementById('m-narr-val').textContent = num(narrTotal)+' кампаний';
   } catch(e) { txt('narrativeList', empty('⚠️','Ошибка',e.message)); }
 }
 async function openNarrativeDetail(cid, topic) {
@@ -23965,6 +24005,24 @@ async function copyToClipboard(text, okMsg) {
 function copyText(t) { return copyToClipboard(t); }
 // Честный прогресс операции: done не может превышать total (защита от «34/17»
 // у операций, перевыполненных при ретрае/пере-подхвате со старыми счётчиками).
+// Одна кнопка «Показать ещё» на все списки с потолком. Без неё экран молча
+// обрывался на первой странице: тридцать из восьмидесяти выглядели как «всё,
+// что есть», и владелец действовал по неполному списку, не зная об этом.
+// Вид и текст — те же, что у списка контактов, где эта кнопка появилась первой.
+function moreBtn(shown, total, fn) {
+  if (!(Number(total) > Number(shown))) return '';
+  return `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="${fn}">`
+       + `Показать ещё · ${num(shown)} из ${num(total)}</button>`;
+}
+// Ответ списка: раньше часть маршрутов отдавала голый массив. Читаем оба вида,
+// чтобы закэшированный Telegram'ом мини-апп не остался с пустым экраном.
+function listOf(d, key) {
+  if (Array.isArray(d)) return d;
+  return (d && (d[key] || d.items)) || [];
+}
+function totalOf(d, rows) {
+  return (d && !Array.isArray(d) && d.total != null) ? d.total : rows.length;
+}
 function progFrac(o) {
   const t=o.total_items||0, d=o.done_items||0;
   return num(t>0?Math.min(d,t):d)+'/'+num(t);

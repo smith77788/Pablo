@@ -1025,6 +1025,19 @@ def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Respons
     )
 
 
+def _list_limit(request: web.Request, default: int, maximum: int) -> int:
+    """Потолок списка: по умолчанию короткий, по просьбе экрана — больший.
+
+    Экран сначала берёт первую страницу, а когда владелец нажимает «Показать
+    ещё», просит тот же список с большим потолком. Без этого списки молча
+    обрывались: тридцать из восьмидесяти выглядели как «всё, что есть».
+    """
+    raw = request.rel_url.query.get("limit")
+    if raw is None:
+        return default
+    return min(validate_integer(raw, min_val=1, max_val=maximum) or default, maximum)
+
+
 async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
     try:
         return int(await pool.fetchval(query, *args) or 0)
@@ -4748,6 +4761,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        lim = _list_limit(request, 100, 2000)
         rows = await _safe_fetch(pool,
             """SELECT bu.user_id, bu.username, bu.first_name, bu.first_seen,
                       mb.username AS bot_username
@@ -4755,8 +4769,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                JOIN managed_bots mb ON mb.bot_id = bu.bot_id
                WHERE mb.added_by = $1 AND bu.user_id > 0
                ORDER BY bu.first_seen DESC NULLS LAST
-               LIMIT 100""", uid)
-        return _json_resp({"users": rows or []})
+               LIMIT $2""", uid, lim)
+        total = await _safe_count(pool,
+            """SELECT COUNT(*) FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by = $1 AND bu.user_id > 0""", uid)
+        return _json_resp({"users": rows or [], "total": total})
 
     async def new_users_export(request: web.Request) -> web.Response:
         """Экспорт ленты новых подписчиков (CSV) по всем ботам владельца."""
@@ -9508,10 +9526,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rows = await pool.fetch(
                 """SELECT id, kind, title, body, tags, pinned, created_at, updated_at
                    FROM botmother_memory WHERE owner_id=$1
-                   ORDER BY pinned DESC, updated_at DESC LIMIT 50""",
-                uid,
+                   ORDER BY pinned DESC, updated_at DESC LIMIT $2""",
+                uid, _list_limit(request, 50, 1000),
             )
-            return _json_resp({"memories": [
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM botmother_memory WHERE owner_id=$1", uid)
+            return _json_resp({"total": total, "memories": [
                 {
                     **dict(r),
                     "tags": list(r["tags"] or []),
@@ -11413,13 +11433,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        lim = _list_limit(request, 100, 2000)
         rows = await _safe_fetch(pool,
             """SELECT id, channel_ref, channel_title, msg_id, advertiser,
                       promised_from, promised_until, status, verdict,
                       first_seen_at, last_seen_at, absent_since,
                       views_first, views_last, checks_done, cert_sig, created_at
                  FROM notary_watches WHERE owner_id=$1
-                ORDER BY created_at DESC LIMIT 100""", uid)
+                ORDER BY created_at DESC LIMIT $2""", uid, lim)
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM notary_watches WHERE owner_id=$1", uid)
         from services import notary as _nt
         out = []
         for r in (rows or []):
@@ -11431,7 +11454,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             d["verdict_label"] = _nt.VERDICT_LABEL.get(v, "⏳ Ожидает наблюдений")
             d["signed"] = bool(d.pop("cert_sig", None))
             out.append(d)
-        return _json_resp({"ok": True, "watches": out})
+        return _json_resp({"ok": True, "watches": out, "total": total})
 
     async def notary_create(request: web.Request) -> web.Response:
         """Поставить размещение под наблюдение.
@@ -11592,13 +11615,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             """SELECT id, title, chat_count, status, invite_link, error,
                       instance_id, join_count, created_at
                  FROM chatlist_folders WHERE owner_id=$1
-                ORDER BY created_at DESC LIMIT 100""", uid)
+                ORDER BY created_at DESC LIMIT $2""", uid, _list_limit(request, 100, 2000))
         out = []
         for r in (rows or []):
             d = dict(r)
             d["created_at"] = d["created_at"].isoformat() if d.get("created_at") else None
             out.append(d)
-        return _json_resp({"ok": True, "folders": out})
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM chatlist_folders WHERE owner_id=$1", uid)
+        return _json_resp({"ok": True, "folders": out, "total": total})
 
     async def chatlist_folder_create(request: web.Request) -> web.Response:
         """Собрать папку из своих каналов/чатов и поставить экспорт ссылки в очередь.
@@ -13996,8 +14021,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         rows = await _safe_fetch(pool,
             """SELECT id, username, label, channel_id, last_members, last_checked, created_at
-               FROM competitors WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50""", uid)
-        return _json_resp({"competitors": rows})
+               FROM competitors WHERE owner_id=$1
+               ORDER BY created_at DESC LIMIT $2""", uid, _list_limit(request, 50, 1000))
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM competitors WHERE owner_id=$1", uid)
+        return _json_resp({"competitors": rows, "total": total})
 
     async def add_competitor(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14266,8 +14294,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                FROM tracked_keywords tk
                JOIN managed_bots mb ON mb.bot_id=tk.bot_id
                WHERE tk.owner_id=$1
-               ORDER BY tk.created_at DESC LIMIT 50""", uid)
-        return _json_resp({"keywords": rows})
+               ORDER BY tk.created_at DESC LIMIT $2""", uid, _list_limit(request, 50, 1000))
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tracked_keywords tk JOIN managed_bots mb "
+            "ON mb.bot_id=tk.bot_id WHERE tk.owner_id=$1", uid)
+        return _json_resp({"keywords": rows, "total": total})
 
     async def add_keyword(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -15376,20 +15407,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         asset_type = request.rel_url.query.get("type")
+        lim = _list_limit(request, 50, 1000)
         try:
             if asset_type:
                 rows = await pool.fetch(
                     "SELECT id, asset_type, name, created_at FROM asset_templates "
-                    "WHERE owner_id=$1 AND asset_type=$2 ORDER BY created_at DESC LIMIT 50",
-                    uid, asset_type,
+                    "WHERE owner_id=$1 AND asset_type=$2 ORDER BY created_at DESC LIMIT $3",
+                    uid, asset_type, lim,
                 )
+                total = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1 AND asset_type=$2",
+                    uid, asset_type)
             else:
                 rows = await pool.fetch(
                     "SELECT id, asset_type, name, created_at FROM asset_templates "
-                    "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
-                    uid,
+                    "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
+                    uid, lim,
                 )
-            return _json_resp([dict(r) for r in rows])
+                total = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1", uid)
+            # Было — голый массив; экран показывал первые 50 как «всё, что есть».
+            # Теперь ответ несёт настоящий итог (потребитель один — mini_app).
+            return _json_resp({"items": [dict(r) for r in rows], "total": total})
         except Exception as exc:
             log.exception("asset_templates_list uid=%d", uid)
             return _err(str(exc), 500)
@@ -15553,10 +15592,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, name, description, target_url, target_label, bot_id "
-                "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC LIMIT 30",
-                uid,
+                "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC LIMIT $2",
+                uid, _list_limit(request, 30, 1000),
             )
-            return _json_resp([dict(r) for r in rows])
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM presence_packs WHERE owner_id=$1", uid)
+            # Было — голый массив; плитка «N пакетов» считала показанное, а не всё.
+            return _json_resp({"items": [dict(r) for r in rows], "total": total})
         except Exception as exc:
             log.exception("presence_packs_list uid=%d", uid)
             return _err(str(exc), 500)
@@ -16809,10 +16851,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
-                "FROM narrative_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 30",
-                uid,
+                "FROM narrative_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
+                uid, _list_limit(request, 30, 1000),
             )
-            return _json_resp([dict(r) for r in rows])
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM narrative_campaigns WHERE owner_id=$1", uid)
+            # Было — голый массив; плитка «N кампаний» считала показанное, а не всё.
+            return _json_resp({"items": [dict(r) for r in rows], "total": total})
         except Exception as exc:
             log.exception("narrative_campaigns_list uid=%d", uid)
             return _err(str(exc), 500)
