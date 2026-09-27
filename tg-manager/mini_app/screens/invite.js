@@ -214,7 +214,7 @@ async function _invLoadAccs(q) {
         <input type="checkbox" value="${a.id}" style="accent-color:var(--accent)">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.first_name||a.phone)} <span style="color:var(--hint)">${a.username?'@'+esc(a.username):''}</span>${riskBadge(a)}</span>
       </label>
-      <span onclick="openInviteAccount(${a.id})" title="Лимит, пауза и риск этого аккаунта" style="color:var(--accent);cursor:pointer;padding:0 4px;flex:none">ⓘ</span>
+      <span class="icon-tap" onclick="openInviteAccount(${a.id})" title="Лимит, пауза и риск этого аккаунта" role="button" tabindex="0" aria-label="Лимит, пауза и риск этого аккаунта" style="color:var(--accent)">ⓘ</span>
     </div>`).join('');
     const flagged = accs.filter(a=>a.health_status==='quarantine'||a.health_status==='at_risk').length;
     if (flagged) {

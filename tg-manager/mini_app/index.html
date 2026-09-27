@@ -237,6 +237,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
    телефона, и на таком расстоянии промах по соседу — обычное дело. */
 .icon-btn.danger{color:var(--red);border-color:rgba(248,113,113,.28);background:rgba(248,113,113,.08)}
 .icon-btn.accent{color:var(--blue)}
+/* Зона нажатия у значков-действий внутри строк списка. Сам значок остаётся
+   прежнего размера — растёт только площадь, по которой попадает палец.
+   Замер на экране 360px показал значки 14–21px: промах по 🗑 в списке
+   удаляет не то, что человек целил. */
+.icon-tap{display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;flex-shrink:0;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent}
+.icon-tap:active{background:var(--sep)}
+/* То же для коротких текстовых ссылок-действий: высота строки 14–15px мала
+   для пальца, поднимаем до 34px, не меняя размер шрифта. */
+.link-tap{display:inline-flex;align-items:center;min-height:34px;cursor:pointer}
 #navOverlay{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;visibility:hidden;transition:opacity .2s;z-index:120}
 #navOverlay.on{opacity:1;visibility:visible}
 #navDrawer{position:fixed;top:0;left:0;bottom:0;width:80%;max-width:320px;background:var(--bg);border-right:1px solid var(--sep);transform:translateX(-102%);transition:transform .22s cubic-bezier(.4,0,.2,1);z-index:121;display:flex;flex-direction:column;box-shadow:2px 0 20px rgba(0,0,0,.35)}
@@ -462,7 +471,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 #opDone.show{opacity:1;transform:translateY(0);pointer-events:auto}
 #opDone .od-title{font-weight:600;margin-bottom:3px}
 #opDone .od-sum{color:var(--hint);font-size:12px;line-height:1.4;white-space:pre-wrap;max-height:64px;overflow:hidden}
-#opDone .od-x{position:absolute;top:6px;right:10px;color:var(--hint);font-size:16px;cursor:pointer;padding:2px 6px}
+#opDone .od-x{position:absolute;top:2px;right:6px;color:var(--hint);font-size:16px;cursor:pointer;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center}
 
 /* ─── Modal ──────────────────────────────────────────────────── */
 .mbg{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;display:none;align-items:flex-end}
@@ -736,7 +745,7 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 
 /* ─── More screen status bar ─────────────────────────────── */
 .acc-status-bar{display:flex;gap:6px;padding:8px 16px 4px;flex-wrap:wrap}
-.asb-item{background:var(--bg2);border-radius:var(--radius);padding:6px 10px;font-size:11px;color:var(--hint);flex:1 1 auto;text-align:center;min-width:80px;cursor:default}
+.asb-item{background:var(--bg2);border-radius:var(--radius);padding:6px 10px;min-height:32px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--hint);flex:1 1 auto;text-align:center;min-width:80px;cursor:default}
 .asb-item.tap{cursor:pointer;color:var(--accent)}
 .asb-item.tap:active{opacity:.7}
 
@@ -928,10 +937,10 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 /* Пресеты в формах ввода (шаблоны в один тап) */
 .preset-row{display:flex;gap:6px;overflow-x:auto;padding:0 0 8px;scrollbar-width:none}
 .preset-row::-webkit-scrollbar{display:none}
-.preset-chip{flex-shrink:0;background:var(--bg2);border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;white-space:nowrap;transition:transform .1s,border-color .12s}
+.preset-chip{flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;white-space:nowrap;transition:transform .1s,border-color .12s}
 .preset-chip:active{transform:scale(.94)}
 .preset-chip:hover{border-color:var(--accent)}
-.copilot-x{position:absolute;top:7px;right:9px;font-size:12px;color:var(--hint);opacity:.55;padding:3px 5px;line-height:1;border-radius:8px}
+.copilot-x{position:absolute;top:2px;right:4px;font-size:12px;color:var(--hint);opacity:.55;line-height:1;border-radius:8px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center}
 .copilot-x:active{opacity:1;background:var(--bg)}
 /* Часто используемые разделы */
 .freq-row{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
@@ -2473,7 +2482,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
       <span style="font-size:12px;color:var(--hint)">Аккаунты флота</span>
-      <span onclick="cwToggleAllAccs()" style="font-size:11px;color:var(--accent);cursor:pointer">выбрать все / сбросить</span>
+      <span class="link-tap" onclick="cwToggleAllAccs()" role="button" tabindex="0" style="font-size:11px;color:var(--accent)">выбрать все / сбросить</span>
     </div>
     <div id="cwAccs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;padding-left:16px;padding-right:16px"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div style="font-size:11px;color:var(--hint);margin:0 0 10px">Ничего не выбрано = весь живой флот (до 30 аккаунтов).</div>
@@ -3987,7 +3996,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
         <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
-        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
+        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-flex;align-items:center;min-height:32px;padding:0 4px;margin:0 -4px">📝 Вставить шаблон</a></div>
       </div>
       <div class="field" id="mpPillarWrap" style="margin-bottom:12px;display:none">
         <label>Рубрика</label>
@@ -4475,7 +4484,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:8px 16px">
       <div class="preset-row" id="qpPresetRow"></div>
       <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
-      <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div></div>
+      <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-flex;align-items:center;min-height:32px;padding:0 4px;margin:0 -4px">📝 Вставить шаблон</a></div></div>
     </div>
     <div class="sec">Выберите каналы</div>
     <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -6568,7 +6577,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до Spintax</div>
       <input type="text" id="cmpNameFb" maxlength="32" placeholder="Если имени нет, писать: друг">
       <div class="field-note">Чем заменить {name}, когда у получателя нет ни имени, ни ника</div>
-      <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--accent)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
+      <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--accent)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--accent);display:inline-flex;align-items:center;min-height:32px;padding:0 4px;margin:0 -4px">📝 Вставить шаблон</a></div>
       <div class="field-note" id="cmpSpinPreview" style="display:none;color:var(--text);background:var(--bg);border-radius:8px;padding:8px;margin-top:4px"></div>
     </div>
     <div class="field">
@@ -8282,7 +8291,7 @@ async function loadOrganismPulse() {
               <div style="font-size:13px;font-weight:600">${sv.e} ${esc(s.title)}</div>
               <div style="font-size:12px;color:var(--hint);margin-top:2px;line-height:1.4">${esc(s.why)}</div>
             </div>
-            <span onclick="dismissPulse('${esc(s.id)}')" style="cursor:pointer;color:var(--hint);font-size:13px;padding:2px" role="button" tabindex="0" aria-label="Закрыть">✕</span>
+            <span class="icon-tap" onclick="dismissPulse('${esc(s.id)}')" style="color:var(--hint);font-size:13px" role="button" tabindex="0" aria-label="Закрыть">✕</span>
           </div>
           <button class="btn btn-s" style="margin-top:8px;font-size:12px;padding:6px 12px" onclick="runPulseActionById('${esc(_pulseKeep(s))}')">▶ ${esc(pulseActionLabel(s.action))}</button>
         </div>`;
@@ -8293,7 +8302,7 @@ async function loadOrganismPulse() {
     // отдельным центрированным текстом под карточкой: ни к чему не привязана,
     // выровнена не как остальные ссылки-разделы (те стоят справа в .sec-row).
     html += `<div style="border-top:1px solid var(--sep);margin-top:12px;padding-top:10px;text-align:right">
-      <span onclick="openDigest()" style="cursor:pointer;color:var(--accent);font-size:12px;font-weight:600">📈 Полный отчёт →</span>
+      <span class="link-tap" onclick="openDigest()" role="button" tabindex="0" style="color:var(--accent);font-size:12px;font-weight:600">📈 Полный отчёт →</span>
     </div>`;
     html += '</div>';
     el.innerHTML = html;
@@ -8396,7 +8405,7 @@ async function cwLoadAccounts(){
   try{
     const r=await api('/api/miniapp/chatwarmup/accounts'); CW_ACC_ALL=r.accounts||[];
     if(!CW_ACC_ALL.length){el.innerHTML='<span style="font-size:12px;color:var(--hint)">Нет живых аккаунтов</span>';return;}
-    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" style="font-size:11px;padding:5px 10px;border-radius:14px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;border:1px solid transparent">${esc(a.label)}</span>`).join('');
+    el.innerHTML=CW_ACC_ALL.map(a=>`<span class="cw-chip" data-id="${a.id}" onclick="cwToggleAcc(${a.id})" style="font-size:11px;padding:5px 10px;min-height:32px;display:inline-flex;align-items:center;border-radius:14px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;border:1px solid transparent">${esc(a.label)}</span>`).join('');
   }catch(e){el.innerHTML=errHtml(e.message,'cwLoadAccounts()');}
 }
 function _cwChipStyle(el,on){el.style.background=on?'var(--accent-soft-2)':'rgba(255,255,255,.06)';el.style.borderColor=on?'var(--accent)':'transparent';}
@@ -12921,7 +12930,7 @@ async function loadCRM(append) {
     if (!append && (d.all_tags||[]).length) {
       document.getElementById('crmTagsBar').innerHTML =
         `<span class="badge ${!CRM_TAG?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px" onclick="setCRMTag('')">Все</span>` +
-        d.all_tags.map(t=>`<span class="badge ${CRM_TAG===t?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px;white-space:nowrap" onclick="setCRMTag('${esc(t)}')">#${esc(t)}</span>`).join('');
+        d.all_tags.map(t=>`<span class="badge ${CRM_TAG===t?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px;min-height:30px;display:inline-flex;align-items:center;white-space:nowrap" onclick="setCRMTag('${esc(t)}')">#${esc(t)}</span>`).join('');
     }
     const contacts = d.contacts||[];
     if (!contacts.length && !append) {
@@ -16557,7 +16566,7 @@ function vaultMediaLine(m) {
   const size = m.media_size ? ' · ' + fmtBytes(m.media_size) : '';
   const label = esc(m.media_label) + (m.media_name ? ' · ' + esc(m.media_name) : '') + size;
   return m.has_media
-    ? `<div class="tap" onclick="openVaultMedia(${m.msg_id})" style="opacity:.95;font-size:12px;margin-bottom:2px;text-decoration:underline">${label} ↗</div>`
+    ? `<div class="tap link-tap" onclick="openVaultMedia(${m.msg_id})" style="opacity:.95;font-size:12px;margin-bottom:2px;text-decoration:underline">${label} ↗</div>`
     : `<div style="opacity:.85;font-size:12px;margin-bottom:2px">${label}</div>`;
 }
 
@@ -17031,7 +17040,7 @@ async function openSavedSegments() {
       <div style="display:flex;align-items:center;gap:8px">
         <div class="li-body"><div class="li-name">${esc(s.name)}</div>
           <div class="li-sub">${s.count!=null?('👥 '+num(s.count)+' контактов'):'—'}</div></div>
-        <span style="cursor:pointer;color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span>
+        <span class="icon-tap" style="color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span>
       </div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-p" style="flex:1 1 auto;font-size:12px" onclick="segmentActFromSaved(${s.id},'write')">✍️ Написать</button>
@@ -17176,10 +17185,10 @@ async function loadIntentRules() {
           <div class="li-sub">${act||'— без действия —'} · сработ.: ${r.hits||0}</div>
         </div>
         <div class="li-right" style="display:flex;gap:8px;align-items:center">
-          ${r.hits ? `<span style="cursor:pointer;font-size:15px" onclick="openIntentHits(${r.id})" title="Показать, на что сработало" role="button" tabindex="0">📜</span>` : ''}
-          <span style="cursor:pointer;font-size:15px" onclick="editIntentRule(${r.id})" title="Изменить" role="button" tabindex="0">✏️</span>
-          <span style="cursor:pointer;font-size:15px" onclick="toggleIntentRule(${r.id})" title="Вкл/выкл">${r.is_active?'⏸':'▶️'}</span>
-          <span style="cursor:pointer;font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id}, this)" title="Удалить" role="button" tabindex="0">🗑</span>
+          ${r.hits ? `<span class="icon-tap" style="font-size:15px" onclick="openIntentHits(${r.id})" title="Показать, на что сработало" role="button" tabindex="0" aria-label="Показать, на что сработало">📜</span>` : ''}
+          <span class="icon-tap" style="font-size:15px" onclick="editIntentRule(${r.id})" title="Изменить" role="button" tabindex="0" aria-label="Изменить">✏️</span>
+          <span class="icon-tap" style="font-size:15px" onclick="toggleIntentRule(${r.id})" title="Вкл/выкл" role="button" tabindex="0" aria-label="Включить или выключить">${r.is_active?'⏸':'▶️'}</span>
+          <span class="icon-tap" style="font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id}, this)" title="Удалить" role="button" tabindex="0" aria-label="Удалить">🗑</span>
         </div>
       </div>`;
     }).join('');
@@ -18736,7 +18745,7 @@ async function openNodes() {
           <div class="row-val">${n.open_threads||0} открытых топиков · ${n.total_threads||0} всего</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
-          <span class="chev" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')" role="button" tabindex="0" aria-label="Открыть ветки">›</span>
+          <span class="chev icon-tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')" role="button" tabindex="0" aria-label="Открыть ветки">›</span>
           <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteNode(${n.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>
@@ -24861,7 +24870,7 @@ function renderNetNodesEdges(d) {
       <div class="li-name">${esc(n.label || n.type + ' #' + n.object_id)}</div>
       <div class="li-sub">${esc(objRu(n.type))} · ID: ${n.object_id}</div>
     </div>
-    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetNode(${n.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
+    <div class="li-right"><span class="icon-tap" style="font-size:16px" onclick="removeNetNode(${n.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
   </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет узлов</div>');
 
   txt('netEdgesList', edges.map(e => `<div class="li">
@@ -24870,7 +24879,7 @@ function renderNetNodesEdges(d) {
       <div class="li-name">${e.from_label || '#'} → ${e.to_label || '#'}</div>
       <div class="li-sub">${esc(objRu(e.type || 'forward'))}</div>
     </div>
-    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetEdge(${e.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
+    <div class="li-right"><span class="icon-tap" style="font-size:16px" onclick="removeNetEdge(${e.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
   </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет рёбер</div>');
 }
 
