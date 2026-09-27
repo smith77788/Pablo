@@ -3652,38 +3652,52 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         status = (request.query.get("status") or "").strip().lower()
         if status not in ("ok", "fail", "failed", "error", "skip", "skipped"):
             status = ""
+        # Поиск по цели. У операции на 2000 целей вопрос «а @ivan-то позвали?»
+        # иначе решается прокруткой. Ищем и по сообщению: причина отказа
+        # («Privacy restricted») — второй способ найти нужные строки.
+        needle = (request.query.get("q") or "").strip()[:64].lstrip("@").strip()
 
+        # Счётчики и общее число считаются ПО ТОЙ ЖЕ выборке, что и строки:
+        # разойдись они — шапка «N из M» описывала бы один набор, а список
+        # показывал другой.
+        _qc = " AND (target ILIKE $2 OR message ILIKE $2)" if needle else ""
+        _qa: list = [f"%{needle}%"] if needle else []
         counts: dict = {}
         total = 0
         try:
             agg = await pool.fetch(
                 "SELECT status, COUNT(*) AS n FROM operation_log "
-                "WHERE op_id=$1 GROUP BY status", op_id)
+                f"WHERE op_id=$1{_qc} GROUP BY status", op_id, *_qa)
             for r in agg:
                 counts[(r["status"] or "").lower() or "unknown"] = int(r["n"] or 0)
             total = sum(counts.values())
         except Exception as exc:
             log.warning("operation_log op=%d: агрегат недоступен: %s", op_id, exc)
             total = await _safe_count(
-                pool, "SELECT COUNT(*) FROM operation_log WHERE op_id=$1", op_id)
+                pool, f"SELECT COUNT(*) FROM operation_log WHERE op_id=$1{_qc}",
+                op_id, *_qa)
 
+        _n = len(_qa)
         if status:
             rows = await _safe_fetch(pool,
                 "SELECT step_num, target, status, message, created_at "
-                "FROM operation_log WHERE op_id=$1 AND lower(status)=$2 "
-                "ORDER BY step_num, id LIMIT $3 OFFSET $4", op_id, status, limit, offset)
+                f"FROM operation_log WHERE op_id=$1{_qc} AND lower(status)=${_n + 2} "
+                f"ORDER BY step_num, id LIMIT ${_n + 3} OFFSET ${_n + 4}",
+                op_id, *_qa, status, limit, offset)
             shown_total = counts.get(status, len(rows) + offset)
         else:
             rows = await _safe_fetch(pool,
                 "SELECT step_num, target, status, message, created_at "
-                "FROM operation_log WHERE op_id=$1 "
-                "ORDER BY step_num, id LIMIT $2 OFFSET $3", op_id, limit, offset)
+                f"FROM operation_log WHERE op_id=$1{_qc} "
+                f"ORDER BY step_num, id LIMIT ${_n + 2} OFFSET ${_n + 3}",
+                op_id, *_qa, limit, offset)
             shown_total = total
         return _json_resp({
             "logs": rows,
             "total": total,
             "counts": counts,
             "status": status,
+            "q": needle or None,
             "page": {"offset": offset, "limit": limit,
                      "has_more": offset + len(rows) < shown_total},
         })

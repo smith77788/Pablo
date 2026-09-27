@@ -12058,7 +12058,13 @@ async function openOpDetail(opId) {
     const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
     const dDone = o.total_items>0?Math.min(o.done_items||0,o.total_items):(o.done_items||0);
     const [bc,bl]=stb(o.status);
-    OPLOG_ID = opId; OPLOG_FILTER = ''; OPLOG_ROWS = [];
+    // Экран перерисовывается сам, когда операция завершается. Сбрасывать срез
+    // и поиск при этом нельзя: человек смотрел неудачные цели, а список молча
+    // показывал бы снова все.
+    const _sameOp = (OPLOG_ID === opId);
+    OPLOG_ID = opId;
+    if (!_sameOp) { OPLOG_FILTER = ''; OPLOG_Q = ''; }
+    OPLOG_ROWS = [];
     const logs = await api(_opLogQuery(0)).catch(()=>({logs:[]}));
     let html = `
       <div class="lst" style="margin:12px 16px 0">
@@ -12146,6 +12152,7 @@ async function openOpDetail(opId) {
       OPLOG_TOTAL = (logs.total != null) ? logs.total : OPLOG_ROWS.length;
       OPLOG_COUNTS = logs.counts || {};
       html += `<div class="sec" style="margin-top:12px" id="oplogSec"></div>
+        <div style="padding:0 16px 8px"><input type="text" id="oplogSearch" class="inp" placeholder="🔍 Найти цель или причину" aria-label="Поиск по логу операции" autocomplete="off" value="${esc(OPLOG_Q)}" oninput="onOpLogSearch(this.value)"></div>
         <div id="oplogChips" class="lf-chips"></div>
         <div class="lst" id="oplogList" style="margin:0 16px;max-height:300px;overflow-y:auto"></div>
         <div class="lst-more" id="oplogMore"></div>`;
@@ -12162,11 +12169,22 @@ async function openOpDetail(opId) {
 // общее число, есть срез по статусу и догрузка остатка.
 const OPLOG_PAGE = 200;
 let OPLOG_ID = null, OPLOG_ROWS = [], OPLOG_TOTAL = 0, OPLOG_COUNTS = {},
-    OPLOG_FILTER = '', OPLOG_LOADING = false;
+    OPLOG_FILTER = '', OPLOG_LOADING = false, OPLOG_Q = '', OPLOG_T = null;
 function _opLogQuery(offset) {
   let u = '/api/miniapp/operation/' + OPLOG_ID + '/log?limit=' + OPLOG_PAGE + '&offset=' + offset;
   if (OPLOG_FILTER) u += '&status=' + encodeURIComponent(OPLOG_FILTER);
+  if (OPLOG_Q) u += '&q=' + encodeURIComponent(OPLOG_Q);
   return u;
+}
+// У операции на две тысячи целей вопрос «а @ivan-то позвали?» решался только
+// прокруткой. Поиск идёт по цели И по сообщению: причина отказа («Privacy
+// restricted») — второй способ найти нужные строки. Счётчики и срезы сервер
+// пересчитывает по той же выборке, поэтому шапка и чипы не расходятся со
+// списком.
+function onOpLogSearch(v) {
+  OPLOG_Q = (v || '').trim();
+  if (OPLOG_T) clearTimeout(OPLOG_T);
+  OPLOG_T = setTimeout(() => filterOpLog(OPLOG_FILTER), 350);
 }
 function _opLogShownTotal() {
   if (!OPLOG_FILTER) return OPLOG_TOTAL;
@@ -12190,8 +12208,13 @@ function _opLogStRu(st) {
 function _opLogNum(n) { return String(Number(n||0)); }
 function renderOpLog() {
   const sec = document.getElementById('oplogSec');
-  if (sec) sec.textContent = OPLOG_FILTER
-    ? `📋 Лог · ${_opLogNum(OPLOG_ROWS.length)} из ${_opLogNum(_opLogShownTotal())} по срезу`
+  // Сузили список — скажем, чем именно: «3 из 3» без объяснения выглядит как
+  // потерянный лог.
+  const _olWhy = (OPLOG_FILTER && OPLOG_Q) ? ' по срезу и поиску'
+               : OPLOG_FILTER ? ' по срезу'
+               : OPLOG_Q ? ' по поиску' : '';
+  if (sec) sec.textContent = (OPLOG_FILTER || OPLOG_Q)
+    ? `📋 Лог · ${_opLogNum(OPLOG_ROWS.length)} из ${_opLogNum(_opLogShownTotal())}${_olWhy}`
     : `📋 Лог · показано ${_opLogNum(OPLOG_ROWS.length)} из ${_opLogNum(OPLOG_TOTAL)}`;
   renderOpLogChips();
   const el = document.getElementById('oplogList');
@@ -12201,7 +12224,7 @@ function renderOpLog() {
           <div class="row-name">${esc(l.target||'')}</div>
           <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
         </div></div>`).join('')
-      : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">По этому срезу записей нет.</div>`;
+      : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">${OPLOG_Q ? 'По этому поиску записей нет.' : 'По этому срезу записей нет.'}</div>`;
   }
   renderOpLogMore();
 }
@@ -12210,6 +12233,8 @@ function renderOpLogChips() {
   if (!box) return;
   const c = OPLOG_COUNTS || {};
   const bad = Object.keys(c).filter(k => k !== 'ok');
+  // OPLOG_TOTAL приходит с сервера уже с учётом поиска — чип «Все» и список
+  // считают один и тот же набор.
   const defs = [['', 'Все', OPLOG_TOTAL], ['ok', '🟢 Успешно', c.ok || 0]];
   bad.forEach(k => defs.push([k, '🔴 ' + _opLogStRu(k), c[k] || 0]));
   // Срез, за которым никого нет, не показываем: обещание без содержания.

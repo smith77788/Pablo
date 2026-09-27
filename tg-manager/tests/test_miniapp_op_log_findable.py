@@ -81,10 +81,23 @@ def test_log_endpoint_pages_and_counts():
 
 
 def test_status_filter_is_not_injectable():
-    """Статус приходит из строки запроса и уходит в SQL — берём только известные."""
+    """Статус приходит из строки запроса и уходит в SQL — берём только известные.
+
+    Номер плейсхолдера не пиним: он поехал, когда в запрос добавился параметр
+    поиска по логу (стало `${_n + 2}`). Пиним то, ради чего тест есть, —
+    статус сверяется со списком известных и подставляется ПАРАМЕТРОМ, а не
+    вклеивается в текст запроса.
+    """
+    import re as _re
     body = _py_fn(_api_src(), "operation_log")
     assert 'if status not in (' in body, "статус не сверяется со списком известных"
-    assert "lower(status)=$2" in body, "статус подставляется не параметром"
+    assert _re.search(r"lower\(status\)=\$(?:\d+|\{[^}]+\})", body), (
+        "статус подставляется не параметром")
+    # и уходит в fetch отдельным аргументом, а не внутри строки
+    assert _re.search(r"\*?_?q?a?,?\s*status,\s*limit,\s*offset", body) or ", status," in body, (
+        "статус не передан аргументом запроса")
+    assert 'lower(status)=\'' not in body and 'lower(status)="' not in body, (
+        "статус вклеен в текст SQL")
 
 
 def test_header_names_the_whole_log_not_the_page():
