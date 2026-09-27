@@ -121,3 +121,32 @@ def test_a_row_action_does_not_collapse_the_loaded_history():
     assert "Math.max(BCAST_PAGE, BCAST_ROWS.length)" in body, (
         "перезагрузка после действия в строке схлопывает догруженное до "
         "одной страницы")
+
+
+def test_analytics_row_uses_server_totals_not_the_page():
+    """Плитки над аналитикой уже считались по всей истории, а строка под ними —
+    по странице. «Доставка 97%» и «Отправлено 1 240» сверху спорили с
+    «Всего рассылок: 200 · Отправлено 310» снизу: второе — это последние
+    двести строк, а не вся история."""
+    html = miniapp_html()
+    call = _js_fn(html, "loadBroadcastSchedule")
+    assert "renderBcAnalytics(all, d.total, t)" in call, (
+        "в аналитику не передаются серверные итоги — строка снова будет "
+        "считать по загруженной странице")
+    body = _js_fn(html, "renderBcAnalytics")
+    assert "serverTotal" in body and "serverTotals" in body, (
+        "renderBcAnalytics не принимает итоги по всей истории")
+    assert "${num(totalBcasts)}" in body, "«Всего рассылок» снова берётся из длины страницы"
+    assert "st.sent != null" in body and "st.failed != null" in body, (
+        "суммы отправленного и ошибок снова считаются по странице")
+
+
+def test_analytics_bars_admit_they_are_a_page():
+    """Столбцы по ботам строятся по загруженной странице — это нормально, но
+    должно быть сказано, иначе срез читается как вся картина."""
+    body = _js_fn(miniapp_html(), "renderBcAnalytics")
+    assert "bcAnalyticsNote" in body, "нет места для оговорки под столбцами"
+    assert "serverTotal > items.length" in body, (
+        "оговорка не привязана к тому, длиннее ли история загруженной страницы")
+    assert "bcAnalyticsNote" in miniapp_html().split("<script")[0] or 'id="bcAnalyticsNote"' in miniapp_html(), \
+        "элемента для оговорки нет в разметке — текст некуда положить"

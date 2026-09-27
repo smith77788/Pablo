@@ -3282,6 +3282,24 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         log_exc_swallow(log, "Не удалось загрузить каналы для карты инфраструктуры")
         channels = []
 
+    # Карта строится по первым 30 ботам и 20 каналам, а подпись внизу писала
+    # «Итого: 30 ботов · 20 каналов» — то есть у владельца с полусотней ботов
+    # называла числом всего парка размер страницы. Берём настоящие счётчики.
+    try:
+        bots_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", uid
+        ) or 0
+    except Exception:
+        log_exc_swallow(log, "Не удалось посчитать ботов для карты инфраструктуры")
+        bots_total = len(bots)
+    try:
+        chans_total = await pool.fetchval(
+            "SELECT COUNT(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1", uid
+        ) or 0
+    except Exception:
+        log_exc_swallow(log, "Не удалось посчитать каналы для карты инфраструктуры")
+        chans_total = len(channels)
+
     lines = ["🗺️ <b>Карта инфраструктуры</b>\n"]
 
     cluster_map: dict[str, list] = {"default": []}
@@ -3327,10 +3345,21 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             uname = f" @{html.escape(ch['username'])}" if ch.get("username") else ""
             lines.append(f"  📡 {cname}{uname}")
 
+    swarm_shown = len([b for b in bots if b.get("swarm_enabled")])
+    hidden = []
+    if bots_total > len(bots):
+        hidden.append(f"ботов показано {len(bots)} из {bots_total}")
+    if chans_total > len(channels):
+        hidden.append(f"каналов {len(channels)} из {chans_total}")
     lines.append(
-        f"\n<i>Итого: {len(bots)} ботов · {len(channels)} каналов · "
-        f"{len([b for b in bots if b.get('swarm_enabled')])} в «Рое»</i>"
+        f"\n<i>Итого: {bots_total} ботов · {chans_total} каналов · "
+        f"{swarm_shown} в «Рое» (среди показанных)</i>"
     )
+    if hidden:
+        lines.append(
+            f"<i>На карте помещается не всё: {', '.join(hidden)}. "
+            f"Полная карта с поиском — в мини-аппе.</i>"
+        )
 
     topo_text = "\n".join(lines)
     if len(topo_text) > 4000:

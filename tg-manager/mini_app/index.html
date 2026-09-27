@@ -1675,6 +1675,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="bcAnalyticsChart" style="margin:0 16px 8px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
       <div style="display:flex;align-items:flex-end;gap:4px;height:60px" id="bcAnalyticsBars"></div>
       <div style="display:flex;justify-content:space-between;margin-top:4px" id="bcAnalyticsLabels"></div>
+      <div id="bcAnalyticsNote"></div>
     </div>
     <div class="lst" id="bcAnalyticsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -14521,7 +14522,7 @@ async function loadBroadcastSchedule() {
     _bcAbData = abList;
     renderBcScheduleList(scheduled);
     renderBcAbList(abList);
-    renderBcAnalytics(all);
+    renderBcAnalytics(all, d.total, t);
   } catch(e) {
     txt('bcSchedList', errHtml(e.message,'loadBroadcastSchedule()'));
     txt('bcAbList', empty('🧪','Не загрузилось',''));
@@ -14562,13 +14563,19 @@ function renderBcAbList(items) {
     </div>`;
   }).join('');
 }
-function renderBcAnalytics(items) {
+// serverTotal и serverTotals приходят с сервера по ВСЕЙ истории. Без них
+// строка считалась по странице и спорила с плитками над собой: плитка
+// «Доставка» брала общие суммы, а «Всего рассылок» — длину страницы, то есть
+// у владельца с тысячей рассылок писала «Всего рассылок: 200».
+function renderBcAnalytics(items, serverTotal, serverTotals) {
   const el = document.getElementById('bcAnalyticsBars');
   const labels = document.getElementById('bcAnalyticsLabels');
   const list = document.getElementById('bcAnalyticsList');
   if (!items.length) { if(el) el.innerHTML=''; if(labels) labels.innerHTML=''; if(list) list.innerHTML=''; return; }
-  const sent = items.reduce((s,b)=>(s+(b.sent_count||0)),0);
-  const failed = items.reduce((s,b)=>(s+(b.failed_count||0)),0);
+  const st = serverTotals || {};
+  const sent = (st.sent != null) ? st.sent : items.reduce((s,b)=>(s+(b.sent_count||0)),0);
+  const failed = (st.failed != null) ? st.failed : items.reduce((s,b)=>(s+(b.failed_count||0)),0);
+  const totalBcasts = (serverTotal != null) ? serverTotal : items.length;
   const byBot = {};
   items.forEach(b=>{
     const k = b.bot_username||b.bot_id||'—';
@@ -14586,10 +14593,16 @@ function renderBcAnalytics(items) {
     </div>`;
   }).join('');
   if(labels) labels.innerHTML = bots.map(([name])=>`<span style="font-size:10px;color:var(--hint)">@${(name||'').substring(0,6)}</span>`).join('');
+  // Столбцы по ботам строятся по загруженной странице — если история длиннее,
+  // говорим об этом, а не выдаём срез за всю картину.
+  const barNote = document.getElementById('bcAnalyticsNote');
+  if (barNote) barNote.innerHTML = (serverTotal != null && serverTotal > items.length)
+    ? `<div class="lst-more-note">Столбцы по последним ${num(items.length)} рассылкам из ${num(serverTotal)}.</div>`
+    : '';
   if(list) list.innerHTML = `<div class="li" style="cursor:default">
     <div class="ava ava-teal">📊</div>
     <div class="li-body">
-      <div class="li-name">Всего рассылок: ${items.length}</div>
+      <div class="li-name">Всего рассылок: ${num(totalBcasts)}</div>
       <div class="li-sub">Отправлено: ${num(sent)} · Ошибки: ${num(failed)} · Доставка: ${sent+failed>0?Math.round(sent/(sent+failed)*100):'—'}%</div>
     </div>
   </div>`;
