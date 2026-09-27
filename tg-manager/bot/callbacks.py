@@ -266,6 +266,19 @@ class BmCb(CallbackData, prefix="bm"):
     op_id: int = 0
 
 
+class CapCb(CallbackData, prefix="cap"):
+    """Кнопка «остальное не поместилось» в срезанном списке выбора.
+
+    Одна на все экраны: обработчик в bot/handlers/picker_cap_notice.py просто
+    объясняет, сколько скрыто и где смотреть полный список. Нажатие ничего не
+    меняет — это подпись, которой в клавиатуре больше негде стоять.
+    """
+
+    total: int = 0
+    shown: int = 0
+    what: str = "acc"
+
+
 class AssetTplCb(CallbackData, prefix="atpl"):
     action: str
     tpl_id: int = 0

@@ -23,6 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import db
 from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import WarmupSessionFSM, ResourceActivityFSM
 from bot.utils.event_status import mark_handled_error
 from services.logger import log_exc_swallow
@@ -148,13 +149,15 @@ async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         text=f"🌡 Выбрать все аккаунты ({total})",
         callback_data=WarmupCb(action="select_all_plan"),
     )
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         icon = "✅" if acc["has_plan"] else "⚪"
         label = acc.get("first_name") or acc["phone"]
         kb.button(
             text=f"{icon} {html.escape(label)} [{acc['acc_status']}]",
             callback_data=WarmupCb(action="select_plan", account_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
     kb.adjust(1)
 
@@ -874,13 +877,15 @@ async def _show_account_picker(
         accounts = []
 
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         icon = "✅" if acc["id"] in selected else "⬜"
         label = acc.get("first_name") or acc["phone"]
         kb.button(
             text=f"{icon} {html.escape(label)}",
             callback_data=WarmupCb(action="tog_acc", account_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     if selected:
         kb.button(
             text=f"➡️ Готово ({len(selected)} акк.)",
@@ -1726,13 +1731,15 @@ async def _show_ract_account_picker(
         accounts = []
 
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         icon = "✅" if acc["id"] in selected else "⬜"
         label = acc.get("first_name") or acc["phone"]
         kb.button(
             text=f"{icon} {html.escape(label)}",
             callback_data=ResourceActCb(action="tog_acc", account_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     if selected:
         kb.button(
             text=f"➡️ Готово ({len(selected)} акк.)",

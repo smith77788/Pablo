@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AccCb, BmCb, GroupFCb, EcoPickCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
@@ -100,11 +101,13 @@ async def cb_group_create_start(
         return
 
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=f"✅ {_acc_label(acc)}",
             callback_data=GroupFCb(action="create_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
     kb.adjust(1)
 
@@ -373,11 +376,13 @@ async def cb_group_list_start(
         return
 
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=f"👤 {_acc_label(acc)}",
             callback_data=GroupFCb(action="list_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -462,11 +467,13 @@ async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=f"👤 {_acc_label(acc)}",
             callback_data=GroupFCb(action="members_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -630,11 +637,13 @@ async def cb_group_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=GroupFCb(action="import_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="🔄 Все аккаунты сразу", callback_data=GroupFCb(action="import_all"))
     kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
     kb.adjust(2, 1, 1)
@@ -778,11 +787,13 @@ async def cb_group_announce_start(
         return
 
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=f"👤 {_acc_label(acc)}",
             callback_data=GroupFCb(action="announce_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(

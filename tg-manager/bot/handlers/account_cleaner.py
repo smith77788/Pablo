@@ -15,6 +15,7 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import CleanerCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
@@ -119,12 +120,14 @@ async def _pick_account_kb(
             text="📵 Нет аккаунтов с доступной сессией",
             callback_data=CleanerCb(action="menu"),
         )
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         label = acc.get("first_name") or acc["phone"]
         kb.button(
             text=html.escape(label),
             callback_data=CleanerCb(action=action, account_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=CleanerCb(action="menu"))
     kb.adjust(1)
     return kb

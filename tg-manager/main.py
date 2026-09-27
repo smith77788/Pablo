@@ -84,6 +84,7 @@ from bot.handlers import proxy_manager as proxy_handler
 from bot.handlers import cluster_manager as cluster_handler
 from bot.handlers import audience_parser as audience_parser_handler
 from bot.handlers import keyword_interceptor as keyword_interceptor_handler
+from bot.handlers import picker_cap_notice as picker_cap_notice_handler
 from bot.handlers import chat_guard as chat_guard_handler
 from bot.handlers import organism_nudge as organism_nudge_handler
 from bot.handlers import managed_bots as managed_bots_handler
@@ -496,6 +497,8 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     dp.include_router(cluster_handler.router)
     dp.include_router(audience_parser_handler.router)
     dp.include_router(keyword_interceptor_handler.router)
+    # Подпись «остальное не поместилось» в срезанных списках выбора — одна на все экраны.
+    dp.include_router(picker_cap_notice_handler.router)
     # Модератор чатов — раньше relay (ловит reply) и общих групповых хендлеров,
     # чтобы системные сообщения/команды модерации обрабатывались первыми; когда
     # чат не под охраной, хендлер поднимает SkipHandler и апдейт идёт дальше.

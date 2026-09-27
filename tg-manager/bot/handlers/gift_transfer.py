@@ -17,6 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters.state import State, StatesGroup
 
 from bot.callbacks import BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from services.gift_inventory import GiftInventoryService
 from services.gift_transfer import GiftTransferService
 from services.gift_report import GiftTransferReportService
@@ -151,12 +152,14 @@ async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
     kb.button(text="❌ Снять выбор", callback_data="gt:scan_none")
     kb.row()
 
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         status_emoji = "🟢" if acc["is_active"] else "🔴"
         kb.button(
             text=f"{status_emoji} {acc['phone']}",
             callback_data=f"gt:toggle_acc:{acc['id']}",
         )
+    _cap_note(kb, accounts, _shown)
 
     kb.row()
     kb.button(text="▶️ Начать сканирование", callback_data="gt:start_scan")

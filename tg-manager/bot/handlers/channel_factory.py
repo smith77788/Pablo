@@ -23,6 +23,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AccCb, ChanFactCb, SeoCb, EcoPickCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from services.logger import log_exc_swallow
 from bot.states import (
@@ -148,11 +149,13 @@ async def cb_chanf_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="import_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(
         text="🔄 Все аккаунты сразу", callback_data=ChanFactCb(action="import_all_accs")
     )
@@ -784,11 +787,13 @@ async def cb_chanf_bulk_create_start(
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="bulk_create_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(3)
     await state.set_state(BulkChannelCreateFSM.choosing_account)
@@ -1086,11 +1091,13 @@ async def cb_chanf_be_scope_acc(
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="be_pick_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="bulk_edit"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -1222,11 +1229,13 @@ async def cb_chanf_gen_links(
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="gen_links_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(2)
     await callback.message.edit_text(
@@ -1366,11 +1375,13 @@ async def cb_chanf_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="stats_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(2)
     await callback.message.edit_text(
@@ -1566,11 +1577,13 @@ async def cb_chanf_seo_pick_acc(
         await _show_seo_chan_picker(callback, pool, accounts[0]["id"], user_id, page=0)
         return
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="seo_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.adjust(1)
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     await callback.message.edit_text(

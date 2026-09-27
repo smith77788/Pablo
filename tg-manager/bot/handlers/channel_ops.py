@@ -32,6 +32,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb, AccCb, MassOpCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from services import task_registry as _treg
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from bot.states import (
@@ -474,10 +475,12 @@ def _bulk_select_kb(
         )
     kb.button(text="✅ Выбрать все", callback_data=f"chan:bsall:{op}")
     kb.button(text="☐ Снять все", callback_data=f"chan:bsnone:{op}")
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         icon = "✅" if acc["id"] in selected else "☐"
         label = f"{icon} {_acc_label(acc)}"
         kb.button(text=label, callback_data=f"chan:bsel:{op}:{acc['id']}")
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="bulk_menu").pack())
     kb.adjust(1)
     return kb
@@ -486,9 +489,11 @@ def _bulk_select_kb(
 def _account_picker_kb(accounts: list, action: str) -> InlineKeyboardBuilder:
     """Inline keyboard to pick one account for an action."""
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         label = ("✅ " if acc["is_active"] else "❌ ") + _acc_label(acc)
         kb.button(text=label, callback_data=ChanCb(action=action, acc_id=acc["id"]))
+    _cap_note(kb, accounts, _shown)
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
     kb.adjust(1)
     return kb
@@ -2205,7 +2210,8 @@ async def cb_manage_admins(
         lines.append("<i>Нет других активных аккаунтов с известным Telegram ID.</i>")
     else:
         lines.append(f"Доступно {len(accounts)} аккаунтов:")
-        for acc in accounts:
+        _shown = _cap(accounts)
+        for acc in _shown:
             name = (acc["first_name"] or "").strip()
             uname = (
                 f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
@@ -2217,6 +2223,7 @@ async def cb_manage_admins(
                     action="do_promote", acc_id=acc_id, channel_id=ch_id, page=acc["id"]
                 ),
             )
+        _cap_note(kb, accounts, _shown)
         kb.button(
             text="👑 Промовать ВСЕХ",
             callback_data=ChanCb(action="promote_all", acc_id=acc_id, channel_id=ch_id),
@@ -2643,11 +2650,13 @@ async def _show_invite_acc_selector(
     edit: bool = True,
 ) -> None:
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         icon = "✅" if acc["id"] in selected else "☐"
         kb.button(
             text=f"{icon} {_acc_label(acc)}", callback_data=f"invite:acc:{acc['id']}"
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="✅ Выбрать все", callback_data="invite:acc:selall")
     kb.button(text="☐ Снять все", callback_data="invite:acc:selnone")
     n = len(selected)
@@ -4019,7 +4028,8 @@ async def _show_bulk_report_account_picker(
         f"Выбрано: <b>{len(selected)}/{len(accounts)}</b>\n",
     ]
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         acc_id = acc["id"]
         is_sel = acc_id in selected
         phone = acc.get("phone", "")[-4:] if acc.get("phone") else "----"
@@ -4029,6 +4039,7 @@ async def _show_bulk_report_account_picker(
             text=f"{mark} {html.escape(name)} ···{phone}",
             callback_data=f"chan:br_toggle:{acc_id}",
         )
+    _cap_note(kb, accounts, _shown)
     kb.adjust(1)
     kb.row(
         InlineKeyboardButton(text="✅ Выбрать все", callback_data="chan:br_selall"),
@@ -5951,13 +5962,15 @@ def _cinv_channel_picker_kb(channels: list, page: int = 0) -> InlineKeyboardBuil
 
 def _cinv_acc_picker_kb(accounts: list, selected: set) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         mark = "✅" if acc["id"] in selected else "⬜"
         label = _acc_label(acc)
         kb.button(
             text=f"{mark} {label}",
             callback_data=ContactInvCb(action="toggle_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     if selected:
         kb.button(
             text=f"🚀 Продолжить ({len(selected)} акк.)",

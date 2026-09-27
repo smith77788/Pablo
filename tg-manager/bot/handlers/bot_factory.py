@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb, BotFactCb, EcoPickCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import BotCloneSettingsFSM, BotCreateFSM, BotTokenImportFSM, BotValidateFSM
 from database import db
 from services import bot_api
@@ -118,11 +119,13 @@ async def cb_factory_create(
 
     await state.set_state(BotCreateFSM.choosing_account)
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         kb.button(
             text=f"✅ {_acc_label(acc)}",
             callback_data=BotFactCb(action="create_acc", bot_id=acc["id"]),
         )
+    _cap_note(kb, accounts, _shown)
     kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(

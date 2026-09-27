@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, GeoPresenceCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import GlobalPresenceFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -1557,7 +1558,8 @@ async def _show_accounts_step(
         return
 
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
+    _shown = _cap(accounts)
+    for acc in _shown:
         check = "✅" if acc["id"] in selected_ids else "⬜"
         trust = (
             f" ({acc['trust_score']:.0f}%)"
@@ -1568,6 +1570,7 @@ async def _show_accounts_step(
             text=f"{check} {acc['phone']}{trust}",
             callback_data=GeoPresenceCb(action="acc_tog", item=str(acc["id"])),
         )
+    _cap_note(kb, accounts, _shown)
     kb.adjust(1)
 
     nav = InlineKeyboardBuilder()
