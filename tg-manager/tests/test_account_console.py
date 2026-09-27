@@ -302,13 +302,41 @@ def test_write_any_contact_uses_access_hash():
     assert "c.access_hash" in body, "контакт без @username не резолвится по access_hash"
 
 
+def _fn_body(name: str) -> str:
+    """Тело функции целиком, по балансу скобок.
+
+    Раньше здесь брали фиксированное окно в 700 символов от начала функции.
+    Окно — плохая мера: стоило добавить в начало подтверждение отправки, и
+    проверяемая строка выехала за край, а тест покраснел, хотя гарантия цела.
+    Тот же класс ошибки стережёт test_no_silently_disabled_guards.
+    """
+    m = re.search(rf"(?:async\s+)?function {name}\(", HTML)
+    assert m, f"нет функции {name}"
+    i = HTML.index("{", m.end() - 1)
+    depth, j = 0, i
+    while j < len(HTML):
+        if HTML[j] == "{":
+            depth += 1
+        elif HTML[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return HTML[i:j + 1]
+        j += 1
+    raise AssertionError(f"не выделить тело {name}()")
+
+
 def test_multiselect_group_send_reuses_safe_dm():
     """«Написать всем» идёт через безопасный DM-движок (operation_bus), не циклом."""
     for fn in ("toggleAccContSelect", "toggleAccContPick", "writeSelectedContacts", "submitAccContMsg"):
         assert re.search(rf"function {fn}\(", HTML), f"нет функции {fn}"
-    m = re.search(r"function submitAccContMsg\(", HTML)
-    body = HTML[m.start(): m.start() + 700]
+    body = _fn_body("submitAccContMsg")
     assert "/api/miniapp/dm/adhoc_send" in body, "групповая отправка не через безопасный adhoc-путь"
+    # И именно ОДНИМ запросом: цикл с отправкой на контакт — это обход движка,
+    # то есть мимо пейсинга, тарифа и предохранителя.
+    sends = re.findall(r"api\(\s*[`'\"][^`'\"]*(?:send|dm)[^`'\"]*[`'\"]", body, re.I)
+    assert len(sends) == 1, f"ожидался один запрос отправки, найдено {len(sends)}: {sends}"
+    assert not re.search(r"(for\s*\(|\.forEach\(|\.map\()[^;]{0,200}await\s+api\(", body), \
+        "отправка в цикле — мимо безопасного движка"
     cont = _screen_body("s-acccontacts")
     assert "writeSelectedContacts()" in cont and 'id="accContBulk"' in cont
 

@@ -9906,6 +9906,24 @@ async function submitAccProfile() {
   try {
     let r;
     if (AP_MASS) {
+      // Массовый режим меняет РЕАЛЬНЫЕ аккаунты, и часть операций не откатить:
+      // 2FA-пароль потом не вспомнить, закрытые сессии не вернуть. Одиночный
+      // режим спрашивать не обязан — там видно, чей это аккаунт; в массовом
+      // человек не видит списка и должен узнать, скольких это коснётся.
+      const _apOpt = document.querySelector('#apOp option[value="' + op + '"]');
+      const _apWhat = _apOpt ? (_apOpt.textContent || op).trim() : op;
+      const _apN = _massSelCount();
+      const _apWarn = (op === '2fa')
+        ? '\n\n⚠️ Пароль 2FA восстановить нельзя. Потеряете его — потеряете аккаунты.'
+        : (op === 'close_sessions')
+        ? '\n\n⚠️ Сторонние сессии закроются без возврата: где аккаунт был залогинен, туда придётся входить заново.'
+        : (op === 'reset_2fa')
+        ? '\n\n⚠️ Защита аккаунтов будет снята.'
+        : '';
+      if (!await askConfirm('«' + _apWhat + '» на ' + _apN + ' '
+            + plural(_apN, 'аккаунте', 'аккаунтах', 'аккаунтах') + '?' + _apWarn)) {
+        return;  // кнопку вернёт finally этого же try
+      }
       Object.assign(payload, _massSel());
       r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify(payload)});
       toast(`✅ Поставлено в очередь для ${r.count||_massSelCount()} аккаунтов`);
@@ -10776,6 +10794,16 @@ async function submitAccContMsg() {
   if (!text) { err.textContent = 'Введите текст'; return; }
   const usernames = ACC_CONTACTS.filter(c => ACC_CONT_SEL && ACC_CONT_SEL.has(c.id) && c.username).map(c => c.username);
   if (!usernames.length) { err.textContent = 'Нет получателей с @username'; return; }
+  // Сообщение уходит ЖИВЫМ людям и отозвать его нельзя. Спрашиваем здесь же и
+  // называем, скольким именно: человек выбирал контакты галочками и мог
+  // промахнуться, а часть выбранных без @username отсеялась молча.
+  const _dmSkipped = (ACC_CONT_SEL ? ACC_CONT_SEL.size : usernames.length) - usernames.length;
+  if (!await askConfirm('Отправить сообщение ' + usernames.length + ' '
+        + plural(usernames.length, 'человеку', 'людям', 'людям') + '?'
+        + (_dmSkipped > 0
+            ? '\n' + _dmSkipped + ' из выбранных без @username — им не уйдёт.'
+            : '')
+        + '\nОтозвать отправленное нельзя.')) return;
   try {
     const r = await api('/api/miniapp/dm/adhoc_send', {method:'POST',
       body: JSON.stringify({usernames, text, account_ids: [ACC_CONSOLE_ID]})});
