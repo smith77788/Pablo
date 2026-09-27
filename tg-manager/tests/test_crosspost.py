@@ -70,8 +70,10 @@ def test_endpoints_through_bus_and_routes():
     assert "async def crosspost_links_list" in api
     assert '"/api/miniapp/crosspost/run"' in api
     assert '"/api/miniapp/crosspost/links"' in api
-    i = api.index("async def crosspost_run")
-    assert 'operation_bus.submit' in api[i:i + 900]
+    # Границы функции из ast, а не окно в 900 символов: окно промахивалось,
+    # стоило добавить в функцию пару строк, и проверка «через шину» замолкала.
+    fn = _func_src(os.path.join(ROOT, "services", "mini_app_api.py"), "crosspost_run")
+    assert 'operation_bus.submit' in fn
 
 
 def test_frontend_crosspost_ui():

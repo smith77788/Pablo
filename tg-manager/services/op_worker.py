@@ -58,6 +58,22 @@ async def _safe_execute(pool: asyncpg.Pool, query: str, *args, log_ctx: str = ""
         return "ERROR"
 
 
+async def _mark_progress(pool: asyncpg.Pool, op_id: int, done: int) -> None:
+    """Отметить в операции, сколько единиц работы уже пройдено.
+
+    Полоса прогресса в мини-аппе и в панели операций рисуется ровно по
+    done_items/total_items. Исполнитель, который эти счётчики не трогает,
+    оставляет полосу на нуле весь прогон: владелец видит «0 из 50 · 0%»
+    полчаса подряд и не может отличить работающую операцию от зависшей.
+    Счётчик двигаем на единицу ПОЗАДИ факта (перед началом очередной единицы
+    отмечаем предыдущие) — так полоса никогда не обгоняет реальность.
+    """
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+        max(0, int(done)), op_id, log_ctx=f"[progress op={op_id}]",
+    )
+
+
 async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") -> asyncpg.Record | None:
     """Fetch a single row, return None on failure. Never raises."""
     try:
@@ -6842,6 +6858,14 @@ async def _exec_check_channel_rankings(
     res = await channel_ranking.check_owner(pool, owner_id, bot=bot)
     if res.get("error"):
         return {"status": "failed", "summary": f"⚠️ {res['error']}"}
+    # Сколько ключей замерили — известно только по итогу, поэтому масштаб
+    # операции проставляем здесь. Без этого в панели операций навсегда
+    # оставалось «0 из 0», хотя итог рядом сообщал про десятки ключей.
+    _checked = int(res.get("checked") or 0)
+    if _checked:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET total_items=$1, done_items=$1 WHERE id=$2",
+            _checked, op_id, log_ctx=f"[progress op={op_id}]")
     return {"status": "done",
             "checked": res.get("checked", 0), "found": res.get("found", 0),
             "summary": (f"Проверено ключей: {res.get('checked', 0)}, "
@@ -11094,12 +11118,20 @@ async def _exec_deploy_network(
         node_type: dict[int, str] = {n["id"]: (n.get("node_type") or "").lower() for n in nodes}
         created = wired = 0
         manual: list[str] = []
+        # Счётчик шагов общий на оба цикла: план (plan_deployment) считает шагом
+        # каждый недостающий узел и каждое ребро, и total_items операции равен
+        # именно этой сумме. Без отметок полоса стояла на нуле, хотя создание
+        # одного канала занимает 30–60 секунд.
+        _done_n = 0
         for n in nodes:
             if await _is_cancelled(pool, op_id):
+                await _mark_progress(pool, op_id, _done_n)
                 return {"status": "cancelled", "created": created, "wired": wired,
                         "summary": f"Отменено. Создано {created}, связано {wired}."}
             if n.get("ref_id"):
-                continue
+                continue  # существующий узел шагом плана не был — счётчик не двигаем
+            await _mark_progress(pool, op_id, _done_n)
+            _done_n += 1
             ntype = (n.get("node_type") or "").lower()
             label = (n.get("label") or "").strip() or "Объект"
             if ntype in ("channel", "group", "chat"):
@@ -11161,6 +11193,8 @@ async def _exec_deploy_network(
             etype = (e.get("edge_type") or "").lower()
             if await _is_cancelled(pool, op_id):
                 break
+            await _mark_progress(pool, op_id, _done_n)
+            _done_n += 1
             s_id, t_id = e.get("source_node_id"), e.get("target_node_id")
             src_ref, dst_ref = node_ref.get(s_id), node_ref.get(t_id)
             if etype == "admin":
@@ -11207,6 +11241,7 @@ async def _exec_deploy_network(
                              {"instance_id": instance_id, "created": created, "wired": wired})
         except Exception:
             pass
+        await _mark_progress(pool, op_id, _done_n)
         parts = [f"🔗 Связка развёрнута: создано {created}, связано {wired}"]
         if manual:
             parts.append("Вручную: " + "; ".join(manual[:5]))
@@ -11279,9 +11314,14 @@ async def _exec_community_liven(
                 "summary": "⚠️ Оживление: бот не смог создать ссылку (нужен админ с правом приглашать)"}
     joined = 0
     busy = 0
+    _done_n = 0
     for acc in (accs or []):
         if await _is_cancelled(pool, op_id):
             break
+        # Полоса прогресса операции: без этой отметки done_items остаётся
+        # нулём весь прогон и владелец видит «0 из N» всё время работы.
+        await _mark_progress(pool, op_id, _done_n)
+        _done_n += 1
         # Захват на КАЖДЫЙ аккаунт: вступает он своей живой сессией. Занятый
         # пропускаем, а не открываем на нём вторую сессию (AUTH_KEY_DUPLICATED).
         if not await try_claim_account(int(acc["id"])):
@@ -11301,8 +11341,15 @@ async def _exec_community_liven(
             await nodes_engine.add_node_member(pool, node_id, int(acc["id"]), "member")
             joined += 1
             await _governed_sleep(pool, owner_id, random.uniform(20, 45))
+    await _mark_progress(pool, op_id, _done_n)
+    # Просили N аккаунтов, а свободных нашлось меньше — операция закончится с
+    # полосой ниже ста процентов, и владелец должен прочитать почему, а не
+    # гадать, оборвалась она или нет.
+    _short = len(accs or []) < count
     return {"status": "done", "joined": joined,
             "summary": (f"🏛 Оживление ноды: вступило {joined} аккаунтов флота"
+                        + (f" · свободных аккаунтов нашлось {len(accs or [])} из {count}"
+                           if _short else "")
                         + (f" · пропущено занятых: {busy}" if busy else ""))}
 
 
@@ -11354,9 +11401,14 @@ async def _exec_community_set_staff(
     try:
         chat_id = int(node["tg_chat_id"])
         promoted = 0
+        _done_n = 0
         for aid in acc_ids:
             if await _is_cancelled(pool, op_id):
                 break
+            # Полоса прогресса операции: без отметки done_items остаётся нулём
+            # весь прогон, а между промоутами проходит 10–25 секунд.
+            await _mark_progress(pool, op_id, _done_n)
+            _done_n += 1
             target = await _safe_fetchrow(
                 pool, "SELECT tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2", aid, owner_id)
             uid_tg = target["tg_user_id"] if target else None
@@ -11373,6 +11425,7 @@ async def _exec_community_set_staff(
                     await _governed_sleep(pool, owner_id, random.uniform(10, 25))
             except Exception as e:
                 log.debug("_exec_community_set_staff op=%d acc=%s: %s", op_id, aid, e)
+        await _mark_progress(pool, op_id, _done_n)
         return {"status": "done", "promoted": promoted,
                 "summary": f"🛡 Роли ноды: назначено {promoted} ({role})"}
     finally:
@@ -11400,9 +11453,14 @@ async def _exec_crosspost_run(
         return {"status": "done", "summary": "🔁 Кросспостинг: активных правил нет"}
     total_fwd = 0
     runs = 0
+    _done_n = 0
     for lk in links:
         if await _is_cancelled(pool, op_id):
             break
+        # Полоса прогресса операции: без этой отметки done_items остаётся
+        # нулём весь прогон и владелец видит «0 из N» всё время работы.
+        await _mark_progress(pool, op_id, _done_n)
+        _done_n += 1
         acc = None
         if lk.get("account_id"):
             acc = await _safe_fetchrow(
@@ -11443,6 +11501,7 @@ async def _exec_crosspost_run(
             int(res.get("last_msg_id") or lk["last_msg_id"] or 0), fwd, lk["id"])
         if fwd:
             await _governed_sleep(pool, owner_id, random.uniform(5, 12))
+    await _mark_progress(pool, op_id, _done_n)
     return {"status": "done", "forwarded": total_fwd, "rules": runs,
             "summary": f"🔁 Кросспостинг: переслано {total_fwd} по {runs} правил."}
 

@@ -19673,10 +19673,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         p = {}
         if str(body.get("link_id") or "").isdigit():
             p["link_id"] = int(body["link_id"])
+        # Масштаб — по тому, что реально пройдёт: иначе «1 из 12» или «50 из 80».
+        _total = 1 if "link_id" in p else min(int(n), 50)
         try:
             from services import operation_bus
             op_id = await operation_bus.submit(pool, uid, "crosspost_run", p,
-                                               total_items=int(n), label="Кросспостинг: прогон")
+                                               total_items=_total, label="Кросспостинг: прогон")
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)

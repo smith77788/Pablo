@@ -1,6 +1,7 @@
 """Связки Фаза 2: исполнитель развёртывания (op deploy_network) — wiring/контракт."""
 from __future__ import annotations
 
+import ast
 import os
 from services import op_worker
 
@@ -9,6 +10,20 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def _ow():
     return open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
+
+
+def _func_src(path: str, name: str) -> str:
+    """Текст функции по границам из ast, а не окном фиксированной длины.
+
+    Окно «заголовок плюс N символов» промахивается, стоит функции подрасти
+    на пару строк: проверка ничего не находит и молча перестаёт защищать.
+    """
+    src = open(path, encoding="utf-8").read()
+    lines = src.splitlines()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return "\n".join(lines[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"функция {name} не найдена")
 
 
 def _api():
@@ -22,9 +37,8 @@ def test_op_dispatch_wired():
 
 
 def test_executor_creates_persists_and_wires():
-    src = _ow()
-    i = src.index("async def _exec_deploy_network")
-    fn = src[i:i + 9000]
+    fn = _func_src(os.path.join(ROOT, "services", "op_worker.py"),
+                   "_exec_deploy_network")
     # создаёт объекты через фабрику аккаунта
     assert "account_manager.create_channel" in fn
     # пишет id обратно в узел
@@ -42,9 +56,8 @@ def test_executor_creates_persists_and_wires():
 
 
 def test_executor_handles_attach_discussion_group():
-    src = _ow()
-    i = src.index("async def _exec_deploy_network")
-    fn = src[i:i + 9000]
+    fn = _func_src(os.path.join(ROOT, "services", "op_worker.py"),
+                   "_exec_deploy_network")
     # attach/link рёбра прикрепляют группу как чат обсуждений
     assert "set_discussion_group" in fn
     assert '"attach", "link"' in fn
