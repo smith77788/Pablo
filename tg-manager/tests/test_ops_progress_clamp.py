@@ -22,5 +22,13 @@ def test_clamped_done_used_in_progress_display():
     assert HTML.count("Math.min(o.done_items||0,o.total_items)") >= 2
     # список показывает dDone, а не сырой done_items
     assert "num(dDone)+'/'+num(o.total_items||0)" in HTML
-    # деталь показывает dDone в строке «Прогресс»
-    assert "${num(dDone)} / ${num(o.total_items||0)} (${pct}%)" in HTML
+    # деталь показывает dDone в строке «Прогресс». Точное написание строки здесь
+    # больше не годится: числа обёрнуты в <span> с якорями data-op-cnt/data-op-pct,
+    # чтобы живой прогресс по SSE обновлял открытую карточку, а не замирал на
+    # момент открытия. Проверяем состав строки, а не её буквальный текст.
+    row = re.search(r">Прогресс<.{0,400}?</div></div>", HTML, re.DOTALL)
+    assert row, "строка «Прогресс» в карточке операции не найдена"
+    cell = row.group(0)
+    assert "num(dDone)" in cell, "карточка показывает сырой done_items вместо зажатого"
+    assert "num(o.total_items||0)" in cell, "в карточке пропал знаменатель"
+    assert "${pct}" in cell, "в карточке пропал процент"

@@ -7371,7 +7371,17 @@ function openSSE() {
     try { renderAct((JSON.parse(e.data).items)||[]); } catch(_) {}
   });
   SSE.addEventListener('op_progress', e => {
-    try { renderOpProgress((JSON.parse(e.data).items)||[]); } catch(_) {}
+    try {
+      const items = (JSON.parse(e.data).items)||[];
+      renderOpProgress(items);
+      // Панель живого прогресса живёт только на Главной. Списки операций и
+      // карточка операции показывали те же числа, но замирали на момент
+      // открытия: событие с новыми числами приходило каждые несколько секунд и
+      // выбрасывалось. Человек, открывший «Операции», чтобы посмотреть, как
+      // идёт запущенный инвайт, видел неподвижное «0/340» и уходил обновлять
+      // экран руками.
+      liveOpRows(items);
+    } catch(_) {}
   });
   // Бэкенд слал op_complete с самого начала, а подписчика не было: событие
   // считалось, сериализовалось, уходило по проводу — и выбрасывалось. Для
@@ -7546,6 +7556,35 @@ function showOpComplete(op) {
 }
 
 let _hadOpProgress = false;
+// Подтягивает живые числа в уже отрисованные строки операций: список операций,
+// массовые операции и карточку одной операции. Правит только то, что сейчас на
+// экране, — не нашлось элемента, значит экран закрыт, и делать нечего.
+// Перерисовывать списки целиком нельзя: под пальцем уехала бы прокрутка, а
+// открытые меню строк закрылись бы на каждом событии.
+function liveOpRows(items) {
+  (items || []).forEach(op => {
+    const id = Number(op.id) || 0;
+    if (!id) return;
+    const total = Number(op.total) || 0;
+    // done не может превышать total — та же защита, что в списке операций.
+    const done = total > 0 ? Math.min(Number(op.done) || 0, total) : (Number(op.done) || 0);
+    const pct = Math.max(0, Math.min(100, Number(op.pct) || 0));
+    document.querySelectorAll('[data-op-cnt="' + id + '"]').forEach(el => {
+      // Разделитель берём из того, что уже написано: в списке это «12/340», в
+      // карточке «12 / 340». Своим форматом здесь мы бы переписали чужой.
+      el.textContent = (el.textContent || '').indexOf(' / ') >= 0
+        ? num(done) + ' / ' + num(total)
+        : num(done) + '/' + num(total);
+    });
+    document.querySelectorAll('[data-op-pct="' + id + '"]').forEach(el => {
+      el.textContent = String(pct);
+    });
+    document.querySelectorAll('[data-op-bar="' + id + '"]').forEach(el => {
+      el.style.width = pct + '%';
+    });
+  });
+}
+
 function renderOpProgress(items) {
   const el = document.getElementById('opProgress');
   if (!el) return;
@@ -11807,12 +11846,12 @@ function renderOps() {
       // Приостановленную тоже можно отменить — иначе она висит в очереди, пока
       // пользователь не возобновит ВСЮ очередь целиком.
       const canCancel = o.status==='pending'||o.status==='running'||o.status==='paused';
-      return `<div class="li" style="display:block;cursor:pointer;padding:11px 14px" onclick="openOpDetail(${o.id})">
+      return `<div class="li" id="op-row-${o.id}" style="display:block;cursor:pointer;padding:11px 14px" onclick="openOpDetail(${o.id})">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
             <div class="li-name">${esc(o.label||o.op_type||'операция')}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰</span>':''}</div>
-            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru'):num(dDone)+'/'+num(o.total_items||0)+' · '+ago(o.created_at)}</div>
+            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru'):`<span data-op-cnt="${o.id}">${num(dDone)+'/'+num(o.total_items||0)}</span> · `+ago(o.created_at)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
@@ -11821,7 +11860,7 @@ function renderOps() {
             ${opCanRetry(o)?`<span style="font-size:13px;color:var(--blue);cursor:pointer;font-weight:500" onclick="event.stopPropagation();retryOp(${o.id})">↺ Повтор</span>`:''}
           </div>
         </div>
-        ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
+        ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" data-op-bar="${o.id}" style="width:${pct}%"></div></div>`:''}
         ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(o.error_msg.substring(0,80))}</div>`:''}
       </div>`;
     }).join(''));
@@ -11846,7 +11885,7 @@ async function openOpDetail(opId) {
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || o.op_type || '')}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val">${num(dDone)} / ${num(o.total_items||0)} (${pct}%)</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru'):''}</div></div></div>
         ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru')}</div></div></div>`:''}
         ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru')}</div></div></div>`:''}
@@ -11855,7 +11894,7 @@ async function openOpDetail(opId) {
       </div>
     `;
     if (o.status==='running') {
-      html += `<div style="padding:12px 16px"><div class="prog" style="margin-bottom:8px"><div class="prog-fill" style="width:${pct}%"></div></div></div>`;
+      html += `<div style="padding:12px 16px"><div class="prog" style="margin-bottom:8px"><div class="prog-fill" data-op-bar="${o.id}" style="width:${pct}%"></div></div></div>`;
     }
     // Кнопка «⏸ Приостановить» звала cancelOp — операция уходила в 'cancelled'
     // безвозвратно, хотя подпись обещала обратимое действие. Теперь пауза — это
@@ -21992,7 +22031,7 @@ async function openMassOps(focusId) {
         <div class="row" id="massop-${r.id}">
           <div class="row-body">
             <div class="row-name">#${r.id} ${opName}</div>
-            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · Прогресс: ${progress}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · Прогресс: <span data-op-cnt="${r.id}">${progress}</span></div>
             <div class="row-val" style="color:var(--hint)">${ago(r.created_at)} ${r.finished_at?'→ '+ago(r.finished_at):''}</div>
           </div>
         </div>
