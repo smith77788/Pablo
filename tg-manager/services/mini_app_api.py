@@ -11429,6 +11429,112 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 
+    async def mesh_tasks(request: web.Request) -> web.Response:
+        """Bot Mesh: задачи, которые боты передают друг другу по маршруту.
+
+        Владелец видит цепочку Sales→Qualification→CRM как один рабочий
+        процесс; на деле это задача, идущая по ботам. Экрана у неё не было
+        вовсе: задачи копились в таблице, а посмотреть, куда дошла и почему
+        брошена, было негде.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        lim = _list_limit(request, 30, 500)
+        rows = await _safe_fetch(pool,
+            """SELECT task_id, origin_bot, route, step, depth, trace, status,
+                      drop_reason, deadline_at, created_at, updated_at
+                 FROM bot_mesh_tasks WHERE owner_id=$1
+                ORDER BY created_at DESC LIMIT $2""", uid, lim)
+        total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM bot_mesh_tasks WHERE owner_id=$1", uid)
+        names = await _mesh_bot_names(uid)
+        out = []
+        for r in (rows or []):
+            d = dict(r)
+            route = d.get("route") or []
+            if isinstance(route, str):
+                try:
+                    route = json.loads(route)
+                except (TypeError, ValueError):
+                    route = []
+            trace = d.get("trace") or []
+            if isinstance(trace, str):
+                try:
+                    trace = json.loads(trace)
+                except (TypeError, ValueError):
+                    trace = []
+            out.append({
+                "task_id": d["task_id"],
+                "origin_bot": d.get("origin_bot"),
+                "origin_name": names.get(d.get("origin_bot")),
+                # Маршрут — именами ботов: идентификатор владельцу ничего не говорит.
+                "route": [{"bot": st.get("bot"),
+                           "bot_name": names.get(st.get("bot")),
+                           "capability": st.get("capability")}
+                          for st in route if isinstance(st, dict)],
+                "step": d.get("step") or 0,
+                "depth": d.get("depth") or 0,
+                "trace_names": [names.get(b) or ("бот #" + str(b)) for b in trace],
+                "status": d.get("status") or "running",
+                "drop_reason": d.get("drop_reason"),
+                "deadline_at": d["deadline_at"].isoformat() if d.get("deadline_at") else None,
+                "created_at": d["created_at"].isoformat() if d.get("created_at") else None,
+                "updated_at": d["updated_at"].isoformat() if d.get("updated_at") else None,
+            })
+        return _json_resp({"tasks": out, "total": total})
+
+    async def _mesh_bot_names(uid: int) -> dict:
+        """bot_id → @username владельца. Экран показывает имена, а не числа."""
+        rows = await _safe_fetch(pool,
+            "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1", uid)
+        out = {}
+        for r in (rows or []):
+            out[r["bot_id"]] = ("@" + r["username"]) if r["username"] else (
+                r["first_name"] or None)
+        return out
+
+    async def mesh_task_detail(request: web.Request) -> web.Response:
+        """Трасса одной задачи: кто кому передал, что вышло и почему брошено."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        task_id = request.match_info.get("task_id") or ""
+        task = await _safe_fetchrow(pool,
+            """SELECT task_id, origin_bot, route, step, depth, trace, payload,
+                      status, drop_reason, deadline_at, created_at, updated_at
+                 FROM bot_mesh_tasks WHERE task_id=$1 AND owner_id=$2""",
+            task_id, uid)
+        if not task:
+            return _err("Задача не найдена", 404)
+        hops = await _safe_fetch(pool,
+            """SELECT step, from_bot, to_bot, capability, outcome, reason, created_at
+                 FROM bot_mesh_hops WHERE task_id=$1 ORDER BY created_at LIMIT 200""",
+            task_id)
+        names = await _mesh_bot_names(uid)
+        d = dict(task)
+        return _json_resp({
+            "task_id": d["task_id"],
+            "status": d.get("status") or "running",
+            "drop_reason": d.get("drop_reason"),
+            "step": d.get("step") or 0,
+            "depth": d.get("depth") or 0,
+            "origin_name": names.get(d.get("origin_bot")),
+            "deadline_at": d["deadline_at"].isoformat() if d.get("deadline_at") else None,
+            "created_at": d["created_at"].isoformat() if d.get("created_at") else None,
+            "hops": [{
+                "step": h["step"],
+                "from_name": names.get(h["from_bot"]) or (
+                    ("бот #" + str(h["from_bot"])) if h["from_bot"] else "запуск"),
+                "to_name": names.get(h["to_bot"]) or (
+                    ("бот #" + str(h["to_bot"])) if h["to_bot"] else "—"),
+                "capability": h["capability"],
+                "outcome": h["outcome"],
+                "reason": h["reason"],
+                "created_at": h["created_at"].isoformat() if h["created_at"] else None,
+            } for h in (hops or [])],
+        })
+
     async def notary_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -17992,6 +18098,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vlayer/overview", vlayer_overview)
     app.router.add_get("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}",
                        vlayer_entity)
+    app.router.add_get("/api/miniapp/mesh/tasks", mesh_tasks)
+    app.router.add_get("/api/miniapp/mesh/task/{task_id}", mesh_task_detail)
     app.router.add_get("/api/miniapp/notary", notary_list)
     app.router.add_post("/api/miniapp/notary", notary_create)
     app.router.add_get("/api/miniapp/notary/{watch_id}", notary_detail)

@@ -1939,6 +1939,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Авто-воронки</div>
         <div class="mgmt-tile-val" id="m-af-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openBotMesh()">
+        <div class="mgmt-tile-ico">🔗</div>
+        <div class="mgmt-tile-lbl">Задачи между ботами</div>
+        <div class="mgmt-tile-val" id="m-botmesh-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openSalesManager()">
         <div class="mgmt-tile-ico">🧑‍💼</div>
         <div class="mgmt-tile-lbl">Менеджер продаж</div>
@@ -5333,6 +5338,32 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       кто остыл. События, которых Telegram не шлёт, слой вычисляет сам.
     </div>
     <div id="vlayerBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-botmesh">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔗 Задачи между ботами</div>
+    <div class="hdr-meta"><span id="botmeshCount" style="font-size:12px;color:var(--hint)"></span></div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
+      Цепочка вида «Продажи → Квалификация → CRM» — это одна задача, которую
+      боты передают друг другу. Здесь видно, где она сейчас, чем закончилась
+      и почему была брошена.
+    </div>
+    <div class="lst" id="botmeshList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<div class="screen" id="s-botmeshdetail">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔗 Трасса задачи</div>
+  </div>
+  <div class="sub-sb">
+    <div id="botmeshDetail"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -19912,6 +19943,110 @@ async function openVLayerEntity(entityType, entityId) {
 
 // ── «Нотариус»: заверение рекламных размещений ───────────────────────────
 let NOTARY_WATCHES = [];
+// ── Bot Mesh: задачи, которые боты передают друг другу ──────────────
+// Экрана у этого не было: задачи копились в таблице, а посмотреть, где задача
+// сейчас и почему брошена, было негде — «цепочка работает» приходилось верить
+// на слово.
+const MESH_ST = {
+  running:   ['b-bl', '▶ идёт'],
+  done:      ['b-gr', '✓ завершена'],
+  dropped:   ['b-or', '⏹ брошена'],
+  failed:    ['b-rd', '✕ ошибка'],
+};
+// Причины отбрасывания — предохранители ядра. Владельцу нужен смысл, а не код.
+const MESH_DROP = {
+  expired:      'вышел срок задачи',
+  max_depth:    'слишком много передач подряд',
+  loop:         'маршрут пошёл по кругу',
+  duplicate:    'этот шаг уже выполнялся',
+  no_target:    'следующего бота в маршруте нет',
+};
+function meshDropText(r) {
+  if (!r) return '';
+  return MESH_DROP[r] || r;
+}
+let MESH_LIMIT = 30;
+async function openBotMeshMore() { MESH_LIMIT += 200; await openBotMesh(true); }
+async function openBotMesh(keep) {
+  if (!keep) { MESH_LIMIT = 30; push('s-botmesh'); }
+  if (!keep) txt('botmeshList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/mesh/tasks?limit='+MESH_LIMIT);
+    const tasks = listOf(d,'tasks');
+    const total = totalOf(d, tasks);
+    const cntLbl = total ? num(total)+' '+plural(total,'задача','задачи','задач') : '';
+    txt('botmeshCount', cntLbl);
+    txt('m-botmesh-val', cntLbl);
+    if (!tasks.length) {
+      txt('botmeshList', empty('🔗','Задач между ботами нет',
+        'Появятся, когда боты начнут передавать работу по маршруту'));
+      return;
+    }
+    txt('botmeshList', tasks.map(t=>{
+      const [cls, lbl] = MESH_ST[t.status] || ['b-gy', t.status||''];
+      const steps = (t.route||[]).length;
+      const where = steps
+        ? `шаг ${num(Math.min((t.step||0)+1, steps))} из ${num(steps)}`
+        : 'маршрут пуст';
+      const path = (t.route||[])
+        .map(r=>esc(r.bot_name || ('бот #'+r.bot)))
+        .join(' → ');
+      const drop = t.drop_reason ? ' · '+esc(meshDropText(t.drop_reason)) : '';
+      return `<div class="li tap" onclick="openBotMeshTask('${esc(t.task_id)}')">
+        <div class="ava ava-blue">🔗</div>
+        <div class="li-body">
+          <div class="li-name">${path || 'Задача без маршрута'}</div>
+          <div class="li-sub">${esc(where)} · передач ${num(t.depth||0)}${drop}</div>
+          <div class="li-sub" style="opacity:.7">${ago(t.created_at)}</div>
+        </div>
+        <span class="badge ${cls}">${lbl}</span>
+      </div>`;
+    }).join('') + moreBtn(tasks.length, total, 'openBotMeshMore()'));
+  } catch(e) { txt('botmeshList', errHtml(e.message, 'openBotMesh()')); }
+}
+// Повтор без аргумента невозможен — id задачи держим рядом, как у других
+// экранов-карточек: onclick не унесёт строку в кавычках без риска.
+let _MESH_TASK_ID = null;
+function retryBotMeshTask() { if (_MESH_TASK_ID) openBotMeshTask(_MESH_TASK_ID, true); }
+async function openBotMeshTask(taskId, keep) {
+  _MESH_TASK_ID = taskId;
+  if (!keep) push('s-botmeshdetail');
+  txt('botmeshDetail','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/mesh/task/'+encodeURIComponent(taskId));
+    const [cls, lbl] = MESH_ST[d.status] || ['b-gy', d.status||''];
+    const hops = d.hops||[];
+    const head = `<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span class="badge ${cls}">${lbl}</span>
+        <span style="font-size:12px;color:var(--hint)">${ago(d.created_at)}</span>
+      </div>
+      <div style="font-size:13px">Запустил: ${esc(d.origin_name || 'неизвестно')}</div>
+      <div style="font-size:13px">Передач: ${num(d.depth||0)}</div>
+      ${d.drop_reason?`<div style="font-size:13px;color:var(--orange)">Брошена: ${esc(meshDropText(d.drop_reason))}</div>`:''}
+    </div>`;
+    if (!hops.length) {
+      txt('botmeshDetail', head + empty('🔗','Передач ещё не было',
+        'Задача создана, но первый шаг пока не выполнен'));
+      return;
+    }
+    const OUT = {accepted:['b-bl','принято'], handled:['b-gr','выполнено'],
+                 dropped:['b-or','отброшено'], failed:['b-rd','ошибка']};
+    txt('botmeshDetail', head + '<div class="lst">' + hops.map(h=>{
+      const [oc, ol] = OUT[h.outcome] || ['b-gy', h.outcome||''];
+      return `<div class="li">
+        <div class="ava ava-purple">${num((h.step||0)+1)}</div>
+        <div class="li-body">
+          <div class="li-name">${esc(h.from_name)} → ${esc(h.to_name)}</div>
+          <div class="li-sub">${h.capability?esc(h.capability)+' · ':''}${ago(h.created_at)}</div>
+          ${h.reason?`<div class="li-sub" style="color:var(--orange)">${esc(meshDropText(h.reason))}</div>`:''}
+        </div>
+        <span class="badge ${oc}">${ol}</span>
+      </div>`;
+    }).join('') + '</div>');
+  } catch(e) { txt('botmeshDetail', errHtml(e.message, 'retryBotMeshTask()')); }
+}
+
 let NOTARY_LIMIT = 100;
 async function openNotaryMore() { NOTARY_LIMIT += 400; await openNotary(true); }
 async function openNotary(keep) {
