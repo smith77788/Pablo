@@ -284,9 +284,11 @@ function _spField(f) {
       '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('');
     inner = '<select id="' + id + '">' + opts + '</select>';
   } else if (f.type === 'bool') {
+    // Подпись не была связана с галочкой (ни обёртки, ни for): тап по тексту
+    // не делал ничего, а цель сводилась к самому квадратику 13×13.
     return '<div class="field" style="display:flex;align-items:center;gap:10px;justify-content:space-between">' +
-      '<label style="margin:0">' + esc(f.label) + '</label>' +
-      '<input type="checkbox" id="' + id + '"></div>';
+      '<label class="chk-row" for="' + id + '" style="margin:0;flex:1;justify-content:space-between;cursor:pointer">' +
+      esc(f.label) + '<input type="checkbox" id="' + id + '"></label></div>';
   } else if (f.type === 'number') {
     inner = '<input type="number" id="' + id + '"' + ph + '>';
   } else if (f.type === 'money') {

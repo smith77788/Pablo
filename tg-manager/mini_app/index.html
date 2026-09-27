@@ -555,6 +555,13 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
    width:18px — то есть симптом лечили поштучно, не находя причину.
    Здесь причина снята один раз для всех. */
 .field input[type=checkbox],.field input[type=radio]{width:auto;min-width:0;padding:0;margin:0;flex:none;-webkit-appearance:auto;appearance:auto;accent-color:var(--accent);cursor:pointer}
+/* Строка-переключатель. Галочка сама по себе — 13×13 на телефоне, и палец
+   промахивается; на экране инвайта промах меняет, КОГО позовут. Цель — вся
+   строка целиком, не меньше 40px по высоте: попадать нужно по тексту, а не
+   по квадратику. */
+.chk-row{min-height:40px}
+.chk-row input[type=checkbox]{width:18px;height:18px;flex:0 0 auto}
+
 .field-note{font-size:11px;color:var(--hint);margin-top:4px}
 .field-err{font-size:12px;color:var(--red);background:rgba(248,113,113,.08);border-radius:var(--radius);padding:7px 10px;margin-top:6px;display:none}
 /* Поле ввода внутри flex-ряда. У <input> и <select> есть СОБСТВЕННАЯ
@@ -1414,7 +1421,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="ccwAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
     <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="ccwAbWrap" style="display:none;margin-top:8px">
-      <label style="font-size:12px;color:var(--hint);cursor:pointer;display:block"><input type="checkbox" id="ccwAbOn" onchange="toggleAb(this)" style="vertical-align:middle"> 🧪 A/B-тест: разложить варианты по аудитории поровну</label>
+      <label class="chk-row" style="font-size:12px;color:var(--hint);cursor:pointer;display:block"><input type="checkbox" id="ccwAbOn" onchange="toggleAb(this)" style="vertical-align:middle"> 🧪 A/B-тест: разложить варианты по аудитории поровну</label>
       <div id="ccwAbBox" style="display:none;margin-top:6px">
         <textarea id="ccwVarB" rows="2" placeholder="Вариант B..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
         <textarea id="ccwVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
@@ -1672,7 +1679,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <option value="daily">Ежедневно</option>
       <option value="weekly">Еженедельно</option>
     </select></div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);padding:4px 0 10px;cursor:pointer">
+    <label class="chk-row" style="display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);padding:4px 0 10px;cursor:pointer">
       <input type="checkbox" id="bs-ab-toggle" style="width:18px;height:18px" onchange="document.getElementById('bsAbWrap').style.display=this.checked?'block':'none'">
       🧪 Включить A/B тестирование
     </label>
@@ -2750,8 +2757,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <input type="text" id="cfTitle" placeholder="Название (общее для всех)" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
       <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
-      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:10px">
-        <input type="checkbox" id="cfIsGroup" style="width:16px;height:16px"> Создавать группы (чаты), а не каналы
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:10px">
+        <input type="checkbox" id="cfIsGroup"> Создавать группы (чаты), а не каналы
       </label>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="number" id="cfCount" value="1" min="1" max="20" title="Сколько на каждый аккаунт" style="flex:0 0 90px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
@@ -2770,8 +2777,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div id="cfPreview" style="margin-bottom:8px"></div>
       <div class="sec" style="margin:6px 0 4px">Автоматизация после создания</div>
       <textarea id="cfFirstPost" placeholder="Первый пост (необязательно). Поддержка вариантов: {Привет|Здравствуйте}, будет закреплён" rows="2" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:6px"></textarea>
-      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
-        <input type="checkbox" id="cfPinFirst" style="width:16px;height:16px" checked> Закрепить первый пост
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
+        <input type="checkbox" id="cfPinFirst" checked> Закрепить первый пост
       </label>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
         <input type="number" id="cfSeed" value="0" min="0" max="200" title="Сколько своих аккаунтов подписать" style="flex:0 0 90px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
@@ -2831,8 +2838,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <select id="gfAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
         <option value="">Выберите аккаунт...</option>
       </select>
-      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
-        <input type="checkbox" id="gfSupergroup" checked style="width:16px;height:16px">
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
+        <input type="checkbox" id="gfSupergroup" checked>
         Супергруппа
       </label>
       <button class="btn btn-p" id="gfSubmit" style="width:100%" onclick="submitGroupFactory()">👥 Создать группу</button>
@@ -3341,11 +3348,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field"><label>Цель (куда)</label><select id="clTgt" class="sel"><option value="">Загрузка...</option></select></div>
     <div class="field"><label>Что копировать</label>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFname" checked> Имя</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFdesc" checked> Описание</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFshort"> Краткое опис.</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFphoto"> Фото</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFcmds"> Команды</label>
+        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFname" checked> Имя</label>
+        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFdesc" checked> Описание</label>
+        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFshort"> Краткое опис.</label>
+        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFphoto"> Фото</label>
+        <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFcmds"> Команды</label>
       </div>
     </div>
     <div class="field-err" id="cl-err"></div>
@@ -3727,8 +3734,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </select>
         <input type="text" id="intTag" placeholder="тег" class="inp" style="flex:1;box-sizing:border-box">
       </div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
-        <input type="checkbox" id="intNotify" checked style="width:16px;height:16px"> Уведомлять в ЛС при срабатывании
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
+        <input type="checkbox" id="intNotify" checked> Уведомлять в ЛС при срабатывании
       </label>
       <div id="intErr" style="color:var(--red);font-size:13px;min-height:16px"></div>
       <button class="btn btn-p" style="width:100%" id="intAddBtn" onclick="addIntentRule()">➕ Добавить правило</button>
@@ -4522,7 +4529,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec" style="margin-top:8px">ИИ-предложения по SEO <span class="sec-act" onclick="applySeoAll()">Применить всё →</span></div>
     <div class="lst" id="seoSuggestions"></div>
     <div class="sec" style="margin-top:8px">Переоптимизация ботов
-      <label style="float:right;font-size:12px;color:var(--hint);cursor:pointer">
+      <label class="chk-row" style="float:right;font-size:12px;color:var(--hint);cursor:pointer">
         <input type="checkbox" id="reoptToggle" onchange="toggleReopt(this)" style="vertical-align:middle"> авто при падении
       </label>
     </div>
@@ -4947,21 +4954,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field" id="massInviteFilters">
         <label>Фильтры аудитории</label>
         <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px">
-          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltUsername"> только с @username</label>
-          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltNotBot"> не боты</label>
-          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltPremium"> premium</label>
-          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltActive"> активные</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltUsername"> только с @username</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltNotBot"> не боты</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltPremium"> premium</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltActive"> активные</label>
         </div>
         <div class="hint" style="padding:4px 2px 0">Отсеять ботов/удалённых/приватные аккаунты до запуска — меньше «пустых» приглашений и риска.</div>
       </div>
       <div class="field">
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invDaughterGroups"> 🛡 Мать-Дочка (инвайт через одноразовую группу)</label>
+        <label class="chk-row" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invDaughterGroups"> 🛡 Мать-Дочка (инвайт через одноразовую группу)</label>
         <div class="hint" style="padding:4px 2px 0">Приглашённые сначала попадают в одноразовую дочернюю группу с закреплённой ссылкой на ваш канал. Если Telegram её закроет — сгорит расходник, а не боевой канал; система создаст новую и продолжит прогон.</div>
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:8px"><input type="checkbox" id="invShowcase"> 🏪 Витрина (пускать в канал волнами)</label>
+        <label class="chk-row" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:8px"><input type="checkbox" id="invShowcase"> 🏪 Витрина (пускать в канал волнами)</label>
         <div class="hint" style="padding:4px 2px 0">Дочерняя группа снимает бан за сам инвайт, но приглашённые переходят в канал по одной ссылке — он получает всплеск вступлений, а это и есть сигнал, по которому каналы закрывают. Витрина копит аудиторию между ними и открывает вход порциями: ссылка выпускается с лимитом мест, кончились — следующая порция позже. Работает только вместе с «Мать-Дочкой». Цена — время: 200 человек доедут примерно за полтора часа.</div>
       </div>
       <div class="field">
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invSafeMode"> 🛡 Безопасный режим (умный темп по чату)</label>
+        <label class="chk-row" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invSafeMode"> 🛡 Безопасный режим (умный темп по чату)</label>
         <div class="hint" style="padding:4px 2px 0">Держит частоту вступлений/мин под лимитом, замораживает приём при флуде чата, оценивает «живость» чата и останавливается, если приглашённые массово выходят/жалуются.</div>
       </div>
       <div class="field" id="massInviteImportField" style="display:none">
@@ -5047,7 +5054,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           участников это спамит и выгоняет из чата. Поле сохранено на будущее —
           но сообщение не уходит.
         </div>
-        <label style="font-size:12px;color:var(--hint);cursor:pointer;display:block;margin-top:6px"><input type="checkbox" id="miWelcomeAbOn" onchange="toggleWelcomeAb(this)" style="vertical-align:middle"> 🧪 A/B приветствие: делить вступивших по вариантам</label>
+        <label class="chk-row" style="font-size:12px;color:var(--hint);cursor:pointer;display:block;margin-top:6px"><input type="checkbox" id="miWelcomeAbOn" onchange="toggleWelcomeAb(this)" style="vertical-align:middle"> 🧪 A/B приветствие: делить вступивших по вариантам</label>
         <div id="miWelcomeAbBox" style="display:none;margin-top:6px">
           <textarea id="miWelcomeVarB" rows="2" placeholder="Вариант B приветствия..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
           <textarea id="miWelcomeVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
@@ -5076,15 +5083,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <input type="number" id="massInvitePerAcc" min="0" placeholder="без лимита">
           <div class="field-note">Инвайт — самая баноопасная операция. Меньше на аккаунт = дольше живёт</div>
         </div>
-        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
           <input type="checkbox" id="massInviteOnePass" onchange="loadInvitePreflight(INV_AUDIENCE)">
           <span>🚀 Один проход (макс. интенсивность)</span>
         </label>
-        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
           <input type="checkbox" id="massInviteReinvite">
           <span>♻️ Приглашать повторно (не пропускать уже приглашённых)</span>
         </label>
-        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
           <input type="checkbox" id="massInviteAutoPromote" checked>
           <span>🛡 Выдавать инвайтерам права приглашать</span>
         </label>
@@ -5092,7 +5099,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           автоматически выдаёт остальным инвайтерам право «Добавлять участников».
           Без этого инвайтить сможет только он один. <b>Ваши аккаунты станут
           админами чата</b> — снимите галочку, если этого не нужно.</div>
-        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
           <input type="checkbox" id="massInvitePromoteTrick" checked>
           <span>👑 Добирать закрытых приватностью через админку</span>
         </label>
@@ -5100,7 +5107,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           пробуем добавить трюком: цель на мгновение делается админом (это и
           добавляет её в чат) и тут же лишается прав. <b>Посторонний на секунды
           получает админку вашего чата</b> — снимите галочку, если это неприемлемо.</div>
-        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
           <input type="checkbox" id="massInviteLinkFallback" checked onchange="massInviteMethodToggle()">
           <span>🔗 Недостижимым — ссылка в ЛС (последний шанс)</span>
         </label>
@@ -5109,7 +5116,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           ошибки, отправляем ссылку-приглашение в личные сообщения: человек
           вступает сам. Самый безопасный для аккаунта способ из всех — годится
           именно как последний рубеж.</div>
-        <label class="field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
           <input type="checkbox" id="massInviteIncludeRisky">
           <span>⚠️ Взять рисковые аккаунты (снять кулдаун/карантин)</span>
         </label>
@@ -5650,11 +5657,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="number" id="strikeRestrikeH" min="0" max="168" value="4">
         <div class="field-note">Анти-детект: не бить одну цель чаще этого интервала. 0 — без ограничения</div>
       </div>
-      <label class="field" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <label class="chk-row field" style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="strikeForce">
         <span>Форсировать повтор (игнорировать интервал)</span>
       </label>
-      <label class="field" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <label class="chk-row field" style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="strikePersist">
         <span>Настойчивая эскалация — давить, пока цель не снята</span>
       </label>
@@ -5931,7 +5938,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="bcastButtons" rows="2" placeholder="Текст кнопки | https://ссылка&#10;Вторая кнопка | https://..."></textarea>
       <div class="field-note">По одной кнопке на строку: <code>Текст | URL</code></div>
     </div>
-    <label style="display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);padding:4px 0 10px;cursor:pointer">
+    <label class="chk-row" style="display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);padding:4px 0 10px;cursor:pointer">
       <input type="checkbox" id="bcastSilent" style="width:18px;height:18px">
       🔕 Без звука (тихая отправка)
     </label>
@@ -6571,7 +6578,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note">Аккаунт, достигший лимита, выбывает до следующего дня. Защита от бана</div>
     </div>
     <div class="field">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="cmpQuiet" checked style="width:auto;margin:0">
         <span>Не писать ночью</span>
       </label>
@@ -16790,8 +16797,8 @@ async function _renderContactAccPicker(containerId, preselectIds) {
     if (!live.length) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>'; return; }
     const all = preselectIds === 'all';
     const pre = new Set((all ? [] : (preselectIds||[])).map(Number));
-    el.innerHTML = live.map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px">
-      <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${all||pre.has(+a.id)?'checked':''} style="width:16px;height:16px">
+    el.innerHTML = live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px">
+      <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${all||pre.has(+a.id)?'checked':''}>
       ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('');
   } catch(e) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'; }
 }
@@ -21635,7 +21642,7 @@ async function _gpLoadAccs(q) {
   try {
     const r = await accPickerLoad('', q);
     list.innerHTML = r.accs.map(a=>
-      `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:13px;color:var(--text)">
+      `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:13px;color:var(--text)">
         <input type="checkbox" class="gp-acc-cb" value="${a.id}" style="width:18px;height:18px">
         <span>${esc(a.phone||a.first_name||'#'+a.id)}</span>
         <span style="color:${a.is_active?'var(--green)':'var(--red)'};font-size:11px">${a.is_active?'🟢':'🔴'}</span>
@@ -22156,8 +22163,8 @@ async function _massOpsLoadAccs(q) {
     const r = await accPickerLoad('active', q);
     const live = r.accs;
     txt('mjAccounts', live.length
-      ? live.map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px">
-          <input type="checkbox" class="mj-acc-cb" value="${a.id}" style="width:16px;height:16px">
+      ? live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px">
+          <input type="checkbox" class="mj-acc-cb" value="${a.id}">
           ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
       : `<div style="font-size:13px;color:var(--hint)">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</div>`);
     accPickerSetNote('mjAccounts', accPickerNote(r));
