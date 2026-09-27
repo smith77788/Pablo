@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import html as _html
 from bot.callbacks import WorkspaceCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 
 def _esc(s: str) -> str:
     return _html.escape(str(s) if s else "")
@@ -72,12 +73,14 @@ async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
     await safe_answer(callback)
     workspaces = await db.get_user_workspaces(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
-    for ws in workspaces:
+    _shown = _cap(workspaces)
+    for ws in _shown:
         role_icon = "👑" if ws["role"] == "owner" else "👤"
         kb.button(
             text=f"{role_icon} {ws['name']} ({ws['member_count']} участ.)",
             callback_data=WorkspaceCb(action="view", ws_id=ws["id"]),
         )
+    _cap_note(kb, workspaces, _shown, what="grp")
     kb.button(text="➕ Создать пространство", callback_data=WorkspaceCb(action="create"))
     kb.button(text="🔗 Войти по коду", callback_data=WorkspaceCb(action="join"))
     kb.button(text="⬅️ Назад", callback_data=BmCb(action="settings"))

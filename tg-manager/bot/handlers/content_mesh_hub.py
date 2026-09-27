@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ContentMeshCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import ContentMeshFSM
 from bot.utils.op_helpers import safe_answer
 
@@ -73,13 +74,15 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     kb = InlineKeyboardBuilder()
-    for m in meshes:
+    _shown = _cap(meshes)
+    for m in _shown:
         status = "🟢" if m["enabled"] else "🔴"
         src = m["source_channel"] or "—"
         kb.button(
             text=f"{status} {html.escape(m['name'])} ← {html.escape(src)}",
             callback_data=ContentMeshCb(action="view", mesh_id=m["id"]),
         )
+    _cap_note(kb, meshes, _shown, what="acc")
     kb.button(text="➕ Создать сеть", callback_data=ContentMeshCb(action="create"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
     kb.adjust(1)
@@ -334,12 +337,14 @@ async def cb_mesh_targets(
         "SELECT * FROM mesh_targets WHERE mesh_id=$1 ORDER BY id", callback_data.mesh_id
     )
     kb = InlineKeyboardBuilder()
-    for t in targets:
+    _shown = _cap(targets)
+    for t in _shown:
         status = "🟢" if t["enabled"] else "🔴"
         kb.button(
             text=f"{status} {html.escape(t['target_channel'])} ✕",
             callback_data=ContentMeshCb(action="del_target", mesh_id=callback_data.mesh_id, extra=str(t["id"])),
         )
+    _cap_note(kb, targets, _shown, what="ch")
     kb.button(text="➕ Добавить цель", callback_data=ContentMeshCb(action="add_target", mesh_id=callback_data.mesh_id))
     kb.button(text="◀️ Назад", callback_data=ContentMeshCb(action="view", mesh_id=callback_data.mesh_id))
     kb.adjust(1)
@@ -429,12 +434,14 @@ async def cb_mesh_del_target(
         "SELECT * FROM mesh_targets WHERE mesh_id=$1 ORDER BY id", callback_data.mesh_id
     )
     kb = InlineKeyboardBuilder()
-    for t in targets:
+    _shown = _cap(targets)
+    for t in _shown:
         status = "🟢" if t["enabled"] else "🔴"
         kb.button(
             text=f"{status} {html.escape(t['target_channel'])} ✕",
             callback_data=ContentMeshCb(action="del_target", mesh_id=callback_data.mesh_id, extra=str(t["id"])),
         )
+    _cap_note(kb, targets, _shown, what="ch")
     kb.button(text="➕ Добавить цель", callback_data=ContentMeshCb(action="add_target", mesh_id=callback_data.mesh_id))
     kb.button(text="◀️ Назад", callback_data=ContentMeshCb(action="view", mesh_id=callback_data.mesh_id))
     kb.adjust(1)

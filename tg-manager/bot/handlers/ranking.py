@@ -15,6 +15,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import RankCb, VisCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.keyboards import back_to_bot, subscription_locked_markup
 from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
 from bot.utils.op_helpers import safe_edit, terminal_kb
@@ -1263,12 +1264,14 @@ async def vis_select_bot(
         return
 
     kb = InlineKeyboardBuilder()
-    for bot in bots:
+    _shown = _cap(bots)
+    for bot in _shown:
         label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
         kb.button(
             text=f"🤖 {label}",
             callback_data=VisCb(action="by_bot", bot_id=bot["bot_id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
     kb.adjust(1)
 
@@ -1406,12 +1409,14 @@ async def vis_add_keyword_start(
     await state.set_state(AddKeywordFSM.choosing_bot)
 
     kb = InlineKeyboardBuilder()
-    for bot in bots:
+    _shown = _cap(bots)
+    for bot in _shown:
         label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
         kb.button(
             text=f"🤖 {label}",
             callback_data=VisCb(action="vis_pick_bot", bot_id=bot["bot_id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="❌ Отмена", callback_data=VisCb(action="dashboard"))
     kb.adjust(1)
 

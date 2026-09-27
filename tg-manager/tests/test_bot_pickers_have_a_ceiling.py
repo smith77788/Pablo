@@ -27,8 +27,15 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 BOT = ROOT / "bot"
 
-# Коллекции, которые растут вместе с тарифом пользователя.
-GROWING = {"accounts", "accs"}
+# Коллекции, которые растут вместе с тарифом пользователя или с платформой.
+# Тарифы, языки, статусы и прочие константы сюда не входят: их число задано
+# кодом и не меняется от того, сколько у человека аккаунтов.
+GROWING = {
+    "accounts", "accs", "bots", "channels", "users", "groups", "sessions",
+    "profiles", "targets", "available", "active", "recipients", "templates",
+    "runs", "keys", "campaigns", "meshes", "funnels", "packs", "panels",
+    "workspaces", "orders",
+}
 
 
 def _picker_loops():
@@ -64,17 +71,21 @@ def test_detector_sees_the_pickers():
     loops = _picker_loops()
     assert len(loops) > 200, f"циклов с кнопками найдено {len(loops)} — сломан разбор"
     capped = [l for l in loops if l[3] == "_shown"]
-    assert len(capped) >= 20, f"обрезанных пикеров всего {len(capped)} — потолок растеряли"
+    assert len(capped) >= 50, f"обрезанных пикеров всего {len(capped)} — потолок растеряли"
 
 
 def test_account_pickers_are_capped():
-    """Ни один цикл по аккаунтам не строит кнопки напрямую по всей коллекции."""
+    """Ни один цикл по растущей коллекции не строит кнопку на каждый элемент."""
     bad = []
     for path, line, fn, it, fsrc in _picker_loops():
         if it not in GROWING:
             continue
-        # уже ограничено запросом или срезом — тоже годится
+        # Уже ограничено запросом, срезом или ранним выходом на постраничность —
+        # тоже годится. Последнее — про `quick_pick_kb`: он строит кнопки только
+        # когда список короткий, а длинный отдаёт постраничному варианту.
         if re.search(r"\bLIMIT\s+\d+|\[:\s*\d+\s*\]|islice\(", fsrc, re.I):
+            continue
+        if re.search(r"if\s+len\([^)]+\)\s*>\s*\w+\s*:\s*\n\s*return", fsrc):
             continue
         bad.append(f"    {path}:{line}: {fn}() строит кнопку на каждый элемент {it}")
     assert not bad, (
@@ -144,3 +155,17 @@ def test_notice_button_explains_itself():
     assert "show_alert=True" in handler, "ответ без всплывающего окна человек не заметит"
     main = (ROOT / "main.py").read_text(encoding="utf-8")
     assert "picker_cap_notice_handler.router" in main, "роутер подписи не подключён"
+
+
+def test_notice_knows_every_section_code():
+    """Код раздела в подписи обработчик обязан уметь назвать словом."""
+    handler = (BOT / "handlers" / "picker_cap_notice.py").read_text(encoding="utf-8")
+    known = set(re.findall(r'"(\w+)":\s*"', handler))
+    used = set()
+    for path in sorted(BOT.rglob("*.py")):
+        used |= set(re.findall(r'_cap_note\([^)]*what="(\w+)"', path.read_text(encoding="utf-8")))
+    unknown = used - known
+    assert not unknown, (
+        f"подпись ссылается на разделы, которых обработчик не знает: {sorted(unknown)} "
+        f"— человек увидит расплывчатое «объектов»"
+    )

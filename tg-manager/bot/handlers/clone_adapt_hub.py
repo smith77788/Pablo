@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import CloneAdaptCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import CloneAdaptFSM
 from database import db
 from services import bot_api
@@ -176,12 +177,14 @@ async def cb_ca_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
         )
         return
     kb = InlineKeyboardBuilder()
-    for b in bots:
+    _shown = _cap(bots)
+    for b in _shown:
         label = html.escape(b["username"] or b["first_name"] or f"id{b['bot_id']}")
         kb.button(
             text=f"🤖 @{label}",
             callback_data=CloneAdaptCb(action="source", bot_id=b["bot_id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="◀️ Назад", callback_data=CloneAdaptCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(

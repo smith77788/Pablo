@@ -30,6 +30,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, NodesCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import (
     NodesAddFSM,
     NodesBroadcastFSM,
@@ -85,9 +86,11 @@ async def cb_nodes_menu(
     workspaces = await nodes_engine.get_workspaces(pool, owner)
 
     kb = InlineKeyboardBuilder()
-    for ws in workspaces:
+    _shown = _cap(workspaces)
+    for ws in _shown:
         label = f"{NODE_TYPE_LABELS.get(ws['node_type'], ws['node_type'])} — {html.escape(ws['name'])}"
         kb.button(text=label, callback_data=NodesCb(action="view", node_id=ws["id"]))
+    _cap_note(kb, workspaces, _shown, what="grp")
     kb.button(text="➕ Добавить воркспейс", callback_data=NodesCb(action="add"))
     kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)

@@ -13,6 +13,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 
 import os as _os
 from aiogram.types import WebAppInfo as _WebAppInfo
@@ -1093,7 +1094,8 @@ async def cb_pick_bot_for(
         return
 
     kb = InlineKeyboardBuilder()
-    for bot in bots:
+    _shown = _cap(bots)
+    for bot in _shown:
         name = html.escape(
             bot.get("username") or bot.get("first_name") or f"id{bot['bot_id']}"
         )
@@ -1108,6 +1110,7 @@ async def cb_pick_bot_for(
         else:  # ar
             cd = AutoReplyCb(action="menu", bot_id=bot["bot_id"])
         kb.button(text=f"🤖 @{name}", callback_data=cd)
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
     kb.adjust(1)
 
@@ -2598,7 +2601,8 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     kb = InlineKeyboardBuilder()
-    for bot in bots:
+    _shown = _cap(bots)
+    for bot in _shown:
         name = html.escape(
             bot.get("username") or bot.get("first_name") or f"id{bot['bot_id']}"
         )
@@ -2606,6 +2610,7 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             text=f"🤖 @{name}",
             callback_data=ScheduleCb(action="menu", bot_id=bot["bot_id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
     kb.adjust(1)
     await _edit(

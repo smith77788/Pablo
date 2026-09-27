@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import GhostCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import GhostConfigFSM
 from bot.utils.op_helpers import safe_answer
 
@@ -89,13 +90,15 @@ async def cb_ghost_menu(
         )
         return
     kb = InlineKeyboardBuilder()
-    for p in profiles:
+    _shown = _cap(profiles)
+    for p in _shown:
         name = html.escape(p["username"] or p["first_name"] or p["phone"] or f"id{p['account_id']}")
         status = "🟢" if p["enabled"] else "🔴"
         kb.button(
             text=f"{status} {name} — {_PERSONALITY.get(p['personality'], ('?',))[0]}",
             callback_data=GhostCb(action="view", profile_id=p["id"]),
         )
+    _cap_note(kb, profiles, _shown, what="acc")
     kb.button(text="➕ Добавить аккаунт", callback_data=GhostCb(action="add"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
     kb.adjust(1)
@@ -145,12 +148,14 @@ async def cb_ghost_add(
         )
         return
     kb = InlineKeyboardBuilder()
-    for a in available:
+    _shown = _cap(available)
+    for a in _shown:
         name = html.escape(a["username"] or a["first_name"] or a["phone"] or f"id{a['id']}")
         kb.button(
             text=f"📱 {name}",
             callback_data=GhostCb(action="pick_acc", account_id=a["id"]),
         )
+    _cap_note(kb, available, _shown, what="acc")
     kb.button(text="◀️ Назад", callback_data=GhostCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(

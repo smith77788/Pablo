@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AutoFunnelCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import AutoFunnelFSM
 from database import db
 from services import auto_funnel as af_service
@@ -77,7 +78,8 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     kb = InlineKeyboardBuilder()
-    for f in funnels:
+    _shown = _cap(funnels)
+    for f in _shown:
         status = "🟢" if f["enabled"] else "🔴"
         bot_label = html.escape(f["bot_uname"] or f["bot_name"] or f"id{f['bot_id']}")
         seg = _SEGMENTS.get(f["target_segment"], f["target_segment"])
@@ -85,6 +87,7 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             text=f"{status} {html.escape(f['name'])} / @{bot_label}",
             callback_data=AutoFunnelCb(action="view", funnel_id=f["id"]),
         )
+    _cap_note(kb, funnels, _shown, what="acc")
     kb.button(text="➕ Создать воронку", callback_data=AutoFunnelCb(action="create"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
     kb.adjust(1)
@@ -139,12 +142,14 @@ async def msg_af_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         )
         return
     kb = InlineKeyboardBuilder()
-    for b in bots:
+    _shown = _cap(bots)
+    for b in _shown:
         label = html.escape(b["username"] or b["first_name"] or f"id{b['bot_id']}")
         kb.button(
             text=f"🤖 @{label}",
             callback_data=AutoFunnelCb(action="pick_bot", extra=str(b["bot_id"])),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="❌ Отмена", callback_data=AutoFunnelCb(action="menu"))
     kb.adjust(1)
     await message.answer(

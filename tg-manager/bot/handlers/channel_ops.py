@@ -1320,12 +1320,14 @@ async def cb_bulk_post_chans_start(
         )
         return
     kb = InlineKeyboardBuilder()
-    for acc in active:
+    _shown = _cap(active)
+    for acc in _shown:
         label = acc["first_name"] or acc["phone"] or f"id={acc['id']}"
         kb.button(
             text=f"👤 {label}",
             callback_data=ChanCb(action="bulk_post_chans_acc", acc_id=acc["id"]),
         )
+    _cap_note(kb, active, _shown, what="ch")
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="bulk_menu"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -5493,11 +5495,13 @@ async def cb_my_chans(
         )
         return
     kb = InlineKeyboardBuilder()
-    for a in active:
+    _shown = _cap(active)
+    for a in _shown:
         kb.button(
             text=_acc_label(a),
             callback_data=ChanCb(action="my_chans_acc", acc_id=a["id"]),
         )
+    _cap_note(kb, active, _shown, what="ch")
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
     kb.adjust(1)
     await state.set_state(MyChannelsFSM.choosing_account)

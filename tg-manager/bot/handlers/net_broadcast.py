@@ -12,6 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import NetBcCb, NetworkCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.keyboards import net_broadcast_target_menu, net_broadcast_lang_menu
 from bot.states import NetworkBroadcastV2
 from bot.utils.subscription import require_plan, locked_text
@@ -154,7 +155,8 @@ async def cb_net_bc_lang(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 def _build_bot_pick_kb(bots: list, selected: list[int]) -> object:
     """Строит клавиатуру выбора ботов с чекбоксами."""
     kb = InlineKeyboardBuilder()
-    for b in bots:
+    _shown = _cap(bots)
+    for b in _shown:
         bid = b["bot_id"]
         label = (
             f"@{b['username']}"
@@ -167,6 +169,7 @@ def _build_bot_pick_kb(bots: list, selected: list[int]) -> object:
             text=f"{check}{label} ({aud:,} юз.)",
             callback_data=NetBcCb(action="toggle_bot", bot_id=bid),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     has_selected = bool(selected)
     if has_selected:
         kb.button(

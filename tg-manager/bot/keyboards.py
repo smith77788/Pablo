@@ -15,6 +15,7 @@ Usage:
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import (
     AboutCb,
     BotCb,
@@ -653,7 +654,8 @@ def schedule_template_list(bot_id: int, templates: list) -> InlineKeyboardMarkup
 
 def bots_pick(bots: list, exclude_bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    for bot in bots:
+    _shown = _cap(bots)
+    for bot in _shown:
         if bot["bot_id"] == exclude_bot_id:
             continue
         label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
@@ -663,6 +665,7 @@ def bots_pick(bots: list, exclude_bot_id: int) -> InlineKeyboardMarkup:
                 action="pick_b", bot_id=exclude_bot_id, target_id=bot["bot_id"]
             ),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -758,7 +761,8 @@ def auto_reply_menu(bot_id: int, replies: list) -> InlineKeyboardMarkup:
 
 def auto_reply_copy_target(from_bot_id: int, bots: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    for b in bots:
+    _shown = _cap(bots)
+    for b in _shown:
         if b["bot_id"] == from_bot_id:
             continue
         label = f"@{b['username']}" if b["username"] else b["first_name"]
@@ -768,6 +772,7 @@ def auto_reply_copy_target(from_bot_id: int, bots: list) -> InlineKeyboardMarkup
                 action="copy_confirm", bot_id=from_bot_id, target_bot_id=b["bot_id"]
             ),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(
         text="◀️ Назад", callback_data=AutoReplyCb(action="menu", bot_id=from_bot_id)
     )

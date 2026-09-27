@@ -18,6 +18,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 import aiohttp
 import asyncpg
 
@@ -146,7 +147,8 @@ def _menu_kb() -> object:
 
 def _list_kb(templates: list, asset_type: str) -> object:
     kb = InlineKeyboardBuilder()
-    for tpl in templates:
+    _shown = _cap(templates)
+    for tpl in _shown:
         kb.button(
             text=f"📄 {tpl['name']}",
             callback_data=AssetTplCb(
@@ -165,6 +167,7 @@ def _list_kb(templates: list, asset_type: str) -> object:
                 action="delete_confirm", tpl_id=tpl["id"], asset_type=asset_type
             ),
         )
+    _cap_note(kb, templates, _shown, what="acc")
     if not templates:
         kb.button(text="➕ Создать шаблон", callback_data=AssetTplCb(action="create"))
     kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))

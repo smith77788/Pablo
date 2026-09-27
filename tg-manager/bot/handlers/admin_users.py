@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery
 import asyncpg
 from aiogram.filters.callback_data import CallbackData
 from bot.utils.subscription import is_platform_admin
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
@@ -109,7 +110,8 @@ async def cb_users_list(
     kb = InlineKeyboardBuilder()
 
     # Быстрые действия для каждого пользователя
-    for u in users:
+    _shown = _cap(users)
+    for u in _shown:
         uid = u["user_id"]
         uname = u["username"] or f"#{uid}"
         ban_label = "✅ Разбан" if u["is_banned"] else "🚫 Бан"
@@ -118,6 +120,7 @@ async def cb_users_list(
         kb.button(text=ban_label, callback_data=AdminUserCb(action=ban_action, user_id=uid, page=page))
         kb.button(text="💳 +30д", callback_data=AdminUserCb(action="quick_grant30", user_id=uid, page=page))
         kb.adjust(3)
+    _cap_note(kb, users, _shown, what="acc")
 
     # Навигация
     nav_buttons = 0
@@ -731,7 +734,8 @@ async def cb_quick_ban(
     max_page = max(0, (total - 1) // 5)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     kb = InlineKeyboardBuilder()
-    for u in users:
+    _shown = _cap(users)
+    for u in _shown:
         uid = u["user_id"]
         uname = u["username"] or f"#{uid}"
         ban_label = "✅ Разбан" if u["is_banned"] else "🚫 Бан"
@@ -740,6 +744,7 @@ async def cb_quick_ban(
         kb.button(text=ban_label, callback_data=AdminUserCb(action=ban_action, user_id=uid, page=page))
         kb.button(text="💳 +30д", callback_data=AdminUserCb(action="quick_grant30", user_id=uid, page=page))
         kb.adjust(3)
+    _cap_note(kb, users, _shown, what="acc")
     nav = []
     if page > 0:
         kb.button(text="⬅️", callback_data=AdminUserCb(action="list", page=page - 1))
@@ -794,7 +799,8 @@ async def cb_quick_grant30(
     max_page = max(0, (total - 1) // 5)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     kb = InlineKeyboardBuilder()
-    for u in users:
+    _shown = _cap(users)
+    for u in _shown:
         uid = u["user_id"]
         uname = u["username"] or f"#{uid}"
         ban_label = "✅ Разбан" if u["is_banned"] else "🚫 Бан"
@@ -803,6 +809,7 @@ async def cb_quick_grant30(
         kb.button(text=ban_label, callback_data=AdminUserCb(action=ban_action, user_id=uid, page=page))
         kb.button(text="💳 +30д", callback_data=AdminUserCb(action="quick_grant30", user_id=uid, page=page))
         kb.adjust(3)
+    _cap_note(kb, users, _shown, what="acc")
     nav_count = (1 if page > 0 else 0) + 1 + (1 if page < max_page else 0)
     if page > 0:
         kb.button(text="⬅️", callback_data=AdminUserCb(action="list", page=page - 1))

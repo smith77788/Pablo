@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb, DnaCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from services import audience_dna as dna_svc
 from services.audience_dna import AudienceDNA, generate_recommendations
@@ -93,12 +94,14 @@ async def cb_dna_menu(
         return
 
     kb = InlineKeyboardBuilder()
-    for b in bots:
+    _shown = _cap(bots)
+    for b in _shown:
         label = _bot_label(b)
         kb.button(
             text=f"🤖 {label}",
             callback_data=DnaCb(action="report", bot_id=b["bot_id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="◀️ Аналитика", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
 

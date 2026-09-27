@@ -1,6 +1,7 @@
 """Subscription gate middleware — blocks bot access until user subscribes to required channels."""
 
 from __future__ import annotations
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 import logging
 import os
 import time
@@ -68,10 +69,12 @@ def _is_admin(user_id: int) -> bool:
 
 def _gate_markup(channels: list[dict]):
     kb = InlineKeyboardBuilder()
-    for ch in channels:
+    _shown = _cap(channels)
+    for ch in _shown:
         title = ch.get("channel_title") or ch["channel_username"]
         url = "https://t.me/" + ch["channel_username"].lstrip("@")
         kb.button(text=f"📢 {title}", url=url)
+    _cap_note(kb, channels, _shown, what="ch")
     kb.button(text="✅ Я подписался — проверить", callback_data="gate:check")
     kb.adjust(1)
     return kb.as_markup()

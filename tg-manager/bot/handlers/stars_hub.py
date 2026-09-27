@@ -11,6 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 
 from bot.callbacks import StarsCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import StarsExperimentFSM
 from database import db
 from services import stars_optimizer
@@ -363,12 +364,14 @@ async def cb_create_start(callback: CallbackQuery, state: FSMContext, pool: asyn
         return
 
     kb = InlineKeyboardBuilder()
-    for b in bots:
+    _shown = _cap(bots)
+    for b in _shown:
         label = f"@{b['username']}" if b.get("username") else b.get("first_name", "Bot")
         kb.button(
             text=f"🤖 {label}",
             callback_data=StarsCb(action="create_pick_bot", experiment_id=0, bot_id=b["id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     kb.button(text="◀️ Отмена", callback_data=StarsCb(action="dashboard", experiment_id=0, bot_id=0))
     kb.adjust(1)
     await state.set_state(StarsExperimentFSM.choosing_bot)

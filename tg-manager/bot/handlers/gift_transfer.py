@@ -985,11 +985,13 @@ async def cb_manage_recipients(callback: CallbackQuery, state: FSMContext, pool)
     kb = InlineKeyboardBuilder()
 
     if recipients:
-        for r in recipients:
+        _shown = _cap(recipients)
+        for r in _shown:
             kb.button(
                 text=f"👤 {r['name']} ({r['username'] or 'нет @'})",
                 callback_data=f"gt:edit_recipient:{r['id']}",
             )
+        _cap_note(kb, recipients, _shown, what="acc")
         kb.row()
 
     kb.button(text="➕ Добавить получателя", callback_data="gt:add_recipient")

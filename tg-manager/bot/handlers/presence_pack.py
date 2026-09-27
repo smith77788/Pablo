@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import PackCb, BotAdminCb, BmCb, AutoReplyCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import PresencePackFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -78,7 +79,8 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     packs = await db.get_presence_packs(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
-    for p in packs:
+    _shown = _cap(packs)
+    for p in _shown:
         ch_ids = _jlist(p["channel_ids"])
         gr_ids = _jlist(p["group_ids"])
         seed_icon = "🌱" if p["seed_posted"] else "⬜"
@@ -88,6 +90,7 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             text=f"{status} {p['name']} ({len(ch_ids)}📡 {len(gr_ids)}👥)",
             callback_data=PackCb(action="view", pack_id=p["id"]),
         )
+    _cap_note(kb, packs, _shown, what="acc")
 
     kb.button(text="➕ Создать пакет", callback_data=PackCb(action="create"))
     kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))

@@ -18,6 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from aiogram.filters import Command, StateFilter
 from bot.keyboards import main_menu
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.utils.subscription import get_free_mode, set_free_mode
 from bot.utils.event_status import mark_handled_error
 from bot.middlewares.subscription_gate import (
@@ -3483,11 +3484,13 @@ def _gate_kb(channels: list, gate_on: bool):
     kb.button(text="➕ Добавить канал", callback_data="adm:gate_add_ask")
     if gate_on and channels:
         kb.button(text="📢 Оповестить всех незарегистрированных", callback_data="adm:gate_notify_all")
-    for ch in channels:
+    _shown = _cap(channels)
+    for ch in _shown:
         safe = _html.escape(ch["channel_title"] or ch["channel_username"])
         kb.button(
             text=f"🗑 {safe}", callback_data=f"adm:gate_del:{ch['id']}"
         )
+    _cap_note(kb, channels, _shown, what="ch")
     kb.button(text="🏠 Админка", callback_data="adm:main")
     kb.adjust(1)
     return kb.as_markup()

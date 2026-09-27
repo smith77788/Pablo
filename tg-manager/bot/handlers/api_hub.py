@@ -14,6 +14,7 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ApiHubCb, BmCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import ApiKeyFSM
 from bot.utils.op_helpers import safe_answer
 
@@ -98,11 +99,13 @@ async def cb_api_menu(
     text = _menu_text(keys)
 
     kb = InlineKeyboardBuilder()
-    for k in keys:
+    _shown = _cap(keys)
+    for k in _shown:
         kb.button(
             text=f"🗑 bm_{k['key_prefix']}... «{k['name']}»",
             callback_data=ApiHubCb(action="revoke", item_id=k["id"]),
         )
+    _cap_note(kb, keys, _shown, what="acc")
     count = len(keys)
     if count < _MAX_KEYS:
         kb.button(text="➕ Создать ключ", callback_data=ApiHubCb(action="create"))
@@ -231,11 +234,13 @@ async def cb_api_revoke_confirm(
     keys = await _list_keys(pool, callback.from_user.id)
     text = _menu_text(keys)
     kb   = InlineKeyboardBuilder()
-    for k in keys:
+    _shown = _cap(keys)
+    for k in _shown:
         kb.button(
             text=f"🗑 bm_{k['key_prefix']}... «{k['name']}»",
             callback_data=ApiHubCb(action="revoke", item_id=k["id"]),
         )
+    _cap_note(kb, keys, _shown, what="acc")
     count = len(keys)
     if count < _MAX_KEYS:
         kb.button(text="➕ Создать ключ", callback_data=ApiHubCb(action="create"))

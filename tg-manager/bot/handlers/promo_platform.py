@@ -28,6 +28,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, PromoCb, RankCb
+from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import (
     PromoAddBotFSM,
     PromoAddPanelFSM,
@@ -750,12 +751,14 @@ async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: as
         kb.button(text=f"{mark}{label}", callback_data=PromoCb(action="warehouse", value=s))
     if status_filter:
         kb.button(text="Все", callback_data=PromoCb(action="warehouse"))
-    for b in bots:
+    _shown = _cap(bots)
+    for b in _shown:
         st = _BOT_STATUS.get(b["status"], b["status"])
         kb.button(
             text=f"{st} @{b['bot_username']}",
             callback_data=PromoCb(action="bot_detail", item_id=b["id"]),
         )
+    _cap_note(kb, bots, _shown, what="bot")
     if page > 0:
         kb.button(text="◀️", callback_data=PromoCb(action="warehouse", page=page - 1, value=status_filter))
     if len(bots) == 10:
