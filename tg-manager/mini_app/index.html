@@ -2682,7 +2682,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="number" id="daPerAcc" min="1" max="500" placeholder="—" title="Максимум сообщений с одного аккаунта за эту рассылку" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
         <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">макс. с одного аккаунта за рассылку · защита от бана (пусто — без лимита)</div>
       </div>
-      <button class="btn btn-p" style="width:100%" onclick="submitDmAdhoc()">✉️ Разослать в ЛС</button>
+      <div id="daPreview" style="margin-bottom:8px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" style="flex:0 0 auto" onclick="dmPreview()">👁 Предпросмотр</button>
+        <button class="btn btn-p" style="flex:1 1 auto" onclick="submitDmAdhoc()">✉️ Разослать в ЛС</button>
+      </div>
       <div id="daErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
 
@@ -21948,6 +21952,34 @@ const MASS_OP_LABELS = {
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
 // Разовая рассылка в ЛС — операция bulk_dm_adhoc, как в боте.
+// Рассылка в ЛС уходит живым людям и не отменяется, а до нажатия автор видел
+// только исходный шаблон: что развернёт spintax и что встанет вместо {name},
+// выяснялось уже после отправки. Рендер делает сервер теми же функциями, что и
+// исполнитель, — иначе предпросмотр показывал бы не то, что уйдёт.
+async function _dmRender(text) {
+  return api('/api/miniapp/dm/preview', {method:'POST', body:JSON.stringify({text})});
+}
+async function dmPreview() {
+  const box = document.getElementById('daPreview');
+  const errEl = document.getElementById('daErr');
+  errEl.textContent = '';
+  const text = (document.getElementById('daText')?.value || '').trim();
+  if (!text) { errEl.textContent = 'Введите текст сообщения'; return; }
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  let r;
+  try { r = await _dmRender(text); }
+  catch(e) { box.innerHTML = ''; errEl.textContent = e.message || 'Ошибка'; return; }
+  const warn = r.same_for_everyone
+    ? `<div class="field-note" style="color:var(--red)">Текст не меняется: каждый получит буква-в-букву одно и то же. Это самая заметная спам-сигнатура — добавьте варианты через {А|Б}.</div>`
+    : `<div class="field-note">Текст различается: ${num(r.distinct)} ${plural(r.distinct,'вариант','варианта','вариантов')} на восемь проб.</div>`;
+  const pers = r.personalized
+    ? `<div class="field-note">Имя подставляется. В примере — «${esc(r.name_used)}».</div>`
+    : `<div class="field-note">Обращения по имени нет. Можно добавить {name}.</div>`;
+  box.innerHTML = `<div class="sec" style="margin:0 0 4px">Так это увидит получатель</div>`
+    + (r.variants||[]).map((v,i)=>`<div class="lst" style="padding:9px 11px;margin-bottom:6px;white-space:pre-wrap;font-size:14px"><span style="color:var(--hint);font-size:12px">Вариант ${i+1}</span>\n${esc(v)}</div>`).join('')
+    + warn + pers;
+}
+
 async function submitDmAdhoc() {
   const errEl = document.getElementById('daErr');
   errEl.textContent = '';
@@ -21968,11 +22000,24 @@ async function submitDmAdhoc() {
   const capNote = uniq.length > 1000
     ? `\n⚠️ За раз уйдёт только первая 1000 из ${uniq.length}.` : '';
   const willSend = Math.min(uniq.length, 1000);
+  // Один отрендеренный пример прямо в подтверждении: человек видит то, что
+  // уйдёт, а не свой шаблон. Не отрендерилось — отправку не блокируем, но и
+  // примера не выдумываем.
+  let sampleNote = '', sameNote = '';
+  try {
+    const pv = await _dmRender(text);
+    if (pv && pv.variants && pv.variants.length) {
+      sampleNote = `\n\nПример того, что уйдёт:\n«${pv.variants[0]}»`;
+    }
+    if (pv && pv.same_for_everyone) {
+      sameNote = `\n\n⚠️ Текст одинаковый для всех — самая заметная спам-сигнатура.`;
+    }
+  } catch(_) {}
   if (!await askConfirm(
       `Разослать сообщение ${willSend} получателям?\n\n`+
       `Сообщения уйдут реальным людям — отменить отправку нельзя.\n`+
       `Задержка: ${delay}с · займёт около ${humanDur(willSend*delay)}.`+
-      dupNote + capNote)) return;
+      dupNote + capNote + sampleNote + sameNote)) return;
   try {
     const r = await api('/api/miniapp/dm/adhoc_send', {method:'POST', body:JSON.stringify({
       usernames, text, delay, account_ids: accIds,

@@ -8687,6 +8687,64 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "week": {k: int(week.get(k) or 0) for k in ("ok", "failed", "floods")},
         })
 
+    async def dm_preview(request: web.Request) -> web.Response:
+        """Как будет выглядеть сообщение у получателя.
+
+        Рассылка в ЛС уходит живым людям и не отменяется, а автор до нажатия
+        видел только исходный шаблон: что именно развернёт spintax и что
+        подставится вместо {name}, было известно лишь после отправки.
+
+        Рендер идёт ТЕМИ ЖЕ функциями и в ТОМ ЖЕ порядке, что и в исполнителе
+        (dm_engine: personalize → expand_spintax). Иначе предпросмотр стал бы
+        вторым источником правды и показывал бы не то, что уйдёт.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        text = validate_string(data.get("text"), max_len=4096)
+        if not text:
+            return _err("Введите текст сообщения", 400)
+        name = validate_string(data.get("name"), max_len=64) or "Анна"
+        try:
+            from services.dm_engine import expand_spintax, personalize
+        except Exception as exc:  # pragma: no cover - импорт движка
+            log.exception("dm_preview import uid=%d", uid)
+            return _err(str(exc), 500)
+        target = {"first_name": name, "username": name.lower()}
+        # Показываем три варианта, а решаем «текст одинаковый для всех» по
+        # восьми: на шаблоне из двух вариантов три совпавших броска выпадают в
+        # четверти случаев, и предупреждение врало бы на здоровом тексте.
+        # Восемь бросков снижают это примерно до одного случая из ста двадцати.
+        _DRAWS = 8
+        draws = []
+        for _ in range(_DRAWS):
+            try:
+                draws.append(expand_spintax(personalize(text, target)))
+            except Exception as exc:
+                return _err(f"Шаблон не разворачивается: {exc}", 400)
+        # Показать стараемся РАЗНЫЕ броски: три одинаковых из восьми разных
+        # выглядели бы как отсутствие spintax.
+        variants, seen = [], set()
+        for d in draws:
+            if d not in seen:
+                seen.add(d)
+                variants.append(d)
+            if len(variants) == 3:
+                break
+        while len(variants) < 3 and draws:
+            variants.append(draws[len(variants) % len(draws)])
+        return _json_resp({
+            "variants": variants,
+            "distinct": len(set(draws)),
+            "same_for_everyone": len(set(draws)) == 1,
+            "personalized": "{" in text and personalize(text, target) != text,
+            "name_used": name,
+        })
+
     async def dm_adhoc_send(request: web.Request) -> web.Response:
         """Разовая рассылка в ЛС по списку @username (паритет с ботом)."""
         uid = _get_uid(request)
@@ -17636,6 +17694,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)
     app.router.add_get("/api/miniapp/invite/advice", invite_advice)
     app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
+    app.router.add_post("/api/miniapp/dm/preview", dm_preview)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/channels/bulk_post", channels_bulk_post)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
