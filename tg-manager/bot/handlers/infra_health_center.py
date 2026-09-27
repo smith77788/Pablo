@@ -350,7 +350,7 @@ async def cb_hc_run_recovery(
     callback: CallbackQuery,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer("🔄 Запуск Recovery Engine...", show_alert=False)
+    await callback.answer("🔄 Запуск восстановления...", show_alert=False)
     owner_id = callback.from_user.id
 
     try:
@@ -361,7 +361,7 @@ async def cb_hc_run_recovery(
         success = [a for a in actions if a.status == "success"]
         skipped = [a for a in actions if a.status == "skipped"]
 
-        lines = ["🔄 <b>Recovery Engine — результаты</b>\n"]
+        lines = ["🔄 <b>Восстановление — результаты</b>\n"]
         if not actions:
             lines.append("✅ Проблем не обнаружено — инфраструктура в норме.")
         else:
@@ -394,7 +394,7 @@ async def cb_hc_run_recovery(
         kb.button(text="◀️ Назад", callback_data=InfraHCCb(action="menu"))
         await safe_edit(
             callback,
-            f"❌ Ошибка при запуске Recovery Engine: {html.escape(str(e)[:100])}",
+            f"❌ Ошибка при запуске восстановления: {html.escape(str(e)[:100])}",
             reply_markup=kb.as_markup(),
         )
 
@@ -424,7 +424,7 @@ async def cb_hc_health_trend(
 
     if not rows:
         lines.append(
-            "<i>Данных пока нет — подождите первый цикл Recovery Engine (~15 мин)</i>"
+            "<i>Данных пока нет — подождите первый цикл восстановления (~15 мин)</i>"
         )
     else:
         scores = [r["health_score"] for r in rows]
@@ -476,7 +476,7 @@ async def cb_hc_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         insights = await infra_copilot.run_full_analysis(pool, owner_id)
         text = infra_copilot.format_copilot_report(insights, max_items=6)
     except Exception as e:
-        text = f"❌ Ошибка Copilot: {html.escape(str(e)[:150])}"
+        text = f"❌ Ошибка ИИ-аналитика: {html.escape(str(e)[:150])}"
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=InfraHCCb(action="copilot"))

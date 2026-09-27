@@ -526,22 +526,22 @@ async def cb_grant_strike(
         log_exc_swallow(log, "cb_grant_strike: DB write failed")
         await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
         return
-    await callback.answer("✅ Strike доступ выдан.", show_alert=True)
+    await callback.answer("✅ Доступ к жалобам выдан.", show_alert=True)
 
     await callback.message.edit_text(
-        f"⚔️ Strike доступ выдан пользователю #{user_id}.",
+        f"⚔️ Доступ к жалобам выдан пользователю #{user_id}.",
         parse_mode="HTML",
     )
     try:
         await callback.bot.send_message(
             user_id,
-            "⚔️ <b>Strike Module активирован!</b>\n\n"
-            "Администратор предоставил вам доступ к Strike Module.\n"
+            "⚔️ <b>Модуль «Массовые жалобы» активирован!</b>\n\n"
+            "Администратор предоставил вам доступ к модулю «Массовые жалобы».\n"
             "Откройте меню для использования.",
             parse_mode="HTML",
         )
     except Exception:
-        log_exc_swallow(log, "Ошибка отправки уведомления об активации Strike-доступа")
+        log_exc_swallow(log, "Ошибка отправки уведомления об активации доступа к жалобам")
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "revoke_strike"))
@@ -555,21 +555,21 @@ async def cb_revoke_strike(
 
     user_id = callback_data.user_id
     await db.revoke_strike_access(pool, user_id, callback.from_user.id)
-    await callback.answer("✅ Strike доступ отозван.", show_alert=True)
+    await callback.answer("✅ Доступ к жалобам отозван.", show_alert=True)
 
     await callback.message.edit_text(
-        f"⚔️ Strike доступ отозван у пользователя #{user_id}.",
+        f"⚔️ Доступ к жалобам отозван у пользователя #{user_id}.",
         parse_mode="HTML",
     )
     try:
         await callback.bot.send_message(
             user_id,
-            "ℹ️ <b>Strike доступ был отозван администратором.</b>\n\n"
+            "ℹ️ <b>Доступ к жалобам был отозван администратором.</b>\n\n"
             "Для получения доступа обратитесь к администратору.",
             parse_mode="HTML",
         )
     except Exception:
-        log_exc_swallow(log, "Ошибка отправки уведомления об отзыве Strike-доступа")
+        log_exc_swallow(log, "Ошибка отправки уведомления об отзыве доступа к жалобам")
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "ban"))

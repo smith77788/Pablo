@@ -59,7 +59,7 @@ async def cb_net_menu(
     await callback.message.edit_text(
         f"🌐 <b>Сеть &amp; массовые операции</b>\n\n"
         f"🤖 Ботов: <b>{ov['total_bots']}</b> | "
-        f"🧬 Swarm: <b>{ov['swarm_bots']}</b> ({swarm_pct}%)\n"
+        f"🧬 Рой: <b>{ov['swarm_bots']}</b> ({swarm_pct}%)\n"
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
         f"👤 Уникальных юзеров: <b>{ov['unique_users']:,}</b>\n"
         f"📢 Сообщений отправлено: <b>{ov['total_sent']:,}</b>\n\n"
@@ -115,7 +115,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.message.edit_text(
         f"📊 <b>Аналитика сети</b>\n\n"
         f"🤖 Всего ботов: <b>{ov['total_bots']}</b>\n"
-        f"🧬 В Swarm: <b>{ov['swarm_bots']}</b> / {ov['total_bots']}\n"
+        f"🧬 В «Рое»: <b>{ov['swarm_bots']}</b> / {ov['total_bots']}\n"
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
         f"🌐 Режим: <b>{mode.upper()}</b>\n\n"
         f"<b>Аудитория:</b>\n"
@@ -150,7 +150,7 @@ async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
         await callback.message.edit_text(
             "🌐 <b>Кластеры</b>\n\nКластеров пока нет.\n"
-            "Назначьте боту кластер через «🧬 Swarm» → «Изменить кластер».",
+            "Назначьте боту кластер через «🧬 Рой» → «Изменить кластер».",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -178,7 +178,7 @@ async def cb_cluster_view(
 
     lines = [
         f"🌐 <b>Кластер: {cluster}</b>\n",
-        f"Ботов: {len(bots)} | В Swarm: {swarm_on} | Аудитория: {total_aud:,}",
+        f"Ботов: {len(bots)} | В «Рое»: {swarm_on} | Аудитория: {total_aud:,}",
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
@@ -204,13 +204,13 @@ async def cb_bulk_swarm_on(
 
     cluster = callback_data.cluster or ""
     n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, True)
-    await callback.answer(f"✅ Swarm включён для {n} ботов.", show_alert=True)
+    await callback.answer(f"✅ Рой включён для {n} ботов.", show_alert=True)
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     total_aud = sum(b["audience_count"] for b in bots)
     mode = await db.get_system_mode(pool)
     lines = [
         f"🌐 <b>Кластер: {cluster}</b>\n",
-        f"Ботов: {len(bots)} | В Swarm: {n} | Аудитория: {total_aud:,}",
+        f"Ботов: {len(bots)} | В «Рое»: {n} | Аудитория: {total_aud:,}",
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
@@ -233,7 +233,7 @@ async def cb_bulk_swarm_off(
 
     cluster = callback_data.cluster or ""
     n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, False)
-    await callback.answer(f"⚫ Swarm отключён для {n} ботов.", show_alert=True)
+    await callback.answer(f"⚫ Рой отключён для {n} ботов.", show_alert=True)
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     mode = await db.get_system_mode(pool)
     lines = [
@@ -396,8 +396,8 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
         await callback.message.edit_text(
-            "⚖️ <b>Веса роутинга</b>\n\nНет ботов в Swarm.\n"
-            "Включите Swarm для ботов через их меню → «🧬 Swarm».",
+            "⚖️ <b>Веса роутинга</b>\n\nНет ботов в «Рое».\n"
+            "Включите Рой для ботов через их меню → «🧬 Рой».",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

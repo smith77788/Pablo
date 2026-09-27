@@ -103,7 +103,7 @@ async def cb_gp_menu(
         await state.clear()
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Global Presence Factory", "enterprise"),
+            locked_text("Гео-сеть — фабрика присутствия", "enterprise"),
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="visibility")),
         )
         return
@@ -178,7 +178,7 @@ async def cb_gp_menu(
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(2, 1, 1, 1, 1, 1)
     await callback.message.edit_text(
-        f"🌍 <b>Гео-сеть: создать</b> (Global Presence)\n"
+        f"🌍 <b>Гео-сеть: создать</b>\n"
         f"{'─' * 28}\n"
         f"Бот <b>создаёт НОВУЮ</b> Telegram-инфраструктуру сразу в сотнях городов — "
         f"каналы, группы и боты с локализованными названиями, username, "
@@ -452,7 +452,7 @@ async def _show_template_step(
     asset_label = _asset_label_map.get(asset_type, "актива")
     await _edit(
         callback,
-        f"🌍 <b>Global Presence Factory</b>\n\n"
+        f"🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         f"<b>Шаг 2/8 — Шаблон {asset_label}</b>\n"
         f"Шаблон задаёт описание, аватар и первый пост.\n\n"
         f"{header}",
@@ -592,7 +592,7 @@ async def _show_name_pattern_step(
     kb.adjust(1, 2)
     await _edit(
         callback,
-        f"🌍 <b>Global Presence Factory</b>\n\n"
+        f"🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         f"<b>Шаг — Названия</b>\n\n"
         f"📚 <b>Библиотека тематик</b> подберёт названия сама, разные для "
         f"каждого города:\n{lib_text}\n"
@@ -733,7 +733,7 @@ async def _show_username_pattern_step(
     kb.adjust(2, 1)
     await _edit(
         callback,
-        f"🌍 <b>Global Presence Factory</b>\n\n"
+        f"🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         f"<b>Шаг 4/8 — Паттерн username</b>\n"
         f"Username делает канал публичным и находимым.\n"
         f"Правила: 5–32 символа, a-z, 0-9, подчёркивание.\n\n"
@@ -1094,7 +1094,7 @@ async def _show_geo_step(callback: CallbackQuery, state: FSMContext) -> None:
     kb.adjust(1)
     await _edit(
         callback,
-        "🌍 <b>Global Presence Factory</b>\n\n"
+        "🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         "<b>Шаг 5/8 — География</b>\n"
         "Выберите пресет или введите города вручную:",
         markup=kb.as_markup(),
@@ -1166,7 +1166,7 @@ async def _show_pop_filter_step(callback: CallbackQuery, state: FSMContext) -> N
     kb.adjust(1)
     await _edit(
         callback,
-        "🌍 <b>Global Presence Factory</b>\n\n"
+        "🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         f"<b>Шаг 5/8 — Уточнение географии</b>\n"
         f"Пресет: <b>{html.escape(preset.get('label', ''))}</b>\n\n"
         "Отфильтровать по размеру города или выбрать федеральный округ? "
@@ -1197,7 +1197,7 @@ async def _show_district_step(callback: CallbackQuery, state: FSMContext) -> Non
     kb.adjust(1)
     await _edit(
         callback,
-        "🌍 <b>Global Presence Factory</b>\n\n"
+        "🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         "<b>Шаг 5/8 — Федеральный округ</b>\n\n"
         "Выберите округ — в проект войдут все его города:",
         markup=kb.as_markup(),
@@ -1326,7 +1326,7 @@ async def cb_gp_geo_custom(callback: CallbackQuery, state: FSMContext) -> None:
     kb.adjust(2)
     await _edit(
         callback,
-        "🌍 <b>Global Presence Factory</b>\n\n"
+        "🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         "<b>Шаг 5/8 — Кастомные города</b>\n\n"
         "Введите города, по одному на строку:\n"
         "<code>Berlin\nParis\nMadrid\nTokyo</code>\n\n"
@@ -1525,10 +1525,10 @@ async def _show_accounts_step(
         no_acc_kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
         no_acc_kb.adjust(1)
         no_acc_text = (
-            f"🌍 <b>Global Presence Factory</b>\n\n"
+            f"🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
             f"<b>Шаг 6/8 — Аккаунты</b>\n\n"
             f"⚠️ <b>У вас нет активных аккаунтов</b>\n\n"
-            f"Для запуска Global Presence необходимо добавить хотя бы один аккаунт "
+            f"Для запуска гео-сети необходимо добавить хотя бы один аккаунт "
             f"в разделе <b>/menu → 🏗 Активы & Сети → 📱 TG-аккаунты</b>.\n\n"
             f"📍 Гео: {geo_label} ({n_cities} городов) — настроено\n\n"
             f"Добавьте аккаунт и вернитесь сюда."
@@ -1601,7 +1601,7 @@ async def _show_accounts_step(
     kb.attach(done_row)
 
     text = (
-        f"🌍 <b>Global Presence Factory</b>\n\n"
+        f"🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
         f"<b>Шаг 6/8 — Аккаунты</b>\n"
         f"Выберите аккаунты для создания каналов.\n"
         f"Будет использован round-robin.\n\n"
@@ -2352,7 +2352,7 @@ async def cb_gp_launch_stale(callback: CallbackQuery, state: FSMContext) -> None
     await callback.message.edit_text(
         "⚠️ <b>Запуск не принят</b>\n\n"
         "Сессия мастера устарела или бот перезапускался между шагами. "
-        "Откройте Global Presence и соберите план еще раз.",
+        "Откройте гео-сеть и соберите план ещё раз.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -2434,7 +2434,7 @@ async def cb_gp_progress(
 
     running_line = f"🔄 Выполняется: {running_now}\n" if running_now > 0 else ""
     text = (
-        f"🌍 <b>Global Presence Plan #{plan_id}</b>\n"
+        f"🌍 <b>Гео-сеть — план #{plan_id}</b>\n"
         f"Статус: {status_map.get(plan['status'], plan['status'])}\n"
         f"{'─' * 28}\n"
         f"Всего: {total}\n"
@@ -2509,7 +2509,7 @@ async def cb_gp_retry(
         await safe_answer(callback)
 
         await callback.message.edit_text(
-            locked_text("Global Presence", "enterprise"),
+            locked_text("Гео-сеть", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="visibility")),
         )
@@ -3443,7 +3443,7 @@ async def cb_gp_cancel_plan(
     kb.adjust(2)
     await _edit(
         callback,
-        f"🚫 <b>Global Presence Plan #{plan_id} отменён</b>\n\n"
+        f"🚫 <b>План гео-сети #{plan_id} отменён</b>\n\n"
         f"Незавершённые операции остановлены.\n"
         f"Уже созданные каналы/группы остаются активными.",
         markup=kb.as_markup(),
@@ -3472,7 +3472,7 @@ async def cb_gp_plans_list(
         kb.adjust(1)
         await _edit(
             callback,
-            "🌍 <b>Global Presence Factory</b>\n\n"
+            "🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
             "У вас ещё нет планов присутствия.\n"
             "Нажмите «Создать план» чтобы начать.",
             markup=kb.as_markup(),
@@ -3514,7 +3514,7 @@ async def cb_gp_plans_list(
 
     await _edit(
         callback,
-        "🌍 <b>Global Presence — Мои планы</b>\n\n"
+        "🌍 <b>Гео-сеть — Мои планы</b>\n\n"
         "Нажмите на план для просмотра прогресса:",
         markup=kb.as_markup(),
     )
@@ -3614,7 +3614,7 @@ async def cb_gp_objects(
 
     await _edit(
         callback,
-        "🌍 <b>Global Presence — Все объекты</b>\n\n"
+        "🌍 <b>Гео-сеть — Все объекты</b>\n\n"
         f"Всего создано: <b>{total}</b>\n"
         f"{active_line}\n"
         f"{body}",
@@ -3690,5 +3690,5 @@ async def cb_gp_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="🌍 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.adjust(2)
     await _edit(
-        callback, "❌ <b>Global Presence Factory</b> — отменено.", markup=kb.as_markup()
+        callback, "❌ <b>Гео-сеть — фабрика присутствия</b> — отменено.", markup=kb.as_markup()
     )

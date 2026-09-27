@@ -90,7 +90,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 async def cb_chanf_menu(callback: CallbackQuery) -> None:
     await safe_answer(callback)
     await callback.message.edit_text(
-        "📡 <b>Channel Factory — менеджер каналов</b>\n\n"
+        "📡 <b>Фабрика каналов — менеджер каналов</b>\n\n"
         "• <b>Создать канал</b> — новый Telegram-канал через ваш аккаунт\n"
         "• <b>Массовое создание</b> — несколько каналов с умными задержками\n"
         "• <b>Импорт из Telegram</b> — подключить уже существующие каналы\n"
@@ -113,7 +113,7 @@ async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
     kb.button(text="⚡ Все операции", callback_data=BmCb(action="operations"))
     kb.adjust(1)
     await callback.message.edit_text(
-        "◀️ <b>Channel Factory</b>\n\nВыберите куда вернуться:",
+        "◀️ <b>Фабрика каналов</b>\n\nВыберите куда вернуться:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -296,7 +296,7 @@ async def cb_chanf_mass_pub_redirect(callback: CallbackQuery) -> None:
     kb.adjust(1)
     await callback.message.edit_text(
         "📤 <b>Массовая публикация</b>\n\n"
-        "Для массовой публикации используйте отдельный модуль Mass Publish.",
+        "Для массовой публикации используйте отдельный модуль Массовая публикация.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

@@ -62,14 +62,14 @@ _PRESET_DESCRIPTIONS: dict[str, str] = {
 }
 
 _NAVIGATE_LABELS: dict[str, str] = {
-    "gp_factory": "🌍 Открыть GP Factory",
-    "factory": "🏭 Открыть Factory",
+    "gp_factory": "🌍 Открыть гео-сеть",
+    "factory": "🏭 Открыть фабрику",
     "mass_ops": "⚙️ Открыть Mass Ops",
     "health_dashboard": "🩺 Открыть здоровье",
     "ecosystems": "🧠 Открыть экосистемы",
     "strike": "⚔️ Открыть массовые жалобы",
     "main": "🏠 Открыть меню",
-    "ranking": "🔎 Открыть Rankings",
+    "ranking": "🔎 Открыть Позиции в поиске",
 }
 
 

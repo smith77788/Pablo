@@ -81,7 +81,7 @@ async def cb_ghost_menu(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
         await callback.message.edit_text(
-            "👻 <b>Ghost Engine</b>\n\n"
+            "👻 <b>Призрак</b>\n\n"
             "⚠️ Модуль недоступен — база данных не содержит нужных таблиц.\n\n"
             "Обратитесь к администратору для применения миграции <code>schema_v105.sql</code>.",
             parse_mode="HTML",
@@ -102,7 +102,7 @@ async def cb_ghost_menu(
     count = len(profiles)
     active = sum(1 for p in profiles if p["enabled"])
     await callback.message.edit_text(
-        "👻 <b>Ghost Engine</b>\n\n"
+        "👻 <b>Призрак</b>\n\n"
         "Автономная фоновая активность аккаунтов — онлайн-присутствие, "
         "чтение диалогов, реакции на посты каналов, сохранение в избранное.\n\n"
         "Аккаунты действуют только в рамках существующих подписок. "
@@ -135,8 +135,8 @@ async def cb_ghost_add(
     available = [a for a in accounts if a["id"] not in already]
     if not available:
         await callback.message.edit_text(
-            "👻 <b>Ghost Engine</b>\n\n"
-            "Все ваши аккаунты уже добавлены в Ghost Engine, "
+            "👻 <b>Призрак</b>\n\n"
+            "Все ваши аккаунты уже под «Призраком», "
             "или у вас нет активных аккаунтов.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardBuilder().button(
@@ -154,7 +154,7 @@ async def cb_ghost_add(
     kb.button(text="◀️ Назад", callback_data=GhostCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        "👻 <b>Выберите аккаунт для Ghost Engine</b>\n\n"
+        "👻 <b>Выберите аккаунт для «Призрака»</b>\n\n"
         "Аккаунт будет имитировать фоновую активность в Telegram:\n"
         "онлайн-статус, чтение, реакции — только в его текущих подписках.",
         parse_mode="HTML",
@@ -237,7 +237,7 @@ async def _show_profile(
         last_txt = f"{ico} {lbl}" + (f" ({ts.strftime('%H:%M')})" if ts else "")
 
     text = (
-        f"👻 <b>Ghost Engine — {acc_name}</b>\n\n"
+        f"👻 <b>Призрак — {acc_name}</b>\n\n"
         f"Статус: <b>{status}</b>\n"
         f"Тип: <b>{p_label}</b> — {p_desc}\n"
         f"Окно активности: <b>{hours}</b>\n"
@@ -490,7 +490,7 @@ async def cb_ghost_logs(
         callback_data.profile_id,
     )
     if not rows:
-        text = "👻 <b>Ghost Engine — Лог</b>\n\nДействий пока не было."
+        text = "👻 <b>Призрак — Лог</b>\n\nДействий пока не было."
     else:
         lines = []
         for r in rows:
@@ -503,10 +503,10 @@ async def cb_ghost_logs(
             tgt = f" → {html.escape(r['target'])}" if r["target"] else ""
             err = f" [{html.escape(r['error_msg'][:40])}]" if r["error_msg"] and r["result"] != "ok" else ""
             lines.append(f"<code>{t}</code> {ico} {lbl}{tgt}{err}")
-        text = "👻 <b>Ghost Engine — Последние 20 действий</b>\n\n" + "\n".join(lines)
+        text = "👻 <b>Призрак — Последние 20 действий</b>\n\n" + "\n".join(lines)
 
     acc_name = await _get_account_name(pool, profile["account_id"], callback.from_user.id)
-    text = text.replace("Ghost Engine —", f"Ghost Engine — {acc_name} —", 1)
+    text = text.replace("Призрак —", f"Призрак — {acc_name} —", 1)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=GhostCb(action="view", profile_id=callback_data.profile_id))
@@ -531,7 +531,7 @@ async def cb_ghost_del(
     kb.button(text="◀️ Отмена", callback_data=GhostCb(action="view", profile_id=callback_data.profile_id))
     kb.adjust(1)
     await callback.message.edit_text(
-        f"⚠️ Удалить Ghost профиль для <b>{acc_name}</b>?\n\n"
+        f"⚠️ Удалить профиль «Призрака» для <b>{acc_name}</b>?\n\n"
         "История действий также будет удалена.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -555,7 +555,7 @@ async def cb_ghost_del_confirm(
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К «Призраку»", callback_data=GhostCb(action="menu"))
     await callback.message.edit_text(
-        "✅ Ghost профиль удалён.",
+        "✅ Профиль «Призрака» удалён.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

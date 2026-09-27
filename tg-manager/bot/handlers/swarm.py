@@ -31,7 +31,7 @@ async def cb_swarm_menu(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Swarm (умный роутинг трафика)", "enterprise"),
+            locked_text("Рой (умный роутинг трафика)", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 "enterprise", back_callback=BmCb(action="assets")
@@ -51,7 +51,7 @@ async def cb_swarm_menu(
         return
     await safe_answer(callback)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
-    swarm_status = "🟢 Активен в Swarm" if row.get("swarm_enabled") else "⚫ Не в Swarm"
+    swarm_status = "🟢 Активен в «Рое»" if row.get("swarm_enabled") else "⚫ Не в «Рое»"
     role = ROLE_LABELS.get(row.get("bot_role", "general"), "⚙️ General")
     cluster = row.get("cluster") or "default"
     try:
@@ -60,9 +60,9 @@ async def cb_swarm_menu(
         log_exc_swallow(log, "cb_swarm_menu: get_system_mode failed")
         mode = "manual"
     await callback.message.edit_text(
-        f"🧬 <b>Swarm — {label}</b>\n\n"
+        f"🧬 <b>Рой — {label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
-        "Swarm — это система умного распределения пользователей между вашими ботами. Когда новый человек приходит в одного бота, система может автоматически перенаправить его в другой бот, который сейчас лучше конвертирует.\n\n"
+        "Рой — это система умного распределения пользователей между вашими ботами. Когда новый человек приходит в одного бота, система может автоматически перенаправить его в другой бот, который сейчас лучше конвертирует.\n\n"
         "💡 <b>Как работает:</b>\n"
         "Каждый бот получает роль: Entry (точка входа), Conversion (продаёт), Retention (удерживает). Система сама решает, в какой бот направить пользователя, основываясь на статистике.\n\n"
         f"Статус: {swarm_status}\n"
@@ -81,7 +81,7 @@ async def cb_swarm_toggle(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Swarm-роутинг", "enterprise"),
+            locked_text("роутинг «Роя»", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
@@ -116,7 +116,7 @@ async def cb_swarm_toggle(
         log_exc_swallow(log, "cb_swarm_toggle: get_bot (refresh) failed")
         row2 = row
     label = f"@{row2['username']}" if row2["username"] else row2["first_name"]
-    swarm_status = "🟢 Активен в Swarm" if new_state else "⚫ Не в Swarm"
+    swarm_status = "🟢 Активен в «Рое»" if new_state else "⚫ Не в «Рое»"
     role = ROLE_LABELS.get(row2.get("bot_role", "general"), "⚙️ General")
     try:
         mode = await db.get_system_mode(pool)
@@ -125,7 +125,7 @@ async def cb_swarm_toggle(
         mode = "manual"
     await callback.answer("✅ Статус обновлён")
     await callback.message.edit_text(
-        f"🧬 <b>Swarm — {label}</b>\n\n"
+        f"🧬 <b>Рой — {label}</b>\n\n"
         f"Статус: {swarm_status}\n"
         f"Роль: {role}\n"
         f"Кластер: <code>{row2.get('cluster') or 'default'}</code>\n\n"
@@ -171,7 +171,7 @@ async def cb_swarm_stats(
     ret_d1 = float(metrics["retention_d1"] or 0) if metrics else 0.0
 
     no_data_hint = (
-        "\n\n💡 <i>Пока нет данных о роутинге. Включите Swarm и подождите, "
+        "\n\n💡 <i>Пока нет данных о роутинге. Включите Рой и подождите, "
         "пока пользователи начнут взаимодействовать с ботом.</i>"
         if stats.get("total", 0) == 0
         else ""
@@ -204,7 +204,7 @@ async def cb_swarm_role(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Swarm-роутинг", "enterprise"),
+            locked_text("роутинг «Роя»", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
@@ -245,13 +245,13 @@ async def cb_swarm_role(
         else (row["first_name"] if row else "")
     )
     swarm_status = (
-        "🟢 Активен в Swarm" if row and row.get("swarm_enabled") else "⚫ Не в Swarm"
+        "🟢 Активен в «Рое»" if row and row.get("swarm_enabled") else "⚫ Не в «Рое»"
     )
     role_label = ROLE_LABELS.get(role, role)
     mode = await db.get_system_mode(pool)
     await callback.answer(f"✅ Роль изменена: {role_label}")
     await callback.message.edit_text(
-        f"🧬 <b>Swarm — {label}</b>\n\n"
+        f"🧬 <b>Рой — {label}</b>\n\n"
         f"Статус: {swarm_status}\n"
         f"Роль: {role_label}\n"
         f"Кластер: <code>{row.get('cluster') or 'default'}</code>\n\n"
@@ -278,7 +278,7 @@ async def cb_set_mode(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Swarm-роутинг", "enterprise"),
+            locked_text("роутинг «Роя»", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
@@ -318,7 +318,7 @@ async def cb_change_mode(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Swarm-роутинг", "enterprise"),
+            locked_text("роутинг «Роя»", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
@@ -349,7 +349,7 @@ async def cb_change_mode(
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.answer(f"✅ Режим изменён: {mode.upper()}")
     await callback.message.edit_text(
-        f"🧬 <b>Swarm — {label}</b>\n\n"
+        f"🧬 <b>Рой — {label}</b>\n\n"
         f"Статус: {'🟢 Включён' if row.get('swarm_enabled') else '⚫ Отключён'}\n"
         f"Роль: <b>{row.get('bot_role', 'general')}</b>\n"
         f"Кластер: <code>{row.get('cluster') or 'default'}</code>\n\n"

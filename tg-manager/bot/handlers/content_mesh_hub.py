@@ -64,7 +64,7 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
-            "🕸️ <b>Content Mesh</b>\n\n"
+            "🕸️ <b>Сеть контента</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
             "Администратору необходимо применить миграцию <code>schema_v106.sql</code>.",
             parse_mode="HTML",
@@ -88,7 +88,7 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     pend_cnt = pending["cnt"] if pending else 0
 
     await callback.message.edit_text(
-        "🕸️ <b>Content Mesh</b>\n\n"
+        "🕸️ <b>Сеть контента</b>\n\n"
         "Автоматическое копирование постов из источника во все подключённые каналы.\n"
         "Посты отправляются с задержкой и без пометки «переслано».\n\n"
         f"Сетей: <b>{len(meshes)}</b>  |  Активных: <b>{active}</b>  |  В очереди: <b>{pend_cnt}</b>",
@@ -109,7 +109,7 @@ async def cb_mesh_create(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ContentMeshCb(action="menu"))
     await callback.message.edit_text(
-        "🕸️ <b>Новая Content Mesh</b>\n\n"
+        "🕸️ <b>Новая сеть контента</b>\n\n"
         "Введите название для этой сетки (например: <code>Канал RU → 5 целей</code>).",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -199,7 +199,7 @@ async def cb_mesh_view(
     await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     await _show_mesh(callback.message, pool, mesh, callback.from_user.id)
 
@@ -213,7 +213,7 @@ async def cb_mesh_toggle(
 ) -> None:
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     new_state = not mesh["enabled"]
     await pool.execute(
@@ -235,7 +235,7 @@ async def cb_mesh_set_source(
     await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     await state.set_state(ContentMeshFSM.waiting_source_channel)
     await state.update_data(mesh_id=callback_data.mesh_id)
@@ -328,7 +328,7 @@ async def cb_mesh_targets(
     await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     targets = await pool.fetch(
         "SELECT * FROM mesh_targets WHERE mesh_id=$1 ORDER BY id", callback_data.mesh_id
@@ -417,7 +417,7 @@ async def cb_mesh_del_target(
     # цель из чужой сети, а уже потом увидеть «Mesh не найдена».
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     await pool.execute(
         "DELETE FROM mesh_targets WHERE id=$1 AND mesh_id=$2",
@@ -455,7 +455,7 @@ async def cb_mesh_settings(
     await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     await state.set_state(ContentMeshFSM.waiting_delay)
     await state.update_data(mesh_id=callback_data.mesh_id)
@@ -463,7 +463,7 @@ async def cb_mesh_settings(
     kb.button(text="❌ Отмена", callback_data=ContentMeshCb(action="view", mesh_id=callback_data.mesh_id))
     cta = html.escape(mesh["append_text"] or "—")
     await callback.message.edit_text(
-        f"⚙️ <b>Настройки Mesh</b>\n\n"
+        f"⚙️ <b>Настройки сети контента</b>\n\n"
         f"Задержка: <b>{mesh['delay_minutes']} мин</b>\n"
         f"Суффикс: {cta}\n\n"
         "Введите новую задержку в минутах (0–1440) и, через пробел, суффикс "
@@ -515,7 +515,7 @@ async def cb_mesh_logs(
     await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     rows = await pool.fetch(
         """
@@ -559,14 +559,14 @@ async def cb_mesh_del(
     await safe_answer(callback)
     mesh = await _get_mesh(pool, callback_data.mesh_id, callback.from_user.id)
     if not mesh:
-        await callback.answer("Mesh не найдена.", show_alert=True)
+        await callback.answer("Сеть контента не найдена.", show_alert=True)
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="🗑 Да, удалить", callback_data=ContentMeshCb(action="del_confirm", mesh_id=callback_data.mesh_id))
     kb.button(text="◀️ Отмена", callback_data=ContentMeshCb(action="view", mesh_id=callback_data.mesh_id))
     kb.adjust(1)
     await callback.message.edit_text(
-        f"⚠️ Удалить Mesh <b>{html.escape(mesh['name'])}</b>?\n\n"
+        f"⚠️ Удалить сеть контента <b>{html.escape(mesh['name'])}</b>?\n\n"
         "Все цели и история доставок будут удалены.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -584,4 +584,4 @@ async def cb_mesh_del_confirm(
     await callback.answer("🗑 Удалено")
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К сети контента", callback_data=ContentMeshCb(action="menu"))
-    await callback.message.edit_text("✅ Mesh удалена.", parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text("✅ Сеть контента удалена.", parse_mode="HTML", reply_markup=kb.as_markup())

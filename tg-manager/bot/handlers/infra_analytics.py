@@ -937,12 +937,12 @@ async def cb_infra_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         insights = await infra_copilot.run_full_analysis(pool, owner_id)
         if not insights:
             text = (
-                "✅ <b>Copilot: всё в норме</b>\n\nКритических проблем не обнаружено."
+                "✅ <b>ИИ-аналитик: всё в норме</b>\n\nКритических проблем не обнаружено."
             )
         else:
             text = infra_copilot.format_copilot_report(insights)
     except Exception as e:
-        text = f"⚠️ Copilot временно недоступен: {html.escape(str(e))}"
+        text = f"⚠️ ИИ-аналитик временно недоступен: {html.escape(str(e))}"
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=InfraCb(action="copilot"))
@@ -1116,7 +1116,7 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 async def cb_copilot_snooze(
     callback: CallbackQuery, callback_data: InfraCb, pool: asyncpg.Pool
 ) -> None:
-    """Отложить уведомления Infrastructure Copilot на N часов."""
+    """Отложить уведомления ИИ-аналитика на N часов."""
     from services import infra_copilot as _cop
     from database import db as _db
 
@@ -1144,7 +1144,7 @@ async def cb_copilot_snooze(
 
 @router.callback_query(InfraCb.filter(F.action == "snooze_clear"))
 async def cb_copilot_snooze_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Снять снуз — вернуть уведомления Copilot."""
+    """Снять снуз — вернуть уведомления ИИ-аналитика."""
     from services import infra_copilot as _cop
     from database import db as _db
 

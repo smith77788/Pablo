@@ -81,7 +81,7 @@ _PRICE_USD = 250
 _table_ok = False
 
 _DISCLAIMER = (
-    "\n\n<i>⚠️ <b>Важно:</b> Strike Module является инструментом для подачи "
+    "\n\n<i>⚠️ <b>Важно:</b> модуль «Массовые жалобы» является инструментом для подачи "
     "законных жалоб через официальные механизмы Telegram Trust &amp; Safety. "
     "Результат зависит исключительно от решения модераторов Telegram. "
     "Использование модуля не гарантирует удаление или блокировку ресурса.</i>"
@@ -187,7 +187,7 @@ async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if access:
         text = (
-            "⚔️ <b>Strike Module</b> — активен\n\n"
+            "⚔️ <b>Модуль «Массовые жалобы»</b> — активен\n\n"
             "<b>⚡ Мини-страйк</b> — 1 аккаунт, максимальный охват:\n"
             "• 12-векторная MTProto атака (все причины по кругу)\n"
             "• Email → abuse@telegram.org\n"
@@ -198,7 +198,7 @@ async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     else:
         text = (
-            "⚔️ <b>Strike Module</b>\n\n"
+            "⚔️ <b>Массовые жалобы</b>\n\n"
             "<b>Модуль массовой зачистки нелегального контента</b>\n\n"
             "12-векторная скоординированная атака с нескольких аккаунтов против:\n"
             "• 🟣 Наркотики и запрещённые вещества\n"
@@ -270,7 +270,7 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     kb.adjust(1)
 
     await callback.message.edit_text(
-        f"⚙️ <b>Настройки Strike — Режим</b>\n\n"
+        f"⚙️ <b>Настройки массовых жалоб — режим</b>\n\n"
         f"Текущий режим: <b>{current_label}</b>\n"
         f"<i>{current_desc}</i>\n\n"
         f"<b>⚡ Быстрый</b> — 6 векторов: ReportPeer + ReportPhoto + ReportPinned + ReportMessages. "
@@ -343,7 +343,7 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         log_exc_swallow(log, "cb_strike_buy: _has_access failed")
         _already = False
     if _already:
-        await callback.answer("⚔️ Strike уже активен!", show_alert=True)
+        await callback.answer("⚔️ Массовые жалобы уже активны!", show_alert=True)
         return
     await safe_answer(callback)
 
@@ -390,7 +390,7 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not wallet:
         await callback.message.edit_text(
-            "⚔️ <b>Strike Module — $250 USDT</b>\n\n"
+            "⚔️ <b>Массовые жалобы — $250 USDT</b>\n\n"
             "⚠️ Автоматическая оплата не настроена.\n\n"
             "Свяжитесь с администратором для активации.",
             parse_mode="HTML",
@@ -399,7 +399,7 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     await callback.message.edit_text(
-        f"⚔️ <b>Strike Module — оплата</b>\n\n"
+        f"⚔️ <b>Модуль «Массовые жалобы» — оплата</b>\n\n"
         f"Сумма: <b>{_PRICE_USD} USDT</b>\n"
         f"Сеть: <b>TRC-20 (TRON)</b>\n\n"
         f"Кошелёк:\n<code>{wallet}</code>\n\n"
@@ -427,7 +427,7 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         kb = InlineKeyboardBuilder()
         kb.button(text="⚔️ Открыть массовые жалобы", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
-            "✅ <b>Strike Module активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
+            "✅ <b>Модуль «Массовые жалобы» активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -478,7 +478,7 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         kb_open = InlineKeyboardBuilder()
         kb_open.button(text="⚔️ Открыть массовые жалобы", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
-            "✅ <b>Strike Module активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
+            "✅ <b>Модуль «Массовые жалобы» активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
             parse_mode="HTML",
             reply_markup=kb_open.as_markup(),
         )
@@ -555,7 +555,7 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         )
         return
 
-    lines: list[str] = ["📜 <b>История Strike</b>\n"]
+    lines: list[str] = ["📜 <b>История массовых жалоб</b>\n"]
 
     # ── Очередь ──────────────────────────────────────────────────────────────
     if queue_rows:
@@ -737,7 +737,7 @@ async def cb_strike_rerun(
         target,
         reason,
         edit=True,
-        extra_info=f"🔁 Повтор Strike · {preset_info}",
+        extra_info=f"🔁 Повтор массовых жалоб · {preset_info}",
     )
 
 
@@ -765,7 +765,7 @@ async def cb_strike_admin_grant(
     except Exception as exc:
         await callback.answer(f"❌ Ошибка: {exc}", show_alert=True)
         return
-    await callback.answer(f"✅ Strike активирован для {target_id}", show_alert=True)
+    await callback.answer(f"✅ Массовые жалобы активированы для {target_id}", show_alert=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

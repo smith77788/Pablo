@@ -746,7 +746,7 @@ async def cb_nodes_broadcast(
     await state.update_data(node_id=node["id"], node_name=node["name"])
 
     await callback.message.edit_text(
-        f"<b>📢 Broadcast по топикам</b>\n\n"
+        f"<b>📢 Рассылка по топикам</b>\n\n"
         f"Воркспейс: <b>{html.escape(node['name'])}</b>\n"
         f"Получателей: <b>{open_count}</b> открытых топиков\n\n"
         "Введите текст алерта (HTML):",
@@ -815,7 +815,7 @@ async def msg_broadcast_text(
     kb.adjust(1)
 
     await message.answer(
-        f"✅ <b>Broadcast завершён</b>\n\n"
+        f"✅ <b>Рассылка завершена</b>\n\n"
         f"Доставлено: <b>{total_sent}</b>\n"
         f"Ошибок: <b>{total_failed}</b>",
         parse_mode="HTML",

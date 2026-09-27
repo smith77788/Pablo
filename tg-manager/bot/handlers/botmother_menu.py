@@ -3290,7 +3290,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     lines.append(
         f"\n<i>Итого: {len(bots)} ботов · {len(channels)} каналов · "
-        f"{len([b for b in bots if b.get('swarm_enabled')])} в Swarm</i>"
+        f"{len([b for b in bots if b.get('swarm_enabled')])} в «Рое»</i>"
     )
 
     topo_text = "\n".join(lines)

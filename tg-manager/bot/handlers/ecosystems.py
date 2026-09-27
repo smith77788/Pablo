@@ -39,7 +39,7 @@ _ECO_TYPES = {
     "regional": ("🌍", "Региональная"),
     "global_presence": ("🌐", "Глобальное присутствие"),
     "media_network": ("📡", "Медиасеть"),
-    "strike_network": ("⚡", "Strike-сеть"),
+    "strike_network": ("⚡", "сеть жалоб"),
 }
 
 _MEMBER_TYPES = {
@@ -392,7 +392,7 @@ async def cb_eco_factory(
     kb.adjust(2, 2, 1, 1)
 
     text = (
-        f"🏭 <b>Ecosystem Factory: {html.escape(eco['name'])}</b>\n\n"
+        f"🏭 <b>Фабрика экосистемы: {html.escape(eco['name'])}</b>\n\n"
         f"Создайте активы и добавьте их в эту экосистему.\n\n"
         f"<b>📡 Каналы</b> — создать новый канал → после создания нажмите "
         f"«🌐 Добавить в экосистему»\n"

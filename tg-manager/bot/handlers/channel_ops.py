@@ -187,7 +187,7 @@ def _friendly_join_error(error_str: str) -> str:
 
 
 _DISCLAIMER = (
-    "\n\n<i>⚠️ <b>Важно:</b> Strike Module является инструментом для подачи "
+    "\n\n<i>⚠️ <b>Важно:</b> модуль «Массовые жалобы» является инструментом для подачи "
     "законных жалоб через официальные механизмы Telegram Trust &amp; Safety. "
     "Результат зависит исключительно от решения модераторов Telegram. "
     "Использование модуля не гарантирует удаление или блокировку ресурса.</i>"
@@ -3772,7 +3772,7 @@ async def cb_bulk_report_start(
         kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         kb.adjust(1)
         await callback.message.edit_text(
-            "⚔️ <b>Strike Module</b>\n\n"
+            "⚔️ <b>Массовые жалобы</b>\n\n"
             "Функция многоаккаунтной зачистки нелегального контента "
             "доступна по отдельной лицензии.\n\n"
             "💰 Стоимость: <b>$250 USDT</b> · Пожизненный доступ",
@@ -3819,7 +3819,7 @@ async def cb_br_mode_single(
     from bot.handlers.strike import _has_access
 
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа к Strike Module.", show_alert=True)
+        await callback.answer("Нет доступа к модулю «Массовые жалобы».", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(BulkReportFSM.waiting_peer)
@@ -3842,7 +3842,7 @@ async def cb_br_mode_batch(
     from bot.handlers.strike import _has_access
 
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа к Strike Module.", show_alert=True)
+        await callback.answer("Нет доступа к модулю «Массовые жалобы».", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(BulkReportFSM.waiting_peers_batch)
@@ -4176,7 +4176,7 @@ async def cb_br_confirm(
         )
         if not _ready:
             await callback.message.edit_text(
-                f"🚫 <b>Strike отложен</b>\n\n{_reason}\n\n"
+                f"🚫 <b>Массовые жалобы отложены</b>\n\n{_reason}\n\n"
                 "Инфраструктура под нагрузкой — подождите и попробуйте снова.",
                 parse_mode="HTML",
                 reply_markup=_back_kb().as_markup(),
@@ -4264,7 +4264,7 @@ async def cb_br_confirm(
     if not op_ids:
         err_text = "\n".join(errors[:3])
         await callback.message.edit_text(
-            f"⚠️ <b>Не удалось поставить Strike в очередь</b>\n\n<code>{html.escape(err_text)}</code>",
+            f"⚠️ <b>Не удалось поставить жалобы в очередь</b>\n\n<code>{html.escape(err_text)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -4284,12 +4284,12 @@ async def cb_br_confirm(
         note = f"\n⚠️ Ошибок постановки: {len(errors)}"
 
     await callback.message.edit_text(
-        f"⚔️ <b>Strike поставлен в очередь</b>\n\n"
+        f"⚔️ <b>Массовые жалобы поставлены в очередь</b>\n\n"
         f"🎯 Цели: {peers_preview}\n"
         f"👥 Аккаунтов: <b>{len(viable)}</b>{preflight_note}\n"
         f"📋 Операций: <b>{len(op_ids)}</b> (IDs: {', '.join(str(i) for i in op_ids[:5])})\n"
         f"⚙️ Режим: {label}{note}\n\n"
-        f"Воркер запустит Strike автоматически. Следить за прогрессом: <b>Очередь</b>",
+        f"Воркер запустит жалобы автоматически. Следить за прогрессом: <b>Очередь</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

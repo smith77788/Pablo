@@ -979,7 +979,7 @@ def funnel_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
 def swarm_menu(bot_id: int, row) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     swarm_on = row.get("swarm_enabled", False)
-    toggle_text = "🟢 Отключить Swarm" if swarm_on else "⚫ Включить Swarm"
+    toggle_text = "🟢 Отключить Рой" if swarm_on else "⚫ Включить Рой"
     kb.button(text=toggle_text, callback_data=SwarmCb(action="toggle", bot_id=bot_id))
     role = row.get("bot_role", "general")
     for r, label in [

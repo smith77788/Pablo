@@ -131,3 +131,70 @@ def test_bot_and_miniapp_call_modules_the_same():
     assert not missing_bot, (
         "бот зовёт модуль иначе, чем мини-апп: " + ", ".join(missing_bot)
     )
+
+
+# Английские названия модулей: бот писал их прямо в тексте сообщений
+# («⚡ <b>Auto-Funnel</b>», «👻 <b>Ghost Engine</b>», «🗺️ <b>Topology Map</b>»),
+# даже там, где кнопка рядом уже была русской. Заголовок экрана владелец читает
+# первым, поэтому он важнее кнопки.
+ENGLISH_MODULE_NAMES = [
+    "Bot Factory", "Channel Factory", "Ecosystem Factory", "Global Presence",
+    "Content Mesh", "Ghost Engine", "Auto-Funnel", "Topology Map",
+    "Recovery Engine", "Health Center", "Intelligence Report", "Keyword Gap",
+    "Mass Publish", "Free Mode", "Strike Module", "Copilot", "Failover",
+    "Workspace", "Swarm", "Broadcast", "Dry Run",
+]
+_CYR = re.compile(r"[А-Яа-яЁё]")
+
+
+def _human_strings():
+    """Строковые литералы с кириллицей — то есть тексты для человека.
+
+    Докстринги исключены: их читает разработчик. Строки без кириллицы тоже
+    (callback_data, ключи словарей, SQL) — но с оговоркой: кусок f-строки может
+    быть без кириллицы, поэтому куски одной f-строки склеиваются обратно.
+    """
+    import ast as _ast
+
+    out = []
+    for path in sorted(BOT.rglob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        tree = _ast.parse(src)
+        docs = set()
+        for node in _ast.walk(tree):
+            body = getattr(node, "body", None)
+            if isinstance(node, (_ast.Module, _ast.ClassDef, _ast.FunctionDef,
+                                 _ast.AsyncFunctionDef)) and body:
+                first = body[0]
+                if isinstance(first, _ast.Expr) and isinstance(first.value, _ast.Constant) \
+                        and isinstance(first.value.value, str):
+                    docs.add((first.value.lineno, first.value.col_offset))
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.JoinedStr):
+                text = "".join(
+                    v.value for v in node.values
+                    if isinstance(v, _ast.Constant) and isinstance(v.value, str)
+                )
+            elif isinstance(node, _ast.Constant) and isinstance(node.value, str):
+                if (node.lineno, node.col_offset) in docs:
+                    continue
+                text = node.value
+            else:
+                continue
+            if _CYR.search(text):
+                out.append((path.relative_to(ROOT), node.lineno, text))
+    return out
+
+
+def test_message_texts_call_modules_in_russian():
+    """В тексте сообщения модуль зовётся так же, как на кнопке и в мини-аппе."""
+    strings = _human_strings()
+    assert len(strings) > 2000, f"строк-сообщений найдено {len(strings)} — сломан разбор"
+    bad = []
+    for f, line, text in strings:
+        hit = [n for n in ENGLISH_MODULE_NAMES if n in text]
+        if hit:
+            bad.append(f"    {f}:{line}: {text[:70]!r} → {hit}")
+    assert not bad, (
+        "английские названия модулей в текстах бота:\n" + "\n".join(sorted(set(bad)))
+    )

@@ -69,7 +69,7 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
         kb.adjust(1)
         await callback.message.edit_text(
-            "🗺️ <b>Topology Map — граф связей</b>\n\n"
+            "🗺️ <b>Топология — граф связей</b>\n\n"
             "📭 <b>Граф пуст — активов пока нет.</b>\n\n"
             "Чтобы карта отображала связи, добавьте:\n"
             "• <b>📱 Аккаунты</b> — Telegram-аккаунты в разделе «Аккаунты»\n"
@@ -90,7 +90,7 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.adjust(1)
 
     await callback.message.edit_text(
-        "🗺️ <b>Topology Map — граф связей</b>\n\n"
+        "🗺️ <b>Топология — граф связей</b>\n\n"
         f"📱 Аккаунтов: <b>{len(accounts)}</b>\n"
         f"📡 Каналов/групп: <b>{len(channels)}</b>\n"
         f"🤖 Ботов: <b>{len(bots)}</b>\n"
@@ -545,7 +545,7 @@ async def cmd_topology(message: Message) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="🗺️ Открыть топологию", callback_data=TopoCb(action="menu"))
     await message.answer(
-        "🗺️ <b>Topology Map</b>\n\n"
+        "🗺️ <b>Топология</b>\n\n"
         "Граф связей между аккаунтами, каналами, группами и ботами.\n"
         "Нажмите кнопку ниже чтобы открыть интерактивную карту.",
         parse_mode="HTML",

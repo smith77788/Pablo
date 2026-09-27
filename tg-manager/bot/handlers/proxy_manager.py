@@ -943,7 +943,7 @@ async def cb_proxy_failover(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     reassigned = res.get("reassigned") or []
     no_backup = res.get("still_dead_no_backup") or []
     await callback.message.edit_text(
-        "🚑 <b>Failover завершён</b>\n\n"
+        "🚑 <b>Переключение на резерв завершён</b>\n\n"
         f"• Проверено назначенных прокси: <b>{res.get('checked', 0)}</b>\n"
         f"• Живых: {res.get('healthy', 0)}\n"
         f"• Переведено на резерв: <b>{len(reassigned)}</b>\n"
@@ -990,7 +990,7 @@ async def cb_proxy_cleanup_dead(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         f"• Удалено: <b>{len(removed)}</b>\n"
         f"• Пропущено (назначены аккаунтам): {int(skipped)}\n\n"
         "<i>Назначенные мёртвые не удаляются, чтобы не потерять изоляцию — "
-        "сначала переведите их через 🚑 Failover.</i>",
+        "сначала переведите их через 🚑 Переключение на резерв.</i>",
         parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
     )
 

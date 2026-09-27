@@ -227,7 +227,7 @@ async def cb_seo_menu(
         "• <b>Анализ</b> — скор 0–100 + советы\n"
         "• <b>Превью</b> — как вы выглядите в поиске\n"
         "• <b>Динамика</b> — тренд позиций по keywords\n"
-        "• <b>Keyword Gap</b> — какие слова не в описании\n"
+        "• <b>Разрыв по ключевым словам</b> — какие слова не в описании\n"
         "• <b>Гайд 2026</b> — все реальные факторы ранжирования",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -2384,7 +2384,7 @@ async def cb_seo_content_gap(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Keyword Gap анализ", "starter"),
+            locked_text("Разрыв по ключевым словам анализ", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
@@ -2482,7 +2482,7 @@ async def cb_seo_chan_content_gap(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Keyword Gap — канал", "starter"),
+            locked_text("Разрыв по ключевым словам — канал", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )

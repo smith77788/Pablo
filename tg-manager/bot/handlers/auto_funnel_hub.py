@@ -68,7 +68,7 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
-            "⚡ <b>Auto-Funnel</b>\n\n"
+            "⚡ <b>Авто-воронки</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
             "Администратору необходимо применить миграцию <code>schema_v108.sql</code>.",
             parse_mode="HTML",
@@ -93,7 +93,7 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     c = active_runs["completed_cnt"] if active_runs else 0
 
     await callback.message.edit_text(
-        "⚡ <b>Auto-Funnel</b>\n\n"
+        "⚡ <b>Авто-воронки</b>\n\n"
         "Автоматические цепочки сообщений для аудитории ваших ботов.\n"
         "Настройте шаги (тексты + задержки), выберите сегмент аудитории и запустите.\n\n"
         f"Воронок: <b>{len(funnels)}</b>  |  В работе: <b>{a}</b>  |  Завершено: <b>{c}</b>",
@@ -112,7 +112,7 @@ async def cb_af_create(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AutoFunnelCb(action="menu"))
     await callback.message.edit_text(
-        "⚡ <b>Новая Auto-Funnel</b>\n\nВведите название воронки:",
+        "⚡ <b>Новая Авто-воронки</b>\n\nВведите название воронки:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

@@ -73,7 +73,7 @@ _TYPE_PROMPTS = {
         "(или оставьте пустым).\n\n"
         "Пример:\n"
         "<code>Мой канал;;;Новости о моде;;;fashion_shop</code>\n\n"
-        "💡 Для Global Presence Factory поддерживаются:\n"
+        "💡 Для гео-сети поддерживаются:\n"
         "<code>{{CITY}}</code>, <code>{{COUNTRY}}</code>, <code>{{CITY_SLUG}}</code>, "
         "<code>{{INDEX}}</code>"
     ),
@@ -83,7 +83,7 @@ _TYPE_PROMPTS = {
         "(или оставьте пустым).\n\n"
         "Пример:\n"
         "<code>Моя группа;;;Обсуждения о моде;;;fashion_chat</code>\n\n"
-        "💡 Для Global Presence Factory поддерживаются:\n"
+        "💡 Для гео-сети поддерживаются:\n"
         "<code>{{CITY}}</code>, <code>{{COUNTRY}}</code>, <code>{{CITY_SLUG}}</code>, "
         "<code>{{INDEX}}</code>"
     ),

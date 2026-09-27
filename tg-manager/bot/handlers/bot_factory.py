@@ -85,7 +85,7 @@ def _factory_menu_kb() -> object:
 async def cb_factory_menu(callback: CallbackQuery) -> None:
     await safe_answer(callback)
     await callback.message.edit_text(
-        "🤖 <b>Bot Factory</b>\n\nВыберите действие:",
+        "🤖 <b>Фабрика ботов</b>\n\nВыберите действие:",
         parse_mode="HTML",
         reply_markup=_factory_menu_kb(),
     )
@@ -322,7 +322,7 @@ async def cb_factory_do_create_bots(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Фабрика ботов", callback_data=BotFactCb(action="menu"))
         await callback.message.edit_text(
-            "🔒 <b>Bot Factory — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            "🔒 <b>Фабрика ботов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -537,7 +537,7 @@ async def cb_import_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text(
-        "🤖 <b>Bot Factory</b>\n\nВыберите действие:",
+        "🤖 <b>Фабрика ботов</b>\n\nВыберите действие:",
         parse_mode="HTML",
         reply_markup=_factory_menu_kb(),
     )

@@ -644,7 +644,7 @@ async def cb_admin(
         )
         if new_state and not actual_state:
             await callback.message.answer(
-                "⚠️ Free Mode заблокирован.\n"
+                "⚠️ Бесплатный режим заблокирован.\n"
                 "Установите переменную <code>ALLOW_GLOBAL_FREE_MODE=true</code> на сервере.",
                 parse_mode="HTML",
                 reply_markup=terminal_kb(),
@@ -816,7 +816,7 @@ async def cb_admin(
 
     elif action == "strike_grant_ask":
         await callback.message.edit_text(
-            "⚔️ <b>Выдать Strike доступ</b>\n\n"
+            "⚔️ <b>Выдать доступ к жалобам</b>\n\n"
             "Отправьте Telegram ID пользователя:\n"
             "<code>USER_ID</code>\n\n"
             "Пример: <code>123456789</code>\n\n"
@@ -835,11 +835,11 @@ async def cb_admin(
 
     elif action == "strike_revoke_ask":
         await callback.message.edit_text(
-            "⚔️ <b>Забрать Strike доступ</b>\n\n"
+            "⚔️ <b>Забрать доступ к жалобам</b>\n\n"
             "Отправьте Telegram ID пользователя:\n"
             "<code>USER_ID</code>\n\n"
             "Пример: <code>123456789</code>\n\n"
-            "Strike доступ будет немедленно отозван.",
+            "доступ к жалобам будет немедленно отозван.",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -1223,12 +1223,12 @@ async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     # platform_users: прежний запрос падал, и в сводке всегда стоял ноль.
     strike_users = await _safe_count("SELECT COUNT(*) FROM strike_access")
     text = (
-        "🤖 <b>Боты, токены и Strike</b>\n\n"
+        "🤖 <b>Боты, токены и Массовые жалобы</b>\n\n"
         f"Ботов в системе: <b>{bots}</b>\n"
         f"Каналов/чатов: <b>{channels}</b>\n"
         f"Активных TG-аккаунтов: <b>{accounts}</b>\n"
-        f"Strike-доступов: <b>{strike_users}</b>\n\n"
-        "Здесь токены, рассылка и выдача доступа к Strike."
+        f"доступов к жалобам: <b>{strike_users}</b>\n\n"
+        "Здесь токены, рассылка и выдача доступа к массовым жалобам."
     )
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=_admin_section_kb("assets")
@@ -1275,7 +1275,7 @@ async def _adm_section_ai(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         _provider_status_line("Gemini", "GEMINI_API_KEY", "GEMINI_MODEL"),
         _provider_status_line("Groq", "GROQ_API_KEY", "GROQ_MODEL"),
         f"🔁 Порядок: <code>{_html.escape(order)}</code>",
-        f"⚙️ Swarm: <b>{_html.escape(mode.upper())}</b>",
+        f"⚙️ Рой: <b>{_html.escape(mode.upper())}</b>",
         "",
         "Отсюда правим ключи, модели и режим работы системы.",
     ]
@@ -1380,9 +1380,9 @@ async def _adm_section_system(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     )
     text = (
         "🛠 <b>Система</b>\n\n"
-        f"Free Mode: <b>{'ВКЛ' if get_free_mode() else 'ВЫКЛ'}</b>\n"
+        f"Бесплатный режим: <b>{'ВКЛ' if get_free_mode() else 'ВЫКЛ'}</b>\n"
         f"Уведомления о новых: <b>{'ВКЛ' if _NOTIFY_NEW_USERS else 'ВЫКЛ'}</b>\n"
-        f"Swarm режим: <b>{_html.escape(mode.upper())}</b>\n"
+        f"режим «Роя»: <b>{_html.escape(mode.upper())}</b>\n"
         f"Новых отчётов об ошибках: <b>{new_errors}</b>\n\n"
         f"{env_lines}"
     )
@@ -1556,7 +1556,7 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         f"🔗 Цепочек: <b>{int(total_funnels):,}</b>\n"
         f"⏰ Запланировано: <b>{int(total_schedules):,}</b>\n"
         f"👥 Записей в bot_users: <b>{int(db_users):,}</b>\n\n"
-        f"🌐 Swarm mode: <b>{mode.upper()}</b>",
+        f"🌐 Режим «Роя»: <b>{mode.upper()}</b>",
         parse_mode="HTML",
         reply_markup=_back_kb(),
     )
@@ -1782,7 +1782,7 @@ async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     current_desc = _SWARM_MODE_DESCRIPTIONS.get(current, current)
     desc_lines = "\n".join(f"  {d}" for d in _SWARM_MODE_DESCRIPTIONS.values())
     await callback.message.edit_text(
-        f"⚙️ <b>Swarm режим</b>\n\n"
+        f"⚙️ <b>режим «Роя»</b>\n\n"
         f"Текущий: <b>{current.upper()}</b>\n"
         f"<i>{current_desc.split('—', 1)[-1].strip()}</i>\n\n"
         f"<b>Описание режимов:</b>\n{desc_lines}\n\n"
@@ -2423,23 +2423,23 @@ async def handle_admin_message(
                     message.from_user.id,
                 )
                 await message.answer(
-                    f"⚔️ <b>Strike доступ активирован</b>\n\n"
-                    f"Пользователь <code>{target_uid}</code> теперь имеет доступ к Strike Module.",
+                    f"⚔️ <b>доступ к жалобам активирован</b>\n\n"
+                    f"Пользователь <code>{target_uid}</code> теперь имеет доступ к модулю «Массовые жалобы».",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
                 try:
                     await message.bot.send_message(
                         target_uid,
-                        "⚔️ <b>Strike Module активирован!</b>\n\n"
-                        "Администратор предоставил вам доступ к Strike Module.\n"
+                        "⚔️ <b>Модуль «Массовые жалобы» активирован!</b>\n\n"
+                        "Администратор предоставил вам доступ к модулю «Массовые жалобы».\n"
                         "Откройте меню для использования.",
                         parse_mode="HTML",
                     )
                 except Exception:
                     log_exc_swallow(
                         log,
-                        "Не удалось уведомить пользователя о выдаче Strike доступа",
+                        "Не удалось уведомить пользователя о выдаче доступа к жалобам",
                         user_id=target_uid,
                     )
             except Exception as e:
@@ -2455,22 +2455,22 @@ async def handle_admin_message(
             target_uid = int(text.strip())
             await db.revoke_strike_access(pool, target_uid, message.from_user.id)
             await message.answer(
-                f"⚔️ <b>Strike доступ отозван</b>\n\n"
-                f"У пользователя <code>{target_uid}</code> больше нет доступа к Strike Module.",
+                f"⚔️ <b>доступ к жалобам отозван</b>\n\n"
+                f"У пользователя <code>{target_uid}</code> больше нет доступа к модулю «Массовые жалобы».",
                 parse_mode="HTML",
                 reply_markup=_admin_main_kb(),
             )
             try:
                 await message.bot.send_message(
                     target_uid,
-                    "ℹ️ <b>Strike доступ был отозван администратором.</b>\n\n"
+                    "ℹ️ <b>Доступ к жалобам был отозван администратором.</b>\n\n"
                     "Для получения доступа обратитесь к администратору.",
                     parse_mode="HTML",
                 )
             except Exception:
                 log_exc_swallow(
                     log,
-                    "Не удалось уведомить пользователя об отзыве Strike доступа",
+                    "Не удалось уведомить пользователя об отзыве доступа к жалобам",
                     user_id=target_uid,
                 )
         except ValueError:
