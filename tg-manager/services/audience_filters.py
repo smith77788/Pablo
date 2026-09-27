@@ -18,7 +18,8 @@ def parsed_audience_filters(q, base_params_count: int = 1):
     """Доп. WHERE-условия + параметры для выборки parsed_audiences.
 
     ``q``: mapping с ключами source, premium, with_username, not_bot, active,
-    with_phone (значения — truthy-строки/булевы). Плейсхолдеры продолжаются с
+    with_phone (значения — truthy-строки/булевы), gender, last_seen и ``q`` —
+    строка поиска по имени/@username/ID. Плейсхолдеры продолжаются с
     ``base_params_count`` (после уже занятых, напр. owner_id=$1). Булевы фильтры
     параметров НЕ добавляют (только ``source`` добавляет один ILIKE-параметр).
 
@@ -50,6 +51,33 @@ def parsed_audience_filters(q, base_params_count: int = 1):
         idx += 1
         conds.append(f"gender=${idx}")
         params.append(gender)
+    # Поиск по имени / @username / числовому ID. Живёт здесь, а не в обработчике
+    # экрана, ровно по той же причине, что и остальные условия: список, счётчик
+    # «найдено» и выгрузка обязаны отбирать ОДНО И ТО ЖЕ. Разъедься они — экран
+    # покажет одно, а CSV отдаст другое, и заметить это можно только по факту.
+    needle = str(get("q") or "").strip()[:64]
+    if needle:
+        bare = needle.lstrip("@").strip()
+        if bare:
+            idx += 1
+            params.append(f"%{bare}%")
+            parts = [
+                f"username ILIKE ${idx}",
+                f"first_name ILIKE ${idx}",
+                f"last_name ILIKE ${idx}",
+            ]
+            # Числовую строку ищем и как точный tg_user_id: по ней человека и
+            # находят, когда username у него нет.
+            if bare.isdigit():
+                try:
+                    uid_exact = int(bare)
+                except (TypeError, ValueError):
+                    uid_exact = None
+                if uid_exact is not None:
+                    idx += 1
+                    parts.append(f"tg_user_id=${idx}")
+                    params.append(uid_exact)
+            conds.append("(" + " OR ".join(parts) + ")")
     # Last Seen: оставить тех, кто был онлайн не позже N дней назад (0/мусор → без фильтра).
     ls_raw = str(get("last_seen") or "").strip()
     if ls_raw:
