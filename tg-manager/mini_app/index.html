@@ -7233,6 +7233,42 @@ async function fetchT(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
 }
 
 // ── Error helper ───────────────────────────────────────
+// Подтверждение удаления обязано называть, ЧТО именно удаляется. В списке из
+// сорока строк «Удалить шаблон?» не говорит, попал ли палец в нужную, а
+// действие необратимо: человек подтверждал вслепую и узнавал о промахе по
+// пропавшей строке.
+//
+// Имя берём из САМОЙ СТРОКИ, а не прокидываем через onclick: названия приходят
+// от пользователя и из Telegram, и апостроф в имени («O'Brien») разорвал бы
+// атрибут — кнопка перестала бы работать вовсе.
+function rowName(el) {
+  if (!el || !el.closest) return '';
+  const row = el.closest('.row, .li, label, .card, .lst-item');
+  if (!row) {
+    // Кнопка не в строке списка, а на экране-карточке (аккаунт, канал): имя
+    // объекта там стоит в шапке экрана.
+    const scr = el.closest('.screen');
+    const hdr = scr && scr.querySelector('.profile-name');
+    const ht = hdr ? (hdr.textContent || '').trim().replace(/\s+/g, ' ') : '';
+    return ht.length > 48 ? ht.slice(0, 47) + '…' : ht;
+  }
+  const named = row.querySelector('.row-name, .li-name, .card-title');
+  let t = ((named || row).textContent || '').trim().replace(/\s+/g, ' ');
+  // Подписи кнопок внутри той же строки («🗑 Удалить», «Отмена») в имя не идут.
+  row.querySelectorAll('button, .btn, .icon-btn').forEach(b => {
+    const bt = (b.textContent || '').trim();
+    if (bt && t.indexOf(bt) >= 0) t = t.split(bt).join(' ').trim().replace(/\s+/g, ' ');
+  });
+  return t.length > 48 ? t.slice(0, 47) + '…' : t;
+}
+
+// what — «Удалить шаблон» без вопросительного знака; note — предупреждение о
+// последствиях, если оно есть.
+function confirmDelete(what, el, note) {
+  const n = rowName(el);
+  return askConfirm(what + (n ? ' «' + n + '»' : '') + '?' + (note ? '\n' + note : ''));
+}
+
 function errHtml(msg, retryFn) {
   // Выход из ошибки есть всегда. Из 77 вызовов 37 не передавали retryFn, и
   // блок ошибки оказывался тупиком: текст «Сервис временно недоступен» и ни
@@ -9500,7 +9536,7 @@ function renderArList(items) {
       </div>
       <div class="li-right">
         <div class="toggle ${r.is_active?'on':'off'}" onclick="toggleAr(${r.id},this)"></div>
-        <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить авто-ответ" onclick="deleteAr(${r.id})">🗑</span>
+        <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить авто-ответ" onclick="deleteAr(${r.id}, this)">🗑</span>
       </div>
     </div>`;
   }).join('');
@@ -9523,8 +9559,8 @@ async function toggleAr(id, el) {
 // авто-ответ удалялся в момент касания 🗑, ещё до ответа пользователя, — а если
 // тот жал «ОК», удаление уходило вторым запросом. Нажатая «Отмена» не отменяла
 // ничего. Тот же диалог, но через общий askConfirm, который ждёт ответа.
-async function deleteAr(id) {
-  if (!await askConfirm('Удалить авто-ответ?')) return;
+async function deleteAr(id, _el) {
+  if (!await confirmDelete('Удалить авто-ответ', _el)) return;
   await doDeleteAr(id);
 }
 async function doDeleteAr(id) {
@@ -9622,8 +9658,8 @@ async function toggleFunnel(id, el) {
 }
 
 // ── Accounts ───────────────────────────────────────────
-async function removeChannel(chId) {
-  if (!await askConfirm('Убрать канал из управления? (сам канал в Telegram не удаляется)')) return;
+async function removeChannel(chId, _el) {
+  if (!await confirmDelete('Убрать из управления канал', _el, 'Сам канал в Telegram не удаляется.')) return;
   try {
     await api(`/api/miniapp/channel/${chId}`, {method:'DELETE'});
     toast('🗑 Канал убран из управления');
@@ -9910,8 +9946,8 @@ async function toggleAccount(id) {
     openAccount(id);  // обновить экран
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
-async function deleteAccount(id) {
-  if (!await askConfirm('Удалить аккаунт? Действие необратимо.')) return;
+async function deleteAccount(id, _el) {
+  if (!await confirmDelete('Удалить аккаунт', _el, 'Действие необратимо.')) return;
   try {
     await api(`/api/miniapp/account/${id}`, {method:'DELETE'});
     toast('🗑 Аккаунт удалён');
@@ -10876,7 +10912,7 @@ function buildAccDetail(d) {
     <div style="display:flex;gap:8px;padding:0 0 6px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="checkAccount(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🔍 Проверить</button>
       <button class="btn btn-s" onclick="toggleAccount(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">${a.is_active?'⏸ Выключить':'▶️ Включить'}</button>
-      <button class="btn btn-d" onclick="deleteAccount(${a.id})" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
+      <button class="btn btn-d" onclick="deleteAccount(${a.id}, this)" style="flex:1 1 auto;min-width:88px;font-size:13px;padding:10px 6px">🗑 Удалить</button>
       ${a.acc_status==='session_expired'?`<button class="btn btn-g" onclick="reauthAccount(${a.id})" style="flex:1 1 auto;min-width:130px;font-size:13px;padding:10px 6px">🔑 Переавторизация</button>`:''}
     </div>
 
@@ -11227,7 +11263,7 @@ function buildChDetail(d) {
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
       <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👥 Инвайтинг</button>
       <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📊 Собрать аудиторию</button>
-      <button class="btn btn-d" onclick="removeChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">🗑 Убрать</button>
+      <button class="btn btn-d" onclick="removeChannel(${c.channel_id}, this)" style="flex:1 1 auto;min-width:88px">🗑 Убрать</button>
     </div>
 
     <div class="sec">Информация</div>
@@ -12449,7 +12485,7 @@ function buildFunnelDetail(d) {
             ${isLast?'':'<div class="ffstep-tail"></div>'}
           </div>
           <div class="ffstep-body">
-            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''} <span style="color:var(--accent);cursor:pointer;margin-left:8px" onclick="editFunnelStep(${s.id})">✏️ изменить</span>${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id})">🗑 удалить</span>`:''}</div>
+            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после предыдущего':''} <span style="color:var(--accent);cursor:pointer;margin-left:8px" onclick="editFunnelStep(${s.id})">✏️ изменить</span>${s.step_order>1?` <span style="color:var(--red);cursor:pointer;margin-left:8px" onclick="deleteFunnelStep(${s.id}, this)">🗑 удалить</span>`:''}</div>
             ${statLine}
             <div class="ffstep-text">${esc((s.message_text||'').substring(0,120))}${(s.message_text||'').length>120?'…':''}</div>
             ${s.button_text?`<div style="margin-top:6px"><span class="badge b-bl">🔗 ${esc(s.button_text)}</span></div>`:''}
@@ -12564,8 +12600,8 @@ async function saveFunnelStep() {
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
-async function deleteFunnelStep(stepId) {
-  if (!await askConfirm('Удалить этот шаг?')) return;
+async function deleteFunnelStep(stepId, _el) {
+  if (!await confirmDelete('Удалить шаг', _el)) return;
   try {
     await api('/api/miniapp/funnel/step/'+stepId, {method:'DELETE'});
     toast('Шаг удалён');
@@ -12663,7 +12699,7 @@ async function loadCompetitors() {
         </div>
         <div class="li-right">
           ${c.last_members!=null?`<span class="badge b-bl">${num(c.last_members)}</span>`:''}
-          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить конкурента" onclick="deleteComp(${c.id})">🗑</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить конкурента" onclick="deleteComp(${c.id}, this)">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -12703,8 +12739,8 @@ async function saveComp() {
   } finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
 }
 
-async function deleteComp(id) {
-  if (!await askConfirm('Убрать конкурента из наблюдения? Собранная по нему история пропадёт.')) return;
+async function deleteComp(id, _el) {
+  if (!await confirmDelete('Убрать конкурента из наблюдения', _el, 'Собранная по нему история пропадёт.')) return;
   try {
     await api('/api/miniapp/competitor/'+id, {method:'DELETE'});
     toast('Удалено'); loadCompetitors();
@@ -12788,7 +12824,7 @@ async function loadCRM(append) {
           <div class="li-sub">${c.phone?esc(c.phone)+' · ':''} ${tags||'без тегов'} ${c.source?`· <span class="badge b-gy" style="font-size:10px">${esc(c.source)}</span>`:''}</div>
         </div>
         <div class="li-right">
-          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteCrmContact(${c.id})" aria-label="Удалить">🗑</button>
+          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteCrmContact(${c.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>`;
     }).join('');
@@ -12900,7 +12936,7 @@ async function loadKeywords() {
         </div>
         <div class="li-right">
           <span class="badge ${pc}">${posStr}</span>
-          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить ключевое слово" onclick="deleteKw(${k.id})">🗑</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить ключевое слово" onclick="deleteKw(${k.id}, this)">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -12909,8 +12945,8 @@ async function loadKeywords() {
   }
 }
 
-async function deleteKw(id) {
-  if (!await askConfirm('Снять слово с отслеживания? История позиций по нему больше не собирается.')) return;
+async function deleteKw(id, _el) {
+  if (!await confirmDelete('Снять слово с отслеживания', _el, 'История позиций по нему больше не собирается.')) return;
   try {
     await api('/api/miniapp/keyword/'+id, {method:'DELETE'});
     toast('Удалено'); loadKeywords();
@@ -13105,7 +13141,7 @@ async function loadTemplates() {
         </div>
         <div class="li-right">
           <span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Применить шаблон" onclick="useTpl(${t.id},'${esc(t.name||'')}','${esc((t.template?.text||'').replace(/'/g,"&#39;"))}')">📤</span>
-          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаблон" onclick="deleteTpl(${t.id})">🗑</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаблон" onclick="deleteTpl(${t.id}, this)">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -13129,8 +13165,8 @@ function useTpl(id, name, text) {
   toast('📝 Шаблон «'+name+'» вставлен');
 }
 
-async function deleteTpl(id) {
-  if (!await askConfirm('Удалить шаблон? Его текст не восстановить.')) return;
+async function deleteTpl(id, _el) {
+  if (!await confirmDelete('Удалить шаблон', _el, 'Его текст не восстановить.')) return;
   try {
     await api('/api/miniapp/template/'+id, {method:'DELETE'});
     toast('Удалено'); loadTemplates();
@@ -13535,7 +13571,7 @@ async function loadProxies() {
         <div class="li-right">
           <span class="icon-btn sm" role="button" tabindex="0" title="Резервный прокси" aria-label="Пометить прокси резервным" onclick="toggleProxyBackup(${p.id})">${backupIco}</span>
           <span class="icon-btn sm" role="button" tabindex="0" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
-          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)}, this)">🗑</span>
         </div>
       </div>`;
     }).join(''));
@@ -13856,7 +13892,7 @@ async function submitAccImport() {
 // accN — сколько аккаунтов на этом прокси. Сервер такое удаление всё равно не
 // пропустит (409: аккаунты ушли бы напрямую и рискуют AUTH_KEY_DUPLICATED), но
 // объяснить это лучше ДО тапа, а не отказом после.
-async function deleteProxy(id, accN) {
+async function deleteProxy(id, accN, _el) {
   accN = Number(accN||0);
   if (accN) {
     await showInfo(`Прокси назначен ${accN} аккаунт(ам) — удалить его нельзя.\n\n`
@@ -13864,7 +13900,7 @@ async function deleteProxy(id, accN) {
       + `аккаунты на живой прокси, иначе они уйдут напрямую с общего IP.`);
     return;
   }
-  if (!await askConfirm('Удалить прокси? Действие необратимо.')) return;
+  if (!await confirmDelete('Удалить прокси', _el, 'Действие необратимо.')) return;
   try {
     await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
     toast('Удалено'); loadProxies();
@@ -14281,7 +14317,7 @@ function renderProxyPoolList(items) {
       <div class="li-right">
         <span class="icon-btn sm" role="button" tabindex="0" title="Резервный" aria-label="Пометить прокси резервным" onclick="toggleProxyBackup(${p.id})">${p.is_backup?'🛟':'⚪'}</span>
         <span class="icon-btn sm" role="button" tabindex="0" aria-label="Проверить прокси" onclick="checkProxy(${p.id},this)">🔄</span>
-        <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)})">🗑</span>
+        <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить прокси" onclick="deleteProxy(${p.id},${Number(p.acc_count||0)}, this)">🗑</span>
       </div>
     </div>`;
   }).join('');
@@ -14995,7 +15031,7 @@ async function loadDeeplinks() {
           <div class="row-name">${esc(l.name)}</div>
           <div class="row-val">?start=${esc(l.start_param)} · ${num(l.click_count)} кликов · ${num(l.unique_users)} уник.</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${l.id})" aria-label="Удалить">✕</button></div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${l.id}, this)" aria-label="Удалить">✕</button></div>
       </div>
     `).join(''));
   } catch(e) { txt('dlList', empty('⚠️','Ошибка загрузки',e.message)); }
@@ -15025,8 +15061,8 @@ async function saveDl() {
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='➕ Создать'; }
 }
-async function deleteDl(linkId) {
-  if (!await askConfirm('Удалить Deep Link?')) return;
+async function deleteDl(linkId, _el) {
+  if (!await confirmDelete('Удалить Deep Link', _el)) return;
   try {
     await api('/api/miniapp/deeplink/'+linkId, {method:'DELETE'});
     toast('Удалено');
@@ -16826,7 +16862,7 @@ async function openSavedSegments() {
       <div style="display:flex;align-items:center;gap:8px">
         <div class="li-body"><div class="li-name">${esc(s.name)}</div>
           <div class="li-sub">${s.count!=null?('👥 '+num(s.count)+' контактов'):'—'}</div></div>
-        <span style="cursor:pointer;color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id})" role="button" tabindex="0" aria-label="Удалить">🗑</span>
+        <span style="cursor:pointer;color:var(--red);font-size:14px" onclick="deleteSavedSegment(${s.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span>
       </div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-p" style="flex:1 1 auto;font-size:12px" onclick="segmentActFromSaved(${s.id},'write')">✍️ Написать</button>
@@ -16835,8 +16871,8 @@ async function openSavedSegments() {
     </div>`).join('');
   } catch(e){ box.innerHTML = errHtml(e.message,'openSavedSegments()'); }
 }
-async function deleteSavedSegment(id) {
-  if (!await askConfirm('Удалить сегмент? (контакты не трогаются)')) return;
+async function deleteSavedSegment(id, _el) {
+  if (!await confirmDelete('Удалить сегмент', _el, '(контакты не трогаются)')) return;
   try { await api('/api/miniapp/uch/segments/'+id, {method:'DELETE'}); openSavedSegments(); }
   catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
@@ -16974,7 +17010,7 @@ async function loadIntentRules() {
           ${r.hits ? `<span style="cursor:pointer;font-size:15px" onclick="openIntentHits(${r.id})" title="Показать, на что сработало" role="button" tabindex="0">📜</span>` : ''}
           <span style="cursor:pointer;font-size:15px" onclick="editIntentRule(${r.id})" title="Изменить" role="button" tabindex="0">✏️</span>
           <span style="cursor:pointer;font-size:15px" onclick="toggleIntentRule(${r.id})" title="Вкл/выкл">${r.is_active?'⏸':'▶️'}</span>
-          <span style="cursor:pointer;font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id})" title="Удалить" role="button" tabindex="0">🗑</span>
+          <span style="cursor:pointer;font-size:15px;color:var(--red)" onclick="deleteIntentRule(${r.id}, this)" title="Удалить" role="button" tabindex="0">🗑</span>
         </div>
       </div>`;
     }).join('');
@@ -17062,8 +17098,8 @@ async function toggleIntentRule(id) {
   try { await api('/api/miniapp/uch/intent/rule/'+id+'/toggle', {method:'POST'}); loadIntentRules(); }
   catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
-async function deleteIntentRule(id) {
-  if (!await askConfirm('Удалить правило?')) return;
+async function deleteIntentRule(id, _el) {
+  if (!await confirmDelete('Удалить правило', _el)) return;
   try { await api('/api/miniapp/uch/intent/rule/'+id, {method:'DELETE'}); loadIntentRules(); }
   catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
@@ -17154,7 +17190,7 @@ async function loadEditForm(id) {
         <button class="btn btn-p" onclick="saveContactEdit('${id}')" style="flex:1 1 auto">💾 Сохранить</button>
         <button class="btn" onclick="back()" style="flex:1 1 auto;background:var(--bg2)">Отмена</button>
       </div>
-      <div style="margin-top:12px"><button class="btn" style="width:100%;background:rgba(248,113,113,.15);color:var(--red)" onclick="deleteContact('${id}')">🗑 Удалить контакт</button></div>
+      <div style="margin-top:12px"><button class="btn" style="width:100%;background:rgba(248,113,113,.15);color:var(--red)" onclick="deleteContact('${id}', this)">🗑 Удалить контакт</button></div>
     </div>`;
     txt('ceBody', html);
   } catch(e) { txt('ceBody', errHtml(e.message)); }
@@ -17183,8 +17219,8 @@ async function saveContactEdit(id) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
-async function deleteContact(id) {
-  if (!await askConfirm('Удалить контакт?')) return;
+async function deleteContact(id, _el) {
+  if (!await confirmDelete('Удалить контакт', _el)) return;
   try {
     await api('/api/miniapp/uch/contacts/'+id, {method:'DELETE'});
     toast('🗑 Контакт удалён');
@@ -18122,7 +18158,7 @@ async function openPersonas() {
         </div>
         <div class="row-right" style="display:flex;gap:6px">
           <button class="btn ${p.is_active?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="togglePersona(${p.id},${p.is_active})">${p.is_active?'Выкл':'Вкл'}</button>
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deletePersona(${p.id})" aria-label="Удалить">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deletePersona(${p.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -18138,8 +18174,8 @@ async function togglePersona(id, active) {
     openPersonas();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
-async function deletePersona(id) {
-  if (!await askConfirm('Удалить персону?')) return;
+async function deletePersona(id, _el) {
+  if (!await confirmDelete('Удалить персону', _el)) return;
   try {
     await api(`/api/miniapp/persona/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -18344,7 +18380,7 @@ async function openAiMemory() {
           <div class="row-val">${m.title?esc(m.body.slice(0,60)):''} ${(m.tags||[]).map(t=>'#'+esc(t)).join(' ')}</div>
         </div>
         <div class="row-right">
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteAiMem(${m.id})" aria-label="Удалить">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteAiMem(${m.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -18352,8 +18388,8 @@ async function openAiMemory() {
     txt('aiMemoryList', empty('⚠️','Ошибка',e.message));
   }
 }
-async function deleteAiMem(id) {
-  if (!await askConfirm('Удалить запись из ИИ-памяти?')) return;
+async function deleteAiMem(id, _el) {
+  if (!await confirmDelete('Удалить запись из ИИ-памяти', _el)) return;
   try {
     await api(`/api/miniapp/ai_memory/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -18422,7 +18458,7 @@ async function openCommunityNode(id, title, chatId) {
     <button class="btn btn-p" onclick="inviteToCommunity(${id},${chatId})" style="flex:0 0 auto">➕ Пригласить аудиторию</button>
     <button class="btn btn-s" onclick="livenCommunity(${id})" style="flex:0 0 auto">🏛 Оживить флотом</button>
     <button class="btn btn-s" onclick="openCommunityMembers(${id})" style="flex:0 0 auto">🛡 Участники и роли</button>
-    <button class="btn btn-d" onclick="deleteCommunityNode(${id})" style="flex:0 0 auto">🗑 Убрать</button>`);
+    <button class="btn btn-d" onclick="deleteCommunityNode(${id}, this)" style="flex:0 0 auto">🗑 Убрать</button>`);
   try {
     const d = await api('/api/miniapp/community/node/'+id+'/channels');
     const chs = d.channels||[];
@@ -18442,8 +18478,8 @@ async function addCommunityChannel() {
     setTimeout(()=>openCommunityNode(_CUR_CNODE, document.getElementById('cnodeTitle').textContent.replace('🏛 ','')), 1500);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
-async function deleteCommunityNode(id) {
-  if (!await askConfirm('Убрать сообщество из списка? (сама группа в Telegram останется)')) return;
+async function deleteCommunityNode(id, _el) {
+  if (!await confirmDelete('Убрать из списка сообщество', _el, 'Сама группа в Telegram останется.')) return;
   try { await api('/api/miniapp/community/node/'+id,{method:'DELETE'}); back(); openCommunity(); } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
 // Пригласить аудиторию в ноду = инвайт в её супергруппу (переиспользуем инвайт).
@@ -18532,7 +18568,7 @@ async function openNodes() {
         </div>
         <div class="row-right" style="display:flex;gap:6px;align-items:center">
           <span class="chev" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')" role="button" tabindex="0" aria-label="Открыть ветки">›</span>
-          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteNode(${n.id})" aria-label="Удалить">🗑</button>
+          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteNode(${n.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -18947,7 +18983,7 @@ async function openGhost() {
         </div>
         <div class="row-right" style="display:flex;gap:6px">
           <button class="btn ${p.enabled?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleGhost(${p.id},${p.enabled})">${p.enabled?'Выкл':'Вкл'}</button>
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteGhost(${p.id})" aria-label="Удалить">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteGhost(${p.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>
     `).join(''));
@@ -18962,8 +18998,8 @@ async function toggleGhost(id, enabled) {
     openGhost();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
-async function deleteGhost(id) {
-  if (!await askConfirm('Удалить призрачный профиль?')) return;
+async function deleteGhost(id, _el) {
+  if (!await confirmDelete('Удалить призрачный профиль', _el)) return;
   try {
     await api(`/api/miniapp/ghost/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -19227,7 +19263,7 @@ async function openDmCampaigns() {
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
           ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↻ Повторить</button>`:''}
           ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick="editDm(${c.id})">✏️</button>`:''}
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}')" aria-label="Удалить">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}', this)" aria-label="Удалить">🗑</button>
         </div>
       </div>`;
     }).join(''));
@@ -19362,13 +19398,15 @@ async function launchDm(id, status) {
     openDmCampaigns();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
-async function deleteDm(id, status) {
+async function deleteDm(id, status, _el) {
   // Удаление идущей кампании останавливает рассылку (движок видит исчезнувшую
   // строку и выходит) и стирает журнал отправок — значит и отчёт, и защиту от
   // повторной отправки тем же людям. Об этом надо предупредить.
+  const _n = rowName(_el);
+  const _nm = _n ? ' «' + _n + '»' : '';
   const msg = status==='running'
-    ? 'Удалить ИДУЩУЮ кампанию?\n\nРассылка остановится, а журнал отправок будет стёрт — отчёт пропадёт, и при новой кампании эти люди смогут получить сообщение повторно.\n\nЕсли нужно просто прерваться — используйте паузу.'
-    : 'Удалить кампанию?\n\nЖурнал отправок будет стёрт вместе с ней: отчёт пропадёт, и при новой кампании эти люди смогут получить сообщение повторно.';
+    ? 'Удалить ИДУЩУЮ кампанию' + _nm + '?\n\nРассылка остановится, а журнал отправок будет стёрт — отчёт пропадёт, и при новой кампании эти люди смогут получить сообщение повторно.\n\nЕсли нужно просто прерваться — используйте паузу.'
+    : 'Удалить кампанию' + _nm + '?\n\nЖурнал отправок будет стёрт вместе с ней: отчёт пропадёт, и при новой кампании эти люди смогут получить сообщение повторно.';
   if (!await askConfirm(msg)) return;
   try {
     await api(`/api/miniapp/dm_campaign/${id}`,{method:'DELETE'});
@@ -19498,7 +19536,7 @@ async function openWarmup() {
           ${p.status==='active'?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="pauseWarmupPlan(${p.id})" aria-label="Приостановить прогрев">⏸</button>`:''}
           ${(p.status==='paused'&&h.resumable)?`<button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="resumeWarmupPlan(${p.id})" aria-label="Возобновить прогрев">▶</button>`:''}
           ${(p.status==='active'||p.status==='paused')?`<button class="btn btn-o" style="padding:5px 10px;font-size:12px;min-width:0" onclick="cancelWarmupPlan(${p.id})" aria-label="Остановить">⏹</button>`:''}
-          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id})" aria-label="Удалить">🗑</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить">🗑</button>
         </div>
       </div>`;
     }).join(''));
@@ -19801,13 +19839,13 @@ async function openFolders() {
           <div class="row-name">${esc(f.title)} · ${f.chat_count} чат(ов)${f.join_count?' · добавили '+f.join_count:''}</div>
           <div class="row-val" style="word-break:break-all">${esc(String(line).substring(0,90))}</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id})" aria-label="Удалить">🗑</button></div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить">🗑</button></div>
       </div>`;
     }).join(''));
   } catch(e) { txt('foldersList', empty('⚠️','Ошибка',e.message)); }
 }
-async function deleteFolder(id){
-  if(!await askConfirm('Удалить папку из списка? Сама папка в Telegram останется.')) return;
+async function deleteFolder(id, _el){
+  if(!await confirmDelete('Удалить папку из списка', _el, 'Сама папка в Telegram останется.')) return;
   try{ await api('/api/miniapp/chatlist_folders/'+id,{method:'DELETE'}); toast('🗑 Удалено'); openFolders(); }
   catch(e){ toast('⚠️ '+(e.message||'Ошибка').substring(0,80)); }
 }
@@ -19956,8 +19994,8 @@ async function openWarmupLog(planId) {
     txt('wlogList', empty('⚠️','Ошибка',e.message));
   }
 }
-async function deleteWarmupPlan(id) {
-  if (!await askConfirm('Удалить план прогрева?')) return;
+async function deleteWarmupPlan(id, _el) {
+  if (!await confirmDelete('Удалить план прогрева', _el)) return;
   try {
     await api(`/api/miniapp/warmup/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -20043,15 +20081,15 @@ async function openExpDetail(id, name) {
         </div>`;
       }).join('')}</div>
       <div style="padding:12px 0">
-        <button class="btn btn-d" onclick="deleteExp(${id})" style="width:100%">🗑 Удалить эксперимент</button>
+        <button class="btn btn-d" onclick="deleteExp(${id}, this)" style="width:100%">🗑 Удалить эксперимент</button>
       </div>
     `);
   } catch(e) {
     txt('expdetailBody', empty('⚠️','Ошибка',e.message));
   }
 }
-async function deleteExp(id) {
-  if (!await askConfirm('Удалить эксперимент?')) return;
+async function deleteExp(id, _el) {
+  if (!await confirmDelete('Удалить эксперимент', _el)) return;
   try {
     await api(`/api/miniapp/experiment/${id}`,{method:'DELETE'});
     toast('🗑 Удалено');
@@ -20865,7 +20903,7 @@ async function loadDeals() {
         </div>
         <div class="row-right" style="display:flex;gap:5px;flex-direction:column">
           ${nextStage?`<button class="btn btn-p" style="padding:4px 8px;min-width:0;font-size:11px" onclick="advanceDeal(${d2.id},'${nextStage}')">→ ${(STAGE_LABELS[nextStage]||nextStage).split(' ')[1]||nextStage}</button>`:''}
-          <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id})" aria-label="Удалить">✕</button>
+          <button class="btn btn-d" style="padding:4px 8px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id}, this)" aria-label="Удалить">✕</button>
         </div>
       </div>`;
     }).join(''));
@@ -20906,8 +20944,8 @@ async function saveDeal() {
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='➕ Создать'; }
 }
-async function deleteDeal(dealId) {
-  if (!await askConfirm('Удалить сделку?')) return;
+async function deleteDeal(dealId, _el) {
+  if (!await confirmDelete('Удалить сделку', _el)) return;
   try {
     await api('/api/miniapp/crm/deal/'+dealId, {method:'DELETE'});
     toast('Удалено');
@@ -21262,7 +21300,7 @@ async function loadAssetTpl(type) {
   } catch(e) { txt('atList', empty('⚠️','Ошибка',e.message)); }
 }
 async function deleteAssetTpl(id, btn) {
-  if (!await askConfirm('Удалить шаблон?')) return;
+  if (!await confirmDelete('Удалить шаблон', btn)) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/asset_template/${id}`,{method:'DELETE'});
@@ -22365,7 +22403,7 @@ async function loadChannelRanks() {
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div style="font-size:15px;font-weight:700;color:${posColor};white-space:nowrap">${posLabel}${trend}</div>
-          <div class="back" style="width:32px;height:32px;font-size:16px" onclick="removeChannelKeyword(${k.id})" role="button" tabindex="0" aria-label="Удалить">🗑</div>
+          <div class="back" style="width:32px;height:32px;font-size:16px" onclick="removeChannelKeyword(${k.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</div>
         </div>
       </div>`;
     }).join(''));
@@ -22384,8 +22422,8 @@ async function addChannelKeyword() {
     loadChannelRanks();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
-async function removeChannelKeyword(id) {
-  if (!await askConfirm('Убрать этот ключ из отслеживания?')) return;
+async function removeChannelKeyword(id, _el) {
+  if (!await confirmDelete('Снять с отслеживания ключ', _el)) return;
   try {
     await api('/api/miniapp/channel_rankings/remove', {method:'POST', body:JSON.stringify({id})});
     loadChannelRanks();
@@ -22806,7 +22844,7 @@ async function loadMeshTargets() {
       <div class="row">
         <div class="row-ico" style="background:var(--bg-purple-16)">${x.enabled?'📡':'⏸'}</div>
         <div class="row-body"><div class="row-name">${esc(x.target_channel)}</div></div>
-        <div class="row-right"><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить цель" onclick="deleteMeshTarget(${x.id})">🗑</span></div>
+        <div class="row-right"><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить цель" onclick="deleteMeshTarget(${x.id}, this)">🗑</span></div>
       </div>`).join('');
   } catch(e){ el.innerHTML = empty('⚠️','Ошибка',e.message); }
 }
@@ -22820,8 +22858,8 @@ async function addMeshTarget() {
     loadMeshTargets();
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
-async function deleteMeshTarget(targetId) {
-  if (!await askConfirm('Убрать цель из сети контента?')) return;
+async function deleteMeshTarget(targetId, _el) {
+  if (!await confirmDelete('Убрать цель из сети контента', _el)) return;
   try {
     await api(`/api/miniapp/content_mesh/target/${targetId}`,{method:'DELETE'});
     loadMeshTargets();
@@ -23036,7 +23074,7 @@ async function openSelfPromo() {
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleSelfPromo(${r.id},this)">${r.is_active?'Выкл':'Вкл'}</button>
           ${r.is_active?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="launchSelfPromo(${r.id},this)">▶ Запуск</button>`:''}
-          ${r.is_mine?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteSelfPromoTemplate(${r.id})" aria-label="Удалить">🗑</button>`:''}
+          ${r.is_mine?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteSelfPromoTemplate(${r.id}, this)" aria-label="Удалить">🗑</button>`:''}
         </div>
       </div>
     `).join(''));
@@ -23111,8 +23149,8 @@ async function submitNodeCreate() {
   } catch(e) { errEl.textContent = e.message; }
   finally { btn.disabled = false; btn.textContent = '➕ Добавить ноду'; }
 }
-async function deleteNode(nodeId) {
-  if (!await askConfirm('Удалить ноду?')) return;
+async function deleteNode(nodeId, _el) {
+  if (!await confirmDelete('Удалить ноду', _el)) return;
   try {
     await api('/api/miniapp/node/'+nodeId, {method:'DELETE'});
     toast('🗑 Нода удалена');
@@ -23154,8 +23192,8 @@ async function submitCrmContactCreate() {
   } catch(e) { errEl.textContent = e.message; }
   finally { btn.disabled = false; btn.textContent = '➕ Добавить контакт'; }
 }
-async function deleteCrmContact(contactId) {
-  if (!await askConfirm('Удалить контакт?')) return;
+async function deleteCrmContact(contactId, _el) {
+  if (!await confirmDelete('Удалить контакт', _el)) return;
   try {
     await api('/api/miniapp/crm/contact/'+contactId, {method:'DELETE'});
     toast('🗑 Контакт удалён');
@@ -23193,8 +23231,8 @@ async function submitSelfPromoCreate() {
   } catch(e) { errEl.textContent = e.message; }
   finally { btn.disabled = false; btn.textContent = '📣 Создать шаблон'; }
 }
-async function deleteSelfPromoTemplate(id) {
-  if (!await askConfirm('Удалить шаблон?')) return;
+async function deleteSelfPromoTemplate(id, _el) {
+  if (!await confirmDelete('Удалить шаблон', _el)) return;
   try {
     await api('/api/miniapp/self_promo/'+id, {method:'DELETE'});
     toast('🗑 Шаблон удалён');
@@ -23492,7 +23530,7 @@ async function submitAutofunnelCreate() {
   } catch(e) { errEl.textContent=e.message; }
 }
 async function deleteAutoFunnel(fid, btn) {
-  if (!await askConfirm('Удалить авто-воронку?')) return;
+  if (!await confirmDelete('Удалить авто-воронку', btn)) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/auto_funnel/${fid}`,{method:'DELETE'});
@@ -23526,7 +23564,7 @@ async function submitPresencePackCreate() {
   } catch(e) { errEl.textContent=e.message; }
 }
 async function deletePresencePack(id, btn) {
-  if (!await askConfirm('Удалить связку?')) return;
+  if (!await confirmDelete('Удалить связку', btn)) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/presence_pack/${id}`,{method:'DELETE'});
@@ -23561,7 +23599,7 @@ async function submitEcosystemCreate() {
   } catch(e) { errEl.textContent=e.message; }
 }
 async function deleteEcosystem(id, btn) {
-  if (!await askConfirm('Удалить экосистему?')) return;
+  if (!await confirmDelete('Удалить экосистему', btn)) return;
   btn.disabled=true;
   try {
     await api(`/api/miniapp/ecosystem/${id}`,{method:'DELETE'});
@@ -24563,7 +24601,7 @@ function renderNetNodesEdges(d) {
       <div class="li-name">${esc(n.label || n.type + ' #' + n.object_id)}</div>
       <div class="li-sub">${esc(objRu(n.type))} · ID: ${n.object_id}</div>
     </div>
-    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetNode(${n.id})" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
+    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetNode(${n.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
   </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет узлов</div>');
 
   txt('netEdgesList', edges.map(e => `<div class="li">
@@ -24572,7 +24610,7 @@ function renderNetNodesEdges(d) {
       <div class="li-name">${e.from_label || '#'} → ${e.to_label || '#'}</div>
       <div class="li-sub">${esc(objRu(e.type || 'forward'))}</div>
     </div>
-    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetEdge(${e.id})" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
+    <div class="li-right"><span style="font-size:16px;cursor:pointer" onclick="removeNetEdge(${e.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
   </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет рёбер</div>');
 }
 
@@ -24638,8 +24676,8 @@ async function submitNetAddNode() {
   } catch(e) { errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block'; }
 }
 
-async function removeNetNode(nodeId) {
-  if (!await askConfirm('Удалить узел?')) return;
+async function removeNetNode(nodeId, _el) {
+  if (!await confirmDelete('Удалить узел', _el)) return;
   try {
     await api(`/api/miniapp/networks/nodes/${nodeId}`, { method: 'DELETE' });
     toast('🗑 Узел удалён');
@@ -24677,8 +24715,8 @@ async function submitNetAddEdge() {
   } catch(e) { errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block'; }
 }
 
-async function removeNetEdge(edgeId) {
-  if (!await askConfirm('Удалить ребро?')) return;
+async function removeNetEdge(edgeId, _el) {
+  if (!await confirmDelete('Удалить ребро', _el)) return;
   try {
     await api(`/api/miniapp/networks/edges/${edgeId}`, { method: 'DELETE' });
     toast('🗑 Ребро удалено');
@@ -24788,7 +24826,7 @@ async function openWorkflowDetail(wfId, wfName) {
 
     html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
-      <button class="btn btn-r" onclick="deleteWorkflow(${wfId})" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
+      <button class="btn btn-r" onclick="deleteWorkflow(${wfId}, this)" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
     </div>`;
 
     if (!steps.length) {
@@ -24842,8 +24880,8 @@ async function toggleWorkflow(wfId, active) {
   } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
 }
 
-async function deleteWorkflow(wfId) {
-  if (!await askConfirm('Удалить воркфлоу?')) return;
+async function deleteWorkflow(wfId, _el) {
+  if (!await confirmDelete('Удалить воркфлоу', _el)) return;
   try {
     await api(`/api/miniapp/workflows/${wfId}`, { method: 'DELETE' });
     toast('🗑 Удалён');

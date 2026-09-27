@@ -80,14 +80,23 @@ def test_delete_warns_before_the_server_refuses():
 
 
 def test_delete_of_a_free_proxy_still_asks_for_confirmation():
+    """Вопрос задаётся и предупреждает о необратимости.
+
+    Вызов askConfirm переехал в confirmDelete — обёртку, которая тем же
+    вопросом ещё и называет удаляемый прокси."""
     i = _UI.find("async function deleteProxy(")
     body = _UI[i:i + 900]
-    assert "askConfirm" in body and "необратимо" in body
+    assert "confirmDelete(" in body or "askConfirm" in body
+    assert "необратимо" in body
 
 
 def test_both_proxy_lists_pass_the_count_into_delete():
-    """Два экрана рисуют корзину; забыть один — вернуть отказ без объяснения."""
-    assert _UI.count("deleteProxy(${p.id},${Number(p.acc_count||0)})") == 2
+    """Два экрана рисуют корзину; забыть один — вернуть отказ без объяснения.
+
+    Хвост вызова не пиним (в него добавился `this` — элемент строки, из
+    которого берётся имя прокси для вопроса); пиним то, ради чего тест есть:
+    счётчик назначенных аккаунтов уходит из ОБОИХ списков."""
+    assert _UI.count("deleteProxy(${p.id},${Number(p.acc_count||0)}") == 2
 
 
 def test_server_side_guard_is_still_in_place():

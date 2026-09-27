@@ -103,7 +103,8 @@ def test_row_deletes_ask_first():
         head = src[m.end():m.end() + 500]
         cut = head.find("await api(")
         assert cut != -1, f"{fn}: не нашли вызов api"
-        assert "askConfirm" in head[:cut], (
+        # confirmDelete — обёртка над askConfirm, которая ещё и называет объект.
+        assert "askConfirm" in head[:cut] or "confirmDelete" in head[:cut], (
             f"{fn} удаляет без подтверждения — одно касание 🗑 и объекта нет")
 
 

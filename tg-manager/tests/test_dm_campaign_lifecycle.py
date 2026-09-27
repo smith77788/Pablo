@@ -149,8 +149,15 @@ def test_deleted_campaign_stops_the_send_loop():
 
 
 def test_delete_warns_about_consequences():
-    assert "deleteDm(id, status)" in _UI.replace("async function deleteDm(id, status)",
-                                                 "deleteDm(id, status)")
+    """Сигнатуру не пиним: в неё добавился элемент строки, из которого берётся
+    имя кампании для вопроса. Проверяем, что статус по-прежнему доезжает, —
+    без него не отличить идущую кампанию от остановленной."""
+    import re as _re
+    sig = _re.search(r"async function deleteDm\s*\(([^)]*)\)", _UI)
+    assert sig, "deleteDm не найдена"
+    params = [x.strip() for x in sig.group(1).split(",")]
+    assert params[0] == "id" and params[1] == "status", (
+        "deleteDm перестала получать статус — предупреждение об идущей кампании не выбрать")
     assert "ИДУЩУЮ кампанию" in _UI, "удаление идущей кампании требует явного предупреждения"
     assert "журнал отправок" in _UI, (
         "удаление стирает журнал — значит и отчёт, и защиту от повторной отправки"
