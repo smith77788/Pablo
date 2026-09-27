@@ -2723,8 +2723,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                   )
                ORDER BY member_count DESC NULLS LAST
                LIMIT $2 OFFSET $3""", uid, limit, offset)
+        # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
+        # счётчик брал DISTINCT id (первичный ключ строки). Один и тот же канал
+        # лежит в managed_channels отдельной строкой у каждого владельца, а выборка
+        # тянет ещё и чужие строки — из экосистем и рабочих пространств. Общий
+        # канал попадал в список один раз, а в счётчик — столько раз, сколько у
+        # него владельцев: шапка писала «47 каналов» там, где их 40, и кнопка
+        # «Загрузить ещё» предлагала догрузить то, чего нет.
         total = await _safe_count(pool,
-            """SELECT COUNT(DISTINCT id) FROM managed_channels
+            """SELECT COUNT(DISTINCT channel_id) FROM managed_channels
                WHERE owner_id=$1
                   OR channel_id IN (
                       SELECT em2.object_id FROM ecosystem_members em2

@@ -17853,6 +17853,10 @@ async function openBotFactory() {
   bfSetMode(_BF_MODE);
   // Аккаунты для режима «создать новых»: каждый выбранный пишет @BotFather.
   _renderContactAccPicker('bfAccts', []);
+  // Пока идёт запрос, в выпадашке висели экосистемы с ПРОШЛОГО открытия — и
+  // бот привязывался к той, которую человек выбрал из устаревшего списка.
+  { const _bfE = document.getElementById('bfEcosystem');
+    if (_bfE) _bfE.innerHTML = '<option value="">Загрузка экосистем…</option>'; }
   // Load ecosystems
   try {
     const ecos = await api('/api/miniapp/ecosystems');
@@ -21431,6 +21435,10 @@ async function openGpCreateModal() {
   loadGpGeoPresets();
   accPickerSearchBox('gpAccountsList', _gpLoadAccs);
   _gpLoadAccs('');
+  // Тот же случай, что в фабрике ботов: до ответа сервера в выпадашке лежал
+  // список с прошлого открытия экрана.
+  { const _gpE = document.getElementById('gpEcosystem');
+    if (_gpE) _gpE.innerHTML = '<option value="">Загрузка экосистем…</option>'; }
   // Load ecosystems
   try {
     const ecos = await api('/api/miniapp/ecosystems');
@@ -22166,6 +22174,10 @@ async function openChannelRanks() {
   push('s-chranks');
   document.getElementById('crErr').textContent='';
   document.getElementById('crKeyword').value='';
+  // Пока идёт запрос, в выпадашке висели каналы с ПРОШЛОГО открытия экрана —
+  // человек успевал выбрать канал из устаревшего списка.
+  const _crSel = document.getElementById('crChannel');
+  if (_crSel) _crSel.innerHTML = '<option value="">Загрузка каналов…</option>';
   // Наполнить выпадашку каналами владельца.
   try {
     const r = await api('/api/miniapp/channels');
