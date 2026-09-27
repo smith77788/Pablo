@@ -15382,6 +15382,21 @@ async function submitProfileSetter() {
     body.hint = document.getElementById('setter2faHint').value.trim();
     if (!body.new_password) { errEl.textContent='Введите новый пароль'; return; }
   }
+  // Операция идёт по нескольким аккаунтам сразу и не откатывается. Отдельно
+  // про 2FA: пароль ставится НА аккаунты, и если он потеряется, потеряются и
+  // они — это единственное действие здесь, которое нельзя исправить повтором.
+  const _setterN = acc_count > 0 ? acc_count : 0;
+  // Предложный падеж: «на 40 аккаунтах», а не «на 40 аккаунтов».
+  const _setterScale = _setterN
+    ? `${num(_setterN)} ${plural(_setterN,'аккаунте','аккаунтах','аккаунтах')}`
+    : 'всех подходящих аккаунтах';
+  const _setterWhat = SETTER_OP==='name' ? 'Сменить имя и описание'
+                    : SETTER_OP==='avatar' ? 'Сменить аватар'
+                    : 'Поставить пароль двухфакторной защиты';
+  const _setterWarn = SETTER_OP==='2fa'
+    ? '\n\n⚠️ Запишите пароль. Потеряете его — потеряете доступ к этим аккаунтам, восстановить его нечем.'
+    : '';
+  if (!await askConfirm(`${_setterWhat} на ${_setterScale}?${_setterWarn}`)) return;
   const btn = document.getElementById('setterBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
@@ -15613,6 +15628,19 @@ async function submitBoost() {
     payload.premium_only=document.getElementById('boostPremiumOnly').value==='1';
     if(!payload.bot_username){ errEl.textContent='Укажите @username бота'; return; }
   }
+  // Накрутка выполняется живыми аккаунтами и тратит их доверие: масштаб и
+  // цель называем до нажатия, как в остальных массовых операциях.
+  const _bLbl = {views:'Накрутить просмотры', reactions:'Поставить реакции',
+                 stories:'Накрутить просмотры сторис', subscribers:'Привести подписчиков',
+                 bot_starts:'Накрутить запуски бота'}[BOOST_TYPE] || 'Запустить накрутку';
+  const _bTgt = payload.channel || payload.target || payload.bot_username || '';
+  const _bN = acc_count > 0 ? acc_count : 0;
+  const _bScale = _bN
+    ? `${num(_bN)} ${plural(_bN,'аккаунтом','аккаунтами','аккаунтами')}`
+    : 'доступными аккаунтами';
+  if (!await askConfirm(
+      `${_bLbl}${_bTgt ? ' для «' + _bTgt + '»' : ''} ${_bScale}?\n\n`
+      + 'Действия выполнят живые аккаунты — это тратит их доверие и добавляет риск бана.')) return;
   const btn=document.getElementById('boostBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const r=await api('/api/miniapp/boost',{method:'POST',body:JSON.stringify(payload)});
@@ -15869,6 +15897,12 @@ async function submitAiComment() {
   const acc_count=parseInt(document.getElementById('aicAccCount').value)||3;
   const list=channels.split(/[\s,]+/).map(s=>s.trim().replace(/^@/,'')).filter(Boolean);
   if(!list.length){ errEl.textContent='Укажите хотя бы один канал'; return; }
+  // Комментарии пишут ЖИВЫЕ аккаунты в чужих каналах: это видно посторонним и
+  // ложится в риск бана, поэтому масштаб называем до запуска.
+  if (!await askConfirm(
+      `Комментировать в ${num(list.length)} ${plural(list.length,'канале','каналах','каналах')} `
+      + `с ${num(acc_count)} ${plural(acc_count,'аккаунта','аккаунтов','аккаунтов')}?\n\n`
+      + 'Комментарии увидят посторонние, а аккаунты берут на себя риск бана.')) return;
   const btn=document.getElementById('aicBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const r=await api('/api/miniapp/ai_comment',{method:'POST',body:JSON.stringify({channels:list,niche,tone,acc_count})});
@@ -15931,6 +15965,18 @@ async function submitQuickPost() {
   if (QUICK_POST_SELECTED.size===0) { errEl.textContent='Выберите каналы'; return; }
     const schedMin = parseInt(document.getElementById('qpSchedule')?.value||'0')||0;
   const repMin = parseInt(document.getElementById('qpRepeat')?.value||'0')||0;
+  // Пост уходит подписчикам и виден сразу; масштаб называем ДО нажатия, как
+  // и в «посте во все каналы аккаунта» рядом.
+  const _qpN = QUICK_POST_SELECTED.size;
+  // Срок и повтор берём подписью из самого списка («Через 6 часов», «Каждый
+  // день»), а не пересчитываем из минут: пересчёт давал «каждые 1 дн.».
+  const _qpSel = id => { const e = document.getElementById(id);
+    return e && e.selectedIndex >= 0 ? (e.options[e.selectedIndex].textContent || '').trim() : ''; };
+  const _qpWhen = schedMin>0 ? `\nКогда: ${_qpSel('qpSchedule').toLowerCase()}.` : '';
+  const _qpRep = repMin>0 ? `\nПовтор: ${_qpSel('qpRepeat').toLowerCase()}.` : '';
+  if (!await askConfirm(
+      `Опубликовать в ${num(_qpN)} ${plural(_qpN,'канал','канала','каналов')}?`
+      + _qpWhen + _qpRep)) return;
   const btn = document.getElementById('quickPostBtn');
   btn.disabled=true; btn.textContent='Публикую…';
   try {
