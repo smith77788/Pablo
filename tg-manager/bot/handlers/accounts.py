@@ -32,6 +32,7 @@ from bot.utils.subscription import get_plan, locked_text
 from bot.utils import tariffs
 from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
+from bot.utils.picker_cap import cap_text, cap_text_append
 from config import TG_API_ID, TG_API_HASH
 from database import db
 from services import story_manager
@@ -2852,7 +2853,9 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
 
 
 @router.callback_query(AccCb.filter(F.action == "del_dead"))
-async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_del_dead_accounts(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
@@ -2901,6 +2904,58 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             reply_markup=kb.as_markup(),
         )
         return
+
+    # Раньше здесь шло удаление сразу после проверки: одно нажатие — и аккаунтов
+    # нет. Соседняя кнопка «Перепроверить и удалить просроченные» на этом же
+    # экране список ПОКАЗЫВАЕТ и спрашивает, а эта — нет. Ключ сессии не
+    # восстанавливается: аккаунт заводят заново по QR или номеру.
+    await state.update_data(del_dead_ids=dead_ids)
+    by_id = {a["id"]: a for a in accounts}
+    shown = cap_text(dead_ids, 15)
+    lines = [f"⚠️ <b>Удалить {len(dead_ids)} аккаунтов с мёртвой сессией?</b>", ""]
+    for acc_id in shown:
+        a = by_id.get(acc_id) or {}
+        lines.append(
+            "• 🔑 " + escape(str(a.get("first_name") or a.get("phone") or f"id{acc_id}"))
+        )
+    cap_text_append(lines, dead_ids, shown, "аккаунтов")
+    lines.append("")
+    lines.append(
+        "<i>Ключ сессии Telegram уже отозван — войти этими аккаунтами нельзя, "
+        "но запись со всеми настройками и привязками удалится совсем.</i>"
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"🗑 Да, удалить {len(dead_ids)}", callback_data=AccCb(action="del_dead_do")
+    )
+    kb.button(text="◀️ Отмена", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "del_dead_do"))
+async def cb_del_dead_accounts_do(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    uid = callback.from_user.id
+    dead_ids = (await state.get_data()).get("del_dead_ids") or []
+    await state.update_data(del_dead_ids=None)
+    if not dead_ids:
+        # Список живёт в состоянии диалога; если оно потерялось (перезапуск,
+        # другой экран), удалять «на память» нельзя — просим проверить заново.
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔍 Проверить заново", callback_data=AccCb(action="del_dead"))
+        kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "Список мёртвых аккаунтов устарел — проверьте сессии заново.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    await callback.answer("🗑 Удаляю...")
 
     for acc_id in dead_ids:
         try:

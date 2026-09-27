@@ -1223,6 +1223,40 @@ async def cb_alerts(
 
 @router.callback_query(BmCb.filter(F.action == "alerts_clear"))
 async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Спросить перед очисткой: «Очистить всё» стирает ВСЮ историю ограничений.
+
+    Одно нажатие сносило журнал restriction_events целиком и без вопроса. Это
+    история банов и ограничений аккаунтов — то, по чему потом разбирают, что
+    именно привело к бану; восстановить её нечем. Соседняя кнопка на этом же
+    экране — «Назад», промах стоит всей истории.
+    """
+    await safe_answer(callback)
+    try:
+        total = await pool.fetchval(
+            "SELECT COUNT(*) FROM restriction_events WHERE owner_id=$1",
+            callback.from_user.id,
+        ) or 0
+    except Exception:
+        total = 0
+    if not total:
+        await callback.answer("Алертов нет — очищать нечего.", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"🗑 Да, удалить {total}", callback_data=BmCb(action="alerts_clear_do"))
+    kb.button(text="◀️ Отмена", callback_data=BmCb(action="alerts"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        f"⚠️ <b>Удалить всю историю ограничений?</b>\n\n"
+        f"Записей: <b>{total}</b>. Это журнал банов и ограничений ваших "
+        f"аккаунтов — по нему разбирают, что привело к бану. "
+        f"Восстановить его нельзя.",
+        kb.as_markup(),
+    )
+
+
+@router.callback_query(BmCb.filter(F.action == "alerts_clear_do"))
+async def cb_alerts_clear_do(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         await pool.execute(
             "DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id

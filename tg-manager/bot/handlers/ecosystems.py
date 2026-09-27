@@ -783,6 +783,44 @@ async def cb_eco_autodiscover(
 async def cb_eco_members_clear(
     callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
 ) -> None:
+    """Спросить перед очисткой: одно нажатие убирало ВСЕХ участников экосистемы.
+
+    Состав собирают руками и автообнаружением, и восстановить его можно только
+    повторив сбор. Кнопка стояла в общем ряду, без вопроса и без числа.
+    """
+    eco_id = callback_data.eco_id
+    total = 0
+    try:
+        total = await pool.fetchval(
+            "SELECT COUNT(*) FROM ecosystem_members WHERE ecosystem_id=$1 AND owner_id=$2",
+            eco_id,
+            callback.from_user.id,
+        ) or 0
+    except Exception:
+        log_exc_swallow(log, "cb_eco_members_clear: count failed")
+    if not total:
+        await callback.answer("Участников нет — очищать нечего.", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"🗑 Да, удалить {total}",
+        callback_data=EcoCb(action="members_clear_do", eco_id=eco_id),
+    )
+    kb.button(text="◀️ Отмена", callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"⚠️ <b>Убрать всех участников из экосистемы?</b>\n\n"
+        f"Сейчас их <b>{total}</b>. Состав придётся собирать заново — "
+        f"руками или автообнаружением.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(EcoCb.filter(F.action == "members_clear_do"))
+async def cb_eco_members_clear_do(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+) -> None:
     eco_id = callback_data.eco_id
     try:
         await pool.execute(

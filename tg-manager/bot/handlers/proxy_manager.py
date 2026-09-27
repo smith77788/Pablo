@@ -959,6 +959,53 @@ async def cb_proxy_failover(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 @router.callback_query(ProxyCb.filter(F.action == "cleanup_dead"))
 async def cb_proxy_cleanup_dead(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Спросить перед удалением: прокси куплены, а «мёртвый» — вывод проверки.
+
+    Одно нажатие удаляло все неназначенные прокси с is_alive IS FALSE, не
+    показав ни одного и не назвав числа. Проверка связи ошибается: провайдер
+    мог лежать полчаса. Вернуть удалённый прокси можно только повторным
+    импортом, а платят за них деньгами.
+    """
+    if not await _require_proxy_manager(callback, pool):
+        return
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    try:
+        to_delete = await pool.fetchval(
+            """SELECT COUNT(*) FROM user_proxies up
+               WHERE up.owner_id=$1 AND up.is_alive IS FALSE
+                 AND NOT EXISTS (
+                     SELECT 1 FROM tg_accounts a
+                     WHERE a.owner_id=$1 AND a.proxy_id=up.id)""",
+            user_id,
+        ) or 0
+    except Exception as exc:
+        mark_handled_error(f"proxy_cleanup_dead count: {exc}")
+        to_delete = 0
+    if not to_delete:
+        await callback.answer(
+            "Мёртвых неназначенных прокси нет — удалять нечего.", show_alert=True
+        )
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"🗑 Да, удалить {to_delete}",
+        callback_data=ProxyCb(action="cleanup_dead_do"),
+    )
+    kb.button(text="◀️ Отмена", callback_data=ProxyCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"⚠️ <b>Удалить мёртвые прокси?</b>\n\n"
+        f"Под удаление попадают <b>{to_delete}</b> неназначенных прокси, "
+        f"которые не ответили на проверке. Проверка ошибается: провайдер мог "
+        f"лежать временно. Вернуть их можно только повторным импортом.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ProxyCb.filter(F.action == "cleanup_dead_do"))
+async def cb_proxy_cleanup_dead_do(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Удалить подтверждённо-мёртвые НЕназначенные прокси (изоляция сохранена)."""
     if not await _require_proxy_manager(callback, pool):
         return
