@@ -16957,7 +16957,15 @@ async function openContactDetail(id) {
 }
 
 // ── Действия по контакту: написать в ЛС / пригласить в чат ──────────────────
+// Аргументы последнего вызова: кнопка «Повторить» живёт в атрибуте onclick,
+// а туда нельзя положить ни массив id, ни строку в кавычках — разметка
+// рвётся. Поэтому повтор идёт через _retryContactAccPicker() без аргументов.
+let _CD_ACC_PICKER_ARGS = null;
+function _retryContactAccPicker() {
+  if (_CD_ACC_PICKER_ARGS) _renderContactAccPicker(_CD_ACC_PICKER_ARGS[0], _CD_ACC_PICKER_ARGS[1]);
+}
 async function _renderContactAccPicker(containerId, preselectIds) {
+  _CD_ACC_PICKER_ARGS = [containerId, preselectIds];
   const el = document.getElementById(containerId);
   if (!el) return;
   el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
@@ -16970,7 +16978,7 @@ async function _renderContactAccPicker(containerId, preselectIds) {
     el.innerHTML = live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px">
       <input type="checkbox" class="ca-acc-cb" value="${a.id}" ${all||pre.has(+a.id)?'checked':''}>
       ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('');
-  } catch(e) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>'; }
+  } catch(e) { el.innerHTML = errHtml(e.message, '_retryContactAccPicker()'); }
 }
 function _contactPickedAccs() {
   return [...document.querySelectorAll('.ca-acc-cb:checked')].map(cb=>+cb.value);
@@ -20898,7 +20906,7 @@ async function openTakedownKit() {
       </div>`;
     }).join('') || '<div style="color:var(--hint)">Нет доступных каналов</div>';
   } catch(e) {
-    box.innerHTML = '<div style="color:var(--red)">⚠️ '+esc((e.message||'Ошибка').substring(0,80))+'</div>';
+    box.innerHTML = errHtml(e.message, 'openTakedownKit()');
   }
 }
 
@@ -24324,8 +24332,18 @@ async function openBilling() {
       </div>
     `).join(''));
   } catch(e) {
-    txt('billingPlanName','Бесплатный');
-    txt('billingExpires','');
+    // Раньше здесь стояло txt('billingPlanName','Бесплатный'): запрос упал, а
+    // экран уверенно называл тариф бесплатным. Человек, который платит, видел
+    // «Бесплатный» и список тарифов с предложением купить то, что у него уже
+    // есть. Тем же правилом чуть выше объяснён состав тарифа: выдумывать то,
+    // по чему принимают решение о покупке, нельзя. Честный ответ — «не знаем».
+    txt('billingPlanName','Тариф не загрузился');
+    txt('billingExpires', esc(e.message||'Нет связи с сервером'));
+    const bb = document.getElementById('billingPlanBadge');
+    if (bb) bb.style.display = 'none';
+    txt('billingFeaturesList', `<div class="card" style="padding:12px 16px;font-size:13px;color:var(--hint)">
+      Не удалось узнать ваш тариф.
+      <button class="btn btn-s" style="margin-top:8px" onclick="openBilling()">↺ Повторить</button></div>`);
   }
   try {
     const hist = await api('/api/miniapp/payments');
@@ -24345,7 +24363,7 @@ async function openBilling() {
       `).join(''));
     }
   } catch(e) {
-    txt('billingHistory', empty('⚠️','Ошибка загрузки истории',e.message));
+    txt('billingHistory', empty('⚠️','Ошибка загрузки истории',e.message,{label:'↺ Повторить',fn:'openBilling()'}));
   }
 }
 function initPayment(planKey, label, price) {

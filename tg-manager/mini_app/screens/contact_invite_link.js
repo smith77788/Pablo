@@ -30,8 +30,8 @@ async function renderContactInviteLink(contactId) {
     const d = await api('/api/miniapp/uch/contacts/' + contactId + '/invite_history');
     box.innerHTML = _cilRender(contactId, d);
   } catch (e) {
-    box.innerHTML = '<div style="font-size:13px;color:var(--hint)">' +
-      'Не удалось загрузить историю инвайтов</div>';
+    // Без повтора раздел оставался мёртвым до переоткрытия карточки контакта.
+    box.innerHTML = errHtml(e.message, `renderContactInviteLink(${Number(contactId)})`);
   }
 }
 
