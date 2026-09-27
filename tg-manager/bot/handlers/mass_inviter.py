@@ -833,11 +833,11 @@ async def _inv_offer_volume(message: Message, data: dict) -> None:
     # аккаунтов даёт мало). Числа — осознанный фиксированный лимит на аккаунт за
     # прогон (режим «один проход»: не клампим предсказанным дневным лимитом, но
     # держим потолок безопасности 50 и живые сигналы флуда). 50 — верхняя граница.
-    kb.button(text="🤖 Авто (по истории, безопасно)", callback_data=InviterCb(action="confirm", item="auto"))
-    kb.button(text="🎯 Прогрессивно (по возрасту)", callback_data=InviterCb(action="confirm", item="prog"))
-    kb.button(text="📈 10 / аккаунт", callback_data=InviterCb(action="confirm", item="10"))
-    kb.button(text="📈 25 / аккаунт", callback_data=InviterCb(action="confirm", item="25"))
-    kb.button(text="🚀 50 / аккаунт (максимум)", callback_data=InviterCb(action="confirm", item="50"))
+    kb.button(text="🤖 Авто (по истории, безопасно)", callback_data=InviterCb(action="review", item="auto"))
+    kb.button(text="🎯 Прогрессивно (по возрасту)", callback_data=InviterCb(action="review", item="prog"))
+    kb.button(text="📈 10 / аккаунт", callback_data=InviterCb(action="review", item="10"))
+    kb.button(text="📈 25 / аккаунт", callback_data=InviterCb(action="review", item="25"))
+    kb.button(text="🚀 50 / аккаунт (максимум)", callback_data=InviterCb(action="review", item="50"))
     kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
     kb.adjust(1, 1, 2, 1, 1)
     await message.answer(
@@ -976,6 +976,136 @@ async def cb_inviter_link_default(
 
 # ── Подтверждение и постановка в очередь ─────────────────────────────────────
 
+# Значения по умолчанию совпадают с тем, что делает исполнитель без флага, —
+# экран не должен обещать одно, а операция делать другое.
+_INV_TOGGLES = [
+    # ключ в состоянии, подпись, значение по умолчанию, пояснение
+    ("inv_daughter", "🪆 Мать-Дочка", False,
+     "инвайт идёт в одноразовую дочернюю группу с редиректом на боевую: "
+     "бан за инвайт поглощает расходник, а не ваш канал"),
+    ("inv_showcase", "🪟 Витрина", False,
+     "буфер между дочерней и боевым каналом: вступления идут волнами, "
+     "а не всплеском (работает только вместе с «Мать-Дочка»)"),
+    ("inv_skip_invited", "🔁 Пропускать уже приглашённых", True,
+     "выключите, чтобы пройти по базе повторно"),
+    ("inv_auto_promote", "👑 Выдавать админку инвайтерам", True,
+     "операция делает ваши аккаунты админами чата"),
+    ("inv_promote_trick", "🎩 Промоут-трюк", True,
+     "на секунды выдаёт админку постороннему, чтобы добавить его в чат"),
+    ("inv_link_fallback", "✉️ Недостижимым — ссылка в ЛС", True,
+     "кого не удалось добавить, получат приглашение сообщением"),
+]
+
+
+def _inv_flag(data: dict, key: str) -> bool:
+    """Текущее значение переключателя: из состояния либо значение по умолчанию."""
+    for k, _lbl, default, _why in _INV_TOGGLES:
+        if k == key:
+            return bool(data.get(k, default))
+    return False
+
+
+def _inv_visible_toggles(data: dict) -> list:
+    """Витрина без «Мать-Дочка» исполнителем не принимается — не предлагаем её."""
+    out = []
+    for key, lbl, default, why in _INV_TOGGLES:
+        if key == "inv_showcase" and not _inv_flag(data, "inv_daughter"):
+            continue
+        out.append((key, lbl, default, why))
+    return out
+
+
+async def _inv_offer_review(message, data: dict, edit_cb=None) -> None:
+    """Последний экран перед запуском: что именно произойдёт и чем это настроить.
+
+    Раньше кнопка объёма запускала операцию немедленно — самую баноопасную
+    операцию продукта бот стартовал без единого экрана «вот что сейчас будет».
+    Половины настроек, которые есть в мини-аппе, в боте не было вовсе: ни
+    «Мать-Дочки», ни отключения дедупа (хотя итог операции сам советует его
+    отключить), ни отказа от выдачи админки вашим аккаунтам.
+    """
+    group = data.get("group", "")
+    use = data.get("acc_count", 1)
+    total_users = data.get("total_users", 0)
+    method = data.get("inv_method", "direct")
+    pace = data.get("inv_pace", "normal")
+    vol = data.get("inv_vol", "auto")
+    _m_ru = {"admin": "👑 через админку", "link": "🔗 ссылка в ЛС"}.get(method, "➕ обычный")
+    if data.get("inv_safe"):
+        _m_ru = "🛡 безопасный + " + _m_ru
+    _p_ru = {"auto": "🤖 авто (по флоту)", "slow": "🐢 медленно",
+             "normal": "🚶 обычно", "fast": "🐇 быстро"}.get(pace, pace)
+    _v_ru = {"auto": "🤖 авто (по истории)",
+             "prog": "🎯 прогрессивно (по возрасту)"}.get(vol, f"{vol} на аккаунт (один проход)")
+    src_ru = {"parser": "база парсера", "crm": "хранилище контактов",
+              "manual": "список вручную", "phones": "по телефонам"}.get(
+                  data.get("source_type", "manual"), data.get("source_type", ""))
+
+    kb = InlineKeyboardBuilder()
+    lines = []
+    for key, lbl, default, why in _inv_visible_toggles(data):
+        on = bool(data.get(key, default))
+        kb.button(text=("✅ " if on else "⬜️ ") + lbl,
+                  callback_data=InviterCb(action="tgl", item=key))
+        lines.append(f"{'✅' if on else '⬜️'} <b>{html.escape(lbl)}</b> — {html.escape(why)}")
+    kb.button(text="🚀 Запустить инвайт", callback_data=InviterCb(action="confirm", item="go"))
+    kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
+    n_tgl = len(lines)
+    kb.adjust(*([1] * n_tgl + [1, 1]))
+
+    text = (
+        "👥 <b>Инвайтер — проверьте перед запуском</b>\n\n"
+        f"🎯 Группа: <code>{html.escape(group)}</code>\n"
+        f"📋 Источник: {html.escape(src_ru)} — <b>{total_users}</b> чел.\n"
+        f"🔑 Аккаунтов: <b>{use}</b>\n"
+        f"⚙️ Способ: <b>{_m_ru}</b>\n"
+        f"🏃 Темп: <b>{_p_ru}</b>\n"
+        f"📈 Объём: <b>{_v_ru}</b>\n\n"
+        "<b>Настройки</b> (нажмите, чтобы переключить):\n"
+        + "\n".join(lines)
+        + "\n\n⚠️ <i>Инвайт — самая баноопасная операция продукта. "
+          "Операция начнётся только после кнопки «Запустить».</i>"
+    )
+    if edit_cb is not None:
+        await _edit(edit_cb, text, kb.as_markup())
+        return
+    await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(InviterCb.filter(F.action == "review"))
+async def cb_inviter_review(
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext
+) -> None:
+    """Выбран объём — показываем обзор, но НИЧЕГО не запускаем."""
+    vol = callback_data.item if callback_data.item in ("auto", "prog", "10", "25", "50") else "auto"
+    await state.update_data(inv_vol=vol)
+    data = await state.get_data()
+    await _inv_offer_review(callback.message, data, edit_cb=callback)
+
+
+@router.callback_query(InviterCb.filter(F.action == "tgl"))
+async def cb_inviter_toggle(
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext
+) -> None:
+    """Переключатель на экране обзора: меняем и перерисовываем тот же экран."""
+    key = callback_data.item
+    known = {k for k, _l, _d, _w in _INV_TOGGLES}
+    if key not in known:
+        await callback.answer()
+        return
+    data = await state.get_data()
+    cur = _inv_flag(data, key)
+    upd = {key: not cur}
+    # Витрина без «Мать-Дочка» исполнителем не принимается: выключая мать,
+    # гасим и витрину, иначе экран показывал бы включённой настройку, которая
+    # до операции не доедет.
+    if key == "inv_daughter" and cur:
+        upd["inv_showcase"] = False
+    await state.update_data(**upd)
+    data = await state.get_data()
+    await _inv_offer_review(callback.message, data, edit_cb=callback)
+
+
 @router.callback_query(InviterCb.filter(F.action == "confirm"))
 async def cb_inviter_confirm(
     callback: CallbackQuery, callback_data: InviterCb, state: FSMContext, pool: asyncpg.Pool
@@ -990,7 +1120,11 @@ async def cb_inviter_confirm(
     #   "prog" → прогрессивно по возрасту/доверию (volume_mode=progressive);
     #   число  → фиксированный лимит N на аккаунт в режиме «один проход» (не клампим
     #            консервативным дневным прогнозом, но держим потолок 50 + сигналы флуда).
-    _vol = callback_data.item if callback_data.item in ("auto", "prog", "10", "25", "50") else "auto"
+    # Объём выбран на прошлом шаге и лежит в состоянии: сюда приходит "go" с
+    # экрана обзора, а не сам объём.
+    _vol = data.get("inv_vol", "auto")
+    if _vol not in ("auto", "prog", "10", "25", "50"):
+        _vol = "auto"
     _volume_mode = ""
     if _vol == "auto":
         _per_acc_limit, _one_pass = 0, False
@@ -1088,9 +1222,29 @@ async def cb_inviter_confirm(
         # стоп на мёртвом чате и серии выходов/жалоб).
         "safe_mode": bool(data.get("inv_safe")),
     }
-    # Свой текст приглашения для метода «ссылка в ЛС» (spintax разворачивается
-    # на каждую цель отдельно в движке).
-    if method == "link" and data.get("inv_link_msg"):
+    # Переключатели с экрана обзора. Значения по умолчанию повторяют поведение
+    # исполнителя без флага, поэтому в params кладём только отличия от него.
+    if data.get("inv_daughter"):
+        params["use_daughter_groups"] = True
+        # Витрина имеет смысл только вместе с дочерними группами — исполнитель
+        # требует обе, и экран показывает её только в этом случае.
+        if data.get("inv_showcase"):
+            params["use_showcase"] = True
+    if data.get("inv_skip_invited", True) is False:
+        params["skip_invited"] = False
+    if data.get("inv_auto_promote", True) is False:
+        params["auto_promote"] = False
+    if data.get("inv_promote_trick", True) is False:
+        params["promote_trick"] = False
+    if data.get("inv_link_fallback", True) is False:
+        params["link_fallback"] = False
+    # Свой текст приглашения (spintax разворачивается на каждую цель отдельно в
+    # движке). Текст нужен не только методу «ссылка в ЛС»: финальный фолбэк
+    # «недостижимым — ссылка в ЛС» включён по умолчанию и для direct/admin, и
+    # раньше он слал текст по умолчанию, хотя оператор свой уже написал. В
+    # мини-аппе это было учтено, в боте — нет.
+    if data.get("inv_link_msg") and (
+            method == "link" or data.get("inv_link_fallback", True)):
         params["link_message"] = str(data["inv_link_msg"])[:1000]
     # .get, а не [pace]: значение приходит из состояния FSM, которое переживает
     # рестарты и обновления, и незнакомая строка роняла бы хендлер KeyError'ом
