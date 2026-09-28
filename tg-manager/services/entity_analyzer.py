@@ -156,6 +156,12 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
         client = _make_client(acc["session_str"], acc)
         try:
             await asyncio.wait_for(client.connect(), timeout=12)
+            # Запоминаем, чьим аккаунтом работаем: без этого паузу Telegram
+            # некуда записать — обработчик ошибки видит только клиента.
+            try:
+                client._infragram_acc_id = int(acc.get("id") or 0)
+            except Exception:
+                client._infragram_acc_id = 0
             return client
         except Exception:
             log_exc_swallow(log, "connect to Telegram client")
@@ -166,6 +172,23 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
             await _close_quietly(client)
             raise
     return None
+
+
+async def _note_flood(pool, client, exc: BaseException) -> None:
+    """Пауза Telegram, пойманная разбором сущности, обязана попасть в пульс.
+
+    Разбор канала или пользователя — такое же живое действие аккаунтом, как
+    операция. Раньше любая ошибка здесь уходила в warning и возвращалось None:
+    для остального продукта аккаунт оставался спокойным, и следующая
+    подсистема брала его под уже действующее ограничение.
+    """
+    try:
+        from services import flood_engine as _fe
+
+        await _fe.note_flood(pool, getattr(client, "_infragram_acc_id", 0),
+                             exc, "analyze")
+    except Exception:
+        log_exc_swallow(log, "entity_analyzer: пауза не записана в пульс здоровья")
 
 
 # ── OSINT helper functions ─────────────────────────────────────────────────────
@@ -825,6 +848,7 @@ async def analyze_channel(
         log.warning("entity_analyzer: timeout for %s", peer)
         return None
     except Exception as e:
+        await _note_flood(pool, client, e)
         log.warning("entity_analyzer.analyze_channel(%s): %s — %s",
                     peer, type(e).__name__, e)
         return None
@@ -1066,6 +1090,7 @@ async def analyze_user(
         log.warning("entity_analyzer.analyze_user: timeout for %s", peer)
         return None
     except Exception as e:
+        await _note_flood(pool, client, e)
         log.warning("entity_analyzer.analyze_user(%s): %s — %s",
                     peer, type(e).__name__, e)
         return None
@@ -1129,6 +1154,9 @@ async def analyze_telegram_object(
     try:
         entity = await asyncio.wait_for(client.get_entity(target), timeout=20)
     except Exception as exc:
+        # Записать паузу ДО disconnect: после него у клиента уже не спросить,
+        # каким аккаунтом мы работали.
+        await _note_flood(pool, client, exc)
         await client.disconnect()
         err_meta = _map_mtproto_error(exc)
         # Still return ID-based partial if we have an int target
