@@ -154,6 +154,26 @@ _MAX_REVIVES = _int_env("OP_MAX_REVIVES", 3, 1, 20)
 # failed — отдельной ветки не нужно.
 _OP_TIMEOUT_DEFAULT_S = _int_env("OP_TIMEOUT_SEC", 6 * 3600, 5 * 60, 48 * 3600)
 
+# Сколько операция может НЕ ДВИГАТЬСЯ, прежде чем считать её зависшей.
+#
+# Потолок времени выше отвечает на вопрос «долго ли», а нужен ответ на вопрос
+# «жива ли». Массовой операции положено идти часами — это пейсинг против банов,
+# а не болезнь. Зависшая же (сеть легла, прокси молчит, вызов без собственного
+# таймаута) до сих пор держала слот параллельности — один из восьми — и
+# арендованные аккаунты ВСЕ шесть часов, хотя умерла на пятой минуте. Несколько
+# таких, и у владельца почти не остаётся флота и слотов на сутки.
+#
+# Признак «жива» уже пишется в БД самими исполнителями: done_items растёт после
+# каждой взятой цели. Стоял счётчик — операция не работает.
+#
+# Порог намеренно щедрый: между целями бывают большие паузы (флуд-пауза внутри
+# исполнителя, пейсинг инвайта), и убить здоровую работу хуже, чем поздно
+# поймать зависшую.
+_OP_STALL_MIN = _int_env("OP_STALL_MIN", 90, 10, 24 * 60)
+# Как часто смотрим на счётчик. Реже, чем монитор прогресса: это сторож, а не
+# индикатор.
+_OP_STALL_POLL_S = 60.0
+
 _POISON_ERROR = (
     "Операция {n} раз(а) прерывалась вместе с воркером и не дошла до конца — "
     "остановлена, чтобы не занимать флот бесконечно. Запустите её заново."
@@ -2711,6 +2731,76 @@ async def _reschedule_recurring(
         log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
 
 
+async def _run_with_stall_guard(pool: asyncpg.Pool, coro, op_id: int, op_type: str,
+                                timeout_s: float):
+    """Выполнить исполнителя с ДВУМЯ ограничениями: потолок времени и застой.
+
+    Потолок (`timeout_s`) отвечает «не слишком ли долго», сторож застоя —
+    «двигается ли вообще». Второй вопрос важнее: операция, повисшая на ответе
+    Telegram, до сих пор держала слот и арендованные аккаунты до самого потолка,
+    то есть часами после того, как перестала работать.
+
+    Застой считается по `done_items` — счётчику, который исполнители и так
+    двигают после каждой взятой цели. Сторож срабатывает, только если операция
+    УЖЕ что-то сделала: длинная подготовка (разбор большой аудитории до первой
+    цели) не должна выглядеть застоем. Поэтому он строго добавляет защиту и
+    ничего не отнимает — раньше такая операция всё равно дошла бы до потолка.
+
+    Бросает asyncio.TimeoutError, как `asyncio.wait_for`: вызывающий уже умеет
+    превращать это в понятный владельцу текст и обычный повтор.
+    """
+    task = asyncio.ensure_future(coro)
+    deadline = time.monotonic() + float(timeout_s)
+    last_done = -1
+    last_move = time.monotonic()
+    stall_s = _OP_STALL_MIN * 60
+
+    try:
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise asyncio.TimeoutError
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(task), timeout=min(_OP_STALL_POLL_S, left))
+            except asyncio.TimeoutError:
+                pass
+
+            row = await _safe_fetchrow(
+                pool, "SELECT done_items FROM operation_queue WHERE id=$1", op_id,
+                log_ctx=f"[stall_guard op={op_id}]")
+            try:
+                done = int((row or {})["done_items"] or 0)
+            except (KeyError, TypeError, ValueError, IndexError):
+                # Не прочитали счётчик — считаем, что операция движется. Сторож
+                # не имеет права убивать работу из-за сбоя собственного зрения.
+                last_move = time.monotonic()
+                continue
+
+            if done != last_done:
+                last_done = done
+                last_move = time.monotonic()
+                continue
+
+            if done > 0 and (time.monotonic() - last_move) >= stall_s:
+                log.error(
+                    "op_worker: op_id=%d op_type=%s не двигается %d мин "
+                    "(done_items=%d) — прогон прерван, слот и аккаунты "
+                    "освобождаются", op_id, op_type, _OP_STALL_MIN, done,
+                )
+                _reliability_metric("infragram_op_stalls_total", op_type=op_type)
+                raise asyncio.TimeoutError
+    finally:
+        if not task.done():
+            task.cancel()
+            # Дать исполнителю развернуть свои finally (освобождение ресурсов,
+            # запись журнала): брошенная без ожидания задача продолжала бы жить.
+            try:
+                await asyncio.wait([task], timeout=30)
+            except Exception:
+                log_exc_swallow(log, f"op_worker: сворачивание op={op_id}")
+
+
 async def _run_op_task_guarded(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     """Точка входа поллера: реестр активных операций освобождается ВСЕГДА.
 
@@ -2935,9 +3025,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
                 _timeout_s = _obus_t.timeout_for(op_type, _OP_TIMEOUT_DEFAULT_S)
                 try:
-                    result = await asyncio.wait_for(
+                    result = await _run_with_stall_guard(
+                        pool,
                         _handler(pool, bot, op_id, owner_id, params),
-                        timeout=_timeout_s,
+                        op_id, op_type, _timeout_s,
                     )
                 except asyncio.TimeoutError as _to:
                     # Громко: зависшая операция раньше не оставляла следа вообще.
@@ -2949,8 +3040,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     _reliability_metric(
                         "infragram_op_timeouts_total", op_type=op_type)
                     raise TimeoutError(
-                        f"Операция не уложилась в {_timeout_s // 60} мин и была "
-                        f"прервана (вероятно, зависла на ответе Telegram или прокси)"
+                        f"Операция была прервана: она либо не уложилась в "
+                        f"{_timeout_s // 60} мин, либо перестала двигаться дольше "
+                        f"{_OP_STALL_MIN} мин (вероятно, зависла на ответе "
+                        f"Telegram или прокси). Взятые цели сохранены — повтор "
+                        f"продолжит с того же места."
                     ) from _to
 
             # Флот временно занят другими операциями — не проваливаем, а мягко

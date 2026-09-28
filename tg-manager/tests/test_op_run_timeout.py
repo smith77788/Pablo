@@ -82,13 +82,29 @@ def test_every_declared_override_is_sane():
 # ── Связка с воркером ────────────────────────────────────────────────────────
 
 def test_handler_call_is_bounded():
-    body = _fn(_read("services/op_worker.py"), "_run_op_task")
-    assert "asyncio.wait_for(" in body, "вызов исполнителя обязан иметь потолок"
+    """Вызов исполнителя обязан идти под ограничителем — и под тем же самым.
+
+    Ограничителей теперь два: потолок времени («не слишком ли долго») и сторож
+    застоя («двигается ли вообще», по done_items). Оба живут в
+    `_run_with_stall_guard`, поэтому здесь проверяем, что вызов обёрнут именно
+    в него, а сам потолок — в следующей проверке.
+    """
+    ow = _read("services/op_worker.py")
+    body = _fn(ow, "_run_op_task")
     call = body[body.index("_handler = handler_for(op_type)"):]
     assert "_handler(pool, bot, op_id, owner_id, params)" in call
-    wait = call.index("asyncio.wait_for(")
-    handler = call.index("_handler(pool, bot, op_id, owner_id, params)", wait)
-    assert handler - wait < 200, "потолок должен оборачивать именно вызов исполнителя"
+    guard = call.index("_run_with_stall_guard(")
+    handler = call.index("_handler(pool, bot, op_id, owner_id, params)", guard)
+    assert handler - guard < 200, "ограничитель должен оборачивать именно вызов исполнителя"
+
+    # Потолок внутри сторожа — настоящий, а не декоративный.
+    inner = _fn(ow, "_run_with_stall_guard")
+    assert "asyncio.wait_for(" in inner, "у прогона исполнителя нет потолка времени"
+    assert "raise asyncio.TimeoutError" in inner, (
+        "сторож не прерывает прогон: зависшая операция снова будет держать "
+        "слот и арендованные аккаунты"
+    )
+    assert "task.cancel()" in inner, "прерванный исполнитель не отменяется"
 
 
 def test_timeout_is_configurable_and_bounded():
