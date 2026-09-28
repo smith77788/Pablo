@@ -14852,6 +14852,71 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("mass_publish uid=%d", uid)
             return _err("Failed to enqueue mass publish", 500)
 
+    # ── Проверка ограничений/теневого бана наших каналов/чатов/ботов ───────
+    async def check_owned_restrictions_targets(request: web.Request) -> web.Response:
+        """Сколько НАШИХ сущностей проверит массовая проверка ограничений.
+
+        Каналы/чаты — по owner_id, боты — по added_by (на managed_bots нет
+        owner_id, тот же скоуп, что и в topology_nodes). Число нужно человеку
+        ДО запуска: он должен видеть, три у него сущности или триста.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        channels = await _safe_count(pool,
+            "SELECT COUNT(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1", uid)
+        bots = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+        return _json_resp({"ok": True, "channels": int(channels or 0),
+                           "bots": int(bots or 0),
+                           "total": int(channels or 0) + int(bots or 0)})
+
+    async def check_owned_restrictions(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        # Необязательные списки: проверить только выбранные сущности. Пусто = все.
+        channel_ids = body.get("channel_ids")
+        bot_ids = body.get("bot_ids")
+        params: dict = {"owner_id": uid}
+        if channel_ids:
+            try:
+                params["channel_ids"] = [int(x) for x in channel_ids
+                                         if str(x).lstrip("-").isdigit()]
+            except (TypeError, ValueError):
+                return _err("Неверные идентификаторы каналов", 400)
+        if bot_ids:
+            try:
+                params["bot_ids"] = [int(x) for x in bot_ids
+                                     if str(x).lstrip("-").isdigit()]
+            except (TypeError, ValueError):
+                return _err("Неверные идентификаторы ботов", 400)
+        # Число сущностей = total операции (для честного счётчика прогресса).
+        if params.get("channel_ids") is not None or params.get("bot_ids") is not None:
+            total = len(params.get("channel_ids") or []) + len(params.get("bot_ids") or [])
+        else:
+            ch = await _safe_count(pool,
+                "SELECT COUNT(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1", uid)
+            bt = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+            total = int(ch or 0) + int(bt or 0)
+        if total == 0:
+            return _err("Нет каналов/чатов/ботов для проверки")
+        try:
+            from services.operation_bus import submit
+            op_id = await submit(pool, uid, "check_owned_restrictions", params,
+                                 total_items=total)
+            return _json_resp({"ok": True, "op_id": op_id, "total": total})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("check_owned_restrictions uid=%d", uid)
+            return _err("Не удалось поставить проверку в очередь", 500)
+
     # ── Редактор канала (Virtual Channel Administrator) ────────────────────
     # Правила редактора задавались только в коде (save_profile), а подсказка
     # перед публикацией жила лишь в боте: в Mini App — главном интерфейсе —
@@ -18062,6 +18127,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Mass Publish
     app.router.add_get("/api/miniapp/mass_publish/targets", mass_publish_targets)
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
+    app.router.add_get("/api/miniapp/check_owned_restrictions/targets", check_owned_restrictions_targets)
+    app.router.add_post("/api/miniapp/check_owned_restrictions", check_owned_restrictions)
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
     app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
     app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)

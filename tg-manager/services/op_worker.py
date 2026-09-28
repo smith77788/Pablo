@@ -2497,6 +2497,7 @@ def _build_dispatch() -> dict:
         # ── Аккаунты ──────────────────────────────────────────────────────────
         "bulk_update_profile": _exec_bulk_update_profile,
         "check_accounts_health": _exec_check_accounts_health,
+        "check_owned_restrictions": _exec_check_owned_restrictions,
         "scan_owned_resources": _exec_scan_owned_resources,
         "scan_owned_bots": _exec_scan_owned_bots,
         "connect_discovered_bots": _exec_connect_discovered_bots,
@@ -10466,6 +10467,247 @@ async def _exec_check_accounts_health(
         "status_counts": status_counts,
         "spamblock_temp": spamblock_temp,
         "spamblock_perm": spamblock_perm,
+        "summary": summary,
+    }
+
+
+async def _exec_check_owned_restrictions(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовая проверка НАШИХ каналов/чатов/ботов на ограничения и теневой бан.
+
+    Read-only операция: аккаунт-наблюдатель резолвит каждую публичную сущность
+    владельца, читает флаг ограничения (`restricted`/`restriction_reason`),
+    проверяет видимость в глобальном поиске (`contacts.Search`) и — для ботов —
+    отвечает ли бот на /start. Вся классификация — в services/entity_restriction_check.
+
+    Аккаунт под сущность выбирается так: для канала предпочтителен управляющий им
+    аккаунт (`managed_channels.acc_id` — у него точно есть доступ), для бота и как
+    фолбэк — любой свободный аккаунт флота. Коннект наблюдателя открывается один
+    раз и переиспользуется на все его сущности (минимум следа). Находки пишутся в
+    restriction_events через shadowban_monitor._record_event — чтобы общий пульс
+    здоровья видел их, а не появился второй источник правды.
+    """
+    from services import account_manager, infra_memory as _infra_mem
+    from services import entity_restriction_check as _erc
+    from services import shadowban_monitor as _sbm
+
+    only_channels = [int(x) for x in (params.get("channel_ids") or [])]
+    only_bots = [int(x) for x in (params.get("bot_ids") or [])]
+
+    # ── 1. Сущности владельца ────────────────────────────────────────────────
+    # Каналы/чаты: scope по owner_id. DISTINCT ON — один канал может вестись
+    # несколькими аккаунтами (строка на acc_id), берём одну с её управляющим acc.
+    _ch_where = "WHERE owner_id=$1"
+    _ch_args: list = [owner_id]
+    if only_channels:
+        _ch_where += " AND channel_id = ANY($2::bigint[])"
+        _ch_args.append(only_channels)
+    ch_rows = await _safe_fetch(
+        pool,
+        f"SELECT DISTINCT ON (channel_id) channel_id, username, title, type, acc_id "
+        f"FROM managed_channels {_ch_where} ORDER BY channel_id",
+        *_ch_args,
+    )
+    # Боты: scope по added_by (НЕ owner_id — такой колонки на managed_bots нет).
+    _bot_where = "WHERE added_by=$1"
+    _bot_args: list = [owner_id]
+    if only_bots:
+        _bot_where += " AND bot_id = ANY($2::bigint[])"
+        _bot_args.append(only_bots)
+    bot_rows = await _safe_fetch(
+        pool,
+        f"SELECT bot_id, username, first_name FROM managed_bots {_bot_where}",
+        *_bot_args,
+    )
+
+    entities: list[dict] = []
+    for r in ch_rows or []:
+        _type = (r.get("type") or "").lower()
+        kind = "group" if _type in ("megagroup", "supergroup", "group", "chat") else "channel"
+        entities.append({
+            "kind": kind,
+            "id": int(r["channel_id"]),
+            "username": r.get("username"),
+            "title": r.get("title"),
+            "preferred_acc": int(r["acc_id"]) if r.get("acc_id") else None,
+            "bot_id": None,
+        })
+    for r in bot_rows or []:
+        entities.append({
+            "kind": "bot",
+            "id": int(r["bot_id"]),
+            "username": r.get("username"),
+            "title": r.get("first_name"),
+            "preferred_acc": None,
+            "bot_id": int(r["bot_id"]),
+        })
+
+    if not entities:
+        return {"status": "failed",
+                "summary": "⚠️ Нет каналов/чатов/ботов для проверки. Сначала подключите их."}
+
+    # ── 2. Аккаунты-наблюдатели ──────────────────────────────────────────────
+    acc_rows = await _safe_fetch(
+        pool,
+        """SELECT a.id, a.session_str, a.first_name, a.phone, a.username,
+                  a.device_model, a.system_version, a.app_version,
+                  a.lang_code, a.system_lang_code,
+                  a.proxy_id, p.proxy_url, p.geo_country
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+           WHERE a.owner_id=$1 AND a.is_active=TRUE""",
+        owner_id,
+    )
+    observers = [dict(r) for r in (acc_rows or []) if (r.get("session_str") or "").strip()]
+    if not observers:
+        return {"status": "failed",
+                "summary": "⚠️ Нет активного аккаунта для проверки. Подключите хотя бы один аккаунт."}
+
+    observers = await _claim_available_accounts(op_id, observers, owner_id)
+    if not observers:
+        return {"status": "requeue",
+                "summary": "⏳ Все аккаунты заняты другими операциями — попробуйте позже"}
+
+    # Карантинные аккаунты не используем как наблюдателей (fail-open: пульс мог не
+    # ответить — тогда аккаунт остаётся кандидатом, это осознанный fail-open).
+    healthy: list[dict] = []
+    for acc in observers:
+        try:
+            if await _infra_mem.is_account_quarantined(pool, acc["id"]):
+                continue
+        except Exception:
+            pass
+        healthy.append(acc)
+    if not healthy:
+        return {"status": "requeue",
+                "summary": "⏳ Свободные аккаунты сейчас в карантине — попробуйте позже"}
+    observers = healthy
+    _obs_by_id = {int(a["id"]): a for a in observers}
+
+    n = len(entities)
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2", n, op_id)
+
+    # ── 3. Проход с переиспользованием коннекта наблюдателя ───────────────────
+    _clients: dict[int, object] = {}       # acc_id -> подключённый client
+    _dead: set[int] = set()                # acc_id, которые не удалось подключить
+
+    async def _client_for(acc: dict):
+        aid = int(acc["id"])
+        if aid in _clients:
+            return _clients[aid]
+        if aid in _dead:
+            return None
+        try:
+            c = await account_manager.connect_client(
+                acc.get("session_str") or "", device=acc, action_type="op",
+                retry_auth_dup=True)
+            _clients[aid] = c
+            return c
+        except Exception as e:
+            log.warning("check_owned_restrictions op=%d: наблюдатель acc=%s не подключился: %s",
+                        op_id, aid, e)
+            _dead.add(aid)
+            return None
+
+    def _pick_observer(ent: dict):
+        # Предпочитаем управляющий аккаунт канала (есть доступ и к приватному),
+        # затем любого живого наблюдателя (публичную сущность резолвит любой).
+        order: list[dict] = []
+        pref = ent.get("preferred_acc")
+        if pref and pref in _obs_by_id:
+            order.append(_obs_by_id[pref])
+        order.extend(a for a in observers if int(a["id"]) not in _dead
+                     and (not pref or int(a["id"]) != pref))
+        return order
+
+    counts: dict[str, int] = {}
+    findings: list[dict] = []
+    _KIND_RU = {"channel": "Канал", "group": "Чат", "bot": "Бот"}
+
+    try:
+        for idx, ent in enumerate(entities):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "summary": f"Отменено. Проверено: {idx}/{n}\n"
+                               + _erc.build_summary(counts, n, checked=idx),
+                }
+
+            client = None
+            for cand in _pick_observer(ent):
+                client = await _client_for(cand)
+                if client is not None:
+                    break
+
+            if client is None:
+                verdict = _erc.classify(ent["kind"], {"probe_error": "нет доступного аккаунта-наблюдателя"})
+            else:
+                try:
+                    verdict = await _erc.probe_entity(
+                        client, kind=ent["kind"], entity_id=ent["id"],
+                        username=ent.get("username"))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    log.warning("check_owned_restrictions op=%d ent=%s: проба упала: %s",
+                                op_id, ent["id"], e)
+                    verdict = _erc.classify(ent["kind"], {"probe_error": str(e)[:160]})
+
+            status = verdict["status"]
+            counts[status] = counts.get(status, 0) + 1
+
+            _title = (ent.get("title") or (verdict.get("meta") or {}).get("title")
+                      or (f"@{ent['username']}" if ent.get("username") else str(ent["id"])))
+            _label = f"{_KIND_RU.get(ent['kind'], ent['kind'])} «{_title}»"
+            _log_msg = f"{verdict['label']} — {verdict['reason_ru']}"
+            await _safe_execute(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,$4,$5)",
+                op_id, idx + 1, str(_label)[:64],
+                "error" if _erc.is_problem(status) else "ok", _log_msg[:200],
+            )
+
+            # Реальное ограничение сущности — в общий пульс (restriction_events),
+            # чтобы shadowban_monitor/get_account_health его видели.
+            if _erc.is_problem(status):
+                findings.append({"kind": ent["kind"], "title": _title,
+                                 "status": status, "reason": verdict["reason_ru"]})
+                try:
+                    await _sbm._record_event(
+                        pool, owner_id,
+                        _erc.event_type_for(ent["kind"], status),
+                        _erc.severity_for(status),
+                        {"entity_id": ent["id"], "kind": ent["kind"],
+                         "username": ent.get("username"), "title": _title,
+                         "reason": verdict["reason_ru"]},
+                        bot_id=ent.get("bot_id"),
+                    )
+                except Exception as e:
+                    log.debug("check_owned_restrictions: record_event failed: %s", e)
+
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+            # Бережный темп: read-only, но резолв+поиск с одного аккаунта подряд —
+            # это запросы к Telegram, разносим их, чтобы не ловить FloodWait.
+            if idx + 1 < n:
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+    finally:
+        for c in _clients.values():
+            try:
+                await c.disconnect()
+            except Exception:
+                pass
+
+    summary = _erc.build_summary(counts, n)
+    return {
+        "status": "done",
+        "checked": n,
+        "counts": counts,
+        "findings": findings[:50],
         "summary": summary,
     }
 

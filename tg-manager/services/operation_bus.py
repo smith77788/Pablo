@@ -351,6 +351,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🔍",
     },
+    "check_owned_restrictions": {
+        "description": "Проверка каналов/чатов/ботов на ограничения и теневой бан",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🛡",
+    },
     "scan_owned_resources": {
         "description": "Сканирование собственных каналов/групп",
         "min_plan": "starter",
