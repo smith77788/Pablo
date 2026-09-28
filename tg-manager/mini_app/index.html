@@ -17713,27 +17713,226 @@ async function resolveConflict(id, resolution, value) {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
+// ── Умные теги: правила и метки ────────────────────────────────────────
+// Правила раньше были невидимы: экран показывал только готовые метки, а
+// «Применить» рапортовало «проверено правил: 7», которых владелец не мог ни
+// увидеть, ни выключить, ни завести своё.
+const ST_FIELDS = {
+  is_premium:            {t:'Premium-подписка',        kind:'bool'},
+  is_favorite:           {t:'В избранном',             kind:'bool'},
+  phones:                {t:'Телефоны',                kind:'list'},
+  emails:                {t:'Почты',                   kind:'list'},
+  notes:                 {t:'Заметка',                 kind:'text'},
+  company:               {t:'Компания',                kind:'text'},
+  position:              {t:'Должность',               kind:'text'},
+  first_name:            {t:'Имя',                     kind:'text'},
+  last_name:             {t:'Фамилия',                 kind:'text'},
+  username:              {t:'Username',                kind:'text'},
+  source_accounts_count: {t:'Аккаунтов-источников',    kind:'num'},
+  importance_level:      {t:'Важность',                kind:'num'},
+  user_rating:           {t:'Оценка',                  kind:'num'},
+};
+const ST_OPS = {
+  eq:        'равно',
+  neq:       'не равно',
+  not_empty: 'заполнено',
+  gte:       'не меньше',
+  lte:       'не больше',
+  contains:  'содержит',
+  regex:     'подходит под шаблон',
+};
+// Метки встроенных правил — идентификаторы; владельцу показываем по-русски.
+const ST_TAG_RU = {
+  premium:'Premium', has_phone:'Есть телефон', has_email:'Есть почта',
+  multi_account:'У нескольких аккаунтов', has_notes:'Есть заметка',
+  favorite:'В избранном', has_company:'Есть компания',
+};
+function stTagName(tag) { return ST_TAG_RU[tag] || tag; }
+
+function stCondText(c) {
+  if (!c || !c.field) return 'условие не задано';
+  const f = ST_FIELDS[c.field];
+  const fname = f ? f.t : c.field;
+  const op = c.op || '';
+  if (op === 'not_empty') return fname + ' — заполнено';
+  // «Premium равно да» читается коряво; у флага пишем просто «Premium — да».
+  if (f && f.kind === 'bool' && (op === 'eq' || op === 'neq')) {
+    const yes = (op === 'eq') === (c.value === true);
+    return fname + ' — ' + (yes ? 'да' : 'нет');
+  }
+  const v = (c.value === undefined || c.value === null) ? '' : c.value;
+  return fname + ' ' + (ST_OPS[op] || op) + ' ' + v;
+}
+
+let ST_FORM_OPEN = false;
+function stToggleForm() { ST_FORM_OPEN = !ST_FORM_OPEN; openUchSmartTags(); }
+
 async function openUchSmartTags() {
   push('s-uchsmarttags');
   txt('stBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/uch/smart-tags');
-    const tags = d.tags||[];
-    if (!tags.length) { txt('stBody', empty('🏷','Нет тегов','Нажмите "Применить" для генерации')); return; }
-    let html = '<div style="padding:12px 16px">';
-    tags.forEach(t=>{
-      html += `<div class="li"><div class="li-body"><div class="li-name">${esc(t.tag)}</div><div class="li-sub">${t.cnt} контактов · ${esc(t.source||'')}</div></div></div>`;
+    const [rd, td] = await Promise.all([
+      api('/api/miniapp/uch/smart-tags/rules'),
+      api('/api/miniapp/uch/smart-tags'),
+    ]);
+    const rules = rd.rules || [];
+    const tags = td.tags || [];
+    const custom = rules.filter(r => r.source !== 'builtin');
+    const builtin = rules.filter(r => r.source === 'builtin');
+
+    let html = `<div style="padding:12px 16px">
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:10px">
+        Правило само вешает метку на контакт, который под него подходит. Метки
+        никуда не отправляются — по ним удобно фильтровать и собирать сегменты.
+        Изменения применяются кнопкой «⚡ Применить» вверху.
+      </div>`;
+
+    html += `<div class="sec">Свои правила${custom.length?' · '+custom.length:''}</div>`;
+    if (!custom.length) {
+      html += `<div style="font-size:13px;color:var(--hint);padding:6px 0 2px">Пока нет. Ниже можно завести первое.</div>`;
+    } else {
+      html += '<div class="lst" style="margin-top:6px">';
+      custom.forEach(r => {
+        const on = r.is_active !== false;
+        html += `<div class="li">
+          <div class="li-body">
+            <div class="li-name">${esc(r.name||'Без названия')} ${on?'':'<span style="font-size:11px;color:var(--hint)">· выключено</span>'}</div>
+            <div class="li-sub">${esc(stCondText(r.conditions))} → метка «${esc(stTagName(r.tag))}»</div>
+          </div>
+          <div class="li-right" style="display:flex;gap:6px;align-items:center">
+            <button class="btn btn-s icon-tap" style="font-size:11px" onclick="stToggleRule(${Number(r.id)})">${on?'Выключить':'Включить'}</button>
+            <span class="icon-tap" onclick="stDeleteRule(${Number(r.id)},this)" role="button" tabindex="0" aria-label="Удалить правило" title="Удалить">🗑</span>
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+
+    if (ST_FORM_OPEN) {
+      html += `<div class="lst" style="margin-top:10px;padding:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Новое правило</div>
+        <input class="inp" id="stName" placeholder="Название, например «Клиенты с компанией»" style="margin-bottom:6px">
+        <input class="inp" id="stTag" placeholder="Метка, например «клиент»" style="margin-bottom:6px">
+        <select class="inp" id="stField" onchange="stFormSync()" style="margin-bottom:6px">
+          ${Object.keys(ST_FIELDS).map(k=>`<option value="${k}">${esc(ST_FIELDS[k].t)}</option>`).join('')}
+        </select>
+        <select class="inp" id="stOp" onchange="stFormSync()" style="margin-bottom:6px">
+          ${Object.keys(ST_OPS).map(k=>`<option value="${k}">${esc(ST_OPS[k])}</option>`).join('')}
+        </select>
+        <div id="stValWrap" style="margin-bottom:8px"></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-p" style="flex:1" onclick="stCreateRule()">Сохранить</button>
+          <button class="btn btn-s" onclick="stToggleForm()">Отмена</button>
+        </div>
+      </div>`;
+    } else {
+      html += `<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="stToggleForm()">➕ Своё правило</button>`;
+    }
+
+    html += `<div class="sec" style="margin-top:16px">Встроенные правила · ${builtin.length}</div>
+      <div style="font-size:12px;color:var(--hint);padding:2px 0 6px">Работают всегда, удалить их нельзя.</div>
+      <div class="lst">`;
+    builtin.forEach(r => {
+      html += `<div class="li"><div class="li-body">
+        <div class="li-name">${esc(r.name)}</div>
+        <div class="li-sub">${esc(stCondText(r.conditions))} → метка «${esc(stTagName(r.tag))}»</div>
+      </div></div>`;
     });
     html += '</div>';
+
+    html += `<div class="sec" style="margin-top:16px">Метки на контактах${tags.length?' · '+tags.length:''}</div>`;
+    if (!tags.length) {
+      html += `<div style="font-size:13px;color:var(--hint);padding:6px 0">Ни одной метки ещё не проставлено. Нажмите «⚡ Применить» вверху.</div>`;
+    } else {
+      html += '<div class="lst">';
+      tags.forEach(t => {
+        const src = t.source === 'builtin' ? 'встроенное правило' : 'своё правило';
+        html += `<div class="li"><div class="li-body">
+          <div class="li-name">${esc(stTagName(t.tag))}</div>
+          <div class="li-sub">Контактов: ${num(t.cnt)} · ${src}</div>
+        </div></div>`;
+      });
+      html += '</div>';
+    }
+
+    html += '</div>';
     txt('stBody', html);
-  } catch(e) { txt('stBody', errHtml(e.message)); }
+    if (ST_FORM_OPEN) stFormSync();
+  } catch(e) { txt('stBody', errHtml(e.message, 'openUchSmartTags()')); }
+}
+
+// Поле значения зависит от выбранного поля и оператора: «заполнено» значения
+// не требует, у флага значение — да/нет, у числа — число.
+function stFormSync() {
+  const wrap = document.getElementById('stValWrap');
+  if (!wrap) return;
+  const f = ST_FIELDS[document.getElementById('stField').value] || {};
+  const op = document.getElementById('stOp').value;
+  if (op === 'not_empty') { wrap.innerHTML = '<div style="font-size:12px;color:var(--hint)">Значение не нужно: проверяем, что поле не пустое.</div>'; return; }
+  if (f.kind === 'bool') {
+    wrap.innerHTML = '<select class="inp" id="stVal"><option value="true">да</option><option value="false">нет</option></select>';
+    return;
+  }
+  const ph = f.kind === 'num' ? 'число' : 'значение';
+  wrap.innerHTML = `<input class="inp" id="stVal" placeholder="${ph}"${f.kind==='num'?' inputmode="numeric"':''}>`;
+}
+
+async function stCreateRule() {
+  const name = (document.getElementById('stName').value||'').trim();
+  const tag  = (document.getElementById('stTag').value||'').trim();
+  const field = document.getElementById('stField').value;
+  const op = document.getElementById('stOp').value;
+  if (!name) { toast('Дайте правилу название'); return; }
+  if (!tag)  { toast('Укажите метку, которую правило будет вешать'); return; }
+  const cond = {field, op};
+  if (op !== 'not_empty') {
+    const el = document.getElementById('stVal');
+    let v = el ? el.value : '';
+    const kind = (ST_FIELDS[field]||{}).kind;
+    if (kind === 'bool') v = (v === 'true');
+    else if (kind === 'num') {
+      if (v === '' || isNaN(Number(v))) { toast('Значение должно быть числом'); return; }
+      v = Number(v);
+    } else if (!String(v).trim()) { toast('Укажите значение'); return; }
+    cond.value = v;
+  }
+  try {
+    await api('/api/miniapp/uch/smart-tags/rules', {method:'POST', body:JSON.stringify({name, tag, conditions:cond})});
+    toast('✅ Правило сохранено. Нажмите «⚡ Применить», чтобы разложить метки.');
+    ST_FORM_OPEN = false;
+    openUchSmartTags();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function stToggleRule(id) {
+  try {
+    const r = await api('/api/miniapp/uch/smart-tags/rules/'+id+'/toggle', {method:'PUT'});
+    toast(r.is_active ? 'Правило включено' : 'Правило выключено');
+    openUchSmartTags();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function stDeleteRule(id, el) {
+  if (!await confirmDelete('Удалить правило', el, 'Уже проставленные метки останутся.')) return;
+  try {
+    await api('/api/miniapp/uch/smart-tags/rules/'+id, {method:'DELETE'});
+    toast('🗑 Правило удалено');
+    openUchSmartTags();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 async function applySmartTags() {
   toast('⚡ Применяю правила...');
   try {
     const d = await api('/api/miniapp/uch/smart-tags/apply', {method:'POST'});
-    toast(`✅ Применено: ${d.applied||0} тегов, проверено правил: ${d.rules_checked||0}`);
+    const added = d.applied||0, matched = d.matched||0;
+    // Ноль новых меток при непустых совпадениях — не ошибка, а «всё уже
+    // разложено». Раньше счётчик считал попытки и показывал число, которого в
+    // базе не было.
+    toast(added
+      ? `✅ Новых меток: ${added} · совпадений: ${matched} · правил: ${d.rules_checked||0}`
+      : (matched ? `Всё уже разложено: совпадений ${matched}, новых меток нет`
+                 : `Ни один контакт не подошёл под правила (правил: ${d.rules_checked||0})`));
     openUchSmartTags();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
