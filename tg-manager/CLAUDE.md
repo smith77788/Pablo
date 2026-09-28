@@ -40,7 +40,10 @@
   `fetch → rebase → push`; **без force-push** по общей истории. Коммить и пушь ЧАСТО
   (worktree-работа теряется при сбросе контейнера).
 - **Перед push:** `pytest tests/test_no_duplicate_definitions.py` (дубли
-  хендлеров/роутов/JS-функций синтаксис не ловит) + затронутые тесты.
+  хендлеров/роутов/JS-функций синтаксис не ловит) + затронутые тесты + храповики
+  и `ruff` (команда — в корневом `CLAUDE.md`, раздел «Как проверять»; вместе около
+  минуты). **Полный прогон локально не гонять** — указание владельца 28.09.2026,
+  он занимает восемь минут и дублирует CI, который гоняет весь набор на каждый пуш.
 - **Баг → регресс-тест, который падает без фикса** и проходит с ним. Фикс без такого
   теста не завершён.
 - **Массовая операция** (инвайты/рассылки/strike по реальным аккаунтам): канарейка
@@ -105,15 +108,23 @@
   «красный тест — стоп» работает буквально.
 
   ```bash
-  pip install "aiogram==3.30.0" asyncpg aiohttp openai anthropic python-dotenv \
+  python3.12 -m pip install --break-system-packages \
+      "aiogram==3.30.0" "asyncpg==0.29.0" aiohttp openai anthropic python-dotenv \
       openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks "qrcode[pil]" \
-      pillow telethon pytest pytest-asyncio ruff
+      pytest pytest-asyncio ruff
   ```
 
-  telethon и asyncpg застаблены в `tests/conftest.py` и в CI не ставятся, но
-  локально ставить их можно и полезно: заглушка не умеет всё (например,
-  `asyncio.wait_for` требует настоящую корутину), и часть кода на ней не
-  исполняется.
+  **telethon в этот список не добавлять.** Его зависимость `pyaes` не собирается
+  в контейнере агента, а `pip` при одном упавшем пакете не ставит НИ ОДНОГО из
+  списка — прогон потом падает на `ModuleNotFoundError: pytest`, и время уходит
+  на разбор пустой поломки. telethon и asyncpg застаблены в `tests/conftest.py`,
+  CI их тоже не ставит (asyncpg — ставит, пинованный). Настоящий telethon нужен
+  только там, где заглушка не справляется (`asyncio.wait_for` требует настоящую
+  корутину) — тогда ставить его отдельной командой, а не вместе с остальными.
+
+  `--break-system-packages` нужен из-за PEP 668: без него `pip` в этом
+  контейнере отказывается ставить что-либо и молча возвращает код 0.
+  `python3.12` — потому что прод на 3.12, а `pip` по умолчанию смотрит на 3.11.
 - **Мини-апп JS:** `node --check` извлечённого `<script>` из `index.html` и
   `mini_app/screens/*.js`.
 - **UI:** Playwright `deploy/scripts/render_miniapp.mjs`.
