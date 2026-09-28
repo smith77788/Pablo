@@ -607,7 +607,15 @@ async def cb_pack_confirm_create(
         return
     ch_ids = sd.get("pack_channel_ids") or []
     gr_ids = sd.get("pack_group_ids") or []
-    await db.update_presence_pack_channels(pool, pack_id, owner_id, ch_ids, gr_ids)
+    _res = await db.update_presence_pack_channels(pool, pack_id, owner_id, ch_ids, gr_ids)
+    if not _res.get("ok"):
+        # Выбор шёл из своего списка, так что сюда попадём только если канал
+        # успели удалить. Сказать об этом честнее, чем оставить пустой пакет.
+        await callback.message.answer(
+            "⚠️ Часть каналов не найдена или уже не ваша — состав пакета не сохранён. "
+            "Откройте пакет и выберите каналы заново.",
+            reply_markup=terminal_kb(),
+        )
 
     name = sd.get("pack_name") or "Pack"
     bot_username = sd.get("pack_bot_username") or "—"

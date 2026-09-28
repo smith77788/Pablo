@@ -5701,7 +5701,39 @@ async def update_presence_pack_channels(
     owner_id: int,
     channel_ids: list[int],
     group_ids: list[int],
-) -> None:
+) -> dict:
+    """Записать состав пакета. Возвращает {"ok": bool, "foreign": [id, ...]}.
+
+    Номера каналов приходят из тела запроса мини-аппа. Рядом, для `bot_id`,
+    владение проверяется явно, а состав пакета писался как есть — то есть в
+    свой пакет можно было вписать чужой канал. Дальше посев
+    (`_exec_seed_presence_pack`) читает по этим номерам title, username,
+    channel_id и access_hash и пытается публиковать: access_hash — это ключ,
+    которым Telegram резолвит канал, и чужим его отдавать нельзя.
+
+    Проверка стоит здесь, а не в обработчике: дверей две (мини-апп и бот), и
+    они расходятся. Чужой или несуществующий номер — отказ целиком, без
+    частичной записи: молча выкинуть половину состава хуже, чем сказать «нет».
+    """
+    ids = [int(x) for x in list(channel_ids) + list(group_ids)]
+    if ids:
+        rows = await pool.fetch(
+            "SELECT id FROM managed_channels WHERE owner_id=$1 AND id = ANY($2::int[])",
+            owner_id,
+            ids,
+        )
+        own = {int(r["id"]) for r in rows}
+        foreign = sorted({i for i in ids if i not in own})
+        if foreign:
+            log.warning(
+                "presence_pack %s: отказ, чужие или несуществующие каналы %s (owner=%s)",
+                pack_id, foreign[:10], owner_id,
+            )
+            await record_manual_action(
+                pool, owner_id, "presence_pack_foreign_channel_refused",
+                target=f"pack:{pack_id} ids:{foreign[:10]}", result="refused",
+            )
+            return {"ok": False, "foreign": foreign}
 
     await pool.execute(
         "UPDATE presence_packs SET channel_ids=$3, group_ids=$4 WHERE id=$1 AND owner_id=$2",
@@ -5710,6 +5742,7 @@ async def update_presence_pack_channels(
         json.dumps(channel_ids, ensure_ascii=False),
         json.dumps(group_ids, ensure_ascii=False),
     )
+    return {"ok": True, "foreign": []}
 
 
 async def mark_presence_pack_seeded(

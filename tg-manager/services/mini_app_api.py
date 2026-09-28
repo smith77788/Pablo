@@ -15850,11 +15850,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 group_ids = body.get("group_ids", grp)
                 if not isinstance(channel_ids, list) or not isinstance(group_ids, list):
                     return _err("channel_ids и group_ids должны быть списками", 400)
-                await db.update_presence_pack_channels(
+                _res = await db.update_presence_pack_channels(
                     pool, pack_id, uid,
                     [int(x) for x in channel_ids],
                     [int(x) for x in group_ids],
                 )
+                if not _res.get("ok"):
+                    # Ровно как с чужим bot_id рядом: отказ, а не молчаливая
+                    # запись чужого канала в свой пакет.
+                    return _err("Канал или чат не найден или не принадлежит вам", 404)
 
             updated = await db.get_presence_pack(pool, pack_id, uid)
             return _json_resp(_presence_pack_dict(updated))
