@@ -164,6 +164,41 @@ async def get_position_history(pool: asyncpg.Pool, owner_id: int,
         return []
 
 
+async def get_history_for_all(pool: asyncpg.Pool, owner_id: int,
+                              per_keyword: int = 30) -> dict:
+    """История замеров по всем ключам владельца: {keyword_id: [{position, checked_at}]}.
+
+    Экран рисует график по `history`, а свод его не отдавал — и график не
+    появлялся НИ РАЗУ, сколько бы замеров ни накопилось. Забираем одним
+    запросом: на десятках ключей поштучные рейсы до базы экран бы не пережил.
+    Порядок — от старого к новому, как и рисует холст.
+    """
+    try:
+        rows = await pool.fetch(
+            """WITH ranked AS (
+                   SELECT sr.keyword_id, sr.position, sr.checked_at,
+                          ROW_NUMBER() OVER (PARTITION BY sr.keyword_id
+                                             ORDER BY sr.checked_at DESC) AS rn
+                     FROM search_rankings sr
+                     JOIN tracked_keywords tk ON tk.id = sr.keyword_id
+                    WHERE tk.owner_id = $1
+               )
+               SELECT keyword_id, position, checked_at
+                 FROM ranked
+                WHERE rn <= $2
+                ORDER BY keyword_id, checked_at""",
+            owner_id, int(per_keyword))
+        out: dict = {}
+        for r in rows:
+            out.setdefault(r["keyword_id"], []).append(
+                {"position": r["position"],
+                 "checked_at": r["checked_at"].isoformat() if r["checked_at"] else None})
+        return out
+    except Exception as e:
+        log.warning("get_history_for_all error: %s", e)
+        return {}
+
+
 async def get_all_positions(pool: asyncpg.Pool, owner_id: int) -> list:
     """Последняя позиция и предыдущая по каждому ключу владельца.
 

@@ -22820,10 +22820,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             from services.ranking_engine import (
-                get_tracked_keywords, get_all_positions, get_alerts)
+                get_tracked_keywords, get_all_positions, get_alerts,
+                get_history_for_all)
             tracked = await get_tracked_keywords(pool, uid)
             positions = {p["keyword_id"]: p for p in await get_all_positions(pool, uid)}
             alerts = await get_alerts(pool, uid)
+            # История нужна графику позиций. Без неё фронт отфильтровывал все
+            # ключи (`k.history && k.history.length > 1`) и холст не рисовался
+            # НИ РАЗУ, сколько бы замеров ни накопилось.
+            history = await get_history_for_all(pool, uid)
             keywords = []
             for k in tracked:
                 p = positions.get(k["id"]) or {}
@@ -22838,6 +22843,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "trend": (prev - cur) if (cur is not None and prev is not None) else 0,
                     "region": k.get("region") or "ru",
                     "last_checked": last.isoformat() if last else None,
+                    "history": history.get(k["id"], []),
                 })
             return _json_resp({"keywords": keywords, "alerts": alerts})
         except Exception as e:

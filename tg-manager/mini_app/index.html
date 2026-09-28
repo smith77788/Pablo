@@ -25275,7 +25275,7 @@ async function loadRanking() {
     renderRankingAlerts(alerts);
     renderRankingChart(kw);
   } catch(e) {
-    txt('rankingKeywords', errHtml(e.message));
+    txt('rankingKeywords', errHtml(e.message, 'loadRanking()'));
     txt('rankingAlerts', '');
   }
 }
@@ -25308,8 +25308,19 @@ function renderRankingList(kw) {
         <span class="badge ${pc}">${posStr}</span>
         <span style="font-size:11px;color:${trendColor}">${trend}</span>
       </div>
+      <span class="icon-tap" onclick="untrackRankingKeyword(${Number(k.id)},this)" role="button" tabindex="0" aria-label="Снять слово с отслеживания" title="Снять с отслеживания">🗑</span>
     </div>`;
   }).join(''));
+}
+
+// Список ключевых слов только рос: снять слово было нечем, хотя маршрут есть.
+async function untrackRankingKeyword(id, el) {
+  if (!await confirmDelete('Снять слово с отслеживания', el, 'История замеров по нему удалится.')) return;
+  try {
+    await api('/api/miniapp/ranking/untrack', {method:'POST', body:JSON.stringify({keyword_id:id})});
+    toast('Слово снято с отслеживания');
+    loadRanking();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
 function renderRankingAlerts(alerts) {
@@ -25351,7 +25362,18 @@ function renderRankingChart(kw) {
   ctx.clearRect(0, 0, W, H);
 
   const withPos = kw.filter(k => k.history && k.history.length > 1);
-  if (!withPos.length) { if (emptyEl) emptyEl.style.display = 'block'; canvas.style.display = 'none'; return; }
+  if (!withPos.length) {
+    // Причина пустого графика бывает разной, и валить всё на «добавьте слова»
+    // нечестно: слова могут быть, а замеров ещё нет.
+    if (emptyEl) {
+      emptyEl.textContent = kw.length
+        ? 'Замеров пока мало: график появится после второй проверки позиций.'
+        : 'Добавьте ключевые слова для отслеживания';
+      emptyEl.style.display = 'block';
+    }
+    canvas.style.display = 'none';
+    return;
+  }
   const maxPos = Math.max(...withPos.flatMap(k => k.history.map(h => h.position)), 1);
   const colors = ['#2dd4bf', '#60a5fa', '#f59e0b', '#c084fc', '#f87171', '#34d399', '#a78bfa'];
 
