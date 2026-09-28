@@ -8,8 +8,16 @@ WORKDIR /app
 # (railway.json → dockerfilePath: "Dockerfile"), и фикс от Railway-бота
 # (PR #7) в своё время попал только в tg-manager/Dockerfile — то есть в файл,
 # которым деплой не собирается.
+# Шрифты нужны продукту, а не «для красоты»: services/avatar_factory.py рисует
+# аватары и ищет ровно эти каталоги (_FONT_PATHS). В python:3.12-slim их нет, и
+# Pillow молча уходит на ImageFont.load_default() — а тот рисует 7 пикселей
+# вместо запрошенных 87 и не имеет отдельных кириллических глифов (А, Ж, Щ
+# выходят одной и той же заглушкой 5x7). То есть аватар получался пустым
+# квадратом с крошечной кляксой, без единой ошибки в логах.
+# В tg-manager/Dockerfile шрифты стояли, но Railway собирает ЭТОТ файл.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libc6-dev libpq-dev curl procps \
+    fonts-dejavu-core fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
