@@ -17497,6 +17497,13 @@ async function openContactTimeline(id) {
         ${t.detail?`<div style="font-size:12px;color:var(--hint);margin-top:2px;white-space:normal">${esc(String(t.detail).substring(0,120))}</div>`:''}
         </div></div>`;
     });
+    // Лента склеена из нескольких источников, поэтому «сколько всего» для неё
+    // не существует как одно число. Но молчать о срезе нельзя: более ранние
+    // касания в ленту просто не попали.
+    if (d && d.truncated) {
+      html += '<div style="font-size:12px;color:var(--hint);padding:6px 2px">'
+            + 'Показаны последние касания — более ранние в ленту не вошли.</div>';
+    }
     html += '</div>';
     txt('cdBody', html);
   } catch(e) { txt('cdBody', errHtml(e.message)); }
@@ -19430,12 +19437,15 @@ async function submitRegCheck() {
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🔍 Проверить'; }
 }
-async function openRegCheck() {
-  push('s-regcheck');
-  txt('regCheckList','<div class="spin-wrap"><div class="spin"></div></div>');
+let REGCHK_LIMIT = 30;
+async function openRegCheckMore() { REGCHK_LIMIT += 200; await openRegCheck(true); }
+async function openRegCheck(keep) {
+  if (!keep) { REGCHK_LIMIT = 30; push('s-regcheck'); }
+  if (!keep) txt('regCheckList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/reg_check/history');
-    const checks = d.checks||[];
+    const d = await api('/api/miniapp/reg_check/history?limit='+REGCHK_LIMIT);
+    const checks = listOf(d,'checks');
+    const rcTotal = totalOf(d, checks);
     if (!checks.length) { txt('regCheckList', empty('📅','История пуста','Нажмите Проверить')); return; }
     txt('regCheckList', checks.map(c=>`
       <div class="row">
@@ -19445,9 +19455,9 @@ async function openRegCheck() {
           <div class="row-val">${c.reg_date?'📅 '+new Date(c.reg_date).toLocaleDateString('ru'):'❓ Дата не определена'} · ${c.method||''}</div>
         </div>
       </div>
-    `).join(''));
+    `).join('') + moreBtn(checks.length, rcTotal, 'openRegCheckMore()'));
   } catch(e) {
-    txt('regCheckList', empty('⚠️','Ошибка',e.message));
+    txt('regCheckList', errHtml(e.message, 'openRegCheck()'));
   }
 }
 
@@ -20751,13 +20761,24 @@ async function toggleRelay(botId, enable) {
     openRelay(botId, '');
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
-async function openRelaySession(sessionId, name) {
-  txt('relaymsgs-title', '💬 '+name);
-  push('s-relaymsgs');
-  txt('relayMsgBody','<div class="spin-wrap"><div class="spin"></div></div>');
+// id переписки держим рядом: строку в onclick без кавычек не унести.
+let _RELAY_ARGS = null, RELAY_LIMIT = 100;
+async function openRelaySessionMore() {
+  if (!_RELAY_ARGS) return;
+  RELAY_LIMIT += 400;
+  await openRelaySession(_RELAY_ARGS[0], _RELAY_ARGS[1], true);
+}
+function retryRelaySession() {
+  if (_RELAY_ARGS) openRelaySession(_RELAY_ARGS[0], _RELAY_ARGS[1], true);
+}
+async function openRelaySession(sessionId, name, keep) {
+  _RELAY_ARGS = [sessionId, name];
+  if (!keep) { RELAY_LIMIT = 100; txt('relaymsgs-title', '💬 '+name); push('s-relaymsgs'); }
+  if (!keep) txt('relayMsgBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/relay/session/'+sessionId+'/messages');
-    const msgs = d.messages||[];
+    const d = await api('/api/miniapp/relay/session/'+sessionId+'/messages?limit='+RELAY_LIMIT);
+    const msgs = listOf(d,'messages');
+    const relTotal = totalOf(d, msgs);
     if (!msgs.length) { txt('relayMsgBody', empty('💬','Нет сообщений','')); return; }
     document.getElementById('relayMsgBody').innerHTML = msgs.map(m=>{
       const isOut = m.direction==='out';
@@ -20765,11 +20786,11 @@ async function openRelaySession(sessionId, name) {
         <div style="background:${isOut?'#7c3aed':'#2a2a2a'};border-radius:12px;padding:8px 12px;max-width:85%;font-size:14px;word-break:break-word">${esc(m.text)}</div>
         <div style="font-size:10px;color:var(--hint);margin-top:2px">${isOut?'↑ Отправлено':'↓ Получено'} ${ago(m.created_at)}</div>
       </div>`;
-    }).join('');
+    }).join('') + moreBtn(msgs.length, relTotal, 'openRelaySessionMore()');
     // Scroll to bottom
     const el = document.getElementById('relayMsgBody');
     el.scrollTop = el.scrollHeight;
-  } catch(e) { txt('relayMsgBody', empty('⚠️','Ошибка',e.message)); }
+  } catch(e) { txt('relayMsgBody', errHtml(e.message, 'retryRelaySession()')); }
 }
 
 // ── API Keys ───────────────────────────────────────────
@@ -21094,11 +21115,15 @@ function showParserTab(tab) {
   document.getElementById('parserTabAudience').className = tab==='audience'?'btn btn-p':'btn btn-s';
   if (tab==='audience') loadParsedAudience('');
 }
-async function loadParserRuns() {
-  txt('parserRunList','<div class="spin-wrap"><div class="spin"></div></div>');
+let PRUNS_LIMIT = 30;
+async function loadParserRunsMore() { PRUNS_LIMIT += 200; await loadParserRuns(true); }
+async function loadParserRuns(keep) {
+  if (!keep) PRUNS_LIMIT = 30;
+  if (!keep) txt('parserRunList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/parser/runs');
-    const runs = d.runs||[];
+    const d = await api('/api/miniapp/parser/runs?limit='+PRUNS_LIMIT);
+    const runs = listOf(d,'runs');
+    const prTotal = totalOf(d, runs);
     PARSER_RUNS = runs;   // для «→ в рассылку» без проблем с экранированием
     if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг')); return; }
     const stIco = {pending:'⏳',running:'⚙️',done:'✅',empty:'∅',failed:'❌',cancelled:'🚫'};
@@ -21115,9 +21140,14 @@ async function loadParserRuns() {
           <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="startInviteFromParse(${r.id})">➕ В инвайт</button>
         </div>`:''}
       </div>
-    `).join(''));
-    txt('m-parser-cnt', runs.filter(r=>r.status==='done').reduce((s,r)=>s+r.total_saved,0)+' спарсено');
-  } catch(e) { txt('parserRunList', empty('⚠️','Ошибка',e.message)); }
+    `).join('') + moreBtn(runs.length, prTotal, 'loadParserRunsMore()'));
+    // Сумма по ВСЕЙ истории приходит с сервера: посчитать её по показанной
+    // странице нельзя — при 200 запусках вышла бы сумма последних тридцати.
+    const savedAll = (d && d.saved_total != null)
+      ? d.saved_total
+      : runs.filter(r=>r.status==='done').reduce((s,r)=>s+r.total_saved,0);
+    txt('m-parser-cnt', num(savedAll)+' спарсено');
+  } catch(e) { txt('parserRunList', errHtml(e.message, 'loadParserRuns()')); }
 }
 let AUD_FILTERS = {premium:false, with_username:false, not_bot:false, active:false, with_phone:false};
 let AUD_SOURCE = '';
@@ -22730,10 +22760,15 @@ async function openChannelFactory(asGroup) {
 function cfAccAll(on) {
   document.querySelectorAll('#cfAccts .ca-acc-cb').forEach(cb => { cb.checked = !!on; });
 }
-async function loadCfRecent() {
-  txt('cfRecent','<div class="spin-wrap"><div class="spin"></div></div>');
+let CFR_LIMIT = 20;
+async function loadCfRecentMore() { CFR_LIMIT += 200; await loadCfRecent(true); }
+async function loadCfRecent(keep) {
+  if (!keep) CFR_LIMIT = 20;
+  if (!keep) txt('cfRecent','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const rows = await api('/api/miniapp/channel_factory/recent');
+    const d = await api('/api/miniapp/channel_factory/recent?limit='+CFR_LIMIT);
+    const rows = listOf(d,'items');
+    const cfTotal = totalOf(d, rows);
     if (!rows.length) { txt('cfRecent', empty('📢','Нет каналов','')); return; }
     txt('cfRecent', rows.map(r=>`
       <div class="row">
@@ -22743,8 +22778,8 @@ async function loadCfRecent() {
           <div class="row-val" style="color:var(--hint)">${ago(r.added_at||r.created_at)}</div>
         </div>
       </div>
-    `).join(''));
-  } catch(e) { txt('cfRecent', empty('⚠️','Ошибка',e.message)); }
+    `).join('') + moreBtn(rows.length, cfTotal, 'loadCfRecentMore()'));
+  } catch(e) { txt('cfRecent', errHtml(e.message, 'loadCfRecent()')); }
 }
 // Живой предпросмотр генерируемых имён/@ до создания. prefix: 'cf' (каналы) | 'bf' (боты).
 async function previewFactoryNames(prefix) {
@@ -23189,11 +23224,15 @@ async function submitCloner() {
 }
 
 // ── Clone Adapt ─────────────────────────────────────────
-async function openCloneAdapt() {
-  push('s-cloneadapt');
-  txt('caHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
+let CA_LIMIT = 30;
+async function openCloneAdaptMore() { CA_LIMIT += 200; await openCloneAdapt(true); }
+async function openCloneAdapt(keep) {
+  if (!keep) { CA_LIMIT = 30; push('s-cloneadapt'); }
+  if (!keep) txt('caHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const rows = await api('/api/miniapp/clone_adapt/history');
+    const d = await api('/api/miniapp/clone_adapt/history?limit='+CA_LIMIT);
+    const rows = listOf(d,'items');
+    const caTotal = totalOf(d, rows);
     if (!rows.length) { txt('caHistory', empty('🔄','Нет истории','')); return; }
     txt('caHistory', rows.map(r => {
       const src = r.source_name || (r.source_uname?'@'+r.source_uname:'—');
@@ -23209,8 +23248,8 @@ async function openCloneAdapt() {
           </div>
         </div>
       `;
-    }).join(''));
-  } catch(e) { txt('caHistory', empty('⚠️','Ошибка',e.message)); }
+    }).join('') + moreBtn(rows.length, caTotal, 'openCloneAdaptMore()'));
+  } catch(e) { txt('caHistory', errHtml(e.message, 'openCloneAdapt()')); }
 }
 
 async function openCloneModal() {
@@ -23725,12 +23764,27 @@ async function openSemanticMemory() {
     `).join(''));
   } catch(e) { txt('semList', empty('⚠️','Ошибка',e.message)); }
 }
-async function openSemFacts(botId, botName) {
-  push('s-semfacts');
-  document.getElementById('semfacts-name').textContent = botName + ' — факты';
-  txt('semfactsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+let _SEMF_ARGS = null, SEMF_LIMIT = 100;
+async function openSemFactsMore() {
+  if (!_SEMF_ARGS) return;
+  SEMF_LIMIT += 400;
+  await openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
+}
+function retrySemFacts() {
+  if (_SEMF_ARGS) openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
+}
+async function openSemFacts(botId, botName, keep) {
+  _SEMF_ARGS = [botId, botName];
+  if (!keep) {
+    SEMF_LIMIT = 100;
+    push('s-semfacts');
+    document.getElementById('semfacts-name').textContent = botName + ' — факты';
+    txt('semfactsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const rows = await api(`/api/miniapp/semantic_memory/${botId}`);
+    const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=${SEMF_LIMIT}`);
+    const rows = listOf(d,'items');
+    const semTotal = totalOf(d, rows);
     if (!rows.length) { txt('semfactsList', empty('🧬','Фактов нет','')); return; }
     const byUser = {};
     rows.forEach(r => { if (!byUser[r.user_id]) byUser[r.user_id]=[]; byUser[r.user_id].push(r); });
@@ -23741,8 +23795,8 @@ async function openSemFacts(botId, botName) {
           ${facts.map(f=>`<div class="row-val">${esc(f.fact_key)}: ${esc(String(f.fact_value))} <span style="color:var(--hint)">(${Math.round((f.confidence||1)*100)}%)</span></div>`).join('')}
         </div>
       </div>
-    `).join(''));
-  } catch(e) { txt('semfactsList', empty('⚠️','Ошибка',e.message)); }
+    `).join('') + moreBtn(rows.length, semTotal, 'openSemFactsMore()'));
+  } catch(e) { txt('semfactsList', errHtml(e.message, 'retrySemFacts()')); }
 }
 
 // ── Audience DNA ───────────────────────────────────────

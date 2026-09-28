@@ -25,6 +25,10 @@ OWNER_BUILT_LISTS = [
     "new_users", "notary_list", "keywords", "chatlist_folders_list",
     "competitors_list", "ai_memory_list", "asset_templates_list",
     "presence_packs_list", "narrative_campaigns_list",
+    # История — тот же случай: «последние 30» выдавались за всю историю.
+    "parser_runs", "reg_check_history", "clone_adapt_history",
+    "channel_factory_recent", "relay_session_messages", "semantic_memory_bot",
+    "uch_contact_history",
 ]
 
 # Экранные функции, где кнопка «Показать ещё» обязана быть.
@@ -32,6 +36,8 @@ SCREENS_WITH_MORE = [
     "loadCompetitors", "loadKeywords", "openNewUsers", "openNotary",
     "openFolders", "openAiMemory", "loadAssetTpl", "openPresencePacks",
     "openNarrative",
+    "loadParserRuns", "openRegCheck", "openCloneAdapt", "loadCfRecent",
+    "openRelaySession", "openSemFacts",
 ]
 
 
@@ -90,7 +96,7 @@ def test_capped_routes_return_the_real_total():
                          if not l.lstrip().startswith("#"))
         if "_list_limit(" not in code:
             broken.append(f"{name}: потолок не подвинуть — экран не сможет догрузить")
-        elif "COUNT(*)" not in code or '"total"' not in code:
+        elif "COUNT(*)" not in code or not re.search(r"[\"']total[\"']\s*:", code):
             broken.append(f"{name}: в ответе нет настоящего итога (COUNT + total)")
     assert not broken, (
         "Список обрывается молча — владелец примет страницу за весь список:\n  "
@@ -146,3 +152,30 @@ def test_load_more_handlers_exist():
     assert not missing, (
         "Кнопка «Показать ещё» зовёт несуществующую функцию — нажатие ничего "
         f"не сделает: {missing}")
+
+
+def test_parsed_total_is_counted_by_the_database():
+    """Сумму по всей истории нельзя сложить из показанной страницы."""
+    body = _api_funcs()["parser_runs"]
+    assert "saved_total" in body and "SUM(total_saved)" in body, (
+        "сумма спарсенного снова считается не по всей истории")
+    js = _js_func("loadParserRuns")
+    line = next((l for l in js.splitlines()
+                 if "m-parser-cnt" in l and not l.lstrip().startswith("//")), None)
+    assert line is not None, "плитка спарсенного больше не заполняется"
+    assert "reduce(" not in line, (
+        "плитка «N спарсено» снова складывает показанную страницу: при 200 "
+        "запусках это сумма последних тридцати")
+
+
+def test_merged_timeline_admits_it_is_cut():
+    """У склеенной ленты итога нет — но сказать о срезе всё равно обязаны."""
+    body = _api_funcs()["uch_timeline"]
+    code = "\n".join(l for l in body.splitlines() if not l.lstrip().startswith("#"))
+    assert re.search(r"truncated\s*=\s*len\(", code), (
+        "признак среза больше не вычисляется по тому, сколько строк реально "
+        "взяли — а значит ничего не значит")
+    assert re.search(r"[\"']truncated[\"']\s*:", code), (
+        "признак среза не уходит на экран")
+    js = _js_func("openContactTimeline")
+    assert "truncated" in js, "экран ленты касаний молчит о срезе"

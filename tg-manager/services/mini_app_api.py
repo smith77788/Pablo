@@ -10465,10 +10465,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """SELECT entity_id, entity_type, entity_name, username,
                           reg_date, method, checked_at
                    FROM reg_check_cache WHERE checked_by=$1
-                   ORDER BY checked_at DESC LIMIT 30""",
-                uid,
+                   ORDER BY checked_at DESC LIMIT $2""",
+                uid, _list_limit(request, 30, 1000),
             )
-            return _json_resp({"checks": [
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM reg_check_cache WHERE checked_by=$1", uid)
+            return _json_resp({"total": total, "checks": [
                 {
                     **dict(r),
                     "reg_date": r["reg_date"].isoformat() if r["reg_date"] else None,
@@ -12585,13 +12587,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             msgs = await pool.fetch(
                 "SELECT id, direction, text, created_at FROM relay_messages "
-                "WHERE session_id=$1 ORDER BY created_at ASC LIMIT 100",
-                session_id,
+                "WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2",
+                session_id, _list_limit(request, 100, 2000),
             )
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM relay_messages WHERE session_id=$1", session_id)
         except Exception as exc:
             log.exception("relay_session_messages msgs uid=%d sess=%d", uid, session_id)
             return _err(str(exc), 500)
-        return _json_resp({"messages": [
+        return _json_resp({"total": total, "messages": [
             {
                 "id": r["id"],
                 "direction": r["direction"],
@@ -13228,13 +13232,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rows = await pool.fetch(
                 """SELECT id, source_type, source_ref, parse_type, status,
                           total_found, total_saved, started_at, finished_at, error
-                   FROM parser_runs WHERE owner_id=$1 ORDER BY started_at DESC LIMIT 30""",
-                uid,
+                   FROM parser_runs WHERE owner_id=$1
+                    ORDER BY started_at DESC LIMIT $2""",
+                uid, _list_limit(request, 30, 1000),
             )
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM parser_runs WHERE owner_id=$1", uid)
+            # Плитка «N спарсено» суммировала показанную страницу: при 200
+            # запусках она называла сумму последних тридцати. Сумму по всей
+            # истории может посчитать только база.
+            saved_total = await _safe_count(pool,
+                "SELECT COALESCE(SUM(total_saved),0) FROM parser_runs "
+                "WHERE owner_id=$1 AND status='done'", uid)
         except Exception as exc:
             log.exception("parser_runs uid=%d", uid)
             return _err(str(exc), 500)
-        return _json_resp({"runs": [
+        return _json_resp({"total": total, "saved_total": saved_total, "runs": [
             {
                 "id": r["id"],
                 "source": r["source_ref"] or "",
@@ -16430,10 +16443,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await pool.fetch(
                 "SELECT id, title, username, type, added_at FROM managed_channels "
-                "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT 20",
-                uid,
+                "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT $2",
+                uid, _list_limit(request, 20, 1000),
             )
-            return _json_resp([dict(r) for r in rows])
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
+            # Было — голый массив; экран показывал 20 последних как весь список.
+            return _json_resp({"items": [dict(r) for r in rows], "total": total})
         except Exception as exc:
             log.exception("channel_factory_recent uid=%d", uid)
             return _err(str(exc), 500)
@@ -16745,11 +16761,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 FROM clone_adapt_history h
                 LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
                 LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
-                WHERE h.owner_id=$1 ORDER BY h.created_at DESC LIMIT 30
+                WHERE h.owner_id=$1 ORDER BY h.created_at DESC LIMIT $2
                 """,
-                uid,
+                uid, _list_limit(request, 30, 1000),
             )
-            return _json_resp([dict(r) for r in rows])
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM clone_adapt_history WHERE owner_id=$1", uid)
+            # Было — голый массив; история обрывалась на 30 записях молча.
+            return _json_resp({"items": [dict(r) for r in rows], "total": total})
         except Exception as exc:
             log.exception("clone_adapt_history uid=%d", uid)
             return _err(str(exc), 500)
@@ -17324,10 +17343,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Это не ваш ресурс", 403)
             facts = await pool.fetch(
                 "SELECT user_id, fact_key, fact_value, confidence, updated_at "
-                "FROM bot_user_facts WHERE bot_id=$1 ORDER BY updated_at DESC LIMIT 100",
-                bot_id,
+                "FROM bot_user_facts WHERE bot_id=$1 ORDER BY updated_at DESC LIMIT $2",
+                bot_id, _list_limit(request, 100, 2000),
             )
-            return _json_resp([dict(r) for r in facts])
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM bot_user_facts WHERE bot_id=$1", bot_id)
+            # Было — голый массив; сотня фактов выдавалась за всю память бота.
+            return _json_resp({"items": [dict(r) for r in facts], "total": total})
         except Exception as exc:
             log.exception("semantic_memory_bot uid=%d bot=%d", uid, bot_id)
             return _err(str(exc), 500)
@@ -21530,9 +21552,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             cid = request.match_info['contact_id']
             rows = await pool.fetch(
-                'SELECT * FROM contact_history WHERE contact_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 100',
+                'SELECT * FROM contact_history WHERE contact_id=$1 AND owner_id=$2 '
+                'ORDER BY created_at DESC LIMIT $3',
+                cid, uid, _list_limit(request, 100, 2000))
+            total = await _safe_count(pool,
+                'SELECT COUNT(*) FROM contact_history WHERE contact_id=$1 AND owner_id=$2',
                 cid, uid)
-            return _json_resp({'history': [dict(r) for r in rows]})
+            return _json_resp({'history': [dict(r) for r in rows], 'total': total})
         except Exception as e:
             return _err(str(e), 500)
 
@@ -21641,7 +21667,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 crm=dict(crm_row) if crm_row else None)
             out = [{**i, "ts": i["ts"].isoformat() if hasattr(i["ts"], "isoformat") else i["ts"]}
                    for i in items]
-            return _json_resp({'timeline': out, 'count': len(out)})
+            # Лента склеена из разных источников, поэтому «сколько всего» для
+            # неё не существует как одно число. Но сказать, что показано не
+            # всё, обязаны: каждая часть взята с потолком, и при его достижении
+            # более ранние касания в ленту просто не попали.
+            truncated = len(history or []) >= 60 or len(events or []) >= 60
+            return _json_resp({'timeline': out, 'count': len(out),
+                               'truncated': truncated})
         except Exception as e:
             return _err(str(e), 500)
 
