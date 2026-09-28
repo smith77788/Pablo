@@ -83,11 +83,16 @@ async def search_public(
     limit: int = 20,
     _acc: dict | None = None,
     pool=None,
+    already_claimed: bool = False,
 ) -> dict:
     """Глобальный поиск публичных сущностей по строке *query*.
 
     Возвращает {ok, results: [{type, id, title, username, participants, verified}], error?}.
     ``limit`` ограничивает и запрос к Telegram, и размер ответа (макс. 50).
+
+    ``already_claimed=True`` — вызывающий УЖЕ держит аренду на этот аккаунт
+    (так делает исполнитель операции: он захватил флот до вызова). Захват не
+    реентрантный, поэтому повторный привёл бы к отказу самому себе.
     """
     query = (query or "").strip().lstrip("@")
     if not query:
@@ -97,6 +102,24 @@ async def search_public(
     from services.account_manager import _make_client
     from telethon.tl.functions.contacts import SearchRequest
     from telethon.errors import FloodWaitError
+
+    # Разовый поиск — такое же живое подключение аккаунтом, как операция, и
+    # берём аккаунт у ТОГО ЖЕ арбитра. Процессный мьютекс сессии здесь не
+    # помощник: роли web и worker — разные процессы, у каждого своя карта;
+    # единственный межпроцессный арбитр — аренда в БД (op_worker).
+    _acc_id = int((_acc or {}).get("id") or 0)
+    _leased = False
+    if _acc_id and not already_claimed:
+        from services import op_worker as _opw
+
+        _leased = await _opw.try_claim_account(_acc_id)
+        if not _leased:
+            return {
+                "ok": False,
+                "error": "⏳ Аккаунт сейчас занят другой задачей — повторите через минуту.",
+                "error_code": "account_busy",
+                "results": [],
+            }
 
     client = _make_client(session_string, _acc)
     try:
@@ -162,3 +185,10 @@ async def search_public(
             await client.disconnect()
         except Exception:
             pass
+        if _leased:
+            try:
+                from services import op_worker as _opw
+
+                await _opw.release_accounts([_acc_id])
+            except Exception:
+                log.warning("global_search: аренда аккаунта не отпущена", exc_info=True)

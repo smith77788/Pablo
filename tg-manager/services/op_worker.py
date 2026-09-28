@@ -4793,7 +4793,8 @@ async def _exec_find_contact(
         for q in filter(None, [prefix, name]):
             try:
                 res = await asyncio.wait_for(
-                    gse.search_public(acc0["session_str"], q, 30, _acc=acc0, pool=pool), timeout=40
+                    gse.search_public(acc0["session_str"], q, 30, _acc=acc0, pool=pool,
+                                      already_claimed=True), timeout=40
                 )
             except Exception as e:
                 log.warning("find_contact op=%d нативный поиск q=%r: %s", op_id, q, e)

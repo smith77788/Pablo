@@ -139,8 +139,41 @@ async def _close_quietly(client) -> None:
         log_exc_swallow(log, "entity_analyzer: disconnect после неудачного коннекта")
 
 
+async def _release_lease(acc_id: int) -> None:
+    """Отпустить аренду, если коннект так и не состоялся."""
+    if not acc_id:
+        return
+    try:
+        from services import op_worker as _opw
+
+        await _opw.release_accounts([acc_id])
+    except Exception:
+        log_exc_swallow(log, "entity_analyzer: аренда аккаунта не отпущена")
+
+
+async def _release_client_lease(client) -> None:
+    """Отпустить аренду аккаунта, на котором работал клиент разбора.
+
+    Вызывается рядом с `disconnect` в `finally` каждой точки входа: аренда
+    живёт ровно столько же, сколько подключение. Не подменяем `disconnect`
+    клиента — у него уже есть обёртка мьютекса сессии, и вторая подмена делает
+    поведение клиента непредсказуемым для вызывающих.
+    """
+    await _release_lease(int(getattr(client, "_infragram_acc_id", 0) or 0))
+
+
 async def _get_client(pool: asyncpg.Pool, owner_id: int):
-    """Return first connected client from account pool (resilient: tries all)."""
+    """Первый подключённый клиент из флота владельца (перебираем все).
+
+    Аккаунт берём через АРБИТРА операций (`op_worker.try_claim_account`), а не
+    просто по выборке: разбор сущности — такое же живое подключение, как
+    массовая операция, и без захвата мы коннектим сессию, которую прямо сейчас
+    ведёт операция. Процессный мьютекс сессии здесь не спасает — роли
+    `INFRAGRAM_ROLE=web` и `worker` это РАЗНЫЕ процессы, и карта занятости у
+    каждого своя; единственный межпроцессный арбитр — аренда в БД. Занятый
+    аккаунт просто пропускаем: во флоте есть другие.
+    """
+    from services import op_worker as _opw
     from services import resource_selector
     from services.account_manager import _make_client
 
@@ -148,6 +181,9 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
     for acc in candidates:
         if not acc.get("session_str"):
             continue
+        _lease_id = int(acc.get("id") or 0)
+        if _lease_id and not await _opw.try_claim_account(_lease_id):
+            continue  # аккаунт ведёт операция или фоновый цикл — берём следующий
         # Словарь аккаунта передаём ЦЕЛИКОМ: транспорт выбирается по его полям
         # (proxy_id, cf_relay_url, id, ipv6_subnet). Без него клиент уходил
         # НАПРЯМУЮ с host-IP, пока остальные подсистемы того же аккаунта шли
@@ -158,18 +194,19 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
             await asyncio.wait_for(client.connect(), timeout=12)
             # Запоминаем, чьим аккаунтом работаем: без этого паузу Telegram
             # некуда записать — обработчик ошибки видит только клиента.
-            try:
-                client._infragram_acc_id = int(acc.get("id") or 0)
-            except Exception:
-                client._infragram_acc_id = 0
+            # Запомненный id нужен двум вещам: записать паузу Telegram в пульс
+            # и отпустить аренду в `finally` вызывающего.
+            client._infragram_acc_id = _lease_id
             return client
         except Exception:
             log_exc_swallow(log, "connect to Telegram client")
             await _close_quietly(client)
+            await _release_lease(_lease_id)
         except BaseException:
             # Отмена внешним таймаутом мимо `except Exception` проходит насквозь,
             # а ссылки на подключённого клиента ни у кого нет — закрываем здесь.
             await _close_quietly(client)
+            await _release_lease(_lease_id)
             raise
     return None
 
@@ -857,6 +894,7 @@ async def analyze_channel(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "disconnect analysis client")
+        await _release_client_lease(client)
 
 
 async def analyze_user(
@@ -1099,6 +1137,7 @@ async def analyze_user(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "disconnect analysis client")
+        await _release_client_lease(client)
 
 
 async def analyze_telegram_object(
@@ -1191,6 +1230,7 @@ async def analyze_telegram_object(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "disconnect analysis client")
+        await _release_client_lease(client)
 
     # Route to the appropriate analyzer
     if isinstance(entity, User):

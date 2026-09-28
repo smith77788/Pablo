@@ -156,10 +156,56 @@ async def _record_parse_flood(pool, account_id, seconds: int) -> None:
         log_exc_swallow(log, "parser: FloodWait не записан в пульс здоровья")
 
 
-async def _get_best_account(pool: asyncpg.Pool, owner_id: int) -> dict | None:
+# Сколько аккаунтов перебрать, если лучшие заняты. Пять — чтобы разбор не
+# упирался в одну занятую сессию и при этом не перебирал весь флот.
+_CLAIM_TRIES = 5
+
+
+async def _claim_best_account(pool: asyncpg.Pool, owner_id: int) -> tuple[dict | None, int]:
+    """Лучший СВОБОДНЫЙ аккаунт под разбор + его id для последующего release.
+
+    Разбор аудитории — живое подключение аккаунтом, ничем не отличающееся от
+    массовой операции, и берётся оно через того же арбитра
+    (`op_worker.try_claim_account`). Без захвата разбор коннектил сессию,
+    которую прямо сейчас ведёт операция. Процессный мьютекс сессии это не
+    закрывает: роли `INFRAGRAM_ROLE=web` и `worker` — РАЗНЫЕ процессы, карта
+    занятости у каждого своя, и единственный межпроцессный арбитр — аренда
+    в БД.
+
+    Занятый аккаунт не ждём, а исключаем и просим следующий по качеству:
+    `get_best_account` умеет `exclude_ids`. Возвращает (аккаунт, id аренды);
+    (None, 0) — свободных нет.
+    """
+    from services import op_worker as _opw
     from services.flood_engine import get_best_account
 
-    return await get_best_account(pool, owner_id, action_type="parse")
+    exclude: list[int] = []
+    for _ in range(_CLAIM_TRIES):
+        acc = await get_best_account(
+            pool, owner_id, action_type="parse", exclude_ids=exclude
+        )
+        if not acc:
+            return None, 0
+        acc_id = int(acc.get("id") or 0)
+        if not acc_id:
+            return dict(acc), 0
+        if await _opw.try_claim_account(acc_id):
+            return dict(acc), acc_id
+        exclude.append(acc_id)
+    return None, 0
+
+
+async def _release_account(acc_id: int) -> None:
+    """Отпустить аренду аккаунта после разбора. Своя ошибка разбор не роняет,
+    но молчать нельзя: неотпущенная аренда паркует аккаунт в этом процессе."""
+    if not acc_id:
+        return
+    try:
+        from services import op_worker as _opw
+
+        await _opw.release_accounts([acc_id])
+    except Exception:
+        log.warning("parser: аренда аккаунта не отпущена", exc_info=True)
 
 
 async def _create_run(
@@ -278,9 +324,11 @@ async def parse_members(
     from telethon.tl.functions.channels import GetParticipantsRequest
     from telethon.tl.types import ChannelParticipantsSearch
 
-    acc = await _get_best_account(pool, owner_id)
+    acc, _leased = await _claim_best_account(pool, owner_id)
     if not acc:
-        return {"status": "error", "error": "Нет доступных аккаунтов"}
+        return {"status": "error",
+                "error": "Нет свободных аккаунтов — все заняты или на паузе. "
+                         "Повторите через минуту."}
 
     run_id = await _create_run(
         pool, owner_id, "channel", source_ref, "members", acc["id"]
@@ -392,6 +440,7 @@ async def parse_members(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой disconnect клиента в parser")
+        await _release_account(_leased)
 
     status = "done" if total_found > 0 else "empty"
     # Оборванный флудом разбор — НЕ полный результат. Раньше он выглядел как
@@ -538,9 +587,11 @@ async def parse_active_users(
     """
     from services import account_manager
 
-    acc = await _get_best_account(pool, owner_id)
+    acc, _leased = await _claim_best_account(pool, owner_id)
     if not acc:
-        return {"status": "error", "error": "Нет доступных аккаунтов"}
+        return {"status": "error",
+                "error": "Нет свободных аккаунтов — все заняты или на паузе. "
+                         "Повторите через минуту."}
 
     run_id = await _create_run(pool, owner_id, "group", source_ref, "active", acc["id"])
 
@@ -589,6 +640,7 @@ async def parse_active_users(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой disconnect клиента в parser")
+        await _release_account(_leased)
 
     status = "done" if total_found > 0 else "empty"
     # Оборванный флудом разбор — НЕ полный результат. Раньше он выглядел как
@@ -635,9 +687,11 @@ async def parse_commenters(
     from services import account_manager
     from telethon.tl.functions.channels import GetFullChannelRequest
 
-    acc = await _get_best_account(pool, owner_id)
+    acc, _leased = await _claim_best_account(pool, owner_id)
     if not acc:
-        return {"status": "error", "error": "Нет доступных аккаунтов"}
+        return {"status": "error",
+                "error": "Нет свободных аккаунтов — все заняты или на паузе. "
+                         "Повторите через минуту."}
 
     run_id = await _create_run(
         pool, owner_id, "comments", source_ref, "comments", acc["id"]
@@ -705,6 +759,7 @@ async def parse_commenters(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой disconnect клиента в parser")
+        await _release_account(_leased)
 
     status = "done" if total_found > 0 else "empty"
     # Оборванный флудом разбор — НЕ полный результат. Раньше он выглядел как
