@@ -2774,15 +2774,15 @@ async def get_randomized_interval(base_interval: float) -> float:
     return base_interval * jitter
 
 
-async def rotate_proxy_for_strike(pool, account_id: int) -> str | None:
-    try:
-        row = await pool.fetchrow(
-            "SELECT proxy_url FROM user_proxies WHERE is_active=TRUE ORDER BY RANDOM() LIMIT 1"
-        )
-        return row["proxy_url"] if row else None
-    except Exception as e:
-        log.warning("rotate_proxy_for_strike: %s", e)
-        return None
+# rotate_proxy_for_strike удалена (сентябрь 2026). Она брала СЛУЧАЙНЫЙ активный
+# прокси по всей платформе: account_id игнорировался, владелец не проверялся, и
+# страйк уходил бы через чужой прокси — чужой трафик, чужой IP под нашей
+# активностью и перенос бана на чужие аккаунты. Вернуть она могла только
+# шифротекст (proxy_url лежит зашифрованным, расшифровки не было), так что
+# работать всё равно не могла. Смена прокси у аккаунта идёт через
+# services/proxy_rotation (owner-scoped, с расшифровкой и учётом привязки
+# прокси к аккаунту). Возврат такой выборки стережёт
+# tests/test_proxy_selection_is_owner_scoped.py.
 
 
 async def generate_strike_report(pool, operation_id: int) -> dict:
