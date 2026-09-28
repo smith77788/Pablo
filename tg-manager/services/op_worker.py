@@ -14827,11 +14827,41 @@ async def _exec_content_clone(
 
     ok_count = 0
     fail_count = 0
+    skip_count = 0
     cloned_to: list[str] = []
+
+    # Журнал по целям. Без него повтор клонировал содержимое ВТОРОЙ раз в
+    # каналы, которые его уже получили. Причём повтор здесь не редкость, а
+    # штатный ход: на FloodWait исполнитель сам возвращает 'requeue' с задержкой
+    # (см. ниже), и следующий прогон начинал список сначала — половина каналов
+    # получала дубль постов.
+    async def _log_tgt(step: int, key: str, ok: bool, msg: str = "") -> None:
+        await _safe_execute(
+            pool,
+            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+            "VALUES($1,$2,$3,$4,$5)",
+            op_id, step, key, "ok" if ok else "error", (msg or None),
+            log_ctx=f"[content_clone_log op={op_id}]",
+        )
+
+    _already = await completed_targets(pool, op_id)
+    if _already:
+        log.info("content_clone op=%d: повтор — %d целей уже получили содержимое",
+                 op_id, len(_already))
 
     for idx, target_ref in enumerate(target_refs, 1):
         if await _is_cancelled(pool, op_id):
             return {"status": "cancelled", "summary": f"Отменено на {idx - 1}/{total}"}
+        if str(target_ref) in _already:
+            # Работа сделана прошлым прогоном: счётчик не должен проседать
+            # только потому, что сделал её не этот прогон.
+            ok_count += 1
+            skip_count += 1
+            cloned_to.append(target_ref)
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id)
+            continue
         try:
             res = await clone_to_channel(
                 acc["session_str"], acc, source_ref, target_ref, msg_ids, mode,
@@ -14839,8 +14869,11 @@ async def _exec_content_clone(
             if res["ok"] > 0:
                 ok_count += 1
                 cloned_to.append(target_ref)
+                await _log_tgt(idx, str(target_ref), True)
             else:
                 fail_count += 1
+                await _log_tgt(idx, str(target_ref), False,
+                               "; ".join(str(e) for e in (res.get("errors") or [])[:2]))
                 log.warning(
                     "content_clone op=%d target=%s: ok=0 errors=%s",
                     op_id, target_ref, res["errors"][:2],
@@ -14879,6 +14912,7 @@ async def _exec_content_clone(
         except Exception as exc:
             log.warning("content_clone op=%d target=%s: %s", op_id, target_ref, exc)
             fail_count += 1
+            await _log_tgt(idx, str(target_ref), False, str(exc)[:200])
 
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -14891,6 +14925,9 @@ async def _exec_content_clone(
         f"📋 {mode_label} из {source_ref}\n"
         f"📨 Сообщений: {len(msg_ids)} → {total} канал(ов)\n"
         f"✅ Успешно: {ok_count}"
+        # Пропущенные называем прямо: иначе повтор выглядит мгновенным успехом,
+        # и непонятно, отправилось что-то заново или нет.
+        + (f" (из них {skip_count} уже получили в прошлый раз)" if skip_count else "")
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
     )
     return {
@@ -16019,20 +16056,51 @@ async def _exec_report_peer(
 
     ok_count = 0
     fail_count = 0
+    skip_count = 0
+
+    # Журнал по аккаунтам. Повтор операции (сеть, таймаут, сброс зависшей) без
+    # него заставлял УЖЕ отрепортивший аккаунт жаловаться на ту же цель второй
+    # раз. Охвата это не добавляет — Telegram считает повторный репорт с того же
+    # аккаунта тем же голосом, — зато это ровно то поведение, за которое аккаунт
+    # получает ограничения, а репорт и так самое рискованное действие в списке.
+    async def _log_acc_rep(step: int, key: str, ok: bool, msg: str = "") -> None:
+        await _safe_execute(
+            pool,
+            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+            "VALUES($1,$2,$3,$4,$5)",
+            op_id, step, key, "ok" if ok else "error", (msg or None),
+            log_ctx=f"[report_peer_log op={op_id}]",
+        )
+
+    _already = await completed_targets(pool, op_id)
+    if _already:
+        log.info("report_peer op=%d: повтор — %d аккаунтов уже отправили жалобу",
+                 op_id, len(_already))
 
     for idx, acc in enumerate(accounts):
         if await _is_cancelled(pool, op_id):
             break
+        _key = str(acc["id"])
+        if _key in _already:
+            ok_count += 1
+            skip_count += 1
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                op_id)
+            continue
         try:
             res = await rep.report_peer(dict(acc)["session_str"], dict(acc), target, reason)
             if res["ok"]:
                 ok_count += 1
+                await _log_acc_rep(idx + 1, _key, True)
             else:
                 fail_count += 1
+                await _log_acc_rep(idx + 1, _key, False, str(res.get("error") or "")[:200])
                 log.debug("report_peer acc=%d: %s", acc["id"], res.get("error"))
         except Exception as exc:
             log.warning("_exec_report_peer acc=%d: %s", acc["id"], exc)
             fail_count += 1
+            await _log_acc_rep(idx + 1, _key, False, str(exc)[:200])
 
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -16044,7 +16112,11 @@ async def _exec_report_peer(
         "ok": ok_count,
         "failed": fail_count,
         "total": len(accounts),
-        "summary": f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно" + (f" ❌ {fail_count}" if fail_count else ""),
+        # Пропущенные называем прямо: иначе повтор выглядит мгновенным успехом,
+        # и непонятно, ушла жалоба заново или нет.
+        "summary": (f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно"
+                    + (f" (из них {skip_count} отправили в прошлый раз)" if skip_count else "")
+                    + (f" ❌ {fail_count}" if fail_count else "")),
     }
 
 
