@@ -2059,6 +2059,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Аналитика и CRM</div>
     <div style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Статистика, аудитория ботов, контакты, воронки и A/B-эксперименты.</div>
     <div class="mgmt-grid">
+      <div class="mgmt-tile" onclick="openDashboard()">
+        <div class="mgmt-tile-ico">📊</div>
+        <div class="mgmt-tile-lbl">Сводка</div>
+        <div class="mgmt-tile-val" id="m-dash-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openKeywordsScreen()">
         <div class="mgmt-tile-ico">🔍</div>
         <div class="mgmt-tile-lbl">Позиции</div>
@@ -3889,6 +3894,36 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="bs-more" style="padding:12px 16px;display:none">
       <button class="btn btn-s" style="width:100%" onclick="loadMoreSubs()">Загрузить ещё</button>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ СВОДКА ══════════════════════ -->
+<div class="screen" id="s-dashboard">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">📊 Сводка</div>
+    <div class="hdr-meta"><button class="btn btn-s" style="padding:7px 12px;font-size:13px" onclick="loadDashboard()">⟳ Обновить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="dashKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
+    <div class="sec" style="margin-top:8px">По дням</div>
+    <div class="filter-chips" id="dashMetricChips">
+      <div class="chip on" onclick="dashSetMetric('operations',this)">Операции</div>
+      <div class="chip" onclick="dashSetMetric('accounts',this)">Аккаунты</div>
+      <div class="chip" onclick="dashSetMetric('audience',this)">Аудитория</div>
+      <div class="chip" onclick="dashSetMetric('health',this)">Здоровье</div>
+    </div>
+    <div class="filter-chips" id="dashDayChips">
+      <div class="chip" onclick="dashSetDays(7,this)">7 дней</div>
+      <div class="chip on" onclick="dashSetDays(30,this)">30 дней</div>
+      <div class="chip" onclick="dashSetDays(90,this)">90 дней</div>
+    </div>
+    <div id="dashChartWrap" style="margin:0 16px;background:var(--bg2);border-radius:var(--radius-lg);padding:12px">
+      <canvas id="dashChart" style="display:none"></canvas>
+      <div id="dashSeriesEmpty" style="text-align:center;color:var(--hint);font-size:13px;padding:12px"></div>
+    </div>
+    <div id="dashSeriesSum" style="font-size:13px;padding:8px 16px 0"></div>
+    <div id="dashSeriesNote" style="font-size:12px;color:var(--hint);padding:4px 16px 16px;line-height:1.4"></div>
   </div>
 </div>
 
@@ -17723,6 +17758,141 @@ async function resolveConflict(id, resolution, value) {
     toast('✅ Конфликт разрешён');
     openUchConflicts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+// ── Сводка: цифры за сутки и ряды по дням ─────────────────────────────
+// Модуль analytics_dashboard считает это давно (аккаунты, операции, аудитория,
+// здоровье, оценка выручки), но ни один экран его не открывал.
+let DASH_METRIC = 'operations';
+let DASH_DAYS = 30;
+
+const DASH_METRICS = {
+  operations: {t:'Операции',  key:'total',      lbl:'операций за день',
+               src:'журнал операций'},
+  accounts:   {t:'Аккаунты',  key:'total',      lbl:'аккаунтов',
+               src:'снимки здоровья аккаунтов'},
+  audience:   {t:'Аудитория', key:'new_users',  lbl:'новых человек за день',
+               src:'первое касание в ваших ботах'},
+  health:     {t:'Здоровье',  key:'avg_health', lbl:'средний балл здоровья',
+               src:'снимки здоровья аккаунтов'},
+};
+
+function openDashboard() {
+  push('s-dashboard');
+  loadDashboard();
+}
+
+async function loadDashboard() {
+  txt('dashKpi', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/analytics/dashboard');
+    const a = d.accounts||{}, o = d.operations_24h||{}, au = d.audience||{}, h = d.health||{};
+    const card = (val, lbl, color) =>
+      `<div class="kpi-card" style="min-width:64px;text-align:center">`
+      + `<div class="kpi-val"${color?` style="color:${color}"`:''}>${val}</div>`
+      + `<div class="kpi-lbl">${lbl}</div></div>`;
+    let html = card(num(a.active||0)+' / '+num(a.total||0), 'Аккаунты в строю');
+    if (a.banned || a.spamblock) {
+      html += card(num((a.banned||0)+(a.spamblock||0)), 'Бан и спамблок', 'var(--red)');
+    }
+    html += card(num(o.total||0), 'Операций за сутки');
+    if (o.failed) html += card(num(o.failed), 'С ошибкой', 'var(--red)');
+    if (o.running) html += card(num(o.running), 'Сейчас в работе', 'var(--blue)');
+    html += card(num(au.total_users||0), 'Аудитория');
+    html += card('+'+num(au.new_7d||0), 'За неделю', 'var(--green)');
+    html += card(String(h.avg_trust != null ? h.avg_trust : '—'), 'Средний траст');
+    if (h.accounts_at_risk) html += card(num(h.accounts_at_risk), 'Под риском', 'var(--orange)');
+    txt('dashKpi', html);
+  } catch(e) {
+    // Нули вместо цифр — утверждение, которого мы не проверяли.
+    txt('dashKpi', errHtml(e.message, 'loadDashboard()'));
+  }
+  loadDashboardSeries();
+}
+
+function dashSetMetric(m, el) {
+  DASH_METRIC = m;
+  document.querySelectorAll('#dashMetricChips .chip').forEach(c=>c.classList.remove('on'));
+  if (el) el.classList.add('on');
+  loadDashboardSeries();
+}
+function dashSetDays(n, el) {
+  DASH_DAYS = n;
+  document.querySelectorAll('#dashDayChips .chip').forEach(c=>c.classList.remove('on'));
+  if (el) el.classList.add('on');
+  loadDashboardSeries();
+}
+
+async function loadDashboardSeries() {
+  const meta = DASH_METRICS[DASH_METRIC] || DASH_METRICS.operations;
+  txt('dashSeriesNote', 'Источник: ' + meta.src + ' · ' + meta.lbl);
+  const box = document.getElementById('dashSeriesEmpty');
+  const cv = document.getElementById('dashChart');
+  if (box) { box.style.display = 'block'; box.textContent = 'Считаю…'; }
+  if (cv) cv.style.display = 'none';
+  try {
+    const d = await api('/api/miniapp/analytics/historical?metric=' + encodeURIComponent(DASH_METRIC)
+                        + '&days=' + DASH_DAYS);
+    const rows = d.data || [];
+    const pts = rows.map(r => ({ date: r.date, value: Number(r[meta.key] || 0) }));
+    if (!pts.length) {
+      // Пусто по-разному: за период замеров нет — это не поломка и не ноль.
+      if (box) { box.textContent = 'За выбранный период записей нет.'; box.style.display = 'block'; }
+      txt('dashSeriesSum', '');
+      return;
+    }
+    if (box) box.style.display = 'none';
+    dashDrawChart(pts);
+    const sum = pts.reduce((s,p)=>s+p.value, 0);
+    const last = pts[pts.length-1];
+    txt('dashSeriesSum', DASH_METRIC === 'health'
+      ? `Последний замер: ${last.value} · дней с замерами: ${num(pts.length)}`
+      : `Всего за период: ${num(Math.round(sum))} · дней с записями: ${num(pts.length)}`);
+  } catch(e) {
+    if (box) { box.textContent = ''; box.style.display = 'none'; }
+    txt('dashSeriesSum', '');
+    txt('dashChartWrap', errHtml(e.message, 'loadDashboardSeries()'));
+  }
+}
+
+// Простой линейный график по дням. Без библиотеки: одна метрика, один ряд.
+function dashDrawChart(pts) {
+  const canvas = document.getElementById('dashChart');
+  if (!canvas) return;
+  canvas.style.display = 'block';
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const W = rect.width - 24, H = 150;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  const vals = pts.map(p => p.value);
+  const max = Math.max(...vals, 1), min = Math.min(...vals, 0);
+  const span = (max - min) || 1;
+  const x = i => pts.length > 1 ? (i / (pts.length - 1)) * (W - 30) + 20 : W / 2;
+  const y = v => H - 22 - ((v - min) / span) * (H - 40);
+  // Ось: минимум и максимум подписаны, иначе линия — украшение без масштаба.
+  ctx.strokeStyle = 'rgba(128,128,128,.25)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(20, y(max)); ctx.lineTo(W - 6, y(max));
+  ctx.moveTo(20, y(min)); ctx.lineTo(W - 6, y(min)); ctx.stroke();
+  ctx.fillStyle = 'rgba(128,128,128,.85)'; ctx.font = '10px -apple-system, sans-serif';
+  ctx.fillText(String(max), 0, y(max) + 3);
+  ctx.fillText(String(min), 0, y(min) + 3);
+  ctx.beginPath(); ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
+  pts.forEach((p, i) => { i ? ctx.lineTo(x(i), y(p.value)) : ctx.moveTo(x(i), y(p.value)); });
+  ctx.stroke();
+  ctx.fillStyle = '#60a5fa';
+  pts.forEach((p, i) => { ctx.beginPath(); ctx.arc(x(i), y(p.value), 2.5, 0, 6.3); ctx.fill(); });
+  // Крайние даты — чтобы график читался без легенды.
+  const shortDate = s => String(s || '').slice(5).split('-').reverse().join('.');
+  ctx.fillStyle = 'rgba(128,128,128,.85)';
+  ctx.fillText(shortDate(pts[0].date), 14, H - 5);
+  if (pts.length > 1) {
+    const t = shortDate(pts[pts.length-1].date);
+    ctx.fillText(t, W - 6 - ctx.measureText(t).width, H - 5);
+  }
 }
 
 // ── Группы контактов ──────────────────────────────────────────────────
