@@ -3722,28 +3722,82 @@ async def get_channel_members_count(
             log_exc_swallow(log, "Сбой в get_channel_members_count")
 
 
+def _chat_from_full(full, channel_id: int | str):
+    """Карточка канала из ответа GetFullChannel.
+
+    Брать имя из того, что скормили запросу, нельзя: если пир собран как
+    `InputPeerChannel(id, access_hash)` — а это основной способ добраться до
+    приватного канала, — у него нет ни title, ни username. Именно поэтому
+    сверка, даже когда она отрабатывала, писала пустое имя, оно гасилось
+    COALESCE, и канал навсегда оставался в списке под старым названием.
+
+    Настоящая карточка лежит в `full.chats` — там полноценный Channel.
+    """
+    want = _normalize_channel_id(channel_id) if channel_id is not None else 0
+    chats = list(getattr(full, "chats", None) or [])
+    for c in chats:
+        try:
+            if _normalize_channel_id(getattr(c, "id", 0) or 0) == want:
+                return c
+        except (TypeError, ValueError):
+            continue
+    return chats[0] if chats else None
+
+
 async def get_full_channel_info(
     session_string: str,
     channel_id: int | str,
     _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
 ) -> dict | None:
-    """Возвращает {'about', 'members_count', 'username', 'title'} для канала/группы."""
+    """Возвращает {'about', 'members_count', 'username', 'title'} для канала/группы.
+
+    `access_hash` и `username` — не украшение, а единственный способ вообще
+    найти канал. Раньше здесь стоял голый `client.get_entity(channel_id)`, и
+    для свежего клиента это почти всегда провал: у StringSession нет кэша
+    сущностей, а `InputChannel(id, access_hash=0)` Telegram отвергает. Функция
+    возвращала None по каждому каналу, вызывающий тихо шёл дальше — и карточки
+    не обновлялись НИКОГДА, сколько бы кругов сверка ни сделала.
+
+    Порядок резолва тот же, что и во всех рабочих путях проекта
+    (`_resolve_channel_peer`): access_hash → @username → id → обход диалогов.
+
+    ВАЖНО: access_hash в Telegram свой у каждого аккаунта. Передавать сюда хеш,
+    добытый ДРУГИМ аккаунтом, нельзя — будет CHANNEL_INVALID; в таком случае
+    передавайте 0 и username.
+    """
     from telethon.tl.functions.channels import GetFullChannelRequest
 
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(
-            int(channel_id) if str(channel_id).lstrip("-").isdigit() else channel_id
-        )
-        full = await client(GetFullChannelRequest(entity))
+        uname = (username or "").strip().lstrip("@")
+        peer = None
+        if access_hash:
+            try:
+                peer = await _resolve_channel_peer(
+                    client, _normalize_channel_id(channel_id), int(access_hash)
+                )
+            except Exception as e:
+                log.debug("get_full_channel_info: по access_hash не вышло: %s", e)
+        if peer is None and uname:
+            try:
+                peer = await asyncio.wait_for(
+                    client.get_entity(f"@{uname}"), timeout=10.0)
+            except Exception as e:
+                log.debug("get_full_channel_info: @%s не разрезолвлен: %s", uname, e)
+        if peer is None:
+            peer = await _resolve_channel_peer(client, channel_id, 0)
+        full = await client(GetFullChannelRequest(peer))
+        chat = _chat_from_full(full, channel_id)
         about = getattr(full.full_chat, "about", "") or ""
         members = getattr(full.full_chat, "participants_count", 0) or 0
         return {
             "about": about,
             "members_count": members,
-            "username": getattr(entity, "username", "") or "",
-            "title": getattr(entity, "title", "") or "",
+            "username": getattr(chat, "username", "") or "",
+            "title": getattr(chat, "title", "") or "",
         }
     except Exception as e:
         log.debug("get_full_channel_info error: %s", e)
@@ -3774,10 +3828,18 @@ async def get_channels_full_info(
     «обновление» по диалогам подтягивало имя и ссылку, а число участников молча
     оставляло прежним.
 
+    Как находится сам канал. Голый `get_entity(id)` для свежего клиента почти
+    всегда провал: кэша сущностей у StringSession нет, а `InputChannel` с нулевым
+    access_hash Telegram отвергает. Поэтому здесь ОДИН обход диалогов в начале —
+    он даёт access_hash каждого канала именно для этой сессии (хеш в Telegram
+    свой у каждого аккаунта, чужой не подходит), а дальше уже точечные
+    GetFullChannel по готовым пирам.
+
     Недоступный канал пропускается, остальные обрабатываются — одна ошибка не
     должна отменять весь обход.
     """
     from telethon.tl.functions.channels import GetFullChannelRequest
+    from telethon.tl.types import InputPeerChannel
 
     out: dict[int, dict] = {}
     ids = [c for c in (channel_ids or [])][:limit]
@@ -3786,16 +3848,58 @@ async def get_channels_full_info(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+
+        # Один обход диалогов → access_hash для этой сессии по каждому каналу.
+        hashes: dict[int, int] = {}
+        try:
+            _iter = client.iter_dialogs(limit=1000)
+            while True:
+                try:
+                    dlg = await _iter.__anext__()
+                except StopAsyncIteration:
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    continue
+                try:
+                    ent = dlg.entity
+                    eid = _normalize_channel_id(getattr(ent, "id", 0) or 0)
+                    ah = int(getattr(ent, "access_hash", 0) or 0)
+                except Exception:
+                    continue
+                if eid and ah:
+                    hashes[eid] = ah
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.debug("get_channels_full_info: обход диалогов не удался: %s", e)
+
         for idx, cid in enumerate(ids):
+            key = _normalize_channel_id(cid)
             try:
-                entity = await asyncio.wait_for(client.get_entity(int(cid)), timeout=_OP_TIMEOUT)
-                full = await asyncio.wait_for(client(GetFullChannelRequest(entity)), timeout=_OP_TIMEOUT)
+                ah = hashes.get(key, 0)
+                if ah:
+                    peer = InputPeerChannel(channel_id=key, access_hash=ah)
+                else:
+                    # Канала нет в диалогах этой сессии — пробуем по id: для
+                    # публичных иногда проходит, для остальных честно упадёт.
+                    peer = await asyncio.wait_for(
+                        client.get_entity(key), timeout=_OP_TIMEOUT)
+                # Потолок на сам запрос (не только на коннект): зависший
+                # GetFullChannel не должен держать сессию до бесконечности.
+                full = await asyncio.wait_for(
+                    client(GetFullChannelRequest(peer)), timeout=_OP_TIMEOUT)
+                chat = _chat_from_full(full, key)
                 out[int(cid)] = {
                     "members_count": int(
                         getattr(full.full_chat, "participants_count", 0) or 0
                     ),
-                    "title": getattr(entity, "title", "") or "",
-                    "username": getattr(entity, "username", "") or "",
+                    # Имя и ссылку берём из full.chats, а НЕ из пира: у
+                    # InputPeerChannel их нет вовсе, и раньше сюда уходили
+                    # пустые строки — названия каналов так и не обновлялись.
+                    "title": getattr(chat, "title", "") or "",
+                    "username": getattr(chat, "username", "") or "",
                     "about": getattr(full.full_chat, "about", "") or "",
                 }
             except asyncio.CancelledError:
@@ -3813,6 +3917,11 @@ async def get_channels_full_info(
                 log.debug("get_channels_full_info: канал %s пропущен: %s", cid, e)
             if idx < len(ids) - 1:
                 await asyncio.sleep(pause + random.uniform(0, 0.8))
+        if ids and not out:
+            log.warning(
+                "get_channels_full_info: ни один из %d каналов не прочитан "
+                "(в диалогах сессии найдено %d)", len(ids), len(hashes),
+            )
         return out
     except Exception as e:
         log.warning("get_channels_full_info: обход не состоялся: %s", e)

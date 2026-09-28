@@ -24,7 +24,10 @@ _INTERVAL = 4 * 3600  # 4 часа, когда обновлять больше �
 # занимал бы под трое суток, и владелец никогда не видел актуальных данных.
 _INTERVAL_BACKLOG = 15 * 60
 _BATCH_SIZE = 40  # каналов за одну сессию аккаунта (GetFullChannel — чтение)
-_PAUSE_BETWEEN = 3.0  # секунд между запросами к одному аккаунту
+# Пауза между запросами к Telegram. Теперь её выдерживает сама
+# account_manager.get_channels_full_info — сверка ходит пачкой, а не по одному
+# каналу на подключение; здесь константа остаётся её настройкой.
+_PAUSE_BETWEEN = 3.0
 
 
 async def run(pool: asyncpg.Pool, bot) -> None:
@@ -273,18 +276,28 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
             continue
 
         try:
-            for ch in channels[:_BATCH_SIZE]:
-                try:
-                    info = await account_manager.get_full_channel_info(
-                        acc_dict["session_str"], ch["channel_id"], _acc=acc_dict
-                    )
-                except Exception as e:
-                    log.warning(
-                        "drift_detector get_full_channel_info error for channel %s: %s",
-                        ch["channel_id"],
-                        e,
-                    )
-                    info = None
+            # Карточки всей пачки — за ОДНО подключение и с одним обходом
+            # диалогов. Раньше здесь был get_full_channel_info на каждый канал:
+            # это, во-первых, 40 подключений сессии подряд за круг, а во-вторых
+            # — он искал канал голым get_entity(id), без access_hash и без
+            # @username, которые тут же лежат в выборке. Для свежего клиента это
+            # почти гарантированный провал: возвращался None, ставилась отметка
+            # осмотра, и карточка не менялась НИКОГДА.
+            _batch = channels[:_BATCH_SIZE]
+            try:
+                _infos = await account_manager.get_channels_full_info(
+                    acc_dict["session_str"],
+                    [c["channel_id"] for c in _batch],
+                    _acc=acc_dict,
+                    pause=_PAUSE_BETWEEN,
+                    limit=_BATCH_SIZE,
+                )
+            except Exception as e:
+                log.warning("drift_detector: карточки пачки не прочитаны: %s", e)
+                _infos = {}
+
+            for ch in _batch:
+                info = _infos.get(int(ch["channel_id"]))
 
                 # Always update last_drift_check
                 await pool.execute(
@@ -293,7 +306,6 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
                 )
 
                 if not info:
-                    await asyncio.sleep(1.0)
                     continue
 
                 new_title = (info.get("title") or "").strip()
@@ -426,7 +438,6 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
                         new_about,
                     )
 
-                await asyncio.sleep(_PAUSE_BETWEEN)
         finally:
             # Освобождаем ту же сессию, что захватывали выше (при мёртвом
             # «родном» аккаунте это запасной — acc_id указывал бы на чужую).
