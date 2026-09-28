@@ -1154,7 +1154,10 @@ class TestBulkOpsEngine:
     @pytest.mark.asyncio
     async def test_bulk_tag(self):
         from services.contacts_hub.bulk_ops_engine import bulk_tag
-        pool = FakePool(execute_val="UPDATE 1")
+        # Теперь это ОДИН запрос с RETURNING 1 вместо цикла по контактам:
+        # сколько строк вернулось — столько и обновилось. Заглушка отдаёт
+        # строки, а не строку статуса.
+        pool = FakePool(fetch_rows=[{"?column?": 1}, {"?column?": 1}])
         result = await bulk_tag(pool, 123, ["id1", "id2"], "vip")
         assert result["updated"] == 2
         assert result["tag"] == "vip"
@@ -1169,7 +1172,7 @@ class TestBulkOpsEngine:
     @pytest.mark.asyncio
     async def test_bulk_untag(self):
         from services.contacts_hub.bulk_ops_engine import bulk_untag
-        pool = FakePool(execute_val="UPDATE 1")
+        pool = FakePool(fetch_rows=[{"?column?": 1}])
         result = await bulk_untag(pool, 123, ["id1"], "vip")
         assert result["updated"] == 1
 
@@ -1197,14 +1200,14 @@ class TestBulkOpsEngine:
     @pytest.mark.asyncio
     async def test_bulk_add_to_group(self):
         from services.contacts_hub.bulk_ops_engine import bulk_add_to_group
-        pool = FakePool(execute_val="INSERT 0 1")
+        pool = FakePool(fetch_rows=[{"?column?": 1}, {"?column?": 1}])
         result = await bulk_add_to_group(pool, 123, ["id1", "id2"], 1)
         assert result["added"] == 2
 
     @pytest.mark.asyncio
     async def test_bulk_remove_from_group(self):
         from services.contacts_hub.bulk_ops_engine import bulk_remove_from_group
-        pool = FakePool(execute_val="DELETE 1")
+        pool = FakePool(fetch_rows=[{"?column?": 1}])
         result = await bulk_remove_from_group(pool, 123, ["id1"], 1)
         assert result["removed"] == 1
 
