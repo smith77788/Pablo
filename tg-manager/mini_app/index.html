@@ -3897,6 +3897,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- ══════════════════════ СВЯЗАННЫЕ УСТРОЙСТВА ══════════════════════ -->
+<div class="screen" id="s-devices">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">💻 Связанные устройства</div></div>
+  <div class="sub-sb" id="devBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
 <!-- ══════════════════════ СВОДКА ══════════════════════ -->
 <div class="screen" id="s-dashboard">
   <div class="hdr">
@@ -5935,6 +5941,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">🔐 Секрет вебхука</span>
         <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">Изменить</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
+        <span style="font-size:14px">💻 Связанные устройства</span>
+        <button class="btn btn-s" onclick="openDevices()" style="padding:6px 12px;font-size:12px">Показать</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0">
         <span style="font-size:14px">📋 ID пользователя</span>
@@ -17757,6 +17767,63 @@ async function resolveConflict(id, resolution, value) {
     await api('/api/miniapp/uch/conflicts/'+id+'/resolve', {method:'POST', body:JSON.stringify({resolution, value})});
     toast('✅ Конфликт разрешён');
     openUchConflicts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+// ── Связанные устройства ──────────────────────────────────────────────
+// Вне Telegram вход в мини-апп идёт по коду связывания из бота, и браузер
+// запоминается надолго. Посмотреть, что связано, и отозвать лишнее было
+// нечем: маршруты есть, экрана не было.
+async function openDevices() {
+  push('s-devices');
+  txt('devBody', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/devices');
+    const rows = d.devices || [];
+    let html = `<div style="padding:12px 16px">
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:10px">
+        Это браузеры, которым вы разрешили вход по коду из бота. Внутри Telegram
+        связывание не нужно, поэтому здесь его и не видно. Отзыв действует сразу:
+        устройство больше не обменяет свой ключ на доступ.
+      </div>`;
+    const live = rows.filter(r => !r.revoked);
+    if (!rows.length) {
+      html += empty('💻','Связанных устройств нет','Вход только из Telegram — это нормально');
+    } else {
+      html += '<div class="lst">';
+      rows.forEach(r => {
+        const when = r.last_seen_at ? 'был ' + ago(r.last_seen_at)
+                   : (r.paired_at ? 'связан ' + ago(r.paired_at) : '');
+        html += `<div class="li">
+          <div class="ava" style="background:${r.revoked?'var(--sep)':'rgba(96,165,250,.15)'}">${r.revoked?'🚫':'💻'}</div>
+          <div class="li-body">
+            <div class="li-name">${esc(r.label || 'Устройство')}</div>
+            <div class="li-sub">${r.revoked ? 'отозвано' : esc(when)}</div>
+          </div>
+          ${r.revoked ? '' : `<div class="li-right"><button class="btn btn-s" style="font-size:11px" onclick="revokeDevice(${Number(r.id)})">Отозвать</button></div>`}
+        </div>`;
+      });
+      html += '</div>';
+      // Сервер отдаёт последние 50. Молчать об этом нельзя: список выглядел бы
+      // полным.
+      if (rows.length >= 50) {
+        html += `<div style="font-size:12px;color:var(--hint);padding:8px 2px">Показаны последние 50 записей.</div>`;
+      }
+      if (!live.length) {
+        html += `<div style="font-size:13px;color:var(--hint);padding:8px 2px">Действующих устройств нет — все отозваны.</div>`;
+      }
+    }
+    html += '</div>';
+    txt('devBody', html);
+  } catch(e) { txt('devBody', errHtml(e.message, 'openDevices()')); }
+}
+
+async function revokeDevice(id) {
+  if (!await askConfirm('Отозвать доступ этому устройству?\n\nЕсли это браузер, в котором вы сейчас, придётся войти заново по новому коду из бота (/pair).')) return;
+  try {
+    const r = await api('/api/miniapp/devices/revoke', {method:'POST', body:JSON.stringify({id})});
+    toast(r.ok ? 'Доступ отозван' : 'Это устройство уже было отозвано');
+    openDevices();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
