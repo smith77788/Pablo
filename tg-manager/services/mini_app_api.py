@@ -3964,19 +3964,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not row:
                 return _err("Не найдено", 404)
 
-            # Массовая публикация: повторяем ТОЛЬКО упавшие каналы (channel_ids из
-            # operation_log). Иначе успешные каналы получили бы пост повторно
-            # (дубликаты). Работает и для partial-success ('done' с ошибками) —
-            # паритет с ботом (retry_failed).
-            if row["op_type"] == "mass_publish":
-                failed = await pool.fetch(
-                    "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='error'",
-                    op_id)
+            # Публикация: повторяем ТОЛЬКО упавшие каналы. Иначе успешные каналы
+            # получили бы пост повторно (дубликаты). Работает и для
+            # partial-success ('done' с ошибками) — паритет с ботом.
+            #
+            # Список упавших целей собирает operation_bus.collect_failed_targets,
+            # а не запрос на месте. Тот запрос брал ВСЕ строки со status='error'
+            # и не смотрел, не закрылась ли цель успехом позже: канал, упавший на
+            # первой попытке и опубликованный на второй, попадал в «упавшие», и
+            # повтор пытался опубликовать в него снова. Общий сборщик такие цели
+            # исключает и строго разбирает формат target, отбрасывая мусор.
+            if row["op_type"] in ("mass_publish", "quick_post"):
                 failed_ids = [
-                    int(r["target"]) for r in failed
-                    if (r["target"] or "").strip().lstrip("-").isdigit()
+                    int(x) for x in await _obus.collect_failed_targets(
+                        pool, op_id, row["op_type"])
                 ]
-                failed_ids = list(dict.fromkeys(failed_ids))
                 if not failed_ids:
                     return _err("Нет неудавшихся каналов для повтора", 400)
                 try:

@@ -245,6 +245,13 @@ _EXECUTORS = {
     "bulk_seo_apply": "_exec_bulk_seo_apply",
     "bulk_join": "_exec_bulk_join_inner",
     "bulk_leave": "_exec_bulk_leave",
+    # Публикация: target = str(channel_id), одинаково в успехе и в ошибке.
+    # mass_publish и quick_post делит один исполнитель.
+    "mass_publish": "_exec_mass_publish",
+    "quick_post": "_exec_mass_publish",
+    "bulk_post_chans": "_exec_bulk_post_chans",
+    # Клонирование: target = ссылка на канал-приёмник из target_refs.
+    "content_clone": "_exec_content_clone",
 }
 
 
@@ -303,7 +310,12 @@ def test_executor_writes_error_rows_for_declared_ops():
     for op_type, fn in _EXECUTORS.items():
         src = _executor_src(fn)
         assert "INSERT INTO operation_log" in src, f"{op_type}: нет записи в operation_log"
-        assert "'error'" in src, f"{op_type}: не пишет ошибки по целям"
+        # Статус пишется либо литералом в SQL ('error'), либо выражением в
+        # параметре ("ok" if ok else "error") — исполнители используют оба
+        # способа. Проверка на один вид кавычек давала ложную находку: у
+        # bulk_post_chans журнал ошибок есть, а тест уверял, что его нет.
+        assert re.search(r"""['"]error['"]""", src), (
+            f"{op_type}: не пишет ошибки по целям")
 
 
 # ── Проводка в UI ───────────────────────────────────────────────────────────

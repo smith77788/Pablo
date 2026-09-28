@@ -147,6 +147,13 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "📤",
+        # target = str(dialog["id"]) — id канала, одинаково в успехе и в
+        # ошибке. В канал публикует ОДИН аккаунт (первый здоровый из тех, кто
+        # им управляет), поэтому успех закрывает цель окончательно —
+        # per_account здесь был бы вреден: повтор дал бы второй пост.
+        # Пустой channel_ids означает «во все управляемые каналы»; повтор
+        # проставляет список упавших и тем самым сужает операцию.
+        "retry_targets": {"param": "channel_ids", "kind": "int"},
     },
     "bulk_seo_apply": {
         "description": "Применение SEO по сетке",
@@ -327,6 +334,10 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "📤",
+        # target = str(ch_id) — элемент channel_ids как есть. Постит один
+        # аккаунт (acc_id в params), то есть цель отрабатывается один раз:
+        # per_account здесь не нужен.
+        "retry_targets": {"param": "channel_ids", "kind": "int"},
     },
     "channel_import_all": {
         "description": "Импорт каналов со всех аккаунтов",
@@ -449,6 +460,10 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "📋",
+        # target = сама ссылка на канал-приёмник, как она пришла в params.
+        # На цель приходится одно действие (аккаунт выбирается внутри), поэтому
+        # успех закрывает её окончательно.
+        "retry_targets": {"param": "target_refs", "kind": "str"},
     },
     "niche_growth_post": {
         "description": "Growth Agent — постинг промо-контента в нишевых группах",
@@ -520,6 +535,8 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "starter",
         "max_retries": 2,
         "icon": "📝",
+        # Тот же исполнитель, что у mass_publish: target = str(channel_id).
+        "retry_targets": {"param": "channel_ids", "kind": "int"},
     },
     "run_broadcast": {
         "description": "Рассылка по аудитории",
