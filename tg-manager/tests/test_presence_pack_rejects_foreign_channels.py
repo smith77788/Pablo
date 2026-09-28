@@ -96,3 +96,56 @@ def test_пустой_состав_разрешён():
     res = _run(pool, [], [])
     assert res["ok"] is True
     assert _записи_состава(pool)
+
+
+# ── Чужой бот при создании пакета ──────────────────────────────────────────
+
+
+class _PoolBots:
+    """Своими считает ботов из `own`."""
+
+    def __init__(self, own: set[int]):
+        self._own = own
+        self.executed: list[tuple[str, tuple]] = []
+        self.inserted = False
+
+    async def fetchval(self, sql, *a):
+        if "FROM managed_bots" in sql:
+            assert "added_by=$2" in sql, f"владение ботом не проверяется: {sql}"
+            return 1 if int(a[0]) in self._own else None
+        if "INSERT INTO presence_packs" in sql:
+            self.inserted = True
+            return 55
+        return None
+
+    async def execute(self, sql, *a):
+        self.executed.append((" ".join(sql.split()), a))
+        return "INSERT 0 1"
+
+    async def fetch(self, sql, *a):
+        return []
+
+
+def test_пакет_с_чужим_ботом_не_создаётся():
+    pool = _PoolBots(own={10})
+    pack_id = asyncio.run(
+        db.create_presence_pack(pool, 111, "Пак", bot_id=999)
+    )
+    assert pack_id is None, "пакет создан с чужим ботом"
+    assert not pool.inserted
+    журнал = [sql for sql, _ in pool.executed if "operation_audit" in sql]
+    assert журнал, "отказ не записан в журнал"
+
+
+def test_пакет_со_своим_ботом_создаётся():
+    pool = _PoolBots(own={10})
+    pack_id = asyncio.run(
+        db.create_presence_pack(pool, 111, "Пак", bot_id=10)
+    )
+    assert pack_id == 55
+    assert pool.inserted
+
+
+def test_пакет_без_бота_создаётся():
+    pool = _PoolBots(own=set())
+    assert asyncio.run(db.create_presence_pack(pool, 111, "Пак")) == 55

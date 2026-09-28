@@ -5667,7 +5667,31 @@ async def create_presence_pack(
     target_label: str | None = None,
     bot_id: int | None = None,
     bot_username: str | None = None,
-) -> int:
+) -> int | None:
+    """Создать Presence Pack. None, если указан чужой бот.
+
+    `bot_id` приходит из тела запроса мини-аппа. Правка состава пакета
+    (`presence_pack_config`) чужой бот отклоняет — и в коде прямо написано,
+    «иначе линковка чужого bot_id в свой пак», — а создание пакета писало его
+    как есть. Проверка здесь, в единственной функции записи, чтобы двери
+    (мини-апп и бот) не расходились снова.
+    """
+    if bot_id:
+        own = await pool.fetchval(
+            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            int(bot_id),
+            owner_id,
+        )
+        if not own:
+            log.warning(
+                "presence_pack: отказ, чужой бот %s у владельца %s", bot_id, owner_id
+            )
+            await record_manual_action(
+                pool, owner_id, "presence_pack_foreign_bot_refused",
+                target=f"bot:{bot_id}", result="refused",
+            )
+            return None
+
     return await pool.fetchval(
         "INSERT INTO presence_packs(owner_id,name,description,target_url,target_label,bot_id,bot_username) "
         "VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",

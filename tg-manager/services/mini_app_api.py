@@ -15784,12 +15784,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except (TypeError, ValueError):
                 bot_id = None
         try:
-            row = await pool.fetchrow(
-                """INSERT INTO presence_packs(owner_id, name, description, target_url, target_label, bot_id)
-                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
-                uid, name, description or None, target_url or None, target_label or None, bot_id,
+            # Через db.create_presence_pack, а не своим INSERT: там же проверка,
+            # что бот наш (правка состава её делает, создание — не делало).
+            from database import db as _db
+
+            pack_id = await _db.create_presence_pack(
+                pool, uid, name,
+                description=description or None,
+                target_url=target_url or None,
+                target_label=target_label or None,
+                bot_id=bot_id,
             )
-            return _json_resp({"ok": True, "id": row["id"]})
+            if pack_id is None:
+                return _err("Бот не найден или не принадлежит вам", 404)
+            return _json_resp({"ok": True, "id": pack_id})
         except Exception as exc:
             log.exception("presence_pack_create uid=%d", uid)
             return _err(str(exc), 500)
