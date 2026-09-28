@@ -4858,9 +4858,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not ids:
             return _err("Нет аккаунтов для проверки", 400)
         try:
+            _params = {"account_ids": ids, "check_spambot": True}
+            if admin:
+                # Проверка подключается к Telegram сессией аккаунта, поэтому
+                # исполнитель по умолчанию чужие id отбрасывает. Право на
+                # платформенный срез проверено выше — отмечаем его явно.
+                _params["cross_owner"] = True
             op_id = await _obus.submit(
-                pool, uid, "check_accounts_health",
-                {"account_ids": ids, "check_spambot": True},
+                pool, uid, "check_accounts_health", _params,
                 total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов",
             )
             return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
@@ -4982,9 +4987,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         n = len(ids)
         try:
             if op == "check":
+                _params = {"account_ids": ids, "check_spambot": True}
+                if admin:
+                    # См. accounts_check: признак ставится только после проверки
+                    # прав на платформенный срез.
+                    _params["cross_owner"] = True
                 op_id = await _obus.submit(
-                    pool, uid, "check_accounts_health",
-                    {"account_ids": ids, "check_spambot": True},
+                    pool, uid, "check_accounts_health", _params,
                     total_items=n, label=f"Проверка {n} аккаунтов")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             if op == "scan":

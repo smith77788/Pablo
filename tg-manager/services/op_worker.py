@@ -10128,14 +10128,48 @@ async def _exec_check_accounts_health(
         FROM tg_accounts a
         LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
     """
-    # account_ids ВСЕГДА формируются на сервере с проверкой прав (owner-scoped для
-    # обычного пользователя, межтенантно для админа — см. accounts_check/_build).
-    # Поэтому по явному списку фильтруем ТОЛЬКО по id, без owner_id: иначе админская
-    # проверка чужих аккаунтов давала owner_id=админ AND id IN(чужие) = 0 строк →
-    # операция падала «0/N» (ровно баг «Проверка 6 аккаунтов — 0/6 Ошибка»).
-    _where = ("WHERE a.id = ANY($1::bigint[])"
-              if account_ids else "WHERE a.owner_id=$1")
-    _args = (account_ids,) if account_ids else (owner_id,)
+    # Список id приходит из params, то есть из того, что записала дверь. Проверка
+    # здоровья подключается к Telegram РЕАЛЬНОЙ сессией аккаунта, поэтому чужой id
+    # в списке — это работа чужой сессией: ответ Telegram про чужой аккаунт,
+    # смена его acc_status, возможная деактивация. По умолчанию исполнитель
+    # чужие id не берёт, даже если дверь их пропустила.
+    #
+    # Исключение одно: платформенный срез админа (`?scope=platform` в
+    # accounts_check, `{"scope":"platform"}` в accounts_mass). Дверь проверяет
+    # права и ставит признак cross_owner — без него owner_id=админ AND id IN(чужие)
+    # давало 0 строк и операция падала «0/N» (баг «Проверка 6 аккаунтов — 0/6»).
+    # Признак ставится на сервере после проверки прав; тело запроса в params не
+    # попадает ни через одну дверь.
+    _cross_owner = bool(params.get("cross_owner"))
+    if account_ids and _cross_owner:
+        _where = "WHERE a.id = ANY($1::bigint[])"
+        _args = (account_ids,)
+    elif account_ids:
+        _where = "WHERE a.id = ANY($1::bigint[]) AND a.owner_id=$2"
+        _args = (account_ids, owner_id)
+    else:
+        _where = "WHERE a.owner_id=$1"
+        _args = (owner_id,)
+
+    if account_ids and not _cross_owner:
+        # Чужие id в обычной операции — это либо новая дверь без скоупа, либо
+        # подбор id руками. Молча отбросить мало: без следа такое не разобрать.
+        try:
+            _foreign = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE id = ANY($1::bigint[]) AND owner_id <> $2",
+                account_ids, owner_id,
+            )
+        except Exception:
+            _foreign = 0
+        if _foreign:
+            log.warning(
+                "check_accounts_health op=%s owner=%s: в списке %d чужих аккаунтов — отброшены",
+                op_id, owner_id, int(_foreign),
+            )
+            await _db.record_manual_action(
+                pool, owner_id, "foreign_accounts_refused",
+                target=f"op:{op_id} count:{int(_foreign)}", result="refused",
+            )
     query_errored = False
     try:
         rows = await pool.fetch(_HC_COLS + _where, *_args)
