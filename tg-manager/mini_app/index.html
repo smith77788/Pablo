@@ -783,6 +783,10 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
    рендерились без фона/паддинга/радиуса, тогда как на экране аккаунтов
    (.acc-kpi-card) и в .kpi-bar (.kpi-col) карточки были оформлены. Единый вид. */
 .kpi-card{background:var(--bg2);border-radius:var(--radius);padding:9px 12px;text-align:center;flex-shrink:0;min-width:70px}
+/* Число, по которому можно перейти в список. Отличается от обычного
+   рамкой и стрелкой в подписи — иначе непонятно, что оно нажимается. */
+.kpi-card.tap-card{cursor:pointer;border:1px solid var(--sep)}
+.kpi-card.tap-card:active{background:var(--bg3)}
 /* .op-progress-* — живой прогресс операций (SSE) на дашборде. Классы
    использовались, но не были определены → лейбл и % слипались, элементы не
    разделялись. Приводим к единому виду. */
@@ -5583,7 +5587,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div id="healthStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
-    <div class="sec">Последние флуд-события (7 дней)</div>
+    <!-- «(7 дней)» здесь было неправдой: за неделю считается только число в
+         плитке «Флуд 7д», а список событий сервер отдаёт за всё время. -->
+    <div class="sec">Последние флуд-события</div>
     <div class="lst" id="healthEvents"></div>
   </div>
 </div>
@@ -16850,6 +16856,7 @@ async function loadContacts(append=false) {
   if (CONTACT_GENDER) params.set('gender', CONTACT_GENDER);
   if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
   if (CONTACT_GROUP) params.set('group_id', CONTACT_GROUP.id);
+  if (CONTACT_ACCOUNT) params.set('account_id', CONTACT_ACCOUNT.id);
   params.set('limit', CONTACT_PAGE);
   params.set('offset', CONTACT_OFFSET);
   const url = '/api/miniapp/uch/contacts?' + params.toString();
@@ -17966,6 +17973,7 @@ function dashDrawChart(pts) {
 // Сервер умел группы (создать, переименовать, удалить, набрать состав), но
 // экрана у них не было вовсе, и фильтр списка по группе тоже никто не звал.
 let CONTACT_GROUP = null;        // {id, name} — активный фильтр списка
+let CONTACT_ACCOUNT = null;      // {id, name} — «контакты этого аккаунта»
 let CONTACT_GROUPS = [];         // последний прочитанный список групп
 
 async function openContactGroups() {
@@ -18039,12 +18047,14 @@ async function cgDelete(id, el) {
 // над списком — молчаливый фильтр читается как «контактов стало меньше».
 function cgOpenContacts(id, name) {
   CONTACT_GROUP = {id, name};
+  CONTACT_ACCOUNT = null;
   back();                     // уходим с экрана групп
   openContacts();             // тот же вход, что и из плиток
 }
 
 function cgClearGroup() {
   CONTACT_GROUP = null;
+  CONTACT_ACCOUNT = null;
   cgRenderBanner();
   loadContacts();
 }
@@ -18052,10 +18062,13 @@ function cgClearGroup() {
 function cgRenderBanner() {
   const el = document.getElementById('contactGroupBar');
   if (!el) return;
-  if (!CONTACT_GROUP) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const what = CONTACT_GROUP ? {ico:'📁', lbl:'Группа', name:CONTACT_GROUP.name}
+             : CONTACT_ACCOUNT ? {ico:'📡', lbl:'Аккаунт', name:CONTACT_ACCOUNT.name}
+             : null;
+  if (!what) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'block';
-  el.innerHTML = `<span>📁 Группа: <b>${esc(CONTACT_GROUP.name)}</b></span>`
-    + `<span class="icon-tap" onclick="cgClearGroup()" role="button" tabindex="0" aria-label="Снять фильтр по группе" style="float:right">✕</span>`;
+  el.innerHTML = `<span>${what.ico} ${what.lbl}: <b>${esc(what.name)}</b></span>`
+    + `<span class="icon-tap" onclick="cgClearGroup()" role="button" tabindex="0" aria-label="Снять фильтр" style="float:right">✕</span>`;
 }
 
 // Отправить выбранные контакты в группу.
@@ -18892,30 +18905,68 @@ function quickAi(q) {
   sendAiQuery();
 }
 
+// Экран был страницей чисел без единого перехода: «Premium 3 412» — и всё,
+// кто это, не посмотреть. Числа, для которых у списка контактов есть срез,
+// стали переходами; остальные оставлены числами, притворяться нечем.
+function csGoContacts(filter) {
+  CONTACT_FILTER = filter || null;
+  CONTACT_GROUP = null;
+  CONTACT_ACCOUNT = null;
+  back();
+  openContacts();
+  // Подсветить сегмент, в который попали.
+  document.querySelectorAll('#contactFilterSeg .seg-opt').forEach((el, i) => {
+    const map = [null, 'favorite', 'premium', 'multi', 'mutual'];
+    el.classList.toggle('on', map[i] === CONTACT_FILTER);
+  });
+}
+
+function csGoAccountContacts(accId, name) {
+  CONTACT_FILTER = null;
+  CONTACT_GROUP = null;
+  CONTACT_ACCOUNT = {id: accId, name: name || ('Аккаунт #' + accId)};
+  back();
+  openContacts();
+}
+
 async function openContactStats() {
   push('s-contactstats');
   txt('csBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/uch/stats');
     const accs = d.account_stats||[];
+    const go = (lbl, val, filter) =>
+      `<div class="row" onclick="csGoContacts(${filter?`'${filter}'`:'null'})" role="button" tabindex="0">`
+      + `<div class="row-body"><div class="row-name">${lbl}</div><div class="row-val">${val}</div></div>`
+      + `<div class="row-right"><span class="chev">›</span></div></div>`;
+    const plain = (lbl, val) =>
+      `<div class="row"><div class="row-body"><div class="row-name">${lbl}</div><div class="row-val">${val}</div></div></div>`;
     let html = `<div class="lst" style="margin:12px 16px 0">
-      <div class="row"><div class="row-body"><div class="row-name">Всего контактов</div><div class="row-val">${num(d.total||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 ${num(d.premium||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">С username</div><div class="row-val">${num(d.with_username||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">С телефоном</div><div class="row-val">📱 ${num(d.with_phone||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Избранные</div><div class="row-val">⭐ ${num(d.favorites||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">С заметками</div><div class="row-val">📝 ${num(d.notes||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Тегов</div><div class="row-val">🏷 ${num(d.tags||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Групп</div><div class="row-val">📂 ${num(d.groups||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Последняя синхронизация</div><div class="row-val">${d.last_sync?new Date(d.last_sync).toLocaleString('ru'):'—'}</div></div></div>
+      ${go('Всего контактов', num(d.total||0), null)}
+      ${go('Premium', '💎 '+num(d.premium||0), 'premium')}
+      ${go('Избранные', '⭐ '+num(d.favorites||0), 'favorite')}
+      ${plain('С username', num(d.with_username||0))}
+      ${plain('С телефоном', '📱 '+num(d.with_phone||0))}
+      ${plain('С заметками', '📝 '+num(d.notes||0))}
+      ${plain('Тегов', '🏷 '+num(d.tags||0))}
+      <div class="row" onclick="back();openContactGroups()" role="button" tabindex="0">
+        <div class="row-body"><div class="row-name">Групп</div><div class="row-val">📂 ${num(d.groups||0)}</div></div>
+        <div class="row-right"><span class="chev">›</span></div>
+      </div>
+      ${plain('Последняя синхронизация', d.last_sync?new Date(d.last_sync).toLocaleString('ru'):'—')}
     </div>`;
     if (accs.length) {
       html += `<div class="sec" style="margin-top:8px">📡 По аккаунтам</div><div class="lst" style="margin:0 16px">`;
-      accs.forEach(a=>{ html += `<div class="row"><div class="row-body"><div class="row-name">Аккаунт #${a.account_id}</div><div class="row-val">${esc(a.account_name||'')} · ${num(a.contact_count)} контактов</div></div></div>`; });
+      accs.forEach(a=>{
+        const nm = a.account_name || ('Аккаунт #'+a.account_id);
+        html += `<div class="row" onclick="csGoAccountContacts(${Number(a.account_id)},'${esc(String(nm)).replace(/'/g,"\\'")}')" role="button" tabindex="0">
+          <div class="row-body"><div class="row-name">${esc(nm)}</div><div class="row-val">${num(a.contact_count)} ${plural(a.contact_count,'контакт','контакта','контактов')}</div></div>
+          <div class="row-right"><span class="chev">›</span></div></div>`;
+      });
       html += '</div>';
     }
     txt('csBody', html);
-  } catch(e) { txt('csBody', errHtml(e.message)); }
+  } catch(e) { txt('csBody', errHtml(e.message, 'openContactStats()')); }
 }
 
 // ── Bot Factory ──────────────────────────────────────────
@@ -21174,6 +21225,19 @@ async function submitExpCreate() {
 }
 
 // ── Health Dashboard ───────────────────────────────────
+// Числа на этом экране раньше были просто числами: «17 забанено» — и всё,
+// какие именно, не посмотреть. Теперь цифра ведёт в список аккаунтов под
+// этим срезом, а строка флуд-события — в карточку того аккаунта.
+function healthGoAccounts(filter) {
+  ACC_FILTER = filter || 'all';
+  goTab('accounts');
+  // Подсветить плитку выбранного среза, чтобы было видно, куда попали.
+  document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x => {
+    x.classList.toggle('on', x.getAttribute('data-filter') === ACC_FILTER);
+  });
+  reloadAccounts();
+}
+
 async function openHealth() {
   push('s-health');
   txt('healthStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -21182,31 +21246,43 @@ async function openHealth() {
     const d = await api('/api/miniapp/health');
     const risk = d.banned>0||d.low_trust>0?'⚠️ Есть угрозы':'✅ Норма';
     const riskColor = d.banned>0||d.low_trust>0?'var(--orange)':'var(--green)';
-    txt('healthStats',`
-      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active,'green')}">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.banned,'red')}">${d.banned||0}</div><div class="kpi-lbl">Забанено</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.cooling,'orange')}">${d.cooling||0}</div><div class="kpi-lbl">В кулдауне</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.low_trust,'red')}">${d.low_trust||0}</div><div class="kpi-lbl">Низкий траст</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.flood_7d,'orange')}">${d.flood_7d||0}</div><div class="kpi-lbl">Флуд 7д</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.warmup_active||0}</div><div class="kpi-lbl">На прогреве</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:${riskColor}">${risk}</div><div class="kpi-lbl">Статус</div></div>
-    `);
+    // Срезы, которые сервер умеет фильтровать (all/active/cooldown/banned).
+    // Остальные числа не притворяемся, что открываются, — ссылок у них нет.
+    const go = (f, val, lbl, style) =>
+      `<div class="kpi-card tap-card" onclick="healthGoAccounts('${f}')" role="button" tabindex="0" aria-label="${lbl}: открыть список">`
+      + `<div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl} ›</div></div>`;
+    const plain = (val, lbl, style) =>
+      `<div class="kpi-card"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl}</div></div>`;
+    txt('healthStats',
+        go('all', d.total||0, 'Аккаунтов')
+      + go('active', d.active||0, 'Активных', kpiTone(d.active,'green'))
+      + go('banned', d.banned||0, 'Забанено', kpiTone(d.banned,'red'))
+      + go('cooldown', d.cooling||0, 'В кулдауне', kpiTone(d.cooling,'orange'))
+      + plain(d.low_trust||0, 'Низкий траст', kpiTone(d.low_trust,'red'))
+      + plain(d.flood_7d||0, 'Флуд 7д', kpiTone(d.flood_7d,'orange'))
+      + plain(d.warmup_active||0, 'На прогреве')
+      + plain(risk, 'Статус', 'color:'+riskColor));
     txt('m-health-val',`${d.banned||0} забанено · ${d.flood_7d||0} флуд`);
     const events = d.events||[];
-    if (!events.length) { txt('healthEvents', empty('📋','Нет флуд-событий за 7 дней','')); return; }
-    txt('healthEvents', events.map(ev=>`
-      <div class="row">
+    if (!events.length) { txt('healthEvents', empty('📋','Нет флуд-событий','Пока Telegram не просил ваши аккаунты подождать')); return; }
+    let html = events.map(ev=>`
+      <div class="row" ${ev.account_id?`onclick="openAccount(${Number(ev.account_id)})" role="button" tabindex="0"`:''}>
         <div class="row-ico" style="background:var(--bg-red-16)">⚠️</div>
         <div class="row-body">
-          <div class="row-name">${esc(ev.first_name||ev.phone)} · ${esc(ev.operation||'operation')}</div>
-          <div class="row-val">Флуд: ${ev.flood_seconds||0}с · ${ev.created_at?new Date(ev.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-name">${esc(ev.first_name||ev.phone||'Аккаунт')} · ${esc(ev.operation||'операция')}</div>
+          <div class="row-val">Пауза ${ev.flood_seconds||0} с · ${ev.created_at?ago(ev.created_at):''}</div>
         </div>
-      </div>
-    `).join(''));
+        ${ev.account_id?'<div class="row-right"><span class="chev">›</span></div>':''}
+      </div>`).join('');
+    // «Последние 10» раньше выдавались за всю историю.
+    const tot = Number(d.events_total||0);
+    if (tot > events.length) {
+      html += `<div style="font-size:12px;color:var(--hint);padding:8px 14px">Показаны последние ${events.length} из ${num(tot)}.</div>`;
+    }
+    txt('healthEvents', html);
   } catch(e) {
     txt('healthStats','');
-    txt('healthEvents', empty('⚠️','Ошибка',e.message));
+    txt('healthEvents', errHtml(e.message, 'openHealth()'));
   }
 }
 

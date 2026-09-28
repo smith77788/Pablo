@@ -12335,13 +12335,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1 AND status='active'", uid
             )
             # Recent flood events
+            # account_id нужен экрану, чтобы со строки события можно было
+            # перейти в карточку аккаунта: раньше событие было тупиком.
             events = await pool.fetch(
-                """SELECT afl.operation, afl.flood_seconds, afl.created_at,
-                          ta.phone, ta.first_name
+                """SELECT ta.id AS account_id, afl.operation, afl.flood_seconds,
+                          afl.created_at, ta.phone, ta.first_name
                    FROM account_flood_log afl
                    JOIN tg_accounts ta ON ta.id=afl.account_id
                    WHERE ta.owner_id=$1
                    ORDER BY afl.created_at DESC LIMIT 10""",
+                uid,
+            )
+            events_total = await pool.fetchval(
+                """SELECT COUNT(*) FROM account_flood_log afl
+                   JOIN tg_accounts ta ON ta.id=afl.account_id
+                   WHERE ta.owner_id=$1""",
                 uid,
             )
             return _json_resp({
@@ -12349,6 +12357,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "banned": stats["banned"], "cooling": stats["cooling"],
                 "low_trust": stats["low_trust"], "flood_7d": flood_7d,
                 "warmup_active": warmup_active,
+                "events_total": events_total or 0,
                 "events": [
                     {**dict(e), "created_at": e["created_at"].isoformat() if e["created_at"] else None}
                     for e in events

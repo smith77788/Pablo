@@ -63,7 +63,14 @@ const res = await page.evaluate(async () => {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const out = [];
   const isAction = (n) => {
-    if (n.closest('.hdr')) return false;                 // шапка есть у всех
+    // Шапку целиком выбрасывать нельзя: там живут «+ Создать» и «⟳». Не в
+    // счёт только возврат назад — он есть у каждого экрана.
+    if (n.closest('.hdr')) {
+      const cls = String(n.className || '');
+      if (/(^|\s)(back|hdr-burger)(\s|$)/.test(cls)) return false;
+      if (n.closest('.back, .hdr-burger')) return false;
+      if (/^(‹|←|◀️?)$/.test((n.textContent || '').trim())) return false;
+    }
     const t = n.tagName;
     if (t === 'BUTTON' || t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return true;
     if (t === 'A' && n.getAttribute('href')) return true;
@@ -73,8 +80,8 @@ const res = await page.evaluate(async () => {
   const measure = (label) => {
     const el = document.querySelector('.screen.show');
     if (!el) return;
-    const body = el.querySelector('.sub-sb, .sb, .scroll, .body') || el;
-    const text = (body.innerText || '').trim();
+    const body = el;
+    const text = ((el.querySelector('.sub-sb, .sb, .scroll, .body') || el).innerText || '').trim();
     let acts = 0;
     for (const n of body.querySelectorAll('*')) {
       const cs = getComputedStyle(n);
