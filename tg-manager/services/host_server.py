@@ -142,15 +142,20 @@ async def has_access(pool: asyncpg.Pool, user_id: int) -> bool:
 
 
 async def grant_access(
-    pool: asyncpg.Pool, user_id: int, payment_ref: str | None = None,
+    executor, user_id: int, payment_ref: str | None = None,
     granted_by: int | None = None,
 ) -> None:
     """Выдать доступ (из payment_checker при подтверждении оплаты, или админом).
 
     Идемпотентно (ON CONFLICT DO NOTHING) — повторное подтверждение не создаёт дубль.
+
+    `executor` — пул ИЛИ открытое соединение: подтверждение платежа вызывает
+    выдачу внутри своей транзакции, чтобы оплата и доступ не расходились.
+    Таблицу здесь не создаём (она заводится миграцией schema_v158): DDL внутри
+    чужой транзакции с проглоченной ошибкой оставил бы транзакцию оборванной,
+    а следующий запрос упал бы «current transaction is aborted».
     """
-    await _ensure_access_table(pool)
-    await pool.execute(
+    await executor.execute(
         """INSERT INTO host_server_access (user_id, payment_ref, granted_by)
            VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING""",
         user_id, payment_ref, granted_by,

@@ -204,41 +204,55 @@ async def _check_trc20(pool, http, bot, payments) -> None:
 
 
 async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
-    updated = await pool.fetchval(
-        """UPDATE payments SET status='confirmed', tx_hash=$1, confirmed_at=now()
-           WHERE id=$2 AND status IN ('pending','confirming','expired')
-           RETURNING id""",
-        tx_hash,
-        payment["id"],
-    )
-    if not updated:
-        return  # already confirmed or expired
+    """Подтвердить платёж и выдать оплаченное — одной транзакцией.
 
+    Раньше отметка «confirmed» и выдача шли раздельными запросами. Между ними
+    помещается смерть контейнера (Railway передеплоивает часто) или обрыв
+    соединения с базой — и тогда платёж навсегда остаётся подтверждённым без
+    выданной подписки: клейм ниже ловит только статусы pending/confirming/
+    expired, так что следующий цикл этот платёж уже не подберёт. Человек
+    заплатил и не получил ничего, а в системе всё «успешно».
+
+    Дверь вебхука (`services/payment_webhook`) делает ровно это одной
+    транзакцией — здесь было иначе, хотя платёж тот же. Теперь одинаково: если
+    выдача не прошла, откатывается и отметка, и следующий цикл повторит.
+
+    Уведомления и реферальные начисления остаются снаружи: внешние вызовы в
+    транзакции держат соединение и к целостности оплаты отношения не имеют.
+    """
     user_id = payment["user_id"]
-    if payment["plan"] == "strike":
-        await pool.execute(
-            "CREATE TABLE IF NOT EXISTS strike_access "
-            "(user_id BIGINT PRIMARY KEY, purchased_at TIMESTAMPTZ DEFAULT now(), "
-            "payment_ref TEXT, granted_by BIGINT)"
-        )
-        await pool.execute(
-            """INSERT INTO strike_access (user_id, payment_ref)
-               VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING""",
-            user_id,
-            payment["reference"],
-        )
-    if payment["plan"] == "host_server":
-        # Разовая лицензия на модуль Host-Server (как strike) — не подписка.
-        try:
-            from services import host_server
-            await host_server.grant_access(pool, user_id, payment["reference"])
-        except Exception as e:
-            log.warning("host_server grant_access failed user=%s: %s", user_id, e)
-    if payment["plan"] not in ("strike", "host_server"):
-        period_months = int(payment["period_months"] or 1)
-        await _activate_subscription(
-            pool, user_id, payment["plan"], period_months
-        )
+    plan = payment["plan"]
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            updated = await conn.fetchval(
+                """UPDATE payments SET status='confirmed', tx_hash=$1, confirmed_at=now()
+                   WHERE id=$2 AND status IN ('pending','confirming','expired')
+                   RETURNING id""",
+                tx_hash,
+                payment["id"],
+            )
+            if not updated:
+                return  # уже подтверждён — повторно не выдаём
+
+            if plan == "strike":
+                # Таблица заводится миграцией schema_v44, создавать её здесь
+                # не нужно: DDL внутри транзакции лишний, а «таблица из
+                # рантайма» не оставляет следа в схеме.
+                await conn.execute(
+                    """INSERT INTO strike_access (user_id, payment_ref)
+                       VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING""",
+                    user_id,
+                    payment["reference"],
+                )
+            elif plan == "host_server":
+                # Разовая лицензия на модуль Host-Server (как strike) — не подписка.
+                from services import host_server
+
+                await host_server.grant_access(conn, user_id, payment["reference"])
+            else:
+                period_months = int(payment["period_months"] or 1)
+                await _activate_subscription(conn, user_id, plan, period_months)
+
     log.info(
         "Payment confirmed: user=%s plan=%s months=%s ref=%s tx=%s",
         user_id,
@@ -328,9 +342,11 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         )
 
 
-async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> None:
+async def _activate_subscription(executor, user_id: int, plan: str, months: int) -> None:
     # Единая точка активации (see services/billing.py) — та же логика, что у
     # webhook, чтобы подписка/synced platform_users никогда не расходились.
+    # executor — пул ИЛИ открытое соединение: подтверждение платежа вызывает
+    # это внутри своей транзакции.
     from services import billing
 
-    await billing.activate_subscription(pool, user_id, plan, months)
+    await billing.activate_subscription(executor, user_id, plan, months)

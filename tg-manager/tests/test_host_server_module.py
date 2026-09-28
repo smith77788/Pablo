@@ -7,6 +7,7 @@ security-гейт исполнения на устройстве.
 """
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import re
 
@@ -299,9 +300,122 @@ def test_bot_handler_router_loads_and_is_wired():
     assert 'HostCb(action="menu")' in menu_src, "нет входа в меню операций"
 
 
-def test_payment_checker_activates_host_server_as_module_not_subscription():
-    """plan='host_server' → grant_access, и НЕ уходит в _activate_subscription."""
+def _fake_pool_for_confirm():
+    """Пул, отдающий id при клейме платежа; помнит выполненные запросы."""
+
+    class _Conn:
+        def __init__(self, log):
+            self._log = log
+
+        def transaction(self):
+            return self
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def fetchval(self, sql, *a):
+            self._log.append(" ".join(sql.split()))
+            return 1 if "UPDATE payments" in sql else None
+
+        async def execute(self, sql, *a):
+            self._log.append(" ".join(sql.split()))
+            return "INSERT 0 1"
+
+    class _Pool:
+        def __init__(self):
+            self.log: list[str] = []
+
+        def acquire(self):
+            pool = self
+
+            class _Ctx:
+                async def __aenter__(self):
+                    return _Conn(pool.log)
+
+                async def __aexit__(self, *a):
+                    return False
+
+            return _Ctx()
+
+        async def fetchval(self, sql, *a):
+            self.log.append(" ".join(sql.split()))
+            return None
+
+        async def execute(self, sql, *a):
+            self.log.append(" ".join(sql.split()))
+            return "UPDATE 0"
+
+        async def fetch(self, sql, *a):
+            self.log.append(" ".join(sql.split()))
+            return []
+
+        async def fetchrow(self, sql, *a):
+            self.log.append(" ".join(sql.split()))
+            return None
+
+    return _Pool()
+
+
+def test_payment_checker_activates_host_server_as_module_not_subscription(monkeypatch):
+    """plan='host_server' → выдача доступа, и НЕ активация подписки."""
+    from services import host_server as _hs
+    from services import payment_checker as _pc
+
+    выдано: list = []
+    подписка: list = []
+
+    async def _grant(executor, user_id, payment_ref=None, granted_by=None):
+        выдано.append((user_id, payment_ref))
+
+    async def _activate(executor, user_id, plan, months):
+        подписка.append((user_id, plan, months))
+
+    monkeypatch.setattr(_hs, "grant_access", _grant)
+    monkeypatch.setattr(_pc, "_activate_subscription", _activate)
+
+    pool = _fake_pool_for_confirm()
+    payment = {"id": 5, "user_id": 77, "plan": "host_server",
+               "reference": "HST-1", "period_months": 0}
+    asyncio.run(_pc._confirm(pool, None, payment, "0xabc"))
+
+    assert выдано == [(77, "HST-1")], "доступ к модулю не выдан"
+    assert not подписка, "разовый модуль ушёл в активацию подписки"
+
+
+def test_payment_checker_confirms_and_grants_in_one_transaction(monkeypatch):
+    """Отметка «оплачено» и выдача — одной транзакцией.
+
+    Иначе смерть контейнера между ними оставляет платёж подтверждённым без
+    подписки: клейм ловит только pending/confirming/expired, второй раз этот
+    платёж уже не подберётся.
+    """
+    from services import payment_checker as _pc
+
+    внутри: list = []
+
+    async def _activate(executor, user_id, plan, months):
+        # Внутри транзакции нам отдают соединение, а не пул: у пула есть
+        # acquire, у соединения — нет.
+        внутри.append(hasattr(executor, "acquire"))
+
+    monkeypatch.setattr(_pc, "_activate_subscription", _activate)
+
+    pool = _fake_pool_for_confirm()
+    payment = {"id": 5, "user_id": 77, "plan": "pro",
+               "reference": "TON-1", "period_months": 3}
+    asyncio.run(_pc._confirm(pool, None, payment, "0xabc"))
+
+    assert внутри == [False], "подписка выдаётся не в транзакции подтверждения"
+    assert any("UPDATE payments" in sql for sql in pool.log), "платёж не подтверждён"
+
+
+def test_payment_checker_does_not_create_tables_at_payment_time():
+    """DDL на горячем пути оплаты не нужен: таблицы заводятся миграциями."""
     src = (pathlib.Path(__file__).resolve().parents[1] / "services" / "payment_checker.py").read_text("utf-8")
-    assert "host_server.grant_access" in src, "нет выдачи доступа при оплате host_server"
-    # разовые модули исключены из активации подписки
-    assert '("strike", "host_server")' in src, "host_server не исключён из активации подписки"
+    assert "CREATE TABLE" not in src, (
+        "создание таблицы при подтверждении платежа: внутри транзакции это "
+        "лишняя блокировка, а таблица из рантайма не оставляет следа в схеме"
+    )
