@@ -9,31 +9,34 @@ log = logging.getLogger(__name__)
 
 
 async def bulk_tag(pool, owner_id: int, contact_ids: list, tag: str) -> dict:
-    updated = 0
-    for cid in contact_ids:
-        result = await pool.execute(
-            '''UPDATE unified_contacts SET tags = array_append(
-                CASE WHEN $3 = ANY(tags) THEN tags ELSE tags END, $3),
-               updated_at = NOW()
-               WHERE id=$1 AND owner_id=$2 AND NOT ($3 = ANY(tags))''',
-            cid, owner_id, tag)
-        if result == 'UPDATE 1':
-            updated += 1
-    return {'updated': updated, 'tag': tag}
+    if not contact_ids or not tag:
+        return {'updated': 0, 'tag': tag}
+    rows = await pool.fetch(
+        '''UPDATE unified_contacts
+           SET tags = array_append(tags, $3), updated_at = NOW()
+           WHERE owner_id=$2 AND id = ANY($1::uuid[]) AND NOT ($3 = ANY(tags))
+           RETURNING 1''',
+        list(contact_ids), owner_id, tag)
+    return {'updated': len(rows), 'tag': tag}
 
 
 async def bulk_untag(pool, owner_id: int, contact_ids: list, tag: str) -> dict:
-    updated = 0
-    for cid in contact_ids:
-        result = await pool.execute(
-            'UPDATE unified_contacts SET tags = array_remove(tags, $3), updated_at=NOW() WHERE id=$1 AND owner_id=$2',
-            cid, owner_id, tag)
-        if result == 'UPDATE 1':
-            updated += 1
-    return {'updated': updated, 'tag': tag}
+    if not contact_ids or not tag:
+        return {'updated': 0, 'tag': tag}
+    # Условие «тег вообще есть» было пропущено: UPDATE проходил по каждому
+    # контакту и возвращал «снято у N», даже когда снимать было нечего.
+    rows = await pool.fetch(
+        '''UPDATE unified_contacts
+           SET tags = array_remove(tags, $3), updated_at = NOW()
+           WHERE owner_id=$2 AND id = ANY($1::uuid[]) AND $3 = ANY(tags)
+           RETURNING 1''',
+        list(contact_ids), owner_id, tag)
+    return {'updated': len(rows), 'tag': tag}
 
 
 async def bulk_set_favorite(pool, owner_id: int, contact_ids: list, is_favorite: bool) -> dict:
+    if not contact_ids:
+        return {'updated': 0}
     placeholders = ','.join([f'${i+3}' for i in range(len(contact_ids))])
     params = [is_favorite, owner_id] + contact_ids
     result = await pool.execute(
@@ -282,6 +285,11 @@ async def bulk_remove_tags(pool, owner_id: int, contact_ids: list, tags: list) -
 
 
 async def bulk_set_importance(pool, owner_id: int, contact_ids: list, level: int) -> dict:
+    # Пустой список давал «id IN ()» — синтаксическую ошибку вместо «ничего не
+    # выбрано».
+    if not contact_ids:
+        return {'updated': 0}
+    level = int(level or 0)
     placeholders = ','.join([f'${i+3}' for i in range(len(contact_ids))])
     params = [level, owner_id] + contact_ids
     result = await pool.execute(
@@ -291,6 +299,11 @@ async def bulk_set_importance(pool, owner_id: int, contact_ids: list, level: int
 
 
 async def bulk_set_rating(pool, owner_id: int, contact_ids: list, rating: float) -> dict:
+    # user_rating — INTEGER: дробное значение asyncpg отвергнет, а пустой
+    # список даст «id IN ()».
+    if not contact_ids:
+        return {'updated': 0}
+    rating = int(round(float(rating or 0)))
     placeholders = ','.join([f'${i+3}' for i in range(len(contact_ids))])
     params = [rating, owner_id] + contact_ids
     result = await pool.execute(

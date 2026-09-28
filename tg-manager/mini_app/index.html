@@ -3723,6 +3723,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="btn btn-s" style="font-size:11px" onclick="bulkFavSelected()">⭐ Избранное</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkGroupSelected()">📁 В группу</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkDeleteSelected()">🗑 Удалить</button>
+        <button class="btn btn-s" style="font-size:11px" onclick="bulkMoreSelected()">⋯ Ещё</button>
       </div>
     </div>
     <div class="lst" id="contactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -17852,6 +17853,90 @@ async function bulkGroupSelected() {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
+// Ещё массовые действия. Отдельной кнопкой на каждое панель бы не выдержала:
+// на 360px помещается пять-шесть, а сервер умеет вдвое больше.
+async function bulkMoreSelected() {
+  if (!CONTACT_SELECTED.size) { toast('Сначала отметьте контакты'); return; }
+  const n = CONTACT_SELECTED.size;
+  const opts = [
+    {value:'untag',   label:'🏷 Снять тег',        sub:'убрать один тег у отмеченных'},
+    {value:'imp',     label:'❗ Важность',          sub:'обычный, важный, ключевой'},
+    {value:'rating',  label:'⭐ Оценка',            sub:'от 1 до 5, или снять'},
+    {value:'ungroup', label:'📁 Убрать из группы',  sub:'состав группы, сами контакты останутся'},
+  ];
+  const pick = await askChoice(`Что сделать с ${n} ${plural(n,'контактом','контактами','контактами')}?`, opts);
+  if (!pick) return;
+  if (pick === 'untag')   return bulkUntagSelected();
+  if (pick === 'imp')     return bulkImportanceSelected();
+  if (pick === 'rating')  return bulkRatingSelected();
+  if (pick === 'ungroup') return bulkUngroupSelected();
+}
+
+// Итог массового действия: снять выбор и перечитать список. Ноль изменённых —
+// не ошибка, но и не молчание: значит у отмеченных уже было это значение.
+function _bulkDone(changed, okMsg, nothingMsg) {
+  toast(changed ? okMsg.replace('{n}', num(changed)) : nothingMsg);
+  CONTACT_SELECTED.clear(); CONTACT_SELECT_MODE = false;
+  const bar = document.getElementById('contactBulkBar');
+  if (bar) bar.style.display = 'none';
+  loadContacts();
+}
+
+async function bulkUntagSelected() {
+  const tag = await askPrompt('Какой тег снять?', {placeholder:'название тега'});
+  if (!tag || !tag.trim()) return;
+  try {
+    const r = await api('/api/miniapp/uch/bulk/untag', {method:'POST',
+      body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], tag: tag.trim()})});
+    _bulkDone(Number(r.updated||0), '🏷 Тег снят у {n}', 'Ни у кого из отмеченных этого тега не было');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+const CONTACT_IMPORTANCE = [
+  {value:'0', label:'Обычный',  sub:'без пометки'},
+  {value:'1', label:'Важный',   sub:'не теряться в списке'},
+  {value:'2', label:'Ключевой', sub:'самые нужные люди'},
+];
+async function bulkImportanceSelected() {
+  const lvl = await askChoice('Какая важность?', CONTACT_IMPORTANCE);
+  if (lvl === null) return;
+  try {
+    const r = await api('/api/miniapp/uch/bulk/importance', {method:'POST',
+      body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], level: Number(lvl)})});
+    _bulkDone(Number(r.updated||0), '❗ Важность выставлена у {n}', 'Важность и так была такой');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function bulkRatingSelected() {
+  const opts = [{value:'0', label:'Снять оценку', sub:'без оценки'}];
+  for (let i = 1; i <= 5; i++) opts.push({value:String(i), label:'⭐'.repeat(i)});
+  const r0 = await askChoice('Какую оценку поставить?', opts);
+  if (r0 === null) return;
+  try {
+    const r = await api('/api/miniapp/uch/bulk/rating', {method:'POST',
+      body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], rating: Number(r0)})});
+    _bulkDone(Number(r.updated||0), '⭐ Оценка выставлена у {n}', 'Оценка и так была такой');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function bulkUngroupSelected() {
+  let groups = [];
+  try { groups = (await api('/api/miniapp/uch/groups')).groups || []; }
+  catch(e) { toast('⚠️ '+(e.message||'Ошибка')); return; }
+  if (!groups.length) { toast('Групп ещё нет'); return; }
+  const gid = await askChoice('Из какой группы убрать?', groups.map(g => ({
+    value: String(g.id),
+    label: (g.name||'Без названия'),
+    sub: 'Контактов: ' + num(Number(g.member_count||0)),
+  })));
+  if (!gid) return;
+  try {
+    const r = await api('/api/miniapp/uch/bulk/group', {method:'POST',
+      body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], group_id:Number(gid), action:'remove'})});
+    _bulkDone(Number(r.removed||0), '📁 Убрано из группы: {n}', 'Никого из отмеченных в этой группе не было');
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
 // ── Умные теги: правила и метки ────────────────────────────────────────
 // Правила раньше были невидимы: экран показывал только готовые метки, а
 // «Применить» рапортовало «проверено правил: 7», которых владелец не мог ни
@@ -18076,14 +18161,23 @@ async function applySmartTags() {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
+// Ссылки на выгрузку уходили новой вкладкой БЕЗ заголовка Authorization и
+// возвращали 401: три кнопки не работали. Токен в query — тот же способ, что
+// у выгрузки разобранной аудитории (exportAudience).
+function uchExport(fmt) {
+  const f = (fmt === 'vcf' || fmt === 'json') ? fmt : 'csv';
+  const url = '/api/miniapp/uch/export/' + f + '?token=' + encodeURIComponent(TK);
+  if (tg?.openLink) tg.openLink(location.origin + url); else window.open(url, '_blank');
+}
+
 async function openUchExport() {
   push('s-uchexport');
   let html = `<div style="padding:16px">
     <div class="sec">Экспорт всех контактов</div>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <a class="btn btn-p" href="/api/miniapp/uch/export/csv" target="_blank" style="flex:1;text-decoration:none;text-align:center">📄 CSV</a>
-      <a class="btn btn-p" href="/api/miniapp/uch/export/vcf" target="_blank" style="flex:1;text-decoration:none;text-align:center">📇 VCF</a>
-      <a class="btn btn-p" href="/api/miniapp/uch/export/json" target="_blank" style="flex:1;text-decoration:none;text-align:center">{ } JSON</a>
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('csv')">📄 CSV</button>
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('vcf')">📇 VCF</button>
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('json')">{ } JSON</button>
     </div>
   </div>`;
   txt('expBody', html);
