@@ -55,6 +55,12 @@ _RETENTION: list[tuple[str, str, str]] = [
     # История постов редактора канала: антиповтору нужны десятки последних
     # постов, а тело каждого поста на каждый канал весит до 8 КБ.
     ("va_channel_posts", "published_at", "90 days"),
+    # Журналы прогрева: строка на каждое действие каждого аккаунта, пишутся
+    # непрерывно фоном. Экраны показывают последние 20-60 записей и сводку за
+    # неделю, поэтому месяца истории хватает с запасом. Индексы — schema_v227.
+    ("account_warmup_log", "performed_at", "30 days"),
+    ("warmup_session_log", "performed_at", "30 days"),
+    ("resource_activity_log", "performed_at", "30 days"),
 ]
 
 _OPERATION_QUEUE_RETENTION = "30 days"
