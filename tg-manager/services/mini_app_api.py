@@ -14902,7 +14902,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             dup_threshold=clean["dup_threshold"],
             pillars=pillars,
             mix_weights=weights,
-            autonomy_mode=prev.autonomy_mode if prev else "manual",
+            # Режим редактора: если запрос прислал новый — применяем его, иначе
+            # сохраняем прежний. Раньше здесь всегда стоял prev/"manual", поэтому
+            # включить блокировку из интерфейса было нельзя вовсе.
+            autonomy_mode=clean.get("autonomy_mode",
+                                    prev.autonomy_mode if prev else "manual"),
             max_streak=prev.max_streak if prev else 2,
         )
         if row_id is None:

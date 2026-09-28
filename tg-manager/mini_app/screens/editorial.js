@@ -47,12 +47,29 @@ function _edRender(p) {
   }).join('');
   const maxChars = (p.max_chars && p.max_chars < 4096) ? p.max_chars : '';
   const minChars = p.min_chars ? p.min_chars : '';
+  const mode = ['manual', 'semi', 'autonomous'].indexOf(p.autonomy_mode) >= 0 ? p.autonomy_mode : 'manual';
+  const modeOpt = function (val, label) {
+    return '<option value="' + val + '"' + (val === mode ? ' selected' : '') + '>' + label + '</option>';
+  };
   return '' +
     '<div class="sec">Как это работает</div>' +
     '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.5;color:var(--hint)">' +
       'Перед массовой публикацией редактор сравнивает пост с вашими недавними постами и проверяет эти правила. ' +
-      'Если что-то не так, на подтверждении появится совет. Это подсказка, а не запрет: публиковать можно как есть.' +
+      'В режиме «Только советует» появляется подсказка, а публиковать можно как есть. ' +
+      'В режимах с блокировкой брак в канал не уходит — публикация останавливается автоматически.' +
       (p.configured ? '' : '<br><br>Сейчас действуют правила по умолчанию: только проверка на повтор.') +
+    '</div>' +
+    '<div class="sec">Режим администратора</div>' +
+    '<div class="lst" style="padding:14px">' +
+      '<div class="field"><label>Что редактор делает с браком</label>' +
+        '<select id="edMode">' +
+          modeOpt('manual', 'Только советует — не блокирует') +
+          modeOpt('semi', 'Блокирует явный брак (запрещённые слова и начала)') +
+          modeOpt('autonomous', 'Полный контроль — блокирует любой брак и повтор') +
+        '</select>' +
+        '<div class="field-note">В режимах с блокировкой массовая публикация останавливается сама, без вашего участия, ' +
+          'и в итоге операции виден список причин. «Только советует» ничего не останавливает.</div></div>' +
+      '<button class="btn btn-p" onclick="saveEditorialRules()" style="width:100%">💾 Сохранить правила</button>' +
     '</div>' +
     '<div class="sec">Повторы</div>' +
     '<div class="lst" style="padding:14px">' +
@@ -122,6 +139,8 @@ async function saveEditorialRules() {
     banned_openings: _edWords('edOpenings'),
     pillars: document.getElementById('edPillars').value || '',
   };
+  var modeEl = document.getElementById('edMode');
+  if (modeEl) payload.autonomy_mode = modeEl.value;
   btn.disabled = true; btn.textContent = '⏳ Сохраняю…';
   try {
     const d = await api('/api/miniapp/editorial/policy', { method: 'PUT', body: JSON.stringify(payload) });

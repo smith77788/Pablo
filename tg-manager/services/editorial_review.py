@@ -92,6 +92,43 @@ async def review_draft(
         return cb.EditorialVerdict(ok=True, needs_review=False)
 
 
+async def autonomous_block(
+    pool,
+    owner_id: int,
+    draft: str,
+    *,
+    channel_key: str | None = None,
+) -> tuple[bool, list[str]]:
+    """Решить, блокирует ли автономный редактор эту публикацию.
+
+    Возвращает (блокировать?, причины). Причины непусты только при блокировке.
+    Читает режим автономности из политики владельца и прогоняет тот же гейт, что
+    и предпросмотр, но результат применяет по режиму (channel_brain.enforce_decision).
+
+    FAIL-OPEN — принципиально. Блокировка останавливает легитимную публикацию,
+    которую владелец запустил; сорвать её из-за сбоя самой проверки хуже, чем
+    пропустить сомнительный пост. Любая ошибка (нет политики, сбой БД, битый
+    вердикт) → НЕ блокировать.
+    """
+    try:
+        brain = None
+        if channel_key:
+            brain = await store.get_profile(pool, owner_id, channel_key)
+        if brain is None:
+            brain = await store.get_profile(pool, owner_id, store.OWNER_DEFAULT_KEY)
+        mode = getattr(brain, "autonomy_mode", cb.AUTONOMY_MANUAL) if brain else cb.AUTONOMY_MANUAL
+        # В manual-режиме проверка не нужна вовсе — не тратим запросы к истории.
+        if mode == cb.AUTONOMY_MANUAL:
+            return False, []
+        verdict = await review_draft(
+            pool, owner_id, draft, channel_key=channel_key,
+        )
+        return cb.enforce_decision(mode, verdict)
+    except Exception:
+        log.debug("editorial_review.autonomous_block failed owner=%s", owner_id, exc_info=True)
+        return False, []
+
+
 def _one_variant(draft: str) -> str:
     """Один вариант spintax-шаблона (как его получит канал); без {…} — как есть."""
     if not draft or "{" not in draft:

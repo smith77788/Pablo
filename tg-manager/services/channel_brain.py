@@ -307,3 +307,47 @@ def editorial_gate(
         repetition=rep,
         brand=br,
     )
+
+
+# Режимы автономности редактора. Определяют, что редактор ДЕЛАЕТ с замечанием, а
+# не только показывает ли его. По возрастанию строгости:
+#   manual     — только советует; публикацию не останавливает никогда;
+#   semi       — блокирует явный брак (запрещённые слова/начала — нарушение
+#                голоса бренда), но повтор пропускает как мягкое замечание;
+#   autonomous — блокирует любое замечание (и повтор, и бренд): владелец
+#                делегировал контроль полностью, пост-брак в канал не уходит.
+AUTONOMY_MANUAL = "manual"
+AUTONOMY_SEMI = "semi"
+AUTONOMY_AUTONOMOUS = "autonomous"
+AUTONOMY_MODES = (AUTONOMY_MANUAL, AUTONOMY_SEMI, AUTONOMY_AUTONOMOUS)
+
+# Коды нарушений, которые считаются «жёстким браком» бренда (блокируются уже в
+# semi-режиме). Мягкие сигналы (длина, эмодзи, CTA, повтор) в semi лишь советуют.
+_HARD_BRAND_CODES = ("forbidden_word", "banned_opening")
+
+
+def enforce_decision(mode: str, verdict: EditorialVerdict) -> tuple[bool, list[str]]:
+    """Решение авто-блокировки по режиму и вердикту редактора.
+
+    Возвращает (блокировать?, причины). Причины непусты только при блокировке.
+    Чистая функция — вся политика блокировки здесь, тестируется без БД и сети.
+
+    Fail-open по построению: чистый вердикт (ok) не блокируется ни в каком
+    режиме; неизвестный режим трактуется как manual (самый мягкий) — включить
+    блокировку можно только сознательно выбранным режимом, а не опечаткой.
+    """
+    if verdict is None or not verdict.needs_review:
+        return False, []
+    m = mode if mode in AUTONOMY_MODES else AUTONOMY_MANUAL
+    if m == AUTONOMY_MANUAL:
+        return False, []
+    if m == AUTONOMY_AUTONOMOUS:
+        return True, list(verdict.reasons)
+    # semi: только жёсткие нарушения бренда
+    hard = [
+        v for v in (verdict.brand or {}).get("violations", [])
+        if v.get("code") in _HARD_BRAND_CODES
+    ]
+    if hard:
+        return True, [violation_text(v) for v in hard]
+    return False, []

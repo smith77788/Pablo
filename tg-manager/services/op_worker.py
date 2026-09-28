@@ -3729,6 +3729,34 @@ async def _exec_mass_publish(
     except Exception as _cs_err:
         log.debug("_exec_mass_publish content_safety check failed: %s", _cs_err)
 
+    # Виртуальный администратор: авто-блокировка в неручном режиме. content_safety
+    # выше ловит запрещённый контент; этот гейт — про КАЧЕСТВО канала (повтор,
+    # голос бренда) и срабатывает, только если владелец сам включил semi/авто-
+    # режим в «Правилах редактора». В manual-режиме (по умолчанию) не делает
+    # ничего — на предпросмотре пост уже показывался с советами. Fail-open:
+    # сбой самой проверки публикацию не рушит (см. autonomous_block).
+    try:
+        from services import editorial_review as _er
+
+        _blocked, _reasons = await _er.autonomous_block(pool, owner_id, mp_text)
+        if _blocked:
+            log.info(
+                "_exec_mass_publish op=%d ЗАБЛОКИРОВАНО редактором: %s",
+                op_id, "; ".join(_reasons[:3]),
+            )
+            _why = "\n".join(f"• {r}" for r in _reasons[:5])
+            return {
+                "status": "failed",
+                "summary": (
+                    "✍️ Публикация остановлена виртуальным администратором:\n"
+                    f"{_why}\n"
+                    "Режим редактора можно смягчить в «Каналы → 🧠 Виртуальный "
+                    "администратор»."
+                ),
+            }
+    except Exception as _ed_err:
+        log.debug("_exec_mass_publish editorial gate failed: %s", _ed_err)
+
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
     explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
     # Optional media attachment (from Quick Post Wizard step 3)

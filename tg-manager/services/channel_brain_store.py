@@ -215,7 +215,17 @@ def validate_policy(payload: Any) -> tuple[dict, list[str]]:
     except (TypeError, ValueError):
         errors.append("Порог повтора: нужно число")
         dup = 0.6
-    return {"brand_rules": rules, "dup_threshold": round(dup, 3)}, errors
+    out = {"brand_rules": rules, "dup_threshold": round(dup, 3)}
+    # Режим автономности — опциональный: запрос без него политику режима не
+    # трогает (обрабатывает вызывающий). Присланный мусор — ошибка, а не молча
+    # «manual»: иначе владелец думал бы, что включил блокировку, а её нет.
+    if isinstance(payload, dict) and "autonomy_mode" in payload:
+        am = str(payload.get("autonomy_mode") or "").strip().lower()
+        if am in _ALLOWED_AUTONOMY:
+            out["autonomy_mode"] = am
+        else:
+            errors.append("Режим редактора: допустимо manual / semi / autonomous")
+    return out, errors
 
 
 def validate_pillars(raw: Any) -> tuple[list[str], dict[str, float], list[str]]:
@@ -287,6 +297,9 @@ def to_public(brain: Optional[ChannelBrain]) -> dict:
         "forbidden_words": list(r.forbidden_words),
         "banned_openings": list(r.banned_openings),
         "dup_threshold": brain.dup_threshold if brain else 0.6,
+        # Режим автономности: без него UI не знал бы текущего состояния и не мог
+        # бы предложить включить блокировку.
+        "autonomy_mode": brain.autonomy_mode if brain else cb.AUTONOMY_MANUAL,
         "pillars": [
             {"name": p, "weight": int((brain.mix_weights or {}).get(p, 1))}
             for p in (brain.pillars if brain else [])
