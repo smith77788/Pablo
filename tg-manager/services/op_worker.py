@@ -20,6 +20,7 @@ from services.error_codes import ErrorCode
 from services.error_reporting import report_error
 from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
+from services import operation_bus as _obus_reg
 from services import infra_memory as _infra_mem
 from services import session_simulator
 from services import geo_tempo
@@ -2082,14 +2083,13 @@ async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
     return {"requeued": requeued, "released": len(held)}
 
 
-# Насколько глубоко идём вверх по цепочке повторов. Цепочка — это «повтор
-# повтора повтора»; десяти хватает с большим запасом, а предел нужен на случай
-# битых данных, чтобы обход не стал бесконечным.
-_RETRY_CHAIN_MAX = 10
+# Предел обхода цепочки повторов. Источник правды — operation_bus, здесь только
+# псевдоним: два независимых числа разошлись бы молча.
+_RETRY_CHAIN_MAX = _obus_reg.RETRY_CHAIN_MAX
 
 
 async def journal_op_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
-    """Операции, чей журнал относится к этой работе: она сама и её предки-повторы.
+    """Операции, чей журнал относится к этой работе: сама, предки и потомки-повторы.
 
     ЗАЧЕМ. Все три ключа идемпотентности (`completed_targets`,
     `settled_targets`, `completed_steps`) читают operation_log ПО op_id. Пока
@@ -2105,33 +2105,15 @@ async def journal_op_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
 
     Связь между повтором и оригиналом в данных уже была: `retry_of_op` в params
     ставит operation_bus.submit_retry_failed. Её никто не читал — теперь по ней
-    и идём.
+    и идём, причём в обе стороны: исходная операция остаётся недоведённой
+    навсегда, и второе нажатие «Повторить» на ней ставит повтор, который обязан
+    видеть работу первого повтора, а не только предка.
 
-    Никогда не бросает: не прочитали цепочку — работаем по своему журналу, то
-    есть как раньше.
+    Обход и его пределы живут в operation_bus.retry_family_ids — там же, где
+    единственная функция, собирающая params повтора. Никогда не бросает: не
+    прочитали цепочку — работаем по своему журналу, то есть как раньше.
     """
-    chain = [int(op_id)]
-    seen = {int(op_id)}
-    cur = int(op_id)
-    for _ in range(_RETRY_CHAIN_MAX):
-        row = await _safe_fetchrow(
-            pool,
-            "SELECT params->>'retry_of_op' AS src FROM operation_queue WHERE id=$1",
-            cur,
-            log_ctx=f"[journal_chain op={cur}]",
-        )
-        if not row:
-            break
-        try:
-            src = int(row["src"])
-        except (KeyError, TypeError, ValueError, IndexError):
-            break
-        if src in seen:
-            break
-        seen.add(src)
-        chain.append(src)
-        cur = src
-    return chain
+    return await _obus_reg.retry_family_ids(pool, op_id)
 
 
 async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:

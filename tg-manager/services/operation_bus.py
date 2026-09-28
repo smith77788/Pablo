@@ -966,6 +966,88 @@ def timeout_for(op_type: str, default: int) -> int:
     return value if value > 0 else default
 
 
+# Насколько глубоко идём по цепочке повторов в каждую сторону, и сколько
+# операций одной семьи читаем максимум. Пределы нужны на случай битых данных,
+# чтобы обход не стал бесконечным.
+RETRY_CHAIN_MAX = 10
+RETRY_FAMILY_MAX = 50
+
+
+async def retry_family_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
+    """Операции, чей журнал относится к этой работе: сама, её предки и их потомки.
+
+    ЗАЧЕМ ПРЕДКИ. Ключи идемпотентности исполнителя читают operation_log по
+    op_id, а кнопка «Повторить» ставит НОВУЮ операцию с новым id: журнал у неё
+    пустой, и без ссылки на предка исполнитель прошёл бы весь список целей
+    заново. Ссылка — `retry_of_op` в params.
+
+    ЗАЧЕМ ПОТОМКИ. Исходная операция остаётся недоведённой НАВСЕГДА: её статус
+    не меняется от того, что повтор доделал работу, и кнопка повтора на её
+    экране никуда не девается. Второе нажатие ставило повтор, который видел
+    только журнал предка и ничего не знал о работе ПЕРВОГО повтора — каналы,
+    опубликованные первым, получали второй пост. По дереву семьи оба повтора
+    видят работу друг друга.
+
+    Порядок: сама операция, затем предки снизу вверх, затем потомки. Никогда не
+    бросает: не прочитали — работаем по тому, что успели собрать, то есть как
+    раньше.
+    """
+    family = [int(op_id)]
+    seen = {int(op_id)}
+    cur = int(op_id)
+
+    for _ in range(RETRY_CHAIN_MAX):
+        try:
+            row = await pool.fetchrow(
+                "SELECT params->>'retry_of_op' AS src FROM operation_queue WHERE id=$1",
+                cur,
+            )
+        except Exception:
+            log.warning("operation_bus: цепочка повторов op=%s не прочитана", cur, exc_info=True)
+            return family
+        if not row:
+            break
+        try:
+            parent = int(row["src"])
+        except (KeyError, TypeError, ValueError, IndexError):
+            break
+        if parent in seen:
+            break
+        seen.add(parent)
+        family.append(parent)
+        cur = parent
+
+    frontier = list(family)
+    for _ in range(RETRY_CHAIN_MAX):
+        if not frontier or len(family) >= RETRY_FAMILY_MAX:
+            break
+        try:
+            rows = await pool.fetch(
+                "SELECT id FROM operation_queue "
+                " WHERE params->>'retry_of_op' = ANY($1::text[]) ORDER BY id",
+                [str(i) for i in frontier],
+            )
+        except Exception:
+            log.warning("operation_bus: повторы op=%s не прочитаны", op_id, exc_info=True)
+            break
+        nxt: list[int] = []
+        for r in (rows or []):
+            try:
+                child = int(r["id"])
+            except (KeyError, TypeError, ValueError, IndexError):
+                continue
+            if child in seen:
+                continue
+            seen.add(child)
+            family.append(child)
+            nxt.append(child)
+            if len(family) >= RETRY_FAMILY_MAX:
+                break
+        frontier = nxt
+
+    return family
+
+
 def retry_targets_meta(op_type: str) -> dict | None:
     """Описание точечного повтора для op_type. None — повтор не поддержан."""
     meta = (OP_REGISTRY.get(op_type) or {}).get("retry_targets")
@@ -1022,11 +1104,16 @@ async def collect_failed_targets(pool: asyncpg.Pool, op_id: int, op_type: str) -
     meta = retry_targets_meta(op_type)
     if not meta:
         return []
+    # Журнал берём по ВСЕЙ семье повторов, а не по одному op_id: работу могла
+    # сделать как исходная операция, так и любой из её повторов (см.
+    # retry_family_ids). Иначе второе нажатие «Повторить» на исходной операции
+    # отдавало бы цели, которые первый повтор уже закрыл.
     try:
         rows = await pool.fetch(
             "SELECT target, status FROM operation_log "
-            " WHERE op_id=$1 AND target IS NOT NULL ORDER BY step_num, id",
-            op_id,
+            " WHERE op_id = ANY($1::bigint[]) AND target IS NOT NULL "
+            " ORDER BY step_num, id",
+            await retry_family_ids(pool, op_id),
         )
     except Exception:
         log.warning("operation_bus: чтение operation_log op=%s не удалось", op_id, exc_info=True)
