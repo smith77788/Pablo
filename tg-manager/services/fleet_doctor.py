@@ -200,10 +200,18 @@ async def diagnose(pool, owner_id: int) -> dict:
 
     # Последние реальные ошибки операций — то, что видит пользователь как «не сработало».
     try:
+        from services import op_status as _ost_reason
+
+        # Причина по ОБЕИМ колонкам очереди. Раньше список брал только
+        # error_msg и им же фильтровал, поэтому упавшая операция, чья причина
+        # легла в last_error, из «последних реальных ошибок» просто исчезала:
+        # владелец видел пустой список там, где сбои были.
+        _reason = _ost_reason.sql_error_reason()
         er = await pool.fetch(
-            "SELECT COALESCE(label, op_type) AS op, error_msg, finished_at "
+            f"SELECT COALESCE(label, op_type) AS op, {_reason} AS error_msg, "
+            "finished_at "
             "FROM operation_queue WHERE owner_id=$1 AND status='failed' "
-            "AND error_msg IS NOT NULL AND error_msg <> '' "
+            f"AND COALESCE({_reason}, '') <> '' "
             "ORDER BY finished_at DESC NULLS LAST LIMIT 5", owner_id)
         out["recent_errors"] = [
             {"op": r["op"], "error": (r["error_msg"] or "")[:200]} for r in er]

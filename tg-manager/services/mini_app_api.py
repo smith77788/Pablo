@@ -1881,8 +1881,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT plan, expires_at FROM subscriptions WHERE user_id=$1 AND is_active=true "
                 "AND expires_at > now() ORDER BY expires_at DESC LIMIT 1", uid),
             "activity": pool.fetch(
-                """SELECT COALESCE(label, op_type) AS action, status, created_at,
-                          done_items, total_items, error_msg
+                f"""SELECT COALESCE(label, op_type) AS action, status, created_at,
+                          done_items, total_items,
+                          {op_status.sql_error_reason()} AS error_msg
                    FROM operation_queue WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 10""", uid),
             "acc_health": pool.fetchval(_health_sql, *_health_args),
@@ -3536,7 +3537,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.debug("operations: счётчики по статусам недоступны uid=%s", uid)
         _cols = f"""oq.id, oq.op_type, oq.status, oq.label, oq.total_items, oq.done_items,
-                          COALESCE(oq.error_msg, oq.result->>'reason') AS error_msg,
+                          {op_status.sql_error_reason("oq.")} AS error_msg,
                           oq.created_at, oq.started_at, oq.finished_at,
                           oq.scheduled_for, {_err_sub}"""
         _where = "oq.owner_id=$1"
@@ -3580,9 +3581,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор операции", 400)
         row = await _safe_fetchrow(pool,
             "SELECT id, op_type, status, label, total_items, done_items, "
-            # error_msg честно: колонка, иначе reason из result (старые «мягкие»
-            # провалы писали reason в result, не в error_msg).
-            "COALESCE(error_msg, result->>'reason') AS error_msg, "
+            # Причина честно по ОБЕИМ колонкам: error_msg — терминальный
+            # провал, last_error — почему операция ждёт (флуд-пауза, повторная
+            # попытка, рестарт воркера). Читая только первую, экран молчал о
+            # том, что операция отложена Telegram на час.
+            f"{op_status.sql_error_reason()} AS error_msg, "
             "created_at, finished_at, scheduled_for, "
             "COALESCE(result->>'summary', result->>'reason') AS summary, "
             "result AS _result "
@@ -17786,8 +17789,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             """Fetch running operations with progress for real-time updates."""
             try:
                 rows = await pool.fetch(
-                    """SELECT id, op_type, COALESCE(label, op_type) AS label,
-                              total_items, done_items, status, error_msg
+                    f"""SELECT id, op_type, COALESCE(label, op_type) AS label,
+                              total_items, done_items, status,
+                              {op_status.sql_error_reason()} AS error_msg
                        FROM operation_queue WHERE owner_id=$1 AND status='running'
                        ORDER BY created_at DESC""",
                     uid)
@@ -19505,7 +19509,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # ── Операции, которые упали ────────────────────────────────────────
         try:
             rows = await _safe_fetch(pool,
-                "SELECT id, op_type, label, last_error, finished_at "
+                "SELECT id, op_type, label, "
+                f"{op_status.sql_error_reason()} AS last_error, finished_at "
                 "FROM operation_queue WHERE owner_id=$1 AND status='failed' "
                 "  AND COALESCE(finished_at, created_at) > NOW() - INTERVAL '7 days' "
                 "ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 5", uid)

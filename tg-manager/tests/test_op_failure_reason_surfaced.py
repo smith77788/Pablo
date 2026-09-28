@@ -16,7 +16,7 @@ import inspect
 import re
 from pathlib import Path
 
-from services import op_worker, mini_app_api
+from services import op_status, op_worker, mini_app_api
 
 
 def test_worker_persists_error_msg_on_soft_failure():
@@ -32,8 +32,15 @@ def test_operation_status_coalesces_reason():
     m = re.search(r"async def operation_status.*?FROM operation_queue WHERE id=\$1", src, re.DOTALL)
     assert m, "operation_status не найден"
     body = m.group(0)
-    # error_msg падает назад на reason; summary тоже
-    assert "COALESCE(error_msg, result->>'reason') AS error_msg" in body
+    # Выражение причины стало общим для бота и мини-аппа и строже прежнего: к
+    # error_msg и reason добавилась вторая колонка last_error — туда пишут пути
+    # ОЖИДАНИЯ (флуд-пауза, повторная попытка, рестарт воркера), и раньше
+    # мини-апп про них молчал. Проверяем, что экран берёт общее выражение и что
+    # оно по-прежнему покрывает обе прежние половины.
+    assert "sql_error_reason()} AS error_msg" in body
+    reason_sql = op_status.sql_error_reason()
+    assert "error_msg" in reason_sql and "result->>'reason'" in reason_sql
+    assert "last_error" in reason_sql
     assert "COALESCE(result->>'summary', result->>'reason') AS summary" in body
 
 

@@ -956,9 +956,16 @@ async def cb_op_detail(
     user_id = callback.from_user.id
 
     try:
+        from services import op_status as _ost_detail
+
         op = await pool.fetchrow(
             "SELECT id, op_type, status, done_items, total_items, created_at, "
-            "last_error, retry_count, max_retries, finished_at, result "
+            # Причина по ОБЕИМ колонкам: экран читал только last_error, куда
+            # пишут пути ожидания (флуд-пауза, повторная попытка, рестарт
+            # воркера). Терминальный провал пишет error_msg — и у упавшей
+            # операции экран деталей не показывал причину вообще.
+            f"{_ost_detail.sql_error_reason()} AS last_error, "
+            "retry_count, max_retries, finished_at, result "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2",
             op_id, user_id,
         )
@@ -998,7 +1005,9 @@ async def cb_op_detail(
     if op["finished_at"]:
         lines.append(f"Завершена: {finished}")
     if op["last_error"]:
-        lines.append(f"⚠️ Последняя ошибка: <i>{html.escape(op['last_error'][:150])}</i>")
+        # «Причина», а не «последняя ошибка»: у ждущей операции это объяснение
+        # паузы (Telegram попросил подождать), и слово «ошибка» пугало зря.
+        lines.append(f"⚠️ Причина: <i>{html.escape(str(op['last_error'])[:150])}</i>")
 
     # Result summary if done
     if op["result"]:

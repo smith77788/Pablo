@@ -323,8 +323,12 @@ async def _ops(pool, owner_id: int) -> dict:
             "FROM operation_queue WHERE owner_id=$1", owner_id)
         if r:
             out["running"], out["pending"], out["failed_24h"] = int(r["running"]), int(r["pending"]), int(r["failed"])
+        from services import op_status as _ost_reason
+
         lf = await pool.fetchrow(
-            "SELECT id, op_type, COALESCE(error_msg,'') AS err FROM operation_queue "
+            "SELECT id, op_type, "
+            f"COALESCE({_ost_reason.sql_error_reason()}, '') AS err "
+            "FROM operation_queue "
             "WHERE owner_id=$1 AND status='failed' ORDER BY finished_at DESC LIMIT 1", owner_id)
         if lf:
             out["last_failed"] = {"op_id": int(lf["id"]), "op_type": lf["op_type"],

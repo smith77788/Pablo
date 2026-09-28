@@ -2223,8 +2223,15 @@ async def cb_op_detail(
     op_id = callback_data.op_id
 
     try:
+        from services import op_status as _ost_reason
+
         op = await pool.fetchrow(
-            "SELECT id, op_type, status, params, result, error_msg, "
+            "SELECT id, op_type, status, params, result, "
+            # Причина по ОБЕИМ колонкам очереди: error_msg — терминальный
+            # провал, last_error — почему операция ждёт (флуд-пауза, повторная
+            # попытка, рестарт воркера). Читая одну, экран молчит про половину
+            # случаев (services/op_status.sql_error_reason).
+            f"{_ost_reason.sql_error_reason()} AS error_msg, "
             "total_items, done_items, created_at, started_at, finished_at, "
             "retry_count, max_retries "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2",
@@ -2431,8 +2438,12 @@ async def cb_op_retry(
     user_id = callback.from_user.id
 
     try:
+        from services import op_status as _ost_reason2
+
         row = await pool.fetchrow(
-            "SELECT id, status, op_type, error_msg FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            "SELECT id, status, op_type, "
+            f"{_ost_reason2.sql_error_reason()} AS error_msg "
+            "FROM operation_queue WHERE id=$1 AND owner_id=$2",
             op_id,
             user_id,
         )

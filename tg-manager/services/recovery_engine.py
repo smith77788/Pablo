@@ -564,8 +564,11 @@ async def _operation_recovery(
     actions: list[RecoveryAction] = []
 
     try:
+        from services import op_status as _ost_reason
+
         terminal_failed = await pool.fetch(
-            """SELECT id, op_type, retry_count, max_retries, error_msg, created_at
+            f"""SELECT id, op_type, retry_count, max_retries,
+                      {_ost_reason.sql_error_reason()} AS error_msg, created_at
                FROM operation_queue
                WHERE owner_id=$1
                  AND status='failed'
