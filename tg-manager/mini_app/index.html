@@ -3679,6 +3679,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <span class="chip" style="flex:0 0 auto" onclick="detectDuplicates()">🔍 Дубликаты</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchConflicts()">⚠️ Конфликты</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchSmartTags()">🏷 Умные теги</span>
+      <span class="chip" style="flex:0 0 auto" onclick="openContactGroups()">📁 Группы</span>
       <span class="chip" style="flex:0 0 auto" onclick="openSavedSegments()">📂 Сегменты</span>
       <span class="chip" style="flex:0 0 auto" onclick="saveCurrentSegment()">💾 Сохранить срез</span>
       <span class="chip" style="flex:0 0 auto" onclick="openIntentSensor()">🎯 Намерения</span>
@@ -3711,6 +3712,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
     <div id="contactFilterHint" style="display:none;font-size:12px;color:var(--hint);padding:2px 2px 6px;line-height:1.35"></div>
+    <div id="contactGroupBar" style="display:none;font-size:13px;padding:7px 12px;margin:0 16px 8px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px"></div>
     <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(96,165,250,.1);border-radius:10px;margin:0 16px 8px">
       <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="contactSelCount">0</span>
         <span id="contactWholeToggle" onclick="toggleSegmentWhole()" style="margin-left:8px;cursor:pointer;font-size:12px;color:var(--accent)">весь срез</span></div>
@@ -3719,11 +3721,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="btn btn-s" style="font-size:11px" onclick="openSegmentInvite()">➕ Пригласить</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkTagSelected()">🏷 Тег</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkFavSelected()">⭐ Избранное</button>
+        <button class="btn btn-s" style="font-size:11px" onclick="bulkGroupSelected()">📁 В группу</button>
         <button class="btn btn-s" style="font-size:11px" onclick="bulkDeleteSelected()">🗑 Удалить</button>
       </div>
     </div>
     <div class="lst" id="contactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
+</div>
+
+<!-- ══════════ ГРУППЫ КОНТАКТОВ ══════════ -->
+<div class="screen" id="s-contactgroups">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📁 Группы контактов</div></div>
+  <div class="sub-sb" id="cgBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════ СОХРАНЁННЫЕ СЕГМЕНТЫ ══════════ -->
@@ -16781,6 +16790,7 @@ function lastSeenLabel(t) {
 const CONTACT_PAGE = 200;
 let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
 async function loadContacts(append=false) {
+  cgRenderBanner();           // фильтр по группе виден всегда, пока он включён
   const q = (document.getElementById('contactSearch')?.value||'').trim();
   if (!append) CONTACT_OFFSET = 0;
   // Единый путь: поиск КОМБИНИРУЕТСЯ с фильтрами (пол/стадия/…) и совпадает с
@@ -16793,6 +16803,7 @@ async function loadContacts(append=false) {
   if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
   if (CONTACT_GENDER) params.set('gender', CONTACT_GENDER);
   if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
+  if (CONTACT_GROUP) params.set('group_id', CONTACT_GROUP.id);
   params.set('limit', CONTACT_PAGE);
   params.set('offset', CONTACT_OFFSET);
   const url = '/api/miniapp/uch/contacts?' + params.toString();
@@ -17710,6 +17721,134 @@ async function resolveConflict(id, resolution, value) {
     await api('/api/miniapp/uch/conflicts/'+id+'/resolve', {method:'POST', body:JSON.stringify({resolution, value})});
     toast('✅ Конфликт разрешён');
     openUchConflicts();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+// ── Группы контактов ──────────────────────────────────────────────────
+// Сервер умел группы (создать, переименовать, удалить, набрать состав), но
+// экрана у них не было вовсе, и фильтр списка по группе тоже никто не звал.
+let CONTACT_GROUP = null;        // {id, name} — активный фильтр списка
+let CONTACT_GROUPS = [];         // последний прочитанный список групп
+
+async function openContactGroups() {
+  push('s-contactgroups');
+  txt('cgBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/groups');
+    const groups = d.groups || [];
+    CONTACT_GROUPS = groups;
+    let html = `<div style="padding:12px 16px">
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:10px">
+        Группа — ваша папка контактов. Состав набирается в списке контактов:
+        включите выбор, отметьте нужных и нажмите «📁 В группу».
+      </div>
+      <button class="btn btn-p" style="width:100%;margin-bottom:10px" onclick="cgCreate()">➕ Новая группа</button>`;
+    if (!groups.length) {
+      html += empty('📁','Групп пока нет','Заведите первую — например «Клиенты» или «Партнёры»');
+    } else {
+      html += '<div class="lst">';
+      groups.forEach(g => {
+        const cnt = Number(g.member_count || 0);
+        html += `<div class="li">
+          <div class="li-body" onclick="cgOpenContacts(${Number(g.id)},'${esc(String(g.name||'')).replace(/'/g,"\\'")}')" role="button" tabindex="0">
+            <div class="li-name">${g.color?`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${esc(g.color)};margin-right:6px"></span>`:''}${esc(g.name||'Без названия')}</div>
+            <div class="li-sub">${cnt ? 'Контактов: '+num(cnt) : 'пусто'}</div>
+          </div>
+          <div class="li-right" style="display:flex;gap:8px;align-items:center">
+            <span class="icon-tap" onclick="event.stopPropagation();cgRename(${Number(g.id)},'${esc(String(g.name||'')).replace(/'/g,"\\'")}')" role="button" tabindex="0" aria-label="Переименовать группу" title="Переименовать">✏️</span>
+            <span class="icon-tap" onclick="event.stopPropagation();cgDelete(${Number(g.id)},this)" role="button" tabindex="0" aria-label="Удалить группу" title="Удалить">🗑</span>
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    txt('cgBody', html);
+  } catch(e) { txt('cgBody', errHtml(e.message, 'openContactGroups()')); }
+}
+
+async function cgCreate() {
+  const name = await askPrompt('Название группы', {placeholder:'например, Клиенты'});
+  if (!name || !name.trim()) return;
+  try {
+    await api('/api/miniapp/uch/groups', {method:'POST', body:JSON.stringify({name:name.trim()})});
+    toast('✅ Группа создана');
+    openContactGroups();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function cgRename(id, cur) {
+  const name = await askPrompt('Новое название', {value: cur, placeholder:'название группы'});
+  if (!name || !name.trim() || name.trim() === cur) return;
+  try {
+    await api('/api/miniapp/uch/groups/'+id, {method:'PUT', body:JSON.stringify({name:name.trim()})});
+    toast('✅ Переименовано');
+    openContactGroups();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function cgDelete(id, el) {
+  if (!await confirmDelete('Удалить группу', el, 'Контакты останутся на месте — исчезнет только папка.')) return;
+  try {
+    await api('/api/miniapp/uch/groups/'+id, {method:'DELETE'});
+    toast('🗑 Группа удалена');
+    if (CONTACT_GROUP && CONTACT_GROUP.id === id) { CONTACT_GROUP = null; }
+    openContactGroups();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+// Открыть список контактов, отфильтрованный по группе. Фильтр виден полосой
+// над списком — молчаливый фильтр читается как «контактов стало меньше».
+function cgOpenContacts(id, name) {
+  CONTACT_GROUP = {id, name};
+  back();                     // уходим с экрана групп
+  openContacts();             // тот же вход, что и из плиток
+}
+
+function cgClearGroup() {
+  CONTACT_GROUP = null;
+  cgRenderBanner();
+  loadContacts();
+}
+
+function cgRenderBanner() {
+  const el = document.getElementById('contactGroupBar');
+  if (!el) return;
+  if (!CONTACT_GROUP) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'block';
+  el.innerHTML = `<span>📁 Группа: <b>${esc(CONTACT_GROUP.name)}</b></span>`
+    + `<span class="icon-tap" onclick="cgClearGroup()" role="button" tabindex="0" aria-label="Снять фильтр по группе" style="float:right">✕</span>`;
+}
+
+// Отправить выбранные контакты в группу.
+async function bulkGroupSelected() {
+  if (!CONTACT_SELECTED.size) { toast('Сначала отметьте контакты'); return; }
+  let groups = CONTACT_GROUPS;
+  try {
+    const d = await api('/api/miniapp/uch/groups');
+    groups = d.groups || [];
+    CONTACT_GROUPS = groups;
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); return; }
+  if (!groups.length) {
+    toast('Групп ещё нет — создайте первую');
+    openContactGroups();
+    return;
+  }
+  const pick = await askChoice('В какую группу?', groups.map(g => ({
+    value: String(g.id),
+    label: (g.name||'Без названия') + ' · ' + num(Number(g.member_count||0)),
+  })));
+  if (!pick) return;
+  try {
+    const r = await api('/api/miniapp/uch/bulk/group', {method:'POST',
+      body:JSON.stringify({contact_ids:[...CONTACT_SELECTED], group_id:Number(pick), action:'add'})});
+    const added = Number(r.added||0);
+    // Ноль — не ошибка: значит все выбранные уже были в группе. Молчать об
+    // этом нельзя, иначе кажется, что кнопка не сработала.
+    toast(added ? `📁 Добавлено: ${added}` : 'Все выбранные уже были в этой группе');
+    CONTACT_SELECTED.clear(); CONTACT_SELECT_MODE = false;
+    document.getElementById('contactBulkBar').style.display = 'none';
+    loadContacts();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
@@ -24629,6 +24768,32 @@ function askPrompt(title, opts) {
       if (e.key === 'Escape') done(null);
     });
     setTimeout(() => { try { inp.focus(); } catch(_) {} }, 50);
+  });
+}
+// Выбор одного варианта из списка. Родного диалога с вариантами у Telegram
+// нет, а подставлять номер в askPrompt — заставлять владельца считать строки.
+// options: [{value, label, sub}]. Возвращает value или null.
+function askChoice(title, options) {
+  options = options || [];
+  return new Promise(res => {
+    const bg = document.createElement('div');
+    bg.className = 'mbg show';
+    bg.style.zIndex = '9999';
+    const rows = options.map((o, i) =>
+      '<button class="btn btn-s _acr" data-i="' + i + '" style="width:100%;text-align:left;margin-bottom:6px">'
+      + esc(o.label || String(o.value))
+      + (o.sub ? '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + esc(o.sub) + '</div>' : '')
+      + '</button>').join('');
+    bg.innerHTML = '<div class="modal"><div class="modal-title">' + esc(title || 'Выберите') + '</div>'
+      + '<div style="max-height:52vh;overflow-y:auto;margin-top:8px">' + rows + '</div>'
+      + '<button class="btn btn-d" id="_acc" style="width:100%;margin-top:8px">Отмена</button></div>';
+    document.body.appendChild(bg);
+    const done = v => { try { document.body.removeChild(bg); } catch(_) {} res(v); };
+    bg.querySelectorAll('._acr').forEach(b => {
+      b.onclick = () => done(options[Number(b.dataset.i)].value);
+    });
+    bg.querySelector('#_acc').onclick = () => done(null);
+    bg.onclick = e => { if (e.target === bg) done(null); };
   });
 }
 function showModal(id) {

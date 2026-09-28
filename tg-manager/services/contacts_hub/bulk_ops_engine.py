@@ -136,26 +136,35 @@ async def delete_by_filter(pool, owner_id: int, *, country: str | None = None,
 
 
 async def bulk_add_to_group(pool, owner_id: int, contact_ids: list, group_id: int) -> dict:
-    added = 0
-    for cid in contact_ids:
-        try:
-            await pool.execute(
-                'INSERT INTO contact_group_members (group_id, contact_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-                group_id, cid)
-            added += 1
-        except Exception:
-            pass
-    return {'added': added}
+    # Владельца проверяет САМ запрос: и группа, и контакты должны быть хозяйскими.
+    # Раньше owner_id принимали и не использовали — по чужому id группы можно
+    # было набить чужую группу своими контактами.
+    if not contact_ids:
+        return {'added': 0}
+    rows = await pool.fetch(
+        '''INSERT INTO contact_group_members (group_id, contact_id)
+           SELECT g.id, c.id
+           FROM contact_groups g
+           JOIN unified_contacts c ON c.owner_id = g.owner_id
+           WHERE g.id = $1 AND g.owner_id = $2 AND c.id = ANY($3::uuid[])
+           ON CONFLICT DO NOTHING
+           RETURNING 1''',
+        group_id, owner_id, list(contact_ids))
+    # Считаем добавленные строки, а не попытки: повтор честно покажет 0.
+    return {'added': len(rows)}
 
 
 async def bulk_remove_from_group(pool, owner_id: int, contact_ids: list, group_id: int) -> dict:
-    removed = 0
-    for cid in contact_ids:
-        result = await pool.execute(
-            'DELETE FROM contact_group_members WHERE group_id=$1 AND contact_id=$2', group_id, cid)
-        if result == 'DELETE 1':
-            removed += 1
-    return {'removed': removed}
+    if not contact_ids:
+        return {'removed': 0}
+    rows = await pool.fetch(
+        '''DELETE FROM contact_group_members m
+           USING contact_groups g
+           WHERE m.group_id = g.id AND g.id = $1 AND g.owner_id = $2
+                 AND m.contact_id = ANY($3::uuid[])
+           RETURNING 1''',
+        group_id, owner_id, list(contact_ids))
+    return {'removed': len(rows)}
 
 
 async def create_group(pool, owner_id: int, name: str, color: str = None) -> int:
@@ -187,10 +196,11 @@ async def update_group(pool, group_id: int, owner_id: int, name: str = None, col
 
 
 async def delete_group(pool, group_id: int, owner_id: int) -> bool:
-    await pool.execute(
-        'DELETE FROM contact_group_members WHERE group_id=$1', group_id)
+    # Состав удаляем ТОЛЬКО у своей группы. Раньше первый DELETE шёл без
+    # проверки владельца — чужую группу можно было опустошить по одному id.
     result = await pool.execute(
-        'DELETE FROM contact_groups WHERE id=$1 AND owner_id=$2', group_id, owner_id)
+        '''DELETE FROM contact_groups WHERE id=$1 AND owner_id=$2''',
+        group_id, owner_id)
     return result != 'DELETE 0'
 
 

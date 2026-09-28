@@ -20536,6 +20536,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             gender = None
         crm_stage = (request.query.get('crm_stage') or '').strip()[:40] or None
         excluded_only = request.query.get('excluded_only') == '1'  # только личные (управление)
+        # Фильтр по группе контактов: репозиторий его умел, а список не читал,
+        # поэтому группы было некуда открыть.
+        group_id = validate_integer(request.query.get('group_id'), min_val=1)
         # Пагинация: без неё список молча обрезался дефолтным limit=100 — при 2.9к+
         # контактов пользователь видел «лишь десятки» и не мог долистать до
         # остальных. limit зажат, offset — для «Показать ещё».
@@ -20552,7 +20555,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
                                         tag=tag, premium_only=premium, multi_only=multi,
                                         mutual_only=mutual, gender=gender, crm_stage=crm_stage,
-                                        excluded_only=excluded_only,
+                                        excluded_only=excluded_only, group_id=group_id,
                                         limit=limit, offset=offset)
             result['offset'] = offset
             result['limit'] = limit
