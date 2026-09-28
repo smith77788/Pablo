@@ -21,6 +21,7 @@ from datetime import datetime, timezone, timedelta
 import logging
 import random
 import re
+import sys
 import time
 from services.error_codes import ErrorCode, AppError
 from services.error_reporting import report_error, get_user_error_message
@@ -661,10 +662,29 @@ def set_pool_proxy_cache(urls: list[str]) -> None:  # noqa: D401 - deprecated no
     return None
 
 
-def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
-    """Record proxy failure in infra_memory when connect/op fails with a network error.
-    Non-blocking — no pool needed. Degrades proxy score so future ops avoid it."""
+def _record_proxy_fail(acc: dict | None, action_type: str, exc: BaseException | None = None) -> None:
+    """Записать ПРОВАЛ прокси в infra_memory — снижает его оценку в proxy_selector.
+
+    Занятость сессии провалом прокси НЕ является. `SessionBusyError` поднимается
+    мьютексом сессии ДО того, как клиент вообще открыл сокет: прокси в этой
+    попытке не участвовал. Если засчитать его, success_rate здорового прокси
+    падает от каждого пересечения (консоль листает диалоги, пока идёт операция
+    тем же аккаунтом), `proxy_selector` начинает обходить рабочий прокси — и
+    аккаунт уезжает на другой выход. А смена выхода у живой сессии — это ровно
+    тот сценарий, ради которого мьютекс и написан (AUTH_KEY_DUPLICATED).
+
+    Исключение берём из ЖИВОГО контекста `except` (`sys.exc_info`), если его не
+    передали явно: функция вызывается из полутора десятков except-блоков, и
+    защита, которую надо не забыть протащить параметром, рано или поздно где-то
+    не протащится. Явный `exc` сильнее — его передают там, где вызов идёт не
+    прямо из обработчика.
+    """
     if not acc:
+        return
+    if exc is None:
+        exc = sys.exc_info()[1]
+    if isinstance(exc, SessionBusyError):
+        log.debug("_record_proxy_fail: пропуск — сессия была занята, прокси ни при чём")
         return
     proxy_url = acc.get("proxy_url") or ""
     if not proxy_url:
@@ -675,6 +695,35 @@ def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
         infra_memory.record_proxy_op(proxy_url, action_type, success=False)
     except Exception as e:
         log.warning("_record_proxy_fail: %s", e)
+
+
+def _busy_session_result(exc: BaseException, ok_field: bool = False) -> dict | None:
+    """Занятость сессии → честный результат вместо «сломан прокси». Иначе None.
+
+    `SessionBusyError` поднимает мьютекс сессии ДО открытия сокета: прокси в
+    этой попытке не участвовал, аккаунт жив, ключ цел. Но это наследник
+    `ConnectionError`, и raw-коннекторы ловили его вместе с настоящими сетевыми
+    сбоями, возвращая `proxy_error=True`. В bound-режиме исполнитель операции по
+    этому флагу ИЗОЛИРУЕТ аккаунт до конца операции и пишет владельцу
+    «❌ Прокси недоступен — Исправьте прокси»: аккаунт потерян, а владельца
+    отправили чинить исправное.
+
+    Пересечение реально: разбор сущности, глобальный поиск и парсер берут
+    аккаунт мимо арбитра операций, и пока владелец смотрит канал, идущий
+    инвайт тем же аккаунтом получает «занято». Оно проходит само, как только
+    другое подключение отпустит сессию, поэтому это ПОВТОРИМЫЙ пропуск.
+
+    `ok_field=True` — для функций, чей контракт содержит `ok`.
+    """
+    if not isinstance(exc, SessionBusyError):
+        return None
+    out = {
+        "error": "Сессия аккаунта занята другим подключением — повторим позже",
+        "session_busy": True,
+    }
+    if ok_field:
+        out["ok"] = False
+    return out
 
 
 def _record_proxy_ok(acc: dict | None, action_type: str, latency_ms: int = 0) -> None:
@@ -4064,6 +4113,9 @@ async def join_channel(
             "proxy_error": True,
         }
     except (OSError, ConnectionError) as e:
+        _busy = _busy_session_result(e)
+        if _busy is not None:
+            return _busy
         _record_proxy_fail(_acc, "join")
         return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
@@ -4210,6 +4262,9 @@ async def send_bot_start(
             "proxy_error": True,
         }
     except (OSError, ConnectionError) as e:
+        _busy = _busy_session_result(e)
+        if _busy is not None:
+            return _busy
         _record_proxy_fail(_acc, "bot_start")
         return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
@@ -4268,6 +4323,10 @@ async def leave_channel(
         log.warning("leave_channel: connect timeout — proxy may be dead")
         return {"ok": False, "error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
     except (OSError, ConnectionError) as e:
+        _busy = _busy_session_result(e, ok_field=True)
+        if _busy is not None:
+            log.info("leave_channel: сессия занята другим подключением — повторим позже")
+            return _busy
         _record_proxy_fail(_acc, "leave")
         log.warning("leave_channel: network error (proxy?): %s", e)
         return {"ok": False, "error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
@@ -5779,6 +5838,9 @@ async def post_to_channel(
             "proxy_error": True,
         }
     except (OSError, ConnectionError) as e:
+        _busy = _busy_session_result(e)
+        if _busy is not None:
+            return _busy
         _record_proxy_fail(_acc, "post")
         return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
