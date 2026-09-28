@@ -31,7 +31,7 @@ Telegram-инфраструктура и массовые операции: ак
 cd tg-manager
 cp .env.example .env          # заполнить credentials
 pip install -r requirements.txt
-python -m pytest tests/ -q    # ~4500 тестов, ~3 минуты
+python -m pytest tests/ -q    # ~7700 тестов, ~8 минут (агентам локально не нужен: гоняет CI)
 python main.py
 ```
 

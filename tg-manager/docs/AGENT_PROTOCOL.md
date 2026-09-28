@@ -204,10 +204,18 @@ Anthropic для этого класса, которых нет в раздел�
 Планка: **фикс без проверки по реальному пути и без регресс-теста не считается
 завершённым.**
 
-- **Python:** `python -c "import ast; ast.parse(open('файл').read())"` + `pytest`
-  (в чистой среде: `pytest pytest-asyncio python-dotenv openpyxl aiohttp`; asyncpg
-  стаблен в `tests/conftest.py`). Перед push — прогон затронутых тестов и
-  `test_no_duplicate_definitions`; на крупных сессиях — полный прогон.
+- **Python:** `python -c "import ast; ast.parse(open('файл').read())"` + `pytest`.
+  Набор зависимостей брать ПОЛНЫЙ (команда — в `CLAUDE.md`): на урезанном
+  («pytest pytest-asyncio python-dotenv openpyxl aiohttp») ~70 тестов падают на
+  `ModuleNotFoundError`, и настоящая поломка теряется на их фоне.
+
+  Перед push — затронутые тесты, `test_no_duplicate_definitions`, храповики и
+  `ruff` (точная команда — в корневом `CLAUDE.md`, раздел «Как проверять»;
+  вместе около минуты). **Полный прогон локально не гонять** даже на крупных
+  сессиях — указание владельца 28.09.2026: набор вырос до ~7700 тестов и восьми
+  минут, а весь его на каждый пуш гоняет CI. Исключение — правка общего контракта
+  (`operation_bus`, `db.py`, `mini_app_api` целиком), где затронутую зону нельзя
+  очертить.
 - **Мини-апп JS:** извлечь `<script>` из `mini_app/index.html` и прогнать
   `node --check`; так же `node --check mini_app/screens/*.js`.
 - **UI мини-аппа:** Playwright render-харнесс `deploy/scripts/render_miniapp.mjs`
