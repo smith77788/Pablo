@@ -253,6 +253,26 @@ def test_miniapp_publish_asks_editor_before_confirm():
     assert "/api/miniapp/editorial/review" in js and "/api/miniapp/editorial/policy" in js
 
 
+def test_editor_is_reachable_from_the_channels_screen():
+    """Виртуальный администратор канала должен открываться из раздела «Каналы».
+
+    Раньше «Правила редактора» вели ТОЛЬКО из экрана «Массовая публикация».
+    Владелец, искавший администратора каналов там, где он логически живёт — в
+    разделе «Каналы и чаты», — не находил его вовсе и считал, что фичи нет.
+    Здесь проверяется, что видимый вход стоит именно на экране каналов.
+    """
+    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    i = html.index('id="s-channels"')
+    j = html.index('id="s-', i + 10)  # начало следующего экрана
+    channels_screen = html[i:j]
+    assert "openEditorialRules()" in channels_screen, (
+        "на экране «Каналы и чаты» нет входа к виртуальному администратору"
+    )
+    # функция входа реально определена в подключённом модуле
+    js = open(os.path.join(ROOT, "mini_app", "screens", "editorial.js"), encoding="utf-8").read()
+    assert "function openEditorialRules(" in js
+
+
 def test_verdict_to_public_shape():
     v = cb.EditorialVerdict(ok=False, needs_review=True, reasons=["x"] * 12,
                             repetition={"max_similarity": 0.734})

@@ -1576,6 +1576,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
       <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🧹 Только мои (убрать чужие)</button>
     </div>
+    <!-- Вход к виртуальному администратору канала. Раньше «Правила редактора»
+         открывались ТОЛЬКО из экрана «Массовая публикация» — владелец, искавший
+         администратора каналов в разделе «Каналы», не находил его вовсе. -->
+    <div style="display:flex;gap:8px;padding:0 0 8px">
+      <button class="btn btn-s" onclick="openEditorialRules()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Виртуальный редактор канала: держит голос бренда, не даёт повторяться, чередует рубрики. Проверяет пост перед публикацией">🧠 Виртуальный администратор</button>
+    </div>
     <!-- Поиск и срезы. Список рисовался целиком и без фильтров: после «Фабрики
          каналов» это сотни строк, а роль (владелец / админ / просто участник)
          приходит с сервера и решает, что с каналом вообще можно сделать. -->
