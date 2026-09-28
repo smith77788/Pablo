@@ -5803,23 +5803,35 @@ async def enqueue_op_with_approval(
     total_items: int,
     threshold: int = 20,
 ) -> int:
-    """Enqueue operation. If total_items > threshold, set requires_approval=TRUE."""
-    import json as _json
+    """Поставить операцию; при total_items > threshold — с ожиданием подтверждения.
 
-    needs_approval = total_items > threshold
-    status = "waiting_approval" if needs_approval else "pending"
-    row = await pool.fetchrow(
-        """INSERT INTO operation_queue
-           (owner_id, op_type, params, total_items, status, requires_approval, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,now()) RETURNING id""",
-        owner_id,
-        op_type,
-        _json.dumps(params, ensure_ascii=False) if isinstance(params, dict) else params,
-        total_items,
-        status,
-        needs_approval,
-    )
-    return row["id"]
+    Постановка идёт ЧЕРЕЗ ШИНУ (`operation_bus.submit`), а не прямым INSERT.
+    Прямая запись была здесь с самого начала и обходила разом всё, что шина
+    делает по дороге: гейт тарифа, предохранитель Ban Weather, окно
+    идемпотентности (двойной тап кнопки давал ДВЕ операции) и проверку, что
+    op_type вообще существует в реестре. Вызывающих у функции не было, то есть
+    дыра ещё не выстрелила, но лежала готовой к употреблению, а храповик
+    `tests/test_no_raw_queue_inserts.py` смотрел только в `bot/` и `services/`
+    и её не видел. Теперь смотрит и сюда.
+
+    Ожидание подтверждения проставляется вторым шагом, поверх уже поставленной
+    операции: воркер берёт из очереди только 'pending', поэтому до подтверждения
+    она не исполняется.
+    """
+    from services import operation_bus as _obus
+
+    op_id = int(await _obus.submit(
+        pool, owner_id, op_type, params if isinstance(params, dict) else {},
+        total_items=total_items,
+    ))
+    if total_items > threshold:
+        await pool.execute(
+            "UPDATE operation_queue "
+            "   SET requires_approval=TRUE, status='waiting_approval' "
+            " WHERE id=$1 AND status='pending'",
+            op_id,
+        )
+    return op_id
 
 
 async def get_pending_approvals(pool: asyncpg.Pool, owner_id: int) -> list:

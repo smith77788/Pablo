@@ -29,9 +29,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"services/operation_bus.py"}
 
+# Слои, которые могут ставить операцию. `database` добавлен потому, что был
+# СЛЕПОЙ ЗОНОЙ: храповик смотрел только bot/ и services/, а в database/db.py
+# спокойно лежал прямой INSERT INTO operation_queue (постановка операции с
+# ожиданием подтверждения). Вызывающих у него не было, то есть дыра ещё не
+# выстрелила, но любой хендлер, нашедший готовую функцию, обошёл бы разом гейт
+# тарифа, предохранитель Ban Weather и дедуп двойного тапа — то самое, ради
+# чего этот храповик и существует.
+_LAYERS = ("bot", "services", "database")
+
 
 def _sources():
-    for base in ("bot", "services"):
+    for base in _LAYERS:
         for path in sorted((ROOT / base).rglob("*.py")):
             rel = path.relative_to(ROOT).as_posix()
             if rel in ALLOWED:
