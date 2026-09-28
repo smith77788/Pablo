@@ -3983,12 +3983,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     base = row["params"] if isinstance(row["params"], dict) else _json.loads(row["params"] or "{}")
                 except (TypeError, ValueError):
                     base = {}
-                base = dict(base)
-                base["channel_ids"] = failed_ids
                 # Связь с исходной операцией: по ней исполнитель видит её журнал
                 # и не делает второй раз то, что там уже помечено сделанным
-                # (op_worker.journal_op_ids).
-                base["retry_of_op"] = op_id
+                # (op_worker.journal_op_ids). Тот же сборщик снимает ключи
+                # расписания — повтор круга автопостинга не должен заводить
+                # вторую цепочку публикаций (operation_bus.params_for_retry).
+                base = _obus.params_for_retry(op_id, base)
+                base["channel_ids"] = failed_ids
                 new_id = await _obus.submit(
                     pool, uid, row["op_type"], base,
                     total_items=len(failed_ids),
@@ -4018,14 +4019,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # создание каналов давало второй комплект. По ссылке исполнитель
             # видит журнал предка (op_worker.journal_op_ids) и доделывает
             # остаток, а не переделывает всё.
-            _retry_params = dict(_retry_params)
-            _retry_params["retry_of_op"] = op_id
+            # Тот же сборщик снимает ключи расписания: «Повторить» означает
+            # «сделай эту работу ещё раз», а не «заведи второе расписание».
+            _recurring = _obus.drops_recurrence(_retry_params)
+            _retry_params = _obus.params_for_retry(op_id, _retry_params)
+            # Метку «↻» ставит планировщик кругов; у разового повтора расписания
+            # нет, и метка врала бы владельцу прямо в очереди.
+            _retry_label = row["label"]
+            if _recurring and isinstance(_retry_label, str) and _retry_label.endswith(" ↻"):
+                _retry_label = _retry_label[:-2].rstrip()
             # dedup_window_sec=0: повтор — намеренно та же операция с теми же
             # params, и окно идемпотентности приняло бы его за двойной тап.
             try:
                 new_id = await _obus.submit(
                     pool, uid, row["op_type"], _retry_params,
-                    total_items=row["total_items"] or 0, label=row["label"],
+                    total_items=row["total_items"] or 0, label=_retry_label,
                     dedup_window_sec=0)
             except ValueError:
                 # Тип операции больше не поддерживается (переименован или убран из
@@ -4034,7 +4042,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err(
                     f"Тип операции «{row['op_type']}» больше не поддерживается — "
                     "повтор невозможен", 400)
-            return _json_resp({"ok": True, "new_id": new_id})
+            _resp = {"ok": True, "new_id": new_id}
+            if _recurring:
+                _resp["note"] = ("Повтор запущен один раз — расписание исходной "
+                                 "операции не копируется.")
+            return _json_resp(_resp)
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
@@ -11210,6 +11222,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         import json as _json2
 
         retried, skipped = [], []
+        dropped_schedules = 0
         chosen = candidates[:25]    # потолок: не заваливаем очередь одним нажатием
         # Параметры всех выбранных операций — ОДНИМ запросом. Раньше здесь был
         # отдельный запрос на каждую: до 25 обращений к базе подряд, и владелец
@@ -11224,14 +11237,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        else _json2.loads(src["params"] or "{}"))
             except (TypeError, ValueError):
                 prm = {}
+            # Общий сборщик params повтора: ставит ссылку на журнал предка (иначе
+            # массовый повтор переделывал ВСЮ уже сделанную работу — до 25
+            # операций за нажатие) и снимает ключи расписания. Без этого одно
+            # нажатие размножало автопостинг в 25 параллельных цепочек: у круга
+            # с часовым интервалом за неделю набирается больше сотни записей в
+            # очереди, и каждая тащила свой `repeat_interval_min`.
+            _had_schedule = _obus.drops_recurrence(prm)
+            prm = _obus.params_for_retry(int(c["id"]), prm)
+            _lbl = str(src["label"] or src["op_type"])
+            if _lbl.endswith(" ↻"):
+                _lbl = _lbl[:-2].rstrip()
             try:
                 new_id = await _obus.submit(
                     pool, uid, src["op_type"], prm,
                     total_items=src["total_items"] or 0,
-                    label=f"Повтор: {src['label'] or src['op_type']}",
+                    label=f"Повтор: {_lbl}",
                     dedup_window_sec=0)
                 retried.append({"from": int(c["id"]), "new_id": new_id,
                                 "reason": c["reason"]})
+                # Считаем только реально поставленные: иначе цифра в ответе
+                # обещала бы владельцу запуски, которых не было.
+                if _had_schedule:
+                    dropped_schedules += 1
             except PermissionError as exc:
                 skipped.append({"id": int(c["id"]), "why": str(exc)[:80]})
             except ValueError:
@@ -11246,7 +11274,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "ok": True, "retried": len(retried), "skipped": len(skipped),
             "candidates": len(candidates), "items": retried[:25],
             "note": (f"Перезапущено {len(retried)}"
-                     + (f", пропущено {len(skipped)}" if skipped else "")),
+                     + (f", пропущено {len(skipped)}" if skipped else "")
+                     + (f". Разовым запуском, без копирования расписания: "
+                        f"{dropped_schedules}" if dropped_schedules else "")),
         })
 
     async def bots_scan_fleet(request: web.Request) -> web.Response:

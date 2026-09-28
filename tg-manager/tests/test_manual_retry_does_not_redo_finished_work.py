@@ -23,6 +23,7 @@ params, который ставил operation_bus.submit_retry_failed и не ч
 """
 from __future__ import annotations
 
+import ast
 import inspect
 
 import pytest
@@ -120,15 +121,37 @@ async def test_every_idempotency_key_spans_the_retry_chain(helper):
     )
 
 
+def _handler_src(module, name: str) -> str:
+    """Тело функции по границам AST, а не окном фиксированной длины.
+
+    Окно живёт до следующей правки: подросла функция — срез перестал совпадать с
+    тем, что имелось в виду, и ОТРИЦАТЕЛЬНОЕ утверждение о нём зеленеет навсегда
+    (в чужом куске искомого нет). Это запрещено — tests/test_no_silently_disabled_guards.py.
+    """
+    src = inspect.getsource(module)
+    tree = ast.parse(src)
+    lines = src.split("\n")
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return "\n".join(lines[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"функция {name} не найдена в {module.__name__}")
+
+
 def test_miniapp_retry_links_the_new_operation_to_the_old_one():
     from services import mini_app_api
 
-    src = inspect.getsource(mini_app_api)
-    start = src.index("async def retry_operation")
-    body = src[start:start + 6000]
+    body = _handler_src(mini_app_api, "retry_operation")
 
-    assert body.count('"retry_of_op"') == 2, (
+    # Ссылку ставит общий сборщик params повтора
+    # (operation_bus.params_for_retry) — он же снимает ключи расписания, чтобы
+    # повтор круга автопостинга не заводил вторую цепочку публикаций. Проверка
+    # стала строже: раньше хватало literal "retry_of_op" в любом виде.
+    assert body.count("params_for_retry(") == 2, (
         "кнопка «Повторить» ставит операцию без ссылки на исходную — журнал у "
         "неё пустой, и вся уже сделанная работа будет сделана второй раз "
         "(оба пути: точечный повтор публикации и повтор целиком)"
+    )
+    assert "retry_of_op" not in body, (
+        "params повтора собираются на месте, мимо operation_bus.params_for_retry: "
+        "так уже терялись и ссылка на журнал, и защита от клона расписания"
     )

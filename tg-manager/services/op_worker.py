@@ -2666,6 +2666,12 @@ async def _reschedule_recurring(
         return
 
     _next_params = dict(params)
+    # Ссылка на журнал ДРУГОЙ операции в новый круг не переносится. Круг — это
+    # новая работа: увидев журнал предка, `completed_targets` считает уже
+    # опубликованные каналы сделанными и пропускает их, и канал, однажды
+    # получивший пост, не получал бы больше НИ ОДНОГО — дырка в наполнении
+    # держалась бы вечно, а операция отчитывалась бы об успехе.
+    _next_params.pop("retry_of_op", None)
     if streak:
         _next_params[_RECURRING_STREAK_KEY] = streak
     else:
