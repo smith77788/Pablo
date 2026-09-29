@@ -4339,7 +4339,9 @@ async def get_referral_leaderboard_platform(
     return [dict(r) for r in rows]
 
 
-async def _sync_platform_user_plan(pool, user_id: int, sub_row) -> None:
+async def _sync_platform_user_plan(
+    executor, user_id: int, sub_row, *, in_tx: bool = False
+) -> None:
     """Отразить активную строку subscriptions в денормализованном platform_users
     и сбросить кеш плана.
 
@@ -4352,13 +4354,19 @@ async def _sync_platform_user_plan(pool, user_id: int, sub_row) -> None:
     """
     if not sub_row:
         return
+    _sql = "UPDATE platform_users SET current_plan=$2, plan_expires_at=$3 WHERE user_id=$1"
     try:
-        await pool.execute(
-            "UPDATE platform_users SET current_plan=$2, plan_expires_at=$3 WHERE user_id=$1",
-            user_id,
-            sub_row["plan"],
-            sub_row["expires_at"],
-        )
+        if in_tx:
+            # Вызов изнутри открытой транзакции (executor — соединение).
+            # Синхронизация второго хранилища — best effort, но внутри
+            # транзакции упавший оператор переводит её в aborted, и
+            # проглоченная здесь ошибка убила бы COMMIT всей выдачи тарифа.
+            # Вложенный transaction() — это savepoint: падение ограничено
+            # одним этим апдейтом.
+            async with executor.transaction():
+                await executor.execute(_sql, user_id, sub_row["plan"], sub_row["expires_at"])
+        else:
+            await executor.execute(_sql, user_id, sub_row["plan"], sub_row["expires_at"])
     except Exception:
         log_exc_swallow(log, "_sync_platform_user_plan: platform_users sync failed", user_id=user_id)
     _invalidate_plan_cache(user_id)
@@ -4399,37 +4407,56 @@ async def check_and_grant_rewards(
         count = stats["active"] if metric == "active" else stats["paid"]
         if count < threshold:
             continue
+        # Отметка о награде и сама награда — одной транзакцией. Порознь это
+        # окно, в котором строка referral_rewards уже стоит, а дни подписки ещё
+        # нет: уровень навсегда попадает в existing_levels, и человек не
+        # получит награду НИКОГДА, потому что повторная попытка отсекается той
+        # самой отметкой. Обрыв соединения или рестарт контейнера между двумя
+        # запросами — обычное дело при деплое.
+        #
+        # ON CONFLICT DO NOTHING вместо исключения: внутри транзакции упавший
+        # оператор переводит её в aborted, и «уже выдано» рушило бы всю выдачу.
         try:
-            await pool.execute(
-                "INSERT INTO referral_rewards(user_id, level, plan, days) VALUES($1,$2,$3,$4)",
-                referrer_id,
-                level,
-                plan,
-                days,
-            )
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    claimed = await conn.fetchval(
+                        "INSERT INTO referral_rewards(user_id, level, plan, days) "
+                        "VALUES($1,$2,$3,$4) "
+                        "ON CONFLICT (user_id, level) DO NOTHING RETURNING id",
+                        referrer_id,
+                        level,
+                        plan,
+                        days,
+                    )
+                    if not claimed:
+                        continue
+                    # Extend subscription. RETURNING даёт итоговый plan/expires_at, чтобы
+                    # синхронно обновить platform_users (второе хранилище) — иначе бот видит
+                    # подписку (get_plan читает subscriptions), а мини-апп/админка,
+                    # читающие platform_users.current_plan, показывают free.
+                    sub_row = await conn.fetchrow(
+                        """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
+                           VALUES ($1, $2, now() + ($3 || ' days')::INTERVAL, true)
+                           ON CONFLICT (user_id) DO UPDATE SET
+                               plan = CASE
+                                   WHEN ARRAY_POSITION(ARRAY['starter','pro','enterprise'], EXCLUDED.plan) >
+                                        ARRAY_POSITION(ARRAY['starter','pro','enterprise'], subscriptions.plan)
+                                   THEN EXCLUDED.plan ELSE subscriptions.plan END,
+                               is_active  = true,
+                               expires_at = GREATEST(subscriptions.expires_at, now())
+                                          + ($3 || ' days')::INTERVAL
+                           RETURNING plan, expires_at""",
+                        referrer_id,
+                        plan,
+                        str(days),
+                    )
+                    await _sync_platform_user_plan(conn, referrer_id, sub_row, in_tx=True)
         except Exception:
+            log_exc_swallow(
+                log, "Сбой выдачи реферальной награды",
+                referrer_id=referrer_id, level=level,
+            )
             continue
-        # Extend subscription. RETURNING даёт итоговый plan/expires_at, чтобы
-        # синхронно обновить platform_users (второе хранилище) — иначе бот видит
-        # подписку (get_plan читает subscriptions), а мини-апп/админка,
-        # читающие platform_users.current_plan, показывают free.
-        sub_row = await pool.fetchrow(
-            """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
-               VALUES ($1, $2, now() + ($3 || ' days')::INTERVAL, true)
-               ON CONFLICT (user_id) DO UPDATE SET
-                   plan = CASE
-                       WHEN ARRAY_POSITION(ARRAY['starter','pro','enterprise'], EXCLUDED.plan) >
-                            ARRAY_POSITION(ARRAY['starter','pro','enterprise'], subscriptions.plan)
-                       THEN EXCLUDED.plan ELSE subscriptions.plan END,
-                   is_active  = true,
-                   expires_at = GREATEST(subscriptions.expires_at, now())
-                              + ($3 || ' days')::INTERVAL
-               RETURNING plan, expires_at""",
-            referrer_id,
-            plan,
-            str(days),
-        )
-        await _sync_platform_user_plan(pool, referrer_id, sub_row)
         granted.append(level)
         # Notify referrer
         level_names = {
@@ -4462,28 +4489,33 @@ async def check_and_grant_rewards(
 
 async def give_welcome_bonus(pool: asyncpg.Pool, referred_id: int, bot) -> bool:
     """Give 7 days Starter to a new user who joined via referral link. One-time only."""
-    updated = await pool.fetchval(
-        """UPDATE platform_referrals
-           SET welcome_bonus_given=true
-           WHERE referred_id=$1 AND welcome_bonus_given=false
-           RETURNING id""",
-        referred_id,
-    )
-    if not updated:
-        return False
-    sub_row = await pool.fetchrow(
-        """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
-           VALUES ($1, 'starter', now() + INTERVAL '7 days', true)
-           ON CONFLICT (user_id) DO UPDATE SET
-               plan       = CASE WHEN subscriptions.is_active THEN subscriptions.plan ELSE 'starter' END,
-               is_active  = true,
-               expires_at = GREATEST(subscriptions.expires_at, now()) + INTERVAL '7 days'
-           RETURNING plan, expires_at""",
-        referred_id,
-    )
-    # Синхронизируем platform_users, иначе welcome-бонус виден боту, но не
-    # мини-аппу/админке (см. _sync_platform_user_plan).
-    await _sync_platform_user_plan(pool, referred_id, sub_row)
+    # Отметка «бонус выдан» и сам бонус — одной транзакцией. Порознь обрыв
+    # между двумя запросами оставлял бы welcome_bonus_given=true без единого
+    # дня подписки, а второй попытки не будет: отметка сама себя и отсекает.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            updated = await conn.fetchval(
+                """UPDATE platform_referrals
+                   SET welcome_bonus_given=true
+                   WHERE referred_id=$1 AND welcome_bonus_given=false
+                   RETURNING id""",
+                referred_id,
+            )
+            if not updated:
+                return False
+            sub_row = await conn.fetchrow(
+                """INSERT INTO subscriptions (user_id, plan, expires_at, is_active)
+                   VALUES ($1, 'starter', now() + INTERVAL '7 days', true)
+                   ON CONFLICT (user_id) DO UPDATE SET
+                       plan       = CASE WHEN subscriptions.is_active THEN subscriptions.plan ELSE 'starter' END,
+                       is_active  = true,
+                       expires_at = GREATEST(subscriptions.expires_at, now()) + INTERVAL '7 days'
+                   RETURNING plan, expires_at""",
+                referred_id,
+            )
+            # Синхронизируем platform_users, иначе welcome-бонус виден боту, но не
+            # мини-аппу/админке (см. _sync_platform_user_plan).
+            await _sync_platform_user_plan(conn, referred_id, sub_row, in_tx=True)
     try:
         await bot.send_message(
             referred_id,
