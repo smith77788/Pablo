@@ -10519,7 +10519,10 @@ async def _exec_check_owned_restrictions(
     restriction_events через shadowban_monitor._record_event — чтобы общий пульс
     здоровья видел их, а не появился второй источник правды.
     """
-    from services import account_manager, infra_memory as _infra_mem
+    # infra_memory здесь НЕ импортируем: модуль уже импортирован сверху как
+    # _infra_mem, а локальный import делает имя локальным на всю функцию — на
+    # любой ветке выше этой строки был бы UnboundLocalError.
+    from services import account_manager
     from services import entity_restriction_check as _erc
     from services import shadowban_monitor as _sbm
 
