@@ -1787,6 +1787,20 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
         log.info("op_worker startup: no stale running operations found")
 
 
+async def active_op_ids() -> frozenset[int]:
+    """Операции, которые ВЫПОЛНЯЮТСЯ в этом процессе прямо сейчас.
+
+    Публичный вид на _active_op_ids для соседних подсистем. Нужен потому, что
+    сторож зависших операций живёт не только здесь: в services/account_monitor
+    есть свой, и он этого списка не спрашивал — то есть помечал провалившейся
+    операцию, которая в ту же секунду исправно работала. Читать приватный
+    список чужому модулю неудобно (нужен ещё и замок), поэтому доступ к нему
+    один и правильный.
+    """
+    async with _active_lock:
+        return frozenset(_active_op_ids)
+
+
 async def _watchdog_stale(pool: asyncpg.Pool) -> None:
     """Периодически сбрасывает 'running' операции, которые висят дольше N минут.
 

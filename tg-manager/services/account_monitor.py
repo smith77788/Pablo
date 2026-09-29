@@ -20,7 +20,10 @@ log = logging.getLogger(__name__)
 _INTERVAL = 3600  # check every hour
 _MIN_ACCOUNTS = 2  # alert threshold
 _LOW_TRUST_THRESHOLD = 0.3  # trust_score below this triggers alert
-_STALE_RUNNING_HOURS = 3  # running ops older than this are considered stuck
+# Запас поверх СОБСТВЕННОГО потолка прогона операции. Раньше здесь стоял плоский
+# предел в 3 часа, и он был заведомо меньше потолка одного прогона (6 часов по
+# умолчанию, OP_TIMEOUT_SEC) — см. разбор в _recover_stuck_operations.
+_STUCK_GRACE_MIN = 30
 _ALERT_COOLDOWN = 86400  # 24h between repeated low-account alerts per owner
 _SESSION_EXPIRED_COOLDOWN = 86400  # 24h между алертами «сессия истекла» на аккаунт
 
@@ -196,38 +199,95 @@ async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
 
 
 async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Mark operations stuck in 'running' for too long as failed."""
+    """Пометить провалившимися операции, которые действительно зависли.
+
+    ЧТО ЛОМАЛОСЬ. Это ТРЕТИЙ сторож зависших операций, и единственный, который
+    не спрашивал, не выполняется ли операция прямо сейчас. Он брал всё, что
+    висит в 'running' дольше трёх часов, и писал ей 'failed'.
+
+    Дальше простая арифметика. Свой сторож воркера (op_worker._watchdog_stale)
+    ходит раз в минуту, порог у него 60 минут, и он ИСКЛЮЧАЕТ операции,
+    выполняющиеся в этом процессе. Значит операция, дожившая в 'running' до
+    третьего часа, прошла мимо него около ста восьмидесяти раз — а это возможно
+    только в одном случае: она в списке активных, то есть исправно работает.
+    Получается, этот сторож мог попасть ТОЛЬКО по живой работе.
+
+    Цена попадания высокая. Потолок одного прогона — 6 часов
+    (op_worker._OP_TIMEOUT_DEFAULT_S), и массовый инвайт с пейсингом на часы
+    в него укладывается штатно. Сторож обрывал такую операцию на середине:
+    писал терминальный статус, из-за чего настоящий результат исполнителя потом
+    не мог записаться вовсе (защита от перезаписи терминального статуса), и
+    сообщал владельцу, что операция зависла и её надо перезапустить вручную. То
+    есть здоровая многочасовая работа объявлялась сбоем, её итог терялся, а
+    владельца отправляли гонять флот второй раз.
+
+    ЧТО ТЕПЕРЬ. Выполняющиеся операции исключаются (op_worker.active_op_ids), а
+    порог считается от СОБСТВЕННОГО потолка прогона этого типа операции плюс
+    запас, а не от плоских трёх часов. Сторож остаётся страховкой на строки,
+    осиротевшие после падения процесса, и по живой работе больше не бьёт.
+    """
+    import datetime as _dt
+
+    from services import op_worker as _ow
+    from services import operation_bus as _obus
+
     try:
-        stuck = await pool.fetch(
+        try:
+            active = await _ow.active_op_ids()
+        except Exception:
+            # Не смогли узнать, что выполняется — лучше не трогать НИЧЕГО, чем
+            # оборвать живую операцию: страховка на осиротевшие строки может
+            # подождать следующего круга.
+            log_exc_swallow(log, "account_monitor: список активных операций недоступен")
+            return
+
+        rows = await pool.fetch(
             """
-            SELECT id, owner_id, op_type
+            SELECT id, owner_id, op_type, started_at
             FROM operation_queue
-            WHERE status = 'running'
-              AND started_at < NOW() - ($1 * INTERVAL '1 hour')
-            """,
-            _STALE_RUNNING_HOURS,
+            WHERE status = 'running' AND started_at IS NOT NULL
+            """
         )
-        for row in stuck:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        for row in rows:
+            op_id = int(row["id"])
+            if op_id in active:
+                continue
+            started = row["started_at"]
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=_dt.timezone.utc)
+            limit_s = _obus.timeout_for(
+                row["op_type"], _ow._OP_TIMEOUT_DEFAULT_S
+            ) + _STUCK_GRACE_MIN * 60
+            waited_s = (now - started).total_seconds()
+            if waited_s < limit_s:
+                continue
+            _hours = int(waited_s // 3600)
             await pool.execute(
                 "UPDATE operation_queue SET status='failed', finished_at=NOW(), "
-                "error_msg='Операция зависла (таймаут 3ч) — перезапустите вручную' "
+                "error_msg=$2 "
                 "WHERE id=$1 AND status='running'",
-                row["id"],
+                op_id,
+                f"Операция зависла: {_hours} ч в работе без завершения — "
+                f"перезапустите вручную",
             )
             await db.notify_if_enabled(
                 pool,
                 bot,
                 row["owner_id"],
                 "op_complete",
-                f"⚠️ <b>Операция #{row['id']} зависла</b>\n\n"
+                f"⚠️ <b>Операция #{op_id} зависла</b>\n\n"
                 f"Тип: {row['op_type']}\n"
-                f"Операция выполнялась более {_STALE_RUNNING_HOURS}ч без завершения.\n"
+                f"Операция выполнялась более {_hours} ч без завершения.\n"
                 f"Статус изменён на failed. Перезапустите из раздела Operations → Отчёты.",
                 # Зависших операций у владельца бывает несколько сразу: без
                 # ключа он узнал бы ровно про одну.
-                dedup_key=f"op_stuck:{row['id']}",
+                dedup_key=f"op_stuck:{op_id}",
             )
-            log.warning("account_monitor: marked stuck op id=%d as failed", row["id"])
+            log.warning(
+                "account_monitor: операция %d висела %d ч без завершения → failed",
+                op_id, _hours,
+            )
     except Exception as exc:
         log.debug("account_monitor: stuck ops check error: %s", exc)
 
@@ -466,7 +526,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # Само-heal: снять истёкшие кулдауны (дёшево, каждый цикл) — иначе
             # один давний FloodWait держит аккаунт в «Под риском» навсегда.
             await _heal_expired_cooldowns(pool)
-            # Check for stuck operations every 3 cycles (every 3 hours)
+            # Страховка на осиротевшие строки очереди — раз в 3 круга (~3 часа).
+            # Живые операции она не трогает (см. _recover_stuck_operations).
             if cycle % 3 == 0:
                 await _recover_stuck_operations(pool, bot)
             # Ping Telegram sessions every cycle to detect dead sessions
