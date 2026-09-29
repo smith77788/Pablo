@@ -151,7 +151,10 @@ def test_miniapp_retry_links_the_new_operation_to_the_old_one():
         "неё пустой, и вся уже сделанная работа будет сделана второй раз "
         "(оба пути: точечный повтор публикации и повтор целиком)"
     )
-    assert "retry_of_op" not in body, (
+    # Комментарии выбрасываем: они про retry_of_op ГОВОРЯТ, а проверка про то,
+    # что params им не собирают на месте.
+    code = "\n".join(l for l in body.split("\n") if not l.strip().startswith("#"))
+    assert "retry_of_op" not in code, (
         "params повтора собираются на месте, мимо operation_bus.params_for_retry: "
         "так уже терялись и ссылка на журнал, и защита от клона расписания"
     )

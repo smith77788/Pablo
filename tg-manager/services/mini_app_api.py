@@ -4033,13 +4033,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _retry_label = row["label"]
             if _recurring and isinstance(_retry_label, str) and _retry_label.endswith(" ↻"):
                 _retry_label = _retry_label[:-2].rstrip()
-            # dedup_window_sec=0: повтор — намеренно та же операция с теми же
-            # params, и окно идемпотентности приняло бы его за двойной тап.
+            # Окно идемпотентности НЕ отключаем. Раньше отключали: повтор
+            # считался «той же операцией с теми же params», и окно приняло бы
+            # его за двойной тап. Обе половины этого рассуждения больше не
+            # верны. Во-первых, дедуп ищет совпадение только среди ЖИВЫХ
+            # операций ('pending'/'running'), а повторить можно лишь
+            # недоведённую — то есть завершённую (operation_retry.can_retry
+            # прямо отказывает операции в работе). Во-вторых, params повтора
+            # несут ссылку retry_of_op, которой у исходной операции нет, так
+            # что и по содержимому они уже различаются.
+            #
+            # Зато отключённое окно снимало защиту от двойного тапа именно там,
+            # где по кнопке бьют чаще всего: владелец видит, что работа не
+            # доведена, и жмёт «Повторить» дважды. Получались ДВЕ одинаковые
+            # операции — двойная рассылка тем же адресатам, двойной пост в те же
+            # каналы, двойной расход лимитов аккаунтов.
             try:
                 new_id = await _obus.submit(
                     pool, uid, row["op_type"], _retry_params,
-                    total_items=row["total_items"] or 0, label=_retry_label,
-                    dedup_window_sec=0)
+                    total_items=row["total_items"] or 0, label=_retry_label)
             except ValueError:
                 # Тип операции больше не поддерживается (переименован или убран из
                 # реестра). Раньше копирование строки очереди воскрешало такую
@@ -11254,11 +11266,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if _lbl.endswith(" ↻"):
                 _lbl = _lbl[:-2].rstrip()
             try:
+                # Окно идемпотентности не отключаем — см. разбор в
+                # retry_operation выше. Здесь цена двойного тапа выше всего:
+                # кнопка перезапускает до 25 операций за нажатие, то есть два
+                # тапа давали 50. Каждая операция дедупится по своей ссылке
+                # retry_of_op, поэтому разные операции друг с другом не
+                # сливаются, а повторное нажатие сливается само с собой.
                 new_id = await _obus.submit(
                     pool, uid, src["op_type"], prm,
                     total_items=src["total_items"] or 0,
-                    label=f"Повтор: {_lbl}",
-                    dedup_window_sec=0)
+                    label=f"Повтор: {_lbl}")
                 retried.append({"from": int(c["id"]), "new_id": new_id,
                                 "reason": c["reason"]})
                 # Считаем только реально поставленные: иначе цифра в ответе
