@@ -2874,13 +2874,7 @@ async def send_message_via_account(
         raise
     except Exception as e:
         if is_dead_session_error(str(e)):
-            # Позиционно, а не request=None: исключения Telethon создаются через
-            # BaseException.__new__, который именованных аргументов не берёт, и
-            # эта строка поднимала TypeError вместо мёртвой сессии. Вызывающий
-            # ловит AuthKeyUnregisteredError — по TypeError он аккаунт
-            # session_expired не пометит, и тот останется в строю, падая на
-            # каждой задаче.
-            raise AuthKeyUnregisteredError(None) from e
+            raise AuthKeyUnregisteredError(request=None) from e
         log.exception("send_message error: %s", e)
         return False
     finally:
@@ -2953,13 +2947,7 @@ async def send_media_via_account(
         raise
     except Exception as e:
         if is_dead_session_error(str(e)):
-            # Позиционно, а не request=None: исключения Telethon создаются через
-            # BaseException.__new__, который именованных аргументов не берёт, и
-            # эта строка поднимала TypeError вместо мёртвой сессии. Вызывающий
-            # ловит AuthKeyUnregisteredError — по TypeError он аккаунт
-            # session_expired не пометит, и тот останется в строю, падая на
-            # каждой задаче.
-            raise AuthKeyUnregisteredError(None) from e
+            raise AuthKeyUnregisteredError(request=None) from e
         log.exception("send_media error: %s", e)
         return False
     finally:
