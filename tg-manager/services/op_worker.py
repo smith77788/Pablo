@@ -180,6 +180,19 @@ _POISON_ERROR = (
     "остановлена, чтобы не занимать флот бесконечно. Запустите её заново."
 )
 
+# Почему операция вдруг снова «ожидает». Оба сторожа возвращали её в очередь
+# МОЛЧА: в интерфейсе она откатывалась на нулевой прогресс без единого слова, и
+# владелец видел ровно то, что выглядит как потерянная работа. Про соседние
+# случаи (флуд-пауза, исчерпанный бюджет живучести) ему пишут — здесь пробел.
+_REVIVE_AFTER_RESTART = (
+    "Процесс операций перезапустился, пока операция шла — она возвращена в "
+    "очередь и запустится заново."
+)
+_REVIVE_AFTER_SILENCE = (
+    "Операция не подавала признаков работы дольше {mins} мин — возвращена в "
+    "очередь и запустится заново."
+)
+
 
 async def _ensure_acct_wait_column(pool: "asyncpg.Pool") -> None:
     """Досоздать operation_queue.acct_wait_since, если миграция ещё не доехала.
@@ -1753,8 +1766,10 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
         # «done>total»/«34/17», как и в _maybe_requeue).
         """UPDATE operation_queue
            SET status = 'pending', started_at = NULL, done_items = 0,
-               revive_count = COALESCE(revive_count, 0) + 1
+               revive_count = COALESCE(revive_count, 0) + 1,
+               last_error = $1
            WHERE status = 'running'""",
+        _REVIVE_AFTER_RESTART,
         log_ctx="[reset_stale_revive]",
     )
     # asyncpg возвращает строку вида "UPDATE N"
@@ -1815,12 +1830,14 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
             # нуля, счётчик не должен копиться поверх прошлого (класс «done>total»).
             """UPDATE operation_queue
                 SET status = 'pending', started_at = NULL, done_items = 0,
-                    revive_count = COALESCE(revive_count, 0) + 1
+                    revive_count = COALESCE(revive_count, 0) + 1,
+                    last_error = $3
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
             _STALE_RUNNING_TIMEOUT_MIN,
             active_ids_list,
+            _REVIVE_AFTER_SILENCE.format(mins=_STALE_RUNNING_TIMEOUT_MIN),
         )
         count = int((result or "UPDATE 0").split()[-1])
         if count:
