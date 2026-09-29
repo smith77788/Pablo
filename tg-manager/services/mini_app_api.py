@@ -16099,6 +16099,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Infra Health Center ───────────────────────────────────────────────────
 
+    async def infra_health_resolve(request: web.Request) -> web.Response:
+        """Снять аномалию с активных.
+
+        Экран «Здоровье инфраструктуры» показывал находки anomaly_detector и
+        только. Разобраться с ними можно было лишь из бота
+        (`infra_health_center`), а в мини-аппе оповещение висело до тех пор,
+        пока детектор сам не перестанет его находить.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        anom_id = validate_integer(request.match_info.get("anomaly_id"), min_val=1)
+        if anom_id is None:
+            return _err("Неверный идентификатор оповещения")
+        from services import anomaly_detector
+        ok = await anomaly_detector.resolve_anomaly(pool, anom_id, uid)
+        if not ok:
+            return _err("Оповещение не найдено или уже снято", 404)
+        return _json_resp({"ok": True})
+
     async def infra_health_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -19559,6 +19579,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/asset_template/{tpl_id}", asset_template_delete)
     # Infra Health Center
     app.router.add_get("/api/miniapp/infra_health", infra_health_overview)
+    app.router.add_post("/api/miniapp/infra_health/anomaly/{anomaly_id}/resolve", infra_health_resolve)
     # Swarm
     app.router.add_get("/api/miniapp/swarm", swarm_metrics)
     # Presence Packs

@@ -22710,6 +22710,36 @@ async function submitAssetTplCreate() {
 }
 
 // ── Infra Health Center ─────────────────────────────────
+// Экран показывал находки детектора аномалий как текст и только: типы и
+// детекторы вылезали латиницей (error_spike, queue_surge), разобраться с
+// оповещением можно было лишь из бота, а «затронуто: 12» никуда не вело.
+const IH_ANOMALY = {
+  error_spike:    ['📈 Всплеск ошибок', 'openOps()'],
+  success_drop:   ['📉 Просели успешные операции', 'openOps()'],
+  queue_surge:    ['🧱 Очередь разбухла', 'openOps()'],
+  flood_wave:     ['🌊 Волна флуд-ожиданий', "healthGoAccounts('cooldown','')"],
+  trust_collapse: ['💔 Обвал доверия аккаунтов', 'openHealth()'],
+  latency_spike:  ['🐌 Операции стали медленнее', 'openOps()'],
+};
+const IH_RECOVERY = {account:'аккаунт', operation:'операция', proxy:'прокси', queue:'очередь'};
+const IH_ACTION = {
+  cooldown:'поставлено на охлаждение', reassign:'переназначено',
+  escalate:'передано владельцу', retry:'перезапущено', pause:'приостановлено',
+};
+function ihAnomalyName(t) { return (IH_ANOMALY[t] || [])[0] || (t || 'находка'); }
+function ihAnomalyGo(t) { return (IH_ANOMALY[t] || [])[1] || ''; }
+function ihRecoveryRu(t) { return IH_RECOVERY[t] || (t || '—'); }
+function ihActionRu(a) { return IH_ACTION[a] || (a || '—'); }
+
+async function ihResolve(id, el) {
+  if (!await askConfirm('Снять оповещение?\n\nОно исчезнет из списка. Если причина осталась, детектор найдёт её снова.')) return;
+  if (el) el.disabled = true;
+  try {
+    await api('/api/miniapp/infra_health/anomaly/'+Number(id)+'/resolve', {method:'POST'});
+    toast('✅ Снято');
+    openInfraHealth();
+  } catch(e) { if (el) el.disabled = false; toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function openInfraHealth() {
   push('s-infrahealth');
   txt('ihAlerts','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -22720,28 +22750,32 @@ async function openInfraHealth() {
     const recovery = d.recovery||[];
     const sevCls = {info:'b-bl',warning:'b-or',error:'b-rd',critical:'b-rd'};
     if (!alerts.length) {
-      txt('ihAlerts', empty('✅','Нет активных оповещений','Инфраструктура работает нормально'));
+      txt('ihAlerts', empty('✅','Оповещений нет','Детектор проверяет ошибки, очередь, флуд и доверие аккаунтов каждые пять минут',
+        {label:'⚙️ Посмотреть операции', fn:'openOps()'}));
     } else {
-      txt('ihAlerts', alerts.map(a=>`
-        <div class="row">
+      txt('ihAlerts', alerts.map(a=>{
+        const go = ihAnomalyGo(a.alert_type);
+        return `
+        <div class="row"${go?` onclick="${go}" role="button" tabindex="0" style="cursor:pointer"`:''}>
           <div class="row-ico" style="background:var(--bg-red-16)">⚠️</div>
           <div class="row-body">
             <div class="row-name"><span class="badge ${sevCls[a.severity]||'b-gy'}">${esc(sevRu(a.severity))}</span> ${esc(a.title)}</div>
             ${a.description?`<div class="row-val" style="white-space:normal;line-height:1.35">${esc(a.description)}</div>`:''}
-            <div class="row-val">${esc(a.alert_type)}${a.target_type?' · '+esc(a.target_type):''}${a.affected_count?' · затронуто: '+num(a.affected_count):''}</div>
+            <div class="row-val">${esc(ihAnomalyName(a.alert_type))}${a.affected_count?' · затронуто: '+num(a.affected_count):''}${go?' ›':''}</div>
             <div class="row-val" style="color:var(--hint)">${ago(a.first_seen_at)}</div>
           </div>
-        </div>
-      `).join(''));
+          ${a.id?`<div class="row-right"><button class="btn btn-g" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();ihResolve(${Number(a.id)},this)">Снять</button></div>`:''}
+        </div>`;
+      }).join(''));
     }
     document.getElementById('m-ih-val').textContent = alerts.length?`${alerts.length} ${plural(alerts.length,'оповещение','оповещения','оповещений')}`:'Всё в норме';
     if (!recovery.length) {
-      txt('ihRecovery', empty('🔄','Нет событий восстановления',''));
+      txt('ihRecovery', empty('🔄','Система ничего не чинила','Здесь появятся аккаунты и прокси, которые она починила сама'));
     } else {
       txt('ihRecovery', recovery.map(r=>`
         <div class="row">
           <div class="row-body">
-            <div class="row-name">${esc(r.recovery_type)} · ${esc(r.action)}</div>
+            <div class="row-name">${esc(ihRecoveryRu(r.recovery_type))} · ${esc(ihActionRu(r.action))}</div>
             <div class="row-val"><span class="badge ${sevCls[r.severity]||'b-gy'}">${esc(sevRu(r.severity))}</span> · ${stb(r.status)[1]}</div>
             <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
           </div>
@@ -22749,7 +22783,7 @@ async function openInfraHealth() {
       `).join(''));
     }
   } catch(e) {
-    txt('ihAlerts', empty('⚠️','Ошибка',e.message));
+    txt('ihAlerts', errHtml(e.message, 'openInfraHealth()'));
     txt('ihRecovery','');
   }
 }
