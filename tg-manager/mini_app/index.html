@@ -21304,11 +21304,60 @@ const SHIELD_CFG_LABELS = {
   auto_pause: '⏸ Авто-пауза при высоком риске',
   notify_admin: '🔔 Уведомлять в Telegram'
 };
+// Щит пишет в shield_actions ровно четыре значения — ok/warn/cool/pause
+// (`account_shield._decide`). Словарь же переводил auto_pause/ban_detect/
+// rotate/cooldown/restore, которых он не пишет никогда, поэтому владелец
+// видел в истории сырое английское «pause». Переводим то, что бывает на самом
+// деле; старые ключи оставлены на случай записей из прошлых версий.
 const SHIELD_ACTIONS = {
+  pause:'⏸ Убран из работы', cool:'❄️ Охлаждение', warn:'⚠️ Предупреждение',
+  ok:'✅ Норма',
   auto_pause:'⏸ Авто-пауза', ban_detect:'🚨 Обнаружен бан',
   rotate:'🔄 Ротация аккаунта', cooldown:'❄️ Кулдаун',
   restore:'✅ Восстановление'
 };
+const SHIELD_ICONS = {pause:'⏸', cool:'❄️', warn:'⚠️', ok:'🛡', ban_detect:'🚨', rotate:'🔄'};
+// Настройки щита показывались, но менять их было нечем: у таблицы
+// shield_configs вообще не было писателя со стороны мини-аппа. Теперь каждая
+// строка настройки открывается и сохраняется, а строка истории ведёт в
+// карточку аккаунта.
+let SHIELD_CFG = {};
+
+const SHIELD_RISK_STEPS = [
+  ['0.5', 'Осторожный · 0.5', 'срабатывает рано, ложных тревог больше'],
+  ['0.6', 'Ниже среднего · 0.6', ''],
+  ['0.7', 'Обычный · 0.7', 'значение по умолчанию'],
+  ['0.8', 'Терпимый · 0.8', ''],
+  ['0.9', 'Только явная угроза · 0.9', 'поздно, зато без ложных тревог'],
+];
+const SHIELD_BAN_STEPS = [
+  ['0.3', 'Осторожный · 0.3', 'вмешиваемся при трети вероятности'],
+  ['0.4', 'Ниже среднего · 0.4', ''],
+  ['0.5', 'Обычный · 0.5', 'значение по умолчанию'],
+  ['0.6', 'Терпимый · 0.6', ''],
+  ['0.7', 'Только явная угроза · 0.7', ''],
+];
+const SHIELD_HOURS = [['6','6 часов',''],['12','12 часов',''],['24','24 часа','по умолчанию'],['48','48 часов',''],['72','3 суток','']];
+
+async function shieldSave(patch, okMsg) {
+  try {
+    const r = await api('/api/miniapp/shield/config', {method:'POST', body:JSON.stringify(patch)});
+    SHIELD_CFG = r.config || SHIELD_CFG;
+    toast('✅ ' + okMsg);
+    openShield();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function shieldPick(field, steps, title) {
+  const v = await askChoice(title, steps.map(([value,label,sub]) => ({value,label,sub})));
+  if (v === null) return;
+  shieldSave({[field]: Number(v)}, 'Сохранено');
+}
+
+function shieldToggle(field) {
+  shieldSave({[field]: !SHIELD_CFG[field]}, SHIELD_CFG[field] ? 'Выключено' : 'Включено');
+}
+
 async function openShield() {
   push('s-shield');
   txt('shieldStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -21320,34 +21369,56 @@ async function openShield() {
     const threatened = st.threatened||0;
     const total = st.total_active||0;
     const riskColor = threatened>0?'#ef4444':'#22c55e';
-    txt('shieldStats',`
-      <div class="kpi-card"><div class="kpi-val" style="color:${riskColor}">${threatened>0?'⚠️ Угроза':'✅ Норма'}</div><div class="kpi-lbl">Уровень риска</div></div>
-      <div class="kpi-card"><div class="kpi-val">${total}</div><div class="kpi-lbl">Аккаунтов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--red)">${threatened}</div><div class="kpi-lbl">Высокий риск</div></div>
-      <div class="kpi-card"><div class="kpi-val">${st.ok_count||0}</div><div class="kpi-lbl">Под защитой</div></div>
-    `);
+    const card = (val, lbl, style, filter) => filter
+      ? `<div class="kpi-card tap-card" onclick="healthGoAccounts('${filter}')" role="button" tabindex="0"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl} ›</div></div>`
+      : `<div class="kpi-card"><div class="kpi-val"${style?` style="${style}"`:''}>${val}</div><div class="kpi-lbl">${lbl}</div></div>`;
+    txt('shieldStats',
+        card(threatened>0?'⚠️ Угроза':'✅ Норма', 'Уровень риска', 'color:'+riskColor)
+      + card(total, 'Аккаунтов', '', 'active')
+      + card(threatened, 'Высокий риск', 'color:var(--red)')
+      + card(st.ok_count||0, 'Под защитой'));
     txt('m-shield-val', `${threatened} под угрозой · ${total} аккаунтов`);
     const cfg = d.config||{};
-    txt('shieldConfig', `
-      <div class="row"><div class="row-body"><div class="row-name">🎯 Порог риска</div><div class="row-val">Аккаунты с risk_score ≥ ${cfg.risk_threshold||0.7} считаются опасными</div></div><div class="row-right" style="color:var(--accent);font-weight:600">${cfg.risk_threshold||0.7}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">🚫 Порог бана</div><div class="row-val">Вероятность бана ≥ ${cfg.ban_prob_threshold||0.5} → действие</div></div><div class="row-right" style="color:var(--accent);font-weight:600">${cfg.ban_prob_threshold||0.5}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">⏸ Авто-пауза</div><div class="row-val">Автоматически ставить на паузу рискованные аккаунты</div></div><div class="row-right">${cfg.auto_pause?'✅ Вкл':'❌ Выкл'}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">🔔 Уведомления</div><div class="row-val">Уведомлять в Telegram при обнаружении угрозы</div></div><div class="row-right">${cfg.notify_admin?'✅ Вкл':'❌ Выкл'}</div></div>
-    `);
+    SHIELD_CFG = cfg;
+    const row = (name, val, hint, onclick) =>
+      `<div class="row" onclick="${onclick}" role="button" tabindex="0">
+        <div class="row-body"><div class="row-name">${name}</div><div class="row-val">${hint}</div></div>
+        <div class="row-right" style="color:var(--accent);font-weight:600">${val} ›</div></div>`;
+    txt('shieldConfig',
+        row('🎯 Порог риска', cfg.risk_threshold ?? 0.7,
+            'Аккаунт считается опасным, начиная с этого значения',
+            "shieldPick('risk_threshold',SHIELD_RISK_STEPS,'С какого риска вмешиваться?')")
+      + row('🚫 Порог бана', cfg.ban_prob_threshold ?? 0.5,
+            'При такой вероятности бана щит действует',
+            "shieldPick('ban_prob_threshold',SHIELD_BAN_STEPS,'При какой вероятности бана действовать?')")
+      + row('❄️ Пауза аккаунта', (cfg.cool_duration_hours ?? 24) + ' ч',
+            'На столько щит убирает рискованный аккаунт из работы',
+            "shieldPick('cool_duration_hours',SHIELD_HOURS,'На сколько ставить на паузу?')")
+      + row('⏸ Авто-пауза', cfg.auto_pause?'✅ Вкл':'❌ Выкл',
+            'Сам убирает рискованные аккаунты из работы',
+            "shieldToggle('auto_pause')")
+      + row('🔔 Уведомления', cfg.notify_admin?'✅ Вкл':'❌ Выкл',
+            'Пишет в Telegram, когда находит угрозу',
+            "shieldToggle('notify_admin')"));
     const hist = d.history||[];
-    if (!hist.length) { txt('shieldHistory', empty('📋','История пуста','«Щит» следит за аккаунтами')); return; }
-    txt('shieldHistory', hist.map(h=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-blue-16)">${h.action==='ban_detect'?'🚨':h.action==='rotate'?'🔄':'🛡'}</div>
+    if (!hist.length) { txt('shieldHistory', empty('📋','Щит пока не вмешивался','Здесь появятся аккаунты, которые он убрал из работы')); return; }
+    let html = hist.map(h=>`
+      <div class="row" ${h.account_id?`onclick="openAccount(${Number(h.account_id)})" role="button" tabindex="0"`:''}>
+        <div class="row-ico" style="background:var(--bg-blue-16)">${SHIELD_ICONS[h.action]||'🛡'}</div>
         <div class="row-body">
           <div class="row-name">${esc(h.name||'Аккаунт')} · ${SHIELD_ACTIONS[h.action]||esc(h.action||'—')}</div>
-          <div class="row-val">Риск: ${((h.risk||0)*100).toFixed(0)}% · Бан: ${((h.ban_prob||0)*100).toFixed(0)}% · ${h.created_at?new Date(h.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-val">Риск ${((h.risk||0)*100).toFixed(0)}% · бан ${((h.ban_prob||0)*100).toFixed(0)}% · ${h.created_at?ago(h.created_at):''}</div>
         </div>
-      </div>
-    `).join(''));
+        ${h.account_id?'<div class="row-right"><span class="chev">›</span></div>':''}
+      </div>`).join('');
+    const tot = Number(d.history_total||0);
+    if (tot > hist.length) {
+      html += `<div style="font-size:12px;color:var(--hint);padding:8px 14px">Показаны последние ${hist.length} из ${num(tot)}.</div>`;
+    }
+    txt('shieldHistory', html);
   } catch(e) {
     txt('shieldStats','');
-    txt('shieldHistory', empty('⚠️','Ошибка',e.message));
+    txt('shieldHistory', errHtml(e.message, 'openShield()'));
   }
 }
 

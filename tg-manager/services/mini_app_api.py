@@ -12372,6 +12372,50 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Account Shield ─────────────────────────────────────────────────────────
 
+    async def shield_config_save(request: web.Request) -> web.Response:
+        """Сохранить настройки щита. Писателя у shield_configs в мини-аппе не
+        было вовсе: экран показывал пороги, менять их было нечем."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        fields = {}
+        for key in ("risk_threshold", "ban_prob_threshold"):
+            if key in data and data[key] is not None:
+                try:
+                    v = float(data[key])
+                except (TypeError, ValueError):
+                    return _err(f"Некорректное значение: {key}")
+                if not 0.0 <= v <= 1.0:
+                    return _err("Порог должен быть от 0 до 1")
+                fields[key] = v
+        if "cool_duration_hours" in data and data["cool_duration_hours"] is not None:
+            hours = validate_integer(data["cool_duration_hours"], min_val=1, max_val=168)
+            if hours is None:
+                return _err("Пауза — от 1 до 168 часов")
+            fields["cool_duration_hours"] = hours
+        for key in ("auto_pause", "notify_admin"):
+            if key in data and data[key] is not None:
+                fields[key] = bool(data[key])
+        if not fields:
+            return _err("Нечего сохранять")
+        try:
+            from services.account_shield import save_shield_config
+            cfg = await save_shield_config(pool, uid, **fields)
+        except Exception as exc:
+            log.exception("shield_config_save uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "config": {
+            "risk_threshold": cfg.risk_threshold,
+            "ban_prob_threshold": cfg.ban_prob_threshold,
+            "auto_pause": cfg.auto_pause,
+            "notify_admin": cfg.notify_admin,
+            "cool_duration_hours": cfg.cool_duration_hours,
+        }})
+
     async def shield_summary(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -12389,14 +12433,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE a.owner_id = $1""",
                 uid,
             )
+            # account_id — чтобы строка истории открывала карточку аккаунта.
             history = await pool.fetch(
-                """SELECT sa.action, sa.risk_score, sa.ban_probability, sa.created_at,
-                          a.phone, a.first_name
+                """SELECT a.id AS account_id, sa.action, sa.risk_score,
+                          sa.ban_probability, sa.created_at, a.phone, a.first_name
                    FROM shield_actions sa
                    JOIN tg_accounts a ON a.id = sa.account_id
                    WHERE sa.owner_id=$1 ORDER BY sa.created_at DESC LIMIT 20""",
                 uid,
             )
+            history_total = await pool.fetchval(
+                "SELECT COUNT(*) FROM shield_actions WHERE owner_id=$1", uid)
             cfg = await pool.fetchrow(
                 "SELECT * FROM shield_configs WHERE owner_id=$1", uid
             )
@@ -12410,9 +12457,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "ban_prob_threshold": float(cfg["ban_prob_threshold"]) if cfg else 0.5,
                 "auto_pause": bool(cfg["auto_pause"]) if cfg else True,
                 "notify_admin": bool(cfg["notify_admin"]) if cfg else True,
+                "cool_duration_hours": int(cfg["cool_duration_hours"]) if cfg else 24,
             },
+            "history_total": history_total or 0,
             "history": [
                 {
+                    "account_id": r["account_id"],
                     "action": r["action"], "risk": float(r["risk_score"] or 0),
                     "ban_prob": float(r["ban_probability"] or 0),
                     "name": r["first_name"] or r["phone"] or "",
@@ -18179,6 +18229,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/bot/{bot_id}/avatar", bot_avatar)
     # Account Shield
     app.router.add_get("/api/miniapp/shield", shield_summary)
+    app.router.add_post("/api/miniapp/shield/config", shield_config_save)
     # Ad Intelligence
     app.router.add_get("/api/miniapp/ad_intel", ad_intel_overview)
     app.router.add_post("/api/miniapp/ad_intel/channel", ad_intel_add_channel)

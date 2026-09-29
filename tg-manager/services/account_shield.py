@@ -73,6 +73,50 @@ async def get_shield_config(pool: asyncpg.Pool, owner_id: int) -> ShieldConfig:
     return ShieldConfig()
 
 
+_SHIELD_FIELDS = {
+    # поле: (минимум, максимум) для чисел; None — булево
+    "risk_threshold": (0.0, 1.0),
+    "ban_prob_threshold": (0.0, 1.0),
+    "cool_duration_hours": (1, 168),
+    "auto_pause": None,
+    "notify_admin": None,
+}
+
+
+async def save_shield_config(pool: asyncpg.Pool, owner_id: int, **fields) -> ShieldConfig:
+    """Сохранить настройки щита владельца и вернуть, что получилось.
+
+    Писателя у `shield_configs` в мини-аппе не было вовсе: экран показывал
+    пороги и переключатели, но поменять их было нечем — бот умел только две
+    галочки. Пишем те поля, что пришли, остальные не трогаем.
+    """
+    sets, params = [], []
+    for name, bounds in _SHIELD_FIELDS.items():
+        if name not in fields or fields[name] is None:
+            continue
+        val = fields[name]
+        if bounds is None:
+            val = bool(val)
+        elif name == "cool_duration_hours":
+            val = max(bounds[0], min(bounds[1], int(val)))
+        else:
+            val = max(bounds[0], min(bounds[1], float(val)))
+        params.append(val)
+        sets.append(name)
+    if not sets:
+        return await get_shield_config(pool, owner_id)
+    cols = ", ".join(sets)
+    placeholders = ", ".join(f"${i + 2}" for i in range(len(sets)))
+    updates = ", ".join(f"{c}=${i + 2}" for i, c in enumerate(sets))
+    await pool.execute(
+        f"""INSERT INTO shield_configs (owner_id, {cols})
+            VALUES ($1, {placeholders})
+            ON CONFLICT (owner_id) DO UPDATE SET {updates}, updated_at=NOW()""",
+        owner_id, *params,
+    )
+    return await get_shield_config(pool, owner_id)
+
+
 async def _save_action(
     pool: asyncpg.Pool,
     owner_id: int,
