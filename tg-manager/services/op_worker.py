@@ -12294,8 +12294,16 @@ async def _exec_boost_views(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            # межцелевой темп под губернатором (давление флота тормозит)
-            await asyncio.sleep(await _governed_delay(pool, owner_id, 1.5))
+            # Межцелевой темп под губернатором. Плоские 1.5с днём и ночью — след
+            # автоматизации; разносим шире и по времени суток, как реальные
+            # просмотры (приходят рассеянно).
+            _vd = random.uniform(2.0, 6.0)
+            try:
+                from services import session_simulator as _sim_v
+                _vd *= _sim_v.time_of_day_factor()
+            except Exception:
+                pass
+            await asyncio.sleep(await _governed_delay(pool, owner_id, _vd))
 
     summary = (
         f"👁 Просмотры: {channel} × {len(msg_ids)} сообщений\n"
@@ -12409,8 +12417,16 @@ async def _exec_boost_reactions(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            # межцелевой темп под губернатором (давление флота тормозит)
-            await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
+            # Межцелевой темп под губернатором. Плоские 2с днём и ночью — след
+            # автоматизации; разносим шире и по времени суток, как реальные
+            # реакции (приходят рассеянно, а не залпом за 2с на аккаунт).
+            _rd = random.uniform(3.0, 9.0)
+            try:
+                from services import session_simulator as _sim_r
+                _rd *= _sim_r.time_of_day_factor()
+            except Exception:
+                pass
+            await asyncio.sleep(await _governed_delay(pool, owner_id, _rd))
 
     summary = (
         f"💫 Реакции: {channel} сообщение #{msg_id}\n"

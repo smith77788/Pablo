@@ -117,3 +117,13 @@ def test_seed_pacing_wider_and_time_of_day_scaled():
     body = _body("_exec_boost_subscribers")
     assert "random.uniform(8.0, 25.0)" in body, "разброс посева должен быть шире 3–7с"
     assert "time_of_day_factor()" in body, "пейсинг посева масштабируется временем суток"
+
+
+def test_reactions_and_views_pacing_not_flat():
+    # Плоские 1.5с/2.0с заменены на разброс + время суток (след автоматизации).
+    r = _body("_exec_boost_reactions")
+    v = _body("_exec_boost_views")
+    assert "random.uniform(3.0, 9.0)" in r and "time_of_day_factor()" in r
+    assert "random.uniform(2.0, 6.0)" in v and "time_of_day_factor()" in v
+    assert "_governed_delay(pool, owner_id, 2.0)" not in r
+    assert "_governed_delay(pool, owner_id, 1.5)" not in v
