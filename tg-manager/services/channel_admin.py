@@ -1517,6 +1517,113 @@ async def events(pool, owner_id: int, channel_id: int, limit: int = 30) -> list[
              "at": r["created_at"].isoformat() if r["created_at"] else None} for r in rows or []]
 
 
+async def network_overview(pool, owner_id: int) -> dict:
+    """Сводка по ВСЕЙ сети каналов под управлением — взгляд руководителя.
+
+    Экран администратора показывает каналы по одному; владельцу сотни каналов
+    нужен и общий срез: сколько администраторов работает, сколько канал сеть
+    выпускает за неделю, какой средний охват, что заходит по сети в целом,
+    сколько черновиков ждут решения и где сбои. Это агрегат над таблицами
+    администратора (va_channel_admin / va_channel_posts / va_admin_drafts),
+    а НЕ второй источник правды: считает то же, что channel_report, но по всем
+    каналам разом.
+
+    Fail-soft: любой сбой среза деградирует в ноль/пусто, экран открывается.
+    """
+    out = {
+        "channels_total": 0, "admins_installed": 0, "admins_active": 0,
+        "review_mode": 0, "posts_7d": 0, "avg_views_7d": 0, "members_total": 0,
+        "pending_drafts": 0, "errors": 0, "top_pillars": [], "attention": [],
+    }
+    try:
+        row = await pool.fetchrow(
+            "SELECT "
+            "  count(*) FILTER (WHERE a.channel_id IS NOT NULL) AS installed, "
+            "  count(*) FILTER (WHERE a.enabled) AS active, "
+            "  count(*) FILTER (WHERE a.enabled AND a.publish_mode='review') AS review, "
+            "  count(*) FILTER (WHERE a.fail_streak > 0 OR a.last_error IS NOT NULL) AS errors, "
+            "  coalesce(sum(a.members_count), 0) AS members "
+            "FROM va_channel_admin a WHERE a.owner_id=$1",
+            int(owner_id))
+        if row:
+            out["admins_installed"] = int(row["installed"] or 0)
+            out["admins_active"] = int(row["active"] or 0)
+            out["review_mode"] = int(row["review"] or 0)
+            out["errors"] = int(row["errors"] or 0)
+            out["members_total"] = int(row["members"] or 0)
+    except Exception:
+        log.debug("network_overview: срез администраторов не собран owner=%s", owner_id, exc_info=True)
+
+    try:
+        out["channels_total"] = int(await pool.fetchval(
+            "SELECT count(DISTINCT channel_id) FROM managed_channels WHERE owner_id=$1",
+            int(owner_id)) or 0)
+    except Exception:
+        log.debug("network_overview: число каналов не собрано owner=%s", owner_id, exc_info=True)
+
+    # Посты и охваты по сети за 7 дней — только каналы с администратором, чтобы
+    # сводка отражала работу администратора, а не всю историю публикаций.
+    try:
+        agg = await pool.fetchrow(
+            "SELECT count(*) AS posts_7d, avg(p.views) AS avg_views "
+            "FROM va_channel_posts p "
+            "WHERE p.owner_id=$1 AND p.published_at > now() - interval '7 days'",
+            int(owner_id))
+        if agg:
+            out["posts_7d"] = int(agg["posts_7d"] or 0)
+            out["avg_views_7d"] = int(agg["avg_views"] or 0)
+    except Exception:
+        log.debug("network_overview: срез постов не собран owner=%s", owner_id, exc_info=True)
+
+    try:
+        out["pending_drafts"] = int(await pool.fetchval(
+            "SELECT count(*) FROM va_admin_drafts WHERE owner_id=$1 AND status='pending'",
+            int(owner_id)) or 0)
+    except Exception:
+        log.debug("network_overview: черновики не собраны owner=%s", owner_id, exc_info=True)
+
+    # Что заходит по всей сети: рубрика → средний score, топ-5.
+    try:
+        rows = await pool.fetch(
+            "SELECT pillar, "
+            "  avg(coalesce(views,0) + 3*coalesce(reactions,0) + 5*coalesce(forwards,0)) AS score, "
+            "  avg(views) AS views, count(*) AS posts "
+            "FROM va_channel_posts "
+            "WHERE owner_id=$1 AND pillar IS NOT NULL AND views IS NOT NULL "
+            "  AND published_at > now() - interval '30 days' "
+            "GROUP BY pillar ORDER BY score DESC LIMIT 5",
+            int(owner_id))
+        out["top_pillars"] = [
+            {"pillar": r["pillar"], "avg_views": int(r["views"] or 0), "posts": int(r["posts"] or 0)}
+            for r in rows or []
+        ]
+    except Exception:
+        log.debug("network_overview: топ рубрик не собран owner=%s", owner_id, exc_info=True)
+
+    # Каналы, требующие внимания: сбои и пауза с ошибкой — чтобы владелец сразу
+    # видел, где администратор застрял.
+    try:
+        rows = await pool.fetch(
+            "SELECT a.channel_id, MAX(mc.title) AS title, a.last_error, a.fail_streak "
+            "FROM va_channel_admin a "
+            "LEFT JOIN managed_channels mc ON mc.owner_id=a.owner_id AND mc.channel_id=a.channel_id "
+            "WHERE a.owner_id=$1 AND (a.fail_streak > 0 OR a.last_error IS NOT NULL) "
+            "GROUP BY a.channel_id, a.last_error, a.fail_streak "
+            "ORDER BY a.fail_streak DESC LIMIT 10",
+            int(owner_id))
+        out["attention"] = [
+            {"channel_id": str(r["channel_id"]),
+             "title": r["title"] or str(r["channel_id"]),
+             "error": (r["last_error"] or "")[:160],
+             "fail_streak": int(r["fail_streak"] or 0)}
+            for r in rows or []
+        ]
+    except Exception:
+        log.debug("network_overview: список внимания не собран owner=%s", owner_id, exc_info=True)
+
+    return out
+
+
 def format_daily_report(items: list[tuple[str, dict]]) -> str:
     """Отчёт владельцу за сутки по всем его каналам под администратором."""
     lines = ["🧠 <b>Отчёт виртуального администратора</b>"]

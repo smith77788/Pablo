@@ -15253,10 +15253,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             items = await _ca.list_channels(pool, uid)
             drafts = await _ca.list_drafts(pool, uid)
+            network = await _ca.network_overview(pool, uid)
         except Exception:
             log.warning("va_channels failed uid=%s", uid, exc_info=True)
             return _err("Не удалось загрузить каналы", 500)
-        return _json_resp({"ok": True, "channels": items, "drafts": drafts})
+        return _json_resp({"ok": True, "channels": items, "drafts": drafts,
+                           "network": network})
 
     async def _va_payload(uid: int, cid: int) -> dict | None:
         """Экран канала: настройки, рубрики, план, черновики, статистика, журнал."""

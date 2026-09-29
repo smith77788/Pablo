@@ -60,6 +60,7 @@ async function _vaLoadList() {
     'Выберите канал и поставьте администратора. Он сам разберётся в нише канала, составит контент-план, ' +
     'будет писать и публиковать посты под рост аудитории и заявки, следить за статистикой и присылать ' +
     'вам отчёт раз в сутки. Участвовать не нужно.</div>';
+  h += _vaNetworkHtml(d.network);
   h += _vaDraftsHtml(d.drafts || [], 'list');
   h += '<div class="sec">Каналы (' + chans.length + ')</div>';
   if (!chans.length) {
@@ -83,6 +84,50 @@ async function _vaLoadList() {
     '<div class="li-sub">Запрещённые слова, лимиты, режим проверки ручных публикаций</div></div>' +
     '<span class="chev">›</span></div></div>';
   body.innerHTML = h;
+}
+
+// Сводка по всей сети каналов — взгляд руководителя поверх администраторов
+// отдельных каналов. Показывается, только когда хоть один администратор
+// установлен: пустому владельцу цифры «0/0» не нужны.
+function _vaNetworkHtml(n) {
+  if (!n || !n.admins_installed) return '';
+  const kpi = function (val, lbl) {
+    return '<div style="flex:1;min-width:80px;text-align:center;padding:8px 4px">' +
+      '<div style="font-size:20px;font-weight:700">' + val + '</div>' +
+      '<div style="font-size:11px;color:var(--hint)">' + lbl + '</div></div>';
+  };
+  let h = '<div class="sec">Сеть каналов</div><div class="lst" style="padding:6px">' +
+    '<div style="display:flex;flex-wrap:wrap;gap:4px">' +
+      kpi(n.admins_active + '<span style="font-size:13px;color:var(--hint)">/' + n.admins_installed + '</span>', 'администраторов') +
+      kpi(n.posts_7d, 'постов за 7 дней') +
+      kpi(n.avg_views_7d ? num(n.avg_views_7d) : '—', 'средний охват') +
+      kpi(n.members_total ? num(n.members_total) : '—', 'подписчиков') +
+    '</div>';
+  if (n.pending_drafts) {
+    h += '<div style="padding:6px 10px;font-size:13px">📝 Ждут вашего решения: <b>' + n.pending_drafts + '</b></div>';
+  }
+  h += '</div>';
+
+  if (n.top_pillars && n.top_pillars.length) {
+    h += '<div class="sec">Что заходит по сети</div><div class="lst" style="padding:10px 14px">' +
+      n.top_pillars.map(function (p) {
+        return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--sep)">' +
+          '<span>' + esc(p.pillar) + '</span>' +
+          '<span style="color:var(--hint)">' + num(p.avg_views) + ' просмотров · ' + p.posts + ' постов</span></div>';
+      }).join('') + '</div>';
+  }
+
+  if (n.attention && n.attention.length) {
+    h += '<div class="sec">Требуют внимания (' + n.attention.length + ')</div><div class="lst">' +
+      n.attention.map(function (a) {
+        return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')">' +
+          '<div class="ava" style="background:var(--red,#ef4444)">⚠️</div><div class="li-body">' +
+          '<div class="li-name">' + esc(a.title) + '</div>' +
+          '<div class="li-sub">' + esc(a.error || ('сбоев подряд: ' + a.fail_streak)) + '</div></div>' +
+          '<span class="chev">›</span></div>';
+      }).join('') + '</div>';
+  }
+  return h;
 }
 
 let _vaDraftCtx = 'list';
