@@ -15629,17 +15629,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                ORDER BY active_subs DESC LIMIT 5""", uid)
         # Search keywords and last positions
         keywords = await _safe_fetch(pool,
-            """SELECT tk.keyword, mb.username AS bot_username,
+            """SELECT tk.id, tk.keyword, mb.username AS bot_username,
                       (SELECT sr.position FROM search_rankings sr
                        WHERE sr.keyword_id=tk.id ORDER BY sr.checked_at DESC LIMIT 1) AS last_position
                FROM tracked_keywords tk
                JOIN managed_bots mb ON mb.bot_id=tk.bot_id
                WHERE tk.owner_id=$1 AND tk.is_active=true
                ORDER BY tk.created_at DESC LIMIT 10""", uid)
+        # Потолки выдачи (5 ботов, 10 слов) на экране не признавались: подпись
+        # «N ключей отслеживается» показывала 10 при сотне слов.
+        kw_total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=true", uid)
+        bots_total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
         return _json_resp({
             "growth": growth,
             "top_bots": top_bots,
+            "bots_total": int(bots_total or 0),
             "keywords": keywords,
+            "keywords_total": int(kw_total or 0),
         })
 
     # ── Subscription ─────────────────────────────────────────────────────────

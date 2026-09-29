@@ -3957,9 +3957,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="chart" id="growthChart"></div>
       <div id="growthTotal" style="text-align:center;font-size:13px;color:var(--hint);margin-top:8px"></div>
     </div>
-    <div class="sec" style="margin-top:8px">Топ ботов</div>
+    <div class="sec" style="margin-top:8px;display:flex;justify-content:space-between;align-items:baseline">
+      <span>Топ ботов</span>
+      <span class="icon-tap" style="font-size:12px;font-weight:500" onclick="goTab('bots')" role="button" tabindex="0">все боты ›</span>
+    </div>
     <div class="lst" id="topBots"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:8px">Позиции в поиске</div>
+    <div class="sec" style="margin-top:8px;display:flex;justify-content:space-between;align-items:baseline">
+      <span>Позиции в поиске</span>
+      <span class="icon-tap" style="font-size:12px;font-weight:500" onclick="openRanking()" role="button" tabindex="0">все слова ›</span>
+    </div>
     <div class="lst" id="kwList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -12575,6 +12581,14 @@ function filterOps(status, btn) {
 // ── Analytics ──────────────────────────────────────────
 function openAnalytics() { push('s-analytics'); loadAnalytics(); }
 
+// Сервер отдаёт «топ-5» ботов и последние 10 слов. Экран об этом молчал, и
+// подпись «N ключей отслеживается» показывала 10 при сотне слов.
+function anCap(shown, total, one, few, many) {
+  const t = Number(total || 0);
+  if (!t || t <= shown) return '';
+  return `<div style="font-size:12px;color:var(--hint);padding:8px 14px">Показаны ${num(shown)} из ${num(t)} ${plural(t, one, few, many)}.</div>`;
+}
+
 async function loadAnalytics() {
   txt('topBots','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('kwList','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -12595,31 +12609,42 @@ async function loadAnalytics() {
       }).join('');
       document.getElementById('growthTotal').textContent = `+${total} новых за 7 дней`;
     } else {
-      document.getElementById('growthChart').innerHTML = `<div class="empty-txt" style="width:100%;text-align:center;color:var(--hint)">Нет данных</div>`;
+      // «Нет данных» не отличало «ботов нет» от «за неделю никто не пришёл».
+      document.getElementById('growthChart').innerHTML =
+        `<div class="empty-txt" style="width:100%;text-align:center;color:var(--hint)">${
+          (d.bots_total||0) ? 'За семь дней новых подписчиков не было' : 'Ботов пока нет — считать некого'}</div>`;
+      document.getElementById('growthTotal').textContent = '';
     }
     // Top bots
     const tb = d.top_bots||[];
+    // Раньше строки были помечены cursor:default: экран честно сообщал, что
+    // это тупик. Бот открывается своей карточкой, слово — экраном позиций.
     txt('topBots', tb.length ? tb.map(b=>{
       const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-      return `<div class="li" style="cursor:default">
+      return `<div class="li tap" onclick="openBot(${Number(b.bot_id)})" role="button" tabindex="0">
         <div class="ava ava-blue">🤖</div>
         <div class="li-body"><div class="li-name">${esc(name)}</div><div class="li-sub">${num(b.active_subs||0)} активных подписчиков</div></div>
         <span class="badge b-bl">${num(b.active_subs||0)}</span>
       </div>`;
-    }).join('') : empty('🤖','Нет данных'));
+    }).join('') + anCap(tb.length, d.bots_total, 'бот', 'бота', 'ботов')
+      : empty('🤖','Ботов пока нет','Подключите бота — и здесь появится, кто приводит подписчиков',
+              {label:'🤖 К ботам', fn:"goTab('bots')"}));
     // Keywords
     const kws = d.keywords||[];
     txt('kwList', kws.length ? kws.map(k=>{
       const pos = k.last_position;
-      const posStr = pos!=null?'#'+pos:'Нет данных';
+      const posStr = pos!=null?'#'+pos:'ещё не мерили';
       const pc = pos!=null?(pos<=3?'b-gr':pos<=10?'b-bl':pos<=30?'b-or':'b-gy'):'b-gy';
-      return `<div class="li" style="cursor:default">
+      return `<div class="li tap" onclick="openRanking()" role="button" tabindex="0">
         <div class="ava ava-green">🔍</div>
         <div class="li-body"><div class="li-name">${esc(k.keyword)}</div><div class="li-sub">${k.bot_username?'@'+esc(k.bot_username):''}</div></div>
         <span class="badge ${pc}">${posStr}</span>
       </div>`;
-    }).join('') : empty('🔍','Нет ключевых слов','Добавьте через меню бота'));
-    txt('kw-val', kws.length ? kws.length+' ключей отслеживается' : '—');
+    }).join('') + anCap(kws.length, d.keywords_total, 'слово', 'слова', 'слов')
+      : empty('🔍','Слова не отслеживаются','Добавьте слово — и увидите, на каком месте бот находится в поиске Telegram',
+              {label:'🔍 К позициям', fn:'openRanking()'}));
+    const kwTot = Number(d.keywords_total || kws.length);
+    txt('kw-val', kwTot ? kwTot+' '+plural(kwTot,'ключ','ключа','ключей')+' отслеживается' : '—');
   } catch(e) {
     // Экран ставит ДВА спиннера, а ошибка снимала один: список ключевых слов
     // оставался крутиться навсегда. И повтор звал loadPromoData() — функции с
