@@ -6810,6 +6810,17 @@ async def _exec_bulk_create_channels_multi(
     # Автопосев + первый контент (настраивается ДО старта, чтобы не делать руками).
     _first_post = (params.get("first_post") or "").strip()
     _pin_first = bool(params.get("pin_first_post"))
+    # Прогрев перед публичностью: пауза между «канал создан» и «канал получил
+    # публичный @username». Пустой, только что созданный канал, мгновенно
+    # ставший публичным, Telegram распознаёт как спам-фабрику и скрывает из
+    # поиска (теневой бан). Разносим эти события и сперва кладём в канал первый
+    # пост. Настраивается env (по умолчанию 30–90с); 0 отключает паузу.
+    import os as _os_warm
+    try:
+        _WARM_MIN_S = max(0.0, float(_os_warm.getenv("CHANNEL_WARMUP_MIN_S", "30")))
+        _WARM_MAX_S = max(_WARM_MIN_S, float(_os_warm.getenv("CHANNEL_WARMUP_MAX_S", "90")))
+    except (TypeError, ValueError):
+        _WARM_MIN_S, _WARM_MAX_S = 30.0, 90.0
     _seed_count = max(0, min(int(params.get("seed_count") or 0), 200))
     # Оживление первого поста: сколько аккаунтов ставят реакцию + дают просмотр.
     _engage_count = max(0, min(int(params.get("engage_count") or 0), 200))
@@ -6883,10 +6894,38 @@ async def _exec_bulk_create_channels_multi(
                 failed_count += 1
             elif isinstance(result, dict) and result.get("channel_id") and not result.get("error"):
                 ch_id = result["channel_id"]
-                # Публичный @юзернейм из вращения ключей. Занятые/невалидные
+                _ch_hash = int(result.get("access_hash", 0) or 0)
+
+                # ── Первый контент ДО публичности ─────────────────────────────
+                # Публичный @username назначаем ПОСЛЕ первого поста и паузы (ниже):
+                # пустой, только что созданный канал, мгновенно ставший публичным,
+                # Telegram распознаёт как спам-фабрику и скрывает из поиска (теневой
+                # бан). Пост идёт по access_hash — @username ещё нет.
+                _first_msg_id = 0
+                if _first_post:
+                    try:
+                        from services.dm_engine import expand_spintax as _spin
+                        _text = _spin(_first_post) or _first_post   # разнообразим по каналам
+                        _pr = await account_manager.post_to_channel(
+                            acc["session_str"], ch_id, _text[:4000],
+                            access_hash=_ch_hash, username="", _acc=acc)
+                        if isinstance(_pr, dict) and _pr.get("msg_id"):
+                            _first_msg_id = int(_pr["msg_id"])
+                        if _pin_first and _first_msg_id:
+                            await account_manager.pin_last_channel_post(
+                                acc["session_str"], ch_id, access_hash=_ch_hash,
+                                username="", _acc=acc)
+                    except Exception:
+                        log_exc_swallow(log, "bulk_create_channels_multi: first_post failed")
+
+                # ── Прогрев-пауза, затем публичный @username ──────────────────
+                # Пауза разносит «создан» и «стал публичным» — убирает самый явный
+                # машинный след. @username из вращения ключей; занятые/невалидные
                 # Telegram отвергает — берём следующий кандидат (несколько попыток).
                 _assigned_username = None
                 if _uname_gen is not None:
+                    if _WARM_MAX_S > 0:
+                        await asyncio.sleep(random.uniform(_WARM_MIN_S, _WARM_MAX_S))
                     _tries = 0
                     for _cand in _uname_gen:
                         _tries += 1
@@ -6924,26 +6963,6 @@ async def _exec_bulk_create_channels_multi(
                         await channel_ranking.register_for_channel(pool, owner_id, ch_id, title)
                     except Exception:
                         log_exc_swallow(log, "bulk_create_channels_multi: kw register failed")
-
-                _ch_hash = int(result.get("access_hash", 0) or 0)
-                # ── Первый контент: пост от создателя (он админ) + закреп ──────
-                _first_msg_id = 0
-                if _first_post:
-                    try:
-                        from services.dm_engine import expand_spintax as _spin
-                        _text = _spin(_first_post) or _first_post   # разнообразим по каналам
-                        _pr = await account_manager.post_to_channel(
-                            acc["session_str"], ch_id, _text[:4000],
-                            access_hash=_ch_hash,
-                            username=(_assigned_username or ""), _acc=acc)
-                        if isinstance(_pr, dict) and _pr.get("msg_id"):
-                            _first_msg_id = int(_pr["msg_id"])
-                        if _pin_first and _first_msg_id:
-                            await account_manager.pin_last_channel_post(
-                                acc["session_str"], ch_id, access_hash=_ch_hash,
-                                username=(_assigned_username or ""), _acc=acc)
-                    except Exception:
-                        log_exc_swallow(log, "bulk_create_channels_multi: first_post failed")
 
                 # ── Оживление первого поста: реакции + просмотры флотом ────────
                 # Свежий пост с реакциями/просмотрами выглядит живым (лучше для
