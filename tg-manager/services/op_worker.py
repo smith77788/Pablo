@@ -12313,8 +12313,18 @@ async def _exec_boost_reactions(
 
     channel = params.get("channel", "")
     msg_id = int(params.get("msg_id") or 0)
-    emoji = params.get("emoji") or "❤"
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    # Разнобой реакций. N аккаунтов, ставящих ОДИН и тот же ❤ на пост, — сигнатура
+    # накрутки: реальная аудитория даёт разные реакции. Явно заданный пользователем
+    # emoji уважаем (он мог хотеть один), иначе раздаём из набора случайно на
+    # аккаунт. params["emojis"] (список) имеет приоритет над одиночным emoji.
+    _emoji_set = params.get("emojis")
+    if isinstance(_emoji_set, (list, tuple)) and _emoji_set:
+        _emojis = [str(e) for e in _emoji_set if e]
+    elif params.get("emoji"):
+        _emojis = [str(params["emoji"])]
+    else:
+        _emojis = ["❤", "🔥", "👍", "😍", "👏", "⚡", "🎉", "💯"]
 
     if not channel or not msg_id or not account_ids:
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_reactions"}
@@ -12375,7 +12385,7 @@ async def _exec_boost_reactions(
                 dict(acc),
                 channel,
                 msg_id,
-                emoji,
+                random.choice(_emojis),   # разнобой реакций на аккаунт
             )
             if res["ok"]:
                 ok_count += 1
@@ -12403,7 +12413,7 @@ async def _exec_boost_reactions(
             await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
 
     summary = (
-        f"{emoji} Реакции: {channel} сообщение #{msg_id}\n"
+        f"💫 Реакции: {channel} сообщение #{msg_id}\n"
         f"✅ Аккаунтов: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
     )
@@ -12791,8 +12801,17 @@ async def _exec_boost_subscribers(
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             if idx < total:
-                # межцелевой темп накрутки под губернатором (давление флота тормозит)
-                await asyncio.sleep(await _governed_delay(pool, owner_id, random.uniform(3.0, 7.0)))
+                # Межцелевой темп накрутки под губернатором. Реальные подписки на
+                # канал приходят рассеянно, а не «0→N за N·5с» — иначе сигнатура
+                # накрутки. Разброс шире и масштабируется временем суток (ночью
+                # медленнее): свежий канал не набирает флот залпом.
+                _seed_delay = random.uniform(8.0, 25.0)
+                try:
+                    from services import session_simulator as _sim_seed
+                    _seed_delay *= _sim_seed.time_of_day_factor()
+                except Exception:
+                    pass
+                await asyncio.sleep(await _governed_delay(pool, owner_id, _seed_delay))
 
         summary = (
             f"👥 Подписчики/участники: {target}\n"
