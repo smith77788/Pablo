@@ -21316,12 +21316,19 @@ async function submitExpCreate() {
 // Числа на этом экране раньше были просто числами: «17 забанено» — и всё,
 // какие именно, не посмотреть. Теперь цифра ведёт в список аккаунтов под
 // этим срезом, а строка флуд-события — в карточку того аккаунта.
-function healthGoAccounts(filter) {
+// stage — необязательный второй срез (CRM-этап, напр. «прогрев»): на
+// командном центре есть статусы, которых нет среди плиток-фильтров, зато они
+// есть среди этапов. Без него «Прогрев» вёл бы во «все аккаунты» — это враньё.
+function healthGoAccounts(filter, stage) {
   ACC_FILTER = filter || 'all';
+  ACC_STAGE_FILTER = stage || '';
   goTab('accounts');
   // Подсветить плитку выбранного среза, чтобы было видно, куда попали.
   document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x => {
     x.classList.toggle('on', x.getAttribute('data-filter') === ACC_FILTER);
+  });
+  document.querySelectorAll('#stageChips .st-chip').forEach(x => {
+    x.classList.toggle('on', x.getAttribute('data-stage') === ACC_STAGE_FILTER);
   });
   reloadAccounts();
 }

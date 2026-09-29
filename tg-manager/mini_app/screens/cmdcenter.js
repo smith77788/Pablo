@@ -10,18 +10,23 @@
 'use strict';
 
 // Цвета серий (не из CSS-vars — данные должны читаться в любой теме).
+// `go` — куда ведёт строка легенды: [фильтр, этап] для списка аккаунтов.
+// Пусто — вести некуда, и строка тогда не притворяется кнопкой.
+// 'ok' здесь потому, что его пишут в acc_status наравне с 'active': без него
+// в легенде вылезало сырое английское «ok».
 const CC_STATUS = {
-  active:           { c: '#2dd4bf', label: 'Активные' },
-  warming:          { c: '#38bdf8', label: 'Прогрев' },
-  cooldown:         { c: '#f59e0b', label: 'Кулдаун' },
-  spamblock:        { c: '#fb923c', label: 'Спамблок' },
-  limited:          { c: '#fbbf24', label: 'Ограничены' },
-  banned:           { c: '#ef4444', label: 'Забанены' },
-  deactivated:      { c: '#94a3b8', label: 'Деактив.' },
-  session_expired:  { c: '#a78bfa', label: 'Сессия ист.' },
+  active:           { c: '#2dd4bf', label: 'Активные',    go: ['active', ''] },
+  ok:               { c: '#2dd4bf', label: 'Активные',    go: ['active', ''] },
+  warming:          { c: '#38bdf8', label: 'Прогрев',     go: ['all', 'warming'] },
+  cooldown:         { c: '#f59e0b', label: 'Кулдаун',     go: ['cooldown', ''] },
+  spamblock:        { c: '#fb923c', label: 'Спамблок',    go: ['spamblock', ''] },
+  limited:          { c: '#fbbf24', label: 'Ограничены',  go: null },
+  banned:           { c: '#ef4444', label: 'Забанены',    go: ['banned', ''] },
+  deactivated:      { c: '#94a3b8', label: 'Деактив.',    go: ['dead', ''] },
+  session_expired:  { c: '#a78bfa', label: 'Сессия ист.', go: ['dead', ''] },
 };
 function _ccStatus(st) {
-  return CC_STATUS[st] || { c: '#64748b', label: st };
+  return CC_STATUS[st] || { c: '#64748b', label: st, go: null };
 }
 
 function _ccEnsureScreen() {
@@ -92,12 +97,14 @@ function _ccDonut(parts, centerTop, centerBot) {
     '</svg>';
 }
 
-// Горизонтальный бар: доля value от total.
-function _ccBar(label, value, total, color) {
+// Горизонтальный бар: доля value от total. `onclick` необязателен — бар без
+// перехода остаётся баром и кнопкой не притворяется.
+function _ccBar(label, value, total, color, onclick) {
   const pct = total ? Math.round(value / total * 100) : 0;
-  return '<div style="margin:7px 0">' +
+  const tap = onclick ? ` onclick="${onclick}" role="button" tabindex="0"` : '';
+  return `<div${tap} style="${onclick ? 'cursor:pointer;' : ''}margin:7px 0">` +
     '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">' +
-    `<span style="color:var(--hint)">${esc(label)}</span>` +
+    `<span style="color:var(--hint)">${esc(label)}${onclick ? ' \u203a' : ''}</span>` +
     `<span style="font-weight:700;color:var(--fg)">${value}</span></div>` +
     '<div style="height:8px;border-radius:6px;background:rgba(128,128,128,.15);overflow:hidden">' +
     `<div style="height:100%;width:${pct}%;background:${color};border-radius:6px"></div></div></div>`;
@@ -112,41 +119,65 @@ function _ccRender(d) {
 
   // ── Аккаунты: кольцо + легенда ──
   const accTotal = accounts.reduce((s, a) => s + a.count, 0);
-  const donutParts = accounts.map(a => ({ value: a.count, color: _ccStatus(a.status).c }));
-  const legend = accounts.length
-    ? accounts.map(a => {
-        const st = _ccStatus(a.status);
-        return '<div style="display:flex;align-items:center;gap:6px;font-size:12px;margin:3px 0">' +
+  // 'ok' и 'active' — один и тот же статус в базе, и в легенде они давали две
+  // строки «Активные» подряд. Сводим по подписи.
+  const merged = [];
+  accounts.forEach(a => {
+    const st = _ccStatus(a.status);
+    const same = merged.find(m => m.label === st.label);
+    if (same) { same.count += a.count; return; }
+    merged.push({ status: a.status, label: st.label, c: st.c, go: st.go, count: a.count });
+  });
+  const donutParts = merged.map(a => ({ value: a.count, color: a.c }));
+  // Число в легенде — это срез списка аккаунтов, а не просто цифра: строка
+  // открывает именно его. Где среза нет (статус без фильтра), строка остаётся
+  // строкой, а не притворяется кнопкой.
+  const legend = merged.length
+    ? merged.map(st => {
+        const a = st;
+        const tap = st.go
+          ? ` onclick="healthGoAccounts('${st.go[0]}','${st.go[1]}')" role="button" tabindex="0"`
+          : '';
+        const cur = st.go ? 'cursor:pointer;' : '';
+        return `<div${tap} style="${cur}display:flex;align-items:center;gap:6px;font-size:12px;margin:3px 0;padding:3px 0">` +
           `<span style="width:10px;height:10px;border-radius:3px;background:${st.c};flex:0 0 auto"></span>` +
           `<span style="color:var(--hint);flex:1">${esc(st.label)}</span>` +
-          `<span style="font-weight:700;color:var(--fg)">${a.count}</span></div>`;
+          `<span style="font-weight:700;color:var(--fg)">${a.count}</span>` +
+          (st.go ? '<span style="color:var(--hint)">\u203a</span>' : '') + '</div>';
       }).join('')
     : '<div style="color:var(--hint);font-size:12px">Нет аккаунтов</div>';
+  // Запрос считает только is_active=TRUE — подпись «всего» обещала больше,
+  // чем показывает: отключённые аккаунты в кольцо не попадают вовсе.
   const accCard = _ccCard('👤 Аккаунты по статусам',
     '<div style="display:flex;align-items:center;gap:12px">' +
-    _ccDonut(donutParts, String(accTotal), 'всего') +
-    `<div style="flex:1;min-width:0">${legend}</div></div>`);
+    `<div onclick="healthGoAccounts('all','')" role="button" tabindex="0" style="cursor:pointer">` +
+    _ccDonut(donutParts, String(accTotal), 'в работе') + '</div>' +
+    `<div style="flex:1;min-width:0">${legend}</div></div>` +
+    '<div style="font-size:11px;color:var(--hint);margin-top:8px">Отключённые аккаунты в кольцо не входят. Нажмите на срез — откроется список.</div>');
 
   // ── Прокси-пул ──
   const pt = prx.total || 0;
   const prxCard = _ccCard('🌐 Прокси-пул',
-    _ccBar('Живые', prx.alive || 0, pt, '#2dd4bf') +
-    _ccBar('Мёртвые', prx.dead || 0, pt, '#ef4444') +
-    _ccBar('Назначены аккаунтам', prx.assigned || 0, pt, '#38bdf8') +
-    _ccBar('Резервные', prx.backup || 0, pt, '#f59e0b') +
-    `<div style="font-size:11px;color:var(--hint);margin-top:6px">Всего прокси: <b>${pt}</b></div>`);
+    _ccBar('Живые', prx.alive || 0, pt, '#2dd4bf', 'openProxies()') +
+    _ccBar('Мёртвые', prx.dead || 0, pt, '#ef4444', 'openProxies()') +
+    _ccBar('Назначены аккаунтам', prx.assigned || 0, pt, '#38bdf8', 'openProxies()') +
+    _ccBar('Резервные', prx.backup || 0, pt, '#f59e0b', 'openProxies()') +
+    '<div style="font-size:11px;color:var(--hint);margin-top:6px">Всего прокси: ' +
+    `<b>${pt}</b> · нажмите на строку, чтобы открыть пул</div>`);
 
   // ── Health-гейдж (trust_score 0–100) ──
   const avg = hl.avg || 0;
+  const hTotal = (hl.good || 0) + (hl.warn || 0) + (hl.bad || 0);
   const gcol = avg >= 70 ? '#2dd4bf' : avg >= 40 ? '#f59e0b' : '#ef4444';
   const gauge = _ccDonut([{ value: avg, color: gcol }, { value: 100 - avg, color: 'rgba(0,0,0,0)' }],
                          String(avg), 'trust');
   const healthCard = _ccCard('❤️ Здоровье сетки',
-    '<div style="display:flex;align-items:center;gap:12px">' + gauge +
+    '<div style="display:flex;align-items:center;gap:12px">' +
+    '<div onclick="openHealth()" role="button" tabindex="0" style="cursor:pointer">' + gauge + '</div>' +
     '<div style="flex:1">' +
-    _ccBar('Здоровы (≥70)', hl.good || 0, (hl.good || 0) + (hl.warn || 0) + (hl.bad || 0), '#2dd4bf') +
-    _ccBar('Внимание (40–69)', hl.warn || 0, (hl.good || 0) + (hl.warn || 0) + (hl.bad || 0), '#f59e0b') +
-    _ccBar('Риск (<40)', hl.bad || 0, (hl.good || 0) + (hl.warn || 0) + (hl.bad || 0), '#ef4444') +
+    _ccBar('Здоровы (≥70)', hl.good || 0, hTotal, '#2dd4bf', 'openHealth()') +
+    _ccBar('Внимание (40–69)', hl.warn || 0, hTotal, '#f59e0b', 'openHealth()') +
+    _ccBar('Риск (<40)', hl.bad || 0, hTotal, '#ef4444', 'openHealth()') +
     '</div></div>');
 
   // ── Операции за 7 дней (спарклайн-бары) ──
@@ -164,12 +195,14 @@ function _ccRender(d) {
       }).join('')
     : '<div style="color:var(--hint);font-size:12px">Нет операций за 7 дней</div>';
   const opsCard = _ccCard('⚙️ Операции за 7 дней',
-    `<div style="display:flex;align-items:flex-end;gap:4px;min-height:76px">${bars}</div>` +
+    '<div onclick="openOps()" role="button" tabindex="0" ' +
+    `style="cursor:pointer;display:flex;align-items:flex-end;gap:4px;min-height:76px">${bars}</div>` +
     '<div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--hint)">' +
     '<span><span style="color:#2dd4bf">■</span> успешно</span>' +
     '<span><span style="color:#ef4444">■</span> ошибки</span>' +
-    `<span style="margin-left:auto">▶ выполняется: <b style="color:var(--fg)">${now.running || 0}</b> · ` +
-    `⏳ в очереди: <b style="color:var(--fg)">${now.pending || 0}</b></span></div>`);
+    '<span onclick="openOps()" role="button" tabindex="0" style="cursor:pointer;margin-left:auto">' +
+    `▶ выполняется: <b style="color:var(--fg)">${now.running || 0}</b> · ` +
+    `⏳ в очереди: <b style="color:var(--fg)">${now.pending || 0}</b> \u203a</span></div>`);
 
   return accCard + healthCard + prxCard + opsCard;
 }
