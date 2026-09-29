@@ -1389,8 +1389,16 @@ async def check_last_publish(pool, bot, admin: dict) -> None:
     op_id = admin.get("last_op_id")
     if not op_id:
         return
+    # Причина берётся общим выражением (op_status.sql_error_reason) по ОБЕИМ
+    # колонкам: error_msg пишут терминальные провалы, last_error — пути
+    # ожидания (флуд-пауза, повтор, рестарт воркера). Читая только error_msg,
+    # администратор канала сообщал бы «публикация не прошла» без причины ровно
+    # там, где причина есть.
+    from services import op_status as _ost
+
     row = await pool.fetchrow(
-        "SELECT status, error_msg, result FROM operation_queue WHERE id=$1 AND owner_id=$2",
+        f"SELECT status, {_ost.sql_error_reason()} AS error_msg, result "
+        "FROM operation_queue WHERE id=$1 AND owner_id=$2",
         int(op_id), int(admin["owner_id"]))
     if not row or row["status"] in ("pending", "running", "queued"):
         return

@@ -2023,27 +2023,50 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     await _reset_stale_running(pool)
     _watchdog_tick = 0
     while True:
+        # Счётчик двигается ДО работы: иначе сбой в разборе очереди заодно
+        # останавливал бы и сторожей, которые в этот момент нужнее всего.
+        _watchdog_tick += 1
         try:
             await _process_pending(pool, bot)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             log.exception("op_worker error: %s", e)
-        _watchdog_tick += 1
-        # Heartbeat аренды: пока процесс жив, его аккаунты не уводит другая
-        # реплика. Каждые ~30с — на порядок чаще TTL (15 мин), так что одна
-        # неудачная попытка ничего не роняет.
-        if _watchdog_tick % 3 == 0:
-            await renew_leases()
-        # Run stale-running watchdog every 6 poll cycles (~1 minute)
-        if _watchdog_tick % 6 == 0:
-            await _watchdog_stale(pool)
-            # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
-            # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
-            await _reconcile_in_operation(pool)
-        # Alert admins about stuck operations every ~5 minutes (30 cycles)
-        if _watchdog_tick % 30 == 0:
-            await _watchdog_alerts(pool, bot)
+        # ОБСЛУЖИВАНИЕ ЦИКЛА ТОЖЕ ПОД ЗАЩИТОЙ. Раньше эти четыре вызова стояли
+        # ЗА try, и любое исключение из них не костило один круг, а завершало
+        # `run`. Присмотр (service_supervisor) звал `run` заново, а её первое
+        # действие — `_reset_stale_running`, который возвращает в очередь ВСЁ, что
+        # висит в 'running', списывая каждой операции единицу бюджета живучести.
+        # Задачи операций при этом живут своей жизнью (create_task), то есть
+        # перезапуск цикла бил по работе, которая идёт прямо сейчас: прогресс
+        # обнулялся, операция показывалась владельцу как «ожидает», а через
+        # _MAX_REVIVES таких перезапусков здоровая многочасовая рассылка
+        # объявлялась ядовитой и падала в 'failed'. Ровно тот класс, который
+        # разбирает докстринг `shutdown`: бюджет живучести тратится только на
+        # операции, которые РОНЯЮТ воркер, а не на наши собственные рестарты.
+        try:
+            # Heartbeat аренды: пока процесс жив, его аккаунты не уводит другая
+            # реплика. Каждые ~30с — на порядок чаще TTL (15 мин), так что одна
+            # неудачная попытка ничего не роняет.
+            if _watchdog_tick % 3 == 0:
+                await renew_leases()
+                # Признак жизни самого поллера: единственный способ узнать
+                # снаружи, что очередь ещё кто-то разбирает
+                # (operation_bus.queue_frozen).
+                await _obus_reg.mark_poller_alive(pool, _WORKER_ID)
+            # Run stale-running watchdog every 6 poll cycles (~1 minute)
+            if _watchdog_tick % 6 == 0:
+                await _watchdog_stale(pool)
+                # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
+                # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
+                await _reconcile_in_operation(pool)
+            # Alert admins about stuck operations every ~5 minutes (30 cycles)
+            if _watchdog_tick % 30 == 0:
+                await _watchdog_alerts(pool, bot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.exception("op_worker watchdog cycle error: %s", e)
         await asyncio.sleep(_POLL_INTERVAL)
 
 

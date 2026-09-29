@@ -65,6 +65,20 @@ async def run_full_detection(pool: asyncpg.Pool, bot) -> list[Anomaly]:
         return []
 
     all_anomalies: list[Anomaly] = []
+
+    # ГЛОБАЛЬНАЯ проверка, до разбора по владельцам: исполнитель операций может
+    # просто не работать. Это не «отклонение у владельца», а остановка продукта,
+    # и заметить её можно только отсюда — сторож воркера живёт внутри того же
+    # цикла и умирает вместе с ним (подробности — operation_bus.queue_frozen).
+    try:
+        for a in await _detect_queue_frozen(pool):
+            if await _should_record(pool, a):
+                await _record_anomaly(pool, a)
+                all_anomalies.append(a)
+                await _notify_anomaly(pool, bot, a)
+    except Exception as e:
+        log.debug("anomaly_detector: проверка разбора очереди не удалась: %s", e)
+
     for row in owner_rows:
         owner_id = row["owner_id"]
         try:
@@ -97,6 +111,63 @@ async def _detect_owner(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly]:
             raise r
         if isinstance(r, list):
             anomalies.extend(r)
+    return anomalies
+
+
+# ─── Очередь не разбирается ───────────────────────────────────────────────────
+
+
+async def _detect_queue_frozen(pool: asyncpg.Pool) -> list[Anomaly]:
+    """Исполнитель операций молчит, а готовая к запуску работа ждёт.
+
+    Единственная аномалия, которая считается НЕ по владельцу: причина у неё одна
+    и общая — цикл `op_worker.run` не проходит круги. Владельцу при этом сообщить
+    надо каждому, чья работа стоит, поэтому одно событие превращается в аномалию
+    на каждого затронутого владельца.
+
+    severity=critical: пока это длится, не исполняется НИ ОДНА операция продукта,
+    а на экране у владельца всё выглядит как обычное «ожидает».
+    """
+    anomalies: list[Anomaly] = []
+    try:
+        from services import operation_bus as _obus
+
+        frozen = await _obus.queue_frozen(pool)
+        if not frozen:
+            return anomalies
+
+        silence_s = frozen.get("silence_s")
+        _silence = (
+            "ни разу не отмечался"
+            if silence_s is None
+            else f"молчит {int(float(silence_s) // 60)} мин"
+        )
+        oldest = int(frozen.get("oldest_min") or 0)
+        for owner_id, cnt in (frozen.get("owners") or {}).items():
+            anomalies.append(
+                Anomaly(
+                    anomaly_type="queue_frozen",
+                    detector="queue",
+                    severity="critical",
+                    title=f"Очередь не разбирается: {cnt} операций стоят",
+                    description=(
+                        f"Операции не запускаются: {cnt} шт. ждут очереди, самая "
+                        f"старая — {oldest} мин. Исполнитель операций {_silence}. "
+                        f"Очередь не потеряна: как только исполнитель заработает, "
+                        f"операции стартуют сами. Если это не проходит — нужен "
+                        f"перезапуск сервиса."
+                    ),
+                    owner_id=int(owner_id),
+                    anomaly_value=float(cnt),
+                    affected_count=int(cnt),
+                    metadata={
+                        "oldest_min": oldest,
+                        "poller_silence_s": None if silence_s is None else int(float(silence_s)),
+                    },
+                )
+            )
+    except Exception as e:
+        log.debug("_detect_queue_frozen: %s", e)
     return anomalies
 
 
