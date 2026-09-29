@@ -60,6 +60,12 @@ async function _vaLoadList() {
     'Выберите канал и поставьте администратора. Он сам разберётся в нише канала, составит контент-план, ' +
     'будет писать и публиковать посты под рост аудитории и заявки, следить за статистикой и присылать ' +
     'вам отчёт раз в сутки. Участвовать не нужно.</div>';
+  // Если ИИ не подключён — администратор не сможет писать посты. Это причина
+  // №1 «тишины», и она общая для всех каналов: показываем заметным баннером.
+  if (d.network && d.network.ai_ready === false && d.network.ai_note) {
+    h += '<div class="lst" style="padding:12px 14px;margin-top:8px;border-left:3px solid var(--red,#ef4444);' +
+      'background:var(--bg2);font-size:13px;line-height:1.5">⚠️ ' + esc(d.network.ai_note) + '</div>';
+  }
   h += _vaNetworkHtml(d.network);
   h += _vaDraftsHtml(d.drafts || [], 'list');
   h += '<div class="sec">Каналы (' + chans.length + ')</div>';

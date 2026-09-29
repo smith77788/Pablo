@@ -1517,6 +1517,35 @@ async def events(pool, owner_id: int, channel_id: int, limit: int = 30) -> list[
              "at": r["created_at"].isoformat() if r["created_at"] else None} for r in rows or []]
 
 
+def ai_ready() -> tuple[bool, str]:
+    """Готов ли ИИ писать посты. Возвращает (готов, причина-по-русски если нет).
+
+    Без ИИ администратор технически «включён», проходит настройку по названию
+    канала (fallback), но КАЖДЫЙ такт публикации падает на генерации поста и
+    уходит в самолечение: в канал ничего не выходит, а владелец видит только
+    редкий алерт после трёх сбоев. Эта проверка выносит причину на экран сразу,
+    чтобы «тишина» перестала быть загадкой.
+    """
+    try:
+        from services import ai_claude
+        if ai_claude.enabled():
+            return True, ""
+    except Exception:
+        log.debug("ai_ready: проверка ai_claude не удалась", exc_info=True)
+    try:
+        from services.ai_providers import configured_providers
+        if configured_providers():
+            return True, ""
+    except Exception:
+        log.debug("ai_ready: проверка провайдеров не удалась", exc_info=True)
+    return False, (
+        "ИИ не подключён — без него администратор не может писать посты. "
+        "Каналы настроятся, но публикаций не будет. Подключите ИИ "
+        "(ключ Anthropic или один из провайдеров: OpenRouter, Groq, Gemini) — "
+        "после этого администратор начнёт вести каналы сам."
+    )
+
+
 async def network_overview(pool, owner_id: int) -> dict:
     """Сводка по ВСЕЙ сети каналов под управлением — взгляд руководителя.
 
@@ -1530,10 +1559,15 @@ async def network_overview(pool, owner_id: int) -> dict:
 
     Fail-soft: любой сбой среза деградирует в ноль/пусто, экран открывается.
     """
+    _ai_ok, _ai_note = ai_ready()
     out = {
         "channels_total": 0, "admins_installed": 0, "admins_active": 0,
         "review_mode": 0, "posts_7d": 0, "avg_views_7d": 0, "members_total": 0,
         "pending_drafts": 0, "errors": 0, "top_pillars": [], "attention": [],
+        # Готовность ИИ — общая для всех каналов. Если его нет, каналы
+        # настроятся, но публикаций не будет; выносим причину на экран, чтобы
+        # «тишина» не выглядела загадкой.
+        "ai_ready": _ai_ok, "ai_note": _ai_note,
     }
     try:
         row = await pool.fetchrow(
