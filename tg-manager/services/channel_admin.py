@@ -1627,6 +1627,18 @@ async def network_overview(pool, owner_id: int) -> dict:
 def format_daily_report(items: list[tuple[str, dict]]) -> str:
     """Отчёт владельцу за сутки по всем его каналам под администратором."""
     lines = ["🧠 <b>Отчёт виртуального администратора</b>"]
+    # Сетевая шапка — только когда каналов несколько: владельцу сети нужен общий
+    # итог до разбивки по каналам. Считаем прямо из items, без лишних запросов.
+    if len(items) > 1:
+        posts = sum(int((r.get("posts_7d") or 0)) for _t, r in items)
+        members = sum(int((r.get("members") or 0)) for _t, r in items)
+        troubled = sum(1 for _t, r in items if r.get("last_error"))
+        head = f"\n<b>По сети:</b> каналов {len(items)} · постов за неделю {posts}"
+        if members:
+            head += f" · подписчиков {members}"
+        if troubled:
+            head += f" · ⚠️ требуют внимания: {troubled}"
+        lines.append(head)
     for title, r in items:
         s = f"\n<b>{html.escape(title)}</b>\n• постов за неделю: {r['posts_7d']}"
         if r.get("avg_views_7d"):

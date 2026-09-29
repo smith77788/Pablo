@@ -130,9 +130,6 @@ async def _daily_reports(pool, bot) -> int:
             " AND mc.channel_id=a.channel_id) AS title "
             "FROM va_channel_admin a WHERE a.owner_id=$1 AND a.enabled AND a.setup_done",
             owner_id)
-        await pool.execute(
-            "UPDATE va_channel_admin SET last_report_at=now() WHERE owner_id=$1 AND enabled",
-            owner_id)
         items = []
         for r in rows or []:
             try:
@@ -143,13 +140,36 @@ async def _daily_reports(pool, bot) -> int:
             rep["last_error"] = r["last_error"] or ""
             items.append((r["title"] or str(r["channel_id"]), rep))
         if not items:
+            # Слать нечего — помечаем на сутки, чтобы не перебирать каждую минуту.
+            await _stamp_report(pool, owner_id, retry=False)
             continue
         try:
             await bot.send_message(owner_id, ca.format_daily_report(items), parse_mode="HTML")
             sent += 1
+            # Метку ставим ТОЛЬКО после успешной отправки — раньше она
+            # обновлялась ДО send_message, и при любом сбое доставки (владелец
+            # заблокировал бота, сеть, таймаут) отчёт молча терялся на сутки.
+            await _stamp_report(pool, owner_id, retry=False)
         except Exception:
             log.debug("channel_admin_runner: отчёт владельцу %s не ушёл", owner_id, exc_info=True)
+            # Не теряем отчёт на сутки: повторим примерно через час.
+            await _stamp_report(pool, owner_id, retry=True)
     return sent
+
+
+async def _stamp_report(pool, owner_id: int, *, retry: bool) -> None:
+    """Отметить время суточного отчёта. retry=True → повтор через ~час (не сутки)."""
+    # retry сдвигает метку почти на сутки назад: гейт «last_report_at < now()-24h»
+    # снова разрешит отчёт примерно через час, а не через сутки, но и не каждую
+    # минуту цикла.
+    when = "now() - interval '23 hours'" if retry else "now()"
+    try:
+        await pool.execute(
+            f"UPDATE va_channel_admin SET last_report_at={when} "
+            "WHERE owner_id=$1 AND enabled",
+            owner_id)
+    except Exception:
+        log.debug("channel_admin_runner: метка отчёта не записана owner=%s", owner_id, exc_info=True)
 
 
 async def run(pool, bot) -> None:
