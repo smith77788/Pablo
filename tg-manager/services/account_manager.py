@@ -4743,32 +4743,41 @@ async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int
         return await asyncio.wait_for(client.get_entity(channel_ref), timeout=10.0)
 
     target_id = _normalize_channel_id(channel_ref)
-    try:
-        return await asyncio.wait_for(client.get_entity(target_id), timeout=10.0)
-    except Exception as e:
-        log.debug("_resolve_channel_peer: get_entity failed: %s", e)
-        from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
-        _iter = client.iter_dialogs(limit=500)
-        while True:
-            try:
-                dlg = await _iter.__anext__()
-            except StopAsyncIteration:
-                break
-            except (ChannelPrivateError, ChatAdminRequiredError):
-                continue
-            except Exception as e2:
-                log.debug("_resolve_channel_peer: iter skip: %s", e2)
-                continue
-            try:
-                eid = getattr(dlg.entity, "id", None)
-            except Exception as e3:
-                log.debug("_resolve_channel_peer: entity.id error: %s", e3)
-                continue
-            if eid and abs(int(eid)) == target_id:
-                ah = getattr(dlg.entity, "access_hash", 0)
-                if ah:
-                    return InputPeerChannel(channel_id=target_id, access_hash=ah)
-                return dlg.entity
+    # get_entity(голый int) роняет «Invalid channel object»: для канала на свежей
+    # сессии (StringSession без кэша) Telethon не знает access_hash и не понимает,
+    # что число — это КАНАЛ. PeerChannel(id) указывает тип явно, и Telethon сам
+    # добирает access_hash через getChannels (аккаунт-участник его получает).
+    # Голый id остаётся запасным на случай не-канальных сущностей.
+    from telethon.tl.types import PeerChannel
+    for _ref in (PeerChannel(target_id), target_id):
+        try:
+            return await asyncio.wait_for(client.get_entity(_ref), timeout=10.0)
+        except Exception as e:
+            log.debug("_resolve_channel_peer: get_entity(%r) failed: %s", _ref, e)
+    # Последнее средство — обход диалогов: даёт настоящий access_hash канала для
+    # этой сессии, когда getChannels не сработал.
+    from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
+    _iter = client.iter_dialogs(limit=500)
+    while True:
+        try:
+            dlg = await _iter.__anext__()
+        except StopAsyncIteration:
+            break
+        except (ChannelPrivateError, ChatAdminRequiredError):
+            continue
+        except Exception as e2:
+            log.debug("_resolve_channel_peer: iter skip: %s", e2)
+            continue
+        try:
+            eid = getattr(dlg.entity, "id", None)
+        except Exception as e3:
+            log.debug("_resolve_channel_peer: entity.id error: %s", e3)
+            continue
+        if eid and abs(int(eid)) == target_id:
+            ah = getattr(dlg.entity, "access_hash", 0)
+            if ah:
+                return InputPeerChannel(channel_id=target_id, access_hash=ah)
+            return dlg.entity
     raise ValueError(f"Channel {channel_ref} not found in account dialogs")
 
 
@@ -6011,15 +6020,22 @@ async def post_to_channel(
             uname = username.lstrip("@")
             peer = await asyncio.wait_for(client.get_entity(f"@{uname}"), timeout=10.0)
         else:
-            # Strategy 3: try get_entity(numeric_id) — works for public channels
-            # and channels already in Telethon's entity cache without full dialog scan
+            # Strategy 3: get_entity по id. ГОЛЫЙ int тут роняет «Invalid channel
+            # object»: без access_hash и без метки Telethon не понимает, что число
+            # — это канал (ровно эта ошибка ловилась в проде при публикации
+            # администратора). PeerChannel(id) задаёт тип явно, и Telethon сам
+            # добирает access_hash через getChannels (публикующий аккаунт —
+            # админ канала, то есть участник). Голый id — запасной вариант.
             peer = None
-            try:
-                peer = await asyncio.wait_for(
-                    client.get_entity(_normalize_channel_id(channel_id)), timeout=10.0
-                )
-            except Exception as e:
-                log.debug("post_to_channel: get_entity fallback failed: %s", e)
+            _nid = _normalize_channel_id(channel_id)
+            from telethon.tl.types import PeerChannel as _PeerChannel
+            for _ref in (_PeerChannel(_nid), _nid):
+                try:
+                    peer = await asyncio.wait_for(
+                        client.get_entity(_ref), timeout=10.0)
+                    break
+                except Exception as e:
+                    log.debug("post_to_channel: get_entity(%r) failed: %s", _ref, e)
 
             if peer is None:
                 # Strategy 4: full dialog scan (last resort, slow)
