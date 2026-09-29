@@ -17827,7 +17827,9 @@ async function openUchConflicts() {
   try {
     const d = await api('/api/miniapp/uch/conflicts');
     const conflicts = d.conflicts||[];
-    if (!conflicts.length) { txt('confBody', empty('✅','Нет конфликтов','Все данные согласованы')); return; }
+    if (!conflicts.length) { txt('confBody', empty('✅','Расхождений нет',
+      'Конфликт появляется, когда один и тот же контакт пришёл из двух источников с разными данными',
+      {label:'📇 К контактам', fn:'openContacts()'})); return; }
     let html = '';
     conflicts.forEach(c=>{
       html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(c.first_name||'')} ${esc(c.last_name||'')} · ${esc(c.field_name)}</div><div class="li-sub">A: ${esc(c.value_a||'')} vs B: ${esc(c.value_b||'')}</div></div>
@@ -17837,7 +17839,7 @@ async function openUchConflicts() {
         </div></div>`;
     });
     txt('confBody', html);
-  } catch(e) { txt('confBody', errHtml(e.message)); }
+  } catch(e) { txt('confBody', errHtml(e.message, 'openUchConflicts()')); }
 }
 
 async function resolveConflict(id, resolution, value) {
@@ -18598,8 +18600,9 @@ async function openCloud() {
           целостности. Никто, кроме вас, не соберёт файл обратно.
         </div>
         <div style="margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);font-size:13px">
-          Доступ к облаку — по подписке. Обратитесь к владельцу для подключения.
+          Доступ к облаку — по подписке.
         </div>
+        <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="openBilling()">💳 Посмотреть подписку</button>
       </div>`);
       return;
     }
@@ -18880,9 +18883,11 @@ async function openUchReminders() {
         html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru'):''}</div></div></div>`;
       });
     }
-    if (!overdue.length && !upcoming.length) { html = empty('⏰','Нет напоминаний','Установите напоминания в CRM контакта'); }
+    if (!overdue.length && !upcoming.length) { html = empty('⏰','Напоминаний нет',
+      'Напоминание ставится в карточке контакта — здесь собираются все, что скоро или уже просрочены',
+      {label:'📇 К контактам', fn:'openContacts()'}); }
     txt('remBody', html);
-  } catch(e) { txt('remBody', errHtml(e.message)); }
+  } catch(e) { txt('remBody', errHtml(e.message, 'openUchReminders()')); }
 }
 
 function openUchSyncCenter() {
@@ -21705,12 +21710,15 @@ async function openNetwork() {
   try {
     const d = await api('/api/miniapp/network');
     const clusters = d.clusters||[];
+    // Два числа и ничего больше: список ботов — соседняя вкладка.
     txt('networkStats', `
-      <div class="kpi-card"><div class="kpi-val">${d.total_bots}</div><div class="kpi-lbl">Всего ботов</div></div>
-      <div class="kpi-card"><div class="kpi-val">${clusters.length}</div><div class="kpi-lbl">Кластеров</div></div>
+      <div class="kpi-card tap-card" onclick="goTab('bots')" role="button" tabindex="0"><div class="kpi-val">${num(d.total_bots||0)}</div><div class="kpi-lbl">Всего ботов ›</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(clusters.length)}</div><div class="kpi-lbl">Кластеров</div></div>
     `);
     txt('m-net-cnt', d.total_bots+' ботов · '+clusters.length+' кластеров');
-    if (!clusters.length) { txt('networkClusters', empty('🕸','Нет ботов','')); return; }
+    if (!clusters.length) { txt('networkClusters', empty('🕸','Ботов пока нет',
+      'Кластер — это группа ботов; он появится, как только будет кого группировать',
+      {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
     txt('networkClusters', clusters.map(cl=>`
       <div class="sec">${cl.name==='default'?'🌐 По умолчанию':'📦 '+esc(cl.name)}</div>
       <div class="lst">${cl.bots.map(b=>`
@@ -21726,7 +21734,7 @@ async function openNetwork() {
     `).join(''));
   } catch(e) {
     txt('networkStats', '');
-    txt('networkClusters', empty('⚠️','Ошибка',e.message));
+    txt('networkClusters', errHtml(e.message, 'openNetwork()'));
   }
 }
 
@@ -21914,8 +21922,9 @@ async function openStrike() {
         <div class="strike-access-ico">🔒</div>
         <div class="strike-access-body">
           <div class="strike-access-title">Strike недоступен</div>
-          <div class="strike-access-sub">Приобретите лицензию через бота — /strike</div>
+          <div class="strike-access-sub">Нужна лицензия — её выдают по подписке</div>
         </div>
+        <button class="btn btn-p" style="padding:6px 12px;font-size:12px;min-width:0" onclick="openBilling()">Подписка</button>
       </div>`);
     }
 
@@ -23057,7 +23066,9 @@ async function openPresenceMap() {
         <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(label)}</b><span>${num(n)} акк.</span></div>
         <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
       </div>`;
-    }).join('') : empty('🌐','Нет данных по гео','Привяжите гео-прокси к аккаунтам'));
+    }).join('') : empty('🌐','География неизвестна',
+      'Страна аккаунта определяется по его прокси — пока прокси не привязаны, карта пуста',
+      {label:'🌐 К прокси', fn:'openProxies()'}));
     const gaps = (d.presence&&d.presence.gaps)||[];
     txt('pmGaps', gaps.length ? gaps.map(cc=>{
       const c = (d.presence.countries||{})[cc]||{};
@@ -23065,7 +23076,7 @@ async function openPresenceMap() {
         <div class="row-body"><div class="row-name">${esc(c.name||cc)}</div><div class="row-val">развёрнуто ${num(c.done||0)}/${num(c.planned||0)} — ${num(c.pending||0)} в очереди</div></div></div>`;
     }).join('') : empty('✅','Пробелов нет','Запланированное присутствие развёрнуто'));
   } catch(e) {
-    txt('pmGeo', empty('⚠️','Ошибка',e.message||'Не удалось загрузить'));
+    txt('pmGeo', errHtml(e.message || 'Не удалось загрузить', 'openPresenceMap()'));
   }
 }
 async function openGlobalPresence() {
@@ -24069,10 +24080,14 @@ async function openPhysics() {
   txt('physicsList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/physics');
-    if (!rows.length) { txt('physicsList', empty('⚛️','Нет данных риска','Данные появятся после выполнения операций')); return; }
+    if (!rows.length) { txt('physicsList', empty('⚛️','Риск ещё не считался',
+      'Оценка появляется после первых операций с аккаунтов',
+      {label:'⚙️ К операциям', fn:'openOps()'})); return; }
     const riskLabel = r => r>=0.8?'🔴 Критический':r>=0.5?'🟠 Высокий':r>=0.3?'🟡 Средний':'🟢 Низкий';
+    // account_id сервер отдавал с самого начала, а строка никуда не вела:
+    // «риск 91%» — и всё, аккаунт приходилось искать руками в списке.
     txt('physicsList', rows.map(r => `
-      <div class="row">
+      <div class="row${r.account_id?' tap':''}"${r.account_id?` onclick="openAccount(${Number(r.account_id)})" role="button" tabindex="0"`:''}>
         <div class="row-ico" style="background:var(--bg-red-16)">📱</div>
         <div class="row-body">
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
@@ -24081,11 +24096,12 @@ async function openPhysics() {
           ${r.flood_rate_1h?`<div class="row-val" style="color:var(--orange)">Флуд за час: ${(r.flood_rate_1h).toFixed(1)}</div>`:''}
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
         </div>
+        ${r.account_id?'<div class="row-right chev">›</div>':''}
       </div>
     `).join(''));
     const high = rows.filter(r=>(r.risk_score||0)>=0.5).length;
     document.getElementById('m-physics-val').textContent = high?`${high} проблем`:rows.length+' аккаунтов';
-  } catch(e) { txt('physicsList', empty('⚠️','Ошибка',e.message)); }
+  } catch(e) { txt('physicsList', errHtml(e.message, 'openPhysics()')); }
 }
 
 // ── Graph Hub ───────────────────────────────────────────
@@ -24104,7 +24120,9 @@ async function openGraph() {
       <div class="row"><div class="row-body"><div class="row-name">Сильных пересечений</div><div class="row-val">${num(st.strong_overlaps||0)}</div></div></div>
     `);
     document.getElementById('m-graph-val').textContent = (st.nodes||0)+' нодов';
-    if (!ov.length) { txt('graphOverlaps', empty('🕸','Нет пересечений','')); return; }
+    if (!ov.length) { txt('graphOverlaps', empty('🕸','Пересечений не найдено',
+      'Граф строится по вашим каналам и их аудиториям; пересечения появятся, когда каналов станет больше одного',
+      {label:'📢 К каналам', fn:"goTab('channels')"})); return; }
     txt('graphOverlaps', ov.map(r => `
       <div class="row">
         <div class="row-body">
@@ -24115,8 +24133,8 @@ async function openGraph() {
       </div>
     `).join(''));
   } catch(e) {
-    txt('graphStats', empty('⚠️','Ошибка',e.message));
-    txt('graphOverlaps','');
+    txt('graphStats', '');
+    txt('graphOverlaps', errHtml(e.message, 'openGraph()'));
   }
 }
 
@@ -24812,7 +24830,9 @@ async function openSemanticMemory() {
   txt('semList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/semantic_memory');
-    if (!rows.length) { txt('semList', empty('🧬','Данных нет','Боты ещё не собрали память о пользователях')); return; }
+    if (!rows.length) { txt('semList', empty('🧬','Память пока пуста',
+      'Бот запоминает факты о собеседнике по ходу диалогов — как только они пойдут, они появятся здесь',
+      {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
     txt('semList', rows.map(r => `
       <div class="row tap" onclick="openSemFacts(${r.bot_id},'${esc(r.first_name||r.username||'Бот')}')">
         <div class="row-ico" style="background:var(--bg-purple-16)">🤖</div>
@@ -24823,7 +24843,7 @@ async function openSemanticMemory() {
         <div class="row-right chev">›</div>
       </div>
     `).join(''));
-  } catch(e) { txt('semList', empty('⚠️','Ошибка',e.message)); }
+  } catch(e) { txt('semList', errHtml(e.message, 'openSemanticMemory()')); }
 }
 let _SEMF_ARGS = null, SEMF_LIMIT = 100;
 async function openSemFactsMore() {
@@ -24866,7 +24886,9 @@ async function openAudienceDna() {
   txt('dnaList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/audience_dna');
-    if (!rows.length) { txt('dnaList', empty('🔬','Данных ДНК нет','Откройте 🤖 Боты и нажмите на бота, чтобы запустить первый анализ')); return; }
+    if (!rows.length) { txt('dnaList', empty('🔬','Анализа ещё не было',
+      'Откройте бота в разделе «Боты» и запустите первый разбор аудитории',
+      {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
     txt('dnaList', rows.map(r => {
       const er = r.avg_engagement_rate ? r.avg_engagement_rate.toFixed(1)+'%' : '—';
       const risk = r.churn_risk_pct||0;
@@ -24889,7 +24911,7 @@ async function openAudienceDna() {
         <div class="row-right chev">›</div>
       </div>
     `}).join(''));
-  } catch(e) { txt('dnaList', empty('⚠️','Ошибка',e.message)); }
+  } catch(e) { txt('dnaList', errHtml(e.message, 'openAudienceDna()')); }
 }
 
 let _dnaDetailBotId = null;
