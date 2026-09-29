@@ -142,19 +142,44 @@ class _Found:
         self.users = users or []
 
 
+class _Dlg:
+    def __init__(self, entity):
+        self.entity = entity
+
+
 class _FakeClient:
     def __init__(self, entity, search_hit=True, bot_reply=True, resolve_exc=None,
-                 search_exc=None):
+                 search_exc=None, dialogs=None):
         self._e = entity
         self._hit = search_hit
         self._reply = bot_reply
         self._resolve_exc = resolve_exc
         self._search_exc = search_exc
+        self._dialogs = dialogs or []
 
     async def get_entity(self, ref):
         if self._resolve_exc:
             raise self._resolve_exc
         return self._e
+
+    def iter_dialogs(self, limit=None):
+        dialogs = list(self._dialogs)
+
+        class _It:
+            def __init__(s):
+                s._i = 0
+
+            def __aiter__(s):
+                return s
+
+            async def __anext__(s):
+                if s._i >= len(dialogs):
+                    raise StopAsyncIteration
+                d = dialogs[s._i]
+                s._i += 1
+                return d
+
+        return _It()
 
     async def __call__(self, req):
         if self._search_exc:
@@ -218,14 +243,30 @@ def test_probe_bot_not_replying_is_unreachable():
 # ── две фазы: доступ и внешняя видимость ──────────────────────────────────────
 
 def test_private_entity_resolve_failure_is_check_failed_not_unreachable():
-    # Приватную сущность (нет @username) чужой аккаунт не откроет — это «нечем
-    # проверить», НЕ «недоступна снаружи». Иначе каждый приватный канал, который
-    # проверял не его участник, ложно помечался бы недоступным.
+    # Приватную сущность (нет @username), которой нет в диалогах наблюдателя, не
+    # открыть — это «нечем проверить», НЕ «недоступна снаружи». Иначе каждый
+    # приватный канал, который проверял не его участник, ложно помечался бы
+    # недоступным. get_entity(id) падает, iter_dialogs пуст → check_failed.
     exc = Exception("Cannot find any entity corresponding to ...")
-    c = _FakeClient(_Ent(500), resolve_exc=exc)
+    c = _FakeClient(_Ent(500), resolve_exc=exc, dialogs=[])
     r = _run(erc.resolve_flags(c, kind="channel", entity_id=500, username=None))
     assert r["signals"].get("probe_error")
     assert erc.classify("channel", r["signals"])["status"] == erc.STATUS_CHECK_FAILED
+
+
+def test_private_entity_resolved_via_managing_dialogs_reads_flags():
+    # Приватный канал БЕЗ @username и без access_hash, но управляющий аккаунт —
+    # участник: get_entity(id) падает (голый id → PeerUser), а скан его диалогов
+    # находит канал и позволяет прочитать ограничение. Это и есть фикс бага
+    # «Could not find the input entity for PeerUser» на реальном прогоне.
+    class _RR:
+        platform, reason, text = "ios", "spam", "restricted content"
+    private = _Ent(777, username=None, restricted=True, reasons=[_RR()], title="Приват")
+    c = _FakeClient(private, resolve_exc=Exception("Could not find the input entity for PeerUser(user_id=777)"),
+                    dialogs=[_Dlg(private)])
+    r = _run(erc.resolve_flags(c, kind="channel", entity_id=777, username=None))
+    assert r["signals"].get("resolved") is True
+    assert erc.classify("channel", r["signals"])["status"] == erc.STATUS_RESTRICTED
 
 
 def test_search_visible_true_false_and_none():

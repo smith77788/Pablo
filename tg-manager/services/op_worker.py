@@ -10683,6 +10683,7 @@ async def _exec_check_owned_restrictions(
     # ── 3. Проход с переиспользованием коннекта наблюдателя ───────────────────
     _clients: dict[int, object] = {}       # acc_id -> подключённый client
     _dead: set[int] = set()                # acc_id, которые не удалось подключить
+    _dialogs_done: set[int] = set()        # acc_id, чьи диалоги уже подгружены
 
     async def _client_for(acc: dict):
         aid = int(acc["id"])
@@ -10701,6 +10702,22 @@ async def _exec_check_owned_restrictions(
                         op_id, aid, e)
             _dead.add(aid)
             return None
+
+    async def _ensure_dialogs(aid: int, client) -> None:
+        # Приватную сущность без access_hash резолвит только скан диалогов
+        # управляющего аккаунта. Делаем ОДИН get_dialogs на аккаунт — он наполняет
+        # кэш сущностей сессии, и дальше каждый резолв идёт из кэша, а не сканирует
+        # 500 диалогов заново на КАЖДУЮ сущность (иначе 190 каналов = 190 сканов).
+        if aid in _dialogs_done:
+            return
+        _dialogs_done.add(aid)
+        try:
+            await asyncio.wait_for(client.get_dialogs(limit=None), timeout=90)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.debug("check_owned_restrictions op=%d: get_dialogs acc=%s не удался: %s",
+                      op_id, aid, e)
 
     def _pick_access(ent: dict):
         # Аккаунт С ДОСТУПОМ для резолва+флагов. Приватную сущность (нет
@@ -10745,9 +10762,11 @@ async def _exec_check_owned_restrictions(
                 }
 
             access_client = None
+            _access_acc_id = None
             for cand in _pick_access(ent):
                 access_client = await _client_for(cand)
                 if access_client is not None:
+                    _access_acc_id = int(cand["id"])
                     break
 
             if access_client is None:
@@ -10755,6 +10774,10 @@ async def _exec_check_owned_restrictions(
                         if ent.get("is_private") else "нет доступного аккаунта-наблюдателя")
                 verdict = _erc.classify(ent["kind"], {"probe_error": _why})
             else:
+                # Приватную сущность без access_hash резолвит только скан диалогов
+                # управляющего — наполняем кэш его сессии один раз (не на каждую).
+                if ent.get("is_private") and not ent.get("access_hash"):
+                    await _ensure_dialogs(_access_acc_id, access_client)
                 # Внешний аккаунт для видимости — только публичным сущностям.
                 search_client = None
                 if ent.get("username"):

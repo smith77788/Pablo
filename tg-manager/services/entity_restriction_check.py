@@ -297,20 +297,29 @@ _SEARCH_TIMEOUT = 25.0
 _BOT_PING_TIMEOUT = 8.0
 
 
-def _entity_ref(username: Optional[str], entity_id: Optional[int],
-                kind: str, access_hash: Optional[int]):
-    """Ссылка для get_entity. Публичной — @username; приватному каналу/группе —
-    InputPeerChannel(id, access_hash) (иначе управляющий аккаунт не резолвит её
-    по «голому» id со свежего коннекта); иначе — сам id."""
-    if username:
-        return f"@{username}"
-    if entity_id is not None and access_hash and kind in ("channel", "group"):
-        try:
-            from telethon.tl.types import InputPeerChannel
-            return InputPeerChannel(int(entity_id), int(access_hash))
-        except Exception:
-            return entity_id
-    return entity_id
+async def _resolve_entity(client, kind: str, entity_id: Optional[int],
+                          username: Optional[str], access_hash: Optional[int]):
+    """Резолв сущности в ПОЛНЫЙ объект (с флагами restricted/restriction_reason).
+
+    Бот — публичный user, всегда по @username. Канал/чат — через общий
+    account_manager._resolve_channel_peer (access_hash → @username → PeerChannel
+    по нормализованному id → скан диалогов), чтобы не повторять его логику и не
+    ловить баг «голый положительный id Telethon считает user_id → PeerUser».
+    _resolve_channel_peer может вернуть InputPeerChannel (только peer) — тогда
+    добираем полный объект вторым get_entity(peer).
+    """
+    if kind == "bot":
+        ref = f"@{username}" if username else entity_id
+        return await asyncio.wait_for(client.get_entity(ref), timeout=_RESOLVE_TIMEOUT)
+
+    from services.account_manager import _resolve_channel_peer
+    channel_ref = f"@{username}" if username else entity_id
+    peer = await asyncio.wait_for(
+        _resolve_channel_peer(client, channel_ref, int(access_hash or 0)),
+        timeout=_RESOLVE_TIMEOUT)
+    if hasattr(peer, "restricted"):
+        return peer  # уже полный Channel/Chat
+    return await asyncio.wait_for(client.get_entity(peer), timeout=_RESOLVE_TIMEOUT)
 
 
 async def resolve_flags(
@@ -332,13 +341,12 @@ async def resolve_flags(
     meta: dict = {"id": entity_id, "username": username, "title": None,
                   "verified": False, "scam": False}
 
-    ref = _entity_ref(username, entity_id, kind, access_hash)
-    if ref is None:
-        signals["probe_error"] = "нет ни @username, ни id/access_hash для проверки"
+    if not username and entity_id is None:
+        signals["probe_error"] = "нет ни @username, ни id для проверки"
         return {"signals": signals, "meta": meta}
 
     try:
-        entity = await asyncio.wait_for(client.get_entity(ref), timeout=_RESOLVE_TIMEOUT)
+        entity = await _resolve_entity(client, kind, entity_id, username, access_hash)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 — ошибку классифицируем, не роняем прогон

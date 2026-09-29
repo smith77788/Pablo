@@ -53,8 +53,15 @@ def _run(coro):
 
 
 class _FakeClient:
+    def __init__(self):
+        self.dialogs_calls = 0
+
     async def disconnect(self):
         return None
+
+    async def get_dialogs(self, limit=None):
+        self.dialogs_calls += 1
+        return []
 
 
 def _ch(cid, username, title="Канал", type_="channel", acc_id=1):
@@ -226,6 +233,25 @@ def test_single_account_marks_visibility_unmeasured_and_disables_search():
     kw = probe.await_args_list[0].kwargs
     assert kw.get("do_search") is False
     assert kw.get("search_client") is None
+
+
+def test_dialogs_prefetched_once_per_account_for_private_entities():
+    # Два приватных канала (без username, без access_hash) одного управляющего
+    # (acc=1) → его диалоги грузятся РОВНО ОДИН раз, а не на каждый канал.
+    pool = _FakePool(channels=[_pch(101, acc_id=1), _pch(102, acc_id=1)],
+                     bots=[], accounts=[_acc(1)])
+    shared = _FakeClient()
+    with patch.object(op_worker, "_claim_available_accounts",
+                      AsyncMock(side_effect=lambda op_id, accs, owner: accs)), \
+         patch.object(op_worker, "_is_cancelled", AsyncMock(return_value=False)), \
+         patch("services.infra_memory.is_account_quarantined", AsyncMock(return_value=False)), \
+         patch("services.account_manager.connect_client", AsyncMock(return_value=shared)), \
+         patch("services.entity_restriction_check.probe_entity",
+               AsyncMock(side_effect=[_verdict(erc.STATUS_CLEAN), _verdict(erc.STATUS_CLEAN)])), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        res = _run(op_worker._exec_check_owned_restrictions(pool, None, 7, 99, {}))
+    assert res["status"] == "done"
+    assert shared.dialogs_calls == 1
 
 
 def test_two_accounts_give_external_search_client_for_visibility():
