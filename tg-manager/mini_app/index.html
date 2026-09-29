@@ -5411,7 +5411,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔗 Задачи между ботами</div>
-    <div class="hdr-meta"><span id="botmeshCount" style="font-size:12px;color:var(--hint)"></span></div>
+    <div class="hdr-meta">
+      <span id="botmeshCount" style="font-size:12px;color:var(--hint)"></span>
+      <button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="meshNewTask()">+ Цепочка</button>
+    </div>
   </div>
   <div class="sub-sb">
     <div style="font-size:11px;opacity:.6;padding:2px 2px 8px;line-height:1.4">
@@ -5427,6 +5430,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔗 Трасса задачи</div>
+    <div class="hdr-meta"><span id="botmeshStop"></span></div>
   </div>
   <div class="sub-sb">
     <div id="botmeshDetail"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -20701,10 +20705,79 @@ const MESH_DROP = {
   loop:         'маршрут пошёл по кругу',
   duplicate:    'этот шаг уже выполнялся',
   no_target:    'следующего бота в маршруте нет',
+  send_failed:  'Telegram не принял передачу боту',
+  stopped_by_owner: 'прервана вручную',
 };
 function meshDropText(r) {
   if (!r) return '';
   return MESH_DROP[r] || r;
+}
+// Приёмная половина Bot Mesh была написана целиком, а НАЧАТЬ цепочку было
+// нечем: `bot_mesh.make_envelope`/`create_task` не вызывал никто. Поэтому
+// таблица всегда пустая, и экран честно показывал «Задач между ботами нет» —
+// и всегда бы показывал. Отсюда цепочка запускается.
+async function meshBots() {
+  if (!BOTS || !BOTS.length) { const d = await api('/api/miniapp/bots'); BOTS = d.bots||[]; }
+  return (BOTS||[]).filter(b => b.bot_id);
+}
+function meshBotLabel(b) {
+  return b.username ? '@'+b.username : (b.first_name || ('бот #'+b.bot_id));
+}
+
+async function meshNewTask() {
+  let bots;
+  try { bots = await meshBots(); }
+  catch(e) { toast('⚠️ '+(e.message||'Ошибка')); return; }
+  if (bots.length < 2) {
+    toast('Нужно хотя бы два подключённых бота: один запускает, второй принимает');
+    return;
+  }
+  const opt = b => ({value:String(b.bot_id), label:meshBotLabel(b),
+                     sub:b.first_name && b.username ? b.first_name : ''});
+  const origin = await askChoice('Какой бот запускает цепочку?', bots.map(opt));
+  if (origin === null) return;
+  const route = [];
+  for (let i = 0; i < 8; i++) {
+    const rest = bots.filter(b => String(b.bot_id) !== origin || route.length);
+    const opts = rest.map(opt);
+    if (route.length) opts.unshift({value:'__done', label:'✅ Маршрут готов',
+                                    sub:'шагов: '+route.length});
+    const pick = await askChoice(
+      route.length ? 'Кому передать после шага '+route.length+'?' : 'Кому передать первым?',
+      opts);
+    if (pick === null) return;
+    if (pick === '__done') break;
+    route.push(Number(pick));
+  }
+  if (!route.length) return;
+  const text = ((await askPrompt('Что передать по цепочке?',
+    {placeholder:'текст задачи — увидят боты маршрута', multiline:true})) || '').trim();
+  const names = route.map(id => {
+    const b = bots.find(x => Number(x.bot_id) === id);
+    return b ? meshBotLabel(b) : ('бот #'+id);
+  });
+  const ok = await askConfirm('Запустить цепочку?\n\n' + names.join(' → ')
+    + '\n\nПередача между ботами работает, только если режим общения с ботами включён у каждого из них в @BotFather.');
+  if (!ok) return;
+  try {
+    const r = await api('/api/miniapp/mesh/task', {method:'POST', body:JSON.stringify({
+      origin_bot: Number(origin), route: route.map(b => ({bot:b})), text })});
+    if (r.sent === false) { toast('⚠️ '+(r.error||'Telegram не принял передачу')); }
+    else { toast('✅ Цепочка запущена'); }
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+  openBotMesh();
+}
+
+async function meshStopTask() {
+  if (!_MESH_TASK_ID) return;
+  const ok = await askConfirm('Прервать цепочку?\n\nЗадача будет помечена брошенной. Уже сделанные передачи не отменятся.');
+  if (!ok) return;
+  try {
+    await api('/api/miniapp/mesh/task/'+encodeURIComponent(_MESH_TASK_ID)+'/drop',
+              {method:'POST'});
+    toast('✅ Цепочка прервана');
+    openBotMeshTask(_MESH_TASK_ID, true);
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 let MESH_LIMIT = 30;
 async function openBotMeshMore() { MESH_LIMIT += 200; await openBotMesh(true); }
@@ -20719,8 +20792,9 @@ async function openBotMesh(keep) {
     txt('botmeshCount', cntLbl);
     txt('m-botmesh-val', cntLbl);
     if (!tasks.length) {
-      txt('botmeshList', empty('🔗','Задач между ботами нет',
-        'Появятся, когда боты начнут передавать работу по маршруту'));
+      txt('botmeshList', empty('🔗','Цепочек ещё не было',
+        'Цепочка — это задача, которую боты передают друг другу по маршруту. Запустите первую и увидите здесь, где она сейчас.',
+        {label:'+ Запустить цепочку', fn:'meshNewTask()'}));
       return;
     }
     txt('botmeshList', tasks.map(t=>{
@@ -20757,6 +20831,9 @@ async function openBotMeshTask(taskId, keep) {
     const d = await api('/api/miniapp/mesh/task/'+encodeURIComponent(taskId));
     const [cls, lbl] = MESH_ST[d.status] || ['b-gy', d.status||''];
     const hops = d.hops||[];
+    txt('botmeshStop', d.status === 'running'
+      ? '<button class="btn btn-d" style="padding:7px 14px;font-size:13px" onclick="meshStopTask()">Прервать</button>'
+      : '');
     const head = `<div class="card" style="margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span class="badge ${cls}">${lbl}</span>

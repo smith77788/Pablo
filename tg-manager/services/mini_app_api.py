@@ -11492,6 +11492,120 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── «Нотариус»: заверение рекламных размещений ────────────────────────
 
+    async def mesh_task_create(request: web.Request) -> web.Response:
+        """Запустить цепочку между ботами.
+
+        Приёмная половина Bot Mesh была написана целиком: auto_responder
+        разбирает конверт, гасит петли, двигает шаг и пересылает дальше. А
+        начать цепочку было нечем — `bot_mesh.make_envelope`/`create_task` не
+        вызывал никто, ни из бота, ни из мини-аппа. Поэтому таблица всегда
+        пустая, и на экране владелец видел «Задач между ботами нет».
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        origin = validate_integer(body.get("origin_bot"), min_val=1, max_val=2**63 - 1)
+        if origin is None:
+            return _err("Не выбран бот-инициатор")
+        raw_route = body.get("route") or []
+        if not isinstance(raw_route, list) or not raw_route:
+            return _err("Маршрут пуст: выберите хотя бы одного получателя")
+        if len(raw_route) > 8:
+            return _err("В маршруте не больше восьми шагов")
+        route_ids = []
+        for step in raw_route:
+            bid = validate_integer(step.get("bot") if isinstance(step, dict) else step,
+                                   min_val=1, max_val=2**63 - 1)
+            if bid is None:
+                return _err("В маршруте есть неизвестный бот")
+            route_ids.append(bid)
+        text = (body.get("text") or "").strip()[:2000]
+        # Все боты маршрута должны принадлежать владельцу: иначе цепочку можно
+        # было бы направить в чужого бота.
+        rows = await _safe_fetch(pool,
+            "SELECT bot_id, token, username, first_name FROM managed_bots "
+            "WHERE added_by=$1 AND is_active=TRUE AND bot_id = ANY($2::bigint[])",
+            uid, list({origin, *route_ids}))
+        known = {r["bot_id"]: r for r in (rows or [])}
+        missing = [b for b in [origin, *route_ids] if b not in known]
+        if missing:
+            return _err("Эти боты не ваши или отключены: " + ", ".join(str(b) for b in missing))
+        if route_ids[0] == origin:
+            return _err("Первый получатель не может быть инициатором")
+
+        from services import bot_mesh
+        env = bot_mesh.make_envelope(
+            uid, origin,
+            [{"bot": b, "capability": None} for b in route_ids],
+            payload={"text": text} if text else {})
+        try:
+            await bot_mesh.create_task(pool, env)
+        except Exception as exc:
+            log.exception("mesh_task_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+        # Физическая отправка bot→bot требует включённого режима у ОБОИХ ботов
+        # (@BotFather). Если Telegram отказал — цепочка не «висит запущенной»,
+        # а честно помечается брошенной, и владелец видит причину.
+        try:
+            from services.token_vault import decrypt_token as _dt
+            token = _dt(known[origin]["token"])
+        except Exception:
+            token = known[origin]["token"]
+        sent, why = False, ""
+        try:
+            import aiohttp as _aio
+            async with _aio.ClientSession() as sess:
+                async with sess.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": route_ids[0],
+                          "text": bot_mesh.encode_message(env)},
+                    timeout=_aio.ClientTimeout(total=10),
+                ) as resp:
+                    jd = await resp.json()
+            sent = bool(jd.get("ok"))
+            why = str(jd.get("description") or "")[:200]
+        except Exception as exc:
+            why = str(exc)[:200]
+        if not sent:
+            try:
+                await bot_mesh.drop_task(pool, env["task_id"], "send_failed")
+            except Exception:
+                log.debug("mesh_task_create: drop persist failed")
+            return _json_resp({
+                "ok": False, "task_id": env["task_id"], "sent": False,
+                "error": "Telegram не принял передачу боту: " + (why or "неизвестная причина")
+                         + ". Режим общения между ботами включается у обоих в @BotFather.",
+            })
+        try:
+            await bot_mesh.record_hop(pool, env["task_id"], 0, from_bot=origin,
+                                      to_bot=route_ids[0], capability=None,
+                                      outcome="sent")
+        except Exception:
+            log.debug("mesh_task_create: hop persist failed")
+        return _json_resp({"ok": True, "task_id": env["task_id"], "sent": True})
+
+    async def mesh_task_drop(request: web.Request) -> web.Response:
+        """Прервать цепочку, которая зависла на шаге."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        task_id = (request.match_info.get("task_id") or "")[:64]
+        row = await _safe_fetchrow(pool,
+            "SELECT status FROM bot_mesh_tasks WHERE task_id=$1 AND owner_id=$2",
+            task_id, uid)
+        if not row:
+            return _err("Задача не найдена", 404)
+        if row["status"] != "running":
+            return _err("Цепочка уже не выполняется")
+        from services import bot_mesh
+        await bot_mesh.drop_task(pool, task_id, "stopped_by_owner")
+        return _json_resp({"ok": True})
+
     async def mesh_tasks(request: web.Request) -> web.Response:
         """Bot Mesh: задачи, которые боты передают друг другу по маршруту.
 
@@ -18326,6 +18440,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/vlayer/entity/{entity_type}/{entity_id}",
                        vlayer_entity)
     app.router.add_get("/api/miniapp/mesh/tasks", mesh_tasks)
+    app.router.add_post("/api/miniapp/mesh/task", mesh_task_create)
+    app.router.add_post("/api/miniapp/mesh/task/{task_id}/drop", mesh_task_drop)
     app.router.add_get("/api/miniapp/mesh/task/{task_id}", mesh_task_detail)
     app.router.add_get("/api/miniapp/notary", notary_list)
     app.router.add_post("/api/miniapp/notary", notary_create)
