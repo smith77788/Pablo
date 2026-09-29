@@ -4234,8 +4234,17 @@ async def create_channel(
     about: str = "",
     megagroup: bool = False,
     _acc: dict | None = None,
+    brand_promo: bool = True,
 ) -> dict:
     """Create a broadcast channel (megagroup=False) or supergroup (megagroup=True).
+
+    brand_promo: добавить ли в новый канал бренд-бота @MEXAHI3MBOT админом и
+    закреплённый промо-пост. Это делается ТОЛЬКО для free-tier (монетизация) —
+    исполнитель фабрики передаёт brand_promo=is_user_free_tier(owner). Для
+    платных передаётся False: у них не должно быть бренд-следа, и — важнее —
+    один и тот же bot_id админом в сотнях свежих каналов даёт межканальный
+    граф-след, по которому антиспам Telegram кластеризует «фабрику каналов»
+    и уводит их в теневой бан. По умолчанию True — обратная совместимость.
 
     Returns dict: {channel_id, title, username, type, invite_link, error?}
     """
@@ -4258,13 +4267,17 @@ async def create_channel(
         _ch_id = ch.id
         _ch_hash = getattr(ch, "access_hash", 0) or 0
 
-        # Promote @MEXAHI3MBOT as full admin in every created channel/group
-        try:
-            from services.brand_injection import add_botmother_as_channel_admin, post_welcome_and_pin
-            await add_botmother_as_channel_admin(client, _ch_id, _ch_hash)
-            await post_welcome_and_pin(client, _ch_id, _ch_hash)
-        except Exception as e:
-            log.warning("create_channel: brand_injection failed: %s", e)
+        # Бренд-бот + промо — только free-tier, и НЕ в ту же секунду, что создан
+        # канал: мгновенный сторонний админ + закреп на пустом канале = машинный
+        # залп. Небольшая пауза разносит «создан» и «пришёл бренд-бот».
+        if brand_promo:
+            try:
+                from services.brand_injection import add_botmother_as_channel_admin, post_welcome_and_pin
+                await asyncio.sleep(random.uniform(3.0, 8.0))
+                await add_botmother_as_channel_admin(client, _ch_id, _ch_hash)
+                await post_welcome_and_pin(client, _ch_id, _ch_hash)
+            except Exception as e:
+                log.warning("create_channel: brand_injection failed: %s", e)
 
         return {
             "channel_id": _ch_id,

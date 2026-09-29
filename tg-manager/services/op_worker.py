@@ -5373,6 +5373,13 @@ async def _exec_global_presence_channel(
     if not plan_id:
         return {"status": "failed", "reason": "Не указан plan_id"}
 
+    # Бренд-бот/промо — только free-tier (см. фабрику каналов и create_channel).
+    try:
+        from services import brand_injection as _bi_gate
+        _brand_free = await _bi_gate.is_user_free_tier(pool, owner_id)
+    except Exception:
+        _brand_free = True
+
     plan = await _safe_fetchrow(
             pool,
         "SELECT asset_type FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
@@ -5575,7 +5582,8 @@ async def _exec_global_presence_channel(
 
             t0_gp = time.monotonic()
             result = await account_manager.create_channel(
-                acc["session_str"], title, about=_about, megagroup=is_group, _acc=acc
+                acc["session_str"], title, about=_about, megagroup=is_group, _acc=acc,
+                brand_promo=_brand_free,
             )
 
             if result.get("error") and result.get("flood_wait"):
@@ -5603,6 +5611,7 @@ async def _exec_global_presence_channel(
                         about=_about,
                         megagroup=is_group,
                         _acc=acc,
+                        brand_promo=_brand_free,
                     )
 
             if result.get("error"):
@@ -6821,6 +6830,15 @@ async def _exec_bulk_create_channels_multi(
         _WARM_MAX_S = max(_WARM_MIN_S, float(_os_warm.getenv("CHANNEL_WARMUP_MAX_S", "90")))
     except (TypeError, ValueError):
         _WARM_MIN_S, _WARM_MAX_S = 30.0, 90.0
+    # Бренд-бот @MEXAHI3MBOT админом + промо-пост ставим ТОЛЬКО free-tier: один
+    # bot_id админом в сотнях свежих каналов — межканальный граф-след «фабрики»
+    # (теневой бан). Платным его не ставим вовсе. Сбой проверки тарифа → free
+    # (сохранить монетизацию/текущее поведение).
+    try:
+        from services import brand_injection as _bi_gate
+        _brand_free = await _bi_gate.is_user_free_tier(pool, owner_id)
+    except Exception:
+        _brand_free = True
     _seed_count = max(0, min(int(params.get("seed_count") or 0), 200))
     # Оживление первого поста: сколько аккаунтов ставят реакцию + дают просмотр.
     _engage_count = max(0, min(int(params.get("engage_count") or 0), 200))
@@ -6882,7 +6900,8 @@ async def _exec_bulk_create_channels_multi(
                     _about_i = about
 
             result = await account_manager.create_channel(
-                acc["session_str"], title, about=_about_i, megagroup=is_group, _acc=acc
+                acc["session_str"], title, about=_about_i, megagroup=is_group, _acc=acc,
+                brand_promo=_brand_free,
             )
 
             flood_wait = result.get("flood_wait", 0) if isinstance(result, dict) else 0
@@ -7106,6 +7125,12 @@ async def _exec_bulk_create_channels(
     about = params.get("about", "")
     username_pattern = params.get("username_pattern", "")
     acc_id = params.get("acc_id", 0)
+    # Бренд-бот/промо — только free-tier (см. multi-путь и create_channel).
+    try:
+        from services import brand_injection as _bi_gate
+        _brand_free = await _bi_gate.is_user_free_tier(pool, owner_id)
+    except Exception:
+        _brand_free = True
     # Group Factory passes is_group=True to create a supergroup instead of a
     # broadcast channel. Without honouring it, create_group silently produced a
     # channel (wrong entity type).
@@ -7227,7 +7252,8 @@ async def _exec_bulk_create_channels(
             await session_simulator.typing_delay(title)
 
             result = await account_manager.create_channel(
-                acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
+                acc["session_str"], title, about=about, megagroup=is_group, _acc=acc,
+                brand_promo=_brand_free,
             )
 
             # Handle flood wait
@@ -7244,7 +7270,8 @@ async def _exec_bulk_create_channels(
                     log.info("op_worker bulk_channels: flood %ds, sleeping...", wait_time)
                     await asyncio.sleep(wait_time)
                     result = await account_manager.create_channel(
-                        acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
+                        acc["session_str"], title, about=about, megagroup=is_group, _acc=acc,
+                        brand_promo=_brand_free,
                     )
 
             if (
@@ -11637,6 +11664,12 @@ async def _exec_deploy_network(
     подключений не вводит.
     """
     from services import network_builder as _nb, account_manager
+    # Бренд-бот/промо — только free-tier (см. фабрику каналов и create_channel).
+    try:
+        from services import brand_injection as _bi_gate
+        _brand_free = await _bi_gate.is_user_free_tier(pool, owner_id)
+    except Exception:
+        _brand_free = True
     try:
         instance_id = int(params.get("instance_id"))
     except (TypeError, ValueError):
@@ -11696,7 +11729,8 @@ async def _exec_deploy_network(
                 try:
                     res = await account_manager.create_channel(
                         acc["session_str"], label,
-                        megagroup=ntype in ("group", "chat"), _acc=acc)
+                        megagroup=ntype in ("group", "chat"), _acc=acc,
+                        brand_promo=_brand_free)
                 except Exception as e:
                     manual.append(f"{label}: ошибка создания ({str(e)[:60]})")
                     continue
