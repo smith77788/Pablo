@@ -183,3 +183,35 @@ def test_смена_сегмента_снимает_прежний_тег(pool):
     rows = _run(pool.fetch(
         "SELECT tag FROM user_tags WHERE bot_id=$1 AND user_id=$2", _BOT_ID, 301))
     assert [r["tag"] for r in rows] == ["activity:cold"], [r["tag"] for r in rows]
+
+
+def test_аудит_отказа_действительно_доезжает_до_базы(pool):
+    """`record_manual_action` глотает любое исключение — значит расхождение со
+    схемой не видно нигде, кроме живой базы: отказы изоляции (чужой аккаунт,
+    чужой канал, чужой бот) просто перестали бы записываться, и об этом никто
+    не узнал бы. Здесь проверяем, что строка реально ложится и что колонки
+    заполнены теми значениями, которые потом читает разбор инцидента.
+    """
+    from database import db
+
+    _run(pool.execute("DELETE FROM operation_audit WHERE owner_id=$1", 424242))
+    _run(db.record_manual_action(
+        pool, 424242, "foreign_accounts_refused",
+        target="accounts:7,8", result="refused", error_msg="чужие аккаунты"))
+
+    rows = _run(pool.fetch(
+        "SELECT action, target, result, error_msg, account_id, operation_id, occurred_at "
+        "FROM operation_audit WHERE owner_id=$1", 424242))
+    _run(pool.execute("DELETE FROM operation_audit WHERE owner_id=$1", 424242))
+
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert row["action"] == "foreign_accounts_refused"
+    assert row["target"] == "accounts:7,8"
+    assert row["result"] == "refused"
+    assert row["error_msg"] == "чужие аккаунты"
+    # account_id и operation_id для ручного действия пустые намеренно —
+    # отказ произошёл до того, как появилась операция и был выбран аккаунт.
+    assert row["account_id"] is None
+    assert row["operation_id"] is None
+    assert row["occurred_at"] is not None
