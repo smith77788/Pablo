@@ -15273,8 +15273,12 @@ function goRef() {
 }
 function closeRef() { document.getElementById('refMbg').classList.remove('show'); }
 function refLink() {
+  // Сервер теперь отдаёт готовую ссылку (/referral/detail). Раньше её строили
+  // только из window._botUsername, и если он не определился — «Скопировать»
+  // отвечало отказом, хотя код есть.
+  if (REF_LINK) return REF_LINK;
   const u = (window._botUsername||'').replace(/^@/,'');
-  if (!u) return null;
+  if (!u || !REF_CODE) return null;
   return `https://t.me/${u}?start=${REF_CODE}`;
 }
 function copyRef() {
@@ -19336,6 +19340,18 @@ async function submitPhoneCheck() {
 
 // ── Referral Dashboard ───────────────────────────────────
 const REFERRAL_TIER = {basic:'🥉 Базовый',silver:'🥈 Серебро',gold:'🥇 Золото',diamond:'💎 Платина'};
+// REF_CODE уже объявлен выше (его ставит loadRef из /api/miniapp/referral) —
+// здесь только ссылка, которую теперь отдаёт сервер.
+let REF_LINK = '';
+function refCopyCode() { if (REF_CODE) copyToClipboard(REF_CODE, 'Код скопирован'); }
+function refCopyLink() { if (REF_LINK) copyToClipboard(REF_LINK, 'Ссылка скопирована'); }
+function refShare() {
+  if (!REF_LINK) { toast('Ссылки пока нет'); return; }
+  const url = 'https://t.me/share/url?url=' + encodeURIComponent(REF_LINK)
+    + '&text=' + encodeURIComponent('Присоединяйся к Infragram по моей ссылке — семь дней Starter бесплатно');
+  try { tg.openTelegramLink(url); } catch(_) { copyToClipboard(REF_LINK, 'Ссылка скопирована'); }
+}
+
 async function openReferral() {
   push('s-referral');
   txt('referralStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -19350,28 +19366,50 @@ async function openReferral() {
       <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.total_earned,'green')}">$${Number(d.total_earned||0).toFixed(2)}</div><div class="kpi-lbl">Заработано</div></div>
     `);
     txt('m-ref-val',`${d.referral_count||0} рефералов · ${d.commission_rate||0}% комиссия`);
+    // Экран показывал голый код и писал «Поделитесь кодом!» — поделиться было
+    // нечем: ни копирования, ни ссылки. Бот отдаёт t.me/<бот>?start=<код>
+    // с кнопкой «Поделиться» с самого начала.
+    REF_LINK = d.ref_link || '';
+    if (d.ref_code) REF_CODE = d.ref_code;
     if (d.ref_code) {
       txt('referralCode',`
         <div class="lst">
-          <div class="row"><div class="row-body"><div class="row-name">Ваш реферальный код</div><div class="row-val" style="color:var(--purple-light);font-size:16px;font-weight:600">${esc(d.ref_code)}</div></div></div>
+          <div class="row tap" onclick="refCopyCode()" role="button" tabindex="0">
+            <div class="row-body"><div class="row-name">Ваш реферальный код</div>
+              <div class="row-val" style="color:var(--purple-light);font-size:16px;font-weight:600">${esc(d.ref_code)}</div></div>
+            <div class="row-right">📋 Копировать</div></div>
+          ${d.ref_link?`<div class="row tap" onclick="refCopyLink()" role="button" tabindex="0">
+            <div class="row-body"><div class="row-name">Ссылка для друзей</div>
+              <div class="row-val" style="white-space:normal;word-break:break-all">${esc(d.ref_link)}</div></div>
+            <div class="row-right">📋</div></div>`:''}
           <div class="row"><div class="row-body"><div class="row-name">Комиссия</div></div><div class="row-right" style="${kpiTone(d.commission_rate,'green')}">${d.commission_rate||0}%</div></div>
         </div>
+        ${d.ref_link?'<div style="padding:10px 16px"><button class="btn btn-p" style="width:100%" onclick="refShare()">📤 Поделиться ссылкой</button></div>':''}
       `);
     }
     const refs = d.referrals||[];
-    if (!refs.length) { txt('referralList', empty('🤝','Нет рефералов','Поделитесь кодом!')); return; }
+    if (!refs.length) {
+      txt('referralList', empty('🤝','Пока никто не пришёл',
+        d.ref_link?'Отправьте ссылку — приглашённый получит семь дней Starter бесплатно'
+                  :'Реферальный код появится после первого входа в бота',
+        d.ref_link?{label:'📤 Поделиться ссылкой', fn:'refShare()'}:null));
+      return;
+    }
+    // Три состояния, а показывали два: ждали 'paid', который сервер не отдавал
+    // никогда, и оплативший реферал выглядел как просто зарегистрированный.
+    const REF_ST = {paid:'✅ Оплатил', active:'🚀 Активен', pending:'📋 Зарегистрирован'};
     txt('referralList', refs.map(r=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-green-16)">👤</div>
         <div class="row-body">
           <div class="row-name">@${esc(r.username||r.id)}</div>
-          <div class="row-val">${r.status==='paid'?'✅ Оплатил':'📋 Зарегистрирован'} · ${r.created_at?new Date(r.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-val">${REF_ST[r.status]||'📋 Зарегистрирован'} · ${r.created_at?new Date(r.created_at).toLocaleDateString('ru'):''}</div>
         </div>
       </div>
     `).join(''));
   } catch(e) {
     txt('referralStats','');
-    txt('referralList', empty('⚠️','Ошибка',e.message));
+    txt('referralList', errHtml(e.message, 'openReferral()'));
   }
 }
 

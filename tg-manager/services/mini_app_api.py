@@ -9538,15 +9538,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             top_refs = await pool.fetch(
-                """SELECT u.user_id AS id, u.username, r.created_at, r.activated_at
+                """SELECT u.user_id AS id, u.username, r.created_at, r.activated_at,
+                          r.paid_at
                    FROM platform_referrals r
                    JOIN platform_users u ON u.user_id=r.referred_id
                    WHERE r.referrer_id=$1
                    ORDER BY r.created_at DESC LIMIT 20""",
                 uid,
             )
+            # Голый код без ссылки бесполезен: непонятно, куда его вводить.
+            # Бот («/referral») давно отдаёт t.me/<бот>?start=<код>, а мини-апп
+            # показывал только сам код и писал «Поделитесь кодом!».
+            code = ref_code_row["code"] if ref_code_row else None
+            ref_link = None
+            if code:
+                bot_u = await _resolve_bot_username()
+                if bot_u:
+                    ref_link = f"https://t.me/{bot_u}?start={code}"
             return _json_resp({
-                "ref_code": ref_code_row["code"] if ref_code_row else None,
+                "ref_code": code,
+                "ref_link": ref_link,
                 "tier": amb_row["tier_key"] if amb_row else "basic",
                 "tier_name": amb_row["tier_name"] if amb_row else "Базовый",
                 "commission_rate": float(amb_row["commission_rate"] or 0) if amb_row else 0,
@@ -9557,7 +9568,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     {
                         "id": r["id"], "username": r["username"],
                         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                        "status": "active" if r["activated_at"] else "pending",
+                        # Три разных состояния, а отдавали два. Экран ждал
+                        # 'paid' и не получал его НИКОГДА: оплативший реферал
+                        # показывался как «Зарегистрирован», хотя счётчик
+                        # «Оплативших» рядом считал его по paid_at.
+                        "status": ("paid" if r["paid_at"]
+                                   else "active" if r["activated_at"] else "pending"),
                     }
                     for r in top_refs
                 ],
