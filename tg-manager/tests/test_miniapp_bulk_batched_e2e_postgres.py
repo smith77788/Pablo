@@ -45,6 +45,12 @@ def pool():
                 await conn.execute(open(f, encoding="utf-8").read())
             except Exception:
                 pass
+        # Журнал наката создаёт раннер (database.db), а не файлы схемы —
+        # поднимаем его тем же DDL, иначе тесты журнала падают на пустой базе
+        # с «relation schema_migrations does not exist».
+        from database.db import SCHEMA_MIGRATIONS_DDL
+
+        await conn.execute(SCHEMA_MIGRATIONS_DDL)
         from services.mini_app_api import INLINE_MIGRATIONS
         for stmt in INLINE_MIGRATIONS:
             try:

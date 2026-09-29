@@ -210,16 +210,21 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
     # Completed operation_queue entries — but only if operation_log entries are
     # also gone (FK safety: operation_log.op_id refs operation_queue.id).
     # We prune operation_log first (above), then queue entries.
+    # Срок — литералом в запрос, как у остальных таблиц выше. Через параметр
+    # ($2::INTERVAL) это НЕ работало: asyncpg выводит тип параметра из запроса и
+    # на строке '30 days' падает ещё до Postgres — «invalid input for query
+    # argument». Уборка завершённых операций из-за этого не работала ни разу:
+    # ошибка уходила в лог как «failed to prune operation_queue(done)», а
+    # таблица со всеми операциями продукта росла без потолка.
     deleted, err = await _prune_batched(
         pool,
         "operation_queue",
         "status = ANY($1::text[]) "
-        "  AND created_at < NOW() - $2::INTERVAL "
+        f"  AND created_at < NOW() - INTERVAL '{_OPERATION_QUEUE_RETENTION}' "
         "  AND NOT EXISTS ("
         "      SELECT 1 FROM operation_log WHERE op_id = operation_queue.id"
         "  )",
         list(_DONE_STATUSES),
-        _OPERATION_QUEUE_RETENTION,
     )
     _record(results, "operation_queue(done)", deleted, err)
     if deleted:

@@ -26,6 +26,21 @@ from database.pool_config import get_pool_config, log_pool_config
 log = logging.getLogger(__name__)
 
 
+# Журнал наката миграций. Живёт в коде, а не в schema_vN.sql: его создаёт сам
+# раннер до того, как проиграет первый файл схемы. Константой — чтобы тесты на
+# живой базе поднимали ровно ту же таблицу, а не свою копию, которая со временем
+# разойдётся с настоящей.
+SCHEMA_MIGRATIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename    TEXT PRIMARY KEY,
+        status      TEXT NOT NULL,        -- 'ok' | 'warnings'
+        error_count INT  NOT NULL DEFAULT 0,
+        last_error  TEXT,
+        applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+"""
+
+
 def migration_version_key(path: str) -> int:
     """Номер миграции для сортировки — цифры сразу после `_v`, а не все цифры имени.
 
@@ -328,15 +343,7 @@ async def create_pool() -> asyncpg.Pool:
         # Таблица учёта миграций — наблюдаемость (какие файлы применились чисто,
         # какие с ошибками). Не влияет на поведение, только фиксирует статус.
         try:
-            await conn.execute(
-                """CREATE TABLE IF NOT EXISTS schema_migrations (
-                       filename    TEXT PRIMARY KEY,
-                       status      TEXT NOT NULL,        -- 'ok' | 'warnings'
-                       error_count INT  NOT NULL DEFAULT 0,
-                       last_error  TEXT,
-                       applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-                   )"""
-            )
+            await conn.execute(SCHEMA_MIGRATIONS_DDL)
         except Exception as _mig_exc:
             log.warning("schema_migrations table create failed: %s", _mig_exc)
 
