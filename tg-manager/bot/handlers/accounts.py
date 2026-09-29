@@ -41,6 +41,7 @@ from services.account_manager import (
     check_account_status_full,
     cleanup_pending,
     cleanup_qr_pending,
+    DialogsUnavailableError,
     confirm_2fa,
     confirm_code,
     confirm_qr_2fa,
@@ -2023,7 +2024,16 @@ async def cb_channels(
     )
 
     try:
-        dialogs = await get_dialogs(session_str, _acc=acc)
+        dialogs = await get_dialogs(session_str, _acc=acc, raise_on_failure=True)
+    except DialogsUnavailableError as exc:
+        # Причина уже написана по-русски и адресована владельцу —
+        # показываем её как есть, а не технической подписью в <code>.
+        await callback.message.edit_text(
+            f"⚠️ {escape(str(exc))}",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -2116,7 +2126,16 @@ async def cb_post_choose_chat(
     await callback.message.edit_text("⏳ Загружаю список каналов…", parse_mode="HTML")
 
     try:
-        dialogs = await get_dialogs(session_str, _acc=acc)
+        dialogs = await get_dialogs(session_str, _acc=acc, raise_on_failure=True)
+    except DialogsUnavailableError as exc:
+        # Причина уже написана по-русски и адресована владельцу —
+        # показываем её как есть, а не технической подписью в <code>.
+        await callback.message.edit_text(
+            f"⚠️ {escape(str(exc))}",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -3130,8 +3149,18 @@ async def cb_dialogs(
     fetch_limit = _DIALOGS_PAGE_SIZE + 1
     try:
         dialogs = await get_dialogs(
-            session_str, limit=fetch_limit + page_offset, offset=0, _acc=dict(acc)
+            session_str, limit=fetch_limit + page_offset, offset=0, _acc=dict(acc),
+            raise_on_failure=True,
         )
+    except DialogsUnavailableError as exc:
+        # Причина уже написана по-русски и адресована владельцу —
+        # показываем её как есть, а не технической подписью в <code>.
+        await callback.message.edit_text(
+            f"⚠️ {escape(str(exc))}",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():

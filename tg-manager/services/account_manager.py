@@ -213,6 +213,15 @@ class SessionBusyError(ConnectionError):
     """
 
 
+class DialogsUnavailableError(ConnectionError):
+    """Список диалогов получить не удалось. Это НЕ «каналов нет».
+
+    Отдельный тип нужен, чтобы владелец не читал сбой подключения как пустой
+    аккаунт: пустой список и несостоявшийся коннект выглядят одинаково, а
+    значат противоположное. Текст — по-русски, он уходит владельцу как есть.
+    """
+
+
 def _session_key(session_string: str, device: dict | None) -> str:
     """Стабильный ключ подключения по САМОЙ сессии (её и видит Telegram).
 
@@ -2450,11 +2459,27 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
 
 
 async def get_dialogs(
-    session_string: str, limit: int | None = 50, offset: int = 0, _acc: dict | None = None
+    session_string: str, limit: int | None = 50, offset: int = 0, _acc: dict | None = None,
+    raise_on_failure: bool = False,
 ) -> list[dict]:
-    """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
+    """Каналы и группы аккаунта с поддержкой пагинации.
+
+    ``raise_on_failure=True`` — сбой подключения поднимается как
+    `DialogsUnavailableError` с русским текстом, а не превращается в пустой
+    список. Так делают экраны, которые показывают результат ВЛАДЕЛЬЦУ: иначе
+    «⏳ Загружаю список каналов…» сменяется на «📭 Каналов и групп не найдено»
+    и при мёртвом прокси, и при занятой сессии, и при обрыве сети. Владелец
+    читает это как «аккаунт пустой» и идёт проверять не то.
+
+    По умолчанию False — прежнее поведение для массовых исполнителей, которые
+    на пустом списке просто пропускают аккаунт. Пустой список при УСПЕШНОМ
+    обходе диалогов остаётся пустым списком в обоих режимах.
+    """
     if not session_string:
         log.warning("get_dialogs: session_str отсутствует — сессия недоступна")
+        if raise_on_failure:
+            raise DialogsUnavailableError(
+                "Сессия аккаунта недоступна — переимпортируйте аккаунт.")
         return []
     from telethon.tl.types import Channel, Chat
 
@@ -2510,10 +2535,22 @@ async def get_dialogs(
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "dialogs")
         log.warning("get_dialogs: connect timeout — proxy may be dead")
+        if raise_on_failure:
+            raise DialogsUnavailableError(
+                "Не удалось подключиться к Telegram: истекло время ожидания. "
+                "Проверьте прокси аккаунта.") from None
         return []
     except (OSError, ConnectionError) as e:
         _record_proxy_fail(_acc, "dialogs")
         log.warning("get_dialogs: network error (proxy?): %s", e)
+        if raise_on_failure:
+            if isinstance(e, SessionBusyError):
+                raise DialogsUnavailableError(
+                    "Аккаунт сейчас занят другой задачей — "
+                    "повторите через минуту.") from None
+            raise DialogsUnavailableError(
+                "Не удалось подключиться к Telegram — проблема с сетью или "
+                "прокси аккаунта.") from None
         return []
     except Exception as e:
         from telethon.errors import (
@@ -2534,6 +2571,8 @@ async def get_dialogs(
             )
             raise  # re-raise so callers can mark account as session_expired
         log.exception("get_dialogs error: %s", e)
+        if raise_on_failure:
+            raise
         return []
     finally:
         try:
@@ -2835,7 +2874,13 @@ async def send_message_via_account(
         raise
     except Exception as e:
         if is_dead_session_error(str(e)):
-            raise AuthKeyUnregisteredError(request=None) from e
+            # Позиционно, а не request=None: исключения Telethon создаются через
+            # BaseException.__new__, который именованных аргументов не берёт, и
+            # эта строка поднимала TypeError вместо мёртвой сессии. Вызывающий
+            # ловит AuthKeyUnregisteredError — по TypeError он аккаунт
+            # session_expired не пометит, и тот останется в строю, падая на
+            # каждой задаче.
+            raise AuthKeyUnregisteredError(None) from e
         log.exception("send_message error: %s", e)
         return False
     finally:
@@ -2908,7 +2953,13 @@ async def send_media_via_account(
         raise
     except Exception as e:
         if is_dead_session_error(str(e)):
-            raise AuthKeyUnregisteredError(request=None) from e
+            # Позиционно, а не request=None: исключения Telethon создаются через
+            # BaseException.__new__, который именованных аргументов не берёт, и
+            # эта строка поднимала TypeError вместо мёртвой сессии. Вызывающий
+            # ловит AuthKeyUnregisteredError — по TypeError он аккаунт
+            # session_expired не пометит, и тот останется в строю, падая на
+            # каждой задаче.
+            raise AuthKeyUnregisteredError(None) from e
         log.exception("send_media error: %s", e)
         return False
     finally:
