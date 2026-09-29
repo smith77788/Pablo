@@ -3848,6 +3848,106 @@ async def get_full_channel_info(
             log_exc_swallow(log, "Сбой в get_full_channel_info")
 
 
+def _msg_reactions_total(msg) -> int:
+    """Сумма реакций под постом (0, если реакций нет или они скрыты)."""
+    try:
+        res = getattr(getattr(msg, "reactions", None), "results", None) or []
+        return int(sum(int(getattr(r, "count", 0) or 0) for r in res))
+    except Exception:
+        return 0
+
+
+async def read_channel_snapshot(
+    session_string: str,
+    channel_id: int | str,
+    *,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+    username: str = "",
+    msg_ids: list[int] | None = None,
+    recent_limit: int = 20,
+) -> dict | None:
+    """Снимок канала для виртуального администратора — ОДНО подключение.
+
+    Возвращает {title, username, about, members_count,
+    recent: [{id, text, views, forwards, reactions, date}] (свежие первыми),
+    by_id: {msg_id: {views, forwards, reactions}}} или None при сбое.
+
+    recent — настоящая история канала из Telegram, а не только посты,
+    опубликованные через Infragram: по ней администратор понимает голос канала,
+    который вёлся руками до него. by_id — статистика конкретных постов
+    администратора (просмотры/пересылки/реакции) для обучения контент-микса.
+    Только чтение: ничего не публикует и не меняет.
+    """
+    from telethon.tl.functions.channels import GetFullChannelRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        uname = (username or "").strip().lstrip("@")
+        peer = None
+        if access_hash:
+            try:
+                peer = await _resolve_channel_peer(
+                    client, _normalize_channel_id(channel_id), int(access_hash)
+                )
+            except Exception as e:
+                log.debug("read_channel_snapshot: по access_hash не вышло: %s", e)
+        if peer is None and uname:
+            try:
+                peer = await asyncio.wait_for(
+                    client.get_entity(f"@{uname}"), timeout=10.0)
+            except Exception as e:
+                log.debug("read_channel_snapshot: @%s не разрезолвлен: %s", uname, e)
+        if peer is None:
+            peer = await _resolve_channel_peer(client, channel_id, 0)
+        full = await asyncio.wait_for(client(GetFullChannelRequest(peer)), timeout=_OP_TIMEOUT)
+        chat = _chat_from_full(full, channel_id)
+
+        def _row(m) -> dict:
+            return {
+                "id": int(m.id),
+                "text": (getattr(m, "message", "") or "")[:4096],
+                "views": int(getattr(m, "views", 0) or 0),
+                "forwards": int(getattr(m, "forwards", 0) or 0),
+                "reactions": _msg_reactions_total(m),
+                "date": getattr(m, "date", None),
+            }
+
+        recent: list[dict] = []
+        if recent_limit > 0:
+            msgs = await asyncio.wait_for(
+                client.get_messages(peer, limit=max(1, min(int(recent_limit), 100))),
+                timeout=_OP_TIMEOUT,
+            )
+            recent = [_row(m) for m in (msgs or []) if m is not None and getattr(m, "id", None)]
+        by_id: dict[int, dict] = {}
+        ids = [int(i) for i in (msg_ids or []) if i]
+        if ids:
+            got = await asyncio.wait_for(
+                client.get_messages(peer, ids=ids[:100]), timeout=_OP_TIMEOUT)
+            for m in (got or []):
+                if m is not None and getattr(m, "id", None):
+                    r = _row(m)
+                    by_id[r["id"]] = {k: r[k] for k in ("views", "forwards", "reactions")}
+        return {
+            "title": getattr(chat, "title", "") or "",
+            "username": getattr(chat, "username", "") or "",
+            "about": getattr(full.full_chat, "about", "") or "",
+            "members_count": int(getattr(full.full_chat, "participants_count", 0) or 0),
+            "recent": recent,
+            "by_id": by_id,
+        }
+    except Exception as e:
+        log.debug("read_channel_snapshot error: %s", e)
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в read_channel_snapshot")
+
+
 async def get_channels_full_info(
     session_string: str,
     channel_ids: list,

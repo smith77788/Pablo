@@ -265,12 +265,15 @@ def test_editor_is_reachable_from_the_channels_screen():
     i = html.index('id="s-channels"')
     j = html.index('id="s-', i + 10)  # начало следующего экрана
     channels_screen = html[i:j]
-    assert "openEditorialRules()" in channels_screen, (
+    assert "openVaAdmin()" in channels_screen, (
         "на экране «Каналы и чаты» нет входа к виртуальному администратору"
     )
-    # функция входа реально определена в подключённом модуле
-    js = open(os.path.join(ROOT, "mini_app", "screens", "editorial.js"), encoding="utf-8").read()
-    assert "function openEditorialRules(" in js
+    # функция входа реально определена в подключённом модуле, а из него —
+    # путь к общим правилам редактора
+    js = open(os.path.join(ROOT, "mini_app", "screens", "va_admin.js"), encoding="utf-8").read()
+    assert "function openVaAdmin(" in js
+    assert '<script src="screens/va_admin.js"></script>' in html
+    assert "openEditorialRules()" in js
 
 
 def test_verdict_to_public_shape():

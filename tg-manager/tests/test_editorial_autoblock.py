@@ -155,11 +155,11 @@ def test_db_failure_never_blocks(monkeypatch):
 
 def test_mass_publish_calls_the_gate():
     src = _read("services/op_worker.py")
-    assert "autonomous_block(pool, owner_id, mp_text)" in src, (
+    assert "autonomous_block(pool, owner_id, mp_text" in src, (
         "исполнитель массовой публикации не спрашивает редактора"
     )
     # блокировка возвращает failed с причиной, а не молча публикует
-    i = src.index("autonomous_block(pool, owner_id, mp_text)")
+    i = src.index("autonomous_block(pool, owner_id, mp_text")
     seg = src[i:i + 700]
     assert '"status": "failed"' in seg
     assert "виртуальным администратором" in seg

@@ -467,6 +467,12 @@ class WorkspaceCb(CallbackData, prefix="ws"):
     page: int = 0
 
 
+class VaCb(CallbackData, prefix="va"):
+    """Виртуальный администратор канала: решение по черновику поста."""
+    action: str  # pub, regen, skip
+    id: int = 0  # va_admin_drafts.id
+
+
 class QuickPostCb(CallbackData, prefix="qp"):
     action: str  # start, cancel, toggle, page, sel_all, desel_all, chans_done,
     # back_to_text, back_to_chans, back_to_timing, timing, publish, save_template

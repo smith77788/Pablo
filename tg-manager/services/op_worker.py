@@ -3792,7 +3792,11 @@ async def _exec_mass_publish(
     try:
         from services import editorial_review as _er
 
-        _blocked, _reasons = await _er.autonomous_block(pool, owner_id, mp_text)
+        # Публикация в ОДИН канал (так публикует администратор канала) идёт по
+        # правилам этого канала; во все каналы — по общим правилам владельца.
+        _one = [int(i) for i in (params.get("channel_ids") or [])]
+        _ck = str(_one[0]) if len(_one) == 1 else None
+        _blocked, _reasons = await _er.autonomous_block(pool, owner_id, mp_text, channel_key=_ck)
         if _blocked:
             log.info(
                 "_exec_mass_publish op=%d ЗАБЛОКИРОВАНО редактором: %s",
@@ -4163,6 +4167,7 @@ async def _exec_mass_publish(
                     await content_memory.record_published(
                         pool, owner_id, str(dialog["id"]), _ch_text, op_id=op_id,
                         pillar=params.get("pillar"),
+                        msg_id=(result or {}).get("msg_id"),
                     )
                 except Exception:
                     log_exc_swallow(log, "mass_publish: content_memory record failed")

@@ -4,6 +4,12 @@
 // каналов владельца (массовая публикация идёт сразу во все).
 
 let _edPolicy = null;
+// Канал, чьи правила открыты (виртуальный администратор канала); null — общие.
+let _edChannel = null;
+
+function _edPath() {
+  return '/api/miniapp/editorial/policy' + (_edChannel ? '?channel=' + encodeURIComponent(_edChannel) : '');
+}
 
 function _edScreen() {
   let el = document.getElementById('s-editorial');
@@ -23,13 +29,14 @@ function _edScreen() {
   return el;
 }
 
-async function openEditorialRules() {
+async function openEditorialRules(channelId) {
+  _edChannel = channelId ? String(channelId) : null;
   _edScreen();
   push('s-editorial');
   const body = document.getElementById('s-editorial-body');
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/editorial/policy');
+    const d = await api(_edPath());
     _edPolicy = d.policy || {};
     body.innerHTML = _edRender(_edPolicy);
   } catch (e) {
@@ -54,6 +61,7 @@ function _edRender(p) {
   return '' +
     '<div class="sec">Как это работает</div>' +
     '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.5;color:var(--hint)">' +
+      (_edChannel ? '<b>Правила этого канала.</b> Их соблюдает администратор канала, когда пишет посты; без своих правил действуют общие.<br><br>' : '') +
       'Перед массовой публикацией редактор сравнивает пост с вашими недавними постами и проверяет эти правила. ' +
       'В режиме «Только советует» появляется подсказка, а публиковать можно как есть. ' +
       'В режимах с блокировкой брак в канал не уходит — публикация останавливается автоматически.' +
@@ -143,7 +151,7 @@ async function saveEditorialRules() {
   if (modeEl) payload.autonomy_mode = modeEl.value;
   btn.disabled = true; btn.textContent = '⏳ Сохраняю…';
   try {
-    const d = await api('/api/miniapp/editorial/policy', { method: 'PUT', body: JSON.stringify(payload) });
+    const d = await api(_edPath(), { method: 'PUT', body: JSON.stringify(payload) });
     _edPolicy = d.policy || _edPolicy;
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Правила редактора сохранены');

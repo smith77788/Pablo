@@ -76,6 +76,7 @@ from bot.handlers import channel_factory as chan_factory_handler
 from bot.handlers import competitors as competitors_handler
 from bot.handlers import mass_publish as mass_pub_handler
 from bot.handlers import quick_post as quick_post_handler
+from bot.handlers import va_admin as va_admin_handler
 from bot.handlers import global_presence as global_presence_handler
 from bot.handlers import gift_transfer as gift_transfer_handler
 from bot.handlers import intent_engine as intent_engine_handler
@@ -453,6 +454,7 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     dp.include_router(gift_transfer_handler.router)
     dp.include_router(ecosystems_handler.router)
     dp.include_router(quick_post_handler.router)
+    dp.include_router(va_admin_handler.router)
     dp.include_router(mass_pub_handler.router)
     dp.include_router(competitors_handler.router)
     dp.include_router(sub_handler.router)
@@ -1129,6 +1131,10 @@ async def main() -> None:
         # подсказывает срочное в ЛС (с кулдауном). Система «живёт» между сессиями.
         from services.organism import runner as organism_runner
         _spawn(_resilient("organism_runner", organism_runner.run, pool, bot))
+        # Виртуальный администратор каналов: сам ведёт каналы, где его поставили
+        # (профиль, контент-план, посты, статистика, отчёт) — без участия владельца.
+        from services import channel_admin_runner
+        _spawn(_resilient("channel_admin_runner", channel_admin_runner.run, pool, bot))
         _spawn(
             _resilient("payment_checker", payment_checker.run, pool, http, bot)
         )

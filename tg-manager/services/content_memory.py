@@ -36,17 +36,37 @@ async def record_published(
     *,
     op_id: int | None = None,
     pillar: str | None = None,
+    msg_id: int | None = None,
 ) -> None:
-    """Записать тело опубликованного поста в историю канала. Fail-soft: сбой не рушит публикацию."""
+    """Записать тело опубликованного поста в историю канала. Fail-soft: сбой не рушит публикацию.
+
+    msg_id — id сообщения в канале: по нему виртуальный администратор потом
+    спрашивает у Telegram просмотры поста (schema_v228). Если миграция ещё не
+    доехала и колонки нет, пишем историю без него, а не теряем запись целиком.
+    """
+    args = (
+        int(owner_id),
+        str(channel_key),
+        int(op_id) if op_id is not None else None,
+        (str(pillar)[:120] if pillar else None),
+        str(body or "")[:_MAX_BODY],
+    )
     try:
+        if msg_id:
+            try:
+                await pool.execute(
+                    "INSERT INTO va_channel_posts(owner_id, channel_key, op_id, pillar, body, msg_id) "
+                    "VALUES($1,$2,$3,$4,$5,$6)",
+                    *args, int(msg_id),
+                )
+                return
+            except Exception:
+                log.debug("content_memory: запись с msg_id не удалась, пишу без него",
+                          exc_info=True)
         await pool.execute(
             "INSERT INTO va_channel_posts(owner_id, channel_key, op_id, pillar, body) "
             "VALUES($1,$2,$3,$4,$5)",
-            int(owner_id),
-            str(channel_key),
-            int(op_id) if op_id is not None else None,
-            (str(pillar)[:120] if pillar else None),
-            str(body or "")[:_MAX_BODY],
+            *args,
         )
     except Exception:
         log.debug("content_memory.record_published failed owner=%s ch=%s",
@@ -128,5 +148,32 @@ async def recent_pillars_for_owner(
     except Exception:
         log.debug("content_memory.recent_pillars_for_owner failed owner=%s",
                   owner_id, exc_info=True)
+        return []
+    return [r["pillar"] for r in reversed(rows or []) if r["pillar"]]
+
+
+async def recent_pillars(
+    pool,
+    owner_id: int,
+    channel_key: str,
+    *,
+    limit: int = 30,
+) -> list[str]:
+    """Рубрики недавних постов ОДНОГО канала, СТАРЫЕ В НАЧАЛЕ. Fail-soft → [].
+
+    Нужна администратору канала: контент-микс считается по истории этого канала,
+    а не по всем каналам владельца (у каждого канала свои рубрики).
+    """
+    n = max(1, min(int(limit), _MAX_WINDOW))
+    try:
+        rows = await pool.fetch(
+            "SELECT pillar FROM va_channel_posts "
+            "WHERE owner_id=$1 AND channel_key=$2 AND pillar IS NOT NULL "
+            "ORDER BY published_at DESC, id DESC LIMIT $3",
+            int(owner_id), str(channel_key), n,
+        )
+    except Exception:
+        log.debug("content_memory.recent_pillars failed owner=%s ch=%s",
+                  owner_id, channel_key, exc_info=True)
         return []
     return [r["pillar"] for r in reversed(rows or []) if r["pillar"]]

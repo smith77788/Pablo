@@ -1580,7 +1580,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          открывались ТОЛЬКО из экрана «Массовая публикация» — владелец, искавший
          администратора каналов в разделе «Каналы», не находил его вовсе. -->
     <div style="display:flex;gap:8px;padding:0 0 8px">
-      <button class="btn btn-s" onclick="openEditorialRules()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Виртуальный редактор канала: держит голос бренда, не даёт повторяться, чередует рубрики. Проверяет пост перед публикацией">🧠 Виртуальный администратор</button>
+      <button class="btn btn-s" onclick="openVaAdmin()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Свой администратор на каждый канал: сам изучает нишу, строит контент-план, пишет и публикует посты, следит за статистикой">🧠 Виртуальный администратор</button>
     </div>
     <!-- Поиск и срезы. Список рисовался целиком и без фильтров: после «Фабрики
          каналов» это сотни строк, а роль (владелец / админ / просто участник)
@@ -26622,6 +26622,7 @@ function renderAudSegChart(segments) {
 <script src="screens/sales_manager.js"></script>
 <script src="screens/flood_guard.js"></script>
 <script src="screens/editorial.js"></script>
+<script src="screens/va_admin.js"></script>
 <script src="screens/shield_check.js"></script>
 </body>
 </html>

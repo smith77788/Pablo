@@ -15103,12 +15103,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # перед публикацией жила лишь в боте: в Mini App — главном интерфейсе —
     # пост уходил во все каналы без единой проверки на повтор и правила.
 
+    async def _editorial_key(request: web.Request, uid: int) -> str | None:
+        """Ключ политики: ?channel=<id> — правила своего канала (виртуальный
+        администратор канала), без него — общие правила владельца. None — чужой канал."""
+        from services import channel_brain_store as _cbs
+        raw = (request.query.get("channel") or "").strip()
+        if not raw:
+            return _cbs.OWNER_DEFAULT_KEY
+        try:
+            cid = int(raw)
+        except ValueError:
+            return None
+        from services import channel_admin as _ca
+        return str(cid) if await _ca.channel_row(pool, uid, cid) else None
+
     async def editorial_policy_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
         from services import channel_brain_store as _cbs
-        brain = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+        key = await _editorial_key(request, uid)
+        if key is None:
+            return _err("Канал не найден среди ваших каналов", 404)
+        brain = await _cbs.get_profile(pool, uid, key)
         return _json_resp({"ok": True, "policy": _cbs.to_public(brain),
                            "next_pillar": await _editorial_next_pillar(uid, brain)})
 
@@ -15129,6 +15146,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Не удалось разобрать запрос")
         from services import channel_brain_store as _cbs
+        key = await _editorial_key(request, uid)
+        if key is None:
+            return _err("Канал не найден среди ваших каналов", 404)
         clean, errors = _cbs.validate_policy(body)
         pillars = weights = None
         if isinstance(body, dict) and "pillars" in body:
@@ -15138,12 +15158,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("; ".join(errors[:5]), 400)
         # Что запрос не прислал (рубрики, режим автономности), сохраняем как
         # было, а не затираем значениями по умолчанию.
-        prev = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+        prev = await _cbs.get_profile(pool, uid, key)
         if pillars is None:
             pillars = prev.pillars if prev else None
             weights = prev.mix_weights if prev else None
         row_id = await _cbs.save_profile(
-            pool, uid, _cbs.OWNER_DEFAULT_KEY,
+            pool, uid, key,
             brand_rules=clean["brand_rules"],
             dup_threshold=clean["dup_threshold"],
             pillars=pillars,
@@ -15161,7 +15181,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         log.info("editorial policy saved uid=%s words=%d openings=%d",
                  uid, len(clean["brand_rules"]["forbidden_words"]),
                  len(clean["brand_rules"]["banned_openings"]))
-        brain = await _cbs.get_profile(pool, uid, _cbs.OWNER_DEFAULT_KEY)
+        brain = await _cbs.get_profile(pool, uid, key)
         return _json_resp({"ok": True, "policy": _cbs.to_public(brain),
                            "next_pillar": await _editorial_next_pillar(uid, brain)})
 
@@ -15180,6 +15200,182 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import editorial_review as _er
         verdict = await _er.review_draft(pool, uid, text)
         return _json_resp({"ok": True, **_er.verdict_to_public(verdict)})
+
+    # ── Виртуальный администратор канала (свой на каждый канал) ─────────────
+    # Вся логика — services/channel_admin (её же зовёт бот); здесь только вход.
+
+    def _va_cid(request: web.Request) -> int | None:
+        try:
+            return int(request.match_info["cid"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    async def _va_body(request: web.Request) -> dict | None:
+        try:
+            body = await request.json()
+        except Exception:
+            return None
+        return body if isinstance(body, dict) else None
+
+    async def va_channels(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import channel_admin as _ca
+        try:
+            items = await _ca.list_channels(pool, uid)
+            drafts = await _ca.list_drafts(pool, uid)
+        except Exception:
+            log.warning("va_channels failed uid=%s", uid, exc_info=True)
+            return _err("Не удалось загрузить каналы", 500)
+        return _json_resp({"ok": True, "channels": items, "drafts": drafts})
+
+    async def _va_payload(uid: int, cid: int) -> dict | None:
+        """Экран канала: настройки, рубрики, план, черновики, статистика, журнал."""
+        from services import channel_admin as _ca
+        from services import channel_brain_store as _cbs
+        ch = await _ca.channel_row(pool, uid, cid)
+        if not ch:
+            return None
+        admin = await _ca.get_admin(pool, uid, cid)
+        brain = await _cbs.get_profile(pool, uid, str(cid))
+        return {
+            "ok": True,
+            "channel": {"id": str(cid), "title": ch.get("title") or "",
+                        "username": ch.get("username") or ""},
+            "settings": _ca.settings_public(admin),
+            "pillars": _cbs.to_public(brain)["pillars"],
+            "plan": await _ca.get_plan(pool, uid, cid) if admin else [],
+            "drafts": await _ca.list_drafts(pool, uid, cid) if admin else [],
+            "report": await _ca.channel_report(pool, uid, cid) if admin else None,
+            "events": await _ca.events(pool, uid, cid) if admin else [],
+        }
+
+    async def va_channel_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        cid = _va_cid(request)
+        if cid is None:
+            return _err("Неверный канал")
+        data = await _va_payload(uid, cid)
+        if data is None:
+            return _err("Канал не найден среди ваших каналов", 404)
+        return _json_resp(data)
+
+    async def _va_save(uid: int, cid: int, body: dict, *, install: bool) -> web.Response:
+        from services import channel_admin as _ca
+        from services import channel_brain_store as _cbs
+        clean, errors = _ca.validate_settings(body)
+        pillars = weights = None
+        if "pillars" in body:
+            pillars, weights, p_err = _cbs.validate_pillars(body.get("pillars"))
+            errors += p_err
+        if errors:
+            return _err("; ".join(errors[:5]), 400)
+        try:
+            if install:
+                await _ca.install(pool, uid, cid, clean)
+            else:
+                await _ca.save_settings(pool, uid, cid, clean)
+        except _ca.ChannelAdminError as e:
+            return _err(str(e), 400)
+        if pillars is not None:
+            prev = await _cbs.get_profile(pool, uid, str(cid))
+            await _cbs.save_profile(
+                pool, uid, str(cid),
+                brand_rules=_ca._brand_rules_dict(prev.brand_rules) if prev else {},
+                pillars=pillars, mix_weights=weights,
+                autonomy_mode=prev.autonomy_mode if prev else await _ca.owner_mode(pool, uid),
+                max_streak=prev.max_streak if prev else 2,
+                dup_threshold=prev.dup_threshold if prev else 0.6,
+            )
+        return await va_channel_get_for(uid, cid)
+
+    async def va_channel_get_for(uid: int, cid: int) -> web.Response:
+        data = await _va_payload(uid, cid)
+        if data is None:
+            return _err("Канал не найден среди ваших каналов", 404)
+        return _json_resp(data)
+
+    async def va_channel_save(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        cid = _va_cid(request)
+        body = await _va_body(request)
+        if cid is None or body is None:
+            return _err("Не удалось разобрать запрос")
+        return await _va_save(uid, cid, body, install=False)
+
+    async def va_channel_install(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        cid = _va_cid(request)
+        body = await _va_body(request)
+        if cid is None:
+            return _err("Неверный канал")
+        log.info("va install uid=%s channel=%s", uid, cid)
+        return await _va_save(uid, cid, body or {}, install=True)
+
+    async def va_channel_reconfigure(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        cid = _va_cid(request)
+        if cid is None:
+            return _err("Неверный канал")
+        from services import channel_admin as _ca
+        if not await _ca.get_admin(pool, uid, cid):
+            return _err("Администратор на этом канале не установлен", 404)
+        await _ca.reconfigure(pool, uid, cid)
+        return await va_channel_get_for(uid, cid)
+
+    async def va_channel_post_now(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        cid = _va_cid(request)
+        if cid is None:
+            return _err("Неверный канал")
+        from services import channel_admin as _ca
+        try:
+            res = await _ca.post_now(pool, None, uid, cid)
+        except _ca.ChannelAdminError as e:
+            return _err(str(e), 400)
+        msg = {
+            "published": "Пост написан и отправлен в канал",
+            "draft": "Пост написан — редактор нашёл замечания, он ждёт вашего решения ниже",
+            "error": "Не получилось написать пост — причина в журнале, администратор повторит сам",
+        }.get(res, "Готово")
+        return _json_resp({"ok": res != "error", "result": res, "message": msg})
+
+    async def _va_draft(request: web.Request, action: str) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            did = int(request.match_info["did"])
+        except (KeyError, TypeError, ValueError):
+            return _err("Неверный черновик")
+        from services import channel_admin as _ca
+        fn = {"publish": _ca.publish_draft, "reject": _ca.reject_draft,
+              "regenerate": _ca.regenerate_draft}[action]
+        try:
+            res = await fn(pool, uid, did)
+        except _ca.ChannelAdminError as e:
+            return _err(str(e), 400)
+        return _json_resp({"ok": True, **res})
+
+    async def va_draft_publish(request: web.Request) -> web.Response:
+        return await _va_draft(request, "publish")
+
+    async def va_draft_reject(request: web.Request) -> web.Response:
+        return await _va_draft(request, "reject")
+
+    async def va_draft_regenerate(request: web.Request) -> web.Response:
+        return await _va_draft(request, "regenerate")
 
     # ── Proxies ──────────────────────────────────────────────────────────────
 
@@ -18321,6 +18517,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
     app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
     app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)
+    app.router.add_get("/api/miniapp/va/channels", va_channels)
+    app.router.add_get("/api/miniapp/va/channel/{cid}", va_channel_get)
+    app.router.add_put("/api/miniapp/va/channel/{cid}", va_channel_save)
+    app.router.add_post("/api/miniapp/va/channel/{cid}/install", va_channel_install)
+    app.router.add_post("/api/miniapp/va/channel/{cid}/reconfigure", va_channel_reconfigure)
+    app.router.add_post("/api/miniapp/va/channel/{cid}/post_now", va_channel_post_now)
+    app.router.add_post("/api/miniapp/va/drafts/{did}/publish", va_draft_publish)
+    app.router.add_post("/api/miniapp/va/drafts/{did}/reject", va_draft_reject)
+    app.router.add_post("/api/miniapp/va/drafts/{did}/regenerate", va_draft_regenerate)
     app.router.add_post("/api/miniapp/schedule_post", schedule_post)
     # Proxies
     app.router.add_get("/api/miniapp/proxies", proxies)
