@@ -168,21 +168,50 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             }
         )
 
-    # 7. Operation queue stale (stuck running for > 2h)
-    stale_ops = await pool.fetch(
-        """SELECT COUNT(*) AS cnt FROM operation_queue
-           WHERE owner_id=$1 AND status='running'
-             AND COALESCE(started_at, created_at) < NOW() - INTERVAL '2 hours'""",
+    # 7. Зависшие операции — по СОБСТВЕННОМУ потолку прогона, не по плоским 2 часам.
+    #
+    # Раньше карточка считала зависшей любую операцию, работающую дольше двух
+    # часов. Потолок одного прогона — 6 часов, и массовый инвайт с пейсингом на
+    # часы укладывается в него штатно: владельцу рисовали «зависшие операции»
+    # ровно тогда, когда всё шло как надо. Ложная тревога здесь дороже молчания —
+    # он отменяет живую операцию, а потом перестаёт верить и настоящим
+    # предупреждениям. Порог теперь один на весь продукт
+    # (op_worker.stuck_after_s), а выполняющиеся прямо сейчас операции
+    # исключаются — тот же критерий, по которому их не трогает сторож воркера.
+    import datetime as _dt_adv
+
+    from services import op_worker as _ow_adv
+
+    try:
+        _active_now = await _ow_adv.active_op_ids()
+    except Exception:
+        _active_now = frozenset()
+    _running = await pool.fetch(
+        """SELECT id, op_type, COALESCE(started_at, created_at) AS since
+             FROM operation_queue
+            WHERE owner_id=$1 AND status='running'""",
         owner_id,
     )
-    stale_cnt = (stale_ops[0]["cnt"] if stale_ops else 0) or 0
+    _now_adv = _dt_adv.datetime.now(_dt_adv.timezone.utc)
+    stale_cnt = 0
+    for _r in _running or ():
+        if int(_r["id"]) in _active_now:
+            continue
+        _since = _r["since"]
+        if _since is None:
+            continue
+        if _since.tzinfo is None:
+            _since = _since.replace(tzinfo=_dt_adv.timezone.utc)
+        if (_now_adv - _since).total_seconds() >= _ow_adv.stuck_after_s(_r["op_type"]):
+            stale_cnt += 1
     if stale_cnt > 0:
         recs.append(
             {
                 "severity": "warning",
                 "icon": "🔄",
                 "title": f"Зависшие операции: {stale_cnt} шт",
-                "text": "Есть операции в статусе 'running' более 2 часов. Возможно, они зависли — проверьте очередь.",
+                "text": "Есть операции, которые работают дольше отведённого им "
+                        "времени и не завершились. Проверьте очередь.",
                 "action": "tasks",
             }
         )

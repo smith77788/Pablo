@@ -19795,14 +19795,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.warning("attention: ops_failed", exc_info=True)
 
         # ── Операции, застрявшие в работе ──────────────────────────────────
+        # Порог — СОБСТВЕННЫЙ потолок прогона операции (op_worker.stuck_after_s),
+        # а не плоские два часа, и выполняющиеся прямо сейчас операции
+        # исключаются. Плоский порог был вдвое-втрое меньше разрешённого прогона
+        # (потолок 6 часов), поэтому здоровый массовый инвайт с пейсингом на часы
+        # поднимал эту карточку — да ещё с кнопкой «поставить очередь на паузу»,
+        # то есть владельца прямо подталкивали остановить работающую операцию.
         try:
-            n = int(await _safe_fetchval(pool,
-                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 "
-                "AND status='running' AND started_at < NOW() - INTERVAL '2 hours'",
-                uid) or 0)
+            import datetime as _dt_att
+
+            from services import op_worker as _ow_att
+
+            try:
+                _active_att = await _ow_att.active_op_ids()
+            except Exception:
+                _active_att = frozenset()
+            _rows_att = await _safe_fetch(pool,
+                "SELECT id, op_type, started_at FROM operation_queue "
+                "WHERE owner_id=$1 AND status='running' AND started_at IS NOT NULL",
+                uid) or []
+            _now_att = _dt_att.datetime.now(_dt_att.timezone.utc)
+            n = 0
+            for _r_att in _rows_att:
+                if int(_r_att["id"]) in _active_att:
+                    continue
+                _st_att = _r_att["started_at"]
+                if _st_att.tzinfo is None:
+                    _st_att = _st_att.replace(tzinfo=_dt_att.timezone.utc)
+                if (_now_att - _st_att).total_seconds() >= _ow_att.stuck_after_s(
+                        _r_att["op_type"]):
+                    n += 1
             if n:
                 add("ops_stuck", "high",
-                    f"Операций висит дольше двух часов: {n}",
+                    f"Операций работает дольше отведённого времени: {n}",
                     "Обычно это оборванная сессия или недоступный Telegram. "
                     "Пауза остановит очередь, не теряя прогресс.",
                     n,

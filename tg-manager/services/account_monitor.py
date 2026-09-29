@@ -20,10 +20,6 @@ log = logging.getLogger(__name__)
 _INTERVAL = 3600  # check every hour
 _MIN_ACCOUNTS = 2  # alert threshold
 _LOW_TRUST_THRESHOLD = 0.3  # trust_score below this triggers alert
-# Запас поверх СОБСТВЕННОГО потолка прогона операции. Раньше здесь стоял плоский
-# предел в 3 часа, и он был заведомо меньше потолка одного прогона (6 часов по
-# умолчанию, OP_TIMEOUT_SEC) — см. разбор в _recover_stuck_operations.
-_STUCK_GRACE_MIN = 30
 _ALERT_COOLDOWN = 86400  # 24h between repeated low-account alerts per owner
 _SESSION_EXPIRED_COOLDOWN = 86400  # 24h между алертами «сессия истекла» на аккаунт
 
@@ -229,7 +225,6 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
     import datetime as _dt
 
     from services import op_worker as _ow
-    from services import operation_bus as _obus
 
     try:
         try:
@@ -256,9 +251,9 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
             started = row["started_at"]
             if started.tzinfo is None:
                 started = started.replace(tzinfo=_dt.timezone.utc)
-            limit_s = _obus.timeout_for(
-                row["op_type"], _ow._OP_TIMEOUT_DEFAULT_S
-            ) + _STUCK_GRACE_MIN * 60
+            # Порог — от собственного потолка прогона этого типа, один на все
+            # места, где решают «операция зависла» (op_worker.stuck_after_s).
+            limit_s = _ow.stuck_after_s(row["op_type"])
             waited_s = (now - started).total_seconds()
             if waited_s < limit_s:
                 continue
