@@ -183,6 +183,72 @@ def test_no_accounts_fails_clearly():
     assert res["status"] == "failed"
 
 
+# ── выбор наблюдателей: доступ vs внешняя видимость ───────────────────────────
+
+def _pch(cid, acc_id):
+    # приватный канал (без username) — резолвит только управляющий acc_id
+    return _ch(cid, None, title="Приват", type_="channel", acc_id=acc_id)
+
+
+def test_private_channel_without_managing_account_is_check_failed():
+    # Приватный канал управляется acc=5, а свободен только acc=1. Открыть его
+    # некем — честный check_failed, а не ложная «недоступность». probe даже не
+    # зовётся (нет клиента с доступом).
+    pool = _FakePool(channels=[_pch(101, acc_id=5)], bots=[], accounts=[_acc(1)])
+    probe = AsyncMock()
+    with patch.object(op_worker, "_claim_available_accounts",
+                      AsyncMock(side_effect=lambda op_id, accs, owner: accs)), \
+         patch.object(op_worker, "_is_cancelled", AsyncMock(return_value=False)), \
+         patch("services.infra_memory.is_account_quarantined", AsyncMock(return_value=False)), \
+         patch("services.account_manager.connect_client", AsyncMock(return_value=_FakeClient())), \
+         patch("services.entity_restriction_check.probe_entity", probe), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        res = _run(op_worker._exec_check_owned_restrictions(pool, None, 7, 99, {}))
+    assert res["counts"].get(erc.STATUS_CHECK_FAILED) == 1
+    assert probe.await_count == 0
+
+
+def test_single_account_marks_visibility_unmeasured_and_disables_search():
+    # Один аккаунт, он же управляющий каналом → внешнего наблюдателя нет →
+    # видимость не мерена, и probe вызывается с do_search=False, search_client=None.
+    pool = _FakePool(channels=[_ch(101, "pub", acc_id=1)], bots=[], accounts=[_acc(1)])
+    probe = AsyncMock(side_effect=[_verdict(erc.STATUS_CLEAN)])
+    with patch.object(op_worker, "_claim_available_accounts",
+                      AsyncMock(side_effect=lambda op_id, accs, owner: accs)), \
+         patch.object(op_worker, "_is_cancelled", AsyncMock(return_value=False)), \
+         patch("services.infra_memory.is_account_quarantined", AsyncMock(return_value=False)), \
+         patch("services.account_manager.connect_client", AsyncMock(return_value=_FakeClient())), \
+         patch("services.entity_restriction_check.probe_entity", probe), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        res = _run(op_worker._exec_check_owned_restrictions(pool, None, 7, 99, {}))
+    assert res["visibility_unmeasured"] == 1
+    assert "не проверена" in res["summary"]
+    kw = probe.await_args_list[0].kwargs
+    assert kw.get("do_search") is False
+    assert kw.get("search_client") is None
+
+
+def test_two_accounts_give_external_search_client_for_visibility():
+    # Канал управляется acc=1, есть свободный acc=2 → он становится внешним
+    # наблюдателем видимости: probe получает НЕПУСТОЙ search_client и do_search=True.
+    pool = _FakePool(channels=[_ch(101, "pub", acc_id=1)], bots=[],
+                     accounts=[_acc(1), _acc(2)])
+    probe = AsyncMock(side_effect=[_verdict(erc.STATUS_CLEAN)])
+    with patch.object(op_worker, "_claim_available_accounts",
+                      AsyncMock(side_effect=lambda op_id, accs, owner: accs)), \
+         patch.object(op_worker, "_is_cancelled", AsyncMock(return_value=False)), \
+         patch("services.infra_memory.is_account_quarantined", AsyncMock(return_value=False)), \
+         patch("services.account_manager.connect_client", AsyncMock(return_value=_FakeClient())), \
+         patch("services.entity_restriction_check.probe_entity", probe), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        res = _run(op_worker._exec_check_owned_restrictions(pool, None, 7, 99, {}))
+    assert res.get("visibility_unmeasured", 0) == 0
+    kw = probe.await_args_list[0].kwargs
+    assert kw.get("do_search") is True
+    assert kw.get("search_client") is not None
+    assert kw.get("access_hash") is not None or "access_hash" in kw
+
+
 # ── реестр/диспетч: op_type подключён во всех трёх местах ─────────────────────
 
 def test_op_type_registered_and_dispatched():

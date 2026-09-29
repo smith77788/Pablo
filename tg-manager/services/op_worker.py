@@ -10589,8 +10589,8 @@ async def _exec_check_owned_restrictions(
         _ch_args.append(only_channels)
     ch_rows = await _safe_fetch(
         pool,
-        f"SELECT DISTINCT ON (channel_id) channel_id, username, title, type, acc_id "
-        f"FROM managed_channels {_ch_where} ORDER BY channel_id",
+        f"SELECT DISTINCT ON (channel_id) channel_id, username, title, type, acc_id, "
+        f"access_hash FROM managed_channels {_ch_where} ORDER BY channel_id",
         *_ch_args,
     )
     # Боты: scope по added_by (НЕ owner_id — такой колонки на managed_bots нет).
@@ -10609,21 +10609,28 @@ async def _exec_check_owned_restrictions(
     for r in ch_rows or []:
         _type = (r.get("type") or "").lower()
         kind = "group" if _type in ("megagroup", "supergroup", "group", "chat") else "channel"
+        _uname = (r.get("username") or "").strip() or None
         entities.append({
             "kind": kind,
             "id": int(r["channel_id"]),
-            "username": r.get("username"),
+            "username": _uname,
             "title": r.get("title"),
+            "access_hash": int(r["access_hash"]) if r.get("access_hash") else None,
             "preferred_acc": int(r["acc_id"]) if r.get("acc_id") else None,
+            "is_private": not _uname,
             "bot_id": None,
         })
     for r in bot_rows or []:
+        _uname = (r.get("username") or "").strip() or None
         entities.append({
             "kind": "bot",
             "id": int(r["bot_id"]),
-            "username": r.get("username"),
+            "username": _uname,
             "title": r.get("first_name"),
+            "access_hash": None,
             "preferred_acc": None,
+            # Бот публичен по @username; без него проверить нечем.
+            "is_private": not _uname,
             "bot_id": int(r["bot_id"]),
         })
 
@@ -10695,19 +10702,37 @@ async def _exec_check_owned_restrictions(
             _dead.add(aid)
             return None
 
-    def _pick_observer(ent: dict):
-        # Предпочитаем управляющий аккаунт канала (есть доступ и к приватному),
-        # затем любого живого наблюдателя (публичную сущность резолвит любой).
-        order: list[dict] = []
+    def _pick_access(ent: dict):
+        # Аккаунт С ДОСТУПОМ для резолва+флагов. Приватную сущность (нет
+        # @username) откроет ТОЛЬКО её управляющий аккаунт (участник) — чужой
+        # даст ложную «недоступность», поэтому для приватной берём строго его.
+        # Публичную резолвит любой; управляющего пробуем первым.
         pref = ent.get("preferred_acc")
-        if pref and pref in _obs_by_id:
+        order: list[dict] = []
+        if pref and pref in _obs_by_id and pref not in _dead:
             order.append(_obs_by_id[pref])
-        order.extend(a for a in observers if int(a["id"]) not in _dead
-                     and (not pref or int(a["id"]) != pref))
+        if not ent.get("is_private"):
+            order.extend(a for a in observers if int(a["id"]) not in _dead
+                         and (not pref or int(a["id"]) != pref))
         return order
+
+    def _pick_search(ent: dict):
+        # ВНЕШНИЙ аккаунт для проверки видимости: НЕ управляющий этой сущностью
+        # (у управляющего она в диалогах и найдётся всегда — ложно-зелёный
+        # теневой бан). Любой живой аккаунт с id != управляющего.
+        pref = ent.get("preferred_acc")
+        for a in observers:
+            aid = int(a["id"])
+            if aid in _dead:
+                continue
+            if pref and aid == pref:
+                continue
+            return a
+        return None
 
     counts: dict[str, int] = {}
     findings: list[dict] = []
+    vis_unmeasured = 0   # публичные сущности, где видимость проверить было нечем
     _KIND_RU = {"channel": "Канал", "group": "Чат", "bot": "Бот"}
 
     try:
@@ -10719,19 +10744,31 @@ async def _exec_check_owned_restrictions(
                                + _erc.build_summary(counts, n, checked=idx),
                 }
 
-            client = None
-            for cand in _pick_observer(ent):
-                client = await _client_for(cand)
-                if client is not None:
+            access_client = None
+            for cand in _pick_access(ent):
+                access_client = await _client_for(cand)
+                if access_client is not None:
                     break
 
-            if client is None:
-                verdict = _erc.classify(ent["kind"], {"probe_error": "нет доступного аккаунта-наблюдателя"})
+            if access_client is None:
+                _why = ("нет управляющего аккаунта с доступом к приватной сущности"
+                        if ent.get("is_private") else "нет доступного аккаунта-наблюдателя")
+                verdict = _erc.classify(ent["kind"], {"probe_error": _why})
             else:
+                # Внешний аккаунт для видимости — только публичным сущностям.
+                search_client = None
+                if ent.get("username"):
+                    _s = _pick_search(ent)
+                    if _s is not None:
+                        search_client = await _client_for(_s)
+                    if search_client is None:
+                        vis_unmeasured += 1
                 try:
                     verdict = await _erc.probe_entity(
-                        client, kind=ent["kind"], entity_id=ent["id"],
-                        username=ent.get("username"))
+                        access_client, kind=ent["kind"], entity_id=ent["id"],
+                        username=ent.get("username"), access_hash=ent.get("access_hash"),
+                        search_client=search_client,
+                        do_search=bool(search_client))
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -10787,11 +10824,19 @@ async def _exec_check_owned_restrictions(
                 pass
 
     summary = _erc.build_summary(counts, n)
+    # Честность про непроверенную видимость: если у владельца всего один аккаунт
+    # (или все связаны с сущностью), внешнего наблюдателя нет — теневой бан по
+    # видимости в поиске проверить нечем. Прямо говорим об этом, а не молчим.
+    if vis_unmeasured:
+        summary += (f"\n\nℹ️ Видимость в поиске не проверена у {vis_unmeasured} "
+                    f"публичных сущностей: для этого нужен второй аккаунт, не "
+                    f"связанный с сущностью. Ограничения и доступность проверены.")
     return {
         "status": "done",
         "checked": n,
         "counts": counts,
         "findings": findings[:50],
+        "visibility_unmeasured": vis_unmeasured,
         "summary": summary,
     }
 

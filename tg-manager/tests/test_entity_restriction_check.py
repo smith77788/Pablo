@@ -143,11 +143,13 @@ class _Found:
 
 
 class _FakeClient:
-    def __init__(self, entity, search_hit=True, bot_reply=True, resolve_exc=None):
+    def __init__(self, entity, search_hit=True, bot_reply=True, resolve_exc=None,
+                 search_exc=None):
         self._e = entity
         self._hit = search_hit
         self._reply = bot_reply
         self._resolve_exc = resolve_exc
+        self._search_exc = search_exc
 
     async def get_entity(self, ref):
         if self._resolve_exc:
@@ -155,6 +157,8 @@ class _FakeClient:
         return self._e
 
     async def __call__(self, req):
+        if self._search_exc:
+            raise self._search_exc
         return _Found(chats=[self._e]) if self._hit else _Found()
 
     async def send_message(self, *a, **k):
@@ -209,3 +213,47 @@ def test_probe_bot_not_replying_is_unreachable():
                     search_hit=True, bot_reply=False)
     r = _run(erc.probe_entity(c, kind="bot", entity_id=200, username="bot"))
     assert r["status"] == erc.STATUS_UNREACHABLE
+
+
+# ── две фазы: доступ и внешняя видимость ──────────────────────────────────────
+
+def test_private_entity_resolve_failure_is_check_failed_not_unreachable():
+    # Приватную сущность (нет @username) чужой аккаунт не откроет — это «нечем
+    # проверить», НЕ «недоступна снаружи». Иначе каждый приватный канал, который
+    # проверял не его участник, ложно помечался бы недоступным.
+    exc = Exception("Cannot find any entity corresponding to ...")
+    c = _FakeClient(_Ent(500), resolve_exc=exc)
+    r = _run(erc.resolve_flags(c, kind="channel", entity_id=500, username=None))
+    assert r["signals"].get("probe_error")
+    assert erc.classify("channel", r["signals"])["status"] == erc.STATUS_CHECK_FAILED
+
+
+def test_search_visible_true_false_and_none():
+    hit = _FakeClient(_Ent(100, "chan"), search_hit=True)
+    miss = _FakeClient(_Ent(100, "chan"), search_hit=False)
+    boom = _FakeClient(_Ent(100, "chan"), search_exc=Exception("flood"))
+
+    assert _run(erc.search_visible(hit, username="chan", target_id=100)) is True
+    assert _run(erc.search_visible(miss, username="chan", target_id=100)) is False
+    assert _run(erc.search_visible(boom, username="chan", target_id=100)) is None
+
+
+def test_probe_uses_external_search_client_for_visibility():
+    # Резолв — управляющим (видит канал), видимость — ВНЕШНИМ, который канал НЕ
+    # находит в поиске. Итог должен быть «скрыт из поиска», а не «чисто»: значит
+    # видимость реально берётся у search_client, а не у access_client.
+    access = _FakeClient(_Ent(100, "chan"), search_hit=True)   # управляющий: найдёт
+    external = _FakeClient(_Ent(100, "chan"), search_hit=False)  # внешний: не найдёт
+    r = _run(erc.probe_entity(access, kind="channel", entity_id=100,
+                              username="chan", search_client=external))
+    assert r["status"] == erc.STATUS_HIDDEN
+
+
+def test_probe_without_search_client_and_no_search_leaves_visibility_unknown():
+    # Внешнего нет и do_search=False → видимость не мерена, вердикт «чисто»
+    # (ограничений не найдено), НЕ «скрыт».
+    access = _FakeClient(_Ent(100, "chan"), search_hit=False)
+    r = _run(erc.probe_entity(access, kind="channel", entity_id=100,
+                              username="chan", do_search=False))
+    assert r["status"] == erc.STATUS_CLEAN
+    assert "found_in_search" not in r["signals"]

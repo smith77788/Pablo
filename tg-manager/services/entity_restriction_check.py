@@ -270,67 +270,98 @@ def build_summary(counts: dict, total: int, *, checked: Optional[int] = None) ->
     return "\n".join(lines)
 
 
-# ── Сетевая проба (работает на УЖЕ подключённом Telethon-клиенте) ─────────────
+# ── Сетевая проба (работает на УЖЕ подключённых Telethon-клиентах) ────────────
 #
-# Клиент открывает исполнитель операции ОДИН раз на аккаунт-наблюдатель и передаёт
-# сюда — так на все сущности приходится один коннект наблюдателя, минимум следа.
-# Второй коннект той же сессии здесь открывать нельзя (AUTH_KEY_DUPLICATED),
-# поэтому поиск делаем прямым вызовом на переданном client, а не через
-# global_search_engine.search_public (та открывает собственный коннект).
+# Проба разделена на ДВЕ фазы, потому что честно измерить теневой бан одним
+# аккаунтом нельзя:
+#
+#   • resolve_flags — резолв сущности + флаг ограничения + (для бота) ответ на
+#     /start. Делает аккаунт С ДОСТУПОМ: публичную сущность резолвит любой, а
+#     приватную (без @username) — только её управляющий аккаунт (участник),
+#     по InputPeerChannel(id, access_hash). Чужой аккаунт приватную не откроет,
+#     и это НЕ «недоступна снаружи», а «нечем проверить» — иначе ложный вердикт.
+#
+#   • search_visible — видимость публичного @username в глобальном поиске.
+#     Делает ВНЕШНИЙ аккаунт, НЕ связанный с сущностью: управляющий аккаунт —
+#     участник, его канал всегда в его выдаче, и «скрыт из поиска» не сработал
+#     бы никогда (ложно-зелёный теневой бан). Внешнего аккаунта нет → сигнал не
+#     снимаем (found_in_search остаётся None = «не проверяли»), а не выдаём
+#     «чисто» вслепую.
+#
+# Клиенты открывает исполнитель ОДИН раз на аккаунт и переиспользует на все
+# сущности (минимум следа). Второй коннект той же сессии открывать нельзя
+# (AUTH_KEY_DUPLICATED), поэтому вызовы идут прямо на переданных client.
 
 _RESOLVE_TIMEOUT = 20.0
 _SEARCH_TIMEOUT = 25.0
 _BOT_PING_TIMEOUT = 8.0
 
 
-async def probe_entity(
+def _entity_ref(username: Optional[str], entity_id: Optional[int],
+                kind: str, access_hash: Optional[int]):
+    """Ссылка для get_entity. Публичной — @username; приватному каналу/группе —
+    InputPeerChannel(id, access_hash) (иначе управляющий аккаунт не резолвит её
+    по «голому» id со свежего коннекта); иначе — сам id."""
+    if username:
+        return f"@{username}"
+    if entity_id is not None and access_hash and kind in ("channel", "group"):
+        try:
+            from telethon.tl.types import InputPeerChannel
+            return InputPeerChannel(int(entity_id), int(access_hash))
+        except Exception:
+            return entity_id
+    return entity_id
+
+
+async def resolve_flags(
     client,
     *,
     kind: str,
     entity_id: Optional[int] = None,
     username: Optional[str] = None,
-    do_search: bool = True,
+    access_hash: Optional[int] = None,
     do_bot_ping: bool = True,
 ) -> dict:
-    """Снять сигналы ограничений по одной сущности и классифицировать.
+    """Фаза 1: резолв + флаг ограничения + (для бота) ответ на /start.
 
-    kind: 'channel' | 'group' | 'bot'. Возвращает результат classify() плюс
-    поле 'meta' с фактами сущности (title/username/id/verified/scam) для лога.
-    Сеть/ошибки не глотаются молча — уходят в signals.probe_error и дают статус
-    «Не удалось проверить», а не ложное «Чисто».
+    Возвращает {signals, meta}. signals готовы к classify(), но БЕЗ
+    found_in_search — видимость снимает отдельная фаза search_visible.
     """
     username = (username or "").strip().lstrip("@") or None
-    has_username = bool(username)
-    signals: dict = {"has_username": has_username}
+    signals: dict = {"has_username": bool(username)}
     meta: dict = {"id": entity_id, "username": username, "title": None,
                   "verified": False, "scam": False}
 
-    ref: Any = f"@{username}" if username else entity_id
+    ref = _entity_ref(username, entity_id, kind, access_hash)
     if ref is None:
-        signals["probe_error"] = "нет ни @username, ни id для проверки"
-        out = classify(kind, signals)
-        out["meta"] = meta
-        return out
+        signals["probe_error"] = "нет ни @username, ни id/access_hash для проверки"
+        return {"signals": signals, "meta": meta}
 
-    # 1) Резолв сущности снаружи + флаги ограничения.
     try:
         entity = await asyncio.wait_for(client.get_entity(ref), timeout=_RESOLVE_TIMEOUT)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 — ошибку классифицируем, не роняем прогон
         resolved_false, probe_error = _classify_resolve_error(str(e))
-        signals["resolved"] = not resolved_false
-        if probe_error:
-            signals["probe_error"] = probe_error
-        out = classify(kind, signals)
-        out["meta"] = meta
-        return out
+        # Приватную сущность (нет @username) чужой аккаунт не откроет — это НЕ
+        # «недоступна», а «нечем проверить». Реальную недоступность публичной
+        # ловим по её @username, а приватную — только настоящей ошибкой доступа.
+        if resolved_false and not username:
+            signals["probe_error"] = ("приватную сущность проверить нечем — нужен "
+                                       "её управляющий аккаунт")
+        else:
+            signals["resolved"] = not resolved_false
+            if probe_error:
+                signals["probe_error"] = probe_error
+        return {"signals": signals, "meta": meta}
 
     if entity is None:
-        signals["resolved"] = False
-        out = classify(kind, signals)
-        out["meta"] = meta
-        return out
+        # Пустой резолв публичной = недоступна; приватной = нечем проверить.
+        if username:
+            signals["resolved"] = False
+        else:
+            signals["probe_error"] = "приватную сущность проверить нечем"
+        return {"signals": signals, "meta": meta}
 
     signals["resolved"] = True
     signals["restricted"] = bool(getattr(entity, "restricted", False))
@@ -339,44 +370,14 @@ async def probe_entity(
     meta["title"] = getattr(entity, "title", None) or getattr(entity, "first_name", None)
     meta["verified"] = bool(getattr(entity, "verified", False))
     meta["scam"] = bool(getattr(entity, "scam", False))
-    if entity_id is None:
+    if meta["id"] is None:
         meta["id"] = getattr(entity, "id", None)
 
-    # Официальное ограничение перекрывает всё — лишние запросы (поиск/пинг) не шлём.
+    # Официальное ограничение перекрывает всё — /start уже не шлём.
     if signals["restricted"] or signals["restriction_reasons"]:
-        out = classify(kind, signals)
-        out["meta"] = meta
-        return out
+        signals["_short_circuit"] = True
+        return {"signals": signals, "meta": meta}
 
-    # 2) Видимость в глобальном поиске — только для публичных сущностей.
-    if has_username and do_search:
-        try:
-            from telethon.tl.functions.contacts import SearchRequest
-            found = await asyncio.wait_for(
-                client(SearchRequest(q=username, limit=30)), timeout=_SEARCH_TIMEOUT)
-            hit = False
-            target_id = meta["id"]
-            uname_low = username.lower()
-            for coll in (getattr(found, "chats", None) or [],
-                         getattr(found, "users", None) or []):
-                for ent in coll:
-                    if target_id is not None and int(getattr(ent, "id", 0)) == int(target_id):
-                        hit = True
-                        break
-                    ent_uname = (getattr(ent, "username", None) or "").lower()
-                    if ent_uname and ent_uname == uname_low:
-                        hit = True
-                        break
-                if hit:
-                    break
-            signals["found_in_search"] = hit
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            # Сбой поиска НЕ делает вердикт «скрыт» — это лишь пропуск сигнала.
-            log.debug("probe_entity search failed for @%s: %s", username, e)
-
-    # 3) Отвечает ли бот на /start (жив и может писать). Свой бот владельца.
     if kind == "bot" and do_bot_ping:
         try:
             await asyncio.wait_for(
@@ -387,10 +388,78 @@ async def probe_entity(
             signals["responds"] = bool(msgs)
         except asyncio.CancelledError:
             raise
-        except Exception as e:  # noqa: BLE001
-            # Не смогли пропинговать — не выносим вердикт по этому сигналу.
-            log.debug("probe_entity bot ping failed for @%s: %s", username, e)
+        except Exception as e:  # noqa: BLE001 — пропуск сигнала, не вердикт
+            log.debug("resolve_flags bot ping failed for @%s: %s", username, e)
 
+    return {"signals": signals, "meta": meta}
+
+
+async def search_visible(client, *, username: str,
+                         target_id: Optional[int] = None) -> Optional[bool]:
+    """Фаза 2: виден ли публичный @username в глобальном поиске.
+
+    True — найден; False — по точному username не найден (скрыт из поиска);
+    None — сбой поиска (сигнал не снят, вердикт «скрыт» не выносим). Вызывать
+    ВНЕШНИМ аккаунтом: у управляющего сущность в диалогах и найдётся всегда.
+    """
+    username = (username or "").strip().lstrip("@")
+    if not username:
+        return None
+    try:
+        from telethon.tl.functions.contacts import SearchRequest
+        found = await asyncio.wait_for(
+            client(SearchRequest(q=username, limit=30)), timeout=_SEARCH_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.debug("search_visible failed for @%s: %s", username, e)
+        return None
+    uname_low = username.lower()
+    for coll in (getattr(found, "chats", None) or [],
+                 getattr(found, "users", None) or []):
+        for ent in coll:
+            if target_id is not None and int(getattr(ent, "id", 0)) == int(target_id):
+                return True
+            ent_uname = (getattr(ent, "username", None) or "").lower()
+            if ent_uname and ent_uname == uname_low:
+                return True
+    return False
+
+
+async def probe_entity(
+    access_client,
+    *,
+    kind: str,
+    entity_id: Optional[int] = None,
+    username: Optional[str] = None,
+    access_hash: Optional[int] = None,
+    search_client=None,
+    do_search: bool = True,
+    do_bot_ping: bool = True,
+) -> dict:
+    """Полная проба одной сущности: обе фазы + классификация.
+
+    access_client резолвит и снимает флаги; search_client (если задан) мерит
+    видимость. search_client не задан, но do_search=True → видимость мерит тот
+    же access_client (менее надёжно для участника, но лучше, чем ничего, когда
+    внешнего аккаунта нет и вызывающий это допускает). Возвращает classify()
+    плюс meta.
+    """
+    r = await resolve_flags(access_client, kind=kind, entity_id=entity_id,
+                            username=username, access_hash=access_hash,
+                            do_bot_ping=do_bot_ping)
+    signals = r["signals"]
+    meta = r["meta"]
+
+    # Видимость — только для публичных, когда резолв прошёл и нет ограничения.
+    if (do_search and signals.get("has_username") and signals.get("resolved")
+            and not signals.get("_short_circuit")):
+        vis = await search_visible(search_client or access_client,
+                                   username=username, target_id=meta.get("id"))
+        if vis is not None:
+            signals["found_in_search"] = vis
+
+    signals.pop("_short_circuit", None)
     out = classify(kind, signals)
     out["meta"] = meta
     return out
