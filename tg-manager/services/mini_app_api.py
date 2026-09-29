@@ -2803,7 +2803,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Accounts ─────────────────────────────────────────────────────────────
 
-    def _accounts_where(uid: int, flt: str, stage: str, q: str, admin: bool = False) -> tuple[str, list]:
+    def _accounts_where(uid: int, flt: str, stage: str, q: str, admin: bool = False,
+                        acc_pool: str = "") -> tuple[str, list]:
         """Собрать WHERE + args для списка аккаунтов из фильтра здоровья, CRM-статуса
         и поиска. Возвращает (sql_where, args). Серверная фильтрация снимает
         100-лимит клиента: срез считается по ВСЕЙ таблице, не по загруженной странице.
@@ -2847,6 +2848,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             args.append(f"%{q}%")
             n = len(args)
             clauses.append(f"(phone ILIKE ${n} OR first_name ILIKE ${n} OR username ILIKE ${n})")
+        # Пул — то, чем владелец делит флот на группы. На экране «Инфраструктура»
+        # он был виден числом («Пул europe — 42 акк») и ничем больше: открыть
+        # эти 42 аккаунта было нечем, среза под пул не существовало.
+        if acc_pool:
+            args.append(acc_pool)
+            clauses.append(f"pool = ${len(args)}")
         return " AND ".join(clauses), args
 
     async def accounts(request: web.Request) -> web.Response:
@@ -2866,6 +2873,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if stage and stage not in ACCOUNT_STAGES:
             stage = ""
         q = (qs.get("q") or "").strip()[:64]
+        acc_pool = (qs.get("pool") or "").strip()[:64]
         try:
             offset = max(0, int(qs.get("offset", 0)))
         except (TypeError, ValueError):
@@ -2876,7 +2884,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             limit = 100
 
         # admin=True — межтенантный просмотр всех аккаунтов платформы (без owner-скоупа).
-        where, args = _accounts_where(uid, flt, stage, q, admin=admin)
+        where, args = _accounts_where(uid, flt, stage, q, admin=admin, acc_pool=acc_pool)
         page_args = args + [limit, offset]
         rows = await _safe_fetch(pool,
             f"""SELECT id, phone, first_name, username, is_active, last_used, added_at,
@@ -2994,7 +3002,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "offset": offset, "limit": limit,
                 "filtered_total": filtered_total,
                 "has_more": offset + len(rows) < filtered_total,
-                "filter": flt, "stage": stage, "q": q,
+                "filter": flt, "stage": stage, "q": q, "pool": acc_pool,
             },
         })
 
@@ -4992,7 +5000,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if stage and stage not in ACCOUNT_STAGES:
                 stage = ""
             qterm = (body.get("q") or "").strip()[:64]
-            where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin)
+            # Срез по пулу обязан доехать и сюда: иначе «применить ко всему
+            # срезу» взяло бы аккаунты вне показанного пула — операция ушла бы
+            # шире, чем видел владелец.
+            bpool = (body.get("pool") or "").strip()[:64]
+            where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin, acc_pool=bpool)
             owned = await _safe_fetch(pool,
                 f"SELECT id FROM tg_accounts WHERE {where} ORDER BY id LIMIT 5000", *wargs)
             ids = [int(r["id"]) for r in (owned or [])]

@@ -10319,6 +10319,7 @@ function phoneFlag(phone) {
 
 let ACC_FILTER = 'all';
 let ACC_STAGE_FILTER = '';   // '' = все статусы
+let ACC_POOL_FILTER = '';    // '' = все пулы (срез приходит с «Инфраструктуры»)
 let ACC_SEARCH = '';
 let ACC_OFFSET = 0;
 let ACC_HAS_MORE = false;
@@ -10330,6 +10331,7 @@ function _accQuery(offset) {
   const p = new URLSearchParams();
   if (ACC_FILTER && ACC_FILTER!=='all') p.set('filter', ACC_FILTER);
   if (ACC_STAGE_FILTER) p.set('stage', ACC_STAGE_FILTER);
+  if (ACC_POOL_FILTER) p.set('pool', ACC_POOL_FILTER);
   if (ACC_SEARCH) p.set('q', ACC_SEARCH);
   p.set('offset', offset); p.set('limit', 100);
   return '/api/miniapp/accounts?'+p.toString();
@@ -10464,7 +10466,7 @@ function _fixBtn(f) {
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) {
-    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
+    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
     else el.innerHTML=empty('📱','Нет аккаунтов','Импортируйте сессии прямо здесь или загрузите файл сессии в боте',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
     return;
@@ -10570,7 +10572,8 @@ function updateAccSelBar() {
 // Селектор для масс-действия: либо конкретные id, либо весь серверный срез.
 function _massSel() {
   if (ACC_SEL_ALL_FILTERED) {
-    return {select_all_filtered: true, filter: ACC_FILTER, stage: ACC_STAGE_FILTER, q: ACC_SEARCH};
+    return {select_all_filtered: true, filter: ACC_FILTER, stage: ACC_STAGE_FILTER,
+            q: ACC_SEARCH, pool: ACC_POOL_FILTER};
   }
   return {account_ids: [...ACC_SEL]};
 }
@@ -15677,6 +15680,19 @@ async function openTopology() {
 }
 
 // ── Infra Analytics ─────────────────────────────────────
+// В operation_audit.action попадает не только тип операции (его переводит
+// opRu), но и шесть собственных действий воркера: они вылезали на экран
+// латиницей — «gp_create_bot», «join», «publish».
+const AUDIT_RU = {
+  gp_create_bot:     'создан бот',
+  gp_create_group:   'создана группа',
+  gp_create_channel: 'создан канал',
+  join:              'вступление',
+  leave:             'выход',
+  publish:           'публикация',
+};
+function auditRu(a) { return AUDIT_RU[String(a || '').toLowerCase()] || opRu(a); }
+
 async function openInfra() {
   push('s-infra');
   txt('infraStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -15684,17 +15700,28 @@ async function openInfra() {
   txt('infraAudit','');
   try {
     const d = await api('/api/miniapp/infra');
-    txt('infraStats',`
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active_accounts,'green')}">${d.active_accounts||0}</div><div class="kpi-lbl">Активных акк</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.flood_24h,'orange')}">${d.flood_24h||0}</div><div class="kpi-lbl">Флуд 24ч</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.ops_24h||0}</div><div class="kpi-lbl">Операций 24ч</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.warmup_active||0}</div><div class="kpi-lbl">На прогреве</div></div>
-    `);
+    // Четыре числа и ничего больше — ровно то, на что жаловался владелец.
+    // Каждое из них считает конкретный список, который есть в приложении.
+    const iCard = (val, lbl, style, go) =>
+      `<div class="kpi-card tap-card" onclick="${go}" role="button" tabindex="0">`
+      + `<div class="kpi-val"${style?` style="${style}"`:''}>${val}</div>`
+      + `<div class="kpi-lbl">${lbl} \u203a</div></div>`;
+    txt('infraStats',
+        iCard(d.active_accounts||0, 'Активных акк', kpiTone(d.active_accounts,'green'), "healthGoAccounts('active','')")
+      + iCard(d.flood_24h||0, 'Флуд 24ч', kpiTone(d.flood_24h,'orange'), 'openHealth()')
+      + iCard(d.ops_24h||0, 'Операций 24ч', '', 'openOps()')
+      + iCard(d.warmup_active||0, 'На прогреве', '', 'openWarmup()'));
     txt('m-infra-val',`${d.active_accounts||0} акк · ${d.flood_24h||0} флуд`);
     const pools = d.pools||[];
-    txt('infraPools', pools.length ? pools.map(p=>`
-      <div class="row"><div class="row-body"><div class="row-name">Пул: ${esc(p.pool||'default')}</div></div><div class="row-right">${p.cnt} акк</div></div>
-    `).join('') : empty('📦','Нет пулов',''));
+    // «Пул europe — 42 акк» было числом без продолжения: открыть эти 42
+    // аккаунта было нечем, среза под пул на сервере не существовало.
+    txt('infraPools', pools.length ? pools.map(p=>{
+      const name = p.pool || 'default';
+      return `<div class="row tap" onclick="healthGoAccounts('all','','${esc(name)}')" role="button" tabindex="0">
+        <div class="row-body"><div class="row-name">Пул: ${esc(name)}</div></div>
+        <div class="row-right">${num(p.cnt)} ${plural(p.cnt,'аккаунт','аккаунта','аккаунтов')} \u203a</div></div>`;
+    }).join('') : empty('📦','Пулы не заданы','Пул — это группа аккаунтов: назначается на карточке аккаунта и делит флот по назначению',
+        {label:'📱 К аккаунтам', fn:"goTab('accounts')"}));
     const audit = d.audit||[];
     // operation_audit.result у успешных операций = 'success' (не 'ok'); также
     // считаем зелёными 'ok'/'done'. Иначе успешные показывались красным ❌.
@@ -15703,14 +15730,14 @@ async function openInfra() {
       <div class="row">
         <div class="row-ico" style="background:rgba(${_auditOk(a.result)?'52,211,153':'248,113,113'},.16)">${_auditOk(a.result)?'✅':'❌'}</div>
         <div class="row-body">
-          <div class="row-name">${esc(a.action||'action')}</div>
+          <div class="row-name">${esc(auditRu(a.action))}</div>
           <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru'):''}</div>
         </div>
       </div>
-    `).join('') : empty('📋','Нет записей аудита',''));
+    `).join('') : empty('📋','Записей пока нет','Здесь появятся последние действия над аккаунтами и операциями'));
   } catch(e) {
     txt('infraStats','');
-    txt('infraAudit', empty('⚠️','Ошибка',e.message));
+    txt('infraAudit', errHtml(e.message, 'openInfra()'));
   }
 }
 
@@ -21344,10 +21371,12 @@ async function submitExpCreate() {
 // stage — необязательный второй срез (CRM-этап, напр. «прогрев»): на
 // командном центре есть статусы, которых нет среди плиток-фильтров, зато они
 // есть среди этапов. Без него «Прогрев» вёл бы во «все аккаунты» — это враньё.
-function healthGoAccounts(filter, stage) {
+function healthGoAccounts(filter, stage, accPool) {
   ACC_FILTER = filter || 'all';
   ACC_STAGE_FILTER = stage || '';
+  ACC_POOL_FILTER = accPool || '';
   goTab('accounts');
+  accPoolBanner();
   // Подсветить плитку выбранного среза, чтобы было видно, куда попали.
   document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x => {
     x.classList.toggle('on', x.getAttribute('data-filter') === ACC_FILTER);
@@ -21355,6 +21384,29 @@ function healthGoAccounts(filter, stage) {
   document.querySelectorAll('#stageChips .st-chip').forEach(x => {
     x.classList.toggle('on', x.getAttribute('data-stage') === ACC_STAGE_FILTER);
   });
+  reloadAccounts();
+}
+
+// Срез по пулу приходит с «Инфраструктуры», и на вкладке аккаунтов его ничто
+// не показывает: список просто оказывался короче без объяснения. Баннер
+// называет пул и даёт его снять.
+function accPoolBanner() {
+  const host = document.getElementById('accList');
+  const old = document.getElementById('accPoolBanner');
+  if (old) old.remove();
+  if (!ACC_POOL_FILTER || !host || !host.parentNode) return;
+  const el = document.createElement('div');
+  el.id = 'accPoolBanner';
+  el.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0 16px 8px;padding:8px 12px;'
+    + 'border-radius:10px;background:var(--bg-blue-16);font-size:13px';
+  el.innerHTML = '<span style="flex:1">Пул: <b>' + esc(ACC_POOL_FILTER) + '</b></span>'
+    + '<span class="icon-tap" onclick="accPoolClear()" role="button" tabindex="0">Снять \u2715</span>';
+  host.parentNode.insertBefore(el, host);
+}
+
+function accPoolClear() {
+  ACC_POOL_FILTER = '';
+  accPoolBanner();
   reloadAccounts();
 }
 
