@@ -12246,13 +12246,14 @@ async def _exec_boost_views(
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
     # Суточный лимит: просмотр — риск-действие; исчерпавшие бюджет не участвуют.
+    accounts, _skip_fresh = await _filter_unwarmed_fresh_accounts(pool, op_id, accounts)
     accounts, _skip_budget = await _filter_over_budget_accounts(pool, op_id, accounts)
-    if _skip_budget:
+    if _skip_budget or _skip_fresh:
         await _safe_execute(
             pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id)
     if not accounts:
         return {"status": "requeue",
-                "summary": "⏳ Аккаунты исчерпали суточный лимит действий — попробуйте позже"}
+                "summary": "⏳ Аккаунты исчерпали суточный лимит или ещё не прогреты — попробуйте позже"}
 
     # Идемпотентность повтора. Повтор запускает исполнителя заново с
     # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
@@ -12376,13 +12377,14 @@ async def _exec_boost_reactions(
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
     # Суточный лимит: реакция — риск-действие; исчерпавшие бюджет не участвуют.
+    accounts, _skip_fresh = await _filter_unwarmed_fresh_accounts(pool, op_id, accounts)
     accounts, _skip_budget = await _filter_over_budget_accounts(pool, op_id, accounts)
-    if _skip_budget:
+    if _skip_budget or _skip_fresh:
         await _safe_execute(
             pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id)
     if not accounts:
         return {"status": "requeue",
-                "summary": "⏳ Аккаунты исчерпали суточный лимит действий — попробуйте позже"}
+                "summary": "⏳ Аккаунты исчерпали суточный лимит или ещё не прогреты — попробуйте позже"}
 
     # Идемпотентность повтора. Повтор запускает исполнителя заново с
     # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
@@ -12613,6 +12615,43 @@ async def _filter_over_budget_accounts(
     return kept, len(accounts) - len(kept)
 
 
+async def _filter_unwarmed_fresh_accounts(
+    pool: asyncpg.Pool, op_id: int, accounts: list
+) -> tuple[list, int]:
+    """Не пускать в накрутку СВЕЖЕДОБАВЛЕННЫЕ и НИ РАЗУ не прогретые аккаунты.
+
+    Аккаунт, добавленный минуты назад и сразу пошедший накручивать подписчиков/
+    реакции, — «мёртвый» паттерн (никакой истории поведения). Порог мягкий и
+    env-настраиваемый (BOOST_MIN_ACCOUNT_AGE_HOURS, по умолчанию 1ч), 0 —
+    выключить. Бьёт ТОЧЕЧНО: отсеиваются только (added_at свежий И last_warmup_at
+    IS NULL) — прогретый или поживший аккаунт проходит. Fail-open: сбой/нет данных
+    → все проходят (не обнуляем операцию)."""
+    import os as _os_age
+    try:
+        _min_h = float(_os_age.getenv("BOOST_MIN_ACCOUNT_AGE_HOURS", "1"))
+    except (TypeError, ValueError):
+        _min_h = 1.0
+    if _min_h <= 0 or not accounts:
+        return accounts, 0
+    try:
+        rows = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[]) "
+            "AND last_warmup_at IS NULL "
+            "AND added_at > now() - make_interval(mins => $2)",
+            [int(a["id"]) for a in accounts], int(_min_h * 60),
+        )
+    except Exception:
+        log_exc_swallow(log, f"unwarmed-fresh filter failed op={op_id}")
+        return accounts, 0
+    fresh = {int(r["id"]) for r in (rows or [])}
+    if not fresh:
+        return accounts, 0
+    kept = [a for a in accounts if int(a["id"]) not in fresh]
+    log.info("op=%d: пропущено %d свежих непрогретых аккаунтов (накрутка требует прогрева)",
+             op_id, len(accounts) - len(kept))
+    return kept, len(accounts) - len(kept)
+
+
 # Сколько раз инвайт вправе продолжить сам себя. Аудитория в 2000 целей при
 # консервативном суточном лимите растягивается на дни — но бесконечно хвост
 # продлеваться не должен, иначе забытая операция будет жить месяцами.
@@ -12819,14 +12858,15 @@ async def _exec_boost_subscribers(
         # Суточный лимит: аккаунт, уже исчерпавший бюджет риск-действий, в накрутку
         # не идёт (вступление — риск-действие; один аккаунт не должен вступать в
         # десятки каналов за сутки — сигнатура фермы).
+        accounts, _skip_fresh = await _filter_unwarmed_fresh_accounts(pool, op_id, accounts)
         accounts, _skip_budget = await _filter_over_budget_accounts(pool, op_id, accounts)
-        if _skip_budget:
+        if _skip_budget or _skip_fresh:
             await _safe_execute(
                 pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
                 len(accounts), op_id)
         if not accounts:
             return {"status": "requeue",
-                    "summary": "⏳ Выбранные аккаунты исчерпали суточный лимит действий — попробуйте позже"}
+                    "summary": "⏳ Выбранные аккаунты исчерпали суточный лимит или ещё не прогреты — попробуйте позже"}
 
         # Идемпотентность повтора. Повтор запускает исполнителя заново с
         # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса

@@ -63,3 +63,47 @@ def test_all_boosts_apply_budget_and_audit():
             f"{fn} обязан писать {action} в operation_audit на успех")
         assert "исчерпали суточный лимит" in body, (
             f"{fn} обязан честно отложить операцию, если лимит исчерпан")
+
+
+# ── F10: свежие непрогретые аккаунты не идут в накрутку ───────────────────────
+
+class _FreshPool:
+    def __init__(self, fresh_ids):
+        self._fresh = fresh_ids
+
+    async def fetch(self, q, *a):
+        return [{"id": i} for i in self._fresh]
+
+
+def test_unwarmed_fresh_accounts_are_dropped(monkeypatch):
+    monkeypatch.setenv("BOOST_MIN_ACCOUNT_AGE_HOURS", "1")
+    accs = [{"id": 1}, {"id": 2}, {"id": 3}]
+    kept, skipped = _run(op_worker._filter_unwarmed_fresh_accounts(
+        _FreshPool([2]), 5, accs))
+    assert {a["id"] for a in kept} == {1, 3}
+    assert skipped == 1
+
+
+def test_fresh_filter_disabled_by_zero(monkeypatch):
+    monkeypatch.setenv("BOOST_MIN_ACCOUNT_AGE_HOURS", "0")
+    accs = [{"id": 1}, {"id": 2}]
+    kept, skipped = _run(op_worker._filter_unwarmed_fresh_accounts(
+        _FreshPool([1, 2]), 5, accs))
+    assert kept == accs and skipped == 0
+
+
+def test_fresh_filter_fail_open(monkeypatch):
+    monkeypatch.setenv("BOOST_MIN_ACCOUNT_AGE_HOURS", "1")
+
+    class _Boom:
+        async def fetch(self, q, *a):
+            raise Exception("db")
+
+    accs = [{"id": 1}]
+    kept, skipped = _run(op_worker._filter_unwarmed_fresh_accounts(_Boom(), 5, accs))
+    assert kept == accs and skipped == 0
+
+
+def test_all_boosts_apply_fresh_filter():
+    for fn in ("_exec_boost_subscribers", "_exec_boost_reactions", "_exec_boost_views"):
+        assert "_filter_unwarmed_fresh_accounts(pool, op_id, accounts)" in _body(fn)
