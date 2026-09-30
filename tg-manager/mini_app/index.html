@@ -4062,10 +4062,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-masspub">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">📡 Массовая публикация</div>
+    <div class="hdr-title">📡 Публикация / Рассылка</div>
   </div>
   <div class="sub-sb">
-    <div class="sec">Опубликовать сразу во все каналы</div>
+    <!-- Единый вход для всех рассылок: раньше «Быстрый пост», «Массовая
+         публикация» и «Рассылки» были тремя отдельными модулями с разными
+         настройками, хотя это один функционал (текст+spintax по выбранным
+         получателям). Теперь один экран с выбором получателя. Публикация в
+         каналы — ниже; подписчики бота и ЛС ведут в свои проверенные потоки
+         (разный транспорт доставки, слить в один вызов нельзя). -->
+    <div class="sec">Кому рассылаем</div>
+    <div class="lst">
+      <div class="li tap" onclick="openBcastPick()"><div class="ava ava-purple">📢</div><div class="li-body"><div class="li-name">Подписчики бота</div><div class="li-sub">Сообщение всем, кто запустил вашего бота</div></div><span class="chev">›</span></div>
+      <div class="li tap" onclick="openDmCampaigns()"><div class="ava ava-purple">✉️</div><div class="li-body"><div class="li-name">Личные сообщения (ЛС)</div><div class="li-sub">Рассылка в личку по выбранной аудитории</div></div><span class="chev">›</span></div>
+    </div>
+    <div class="sec">📡 Публикация в наши каналы</div>
     <div class="lst" style="padding:14px">
       <!-- Экран обещал «во ВСЕ каналы» и спрашивал подтверждение, ни разу не
            назвав число: человек жал необратимую кнопку, не зная, три у него
