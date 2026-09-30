@@ -12245,6 +12245,14 @@ async def _exec_boost_views(
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+    # Суточный лимит: просмотр — риск-действие; исчерпавшие бюджет не участвуют.
+    accounts, _skip_budget = await _filter_over_budget_accounts(pool, op_id, accounts)
+    if _skip_budget:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Аккаунты исчерпали суточный лимит действий — попробуйте позже"}
 
     # Идемпотентность повтора. Повтор запускает исполнителя заново с
     # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
@@ -12290,6 +12298,8 @@ async def _exec_boost_views(
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                     op_id, idx, _acc_key,
                 )
+                await _audit(pool, owner_id, "view", "ok",
+                             operation_id=op_id, account_id=acc["id"], target=str(channel)[:120])
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
@@ -12365,6 +12375,14 @@ async def _exec_boost_reactions(
     # Anti-detection (#7): отсеять аккаунты в карантине ПЕРЕД действием — действие
     # с флагнутого (флуд/ограничение) аккаунта = быстрый бан. Общий гейт, fail-open.
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
+    # Суточный лимит: реакция — риск-действие; исчерпавшие бюджет не участвуют.
+    accounts, _skip_budget = await _filter_over_budget_accounts(pool, op_id, accounts)
+    if _skip_budget:
+        await _safe_execute(
+            pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id)
+    if not accounts:
+        return {"status": "requeue",
+                "summary": "⏳ Аккаунты исчерпали суточный лимит действий — попробуйте позже"}
 
     # Идемпотентность повтора. Повтор запускает исполнителя заново с
     # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
@@ -12413,6 +12431,8 @@ async def _exec_boost_reactions(
                     "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                     op_id, idx, _acc_key,
                 )
+                await _audit(pool, owner_id, "reaction", "ok",
+                             operation_id=op_id, account_id=acc["id"], target=str(channel)[:120])
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
@@ -12567,6 +12587,30 @@ async def _filter_quarantined_accounts(
         log.info("op=%d: пропущено %d аккаунтов в карантине (риск-пульс)", op_id, skipped)
         return kept, skipped
     return accounts, 0
+
+
+async def _filter_over_budget_accounts(
+    pool: asyncpg.Pool, op_id: int, accounts: list
+) -> tuple[list, int]:
+    """Отсеять аккаунты, исчерпавшие суточный лимит риск-действий (накрутка тоже
+    нагружает аккаунт: вступление/реакция/просмотр — риск-действия). Без лимита
+    один аккаунт за день участвует во множестве накруток — сверхчеловеческая
+    активность и сигнатура фермы. Fail-open: сбой проверки не блокирует ядро; если
+    ВСЕ исчерпали лимит — возвращаем пусто (вызывающий отложит операцию)."""
+    try:
+        from services import account_budget as _abudget
+        within, over = await _abudget.filter_within_budget(
+            pool, [int(a["id"]) for a in accounts])
+    except Exception:
+        log_exc_swallow(log, f"budget filter failed op={op_id}")
+        return accounts, 0
+    if not over:
+        return accounts, 0
+    _within = set(within)
+    kept = [a for a in accounts if int(a["id"]) in _within]
+    log.info("op=%d: пропущено %d аккаунтов, исчерпавших суточный лимит действий",
+             op_id, len(accounts) - len(kept))
+    return kept, len(accounts) - len(kept)
 
 
 # Сколько раз инвайт вправе продолжить сам себя. Аудитория в 2000 целей при
@@ -12772,6 +12816,18 @@ async def _exec_boost_subscribers(
                 "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
             )
 
+        # Суточный лимит: аккаунт, уже исчерпавший бюджет риск-действий, в накрутку
+        # не идёт (вступление — риск-действие; один аккаунт не должен вступать в
+        # десятки каналов за сутки — сигнатура фермы).
+        accounts, _skip_budget = await _filter_over_budget_accounts(pool, op_id, accounts)
+        if _skip_budget:
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+                len(accounts), op_id)
+        if not accounts:
+            return {"status": "requeue",
+                    "summary": "⏳ Выбранные аккаунты исчерпали суточный лимит действий — попробуйте позже"}
+
         # Идемпотентность повтора. Повтор запускает исполнителя заново с
         # done_items=0 — после сетевого сбоя (_maybe_requeue), после сброса
         # зависшей операции сторожем, после перезапуска контейнера. Тогда
@@ -12821,6 +12877,11 @@ async def _exec_boost_subscribers(
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
                         op_id, idx, _acc_key,
                     )
+                    # Учёт в суточный бюджет: вступление — риск-действие. Без этой
+                    # записи накрутка невидима для лимита, и один аккаунт вступал
+                    # бы в неограниченно много каналов за день.
+                    await _audit(pool, owner_id, "join", "ok",
+                                 operation_id=op_id, account_id=acc["id"], target=str(target)[:120])
             except Exception as exc:
                 log.warning("boost_subscribers op=%d acc=%s: %s", op_id, acc.get("id"), exc)
                 fail_count += 1
