@@ -7301,9 +7301,20 @@ async def _exec_bulk_create_channels(
                     ch_hash,
                     ch_type,
                 )
-                # Set username if pattern provided — 60-120s delay prevents geo-ban detection
+                # Публичный @username — не в первые секунды жизни канала: пустой
+                # свежий канал, мгновенно ставший публичным, Telegram распознаёт
+                # как спам-фабрику и скрывает из поиска (теневой бан). Разносим
+                # «создан» и «стал публичным» ощутимой паузой с поправкой на время
+                # суток (ночью медленнее). Раньше комментарий обещал 60–120с, а код
+                # давал uniform(30,60) — рассинхрон устранён.
                 if username:
-                    await asyncio.sleep(random.uniform(30, 60))
+                    _pub_delay = random.uniform(45, 120)
+                    try:
+                        from services import session_simulator as _sim_pub
+                        _pub_delay *= _sim_pub.time_of_day_factor()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(_pub_delay)
                     err = await account_manager.set_channel_username(
                         acc["session_str"], ch_id, username, _acc=acc
                     )

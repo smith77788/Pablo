@@ -60,3 +60,20 @@ def test_managed_channels_insert_after_username_assigned():
     i_user = body.index("set_channel_username")
     i_insert = body.index("INSERT INTO managed_channels")
     assert i_user < i_insert
+
+
+def _legacy_body() -> str:
+    i = WORKER.index("async def _exec_bulk_create_channels(")
+    j = WORKER.index("\nasync def ", i + 1)
+    return WORKER[i:j]
+
+
+def test_legacy_factory_pause_matches_comment_and_scales_by_time():
+    # Legacy-режим (одиночный аккаунт) тоже не должен делать канал публичным в
+    # первые секунды. Рассинхрон устранён: паузы uniform(30,60) больше нет.
+    body = _legacy_body()
+    assert "random.uniform(30, 60)" not in body, (
+        "рассинхрон комментария и кода устранён — пауза перед публичностью реальная"
+    )
+    assert "random.uniform(45, 120)" in body
+    assert "time_of_day_factor()" in body
