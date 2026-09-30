@@ -1238,8 +1238,25 @@ def _normalize_device_profile(device: dict | None = None) -> dict[str, Any]:
         locale_lang, locale_system = _locale_for_country(payload.get("geo_country"))
         payload.setdefault("lang_code", locale_lang)
         payload.setdefault("system_lang_code", locale_system)
-    payload.setdefault("device_model", "Samsung SM-S911B")
-    payload.setdefault("system_version", "Android 14")
+    # Дефолтный device — не один и тот же на весь флот (аккаунты без
+    # сохранённого профиля иначе делят байт-в-байт один fingerprint = тривиальная
+    # кластеризация фермы). Выбираем из пула ДЕТЕРМИНИРОВАННО по id аккаунта:
+    # один аккаунт всегда одно устройство (смена device между коннектами сама по
+    # себе палит — так что стабильность важнее случайности).
+    if not payload.get("device_model") or not payload.get("system_version"):
+        _seed = payload.get("id") or payload.get("acc_id") or 0
+        try:
+            _seed = int(_seed)
+        except (TypeError, ValueError):
+            _seed = 0
+        if _ANDROID_DEVICES:
+            _dm, _sv = _ANDROID_DEVICES[_seed % len(_ANDROID_DEVICES)]
+        else:
+            _dm, _sv = "Samsung SM-S938B", "Android 17"
+        payload.setdefault("device_model", _dm)
+        payload.setdefault("system_version", _sv)
+        if not payload.get("app_version") and _APP_VERSIONS:
+            payload["app_version"] = _APP_VERSIONS[_seed % len(_APP_VERSIONS)]
     payload.setdefault("app_version", "11.5.3")
     # Пер-аккаунтное Telegram-приложение: весь флот под одной парой
     # TG_API_ID/HASH — прямой корреляционный признак связности когорты.
