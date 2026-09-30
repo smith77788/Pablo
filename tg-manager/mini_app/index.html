@@ -1564,8 +1564,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <!-- Массовые действия по каналам -->
     <div style="display:flex;gap:8px;padding:4px 0 6px">
-      <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 Массовый пост</button>
-      <button class="btn btn-s" onclick="openQuickPost()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">✍️ Быстрый пост</button>
+      <button class="btn btn-p" onclick="openMassPub()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 Публикация / рассылка</button>
       <button class="btn btn-s" onclick="openChannelFactory()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🏭 Создать</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
@@ -1859,12 +1858,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="mgmt-tile" onclick="openMassPub()">
         <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Массовая публикация</div>
-        <div class="mgmt-tile-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openQuickPost()">
-        <div class="mgmt-tile-ico">✍️</div>
-        <div class="mgmt-tile-lbl">Быстрый пост</div>
+        <div class="mgmt-tile-lbl">Публикация / рассылка</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openSpintax()">
@@ -1966,18 +1960,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="mgmt-tile" onclick="openMassPub()">
         <div class="mgmt-tile-ico">📣</div>
-        <div class="mgmt-tile-lbl">Массовая публикация</div>
+        <div class="mgmt-tile-lbl">Публикация / рассылка</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openBotFactory()">
         <div class="mgmt-tile-ico">🏭</div>
         <div class="mgmt-tile-lbl">Фабрика ботов</div>
         <div class="mgmt-tile-val" id="m-botfactory-val"></div>
-      </div>
-      <div class="mgmt-tile" onclick="openQuickPost()">
-        <div class="mgmt-tile-ico">✍️</div>
-        <div class="mgmt-tile-lbl">Быстрый пост</div>
-        <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openGrowthHub()">
         <div class="mgmt-tile-ico">📈</div>
@@ -4078,6 +4067,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec">📡 Публикация в наши каналы</div>
     <div class="lst" style="padding:14px">
+      <!-- Выбор каналов: «Все» (бывшая массовая публикация) или «Выбрать
+           вручную» (бывший «Быстрый пост» — тот же backend _exec_mass_publish,
+           отличался только ручным выбором). Оба режима шлют один и тот же
+           /api/miniapp/mass_publish. -->
+      <div class="field" style="margin-bottom:12px">
+        <label>В какие каналы</label>
+        <select id="mpScope" onchange="mpScopeToggle()">
+          <option value="all" selected>Во все мои каналы</option>
+          <option value="pick">Выбрать вручную</option>
+        </select>
+      </div>
+      <div class="field" id="mpPickWrap" style="display:none;margin-bottom:12px">
+        <label>Отметьте каналы (<span id="mpPickCount">0</span>)</label>
+        <div id="mpChannels" class="lst" style="max-height:260px;overflow:auto;margin-top:6px"><div class="spin-wrap"><div class="spin"></div></div></div>
+      </div>
       <!-- Экран обещал «во ВСЕ каналы» и спрашивал подтверждение, ни разу не
            назвав число: человек жал необратимую кнопку, не зная, три у него
            канала или триста. Теперь адресаты названы до нажатия. -->
@@ -12006,8 +12010,7 @@ function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></d
 // ── Создать операцию: категорийный лаунчер ──────────────
 const OP_CREATE_CATS = [
   {title:'📢 Контент и публикация', items:[
-    {ico:'✍️', name:'Быстрый пост', sub:'Пост в выбранные каналы', fn:'openQuickPost'},
-    {ico:'📤', name:'Массовая публикация', sub:'Во все каналы сразу', fn:'openMassPub'},
+    {ico:'📤', name:'Публикация / рассылка', sub:'В каналы (все или выбранные), подписчикам бота или в ЛС', fn:'openMassPub'},
     {ico:'📋', name:'Контент-клонер', sub:'Копировать контент канала', fn:'openContentCloner'},
   ]},
   {title:'🚀 Продвижение', items:[
@@ -13503,6 +13506,12 @@ function openMassPub() {
   { const _e=document.getElementById('mpEditorial'); if(_e) _e.innerHTML=''; }
   document.getElementById('mpErr').style.display='none';
   document.getElementById('mpBtn').disabled=false;
+  // Сброс выбора каналов (режим «Выбрать»): начинаем со «Все», picker свёрнут.
+  MP_PICKED = new Set();
+  { const _sc=document.getElementById('mpScope'); if(_sc) _sc.value='all'; }
+  { const _pc=document.getElementById('mpPickCount'); if(_pc) _pc.textContent='0'; }
+  { const _mc=document.getElementById('mpChannels'); if(_mc) _mc.dataset.loaded=''; }
+  if (typeof mpScopeToggle === 'function') mpScopeToggle();
   push('s-masspub');
   loadMpTargets();
   loadMpOps();
@@ -13658,14 +13667,62 @@ async function loadMpOps() {
   }
 }
 
+// Выбор каналов вручную (поглощённый «Быстрый пост»): режим «Выбрать» экрана
+// публикации. Тот же backend mass_publish, просто явный channel_ids.
+let MP_PICKED = new Set();
+function mpScopeToggle() {
+  const scope = document.getElementById('mpScope')?.value || 'all';
+  const wrap = document.getElementById('mpPickWrap');
+  const canaryField = document.getElementById('mpCanary') ? document.getElementById('mpCanary').closest('.field') : null;
+  if (scope === 'pick') {
+    if (wrap) wrap.style.display = 'block';
+    if (canaryField) canaryField.style.display = 'none';  // ручной выбор сам ограничивает набор
+    loadMpChannelPicker();
+  } else {
+    if (wrap) wrap.style.display = 'none';
+    if (canaryField) canaryField.style.display = '';
+  }
+}
+async function loadMpChannelPicker() {
+  const box = document.getElementById('mpChannels');
+  if (!box || box.dataset.loaded === '1') return;
+  try {
+    const d = await api('/api/miniapp/channels');
+    const chs = d.channels || [];
+    if (!chs.length) { box.innerHTML = empty('📢','Нет каналов','Создайте канал в «Фабрике каналов» или импортируйте'); return; }
+    box.innerHTML = chs.map(function(c){ return '' +
+      '<div class="row tap" onclick="toggleMpChannel('+c.id+')">' +
+        '<div class="row-ico" id="mpc-'+c.id+'" style="background:rgba(96,165,250,.16)">📢</div>' +
+        '<div class="row-body">' +
+          '<div class="row-name">'+esc(c.title||c.username||c.id)+'</div>' +
+          '<div class="row-val">'+(c.username?'@'+esc(c.username)+' · ':'')+((c.member_count||c.members_count||0).toLocaleString())+' подп.</div>' +
+        '</div></div>'; }).join('');
+    box.dataset.loaded = '1';
+  } catch(e) {
+    box.innerHTML = errHtml('Не удалось загрузить каналы: '+((e&&e.message)||''), 'loadMpChannelPicker()');
+  }
+}
+function toggleMpChannel(id) {
+  const ico = document.getElementById('mpc-'+id);
+  if (MP_PICKED.has(id)) { MP_PICKED.delete(id); if(ico){ico.textContent='📢';ico.style.background='rgba(96,165,250,.16)';} }
+  else { MP_PICKED.add(id); if(ico){ico.textContent='✅';ico.style.background='rgba(52,211,153,.16)';} }
+  const c = document.getElementById('mpPickCount'); if (c) c.textContent = MP_PICKED.size;
+}
+
 async function sendMassPublish() {
   const text = document.getElementById('mpText').value.trim();
   const delay = parseInt(document.getElementById('mpDelay').value);
-  const canary = Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0);
+  const scope = document.getElementById('mpScope') ? document.getElementById('mpScope').value : 'all';
+  const canary = scope === 'pick' ? 0 : Math.max(0, parseInt(document.getElementById('mpCanary')?.value)||0);
   const errEl = document.getElementById('mpErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
-  if (MP_TOTAL === 0) {
+  let pickedIds = null;
+  if (scope === 'pick') {
+    pickedIds = [...MP_PICKED];
+    if (!pickedIds.length) { errEl.textContent='Отметьте хотя бы один канал'; errEl.style.display='block'; return; }
+  }
+  if (scope !== 'pick' && MP_TOTAL === 0) {
     errEl.textContent='Публиковать некуда: ни одного вашего канала не найдено. Создайте канал в «Фабрике каналов» или импортируйте существующие.';
     errEl.style.display='block'; return;
   }
@@ -13703,7 +13760,15 @@ async function sendMassPublish() {
   // назвать число адресатов. Раньше оно спрашивало «во ВСЕ ваши каналы?», и
   // человек подтверждал, не зная, три их или триста.
   let channel_ids = null;
-  if (canary > 0) {
+  if (scope === 'pick') {
+    // Ручной выбор каналов (поглощённый «Быстрый пост»): публикуем ровно в
+    // отмеченные. Канарейка тут не нужна — набор и так ограничен вручную.
+    const when = scheduled_for
+      ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru')+'. До этого операцию можно отменить в «Очереди операций».'
+      : '\n\nПосле старта публикацию нельзя отменить.';
+    if (!(await askConfirm(edNote+'Опубликовать в '+pickedIds.length+' '+plural(pickedIds.length,'выбранный канал','выбранных канала','выбранных каналов')+'?'+when))) return;
+    channel_ids = pickedIds;
+  } else if (canary > 0) {
     let targets;
     try {
       // Берём адресатов ровно из того набора, в который уйдёт полная публикация.
