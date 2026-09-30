@@ -133,6 +133,16 @@ async def set_avatar_from_url(
                     return {"ok": False, "error": f"HTTP {resp.status} downloading photo"}
                 data = await resp.read()
 
+        # Уникализация: один и тот же avatar_url на весь флот = байт-в-байт
+        # идентичное фото профиля у всех аккаунтов, тривиальная кластеризация
+        # фермы. Даём каждому аккаунту незаметно-уникальный вариант (пиксельный/
+        # байтовый джиттер). Fail-safe: при сбое вернутся исходные байты.
+        try:
+            from services import media_uniquifier as _mu
+            data = _mu.uniquify(data, filename="avatar.jpg")
+        except Exception:
+            log_exc_swallow(log, "set_avatar_from_url: uniquify")
+
         file = await asyncio.wait_for(
             client.upload_file(data, file_name="avatar.jpg"),
             timeout=30.0,
@@ -167,6 +177,13 @@ async def set_avatar_from_bytes(
     except ConnectFailed as _cf:
         return {"ok": False, "error": str(_cf)}
     try:
+        # Уникализация байтов аватара — чтобы флот не делил байт-в-байт одно фото
+        # (кластеризация фермы). Fail-safe: при сбое остаются исходные байты.
+        try:
+            from services import media_uniquifier as _mu
+            photo_bytes = _mu.uniquify(photo_bytes, filename=filename)
+        except Exception:
+            log_exc_swallow(log, "set_avatar_from_bytes: uniquify")
         file = await asyncio.wait_for(
             client.upload_file(photo_bytes, file_name=filename),
             timeout=30.0,
