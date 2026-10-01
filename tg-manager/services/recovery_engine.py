@@ -480,7 +480,10 @@ async def _queue_recovery(
             op_id = op["id"]
             stuck_min = round(float(op.get("stuck_minutes") or 0))
             retry = op.get("retry_count") or 0
-            max_ret = op.get("max_retries") or 3
+            # Ноль — «не повторять»: `or 3` возвращал зависшую операцию в
+            # очередь трижды, хотя её тип ретраи отключил осознанно.
+            max_ret = (3 if op.get("max_retries") is None
+                       else int(op.get("max_retries")))
 
             # Если retries < max_retries → вернуть в pending с экспоненциальным backoff
             # Если retries >= max_retries → пометить как failed (dead letter)

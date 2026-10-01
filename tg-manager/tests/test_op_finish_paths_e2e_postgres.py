@@ -285,3 +285,129 @@ def test_crash_finish_reports_zero_rows_on_a_cancelled_operation(pool):
             json.dumps({"status": "failed"}))
 
     assert _run(_go()).strip().endswith(" 0")
+
+
+# ── Переходы состояний на живом прогоне ──────────────────────────────────────
+#
+# Выше проверены сами запросы, здесь — весь путь: _run_op_task ведёт операцию
+# от 'running' до терминального статуса на настоящей базе. Связку в прежних
+# тестах видно только по исходнику, а она и есть то, что получает владелец.
+
+async def _drive(pool, handler, *, max_retries=0, total=3):
+    """Провести операцию через воркер с подменённым исполнителем."""
+    from services import op_worker as w
+
+    op_id = await _new_op(pool, status="pending", total_items=total,
+                          max_retries=max_retries)
+    rows = await pool.fetch(
+        "UPDATE operation_queue SET status='running', started_at=now() WHERE id=$1 "
+        "RETURNING id, owner_id, op_type, params", op_id)
+    _orig = w.handler_for
+    w.handler_for = lambda _op_type: handler
+    try:
+        await w._run_op_task(pool, None, dict(rows[0]))
+    finally:
+        w.handler_for = _orig
+    return op_id, await pool.fetchrow(
+        "SELECT status, done_items, error_msg, result->>'ok' AS ok, "
+        "result->>'failed' AS failed, result->>'summary' AS summary "
+        "FROM operation_queue WHERE id=$1", op_id)
+
+
+async def _log_ok(pool, op_id, targets):
+    for i, t in enumerate(targets):
+        await pool.execute(
+            "INSERT INTO operation_log(op_id, step_num, target, status) "
+            "VALUES($1,$2,$3,'ok')", op_id, i, t)
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+
+def test_crash_after_real_work_ends_as_partial(pool):
+    """Главный разрыв цикла 26: обрыв на 3 целях из 3 — не «ничего не вышло»."""
+    async def _handler(p, bot, op_id, owner_id, params):
+        await _log_ok(p, op_id, ["a", "b"])
+        raise RuntimeError("прокси отвалился на середине")
+
+    async def _go():
+        return await _drive(pool, _handler)
+
+    op_id, row = _run(_go())
+    assert row["status"] == "partial", row
+    assert row["ok"] == "2", "счётчик взят не из журнала целей"
+    assert "прокси отвалился" in (row["error_msg"] or "")
+    assert "2" in (row["summary"] or ""), row["summary"]
+
+
+def test_crash_before_any_work_is_still_failed(pool):
+    """Не было работы — не было и частичного успеха: честный провал."""
+    async def _handler(p, bot, op_id, owner_id, params):
+        raise RuntimeError("аккаунт не подключился")
+
+    async def _go():
+        return await _drive(pool, _handler)
+
+    _op_id, row = _run(_go())
+    assert row["status"] == "failed", row
+    assert row["ok"] == "0"
+
+
+def test_owner_cancellation_during_the_run_keeps_the_counters(pool):
+    """Владелец нажал «Отменить» на ходу: статус отмены и при нём — что успели."""
+    async def _handler(p, bot, op_id, owner_id, params):
+        await _log_ok(p, op_id, ["a"])
+        await p.execute(
+            "UPDATE operation_queue SET status='cancelled' WHERE id=$1", op_id)
+        return {"status": "cancelled", "ok": 1, "failed": 0,
+                "summary": "Отменено. Опубликовано: 1"}
+
+    async def _go():
+        return await _drive(pool, _handler)
+
+    _op_id, row = _run(_go())
+    assert row["status"] == "cancelled", row
+    assert row["ok"] == "1", "итог отмены снова потерян"
+    assert "1" in (row["summary"] or "")
+
+
+def test_a_clean_run_is_still_done(pool):
+    """Сторож самой проверки: здоровый прогон не стал ни partial, ни cancelled."""
+    async def _handler(p, bot, op_id, owner_id, params):
+        await _log_ok(p, op_id, ["a", "b", "c"])
+        return {"status": "done", "ok": 3, "failed": 0, "summary": "Готово: 3"}
+
+    async def _go():
+        return await _drive(pool, _handler)
+
+    _op_id, row = _run(_go())
+    assert row["status"] == "done", row
+    assert row["ok"] == "3" and row["done_items"] == 3
+
+
+def test_zero_retries_means_the_run_is_not_repeated(pool):
+    """`max_retries=0` — «не повторять». Читатель с `or 3` давал три повтора.
+
+    Именно так и нашлось: падающий исполнитель у операции без ретраев уходил в
+    `pending` вместо терминального статуса.
+    """
+    async def _handler(p, bot, op_id, owner_id, params):
+        raise RuntimeError("обрыв")
+
+    async def _go():
+        return await _drive(pool, _handler, max_retries=0)
+
+    _op_id, row = _run(_go())
+    assert row["status"] == "failed", row
+
+
+def test_a_normal_limit_still_retries(pool):
+    """Сторож проверки: с заданным пределом повтор обязан работать как раньше."""
+    async def _handler(p, bot, op_id, owner_id, params):
+        raise RuntimeError("обрыв")
+
+    async def _go():
+        return await _drive(pool, _handler, max_retries=2)
+
+    _op_id, row = _run(_go())
+    assert row["status"] == "pending", (
+        "операция с разрешёнными повторами обязана вернуться в очередь")

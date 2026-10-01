@@ -1497,7 +1497,13 @@ async def _maybe_requeue(
     if not row:
         return False
     retry_count = (row["retry_count"] or 0) + 1
-    max_retries = row["max_retries"] or 3
+    # `or 3` здесь был дырой: ноль — это «НЕ повторять», и `or` превращал его в
+    # три автоматических повтора. Тип, у которого ретраи выключены осознанно
+    # (`create_chatlist_folder`: «Экспорт не идемпотентен — каждый прогон плодит
+    # ссылку»), получал ровно то, от чего его автор защищался. Тройка остаётся
+    # фолбэком только для NULL, то есть для строк без заданного предела.
+    _mr = row["max_retries"]
+    max_retries = 3 if _mr is None else int(_mr)
 
     if retry_count > max_retries:
         return False
@@ -3915,7 +3921,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 retry_info = ""
                 if retry_row:
                     rc = retry_row["retry_count"] or 0
-                    mr = retry_row["max_retries"] or 3
+                    # Ноль — «не повторять», а не «три»: иначе владельцу
+                    # показывалось «Попыток: 1/3» у операции без ретраев.
+                    mr = (3 if retry_row["max_retries"] is None
+                          else int(retry_row["max_retries"]))
                     if rc > 0:
                         retry_info = f"\nПопыток: {rc}/{mr} — лимит исчерпан"
                     else:

@@ -742,7 +742,9 @@ async def cb_ops_dashboard(
             total = op["total_items"] or 0
             created = op["created_at"].strftime("%d.%m %H:%M") if op["created_at"] else "—"
             retry_count = op["retry_count"] or 0
-            max_retries = op["max_retries"] or 3
+            # Ноль — «не повторять»: иначе операция без ретраев никогда не
+            # показывалась исчерпавшей попытки (max_retries > 0 ниже).
+            max_retries = 3 if op["max_retries"] is None else int(op["max_retries"])
             is_dead = op["status"] == "failed" and max_retries > 0 and retry_count >= max_retries
 
             if op["status"] == "running" and total:
@@ -2246,7 +2248,7 @@ async def cb_op_detail(
     await safe_answer(callback)
 
     _retry_count = op["retry_count"] or 0
-    _max_retries = op["max_retries"] or 3
+    _max_retries = 3 if op["max_retries"] is None else int(op["max_retries"])
     _is_dead_letter = (
         op["status"] == "failed"
         and _max_retries > 0
