@@ -11225,6 +11225,19 @@ let CH_LOADING = false;
 let CH_SEARCH = '';
 let CH_FILTER = 'all';
 let _chSearchT = null;
+// Счётчики срезов приходят с сервера: считать их по загруженным страницам
+// значило показывать «👑 Мои 500» человеку, у которого их девятьсот.
+let CH_COUNTS = null;
+
+// Поиск и срез — параметры ЗАПРОСА, а не фильтр по загруженному. Иначе поиск
+// по каналу со следующей страницы не находит ничего, хотя канал есть.
+function _chQuery(offset) {
+  const p = new URLSearchParams({limit: String(CH_PAGE), offset: String(offset)});
+  if (CH_SEARCH) p.set('search', CH_SEARCH);
+  if (CH_FILTER === 'channel' || CH_FILTER === 'group') p.set('kind', CH_FILTER);
+  if (CH_FILTER === 'mine' || CH_FILTER === 'foreign') p.set('role', CH_FILTER);
+  return '/api/miniapp/channels?' + p.toString();
+}
 
 async function openChannels() {
   push('s-channels');
@@ -11232,11 +11245,12 @@ async function openChannels() {
   const box = document.getElementById('chLoadMore'); if (box) box.innerHTML = '';
   CH_OFFSET = 0;
   try {
-    const d = await api('/api/miniapp/channels?limit=' + CH_PAGE + '&offset=0');
+    const d = await api(_chQuery(0));
     CUR_CHANNELS = d.channels||[];
     CH_OFFSET = CUR_CHANNELS.length;
     CH_TOTAL = (d.total!=null?d.total:CUR_CHANNELS.length);
-    txt('ch-cnt', CH_TOTAL+' каналов');
+    CH_COUNTS = d.counts || null;
+    txt('ch-cnt', ((CH_COUNTS && CH_COUNTS.all!=null) ? CH_COUNTS.all : CH_TOTAL)+' каналов');
     renderChFilterChips();
     if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Создайте сеть каналов или импортируйте существующие',
       {label:'📡 Фабрика каналов', fn:'openChannelFactory()'})); renderChLoadMore(0); return; }
@@ -11252,8 +11266,9 @@ async function loadMoreChannels() {
   const box = document.getElementById('chLoadMore');
   if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
   try {
-    const d = await api('/api/miniapp/channels?limit=' + CH_PAGE + '&offset=' + CH_OFFSET);
+    const d = await api(_chQuery(CH_OFFSET));
     const more = d.channels||[];
+    if (d.counts) CH_COUNTS = d.counts;
     // Страница могла вернуться пустой (каналы удалили между запросами) — тогда
     // дальше идти некуда, иначе кнопка «загрузить ещё» осталась бы вечной.
     if (!more.length) { CH_TOTAL = CUR_CHANNELS.length; }
@@ -11263,7 +11278,7 @@ async function loadMoreChannels() {
       CH_OFFSET += more.length;
       if (d.total!=null) CH_TOTAL = d.total;
     }
-    txt('ch-cnt', CH_TOTAL+' каналов');
+    txt('ch-cnt', ((CH_COUNTS && CH_COUNTS.all!=null) ? CH_COUNTS.all : CH_TOTAL)+' каналов');
     renderChFilterChips();
     renderChannels();
     if (CH_SEL_MODE) updateChSelBar();
@@ -11273,50 +11288,68 @@ async function loadMoreChannels() {
   } finally { CH_LOADING = false; }
 }
 
-function _chFiltered() {
-  const q = CH_SEARCH;
-  return CUR_CHANNELS.filter(c => {
-    const isGroup = (c.type==='supergroup' || c.type==='group' || c.type==='chat');
-    if (CH_FILTER==='channel' && isGroup) return false;
-    if (CH_FILTER==='group'   && !isGroup) return false;
-    if (CH_FILTER==='mine'    && c.role!=='owner') return false;
-    if (CH_FILTER==='foreign' && c.role!=='member') return false;
-    if (!q) return true;
-    return ((c.title||'') + ' @' + (c.username||'') + ' ' + (c.channel_id||'')).toLowerCase().includes(q);
-  });
+// Срез и поиск применяет СЕРВЕР (см. _chQuery): фильтровать здесь ещё раз
+// значило бы отбрасывать строки, которые сервер уже отобрал, и снова показывать
+// только загруженное.
+function _chFiltered() { return CUR_CHANNELS; }
+// Смена поиска или среза — это НОВЫЙ запрос с первой страницы, а не фильтр по
+// уже загруженному: иначе видно только то, что успело приехать.
+async function reloadChannels() {
+  txt('chList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  CH_OFFSET = 0;
+  try {
+    const d = await api(_chQuery(0));
+    CUR_CHANNELS = d.channels || [];
+    CH_OFFSET = CUR_CHANNELS.length;
+    CH_TOTAL = (d.total != null ? d.total : CUR_CHANNELS.length);
+    if (d.counts) CH_COUNTS = d.counts;
+    txt('ch-cnt', ((CH_COUNTS && CH_COUNTS.all!=null) ? CH_COUNTS.all : CH_TOTAL)+' каналов');
+    renderChFilterChips();
+    renderChannels();
+    if (CH_SEL_MODE) updateChSelBar();
+  } catch(e) {
+    txt('chList', errHtml(e.message, 'reloadChannels()'));
+  }
 }
 function onChSearch(v) {
   CH_SEARCH = (v||'').trim().toLowerCase();
   clearTimeout(_chSearchT);
-  _chSearchT = setTimeout(()=>{ renderChFilterChips(); renderChannels(); }, 200);
+  _chSearchT = setTimeout(reloadChannels, 300);
 }
 function filterChannels(mode) {
   CH_FILTER = mode;
-  renderChFilterChips();
-  renderChannels();
   try { tg.HapticFeedback?.selectionChanged(); } catch(_) {}
+  reloadChannels();
 }
 function resetChFilters() {
   CH_SEARCH = ''; CH_FILTER = 'all';
   const i = document.getElementById('chSearch'); if (i) i.value = '';
-  renderChFilterChips(); renderChannels();
+  reloadChannels();
 }
 function renderChFilterChips() {
   const box = document.getElementById('chFilterChips');
   if (!box) return;
-  const by = {channel:0, group:0, mine:0, foreign:0};
-  CUR_CHANNELS.forEach(c => {
-    if (c.type==='supergroup'||c.type==='group'||c.type==='chat') by.group++; else by.channel++;
-    if (c.role==='owner') by.mine++;
-    else if (c.role==='member') by.foreign++;
-  });
-  const defs = [['all','Все',CUR_CHANNELS.length], ['mine','👑 Мои',by.mine],
+  // Счётчики приходят с сервера по ВСЕМ видимым каналам. Пока их нет (первый
+  // кадр), показываем загруженное — но как только приедут, цифра становится
+  // настоящей, а не «сколько успело загрузиться».
+  let by;
+  if (CH_COUNTS) {
+    by = {all:CH_COUNTS.all||0, channel:CH_COUNTS.channel||0, group:CH_COUNTS.group||0,
+          mine:CH_COUNTS.mine||0, foreign:CH_COUNTS.foreign||0};
+  } else {
+    by = {all:CUR_CHANNELS.length, channel:0, group:0, mine:0, foreign:0};
+    CUR_CHANNELS.forEach(c => {
+      if (c.type==='supergroup'||c.type==='group'||c.type==='chat') by.group++; else by.channel++;
+      if (c.role==='owner') by.mine++;
+      else if (c.role==='member') by.foreign++;
+    });
+  }
+  const defs = [['all','Все',by.all], ['mine','👑 Мои',by.mine],
                 ['channel','📡 Каналы',by.channel], ['group','💬 Группы',by.group],
                 ['foreign','👤 Чужие',by.foreign]];
-  const vis = defs.filter(([k,,n]) => k==='all' || n>0);
-  // Активный срез мог опуститься до нуля после подгрузки — иначе список остался
-  // бы пустым, а чипа, которым это снять, на экране уже нет.
-  if (!vis.some(([k]) => k === CH_FILTER)) CH_FILTER = 'all';
+  // Активный срез показываем всегда, даже если в нём ноль: иначе чип, которым
+  // его снять, исчезает с экрана, и пустой список выглядит как «каналов нет».
+  const vis = defs.filter(([k,,n]) => k==='all' || n>0 || k===CH_FILTER);
   if (vis.length <= 1) { box.style.display='none'; box.innerHTML=''; return; }
   box.style.display='flex';
   box.innerHTML = vis.map(([k,lbl,n]) =>

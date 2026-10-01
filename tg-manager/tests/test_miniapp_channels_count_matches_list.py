@@ -31,15 +31,23 @@ def _handler_source(name: str) -> str:
 
 
 def test_channels_count_and_list_agree_on_the_same_column():
+    """ВСЕ счётчики обработчика считают то же поле, что отдаёт список.
+
+    Проверялся только первый COUNT(DISTINCT …). Счётчиков рядом со списком стало
+    пять — общее число для «загрузить ещё» и четыре для чипов срезов, — и они
+    стоят на том же экране, под той же шапкой. Ошибись в любом, и чип «👑 Мои 47»
+    снова встанет рядом со списком из сорока.
+    """
     src = _handler_source("channels")
     listed = re.search(r"SELECT DISTINCT\s+(\w+)", src)
-    counted = re.search(r"COUNT\(DISTINCT\s+(\w+)\)", src)
+    counted = re.findall(r"COUNT\(DISTINCT\s+(\w+)\)", src)
     assert listed, "в списке каналов не найден SELECT DISTINCT — проверка ослепла"
     assert counted, "рядом со списком не найден COUNT(DISTINCT …) — проверка ослепла"
-    assert listed.group(1) == counted.group(1), (
-        f"список отдаёт DISTINCT {listed.group(1)}, а счётчик считает "
-        f"DISTINCT {counted.group(1)}: число в шапке не совпадёт со списком, "
-        "а «Загрузить ещё» будет предлагать несуществующие страницы"
+    wrong = sorted({c for c in counted if c != listed.group(1)})
+    assert not wrong, (
+        f"список отдаёт DISTINCT {listed.group(1)}, а счётчики считают "
+        f"DISTINCT {', '.join(wrong)}: число в шапке или на чипе не совпадёт со "
+        "списком, а «Загрузить ещё» будет предлагать несуществующие страницы"
     )
 
 

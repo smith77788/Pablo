@@ -20,15 +20,33 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py"
 
 
+def _sql_text(node: ast.AST) -> str | None:
+    """Текст SQL-литерала — и обычного, и f-строки.
+
+    Проба читала только ast.Constant. Как только запрос стал f-строкой (условие
+    видимости и срез собираются по кускам), она перестала его НАХОДИТЬ — то есть
+    молча ослепла вместо того, чтобы что-то проверить. Подставные части читаем
+    как `{...}`: они попадают в WHERE, а стеречь надо ORDER BY и список выборки.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(
+            part.value if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            else " {...} "
+            for part in node.values)
+    return None
+
+
 def _channels_fetch_sql() -> str:
     """Достаёт первый большой SQL-литерал из тела вложенной функции `channels`."""
     tree = ast.parse(SRC.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "channels":
             for sub in ast.walk(node):
-                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
-                    if "managed_channels" in sub.value and "ORDER BY" in sub.value.upper():
-                        return sub.value
+                text = _sql_text(sub)
+                if text and "managed_channels" in text and "ORDER BY" in text.upper():
+                    return text
     raise AssertionError("не нашли SQL-запрос списка каналов в функции channels")
 
 

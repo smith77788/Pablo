@@ -40,17 +40,33 @@ def _body(name: str) -> str:
     return src[i:j + 1]
 
 
+def _asks_for_a_page(body: str, builder: str = "_chQuery") -> bool:
+    """Загрузчик задаёт страницу сам или через общий сборщик адреса.
+
+    Раньше limit/offset клеились в каждом загрузчике вручную. Теперь адрес
+    списка каналов собирает `_chQuery` (туда же уехали поиск и срез), поэтому
+    признаём и прямое `limit=`, и обращение к сборщику — но сам сборщик
+    проверяем отдельно, чтобы делегирование не стало способом ничего не задать.
+    """
+    return ("limit=" in body and "offset=" in body) or (builder + "(") in body
+
+
 def test_list_loaders_request_explicit_page():
     """Срез запрашивается явно — иначе о его границах нечего и сказать."""
     bots = _body("loadBots")
     assert "limit=" in bots, "loadBots должен запрашивать явный limit"
 
-    chans = _body("openChannels")
-    assert "limit=" in chans and "offset=" in chans, (
-        "openChannels должен запрашивать страницу явно (limit+offset)")
+    builder = _body("_chQuery")
+    assert "limit" in builder and "offset" in builder, (
+        "_chQuery обязан задавать и limit, и offset — иначе страница «как выйдет»")
+
+    for fn in ("openChannels", "reloadChannels"):
+        assert _asks_for_a_page(_body(fn)), (
+            f"{fn} должен запрашивать страницу явно (limit+offset)")
 
     more = _body("loadMoreChannels")
-    assert "offset=" in more, "догрузка каналов идёт по offset"
+    assert "offset=" in more or "_chQuery(CH_OFFSET)" in more, (
+        "догрузка каналов идёт по offset")
 
 
 def test_lists_have_load_more_node():
@@ -94,10 +110,21 @@ def test_long_lists_have_search_and_slices():
     assert "onBotSearch(" in html and "onChSearch(" in html
 
 
-def test_empty_slice_resets_instead_of_showing_nothing():
-    """Опустевший срез сбрасывается на «Все» — иначе экран пуст и снять нечем."""
+def test_empty_slice_leaves_a_way_out():
+    """Из опустевшего среза есть выход — иначе экран пуст и снять его нечем.
+
+    Выходов ровно два, и оба годятся: либо срез сам возвращается в «Все», либо
+    чип активного среза остаётся на экране и при нуле. Раньше требовался только
+    первый. Для каналов он перестал быть верным: срез применяет сервер, и сброс
+    переменной ВНУТРИ отрисовки поменял бы подпись чипа, не перезапросив список
+    — на экране остались бы группы под заголовком «Все». Поэтому у каналов
+    выход второй: чип видно всегда, и он перезапрашивает список по нажатию.
+    """
     for fn, var in (("renderBotFilterChips", "BOT_FILTER"),
                     ("renderChFilterChips", "CH_FILTER")):
         body = _body(fn)
-        assert f"{var} = 'all'" in body, (
-            f"{fn} не возвращает срез в «Все», когда чипа среза больше нет")
+        resets = f"{var} = 'all'" in body
+        keeps_chip = f"k==={var}" in body or f"k === {var}" in body
+        assert resets or keeps_chip, (
+            f"{fn}: из пустого среза не выйти — чипа активного среза на экране "
+            "нет, и в «Все» он сам не возвращается")

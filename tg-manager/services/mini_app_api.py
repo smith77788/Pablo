@@ -913,6 +913,58 @@ def _jlist(val) -> list:
 SSE_TICK_SECONDS = 15
 
 
+# Какие каналы человек вообще видит: свои, из своих экосистем и из рабочих
+# пространств, где он состоит. Условие жило в файле дважды — в выборке страницы
+# и в подсчёте общего числа — и уже начинало расходиться. Теперь один текст на
+# оба запроса и на счётчики срезов: разъехаться нечему.
+_CHANNELS_VISIBLE_SQL = """
+    owner_id=$1
+    OR channel_id IN (
+        SELECT em2.object_id FROM ecosystem_members em2
+        JOIN ecosystems e ON e.id=em2.ecosystem_id
+        WHERE em2.object_type='channel'
+          AND (e.owner_id=$1
+               OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1))
+    )
+    OR id IN (
+        SELECT DISTINCT mc.id FROM managed_channels mc
+        JOIN workspaces w ON w.owner_id=mc.owner_id
+        JOIN workspace_members wm ON wm.workspace_id=w.id
+        WHERE wm.user_id=$1
+    )
+"""
+
+# Группа и канал различаются полем type, владение — is_creator/is_admin.
+_CHANNEL_IS_GROUP_SQL = "type IN ('supergroup','group','chat')"
+
+
+def _channel_filter_sql(kind: str | None, role: str | None,
+                        search: str | None, next_param: int) -> tuple[str, list]:
+    """Доп. условия среза и поиска + их параметры.
+
+    Поиск и срезы считались НА КЛИЕНТЕ, по уже загруженным страницам: у кого
+    каналов больше страницы, поиск по каналу с четвёртой страницы не находил
+    ничего, а чип «👑 Мои 500» показывал не сколько их, а сколько успело
+    загрузиться. Поэтому и то и другое переехало в запрос.
+    """
+    parts: list[str] = []
+    args: list = []
+    if kind == "group":
+        parts.append(_CHANNEL_IS_GROUP_SQL)
+    elif kind == "channel":
+        parts.append("NOT " + _CHANNEL_IS_GROUP_SQL)
+    if role == "mine":
+        parts.append("is_creator IS TRUE")
+    elif role == "foreign":
+        parts.append("is_admin IS FALSE")
+    if search:
+        parts.append(
+            f"(title ILIKE ${next_param} OR username ILIKE ${next_param} "
+            f"OR channel_id::text ILIKE ${next_param})")
+        args.append(f"%{search}%")
+    return ("".join(" AND " + p for p in parts), args)
+
+
 def _cloud_safe_name(name: str | None) -> str:
     """Имя файла, безопасное для манифеста и для заголовка ответа.
 
@@ -2694,24 +2746,33 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     @_cached_user()
     async def channels(request: web.Request) -> web.Response:
+        """Каналы владельца: страница + срез + поиск + честные счётчики срезов.
+
+        Поиск и срезы (каналы/группы/мои/чужие) раньше считались на клиенте по
+        уже загруженным страницам. У кого каналов больше страницы, поиск по
+        каналу со следующей страницы не находил ничего, а чип «👑 Мои 500»
+        показывал не сколько их, а сколько успело загрузиться — рядом с
+        заголовком, где стояло настоящее общее число.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        q = request.rel_url.query
         try:
-            limit = min(validate_integer(request.rel_url.query.get("limit", "500"), min_val=1, max_val=5000) or 500, 5000)
+            limit = min(validate_integer(q.get("limit", "500"), min_val=1, max_val=5000) or 500, 5000)
         except (ValueError, TypeError):
             limit = 500
         try:
-            offset = max(validate_integer(request.rel_url.query.get("offset", "0"), min_val=0) or 0, 0)
+            offset = max(validate_integer(q.get("offset", "0"), min_val=0) or 0, 0)
         except (ValueError, TypeError):
             offset = 0
-        # Показываем ВСЕ каналы доступные пользователю:
-        # 1) Личные каналы (owner_id = uid)
-        # 2) Каналы из экосистем пользователя
-        # 3) Каналы из рабочих пространств пользователя
-        # 4) Каналы созданные через подключённые аккаунты
+        kind = q.get("kind") if q.get("kind") in ("channel", "group") else None
+        role = q.get("role") if q.get("role") in ("mine", "foreign") else None
+        search = (q.get("search") or "").strip()[:100] or None
+
+        cond, extra = _channel_filter_sql(kind, role, search, next_param=4)
         rows = await _safe_fetch(pool,
-            """SELECT DISTINCT channel_id AS id, channel_id, username, title,
+            f"""SELECT DISTINCT channel_id AS id, channel_id, username, title,
                       COALESCE(members_count, 0) AS member_count,
                       type, added_at, is_admin, is_creator,
                       CASE
@@ -2721,46 +2782,44 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           ELSE 'unknown'
                       END AS role
                FROM managed_channels
-               WHERE owner_id=$1
-                  OR channel_id IN (
-                      SELECT em2.object_id FROM ecosystem_members em2
-                      JOIN ecosystems e ON e.id=em2.ecosystem_id
-                      WHERE em2.object_type='channel'
-                        AND (e.owner_id=$1
-                             OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1))
-                  )
-                  OR id IN (
-                      SELECT DISTINCT mc.id FROM managed_channels mc
-                      JOIN workspaces w ON w.owner_id=mc.owner_id
-                      JOIN workspace_members wm ON wm.workspace_id=w.id
-                      WHERE wm.user_id=$1
-                  )
+               WHERE ({_CHANNELS_VISIBLE_SQL}){cond}
                ORDER BY member_count DESC NULLS LAST
-               LIMIT $2 OFFSET $3""", uid, limit, offset)
+               LIMIT $2 OFFSET $3""", uid, limit, offset, *extra)
         # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
         # счётчик брал DISTINCT id (первичный ключ строки). Один и тот же канал
         # лежит в managed_channels отдельной строкой у каждого владельца, а выборка
         # тянет ещё и чужие строки — из экосистем и рабочих пространств. Общий
         # канал попадал в список один раз, а в счётчик — столько раз, сколько у
         # него владельцев: шапка писала «47 каналов» там, где их 40, и кнопка
-        # «Загрузить ещё» предлагала догрузить то, чего нет.
+        # «Загрузить ещё» предлагала догрузить то, чего нет. То же правило — и в
+        # счётчиках чипов ниже: они стоят рядом с этой же шапкой.
+        #
+        # Сколько каналов отвечает ТЕКУЩЕМУ срезу: по нему считается «загрузить
+        # ещё», и он обязан совпадать с тем, что реально отдаётся страницами.
+        cond_total, extra_total = _channel_filter_sql(kind, role, search, next_param=2)
         total = await _safe_count(pool,
-            """SELECT COUNT(DISTINCT channel_id) FROM managed_channels
-               WHERE owner_id=$1
-                  OR channel_id IN (
-                      SELECT em2.object_id FROM ecosystem_members em2
-                      JOIN ecosystems e ON e.id=em2.ecosystem_id
-                      WHERE em2.object_type='channel'
-                        AND (e.owner_id=$1
-                             OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1))
-                  )
-                  OR id IN (
-                      SELECT DISTINCT mc.id FROM managed_channels mc
-                      JOIN workspaces w ON w.owner_id=mc.owner_id
-                      JOIN workspace_members wm ON wm.workspace_id=w.id
-                      WHERE wm.user_id=$1
-                  )""", uid)
-        return _json_resp({"channels": rows, "total": int(total or 0), "offset": offset, "limit": limit})
+            f"""SELECT COUNT(DISTINCT channel_id) FROM managed_channels
+                WHERE ({_CHANNELS_VISIBLE_SQL}){cond_total}""", uid, *extra_total)
+        # Счётчики чипов — по ВСЕМ видимым каналам (и с учётом поиска, если он
+        # есть), одним запросом вместо подсчёта загруженного на клиенте.
+        cond_counts, extra_counts = _channel_filter_sql(None, None, search, next_param=2)
+        crow = await _safe_fetchrow(pool,
+            f"""SELECT COUNT(DISTINCT channel_id) AS all_n,
+                       COUNT(DISTINCT channel_id) FILTER (WHERE {_CHANNEL_IS_GROUP_SQL}) AS group_n,
+                       COUNT(DISTINCT channel_id) FILTER (WHERE NOT {_CHANNEL_IS_GROUP_SQL}) AS channel_n,
+                       COUNT(DISTINCT channel_id) FILTER (WHERE is_creator IS TRUE) AS mine_n,
+                       COUNT(DISTINCT channel_id) FILTER (WHERE is_admin IS FALSE) AS foreign_n
+                  FROM managed_channels
+                 WHERE ({_CHANNELS_VISIBLE_SQL}){cond_counts}""", uid, *extra_counts)
+        counts = {"all": 0, "channel": 0, "group": 0, "mine": 0, "foreign": 0}
+        if crow:
+            counts = {"all": int(crow["all_n"] or 0),
+                      "channel": int(crow["channel_n"] or 0),
+                      "group": int(crow["group_n"] or 0),
+                      "mine": int(crow["mine_n"] or 0),
+                      "foreign": int(crow["foreign_n"] or 0)}
+        return _json_resp({"channels": rows, "total": int(total or 0),
+                           "counts": counts, "offset": offset, "limit": limit})
 
     # ── Campaigns / Funnels ──────────────────────────────────────────────────
 
@@ -6003,7 +6062,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "SELECT channel_id AS id, channel_id, username, title, type, "
             "COALESCE(members_count, 0) AS member_count "
             "FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 "
-            "ORDER BY members_count DESC NULLS LAST LIMIT 500", uid, acc_id)
+            "ORDER BY member_count DESC NULLS LAST LIMIT 500", uid, acc_id)
         return _json_resp({"channels": rows, "total": len(rows or [])})
 
     async def account_bots(request: web.Request) -> web.Response:
@@ -8927,7 +8986,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rows = await _safe_fetch(pool,
                 "SELECT channel_id, username, title FROM managed_channels "
                 "WHERE owner_id=$1 AND acc_id=$2 "
-                "ORDER BY members_count DESC NULLS LAST, channel_id DESC LIMIT 8",
+                "ORDER BY member_count DESC NULLS LAST, channel_id DESC LIMIT 8",
                 uid, int(acc_id))
         elif kind == "group_announce":
             # Тот же набор и та же таксономия типов, что в groups_announce.
@@ -8942,7 +9001,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT channel_id, username, title FROM managed_channels "
                 "WHERE owner_id=$1 AND acc_id=$2 "
                 "AND type IN ('megagroup','supergroup','group','chat') "
-                "ORDER BY members_count DESC NULLS LAST, channel_id DESC LIMIT 8",
+                "ORDER BY member_count DESC NULLS LAST, channel_id DESC LIMIT 8",
                 uid, int(acc_id))
         elif kind == "join_all":
             # Тот же отбор, что invite_join_all, и тот же его потолок: без него
