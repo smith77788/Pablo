@@ -20,8 +20,16 @@ def _read(rel):
 def test_run_op_task_releases_on_crash():
     ow = _read("services/op_worker.py")
     body = ow[ow.index("async def _run_op_task"):ow.index("async def _exec_bulk_bot_edit")]
-    # except-ветка помечает операцию failed
-    assert "UPDATE operation_queue SET status='failed'" in body
+    # except-ветка закрывает операцию терминальным статусом. Он пишется
+    # ПАРАМЕТРОМ, а не литералом: операция, успевшая взять часть целей,
+    # называется 'partial' (см. services/op_status.classify_final), и сверка по
+    # литералу 'failed' ломалась бы ровно на том, что статус стал честным.
+    assert "op_status.classify_final(" in body, (
+        "статус при крахе снова решается не по счётчикам"
+    )
+    assert re.search(r"UPDATE operation_queue SET status=\$\d", body), (
+        "крах не закрывает операцию — она навсегда осталась бы 'running'"
+    )
     # finally ОБЯЗАН освобождать аккаунты и слот параллельности
     fin = body[body.rindex("finally:"):]
     assert "release_operation_accounts(op_id)" in fin

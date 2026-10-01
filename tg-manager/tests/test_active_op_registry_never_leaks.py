@@ -135,7 +135,12 @@ async def test_prologue_crash_is_not_swallowed_but_written_as_failure(worker, mo
     worker._active_op_ids.add(4242)
     await worker._run_op_task_guarded(pool, _Bot(), _row())
 
-    writes = [q for q, _ in pool.executed if "status='failed'" in q]
+    # Статус пишется параметром, а не литералом: операция, успевшая взять часть
+    # целей в прошлом прогоне, закрывается как 'partial'. Поэтому ищем запись
+    # терминального статуса, а не конкретное слово в тексте запроса.
+    writes = [q for q, a in pool.executed
+              if "SET status=$3" in q and "finished_at=now()" in q
+              and any(x in a for x in ("failed", "partial"))]
     assert writes, "операция навсегда осталась бы 'running' — терминальный статус не записан"
     assert "status NOT IN" in writes[0], (
         "запись статуса не защищена от гонки: она может затереть уже "

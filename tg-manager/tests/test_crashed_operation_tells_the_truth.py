@@ -143,12 +143,19 @@ def test_the_crash_branch_saves_the_counters():
 
 
 def test_the_crash_branch_is_visible_outside_the_log():
+    """Три канала объявления переехали в одну дверь — проверяем и её, и вызов."""
     branch = _crash_branch()
-    assert "infragram_operations_total" in branch, (
-        "упавшие операции не попадали на график исходов вовсе")
-    assert "compliance_engine" in branch, (
+    assert "_announce_op_outcome(" in branch, (
+        "упавшие операции не попадали ни на график исходов, ни в аудит, ни в "
+        "память организма")
+    src = _read("services/op_worker.py")
+    door = src[src.index("async def _announce_op_outcome("):]
+    door = door[:door.index("\nasync def ", 10)]
+    assert "infragram_operations_total" in door, (
+        "общая дверь не ведёт на график исходов")
+    assert "compliance_engine" in door, (
         "аудит-трейл обещает ВСЕ операции единым choke point")
-    assert '"op_done"' in branch, "память организма не узнавала о падении"
+    assert '"op_done"' in door, "память организма не узнаёт о завершении"
 
 
 def test_the_audit_outcome_follows_the_status():

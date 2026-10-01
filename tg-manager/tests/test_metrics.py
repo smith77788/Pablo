@@ -80,10 +80,22 @@ def test_metrics_never_raise_on_bad_input():
 # ── четыре сигнала из аудита реально подключены ───────────────────────────────
 
 def test_operation_outcome_and_duration_are_instrumented():
+    """Счётчики исхода живут в общей двери объявления, а путь её зовёт.
+
+    Три канала (график, шина, аудит) были скопированы на каждый путь завершения
+    отдельно, и каждый новый путь терял их целиком; теперь они перечислены в
+    `_announce_op_outcome`. Проверяем и дверь, и то, что успешный путь её зовёт
+    с длительностью — иначе гистограмма времени операции осталась бы пустой.
+    """
     body = _func_src("services/op_worker.py", "_run_op_task")
-    assert "infragram_operations_total" in body, "исход операции не считается"
-    assert "infragram_operation_seconds" in body, "длительность операции не меряется"
+    assert "_announce_op_outcome(" in body, "исход операции никуда не объявляется"
     assert "_t_started" in body
+    assert "duration_s=time.monotonic() - _t_started" in body, (
+        "длительность операции не передаётся — гистограмма останется пустой"
+    )
+    door = _func_src("services/op_worker.py", "_announce_op_outcome")
+    assert "infragram_operations_total" in door, "исход операции не считается"
+    assert "infragram_operation_seconds" in door, "длительность операции не меряется"
 
 
 def test_flood_events_are_instrumented():

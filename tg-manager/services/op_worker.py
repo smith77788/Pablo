@@ -803,6 +803,59 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
         return 0, 0
 
 
+async def _announce_op_outcome(
+    pool: "asyncpg.Pool", op_id: int, owner_id, op_type: str, params,
+    status: str, ok, failed, summary: str = "",
+    duration_s: "float | None" = None,
+) -> None:
+    """Объявить исход операции всем, кроме самой очереди: графики, память, аудит.
+
+    ПОЧЕМУ ОДНА ДВЕРЬ. Этот блок из трёх каналов был скопирован на каждый путь
+    завершения отдельно, и каждый новый путь терял его целиком: отмена не
+    попадала ни на график, ни в аудит; упавшая операция — тоже; голодание по
+    флоту и исчерпанный бюджет живучести закрывались вообще одним UPDATE.
+    Чинилось это по одному исходу за раз, и причина у всех была общая — помнить
+    три канала при добавлении шестого пути завершения было нечем.
+
+    Теперь каналы перечислены в одном месте, а `tests/test_op_outcome_announced.py`
+    требует, чтобы КАЖДАЯ запись терминального статуса в очередь шла рядом с
+    вызовом этой функции (или делегировала его тому, кто её зовёт).
+
+    Каналы:
+      * `infragram_operations_total` — доля исходов по типу операции; плюс
+        `infragram_operation_seconds`, когда длительность известна;
+      * событие шины `op_done` — пара к `op_queued` из operation_bus.submit:
+        без неё жизненный цикл операции в памяти организма не замыкается;
+      * `compliance_engine.record` — подписанный аудит-трейл, который обещает
+        единый choke point и ВСЕ операции, а не выборочно.
+
+    Ничего не бросает: каждый канал отдельно, и сбой любого из них не может
+    помешать закрытию операции (статус в очереди пишет вызывающий ДО этого).
+    """
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_operations_total", {"op_type": op_type, "status": status})
+        if duration_s is not None:
+            _m.observe("infragram_operation_seconds", float(duration_s),
+                       {"op_type": op_type})
+    except Exception:
+        pass
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "op_done", {
+            "op_id": op_id, "op_type": op_type, "status": status,
+            "ok": ok, "failed": failed, "summary": (summary or "")[:300]})
+    except Exception:
+        pass
+    try:
+        from services import compliance_engine
+        await compliance_engine.record(
+            pool, owner_id, None, op_type, status, op_id=op_id,
+            params=params if isinstance(params, dict) else None)
+    except Exception:
+        pass
+
+
 async def _finish_cancelled_op(
     pool: "asyncpg.Pool", op_id: int, owner_id: int, op_type: str,
     params: dict, result: dict, duration_s: float,
@@ -843,29 +896,10 @@ async def _finish_cancelled_op(
         log_ctx=f"[run_op_cancelled op={op_id}]")
     log.info("op_worker: op_id=%d op_type=%s → cancelled in %.1fs (ok=%s failed=%s)",
              op_id, op_type, duration_s, result.get("ok"), result.get("failed"))
-    try:
-        from services import metrics as _m
-        _m.inc("infragram_operations_total",
-               {"op_type": op_type, "status": op_status.CANCELLED})
-        _m.observe("infragram_operation_seconds", float(duration_s),
-                   {"op_type": op_type})
-    except Exception:
-        pass
-    try:
-        from services.organism import spine
-        await spine.emit(pool, owner_id, "op_done", {
-            "op_id": op_id, "op_type": op_type, "status": op_status.CANCELLED,
-            "ok": result.get("ok"), "failed": result.get("failed"),
-            "summary": (result.get("summary") or "")[:300]})
-    except Exception:
-        pass
-    try:
-        from services import compliance_engine
-        await compliance_engine.record(
-            pool, owner_id, None, op_type, op_status.CANCELLED, op_id=op_id,
-            params=params if isinstance(params, dict) else None)
-    except Exception:
-        pass
+    await _announce_op_outcome(
+        pool, op_id, owner_id, op_type, params, op_status.CANCELLED,
+        result.get("ok"), result.get("failed"), result.get("summary") or "",
+        duration_s=duration_s)
 
 
 async def _finish_fleet_starved_op(
@@ -955,26 +989,8 @@ async def _finish_fleet_starved_op(
         "op_worker: op=%d op_type=%s → %s: флот был занят %d мин (ok=%d failed=%d)",
         op_id, op_type, status, waited_min, ok_n, failed_n)
     _reliability_metric("infragram_op_fleet_starved_total", op_type=op_type)
-    try:
-        from services import metrics as _m
-        _m.inc("infragram_operations_total",
-               {"op_type": op_type, "status": status})
-    except Exception:
-        pass
-    try:
-        from services.organism import spine
-        await spine.emit(pool, owner_id, "op_done", {
-            "op_id": op_id, "op_type": op_type, "status": status,
-            "ok": ok_n, "failed": failed_n, "summary": summary[:300]})
-    except Exception:
-        pass
-    try:
-        from services import compliance_engine
-        await compliance_engine.record(
-            pool, owner_id, None, op_type, status, op_id=op_id,
-            params=params if isinstance(params, dict) else None)
-    except Exception:
-        pass
+    await _announce_op_outcome(
+        pool, op_id, owner_id, op_type, params, status, ok_n, failed_n, summary)
     # Этот исход НЕ проходит через общий блок уведомлений в _run_op_task (он
     # ниже по коду, а путь делает return), поэтому раньше операция владельца
     # умирала молча: он видел «ожидает», потом ничего.
@@ -2232,26 +2248,8 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     log.error(
         "op_worker: op=%d op_type=%s → %s по бюджету живучести (%s, ok=%d failed=%d)",
         op_id, op_type, status, source, ok_n, failed_n)
-    try:
-        from services import metrics as _m
-        _m.inc("infragram_operations_total",
-               {"op_type": op_type, "status": status})
-    except Exception:
-        pass
-    try:
-        from services.organism import spine
-        await spine.emit(pool, owner_id, "op_done", {
-            "op_id": op_id, "op_type": op_type, "status": status,
-            "ok": ok_n, "failed": failed_n, "summary": summary[:300]})
-    except Exception:
-        pass
-    try:
-        from services import compliance_engine
-        await compliance_engine.record(
-            pool, owner_id, None, op_type, status, op_id=op_id,
-            params=params if isinstance(params, dict) else None)
-    except Exception:
-        pass
+    await _announce_op_outcome(
+        pool, op_id, owner_id, op_type, params, status, ok_n, failed_n, summary)
     await _notify_owner_about_op(
         pool, bot, owner_id,
         (f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей успело "
@@ -3450,14 +3448,59 @@ async def _run_op_task_guarded(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 bot=bot, owner_id=row.get("owner_id"),
             )
             if not requeued:
-                await _safe_execute(
+                # Сбой ДО исполнителя (разбор params, предохранитель, семафор).
+                # Внутри одного прогона сделанного здесь нет, но журнал целей
+                # переживает возвраты в очередь: операция, уже отработавшая
+                # часть целей и вернувшаяся после флуд-паузы, могла упасть в
+                # прологе — и закрывалась ровным провалом без единой цифры.
+                _pro_op_type = str(row.get("op_type") or "unknown")
+                _pro_params = row.get("params")
+                if isinstance(_pro_params, str):
+                    try:
+                        _pro_params = json.loads(_pro_params)
+                    except (ValueError, TypeError):
+                        _pro_params = None
+                if not isinstance(_pro_params, dict):
+                    _pro_params = {}
+                _pro_ok, _pro_failed = await _journal_counters(pool, op_id)
+                _pro_status = op_status.classify_final(
+                    op_status.FAILED, ok=_pro_ok, failed=_pro_failed)
+                _pro_reason = f"Операция не запустилась: {str(e)[:200]}"
+                _pro_summary = (
+                    f"⚠️ Успело {_pro_ok}, затем операция не смогла запуститься"
+                    if _pro_ok else f"❌ {_pro_reason}"
+                )
+                _pro_res = await _safe_execute(
                     pool,
-                    "UPDATE operation_queue SET status='failed', finished_at=now(), "
-                    "started_at=NULL, error_msg=COALESCE(error_msg, $1) "
+                    "UPDATE operation_queue SET status=$3, finished_at=now(), "
+                    "started_at=NULL, error_msg=COALESCE(error_msg, $1), "
+                    "result=$4::jsonb, acct_wait_since=NULL "
                     f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
-                    f"Операция не запустилась: {str(e)[:200]}", op_id,
+                    _pro_reason, op_id, _pro_status,
+                    json.dumps(
+                        _normalize_result(
+                            {"status": _pro_status, "ok": _pro_ok,
+                             "failed": _pro_failed, "reason": _pro_reason,
+                             "summary": _pro_summary},
+                            _pro_op_type, 0.0),
+                        ensure_ascii=False),
                     log_ctx=f"[run_op_prologue_fail op={op_id}]",
                 )
+                # Ноль строк — операция уже терминальна (почти всегда отмена
+                # владельцем). Об исходе, которого не было, не докладываем.
+                if not str(_pro_res or "").strip().endswith(" 0"):
+                    await _announce_op_outcome(
+                        pool, op_id, row.get("owner_id"), _pro_op_type,
+                        _pro_params, _pro_status, _pro_ok, _pro_failed,
+                        _pro_summary)
+                    await _notify_owner_about_op(
+                        pool, bot, row.get("owner_id"),
+                        f"❌ <b>Операция #{op_id}</b> не запустилась: "
+                        f"{str(e)[:150]}\n\nПопробуйте запустить её снова."
+                        + (f"\n\nУже отработанные цели ({_pro_ok}) повтор "
+                           f"пропустит." if _pro_ok else ""),
+                        dedup_key=f"prologue-fail:{op_id}",
+                    )
         except Exception:
             log_exc_swallow(log, f"op_worker: разбор сбоя пролога op={op_id}")
     finally:
@@ -3820,34 +3863,14 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _err_text,
                 log_ctx=f"[run_op_done op={op_id}]",
             )
-            # Метрики (аудит №6): доля успеха и длительность по типу операции —
-            # без них о деградации узнавали из жалобы клиента, а не с графика.
-            try:
-                from services import metrics as _m
-                _m.inc("infragram_operations_total",
-                       {"op_type": op_type, "status": _final_status})
-                _m.observe("infragram_operation_seconds",
-                           time.monotonic() - _t_started, {"op_type": op_type})
-            except Exception:
-                pass
-            # Событие в шину организма: операция завершена (память + реакция мозга).
-            try:
-                from services.organism import spine
-                await spine.emit(pool, owner_id, "op_done", {
-                    "op_id": op_id, "op_type": op_type, "status": _final_status,
-                    "ok": result.get("ok"), "failed": result.get("failed"),
-                    "summary": (result.get("summary") or "")[:300]})
-            except Exception:
-                pass
-            # Комплаенс: подписанная запись в аудит-трейл — покрываем ВСЕ операции
-            # (единый choke point), а не выборочно. record() никогда не бросает.
-            try:
-                from services import compliance_engine
-                await compliance_engine.record(
-                    pool, owner_id, None, op_type, _final_status,
-                    op_id=op_id, params=params if isinstance(params, dict) else None)
-            except Exception:
-                pass
+            # Графики, память организма и подписанный аудит — одной дверью:
+            # см. _announce_op_outcome (блок был скопирован на каждый путь
+            # завершения, и каждый новый путь терял его целиком).
+            await _announce_op_outcome(
+                pool, op_id, owner_id, op_type, params, _final_status,
+                result.get("ok"), result.get("failed"),
+                result.get("summary") or "",
+                duration_s=time.monotonic() - _t_started)
             # Autopost v2: рекуррентная переочередь постинг-операций в СВОИ каналы.
             # repeat_interval_min>0 → после успешного прогона ставим следующий с
             # scheduled_for=now()+interval. Только постинг-op'ы (allowlist) — чтобы
@@ -4068,29 +4091,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 # график infragram_operations_total, ни в подписанный
                 # аудит-трейл, который обещает единый choke point и ВСЕ
                 # операции. Видно её было только в логе процесса.
-                try:
-                    from services import metrics as _m
-                    _m.inc("infragram_operations_total",
-                           {"op_type": op_type, "status": _crash_status})
-                    _m.observe("infragram_operation_seconds",
-                               time.monotonic() - _t_started, {"op_type": op_type})
-                except Exception:
-                    pass
-                try:
-                    from services.organism import spine
-                    await spine.emit(pool, owner_id, "op_done", {
-                        "op_id": op_id, "op_type": op_type,
-                        "status": _crash_status, "ok": _crash_ok,
-                        "failed": _crash_failed, "summary": str(e)[:300]})
-                except Exception:
-                    pass
-                try:
-                    from services import compliance_engine
-                    await compliance_engine.record(
-                        pool, owner_id, None, op_type, _crash_status, op_id=op_id,
-                        params=params if isinstance(params, dict) else None)
-                except Exception:
-                    pass
+                await _announce_op_outcome(
+                    pool, op_id, owner_id, op_type, params, _crash_status,
+                    _crash_ok, _crash_failed, str(e),
+                    duration_s=time.monotonic() - _t_started)
                 # Circuit breaker: record failure
                 await _circuit_breaker_record(owner_id, False)
                 # ML pacing engine: feed failure with flood/ban granularity
