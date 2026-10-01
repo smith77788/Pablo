@@ -54,26 +54,15 @@ def set_owner_proxy_policy(owner_id: int | None, policy: str | None) -> None:
         return
     _OWNER_PROXY_POLICY[int(owner_id)] = _normalize_policy(policy)
 
-# ── get_me() caching to reduce API calls ────────────────────────────────────
-_GET_ME_CACHE: dict[int, tuple[Any, float]] = {}
-_GET_ME_TTL = 300  # 5 minutes cache
-
-
-def _get_cached_me(session_id: int, me: Any) -> Optional[Any]:
-    """Get cached get_me() result if still valid."""
-    import time as _tm
-    now = _tm.monotonic()
-    if session_id in _GET_ME_CACHE:
-        cached_me, cached_at = _GET_ME_CACHE[session_id]
-        if now - cached_at < _GET_ME_TTL:
-            return cached_me
-    _GET_ME_CACHE[session_id] = (me, now)
-    return None
-
-
-def _invalidate_me_cache(session_id: int) -> None:
-    """Invalidate get_me() cache after logout or significant changes."""
-    _GET_ME_CACHE.pop(session_id, None)
+# Кэша get_me() здесь НЕТ, и это осознанно. Был мёртвый задел «кэш на 5 минут,
+# чтобы снизить число запросов»: словарь и две функции, которые НИКТО не звал ни
+# разу, — то есть комментарий обещал экономию, которой не существовало.
+#
+# Оживлять его нельзя. Все 34 вызова get_me() идут сразу после своего connect() и
+# служат проверкой, что сессия ЖИВА. Ответ из кэша подтвердил бы живой аккаунт,
+# который на самом деле уже разлогинен или забанен, — а это худшая из возможных
+# ошибок в этом продукте: операция пойдёт работать мёртвым аккаунтом. Один
+# запрос на подключение — это не «лишний запрос», это минимум для его задачи.
 
 
 async def resolve_self_user_id(session_string: str, _acc: dict | None = None) -> Optional[int]:

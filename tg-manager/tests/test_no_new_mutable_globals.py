@@ -162,7 +162,6 @@ PROCESS_LOCAL: dict[str, str] = {
 # показания на экране, но не корректности и не доступа.
 CACHE: dict[str, str] = {
     "services/account_health.py:_health_cache": "здоровье аккаунта, пересчитывается",
-    "services/account_manager.py:_GET_ME_CACHE": "get_me с TTL 5 мин",
     "services/account_manager.py:_ACC_TRANSPORT": (
         "релей/прокси аккаунта; истина в tg_accounts, авторитетно перечитывается "
         "на старте операции — добирает поля, которых нет в выборке вызывающего"),
