@@ -13248,6 +13248,40 @@ async def _exec_create_chatlist_folder(
     if not chat_ids:
         return {"status": "failed", "summary": "⚠️ В папке нет чатов"}
 
+    # Идемпотентность повтора. Повтор здесь штатный: `_maybe_requeue` после
+    # сетевой ошибки, сброс зависшей операции сторожем, перезапуск контейнера
+    # (рабочая ветка едет на Railway, перезапуск — на каждом деплое). Исполнитель
+    # пошёл бы сначала и СОЗДАЛ В TELEGRAM ВТОРУЮ ПАПКУ с тем же названием и
+    # вторую chatlist-ссылку. Первая при этом осиротела бы: в базе хранится одна
+    # ссылка на папку, и запись её затирает — отозвать потерянную владелец уже
+    # не может, а папок у аккаунта конечное число.
+    #
+    # Журналом служит сама строка папки, как у кросспостинга — курсор связки.
+    # Схема это и предполагала: комментарий к `filter_id` в
+    # schema_v199_chatlist_folders.sql говорит «нужен для повторного экспорта той
+    # же папки, а не создания новой при каждом клике», и `existing_filter_id` у
+    # `create_shared_folder_link` для этого есть — просто никто его не передавал.
+    _existing_filter_id = None
+    if folder_id:
+        _prev = await _safe_fetchrow(
+            pool,
+            "SELECT status, invite_link, filter_id FROM chatlist_folders "
+            " WHERE id=$1 AND owner_id=$2",
+            int(folder_id), owner_id,
+            log_ctx=f"[chatlist_folder_resume op={op_id}]")
+        if _prev and _prev["status"] == "ready" and _prev["invite_link"]:
+            log.info("chatlist folder op=%d: ссылка уже выдана прошлым прогоном "
+                     "(folder=%s) — Telegram не трогаем", op_id, folder_id)
+            return {"status": "done", "invite_link": _prev["invite_link"],
+                    "summary": f"📁 Папка готова — ссылка: {_prev['invite_link']}"}
+        if _prev and _prev["filter_id"]:
+            # Папка в Telegram уже создана, сорвался только экспорт ссылки.
+            # Переиспользуем её, иначе рядом встанет вторая такая же.
+            _existing_filter_id = int(_prev["filter_id"])
+            log.info("chatlist folder op=%d: папка %s уже создана в Telegram "
+                     "(filter_id=%s) — переиспользуем", op_id, folder_id,
+                     _existing_filter_id)
+
     # Аккаунт-владелец сессии: либо указанный (загрузка одного по id), либо —
     # через единую флуд-осознанную дверь (resource_selector), а НЕ сырым SELECT
     # мимо неё: иначе можно взять аккаунт в кулдауне/на мёртвом прокси.
@@ -13270,7 +13304,8 @@ async def _exec_create_chatlist_folder(
         return {"status": "requeue", "summary": "⚠️ Аккаунт занят другой операцией"}
     try:
         res = await account_manager.create_shared_folder_link(
-            acc["session_str"], cf.clean_title(title), chat_ids, _acc=dict(acc))
+            acc["session_str"], cf.clean_title(title), chat_ids, _acc=dict(acc),
+            existing_filter_id=_existing_filter_id)
     finally:
         await release_accounts([int(acc["id"])])
 

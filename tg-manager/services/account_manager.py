@@ -2640,6 +2640,16 @@ async def create_shared_folder_link(
         return {"ok": False, "error": "пустой набор чатов", "error_kind": "other"}
 
     client = _make_client(session_string, _acc)
+    # filter_id созданной папки — чтобы вернуть его ДАЖЕ ПРИ СБОЕ.
+    #
+    # Папка создаётся шагом 3, а ссылка экспортируется шагом 4, и самый частый
+    # отказ продукта приходится ровно на шаг 4: Telegram требует Premium именно
+    # для ШАРИНГА папки. Раньше при таком отказе filter_id терялся, и повтор
+    # операции брал следующий свободный номер — у владельца рядом вставала
+    # вторая такая же папка, потом третья. Папок у аккаунта конечное число, а
+    # осиротевшие он не видит и отозвать не может. Возвращаем номер наружу,
+    # чтобы повтор переиспользовал ту же папку (`existing_filter_id`).
+    _created: dict = {"filter_id": None}
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
@@ -2695,6 +2705,8 @@ async def create_shared_folder_link(
                         id=fid, title=title,
                         pinned_peers=[], include_peers=peers, emoticon=None))), timeout=_OP_TIMEOUT)
 
+            _created["filter_id"] = fid
+
             # 4) экспорт ссылки-приглашения к папке.
             res = await asyncio.wait_for(client(functions.chatlists.ExportChatlistInviteRequest(
                 chatlist=types.InputChatlistDialogFilter(filter_id=fid),
@@ -2709,7 +2721,7 @@ async def create_shared_folder_link(
         return await asyncio.wait_for(_work(), timeout=_OP_TIMEOUT)
     except FloodWaitError as e:
         return {"ok": False, "error": f"FloodWait {getattr(e,'seconds','?')}с",
-                "error_kind": "flood"}
+                "error_kind": "flood", "filter_id": _created["filter_id"]}
     except Exception as e:
         low = str(e).lower()
         if "premium" in low or "chatlists.chatlist_invites" in low or "user_premium" in low:
@@ -2718,7 +2730,8 @@ async def create_shared_folder_link(
             kind = "auth"
         else:
             kind = "other"
-        return {"ok": False, "error": str(e)[:200], "error_kind": kind}
+        return {"ok": False, "error": str(e)[:200], "error_kind": kind,
+                "filter_id": _created["filter_id"]}
     finally:
         try:
             await client.disconnect()

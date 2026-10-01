@@ -884,11 +884,18 @@ async def set_chatlist_folder_result(
             folder_id, owner_id, result.get("invite_link"),
             result.get("slug"), result.get("filter_id"))
     else:
+        # filter_id пишем и при сбое: папка в Telegram могла быть уже создана, а
+        # сорваться — только экспорт ссылки (самый частый случай: Telegram требует
+        # Premium именно для шаринга). Без этого номера повтор операции создаёт
+        # ВТОРУЮ такую же папку, и осиротевшую владелец отозвать не может.
+        # COALESCE — чтобы отказ ДО создания папки не стирал уже известный номер.
         await pool.execute(
             """UPDATE chatlist_folders
-                  SET status='failed', error=$3, updated_at=now()
+                  SET status='failed', error=$3,
+                      filter_id=COALESCE($4, filter_id), updated_at=now()
                 WHERE id=$1 AND owner_id=$2""",
-            folder_id, owner_id, str(result.get("error") or "ошибка")[:300])
+            folder_id, owner_id, str(result.get("error") or "ошибка")[:300],
+            result.get("filter_id"))
 
 
 async def replace_bot_token(
