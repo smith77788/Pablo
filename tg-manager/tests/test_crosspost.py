@@ -29,20 +29,23 @@ def test_schema_defines_crosspost_links():
     assert "UNIQUE (owner_id, source_channel_id, target_channel_id)" in sql
 
 
+# Окно фиксированной длины (`am[i:i + 2000]`) стояло и здесь, ровно с тем же
+# исходом, что описан в docstring `_func_src`: добавление строк внутрь функции
+# вытолкнуло проверяемое за границу окна, и два теста упали на исправном коде.
+_AM = os.path.join(ROOT, "services", "account_manager.py")
+
+
 def test_forward_helper_exists():
-    am = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
+    am = open(_AM, encoding="utf-8").read()
     assert "async def forward_new_posts" in am
-    i = am.index("async def forward_new_posts")
-    fn = am[i:i + 2000]
+    fn = _func_src(_AM, "forward_new_posts")
     assert "iter_messages" in fn and "forward_messages" in fn
     assert "min_id=since" in fn and "reverse=True" in fn
 
 
 def test_forward_new_link_seeds_cursor_no_backlog_dump():
     # Новая связка (курсор=0) НЕ форвардит старый бэклог — только ставит курсор.
-    am = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
-    i = am.index("async def forward_new_posts")
-    fn = am[i:i + 2000]
+    fn = _func_src(_AM, "forward_new_posts")
     assert "if since <= 0:" in fn
     assert '"seeded": True' in fn
 
@@ -60,7 +63,10 @@ def test_crosspost_run_op_and_dispatch():
     assert "async def _exec_crosspost_run" in ow
     fn = _func_src(os.path.join(ROOT, "services", "op_worker.py"), "_exec_crosspost_run")
     assert "forward_new_posts" in fn
-    assert "UPDATE crosspost_links SET last_msg_id" in fn      # курсор двигается
+    # Курсор двигается, и двигается ПО ХОДУ работы: одной записи в конце
+    # недостаточно — перезапуск посередине пачки пересылал посты второй раз.
+    assert "on_forwarded=" in fn
+    assert "UPDATE crosspost_links" in fn and "last_msg_id" in fn
     assert "_governed_sleep" in fn and "_is_cancelled" in fn
 
 

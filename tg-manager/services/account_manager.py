@@ -5876,12 +5876,25 @@ async def forward_new_posts(
     since_msg_id: int = 0,
     limit: int = 20,
     _acc: dict | None = None,
+    on_forwarded=None,
 ) -> dict:
     """Переслать новые посты источника в цель (кросспостинг связки).
 
     Берёт до `limit` сообщений источника новее since_msg_id (в хронологическом
     порядке) и форвардит в цель. Возвращает {forwarded, last_msg_id, error?}.
-    Аккаунт должен видеть источник и уметь постить в цель."""
+    Аккаунт должен видеть источник и уметь постить в цель.
+
+    `on_forwarded(msg_id)` — необязательный async-колбэк, который вызывается
+    СРАЗУ после каждой удачной пересылки. Он нужен для живучести, а не для
+    отчётности: курсор связки двигает вызывающий, и без колбэка он получал
+    новое значение только по возврату функции. Если процесс умирал посередине
+    (контейнер перезапускается на каждом деплое рабочей ветки, а пересылка
+    двадцати постов с человеческими паузами идёт минуту-полторы), курсор
+    оставался на месте, и следующий прогон отправлял те же посты В ЦЕЛЕВОЙ
+    КАНАЛ ВТОРОЙ РАЗ. Владелец видел дубли у подписчиков, а Telegram — повтор
+    одинакового содержимого с одного аккаунта. Сбой колбэка не роняет
+    пересылку: уже отправленное отменить нельзя, и терять из-за записи в базу
+    остаток пачки незачем."""
     client = _make_client(session_string, _acc)
     forwarded = 0
     since = int(since_msg_id or 0)
@@ -5908,6 +5921,12 @@ async def forward_new_posts(
                 await asyncio.wait_for(client.forward_messages(target, m), timeout=_OP_TIMEOUT)
                 forwarded += 1
                 last_id = max(last_id, int(getattr(m, "id", 0) or 0))
+                if on_forwarded is not None:
+                    try:
+                        await on_forwarded(last_id)
+                    except Exception:
+                        log_exc_swallow(
+                            log, "forward_new_posts: колбэк прогресса не сработал")
                 await asyncio.sleep(random.uniform(1.5, 4.0))
             except Exception as e:
                 log.warning("forward_new_posts fwd src=%s dst=%s: %s",

@@ -12085,10 +12085,35 @@ async def _exec_crosspost_run(
                      acc["id"], lk.get("id"))
             continue
         _claimed_acc = int(acc["id"])
+
+        # Курсор двигаем ПОСЛЕ КАЖДОГО поста, а не по возврату пересылки.
+        #
+        # Пачка — до 20 постов с человеческими паузами, то есть минута-полторы
+        # работы. Перезапуск контейнера случается на КАЖДОМ деплое рабочей
+        # ветки, и раньше он приходился ровно на эту минуту так: посты уже
+        # уехали в целевой канал, а курсор остался на месте, потому что его
+        # записывали одной строкой в конце. Следующий прогон пересылал те же
+        # посты ВТОРОЙ РАЗ — подписчики видели дубли, а Telegram видел повтор
+        # одинакового содержимого с одного аккаунта.
+        #
+        # Защиты от повтора у этого исполнителя нет и не нужно: курсор связки
+        # и ЕСТЬ его журнал — но только если он двигается по ходу работы.
+        _lk_id = lk["id"]
+
+        async def _advance_cursor(msg_id: int, _link_id=_lk_id) -> None:
+            await _safe_execute(
+                pool,
+                "UPDATE crosspost_links "
+                "   SET last_msg_id = GREATEST(COALESCE(last_msg_id, 0), $1), "
+                "       forwarded_total = forwarded_total + 1 "
+                " WHERE id = $2",
+                int(msg_id), _link_id)
+
         try:
             res = await account_manager.forward_new_posts(
                 acc["session_str"], lk["source_channel_id"], lk["target_channel_id"],
-                since_msg_id=int(lk["last_msg_id"] or 0), _acc=dict(acc))
+                since_msg_id=int(lk["last_msg_id"] or 0), _acc=dict(acc),
+                on_forwarded=_advance_cursor)
         except Exception as e:
             log.debug("_exec_crosspost_run link=%s: %s", lk.get("id"), e)
             continue
@@ -12098,10 +12123,14 @@ async def _exec_crosspost_run(
         fwd = int(res.get("forwarded") or 0)
         total_fwd += fwd
         runs += 1
+        # Счётчик пересланного и курсор уже подняты колбэком, поэтому здесь
+        # только отметка прогона и подстраховка курсора для ветки «связка
+        # новая»: там пересылки не было, но курсор надо поставить на «сейчас».
         await _safe_execute(
-            pool, "UPDATE crosspost_links SET last_msg_id=$1, forwarded_total=forwarded_total+$2, "
-            "last_run_at=now() WHERE id=$3",
-            int(res.get("last_msg_id") or lk["last_msg_id"] or 0), fwd, lk["id"])
+            pool, "UPDATE crosspost_links "
+            "   SET last_msg_id = GREATEST(COALESCE(last_msg_id, 0), $1), "
+            "       last_run_at = now() WHERE id=$2",
+            int(res.get("last_msg_id") or lk["last_msg_id"] or 0), lk["id"])
         if fwd:
             await _governed_sleep(pool, owner_id, random.uniform(5, 12))
     await _mark_progress(pool, op_id, _done_n)
