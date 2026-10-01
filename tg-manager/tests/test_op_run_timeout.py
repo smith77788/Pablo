@@ -129,11 +129,34 @@ def test_timeout_uses_per_type_ceiling():
     )
 
 
+def _run_ceiling_handler(body: str) -> str:
+    """Обработчик ИМЕННО потолка прогона, а не первый попавшийся TimeoutError.
+
+    Раньше здесь брался первый `except asyncio.TimeoutError` в функции. В
+    `_run_op_task` их стало два: сначала ограниченный по времени захват
+    семафора владельца (там таймаут — штатный возврат операции в очередь, и он
+    законно пишется как warning), и только потом потолок прогона. Срез по
+    первому вхождению начал мерить не тот обработчик и падал на исправном коде.
+    Опорой служит сам счётчик потолка прогона.
+    """
+    anchor = body.index("infragram_op_timeouts_total")
+    start = body.rindex("except asyncio.TimeoutError", 0, anchor)
+    return body[start:]
+
+
+def test_the_helper_picks_the_run_ceiling_handler_not_the_semaphore_one():
+    """Срез обязан попадать в нужный обработчик — иначе проверки мерят не то."""
+    body = _fn(_read("services/op_worker.py"), "_run_op_task")
+    seg = _run_ceiling_handler(body)
+    assert "infragram_op_timeouts_total" in seg
+    assert "owner_sem" not in seg[:400], (
+        "срез начался на захвате семафора — проверки ниже мерят чужой обработчик")
+
+
 def test_timeout_is_loud():
     """Раньше зависшая операция не оставляла следа вообще."""
     body = _fn(_read("services/op_worker.py"), "_run_op_task")
-    seg = body[body.index("except asyncio.TimeoutError"):]
-    seg = seg[:400]
+    seg = _run_ceiling_handler(body)[:400]
     assert "log.error" in seg, "прерывание по таймауту обязано попасть в логи"
     assert "op_id" in seg and "op_type" in seg
 
@@ -146,7 +169,7 @@ def test_timeout_reaches_the_normal_failure_path():
     """
     ow = _read("services/op_worker.py")
     body = _fn(ow, "_run_op_task")
-    seg = body[body.index("except asyncio.TimeoutError"):]
+    seg = _run_ceiling_handler(body)
     seg = seg[:seg.index("\n            # Флот временно занят")] if "\n            # Флот временно занят" in seg else seg[:800]
     assert "raise TimeoutError(" in seg, (
         "таймаут обязан подниматься как ошибка, а не подменять результат"
