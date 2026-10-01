@@ -7484,18 +7484,33 @@ function errHtml(msg, retryFn) {
 }
 
 // ── API ────────────────────────────────────────────────
-let _reAuthPending = false;
-async function _reAuth() {
-  if (_reAuthPending) return;
-  _reAuthPending = true;
-  try {
-    const r = await fetchT('/api/miniapp/auth', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({initData: tg.initData || ''}),
-    });
-    if (r.ok) { TK = (await r.json()).token; openSSE(); }
-  } catch(_) {}
-  _reAuthPending = false;
+// Параллельные 401 должны ДОЖДАТЬСЯ одного обновления токена, а не уйти ни с
+// чем. Прежний флаг возвращал управление сразу: первый запрос обновлял токен и
+// восстанавливался, а остальные повторялись со СТАРЫМ токеном, получали второй
+// 401 и показывали «Сессия истекла, перезапустите приложение» — на сессии,
+// которая только что успешно продлилась.
+//
+// Это был обычный исход, а не редкость: boot() запускает loadHome, loadSub,
+// loadRef, loadBots и loadAdminSection не дожидаясь друг друга, поэтому при
+// возврате в приложение после истечения двухчасового токена все они получают
+// 401 одновременно — один чинился, четыре врали.
+//
+// Теперь обновление одно, а его результат общий: все ждут одно и то же обещание
+// и повторяют запрос уже с новым токеном. Ссылка обнуляется по завершении, так
+// что следующий 401 (и неудачная попытка) обновит токен заново.
+let _reAuthInFlight = null;
+function _reAuth() {
+  if (_reAuthInFlight) return _reAuthInFlight;
+  _reAuthInFlight = (async () => {
+    try {
+      const r = await fetchT('/api/miniapp/auth', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({initData: tg.initData || ''}),
+      });
+      if (r.ok) { TK = (await r.json()).token; openSSE(); }
+    } catch(_) {}
+  })().finally(() => { _reAuthInFlight = null; });
+  return _reAuthInFlight;
 }
 // Двойной тап по кнопке отправлял ДВА одинаковых запроса. Гасить это по кнопкам
 // пришлось бы в 81 месте, и каждое новое место снова забывали бы, поэтому дедуп
