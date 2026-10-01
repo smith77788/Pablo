@@ -80,3 +80,55 @@ def test_bound_proxy_untouched(monkeypatch):
                         lambda url: (2, "9.9.9.9", 1080, True, None, None) if url else None)
     client = am._make_client("", {"id": 4, "proxy_url": "socks5://9.9.9.9:1080"})
     assert getattr(client, "_infragram_transport", None) == "bound"
+
+
+# ── Экран бота не должен обещать удалённый пул ────────────────────────────────
+# Пул удалён из кода, а экран «🆓 Бесплатный пул» продолжал писать владельцу
+# «прокси автоматически применяются к аккаунтам без личного прокси, пул
+# обновляется каждые 6 часов». Владелец читал это как «мои аккаунты прикрыты» и
+# ничего не делал, а аккаунты выходили с РЕАЛЬНОГО IP хоста. Ложная уверенность
+# в изоляции опаснее честного «прокси нет».
+
+def _proxy_screen_src() -> str:
+    import pathlib
+    return (pathlib.Path(__file__).resolve().parent.parent
+            / "bot" / "handlers" / "proxy_manager.py").read_text(encoding="utf-8")
+
+
+def test_proxy_screen_does_not_use_removed_scraper():
+    """`services.proxy_scraper` удалён вместе с пулом — ссылка на него означала
+    бы либо мёртвый экран, либо возврат нестабильного пула."""
+    assert "proxy_scraper" not in _proxy_screen_src()
+
+
+def _user_visible_strings(src: str) -> list[str]:
+    """Строки, которые увидит владелец. Докстринги исключены намеренно: в них
+    старое обещание цитируется как объяснение, зачем экран переписан."""
+    import ast
+    tree = ast.parse(src)
+    docs = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Module, ast.ClassDef,
+                          ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(n, "body", None)
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                docs.add(id(body[0].value))
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in docs]
+
+
+def test_proxy_screen_does_not_promise_automatic_pool():
+    visible = " ".join(_user_visible_strings(_proxy_screen_src()))
+    for lie in ("автоматически применяются", "каждые 6 часов"):
+        assert lie not in visible, (
+            f"экран снова обещает владельцу то, чего в коде нет: {lie!r}")
+
+
+def test_the_probe_reads_the_visible_text_at_all():
+    """Если выборка строк однажды опустеет, тест выше станет зелёным всегда."""
+    visible = _user_visible_strings(_proxy_screen_src())
+    assert any("Бесплатного пула больше нет" in s for s in visible), (
+        "пробник не видит текст экрана — проверка выключилась молча")
