@@ -1135,7 +1135,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="sec">📢 Быстрая рассылка</div>
     </div>
     <div style="padding:0 0 8px">
-      <textarea id="quickBcText" rows="3" placeholder="Введите текст рассылки..." class="input-bc"></textarea>
+      <textarea id="quickBcText" rows="3" placeholder="Введите текст рассылки…" class="input-bc"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn btn-p" id="quickBcBtn" onclick="submitQuickBroadcast()" style="flex:1 1 auto">📢 Отправить всем</button>
         <button class="btn btn-s" onclick="openBcastPick()" style="flex:0 0 auto;padding:10px 16px">⚙️ Настроить</button>
@@ -1161,7 +1161,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div style="padding:0 0 8px">
       <div style="display:flex;gap:8px">
-        <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx..." style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
+        <input type="text" id="quickBotToken" placeholder="1234567890:AAFxxxxxxxx…" style="flex:1;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;font-family:monospace">
         <button class="btn btn-p" onclick="submitQuickBot()" style="flex:0 0 auto;padding:10px 16px" aria-label="Отправить">➕</button>
       </div>
       <div id="quickBotErr" style="color:var(--red);font-size:12px;margin-top:4px"></div>
@@ -1397,7 +1397,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="display:flex;gap:8px;padding:8px 12px;border-top:1px solid var(--sep);background:var(--bg);align-items:center">
       <input id="achatFile" type="file" style="display:none" onchange="sendAccountFile(this)">
       <button class="btn btn-s" style="padding:10px 12px;flex:0 0 auto" onclick="document.getElementById('achatFile').click()" title="Прикрепить файл (фото/документ)">📎</button>
-      <input id="achatInput" type="text" placeholder="Сообщение..." class="input-flex" onkeydown="if(event.key==='Enter')sendAccountChat()">
+      <input id="achatInput" type="text" placeholder="Сообщение…" class="input-flex" onkeydown="if(event.key==='Enter')sendAccountChat()">
       <button class="btn btn-p" style="padding:10px 16px;flex:0 0 auto" onclick="sendAccountChat()" aria-label="Отправить">➤</button>
     </div>
   </div>
@@ -1440,7 +1440,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><span class="icon-btn" role="button" tabindex="0" id="accContSelBtn" onclick="toggleAccContSelect()" title="Выбрать несколько" aria-label="Выбрать несколько">☑️</span></div>
   </div>
   <div class="sub-sb">
-    <div style="padding:6px 0"><input type="text" id="accContSearch" placeholder="🔍 Поиск..." oninput="filterAccountContacts()" class="inp"></div>
+    <div style="padding:6px 0"><input type="text" id="accContSearch" placeholder="🔍 Поиск…" oninput="filterAccountContacts()" class="inp"></div>
     <div id="accContBulk" style="display:none;padding:8px 12px;background:rgba(96,165,250,.1);border-radius:10px;margin:0 0 8px">
       <div style="font-size:13px;margin-bottom:6px">Выбрано: <span id="accContSelCount">0</span> <span style="color:var(--hint)">· массовая отправка идёт по @username</span></div>
       <button class="btn btn-p" style="width:100%;font-size:13px" onclick="writeSelectedContacts()">✍️ Написать всем выбранным</button>
@@ -1455,7 +1455,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-acccont-msg')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">✍️ Написать выбранным</div>
     <div id="accContMsgHint" style="font-size:12px;color:var(--hint);margin-bottom:10px"></div>
-    <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
+    <textarea id="accContMsgText" rows="4" placeholder="Текст сообщения…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="accContMsgErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitAccContMsg()">🚀 Отправить</button>
   </div>
@@ -1470,12 +1470,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Выберите, с каких аккаунтов отправить. Отправка идёт с защитой от бана (темп/флуд-контроль).</div>
     <div style="font-size:12px;font-weight:600;margin:6px 0 4px">С каких аккаунтов:</div>
     <div id="ccwAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
-    <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
+    <textarea id="ccwText" rows="4" placeholder="Текст сообщения (или подпись к медиа)…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="ccwAbWrap" style="display:none;margin-top:8px">
       <label class="chk-row" style="font-size:12px;color:var(--hint);cursor:pointer;display:block"><input type="checkbox" id="ccwAbOn" onchange="toggleAb(this)" style="vertical-align:middle"> 🧪 A/B-тест: разложить варианты по аудитории поровну</label>
       <div id="ccwAbBox" style="display:none;margin-top:6px">
-        <textarea id="ccwVarB" rows="2" placeholder="Вариант B..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
-        <textarea id="ccwVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
+        <textarea id="ccwVarB" rows="2" placeholder="Вариант B…" style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
+        <textarea id="ccwVarC" rows="2" placeholder="Вариант C (необязательно)…" style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
         <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Основной текст — вариант A. Каждый вариант уйдёт своей равной доле. <span onclick="openAbResults()" style="color:var(--accent);cursor:pointer">Результаты последнего A/B →</span></div>
       </div>
     </div>
@@ -1492,7 +1492,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-contact-invite')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title" id="cciTitle">➕ Пригласить контакт</div>
     <div id="cciPreview" style="display:none;font-size:12px;background:var(--bg2);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.4"></div>
-    <input type="text" id="cciGroup" placeholder="@канал_или_чат или ссылка t.me/..." class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+    <input type="text" id="cciGroup" placeholder="@канал_или_чат или ссылка t.me/…" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     <select id="cciMethod" class="inp" style="width:100%;box-sizing:border-box;margin-bottom:8px">
       <option value="direct">Обычный инвайт</option>
       <option value="admin">Через админку (обход приватности)</option>
@@ -1523,7 +1523,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:9px 4px" onclick="openVaultRecent('edited')">✏️ Изменённые</button>
     </div>
     <div id="vaultAnalytics" style="padding:2px 16px"></div>
-    <div style="padding:2px 0 6px"><input type="text" id="vaultSearch" placeholder="🔍 Поиск по сообщениям..." oninput="vaultSearchDebounced()" class="inp"></div>
+    <div style="padding:2px 0 6px"><input type="text" id="vaultSearch" placeholder="🔍 Поиск по сообщениям…" oninput="vaultSearchDebounced()" class="inp"></div>
     <div id="vaultInboxTabs" style="display:none;gap:6px;padding:2px 0 6px">
       <button class="btn btn-s vinbox on" data-f="all" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="setVaultInbox('all')">Все</button>
       <button class="btn btn-s vinbox" id="vinboxWaiting" data-f="waiting" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="setVaultInbox('waiting')">⏳ Ждут ответа</button>
@@ -1577,7 +1577,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div id="vchatBody" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px"></div>
   <div id="vchatComposer" style="display:none;padding:8px 10px;border-top:1px solid var(--sep);gap:8px;align-items:flex-end">
-    <textarea id="vchatInput" rows="1" placeholder="Ответить от вашего имени..." style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
+    <textarea id="vchatInput" rows="1" placeholder="Ответить от вашего имени…" style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
     <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()" aria-label="Отправить">➤</button>
   </div>
 </div>
@@ -1724,7 +1724,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-bc-schedule')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📅 Новая запланированная рассылка</div>
     <div class="field"><label>Бот</label><select id="bs-bot" class="sel"></select></div>
-    <div class="field"><label>Текст сообщения</label><textarea id="bs-text" rows="4" maxlength="4096" class="input-bc" placeholder="Введите текст..."></textarea></div>
+    <div class="field"><label>Текст сообщения</label><textarea id="bs-text" rows="4" maxlength="4096" class="input-bc" placeholder="Введите текст…"></textarea></div>
     <div class="field"><label>Кому</label><select id="bs-segment" class="sel">
       <option value="all">Всем подписчикам</option>
       <option value="active_7d">Активным за 7 дней</option>
@@ -1741,7 +1741,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       🧪 Включить A/B тестирование
     </label>
     <div id="bsAbWrap" style="display:none">
-      <div class="field"><label>Вариант Б (текст)</label><textarea id="bs-ab-text" rows="3" maxlength="4096" class="input-bc" placeholder="Альтернативный текст..."></textarea></div>
+      <div class="field"><label>Вариант Б (текст)</label><textarea id="bs-ab-text" rows="3" maxlength="4096" class="input-bc" placeholder="Альтернативный текст…"></textarea></div>
       <div class="field"><label>Доля варианта А (%)</label><input type="number" id="bs-ab-split" value="50" min="10" max="90" class="inp"></div>
     </div>
     <div class="field-err" id="bs-err"></div>
@@ -2454,7 +2454,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sb">
     <div class="sec">Рассылка всем пользователям</div>
-    <textarea id="adm-bc-text" rows="5" placeholder="Введите текст сообщения..." class="input-bc-l"></textarea>
+    <textarea id="adm-bc-text" rows="5" placeholder="Введите текст сообщения…" class="input-bc-l"></textarea>
     <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="submitAdminBroadcast()">📢 Отправить</button>
   </div>
 </div>
@@ -2751,7 +2751,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <div class="sec">Пост во все каналы аккаунта</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <select id="bpAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"><option value="">Выберите аккаунт...</option></select>
+      <select id="bpAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px"><option value="">Выберите аккаунт…</option></select>
       <textarea id="bpText" rows="3" placeholder="{{Новость|Обновление}}: текст поста…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <button class="btn btn-p" style="width:100%" onclick="submitBulkPostChans()">📤 Опубликовать во все</button>
       <div id="bpErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
@@ -2791,7 +2791,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Объявление во все группы аккаунта</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <select id="gaAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-        <option value="">Выберите аккаунт...</option>
+        <option value="">Выберите аккаунт…</option>
       </select>
       <textarea id="gaText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст объявления…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Спинтакс {{вариант1|вариант2}} обязателен: одинаковый текст в десятки групп — палевная сигнатура. Вариант подбирается для каждой группы отдельно.</div>
@@ -2909,7 +2909,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="lst" style="margin:0 16px 12px;padding:14px">
       <input type="text" id="gfTitle" placeholder="Название группы" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
       <select id="gfAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-        <option value="">Выберите аккаунт...</option>
+        <option value="">Выберите аккаунт…</option>
       </select>
       <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
         <input type="checkbox" id="gfSupergroup" checked>
@@ -2964,7 +2964,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Выберите бота</div>
     <div class="lst" style="margin:0 16px 8px;padding:8px">
       <select id="mg-bot-sel" onchange="loadMultigeo()" class="sel">
-        <option value="">Загрузка ботов...</option>
+        <option value="">Загрузка ботов…</option>
       </select>
     </div>
     <div class="sec" style="margin-top:4px">Профили по языкам</div>
@@ -3035,7 +3035,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-title">🤖 Добавить бота</div>
     <div class="field">
       <label>Токен бота *</label>
-      <input type="text" id="botAddToken" placeholder="1234567890:AAFxxxxxxxx..." class="inp-sm">
+      <input type="text" id="botAddToken" placeholder="1234567890:AAFxxxxxxxx…" class="inp-sm">
     </div>
     <div class="field" style="font-size:12px;color:var(--hint)">Получите токен у @BotFather в Telegram</div>
     <div class="field-err" id="botAddErr"></div>
@@ -3154,7 +3154,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Текст сообщения * (поддерживает HTML)</label>
-      <textarea id="spContent" rows="5" placeholder="&lt;b&gt;Заголовок&lt;/b&gt;&#10;&#10;Текст рекламы..." style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
+      <textarea id="spContent" rows="5" placeholder="&lt;b&gt;Заголовок&lt;/b&gt;&#10;&#10;Текст рекламы…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
     <div class="field">
       <label>Текст кнопки (CTA)</label>
@@ -3220,7 +3220,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field"><label>Bio / О себе</label><textarea id="apAbout" rows="2" placeholder="(необязательно)" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
     </div>
     <div id="apF-avatar">
-      <div class="field"><label>Ссылка на изображение *</label><input type="text" id="apAvatar" placeholder="https://..." class="inp"></div>
+      <div class="field"><label>Ссылка на изображение *</label><input type="text" id="apAvatar" placeholder="https://…" class="inp"></div>
     </div>
     <div id="apF-2fa">
       <div class="field"><label>Новый пароль 2FA *</label><input type="text" id="apNewPass" class="inp"></div>
@@ -3341,7 +3341,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-asset-tpl')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">📐 Новый шаблон</div>
     <div class="field"><label>Название</label><input id="at-name" type="text" placeholder="Шаблон приветствия" class="inp"></div>
-    <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона..." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Текст</label><textarea id="at-text" rows="4" placeholder="Текст шаблона…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="at-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-asset-tpl')" style="flex:1 1 auto">Отмена</button>
@@ -3355,7 +3355,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-autofunnel')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔀 Новая авто-воронка</div>
-    <div class="field"><label>Бот</label><select id="af-bot" class="sel"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Бот</label><select id="af-bot" class="sel"><option value="">Загрузка…</option></select></div>
     <div class="field"><label>Название</label><input id="af-name" type="text" placeholder="Onboarding воронка" class="inp"></div>
     <div class="field"><label>Сегмент аудитории</label><select id="af-seg" class="sel">
       <option value="all">Все подписчики</option>
@@ -3363,7 +3363,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <option value="new_30d">Новые (30 дней)</option>
       <option value="inactive_30d">Неактивные (30 дней)</option>
     </select></div>
-    <div class="field"><label>Первое сообщение</label><textarea id="af-msg" rows="3" placeholder="Привет! Это первое сообщение воронки..." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+    <div class="field"><label>Первое сообщение</label><textarea id="af-msg" rows="3" placeholder="Привет! Это первое сообщение воронки…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     <div class="field-err" id="af-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-autofunnel')" style="flex:1 1 auto">Отмена</button>
@@ -3378,8 +3378,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-presence-pack')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔗 Новая связка</div>
     <div class="field"><label>Название</label><input id="pp-name" type="text" placeholder="Моя связка" class="inp"></div>
-    <div class="field"><label>Описание</label><input id="pp-desc" type="text" placeholder="Краткое описание..." class="inp"></div>
-    <div class="field"><label>Целевой URL / @username</label><input id="pp-url" type="text" placeholder="@mybot или https://t.me/..." class="inp"></div>
+    <div class="field"><label>Описание</label><input id="pp-desc" type="text" placeholder="Краткое описание…" class="inp"></div>
+    <div class="field"><label>Целевой URL / @username</label><input id="pp-url" type="text" placeholder="@mybot или https://t.me/…" class="inp"></div>
     <div class="field"><label>Метка цели</label><input id="pp-label" type="text" placeholder="Мой бот" class="inp"></div>
     <div class="field-err" id="pp-err"></div>
     <div style="display:flex;gap:8px">
@@ -3395,7 +3395,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeModal('mo-ecosystem')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌐 Новая экосистема</div>
     <div class="field"><label>Название</label><input id="eco-name" type="text" placeholder="Моя экосистема" class="inp"></div>
-    <div class="field"><label>Описание</label><input id="eco-desc" type="text" placeholder="Краткое описание..." class="inp"></div>
+    <div class="field"><label>Описание</label><input id="eco-desc" type="text" placeholder="Краткое описание…" class="inp"></div>
     <div class="field"><label>Тип</label><select id="eco-type" class="sel">
       <option value="custom">Пользовательская</option>
       <option value="media">Медиа</option>
@@ -3403,7 +3403,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <option value="community">Сообщество</option>
       <option value="education">Образование</option>
     </select></div>
-    <div class="field"><label>Регион (необязательно)</label><input id="eco-region" type="text" placeholder="RU, EU, GLOBAL..." class="inp"></div>
+    <div class="field"><label>Регион (необязательно)</label><input id="eco-region" type="text" placeholder="RU, EU, GLOBAL…" class="inp"></div>
     <div class="field-err" id="eco-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-ecosystem')" style="flex:1 1 auto">Отмена</button>
@@ -3417,8 +3417,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-clone')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🔄 Клонировать профиль бота</div>
-    <div class="field"><label>Источник (откуда)</label><select id="clSrc" class="sel"><option value="">Загрузка...</option></select></div>
-    <div class="field"><label>Цель (куда)</label><select id="clTgt" class="sel"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Источник (откуда)</label><select id="clSrc" class="sel"><option value="">Загрузка…</option></select></div>
+    <div class="field"><label>Цель (куда)</label><select id="clTgt" class="sel"><option value="">Загрузка…</option></select></div>
     <div class="field"><label>Что копировать</label>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
         <label class="chk-row" style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" id="clFname" checked> Имя</label>
@@ -3744,7 +3744,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     </details>
     <div style="padding:6px 0">
-      <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов..." oninput="searchContacts()" class="inp">
+      <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов…" oninput="searchContacts()" class="inp">
     </div>
     <div class="seg" id="contactFilterSeg">
       <div class="seg-opt on" onclick="filterContacts(null,this)">Все</div>
@@ -3920,7 +3920,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div id="aiChat" style="padding:12px 16px;height:calc(100vh - 180px);overflow-y:auto"></div>
     <div style="padding:8px 16px;display:flex;gap:8px;border-top:1px solid var(--sep);background:var(--bg)">
-      <input id="aiInput" type="text" placeholder="Спросите о контактах..." onkeydown="if(event.key==='Enter')sendAiQuery()" class="input-flex">
+      <input id="aiInput" type="text" placeholder="Спросите о контактах…" onkeydown="if(event.key==='Enter')sendAiQuery()" class="input-flex">
       <button class="btn btn-p" onclick="sendAiQuery()" style="padding:10px 16px" aria-label="Отправить">➤</button>
     </div>
     <div style="padding:4px 16px 8px;display:flex;gap:6px;flex-wrap:wrap">
@@ -4039,7 +4039,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div style="padding:8px 16px 4px">
-      <input type="text" id="crmSearch" placeholder="🔍 Поиск по имени, нику, телефону..." style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 13px;font-size:15px;color:var(--text);outline:none" oninput="filterCRM(this.value)">
+      <input type="text" id="crmSearch" placeholder="🔍 Поиск по имени, нику, телефону…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 13px;font-size:15px;color:var(--text);outline:none" oninput="filterCRM(this.value)">
     </div>
     <div id="crmTagsBar" style="display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch"></div>
     <div class="lst" id="crmList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4135,7 +4135,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div id="mpTargets" style="margin-bottom:12px;font-size:13px;color:var(--hint);line-height:1.45"></div>
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
-        <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
+        <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации… Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
         <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Спинтакс {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
       </div>
       <div class="field" id="mpPillarWrap" style="margin-bottom:12px;display:none">
@@ -4297,7 +4297,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       Личная пометка, видна только вам. Помогает не запутаться среди нескольких ботов.<br>
       Отправьте пустой текст чтобы удалить заметку.
     </div>
-    <textarea id="noteText" style="width:100%;min-height:180px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:12px;color:var(--text);font-size:15px;resize:vertical;box-sizing:border-box" placeholder="Например: продажи, тест, клиент X..."></textarea>
+    <textarea id="noteText" style="width:100%;min-height:180px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:12px;color:var(--text);font-size:15px;resize:vertical;box-sizing:border-box" placeholder="Например: продажи, тест, клиент X…"></textarea>
     <div id="noteErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
   </div>
 </div>
@@ -4585,7 +4585,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:8px 16px">
       <div class="field"><label>Ниша / тематика</label><input type="text" id="growthNiche" placeholder="например: крипта, маркетинг, фитнес"></div>
       <div class="field"><label>Гео / город (опционально)</label><input type="text" id="growthGeo" placeholder="например: Москва, СПб"></div>
-      <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах..." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><label>Рекламный текст</label><textarea id="growthPromo" rows="5" placeholder="Текст, который будет опубликован в группах…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
       <div class="field"><label>Аккаунтов задействовать (1-10)</label><input type="number" id="growthAccCount" min="1" max="10" value="3"></div>
       <div class="field-err" id="growthErr"></div>
       <button class="btn btn-p" id="growthBtn" onclick="submitGrowth()" style="width:100%">🌿 Запустить</button>
@@ -4623,7 +4623,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Текст публикации</div>
     <div style="padding:8px 16px">
       <div class="preset-row" id="qpPresetRow"></div>
-      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
+      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста… Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
       <div class="field-note">🎲 Спинтакс {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div></div>
     </div>
     <div class="sec">Выберите каналы</div>
@@ -4743,7 +4743,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <!-- РЕЖИМ «по токену»: регистрация уже созданного бота -->
       <div class="field" id="bfTokenField" style="display:none">
         <label>Токен бота *</label>
-        <input type="text" id="bfToken" placeholder="1234567890:AAHxxxxxxxx..." class="inp">
+        <input type="text" id="bfToken" placeholder="1234567890:AAHxxxxxxxx…" class="inp">
         <div class="field-note">Уже создали бота у @BotFather? Вставьте токен — применим оформление и привяжем к экосистеме.</div>
       </div>
       <div class="field">
@@ -4812,11 +4812,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field">
         <label>Ниша / тема</label>
-        <input type="text" id="pNiche" placeholder="Крипто, инвестиции, IT..." class="inp">
+        <input type="text" id="pNiche" placeholder="Крипто, инвестиции, IT…" class="inp">
       </div>
       <div class="field">
         <label>Биография (кратко)</label>
-        <textarea id="pBio" rows="2" placeholder="Краткое описание персонажа..." style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
+        <textarea id="pBio" rows="2" placeholder="Краткое описание персонажа…" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:none"></textarea>
       </div>
       <div class="field">
         <label>Интересы (через запятую)</label>
@@ -5056,7 +5056,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="padding:4px 0 8px;display:flex;flex-direction:column;gap:10px">
       <div class="field"><label>Цель: +N участников</label><input type="number" id="cpGoal" placeholder="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
       <div class="field"><label>Срок, дней</label><input type="number" id="cpDeadline" placeholder="7" min="1" value="7" class="inp" style="width:100%;box-sizing:border-box"></div>
-      <div class="field"><label>Канал / чат (для запуска)</label><input type="text" id="cpGroup" placeholder="@group или t.me/... (необязательно для расчёта)" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <div class="field"><label>Канал / чат (для запуска)</label><input type="text" id="cpGroup" placeholder="@group или t.me/… (необязательно для расчёта)" class="inp" style="width:100%;box-sizing:border-box"></div>
       <div class="field"><label>Способ инвайта</label>
         <select id="cpMethod" class="inp" style="width:100%;box-sizing:border-box">
           <option value="direct">➕ Обычный</option>
@@ -5219,8 +5219,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         </div>
         <label class="chk-row" style="font-size:12px;color:var(--hint);cursor:pointer;display:block;margin-top:6px"><input type="checkbox" id="miWelcomeAbOn" onchange="toggleWelcomeAb(this)" style="vertical-align:middle"> 🧪 A/B приветствие: делить вступивших по вариантам</label>
         <div id="miWelcomeAbBox" style="display:none;margin-top:6px">
-          <textarea id="miWelcomeVarB" rows="2" placeholder="Вариант B приветствия..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
-          <textarea id="miWelcomeVarC" rows="2" placeholder="Вариант C (необязательно)..." style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
+          <textarea id="miWelcomeVarB" rows="2" placeholder="Вариант B приветствия…" style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical;margin-bottom:6px"></textarea>
+          <textarea id="miWelcomeVarC" rows="2" placeholder="Вариант C (необязательно)…" style="width:100%;box-sizing:border-box;padding:8px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:13px;resize:vertical"></textarea>
           <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Верхнее поле — вариант A. Сравните доставку в «Операциях»/A/B (метки A/B#1…).</div>
         </div>
       </div>
@@ -5332,7 +5332,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-starsexp')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">⭐ Новый A/B тест Stars</div>
-    <div class="field"><label>Бот</label><select id="se-bot" class="sel"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Бот</label><select id="se-bot" class="sel"><option value="">Загрузка…</option></select></div>
     <div class="field"><label>Название теста</label><input id="se-name" type="text" placeholder="Тест цены на контент" class="inp"></div>
     <div class="field"><label>Тип контента</label><select id="se-ctype" class="sel">
       <option value="message">💬 Сообщение</option>
@@ -5369,7 +5369,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-ghost')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">👻 Новый призрачный профиль</div>
-    <div class="field"><label>Аккаунт</label><select id="gc-account" class="sel"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Аккаунт</label><select id="gc-account" class="sel"><option value="">Загрузка…</option></select></div>
     <div class="field"><label>Персонаж</label><select id="gc-personality" class="sel">
       <option value="ghost">👻 Призрак (пассивный)</option>
       <option value="watcher">👁 Наблюдатель</option>
@@ -5630,7 +5630,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-exp')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🧪 Новый A/B эксперимент</div>
-    <div class="field"><label>Бот</label><select id="ec-bot" class="sel"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Бот</label><select id="ec-bot" class="sel"><option value="">Загрузка…</option></select></div>
     <div class="field"><label>Название</label><input id="ec-name" type="text" placeholder="Тест приветствия" class="inp"></div>
     <div class="field"><label>Тип</label><select id="ec-type" class="sel">
       <option value="start_message">Приветствие (/start)</option>
@@ -5816,7 +5816,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         Введите username или ссылку на канал/чат для репорта:
       </div>
       <div class="field">
-        <input type="text" id="strikeTargetInput" placeholder="@channel или t.me/..." class="inp">
+        <input type="text" id="strikeTargetInput" placeholder="@channel или t.me/…" class="inp">
       </div>
       <div style="font-size:11px;color:var(--hint);margin:4px 0 14px">
         Поддерживается: @username · t.me/channel · t.me/+HASH
@@ -6086,7 +6086,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Описание проблемы</label>
-      <textarea id="errRepText" style="width:100%;min-height:160px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:12px;color:var(--text);font-size:14px;resize:vertical;box-sizing:border-box" maxlength="2000" placeholder="Опишите ошибку подробно..."></textarea>
+      <textarea id="errRepText" style="width:100%;min-height:160px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:12px;color:var(--text);font-size:14px;resize:vertical;box-sizing:border-box" maxlength="2000" placeholder="Опишите ошибку подробно…"></textarea>
     </div>
     <div id="errRepErr" style="color:var(--red);font-size:13px;margin:4px 0"></div>
     <button class="btn btn-p" id="errRepBtn" onclick="submitErrReport()" style="width:100%">📤 Отправить</button>
@@ -6121,7 +6121,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст сообщения</label>
       <div class="preset-row" id="bcastPresetRow"></div>
-      <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст..."></textarea>
+      <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст…"></textarea>
       <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span></div>
     </div>
     <div class="field">
@@ -6134,7 +6134,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Кнопки под сообщением (необязательно)</label>
-      <textarea id="bcastButtons" rows="2" placeholder="Текст кнопки | https://ссылка&#10;Вторая кнопка | https://..."></textarea>
+      <textarea id="bcastButtons" rows="2" placeholder="Текст кнопки | https://ссылка&#10;Вторая кнопка | https://…"></textarea>
       <div class="field-note">По одной кнопке на строку: <code>Текст | URL</code></div>
     </div>
     <label class="chk-row" style="display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text);padding:4px 0 10px;cursor:pointer">
@@ -6183,7 +6183,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Текст ответа</label>
-      <textarea id="arText" rows="4" maxlength="4096" placeholder="Сообщение которое отправит бот..."></textarea>
+      <textarea id="arText" rows="4" maxlength="4096" placeholder="Сообщение которое отправит бот…"></textarea>
     </div>
     <div class="field">
       <label>Кнопки под ответом (необязательно)</label>
@@ -6237,7 +6237,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Первое сообщение воронки</label>
-      <textarea id="fnMsg" rows="4" maxlength="4096" placeholder="Текст первого сообщения..."></textarea>
+      <textarea id="fnMsg" rows="4" maxlength="4096" placeholder="Текст первого сообщения…"></textarea>
     </div>
     <div class="field-err" id="fnErr"></div>
     <button class="btn btn-p" id="fnBtn" onclick="saveFunnel()" style="width:100%">🔄 Создать</button>
@@ -6269,7 +6269,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-title">📣 Рассылка по всем ботам</div>
     <div class="field">
       <label>Текст сообщения</label>
-      <textarea id="netbcText" rows="5" maxlength="4096" placeholder="Сообщение получат подписчики всех ваших ботов..."></textarea>
+      <textarea id="netbcText" rows="5" maxlength="4096" placeholder="Сообщение получат подписчики всех ваших ботов…"></textarea>
       <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — все боты</div>
     </div>
     <div class="field-err" id="netbcErr"></div>
@@ -6308,7 +6308,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Ключевое слово</label>
-      <input type="text" id="kwText" maxlength="100" placeholder="Напр: telegram bot, автоответчик...">
+      <input type="text" id="kwText" maxlength="100" placeholder="Напр: telegram bot, автоответчик…">
       <div class="field-note">По этому слову бот будет отслеживаться в поиске Telegram</div>
     </div>
     <div class="field-err" id="kwErr"></div>
@@ -6323,7 +6323,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-title">⏰ Запланировать рассылку</div>
     <div class="field">
       <label>Текст сообщения</label>
-      <textarea id="schText" rows="5" maxlength="4096" placeholder="Текст рассылки..."></textarea>
+      <textarea id="schText" rows="5" maxlength="4096" placeholder="Текст рассылки…"></textarea>
     </div>
     <div class="field">
       <label>Дата и время (UTC)</label>
@@ -6355,7 +6355,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Текст шаблона</label>
-      <textarea id="tplText" rows="6" maxlength="4096" placeholder="Поддерживается HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;..."></textarea>
+      <textarea id="tplText" rows="6" maxlength="4096" placeholder="Поддерживается HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;…"></textarea>
       <div class="field-note"><span id="tplLen">0</span>/4096</div>
     </div>
     <div class="field-err" id="tplErr"></div>
@@ -6546,7 +6546,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeWarmupModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🌱 Запустить прогрев</div>
-    <div class="field"><label>Аккаунт</label><select id="warmupAccSel"><option value="">Загрузка...</option></select></div>
+    <div class="field"><label>Аккаунт</label><select id="warmupAccSel"><option value="">Загрузка…</option></select></div>
     <div class="field">
       <label>Режим прогрева</label>
       <select id="warmupPlan">
@@ -6667,7 +6667,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-x" onclick="closeWsModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title">🏢 Новое пространство</div>
     <div class="field"><label>Название</label><input type="text" id="wsName" maxlength="100" placeholder="Напр: Команда продаж"></div>
-    <div class="field"><label>Описание (необязательно)</label><input type="text" id="wsDesc" maxlength="500" placeholder="Описание..."></div>
+    <div class="field"><label>Описание (необязательно)</label><input type="text" id="wsDesc" maxlength="500" placeholder="Описание…"></div>
     <div class="field-err" id="wsErr"></div>
     <button class="btn btn-p" id="wsSaveBtn" onclick="saveWorkspace()" style="width:100%">➕ Создать</button>
   </div>
@@ -6749,7 +6749,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст сообщения</label>
       <div class="preset-row" id="cmpPresetRow"></div>
-      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Спинтакс: {Привет|Здравствуйте}, {name}!"></textarea>
+      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения… Спинтакс: {Привет|Здравствуйте}, {name}!"></textarea>
       <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до спинтакса</div>
       <input type="text" id="cmpNameFb" maxlength="32" placeholder="Если имени нет, писать: друг">
       <div class="field-note">Чем заменить {name}, когда у получателя нет ни имени, ни ника</div>
@@ -6795,7 +6795,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="modal-title">📝 Публикация в канал</div>
     <div class="field">
       <label>Текст поста</label>
-      <textarea id="chPostText" rows="6" maxlength="4096" placeholder="Введите текст публикации..."></textarea>
+      <textarea id="chPostText" rows="6" maxlength="4096" placeholder="Введите текст публикации…"></textarea>
       <div class="field-note"><span id="chPostLen">0</span>/4096</div>
     </div>
     <div class="field">
@@ -6963,7 +6963,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Описание</label>
-      <textarea id="nbCreateDesc" rows="2" placeholder="Описание сети..." class="input-bc"></textarea>
+      <textarea id="nbCreateDesc" rows="2" placeholder="Описание сети…" class="input-bc"></textarea>
     </div>
     <div class="field-err" id="nbCreateErr"></div>
     <button class="btn btn-p" id="nbCreateBtn" onclick="submitNetCreate()" style="width:100%">🕸️ Создать</button>
@@ -6986,7 +6986,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>ID объекта *</label>
-      <input type="text" id="nbNodeId" placeholder="bot_id, channel_id..." class="inp">
+      <input type="text" id="nbNodeId" placeholder="bot_id, channel_id…" class="inp">
     </div>
     <div class="field">
       <label>Метка</label>
@@ -7077,7 +7077,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Описание</label>
-      <textarea id="wfCreateDesc" rows="2" placeholder="Назначение воркфлоу..." class="input-bc"></textarea>
+      <textarea id="wfCreateDesc" rows="2" placeholder="Назначение воркфлоу…" class="input-bc"></textarea>
     </div>
     <div class="field-err" id="wfCreateErr"></div>
     <button class="btn btn-p" id="wfCreateBtn" onclick="submitWorkflowCreate()" style="width:100%">🔄 Создать</button>
@@ -7111,7 +7111,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field" id="wfStepMsgField">
       <label>Текст сообщения</label>
-      <textarea id="wfStepMsg" rows="3" placeholder="Текст сообщения пользователю..." class="input-bc"></textarea>
+      <textarea id="wfStepMsg" rows="3" placeholder="Текст сообщения пользователю…" class="input-bc"></textarea>
     </div>
     <div class="field" id="wfStepDelayField" style="display:none">
       <label>Задержка (минуты)</label>
@@ -20216,7 +20216,7 @@ async function openStars() {
 
 async function openStarsExpModal() {
   const el = document.getElementById('se-bot');
-  el.innerHTML = '<option value="">Загрузка...</option>';
+  el.innerHTML = '<option value="">Загрузка…</option>';
   try {
     const d = await api('/api/miniapp/bots');
     const bots = d.bots || d || [];
@@ -20384,7 +20384,7 @@ async function openGhostModal() {
 }
 async function _ghostLoadAccs(q) {
   const el = document.getElementById('gc-account');
-  el.innerHTML = '<option value="">Загрузка...</option>';
+  el.innerHTML = '<option value="">Загрузка…</option>';
   try {
     const r = await accPickerLoad('', q);
     el.innerHTML = r.accs.length
@@ -20727,7 +20727,7 @@ async function openWarmupModal() {
 // тех, кто в cooldown.
 async function _warmupLoadAccs(q) {
   const sel = document.getElementById('warmupAccSel');
-  sel.innerHTML='<option value="">Загрузка...</option>';
+  sel.innerHTML='<option value="">Загрузка…</option>';
   try {
     const r = await accPickerLoad('active', q);
     sel.innerHTML = r.accs.length
@@ -21577,7 +21577,7 @@ async function deleteExp(id, _el) {
 
 async function openExpModal() {
   const el = document.getElementById('ec-bot');
-  el.innerHTML = '<option value="">Загрузка...</option>';
+  el.innerHTML = '<option value="">Загрузка…</option>';
   try {
     const d = await api('/api/miniapp/bots');
     const bots = d.bots || d || [];
@@ -24259,7 +24259,7 @@ async function _gfLoadAccounts(q) {
       _gfSetSubmit(false, 'Нужен хотя бы один аккаунт');
       return;
     }
-    sel.innerHTML='<option value="">Выберите аккаунт...</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
+    sel.innerHTML='<option value="">Выберите аккаунт…</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
     accPickerSetNote('gfAccount', accPickerNote(r));
     _gfSetSubmit(true);
   } catch(e) {
@@ -24546,8 +24546,8 @@ async function openCloneAdapt(keep) {
 async function openCloneModal() {
   const srcEl = document.getElementById('clSrc');
   const tgtEl = document.getElementById('clTgt');
-  srcEl.innerHTML = '<option value="">Загрузка...</option>';
-  tgtEl.innerHTML = '<option value="">Загрузка...</option>';
+  srcEl.innerHTML = '<option value="">Загрузка…</option>';
+  tgtEl.innerHTML = '<option value="">Загрузка…</option>';
   try {
     const d = await api('/api/miniapp/bots');
     const bots = d.bots || d || [];
@@ -25320,7 +25320,7 @@ async function openAutofunnelModal() {
   document.getElementById('af-err').textContent='';
   document.getElementById('af-seg').value='all';
   const sel = document.getElementById('af-bot');
-  sel.innerHTML='<option value="">Загрузка...</option>';
+  sel.innerHTML='<option value="">Загрузка…</option>';
   showModal('mo-autofunnel');
   try {
     const bots = await api('/api/miniapp/bots');
