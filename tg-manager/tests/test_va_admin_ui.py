@@ -27,3 +27,14 @@ def test_admin_screens_do_not_use_latin_number_format():
     js = _read("mini_app", "screens", "va_admin.js")
     assert not re.search(r"(?<![\w.])num\(", js), "num() даёт «1.2K» — латиница в интерфейсе"
     assert "' постов</span>" not in js and "пост.)" not in js
+
+
+def test_ai_banner_says_where_to_enter_key(monkeypatch):
+    """Плашка «ИИ не подключён» обязана сказать, ГДЕ ввести ключ: иначе владелец
+    видит запрет без выхода (ключ задаётся только в боте, в /admin)."""
+    from services import channel_admin as ca, ai_claude
+    from services import ai_providers
+    monkeypatch.setattr(ai_claude, "enabled", lambda: False)
+    monkeypatch.setattr(ai_providers, "configured_providers", lambda: [])
+    ok, note = ca.ai_ready()
+    assert not ok and "/admin" in note and "AI-ключи" in note
