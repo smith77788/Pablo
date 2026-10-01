@@ -1861,6 +1861,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Публикация / рассылка</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <!-- Виртуальный администратор жил только кнопкой внутри «Каналов»:
+           владелец, открывший «Ещё», его не находил. -->
+      <div class="mgmt-tile" onclick="openVaAdmin()">
+        <div class="mgmt-tile-ico">🧠</div>
+        <div class="mgmt-tile-lbl">Виртуальный администратор</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openSpintax()">
         <div class="mgmt-tile-ico">🎲</div>
         <div class="mgmt-tile-lbl">Спинтакс</div>

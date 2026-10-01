@@ -95,8 +95,15 @@ async function _vaLoadList() {
 // Сводка по всей сети каналов — взгляд руководителя поверх администраторов
 // отдельных каналов. Показывается, только когда хоть один администратор
 // установлен: пустому владельцу цифры «0/0» не нужны.
+function _vaNum(v) {
+  const x = Number(v);
+  return isFinite(x) ? Math.round(x).toLocaleString('ru') : '—';
+}
+
 function _vaNetworkHtml(n) {
   if (!n || !n.admins_installed) return '';
+  // Числа целиком и по-русски: общий форматтер пишет «1.2K», а латиница в
+  // интерфейсе владельцу непонятна.
   const kpi = function (val, lbl) {
     return '<div style="flex:1;min-width:80px;text-align:center;padding:8px 4px">' +
       '<div style="font-size:20px;font-weight:700">' + val + '</div>' +
@@ -104,10 +111,10 @@ function _vaNetworkHtml(n) {
   };
   let h = '<div class="sec">Сеть каналов</div><div class="lst" style="padding:6px">' +
     '<div style="display:flex;flex-wrap:wrap;gap:4px">' +
-      kpi(n.admins_active + '<span style="font-size:13px;color:var(--hint)">/' + n.admins_installed + '</span>', 'администраторов') +
+      kpi(n.admins_active + '<span style="font-size:13px;color:var(--hint)">/' + n.admins_installed + '</span>', 'ведут каналы') +
       kpi(n.posts_7d, 'постов за 7 дней') +
-      kpi(n.avg_views_7d ? num(n.avg_views_7d) : '—', 'средний охват') +
-      kpi(n.members_total ? num(n.members_total) : '—', 'подписчиков') +
+      kpi(n.avg_views_7d ? _vaNum(n.avg_views_7d) : '—', 'средний охват') +
+      kpi(n.members_total ? _vaNum(n.members_total) : '—', 'подписчиков') +
     '</div>';
   if (n.pending_drafts) {
     h += '<div style="padding:6px 10px;font-size:13px">📝 Ждут вашего решения: <b>' + n.pending_drafts + '</b></div>';
@@ -119,7 +126,7 @@ function _vaNetworkHtml(n) {
       n.top_pillars.map(function (p) {
         return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--sep)">' +
           '<span>' + esc(p.pillar) + '</span>' +
-          '<span style="color:var(--hint)">' + num(p.avg_views) + ' просмотров · ' + p.posts + ' постов</span></div>';
+          '<span style="color:var(--hint)">' + _vaNum(p.avg_views) + ' просм. · ' + p.posts + ' ' + plural(p.posts, 'пост', 'поста', 'постов') + '</span></div>';
       }).join('') + '</div>';
   }
 
@@ -228,12 +235,13 @@ function _vaReportHtml(r, s) {
     ' <span style="color:' + (r.members_delta_7d >= 0 ? 'var(--green)' : 'var(--red,#ef4444)') + '">(' +
     (r.members_delta_7d >= 0 ? '+' : '') + r.members_delta_7d + ' за неделю)</span>';
   let h = '<div class="sec">Статистика</div><div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.7">' +
-    'Подписчиков: <b>' + (r.members !== null && r.members !== undefined ? r.members : (s.members_count || '—')) + '</b>' + delta + '<br>' +
-    'Постов за неделю: <b>' + r.posts_7d + '</b>' + (r.avg_views_7d ? ', в среднем <b>' + r.avg_views_7d + '</b> просмотров' : '') + '<br>' +
+    'Подписчиков: <b>' + (r.members !== null && r.members !== undefined ? _vaNum(r.members) : (s.members_count ? _vaNum(s.members_count) : '—')) + '</b>' + delta + '<br>' +
+    'Постов за неделю: <b>' + r.posts_7d + '</b>' + (r.avg_views_7d ? ', в среднем <b>' + _vaNum(r.avg_views_7d) + '</b> ' + plural(r.avg_views_7d, 'просмотр', 'просмотра', 'просмотров') : '') + '<br>' +
     'Всего постов в памяти: ' + r.posts_total;
   if ((r.pillars || []).length) {
     h += '<br><br>Что заходит аудитории:<br>' + r.pillars.map(function (p) {
-      return '• ' + esc(p.name) + ' — ' + p.avg_views + ' просм. в среднем (' + p.posts + ' пост.)';
+      return '• ' + esc(p.name) + ' — <span style="white-space:nowrap">' + _vaNum(p.avg_views) + ' просм. в среднем, ' +
+        p.posts + ' ' + plural(p.posts, 'пост', 'поста', 'постов') + '</span>';
     }).join('<br>');
   } else {
     h += '<br><span style="color:var(--hint)">Отклик по рубрикам появится, когда наберутся просмотры первых постов.</span>';
