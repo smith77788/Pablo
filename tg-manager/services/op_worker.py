@@ -673,6 +673,75 @@ def _flood_cooldown_left(acc_id: int) -> float:
         return 0.0
 
 
+# Статусы, с которыми аккаунт не годится для действия. Тот же список, что в
+# единой двери resource_selector.select_all_active: расхождение здесь означало
+# бы, что одиночные исполнители работают по более слабым правилам, чем массовые.
+_DEAD_ACC_STATUSES = ("banned", "deactivated", "session_expired", "spamblock")
+
+
+async def _single_account_parked(
+    pool: "asyncpg.Pool", acc_id: int, *, summary_key: bool = False,
+) -> dict | None:
+    """Проверить, можно ли вообще брать этот аккаунт; иначе — готовый отказ.
+
+    Одиночные исполнители (объявление в группы, публикация в каналы аккаунта,
+    папка-чатлист, гигиена аккаунта) достают аккаунт сырым SELECT по id —
+    владелец указал конкретный, выбирать не из чего. Но мимо единой двери
+    `resource_selector.select_all_active` терялись ДВА её фильтра:
+
+      * `cooldown_until` — пауза, назначенная Telegram. Массовые исполнители
+        аккаунт в паузе не берут даже при явном выборе (include_ids идёт вместе
+        с respect_cooldown), а одиночные шли в окно паузы за новым штрафом.
+      * `acc_status` — spamblock/banned/session_expired/deactivated. Проверки
+        `is_active=TRUE` для этого не хватает: спамблок ставит статус, но
+        аккаунт остаётся активным, и операция работала с заведомо мёртвой
+        сессией.
+
+    Пауза — не вина владельца, поэтому это `requeue` с `defer_s`: операция
+    дождётся конца паузы и продолжится сама. Мёртвый статус — `failed` с
+    понятной причиной: ждать нечего.
+
+    `summary_key=True` — для прологов, которые отдают текст в `summary`.
+    Fail-open: сбой чтения не отказывает в операции.
+    """
+    _st = ""
+    _db_left = 0.0
+    try:
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT COALESCE(acc_status, 'active') AS st, "
+            "GREATEST(0, COALESCE("
+            "EXTRACT(EPOCH FROM (cooldown_until - NOW())), 0)) AS cd_left "
+            "FROM tg_accounts WHERE id=$1",
+            int(acc_id))
+        if row:
+            _st = str(row["st"] or "")
+            _db_left = float(row["cd_left"] or 0)
+    except Exception:
+        log_exc_swallow(log, f"op_worker: статус аккаунта {acc_id} не прочитан")
+        return None
+
+    if _st in _DEAD_ACC_STATUSES:
+        _text = (f"Аккаунт в состоянии «{_st}» — операция остановлена, "
+                 f"чтобы не работать мёртвой сессией")
+        return {"status": "failed", "ok": 0, "failed": 0,
+                ("summary" if summary_key else "reason"): _text,
+                "reason": _text}
+
+    # Берём строжайший из двух источников: в БД пауза долговечна (переживает
+    # рестарт), в памяти процесса — свежее (её мог записать текущий прогон).
+    _left = max(_db_left, _flood_cooldown_left(int(acc_id)))
+    if _left > 0:
+        _text = (f"Telegram назначил аккаунту паузу {int(_left) // 60 + 1} мин — "
+                 f"операция продолжится автоматически")
+        log.info("op_worker: аккаунт %d под паузой ещё %.0fс — операция ждёт в очереди",
+                 int(acc_id), _left)
+        return {"status": "requeue", "defer_s": int(_left) + 60,
+                ("summary" if summary_key else "reason"): _text,
+                "reason": _text}
+    return None
+
+
 async def _defer_op_for_flood(
     pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = "",
     bot=None, owner_id: int | None = None,
@@ -1024,6 +1093,13 @@ async def _claim_single_account(
     if not acc:
         return None, {"status": "failed",
                       "summary": "⚠️ Аккаунт не найден, отключён или нет сессии"}
+    # Пауза Telegram и мёртвый статус — до захвата: нет смысла занимать аккаунт,
+    # которым всё равно нельзя работать. Эти операции делают десятки записывающих
+    # вызовов (выход из чатов, чистка ЛС и контактов), то есть внутрь окна паузы
+    # уходил бы не один запрос, а серия.
+    _parked = await _single_account_parked(pool, int(acc["id"]), summary_key=True)
+    if _parked:
+        return None, _parked
     if not await try_claim_account(int(acc["id"])):
         return None, {"status": "requeue",
                       "summary": "⏳ Аккаунт занят другой операцией — попробуйте позже"}
@@ -9225,6 +9301,14 @@ async def _exec_group_announce(
         except Exception:
             log_exc_swallow(log, f"group_announce op={op_id}: quarantine check failed")
 
+        # Пауза Telegram и мёртвый статус: аккаунт достаётся сырым SELECT по
+        # id (владелец указал конкретный), то есть мимо фильтров единой двери
+        # resource_selector — проверяем их здесь, иначе одиночные исполнители
+        # работают по более слабым правилам, чем массовые.
+        _parked = await _single_account_parked(pool, int(acc["id"]))
+        if _parked:
+            return _parked
+
         dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
         groups = [
             d for d in dialogs
@@ -10296,6 +10380,14 @@ async def _exec_bulk_post_chans(
                         "ограничение) — публикация остановлена для защиты от бана. Повторите позже."}
         except Exception:
             log_exc_swallow(log, f"bulk_post_chans op={op_id}: quarantine check failed")
+
+        # Пауза Telegram и мёртвый статус: аккаунт достаётся сырым SELECT по
+        # id (владелец указал конкретный), то есть мимо фильтров единой двери
+        # resource_selector — проверяем их здесь, иначе одиночные исполнители
+        # работают по более слабым правилам, чем массовые.
+        _parked = await _single_account_parked(pool, int(acc["id"]))
+        if _parked:
+            return _parked
 
         # Fetch channels with access_hash and username from DB
         ch_rows = await _safe_fetch(
@@ -13536,6 +13628,13 @@ async def _exec_create_chatlist_folder(
             "system_version, app_version, lang_code, system_lang_code, cf_relay_url, "
             "proxy_id FROM tg_accounts WHERE id=$1 AND owner_id=$2 "
             "AND is_active=TRUE AND session_str IS NOT NULL", int(acc_id), owner_id)
+        if acc:
+            # Тот же сырой SELECT, о котором предупреждает комментарий выше:
+            # фильтры единой двери (пауза Telegram, мёртвый статус) к явно
+            # указанному аккаунту применяются отдельной проверкой.
+            _parked = await _single_account_parked(pool, int(acc["id"]))
+            if _parked:
+                return _parked
     else:
         from services import resource_selector as _rs
 
