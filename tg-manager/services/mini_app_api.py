@@ -546,6 +546,24 @@ def _cache_prune(now: float, max_ttl: float = _CACHE_TTL) -> None:
             _cache.pop(k, None)
 
 
+def _cache_drop_user(uid) -> int:
+    """Снять закэшированные ответы одного пользователя. Возвращает сколько снято.
+
+    Ключ записи — "имя_обработчика:uid:строка_запроса", и у одного списка записей
+    столько, сколько страниц и срезов человек успел открыть. Сравниваем ровно
+    средний отрезок, а не ищем ":uid:" подстрокой: такая подстрока может
+    встретиться и внутри чужой строки запроса.
+    """
+    if not uid:
+        return 0
+    want = str(uid)
+    dead = [k for k in _cache
+            if (parts := k.split(":", 2)) and len(parts) >= 2 and parts[1] == want]
+    for k in dead:
+        _cache.pop(k, None)
+    return len(dead)
+
+
 def _cached(key: str, ttl: int = _CACHE_TTL):
     """Кэш ОБЩИХ (не привязанных к пользователю) ответов под фиксированным ключом.
 
@@ -1705,6 +1723,41 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.debug("compress_middleware: сжатие пропущено", exc_info=True)
         return response
 
+    # Кэш ответов живёт 30 секунд — и этого хватало, чтобы человек не увидел
+    # результата собственного действия. Форма добавления бота стоит НА экране
+    # ботов, то есть список гарантированно уже в кэше: вставил токен → «✅ Бот
+    # добавлен!» → список перезагрузился закэшированным ответом ДО добавления →
+    # бота в списке нет. Вывод отсюда один: не получилось, — и токен вставляли
+    # снова. То же на выключении бота («убран из работы», а он в строю) и на
+    # создании канала.
+    #
+    # Сбрасываем в одном месте, а не в каждом обработчике: разослать вызов по
+    # двум десяткам мутаций — значит однажды забыть его в двадцать первой.
+    #
+    # Сносим кэш и на тех POST, которые ничего не меняют (опрос QR-входа стучит
+    # раз в три секунды). Это сознательно: перебдеть стоит один лишний запрос в
+    # базу, недобдеть — человек не видит своего действия. К тому же опрос QR
+    # идёт на экране добавления аккаунта, где списков на виду нет, так что
+    # промахиваться этому сбросу попросту не по чему.
+    _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+    @web.middleware
+    async def cache_invalidate_middleware(request: web.Request, handler):
+        """Изменил данные — свои закэшированные ответы больше не действительны."""
+        response = await handler(request)
+        if request.method in _MUTATING_METHODS:
+            try:
+                # Только удачные: отказ по тарифу и ошибка ничего не изменили,
+                # сбрасывать кэш из-за них — лишняя работа на каждом отказе.
+                if 200 <= int(getattr(response, "status", 500)) < 400:
+                    _cache_drop_user(_get_uid(request))
+            except Exception:
+                log.debug("сброс кэша после изменения не удался", exc_info=True)
+        return response
+
+    # Самым внешним: статус, который реально увидел человек, складывается уже
+    # после plan_gate (он превращает отказ по подписке в 403).
+    app.middlewares.append(cache_invalidate_middleware)
     app.middlewares.append(compress_middleware)
     app.middlewares.append(plan_gate_middleware)
     # Apply security middleware (rate limiting + security headers)
