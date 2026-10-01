@@ -84,7 +84,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 async def cb_mpub_menu(callback: CallbackQuery) -> None:
     await safe_answer(callback)
     await callback.message.edit_text(
-        "📤 <b>Публикация / рассылка — рассылка в каналы</b>\n\n"
+        "📤 <b>Публикация / рассылка — один пост во все каналы</b>\n\n"
         "Отправляет один пост одновременно во все ваши каналы.\n\n"
         "📢 <b>Все каналы</b> — опубликовать во все каналы всех аккаунтов\n"
         "👤 <b>По аккаунту</b> — выбрать конкретный аккаунт\n"

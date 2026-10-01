@@ -730,8 +730,8 @@ async def cb_apply(
         op_type = data.get("op_type", "")
         _OP_LABELS = {
             "mass_publish": "📤 Публикация / рассылка",
-            "bulk_join": "🔗 Массовый join",
-            "bulk_leave": "🚪 Массовый leave",
+            "bulk_join": "🔗 Массовое вступление в каналы",
+            "bulk_leave": "🚪 Массовый выход из каналов",
             "bulk_bot_edit": "✏️ Редактирование ботов",
         }
         op_label = _OP_LABELS.get(op_type, op_type)

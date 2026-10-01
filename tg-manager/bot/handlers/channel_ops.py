@@ -3048,10 +3048,10 @@ async def _run_invite_bg(
                 _acc=acc_dict,
             )
             if not join_res.get("ok"):
-                acc_status[aid]["error"] = join_res.get("error", "join failed")[:50]
+                acc_status[aid]["error"] = join_res.get("error", "не удалось вступить")[:50]
                 acc_status[aid]["done"] = True
-                acc_status[aid]["phase"] = "❌ join"
-                await _upd(aid, "❌ join")
+                acc_status[aid]["phase"] = "❌ не вступил"
+                await _upd(aid, "❌ не вступил")
                 return
 
             # tg_user_id: из БД или из get_me(), который join_channel_by_id вызвал

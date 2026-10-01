@@ -177,7 +177,7 @@ class SubscriptionGateMiddleware(BaseMiddleware):
                 await event.answer("✅ Подписка подтверждена!")
                 try:
                     await event.message.edit_text(
-                        "✅ <b>Спасибо за подписку!</b>\n\nНажмите /start чтобы продолжить.",
+                        "✅ <b>Спасибо за подписку!</b>\n\nНажмите /start, чтобы продолжить.",
                         parse_mode="HTML",
                     )
                 except Exception:
