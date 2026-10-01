@@ -8337,7 +8337,7 @@ function navGo(tab, fn) {
   try {
     if (tab) { goTab(tab); }
     else if (fn && typeof window[fn] === 'function') { window[fn](); }
-  } catch(e) { try { toast('Не удалось открыть раздел'); } catch(_) {} }
+  } catch(e) { try { toast('⚠️ Не удалось открыть раздел'); } catch(_) {} }
 }
 
 function _syncBackButton() {
@@ -8643,7 +8643,7 @@ async function cwLoad(){
 }
 async function cwStart(){
   const chat=document.getElementById('cwChat').value.trim();
-  if(!chat){toast('Укажите чат');return;}
+  if(!chat){toast('❗ Укажите чат');return;}
   const topics=document.getElementById('cwTopics').value.trim();
   try{
     const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
@@ -8737,7 +8737,7 @@ function runPulseActionById(key) {
   // Раньше отсутствующий ключ давал полную тишину: нажатие без единого отклика.
   // Так бывает, когда карточка пережила перерисовку Пульса и её действие уже
   // забыто, — человеку надо сказать это, а не делать вид, что он не нажимал.
-  if (!a) { toast('Карточка устарела — обновляю подсказки'); loadOrganismPulse(); return; }
+  if (!a) { toast('⚠️ Карточка устарела — обновляю подсказки'); loadOrganismPulse(); return; }
   runPulseAction(a);
 }
 // Параметр действия приходит двумя именами: нудж бота кладёт его в ссылку как
@@ -8805,8 +8805,8 @@ function copilotOpen(nav, fn) {
   try {
     if (nav) { goTab(nav); }
     else if (fn && typeof window[fn] === 'function') { window[fn](); }
-    else { toast('Раздел недоступен'); }
-  } catch(e) { try { toast('Не удалось открыть раздел'); } catch(_){} }
+    else { toast('⚠️ Раздел недоступен'); }
+  } catch(e) { try { toast('⚠️ Не удалось открыть раздел'); } catch(_){} }
 }
 
 // «Отложить» — клиентское, на сутки, по id подсказки (без роста схемы БД).
@@ -8946,11 +8946,11 @@ function _parseArgs(argStr) {
 }
 function replayAction(onclick) {
   const fn = _fnNameOf(onclick);
-  if (!fn || typeof window[fn] !== 'function') { toast('Раздел недоступен'); return; }
+  if (!fn || typeof window[fn] !== 'function') { toast('⚠️ Раздел недоступен'); return; }
   const am = /\((.*)\)\s*;?\s*$/.exec(onclick);
   const args = am ? _parseArgs(am[1]) : [];
   try { window[fn].apply(window, args); }
-  catch(e) { try { toast('Не удалось открыть раздел'); } catch(_){} }
+  catch(e) { try { toast('⚠️ Не удалось открыть раздел'); } catch(_){} }
 }
 function renderFrequent() {
   const wrap = document.getElementById('freqWrap');
@@ -8984,7 +8984,7 @@ function replayFrequent(i) {
 function clearFrequent() {
   try { localStorage.removeItem(_FREQ_KEY); } catch(_) {}
   renderFrequent();
-  toast('Список очищен');
+  toast('✅ Список очищен');
 }
 // role="button" — это обещание: «сюда можно нажать». Озвучка его повторяет, и
 // человек нажимает Enter или пробел. По спецификации WAI-ARIA такой элемент
@@ -9425,7 +9425,7 @@ async function openBotByUsername(uname) {
       BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
     }
     const b = (BOTS||[]).find(x => String(x.username||'').toLowerCase() === String(uname).toLowerCase());
-    if (!b) { toast('Бот ещё не появился в списке — обновите раздел «Боты»'); return; }
+    if (!b) { toast('⚠️ Бот ещё не появился в списке — обновите раздел «Боты»'); return; }
     openBot(b.bot_id);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
@@ -9528,7 +9528,7 @@ function updateBotSelBar() {
   if (el) el.textContent = 'Выбрано: '+BOT_SEL.size;
 }
 function openBotBroadcast() {
-  if (!BOT_SEL.size) { toast('Выберите хотя бы одного бота'); return; }
+  if (!BOT_SEL.size) { toast('❗ Выберите хотя бы одного бота'); return; }
   document.getElementById('bbText').value='';
   { const _b=document.getElementById('bbButtons'); if(_b) _b.value=''; }
   document.getElementById('bbErr').textContent='';
@@ -9860,7 +9860,7 @@ async function deleteAr(id, _el) {
 async function doDeleteAr(id) {
   try {
     await api('/api/miniapp/auto_reply/'+id, {method:'DELETE'});
-    toast('Удалено'); loadArList();
+    toast('✅ Удалено'); loadArList();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
@@ -10064,7 +10064,7 @@ async function submitAccMeta() {
 }
 // Массовое перемещение в статус
 function openMassStage() {
-  if (!_massSelCount()) { toast('Выберите хотя бы один аккаунт'); return; }
+  if (!_massSelCount()) { toast('❗ Выберите хотя бы один аккаунт'); return; }
   const e=document.getElementById('msErr'); if(e) e.textContent='';
   showModal('mo-acc-stage');
 }
@@ -10109,7 +10109,7 @@ async function submitAccProfile() {
     try{
       const r=await api(`/api/miniapp/account/${AP_ACC_ID}/login_code`,{method:'POST'});
       if(r.code){ await copyToClipboard(r.code, '📩 Код входа скопирован: '+r.code); }
-      else toast('Код не найден');
+      else toast('⚠️ Код не найден');
     }catch(e){ errEl.textContent=e.message||'Ошибка'; }
     finally{ btn.disabled=false; btn.textContent='Применить'; }
     return;
@@ -10692,7 +10692,7 @@ function _massSelCount() {
 }
 async function runAccMass(op) {
   const n = _massSelCount();
-  if (!n) { toast('Выберите хотя бы один аккаунт'); return; }
+  if (!n) { toast('❗ Выберите хотя бы один аккаунт'); return; }
   const confirmMsg = op==='leave_all'
     ? `Выйти из всех чатов на ${n} аккаунтах? Действие необратимо.`
     : op==='scan' ? `Сканировать ресурсы на ${n} аккаунтах?`
@@ -10724,7 +10724,7 @@ async function purgeDeadAccounts() {
     toast('⚠️ Не удалось проверить: ' + (e.message||'ошибка связи'));
     return;
   }
-  if (!cnt) { toast('Мёртвых аккаунтов нет 👍'); return; }
+  if (!cnt) { toast('✅ Мёртвых аккаунтов нет 👍'); return; }
   if (!await askConfirm(`🗑 Удалить ${cnt} невоскрешаемых аккаунтов (бан / деактивация / отозванная сессия)?\n\nБезвозвратно. Конфликтные (два IP, «Кулдаун») НЕ входят — их лечит перезалив.`)) return;
   try {
     const r = await api('/api/miniapp/accounts/mass', {method:'POST',
@@ -10734,7 +10734,7 @@ async function purgeDeadAccounts() {
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка удаления')); }
 }
 function openMassProfile() {
-  if (!_massSelCount()) { toast('Выберите хотя бы один аккаунт'); return; }
+  if (!_massSelCount()) { toast('❗ Выберите хотя бы один аккаунт'); return; }
   AP_MASS = true;
   const e=document.getElementById('apErr'); if(e) e.textContent='';
   document.getElementById('apOp').value='name';
@@ -11012,7 +11012,7 @@ function toggleAccContPick(id) {
 // bulk_dm_adhoc с темпом/флуд-контролем), НЕ наивным циклом. Работает по
 // @username; без него получатель в adhoc-путь не попадает.
 function writeSelectedContacts() {
-  if (!ACC_CONT_SEL || !ACC_CONT_SEL.size) { toast('Выберите контакты'); return; }
+  if (!ACC_CONT_SEL || !ACC_CONT_SEL.size) { toast('❗ Выберите контакты'); return; }
   const chosen = ACC_CONTACTS.filter(c => ACC_CONT_SEL.has(c.id) && c.username);
   const skipped = ACC_CONT_SEL.size - chosen.length;
   if (!chosen.length) { toast('⚠️ У выбранных нет @username — массовая отправка идёт по @username'); return; }
@@ -11527,7 +11527,7 @@ function updateChSelBar() {
   if (el) el.textContent = 'Выбрано: '+CH_SEL.size;
 }
 function openChMass(op) {
-  if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
+  if (!CH_SEL.size) { toast('❗ Выберите хотя бы один канал'); return; }
   CHM_OP = op;
   const cfg = {
     post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах. Спинтакс {A|B} — свой вариант на канал (меньше палева).`, ph:'Текст поста… Спинтакс: {Привет|Здравствуйте}!'},
@@ -11560,7 +11560,7 @@ async function submitChMass() {
   finally { btn.disabled=false; btn.textContent='Применить'; }
 }
 async function runChMass(op) {
-  if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
+  if (!CH_SEL.size) { toast('❗ Выберите хотя бы один канал'); return; }
   if (op==='promote' && !await askConfirm(`Назначить аккаунты администраторами в ${CH_SEL.size} ${plural(CH_SEL.size,'канале','каналах','каналах')}?`)) return;
   try {
     const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify({op, channel_ids:[...CH_SEL]})});
@@ -11876,7 +11876,7 @@ function renderFuns(items) {
 
 // ── Broadcast modal ────────────────────────────────────
 function openBcastPick() {
-  if (!BOTS.length) { toast('Сначала загрузите список ботов'); goTab('bots'); return; }
+  if (!BOTS.length) { toast('❗ Сначала загрузите список ботов'); goTab('bots'); return; }
   fillBcastBots(-1);
   document.getElementById('bcastText').value='';
   { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
@@ -12184,7 +12184,7 @@ function closeOpCreateAnd(fn) {
   if (STACK[STACK.length-1]==='s-opcreate') back();
   const f = window[fn];
   if (typeof f === 'function') f();
-  else toast('Модуль недоступен');
+  else toast('⚠️ Модуль недоступен');
 }
 
 // Страница истории операций. Список был жёстко ограничен тридцатью последними,
@@ -12602,7 +12602,7 @@ async function cancelOp(id, confirm) {
   if (confirm && !(await askConfirm('Отменить операцию? Вернуть её в очередь будет нельзя — только повторить заново.'))) return;
   try {
     await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
-    toast('Операция отменена');
+    toast('⚠️ Операция отменена');
     _opProgressMarkCancelled(id);
     loadOps();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
@@ -12943,7 +12943,7 @@ function buildFunnelDetail(d) {
 async function addFunnelStep() {
   if (!CUR_FUNNEL_ID) return;
   const text = document.getElementById('fsText').value.trim();
-  if (!text) { toast('Введите текст шага'); return; }
+  if (!text) { toast('❗ Введите текст шага'); return; }
   const delay = parseInt(document.getElementById('fsDelay').value)||0;
   try {
     await api('/api/miniapp/funnel/'+CUR_FUNNEL_ID+'/step', {method:'POST', body:JSON.stringify({message_text:text, delay_minutes:delay})});
@@ -12960,7 +12960,7 @@ function editFunnelStep(stepId) {
   // Шаг берём из кэша: его текст почти наверняка содержит апострофы и кавычки,
   // а встроенный в onclick JSON рвал бы атрибут.
   const step = (CUR_FUNNEL_STEPS||[]).find(x=>String(x.id)===String(stepId));
-  if (!step) { toast('Шаг не найден — обновите экран'); return; }
+  if (!step) { toast('⚠️ Шаг не найден — обновите экран'); return; }
   FS_EDIT_ID = step.id;
   const t = document.getElementById('fsText');
   if (t) { t.value = step.message_text || ''; t.focus(); }
@@ -12990,7 +12990,7 @@ function cancelEditFunnelStep() {
 async function saveFunnelStep() {
   if (!FS_EDIT_ID) return;
   const text = document.getElementById('fsText').value.trim();
-  if (!text) { toast('Введите текст шага'); return; }
+  if (!text) { toast('❗ Введите текст шага'); return; }
   const delay = parseInt(document.getElementById('fsDelay').value)||0;
   try {
     await api('/api/miniapp/funnel/step/'+FS_EDIT_ID, {method:'PATCH',
@@ -13005,7 +13005,7 @@ async function deleteFunnelStep(stepId, _el) {
   if (!await confirmDelete('Удалить шаг', _el)) return;
   try {
     await api('/api/miniapp/funnel/step/'+stepId, {method:'DELETE'});
-    toast('Шаг удалён');
+    toast('✅ Шаг удалён');
     openFunnelDetail(CUR_FUNNEL_ID, document.getElementById('fd-name')?.textContent);
   } catch(e){ toast('⚠️ '+(e.message||'Ошибка')); }
 }
@@ -13148,7 +13148,7 @@ async function deleteComp(id, _el) {
   if (!await confirmDelete('Убрать конкурента из наблюдения', _el, 'Собранная по нему история пропадёт.')) return;
   try {
     await api('/api/miniapp/competitor/'+id, {method:'DELETE'});
-    toast('Удалено'); loadCompetitors();
+    toast('✅ Удалено'); loadCompetitors();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
@@ -13357,12 +13357,12 @@ async function deleteKw(id, _el) {
   if (!await confirmDelete('Снять слово с отслеживания', _el, 'История позиций по нему больше не собирается.')) return;
   try {
     await api('/api/miniapp/keyword/'+id, {method:'DELETE'});
-    toast('Удалено'); loadKeywords();
+    toast('✅ Удалено'); loadKeywords();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
 function openKwModal() {
-  if (!BOTS.length) { toast('Сначала загрузите боты'); return; }
+  if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
   document.getElementById('kwBot').innerHTML = BOTS.map(b=>{
     const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
     return `<option value="${b.bot_id}">${esc(name)}</option>`;
@@ -13517,7 +13517,7 @@ async function saveSchedule() {
 async function cancelSchedule(id) {
   try {
     await api('/api/miniapp/schedule/'+id+'/cancel', {method:'POST'});
-    toast('Отменено'); await loadSchedules();
+    toast('⚠️ Отменено'); await loadSchedules();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
@@ -13577,7 +13577,7 @@ async function deleteTpl(id, _el) {
   if (!await confirmDelete('Удалить шаблон', _el, 'Его текст не восстановить.')) return;
   try {
     await api('/api/miniapp/template/'+id, {method:'DELETE'});
-    toast('Удалено'); loadTemplates();
+    toast('✅ Удалено'); loadTemplates();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
 
@@ -14231,7 +14231,7 @@ async function accPhoneCode(){
   const b=document.getElementById('accPhoneCodeBtn'); b.disabled=true; b.textContent='⏳ Проверяю…';
   try{
     const r=await api('/api/miniapp/account/add/phone/code',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,code,phone_code_hash:_accLoginHash,proxy_id:_accProxy().id})});
-    if(r.needs_2fa){ document.getElementById('accPhoneStep-2fa').style.display='block'; toast('Требуется пароль 2FA'); }
+    if(r.needs_2fa){ document.getElementById('accPhoneStep-2fa').style.display='block'; toast('❗ Требуется пароль 2FA'); }
     else _accDone(r);
   }catch(e){ _accErr(String(e&&e.message||e)); }
   finally{ b.disabled=false; b.textContent='✅ Подтвердить код'; }
@@ -14263,7 +14263,7 @@ async function accQrPoll(){
   try{
     const r=await api('/api/miniapp/account/add/qr/poll',{method:'POST',body:JSON.stringify({proxy_id:_accProxy().id})});
     if(r.status==='done'){ _accDone(r); }
-    else if(r.status==='need_2fa'){ accStopQrPoll(); document.getElementById('accQrStep-2fa').style.display='block'; toast('Требуется пароль 2FA'); }
+    else if(r.status==='need_2fa'){ accStopQrPoll(); document.getElementById('accQrStep-2fa').style.display='block'; toast('❗ Требуется пароль 2FA'); }
     // pending → ждём следующий тик
   }catch(e){ accStopQrPoll(); _accErr(String(e&&e.message||e)); }
 }
@@ -14373,14 +14373,14 @@ async function deleteProxy(id, accN, _el) {
   if (!await confirmDelete('Удалить прокси', _el, 'Действие необратимо.')) return;
   try {
     await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
-    toast('Удалено'); loadProxies();
+    toast('✅ Удалено'); loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
 }
 async function exportProxies() {
   try {
     const r = await api('/api/miniapp/proxy/export?format=json');
     const list = r.proxies||[];
-    if (!list.length) { toast('Нет прокси для экспорта'); return; }
+    if (!list.length) { toast('✅ Нет прокси для экспорта'); return; }
     const header = ['ID','Метка','URL (маска)','Тип','Гео','Активен','Живой','Проверен','Резерв','Назначен аккаунтам'];
     const rows = [header].concat(list.map(p=>[
       p.id, p.label||'', p.url||'', p.type||'', p.geo||'',
@@ -14448,7 +14448,7 @@ async function saveCfCreds() {
   const api_token = document.getElementById('cfToken').value.trim();
   const account_id = document.getElementById('cfAccountId').value.trim();
   const subdomain = document.getElementById('cfSubdomain').value.trim();
-  if (!account_id) { toast('Укажите ID аккаунта'); return; }
+  if (!account_id) { toast('❗ Укажите ID аккаунта'); return; }
   const btn = document.getElementById('cfSaveCredsBtn');
   btn.disabled=true; btn.textContent='💾 Сохраняю…';
   try {
@@ -14520,7 +14520,7 @@ async function assignCfRelay() {
   if (btn) { btn.disabled=true; btn.textContent='🔗 …'; }
   try {
     const r = await api('/api/miniapp/cf/pool/assign', {method:'POST'});
-    if (!r.pool_size) toast('Сначала задеплойте пул воркеров');
+    if (!r.pool_size) toast('❗ Сначала задеплойте пул воркеров');
     else toast(`🔗 Роздано аккаунтам: ${r.assigned||0} (пул ${r.pool_size})`);
     loadCfPoolStatus(); loadProxies();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,120)); }
@@ -14610,7 +14610,7 @@ async function checkProxyIsolation() {
 }
 async function submitProxyImport() {
   const raw = document.getElementById('proxyImport').value.trim();
-  if (!raw) { toast('Вставьте список прокси'); return; }
+  if (!raw) { toast('❗ Вставьте список прокси'); return; }
   try {
     const r = await api('/api/miniapp/proxies/import', {method:'POST', body:JSON.stringify({proxies:raw})});
     toast(`✅ Добавлено: ${r.added}${r.skipped?' · пропущено: '+r.skipped:''}`);
@@ -14954,7 +14954,7 @@ function renderBcAnalytics(items, serverTotal, serverTotals) {
   </div>`;
 }
 function openBcScheduleModal() {
-  if (!BOTS.length) { toast('Сначала загрузите список ботов'); goTab('bots'); return; }
+  if (!BOTS.length) { toast('❗ Сначала загрузите список ботов'); goTab('bots'); return; }
   const sel = document.getElementById('bs-bot');
   sel.innerHTML = BOTS.map(b=>`<option value="${b.bot_id}">@${esc(b.username||'')} (${num(b.subscriber_count||0)} подп.)</option>`).join('');
   document.getElementById('bs-text').value='';
@@ -15466,7 +15466,7 @@ async function loadRef() {
 }
 
 function goRef() {
-  if (!REF_CODE) { toast('Реферальный код не найден'); return; }
+  if (!REF_CODE) { toast('⚠️ Реферальный код не найден'); return; }
   txt('refBody', `
     <div style="font-size:28px;margin-bottom:10px">🎁</div>
     <div style="font-size:22px;font-weight:700;letter-spacing:2px;margin-bottom:8px">${esc(REF_CODE)}</div>
@@ -15551,7 +15551,7 @@ async function deleteDl(linkId, _el) {
   if (!await confirmDelete('Удалить Deep Link', _el)) return;
   try {
     await api('/api/miniapp/deeplink/'+linkId, {method:'DELETE'});
-    toast('Удалено');
+    toast('✅ Удалено');
     loadDeeplinks();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
@@ -15700,7 +15700,7 @@ async function deleteCmd(idx) {
   const newList = CMD_LIST.filter((_,i)=>i!==idx);
   try {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:newList})});
-    toast('Удалено');
+    toast('✅ Удалено');
     loadBotCommands();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
@@ -15980,7 +15980,7 @@ async function submitReporter() {
   const acc_count = parseInt(document.getElementById('reporterAccCount').value)||5;
   const errEl = document.getElementById('reporterErr');
   if (!target) { errEl.textContent='Укажите цель'; return; }
-  if (!await askConfirm(`Отправить ${acc_count} ${plural(acc_count,'репорта','репортов','репортов')} на "${target}"?`)) return;
+  if (!await askConfirm(`Отправить ${acc_count} ${plural(acc_count,'репорта','репортов','репортов')} на «${target}»?`)) return;
   const btn = document.getElementById('reporterBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
@@ -16107,7 +16107,7 @@ function exportCSV(path) {
   const url = path + (path.includes('?')?'&':'?') + 'token=' + encodeURIComponent(TK);
   try { tg.openLink(url, {try_instant_view:false}); }
   catch(_) { window.open(url, '_blank'); }
-  toast('Файл открывается для скачивания…');
+  toast('✅ Файл открывается для скачивания…');
 }
 
 function exportOpsCSV() {
@@ -16118,7 +16118,7 @@ function exportOpsCSV() {
     const badge = el.querySelector('.badge')?.textContent?.trim() || '';
     rows.push(['', name, badge, '', sub, '']);
   });
-  if (rows.length < 2) { toast('Нет операций для экспорта'); return; }
+  if (rows.length < 2) { toast('✅ Нет операций для экспорта'); return; }
   const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a');
@@ -16126,7 +16126,7 @@ function exportOpsCSV() {
   a.download = 'operations_' + new Date().toISOString().slice(0,10) + '.csv';
   a.click();
   URL.revokeObjectURL(a.href);
-  toast('CSV файл скачан');
+  toast('✅ CSV файл скачан');
 }
 
 function nuSwitch(which) {
@@ -17384,7 +17384,7 @@ function _contactPickedAccs() {
 function openContactWrite() {
   SEGMENT_TARGET = null;
   const c = window._cdContact || {};
-  if (!c.username && !c.telegram_user_id) { toast('У контакта нет @username или Telegram ID — писать некуда'); return; }
+  if (!c.username && !c.telegram_user_id) { toast('✅ У контакта нет @username или Telegram ID — писать некуда'); return; }
   const t = document.getElementById('ccwText'); if (t) t.value = '';
   const e = document.getElementById('ccwErr'); if (e) e.textContent = '';
   const ttl = document.getElementById('ccwTitle'); if (ttl) ttl.textContent = '✍️ Написать контакту';
@@ -17494,7 +17494,7 @@ async function _loadSegmentPreview(previewElId) {
 }
 function openSegmentWrite() {
   SEGMENT_TARGET = _segmentTargetInit();
-  if (!SEGMENT_TARGET) { toast('Выберите контакты или включите «весь срез»'); return; }
+  if (!SEGMENT_TARGET) { toast('❗ Выберите контакты или включите «весь срез»'); return; }
   const t = document.getElementById('ccwText'); if (t) t.value = '';
   const e = document.getElementById('ccwErr'); if (e) e.textContent = '';
   const f = document.getElementById('ccwFile'); if (f) f.value = '';
@@ -17506,7 +17506,7 @@ function openSegmentWrite() {
 }
 function openSegmentInvite() {
   SEGMENT_TARGET = _segmentTargetInit();
-  if (!SEGMENT_TARGET) { toast('Выберите контакты или включите «весь срез»'); return; }
+  if (!SEGMENT_TARGET) { toast('❗ Выберите контакты или включите «весь срез»'); return; }
   const g = document.getElementById('cciGroup'); if (g) g.value = '';
   const e = document.getElementById('cciErr'); if (e) e.textContent = '';
   const ttl = document.getElementById('cciTitle'); if (ttl) ttl.textContent = '➕ Пригласить сегмент';
@@ -17608,7 +17608,7 @@ let INTENT_EDIT_ID = null;
 // журналом, то есть теряя ровно ту историю, по которой правило и настраивают.
 function editIntentRule(id) {
   const r = (CUR_INTENT_RULES||[]).find(x=>String(x.id)===String(id));
-  if (!r) { toast('Правило не найдено — обновите экран'); return; }
+  if (!r) { toast('⚠️ Правило не найдено — обновите экран'); return; }
   INTENT_EDIT_ID = r.id;
   document.getElementById('intPhrase').value = r.phrase || '';
   document.getElementById('intStage').value = r.stage || '';
@@ -17698,7 +17698,7 @@ async function seedIntentDefaults() {
 // История переписки контакта — из «Хранилища» (диалог = telegram_user_id).
 function openContactHistory() {
   const c = window._cdContact || {};
-  if (!c.telegram_user_id) { toast('У контакта нет Telegram ID — история недоступна'); return; }
+  if (!c.telegram_user_id) { toast('⚠️ У контакта нет Telegram ID — история недоступна'); return; }
   const name = [c.first_name,c.last_name].filter(Boolean).join(' ') || c.username || ('#'+c.telegram_user_id);
   VAULT_NAMES[c.telegram_user_id] = name;   // VAULT_NAMES — глобальная (let), инициализирована {}
   openVaultChat(c.telegram_user_id);
@@ -17707,7 +17707,7 @@ function openContactInvite() {
   SEGMENT_TARGET = null;
   const c = window._cdContact || {};
   if (!c.username && !c.telegram_user_id && !(Array.isArray(c.phones)&&c.phones.length)) {
-    toast('У контакта нет @username, ID или телефона — некого приглашать'); return; }
+    toast('✅ У контакта нет @username, ID или телефона — некого приглашать'); return; }
   const g = document.getElementById('cciGroup'); if (g) g.value = '';
   const e = document.getElementById('cciErr'); if (e) e.textContent = '';
   const ttl = document.getElementById('cciTitle'); if (ttl) ttl.textContent = '➕ Пригласить контакт';
@@ -18353,7 +18353,7 @@ function cgRenderBanner() {
 
 // Отправить выбранные контакты в группу.
 async function bulkGroupSelected() {
-  if (!CONTACT_SELECTED.size) { toast('Сначала отметьте контакты'); return; }
+  if (!CONTACT_SELECTED.size) { toast('❗ Сначала отметьте контакты'); return; }
   let groups = CONTACT_GROUPS;
   try {
     const d = await api('/api/miniapp/uch/groups');
@@ -18361,7 +18361,7 @@ async function bulkGroupSelected() {
     CONTACT_GROUPS = groups;
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); return; }
   if (!groups.length) {
-    toast('Групп ещё нет — создайте первую');
+    toast('⚠️ Групп ещё нет — создайте первую');
     openContactGroups();
     return;
   }
@@ -18386,7 +18386,7 @@ async function bulkGroupSelected() {
 // Ещё массовые действия. Отдельной кнопкой на каждое панель бы не выдержала:
 // на 360px помещается пять-шесть, а сервер умеет вдвое больше.
 async function bulkMoreSelected() {
-  if (!CONTACT_SELECTED.size) { toast('Сначала отметьте контакты'); return; }
+  if (!CONTACT_SELECTED.size) { toast('❗ Сначала отметьте контакты'); return; }
   const n = CONTACT_SELECTED.size;
   const opts = [
     {value:'untag',   label:'🏷 Снять тег',        sub:'убрать один тег у отмеченных'},
@@ -18453,7 +18453,7 @@ async function bulkUngroupSelected() {
   let groups = [];
   try { groups = (await api('/api/miniapp/uch/groups')).groups || []; }
   catch(e) { toast('⚠️ '+(e.message||'Ошибка')); return; }
-  if (!groups.length) { toast('Групп ещё нет'); return; }
+  if (!groups.length) { toast('⚠️ Групп ещё нет'); return; }
   const gid = await askChoice('Из какой группы убрать?', groups.map(g => ({
     value: String(g.id),
     label: (g.name||'Без названия'),
@@ -18636,8 +18636,8 @@ async function stCreateRule() {
   const tag  = (document.getElementById('stTag').value||'').trim();
   const field = document.getElementById('stField').value;
   const op = document.getElementById('stOp').value;
-  if (!name) { toast('Дайте правилу название'); return; }
-  if (!tag)  { toast('Укажите метку, которую правило будет вешать'); return; }
+  if (!name) { toast('❗ Дайте правилу название'); return; }
+  if (!tag)  { toast('❗ Укажите метку, которую правило будет вешать'); return; }
   const cond = {field, op};
   if (op !== 'not_empty') {
     const el = document.getElementById('stVal');
@@ -18645,9 +18645,9 @@ async function stCreateRule() {
     const kind = (ST_FIELDS[field]||{}).kind;
     if (kind === 'bool') v = (v === 'true');
     else if (kind === 'num') {
-      if (v === '' || isNaN(Number(v))) { toast('Значение должно быть числом'); return; }
+      if (v === '' || isNaN(Number(v))) { toast('⚠️ Значение должно быть числом'); return; }
       v = Number(v);
-    } else if (!String(v).trim()) { toast('Укажите значение'); return; }
+    } else if (!String(v).trim()) { toast('❗ Укажите значение'); return; }
     cond.value = v;
   }
   try {
@@ -18744,7 +18744,7 @@ function _uchClFilter() {
 
 async function uchClPreview() {
   const f = _uchClFilter();
-  if (!f.country && !f.tag) { toast('Задайте страну или тег'); return; }
+  if (!f.country && !f.tag) { toast('❗ Задайте страну или тег'); return; }
   try {
     const d = await api('/api/miniapp/uch/filter/preview', { method: 'POST', body: JSON.stringify(f) });
     document.getElementById('uchClCount').textContent = 'Под фильтр попадает: ' + (d.count || 0) + ' контактов';
@@ -18753,7 +18753,7 @@ async function uchClPreview() {
 
 async function uchClExclude(excluded) {
   const f = _uchClFilter();
-  if (!f.country && !f.tag) { toast('Задайте страну или тег'); return; }
+  if (!f.country && !f.tag) { toast('❗ Задайте страну или тег'); return; }
   try {
     const d = await api('/api/miniapp/uch/filter/exclude', { method: 'POST', body: JSON.stringify({ ...f, excluded: excluded }) });
     toast((excluded ? 'Помечено личными: ' : 'Снято пометок: ') + (d.updated || 0));
@@ -18762,7 +18762,7 @@ async function uchClExclude(excluded) {
 
 async function uchClDelete() {
   const f = _uchClFilter();
-  if (!f.country && !f.tag) { toast('Задайте страну или тег'); return; }
+  if (!f.country && !f.tag) { toast('❗ Задайте страну или тег'); return; }
   // Предпросмотр был советом («сначала лучше сделать предпросмотр»), а не
   // частью действия: удалить безвозвратно можно было, ни разу не увидев, сколько
   // контактов попадёт. Теперь считаем сами и называем число в подтверждении.
@@ -18772,14 +18772,14 @@ async function uchClDelete() {
     uchN = Number(pv.count || 0);
     document.getElementById('uchClCount').textContent = 'Под фильтр попадает: ' + uchN + ' контактов';
   } catch (e) { uchN = null; }
-  if (uchN === 0) { toast('Под фильтр не попадает ни одного контакта'); return; }
+  if (uchN === 0) { toast('⚠️ Под фильтр не попадает ни одного контакта'); return; }
   const uchScale = (uchN === null)
     ? 'все контакты под фильтр (узнать их число не удалось)'
     : uchN + ' ' + plural(uchN, 'контакт', 'контакта', 'контактов') + ' под фильтр';
   if (!await askConfirm('Удалить БЕЗВОЗВРАТНО ' + uchScale + '?\n\nВосстановить их будет нечем.')) return;
   try {
     const d = await api('/api/miniapp/uch/filter/delete', { method: 'POST', body: JSON.stringify({ ...f, confirm: true }) });
-    toast('Удалено: ' + (d.deleted || 0));
+    toast('✅ Удалено: ' + (d.deleted || 0));
     document.getElementById('uchClCount').textContent = '';
   } catch (e) { toast(e.message || 'Ошибка'); }
 }
@@ -18925,7 +18925,7 @@ async function cloudUpload(input) {
     toast(`Файл ${_cloudBytes(file.size)} — больше предела ${_cloudBytes(_CLOUD_MAX_UPLOAD)}`);
     return;
   }
-  if (!file.size) { input.value = ''; toast('Файл пустой'); return; }
+  if (!file.size) { input.value = ''; toast('⚠️ Файл пустой'); return; }
   say(`⏳ Загружаю ${_cloudBytes(file.size)}…`);
   try {
     const fd = new FormData();
@@ -19022,7 +19022,7 @@ async function cloudDelete(fileId) {
   if (!await askConfirm('Удалить файл из облака безвозвратно?')) return;
   try {
     await api('/api/miniapp/cloud/file/' + fileId + '/delete', { method: 'POST', body: '{}' });
-    toast('Удалено');
+    toast('✅ Удалено');
     await openCloud();
   } catch (e) { toast(e.message || 'Ошибка'); }
 }
@@ -19460,7 +19460,7 @@ async function submitPersona() {
     openPersonas();
   } catch(e) {
     if(errEl) errEl.textContent='Ошибка: '+e.message;
-    toast('Ошибка создания');
+    toast('⚠️ Ошибка создания');
   } finally {
     if(btn) { btn.disabled=false; btn.textContent='🎭 Создать персону'; }
   }
@@ -19558,7 +19558,7 @@ let REF_LINK = '';
 function refCopyCode() { if (REF_CODE) copyToClipboard(REF_CODE, 'Код скопирован'); }
 function refCopyLink() { if (REF_LINK) copyToClipboard(REF_LINK, 'Ссылка скопирована'); }
 function refShare() {
-  if (!REF_LINK) { toast('Ссылки пока нет'); return; }
+  if (!REF_LINK) { toast('⚠️ Ссылки пока нет'); return; }
   const url = 'https://t.me/share/url?url=' + encodeURIComponent(REF_LINK)
     + '&text=' + encodeURIComponent('Присоединяйся к Infragram по моей ссылке — семь дней Starter бесплатно');
   try { tg.openTelegramLink(url); } catch(_) { copyToClipboard(REF_LINK, 'Ссылка скопирована'); }
@@ -19827,7 +19827,7 @@ function toggleCMember(aid, el) { if (el.checked) _CMEMBER_SEL.add(aid); else _C
 async function setCommunityStaff(role) {
   if (!_CUR_CNODE) return;
   const ids = [..._CMEMBER_SEL];
-  if (!ids.length) { toast('Отметьте аккаунты'); return; }
+  if (!ids.length) { toast('❗ Отметьте аккаунты'); return; }
   if (!await askConfirm(`Назначить ${ids.length} ${plural(ids.length,'аккаунта','аккаунтов','аккаунтов')} ${role==='admin'?'админами':'модераторами'} ноды?`)) return;
   try {
     const r = await api('/api/miniapp/community/node/'+_CUR_CNODE+'/staff',{method:'POST',body:JSON.stringify({role, account_ids:ids})});
@@ -20124,7 +20124,7 @@ async function loadFleetReadiness() {
   const el = document.getElementById('massInviteReadiness');
   if (!g || !el) return;
   const group = g.value.trim();
-  if (!group) { toast('Укажите группу'); return; }
+  if (!group) { toast('❗ Укажите группу'); return; }
   el.innerHTML = '<span style="color:var(--hint)">Проверяю готовность флота…</span>';
   try {
     const d = await api('/api/miniapp/invite/fleet_readiness?group=' + encodeURIComponent(group));
@@ -20152,11 +20152,11 @@ async function joinAllToGroup() {
   const el = document.getElementById('massInviteReadiness');
   if (!g) return;
   const group = g.value.trim();
-  if (!group) { toast('Укажите группу'); return; }
+  if (!group) { toast('❗ Укажите группу'); return; }
   // Сколько аккаунтов реально пойдут вступать — считаем тем же отбором, что и
   // сама операция, вместе с её потолком.
   const jaT = await massTargets('join_all');
-  if (jaT && jaT.total === 0) { toast('Нет активных аккаунтов с сессией — вступать некем'); return; }
+  if (jaT && jaT.total === 0) { toast('✅ Нет активных аккаунтов с сессией — вступать некем'); return; }
   if (!(await askConfirm('Вступить активными аккаунтами в «'+group+'»'
       + massScaleCapped(jaT, 'аккаунт', 'аккаунта', 'аккаунтов')
       + '?\nНужно для прямого инвайта. Идемпотентно — уже вступившие не пострадают.'))) return;
@@ -20164,7 +20164,7 @@ async function joinAllToGroup() {
   try {
     const r = await api('/api/miniapp/invite/join_all', {method:'POST', body:JSON.stringify({group})});
     if (el) el.innerHTML = `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">🚪 Вступление запущено фоном (операция #${r.op_id}) — ${r.accounts||0} акк. вступают в «${esc(group)}». Прогресс — в разделе «Операции».</div>`;
-    toast('Вступление запущено (операция #'+r.op_id+')');
+    toast('✅ Вступление запущено (операция #'+r.op_id+')');
   } catch(e) { if (el) el.innerHTML = '<span style="color:#ef4444">'+esc(e.message||'Ошибка')+'</span>'; }
 }
 
@@ -20631,7 +20631,7 @@ function editDm(id) {
   // JSON.stringify ломался на апострофе в названии («О'Брайен») — апостроф
   // закрывал атрибут раньше времени.
   const c = (CUR_DM_CAMPAIGNS||[]).find(x=>String(x.id)===String(id));
-  if (!c) { toast('Кампания не найдена — обновите список'); return; }
+  if (!c) { toast('⚠️ Кампания не найдена — обновите список'); return; }
   openCmpModal();                      // сброс полей и CMP_EDIT_ID=null
   CMP_EDIT_ID = c.id;
   document.getElementById('cmpName').value = c.name || '';
@@ -20745,7 +20745,7 @@ async function bulkWarmup() {
   // выпадают заблокированные и те, у кого план уже идёт. Считаем его же.
   const wuT = await massTargets('warmup_bulk');
   if (wuT && wuT.total === 0) {
-    toast('Нет подходящих аккаунтов: все уже греются или недоступны');
+    toast('⚠️ Нет подходящих аккаунтов: все уже греются или недоступны');
     return;
   }
   if (!await askConfirm('Запустить прогрев для активных аккаунтов без плана'
@@ -21031,7 +21031,7 @@ async function meshNewTask() {
   try { bots = await meshBots(); }
   catch(e) { toast('⚠️ '+(e.message||'Ошибка')); return; }
   if (bots.length < 2) {
-    toast('Нужно хотя бы два подключённых бота: один запускает, второй принимает');
+    toast('❗ Нужно хотя бы два подключённых бота: один запускает, второй принимает');
     return;
   }
   const opt = b => ({value:String(b.bot_id), label:meshBotLabel(b),
@@ -21205,7 +21205,7 @@ function openNotaryNew() {
 
 async function submitNotary() {
   const channel = (document.getElementById('ntChannel').value||'').trim();
-  if (!channel) { toast('Укажите канал'); return; }
+  if (!channel) { toast('❗ Укажите канал'); return; }
   const body = {
     channel,
     msg_id: (document.getElementById('ntMsg').value||'').trim() || null,
@@ -22203,7 +22203,7 @@ async function openStrike() {
 }
 
 function openStrikeModal() {
-  if (!_STRIKE_STATUS?.has_access) { toast('Нет доступа к массовым жалобам'); return; }
+  if (!_STRIKE_STATUS?.has_access) { toast('✅ Нет доступа к массовым жалобам'); return; }
   _STRIKE_TARGET = '';
   _STRIKE_CAT = null;
   document.getElementById('strikeTargetInput').value = '';
@@ -22319,7 +22319,7 @@ let _TAKEDOWN_TEXTS = [];
 function copyComplaintText(i) { copyText(_TAKEDOWN_TEXTS[i] || ''); }
 
 async function openTakedownKit() {
-  if (!_STRIKE_TARGET) { toast('Сначала укажите цель'); return; }
+  if (!_STRIKE_TARGET) { toast('❗ Сначала укажите цель'); return; }
   document.getElementById('mo-takedown').classList.add('show');
   const box = document.getElementById('takedownKitBody');
   box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
@@ -22631,7 +22631,7 @@ async function deleteDeal(dealId, _el) {
   if (!await confirmDelete('Удалить сделку', _el)) return;
   try {
     await api('/api/miniapp/crm/deal/'+dealId, {method:'DELETE'});
-    toast('Удалено');
+    toast('✅ Удалено');
     loadDeals();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
@@ -22773,7 +22773,7 @@ async function cancelPromoOrder(orderId) {
   if (!await askConfirm('Отменить заказ?')) return;
   try {
     await api('/api/miniapp/promo/order/'+orderId+'/cancel', {method:'POST'});
-    toast('Заказ отменён');
+    toast('⚠️ Заказ отменён');
     loadPromo();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка').substring(0,60)); }
 }
@@ -23402,7 +23402,7 @@ function gpApplyReference() {
   const refName = document.getElementById('gpRefName').value.trim();
   const refUser = document.getElementById('gpRefUsername').value.trim();
   const refCity = document.getElementById('gpRefCity').value.trim();
-  if (!refCity) { toast('Укажите город-образец'); return; }
+  if (!refCity) { toast('❗ Укажите город-образец'); return; }
   // Та же логика, что серверный derive_pattern_from_reference (регистронезависимая замена).
   const rx = new RegExp(refCity.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'ig');
   if (refName) document.getElementById('gpNamePattern').value = refName.replace(rx, '{{CITY_NAME}}');
@@ -24641,7 +24641,7 @@ async function loadMeshTargets() {
 }
 async function addMeshTarget() {
   const v = document.getElementById('mt-input').value.trim();
-  if (!v) { toast('Введите канал-цель'); return; }
+  if (!v) { toast('❗ Введите канал-цель'); return; }
   try {
     await api(`/api/miniapp/content_mesh/${MT_MESH_ID}/target`,{method:'POST',body:JSON.stringify({target_channel:v})});
     document.getElementById('mt-input').value='';
@@ -25454,14 +25454,14 @@ function esc(s) {
 // раза обманывали: `navigator.clipboard?.writeText(x).then(...)` при отсутствии
 // clipboard возвращал undefined, и `.then` падал TypeError мимо своего же
 // .catch — пользователь не получал ни текста, ни сообщения; а
-// `navigator.clipboard?.writeText(x); toast('Скопировано')` писал «Скопировано»
+// `navigator.clipboard?.writeText(x); toast('✅ Скопировано')` писал «Скопировано»
 // всегда. На экспорте сессии аккаунта это означало «сессия скопирована» при
 // пустом буфере — и потерю самого ценного, что есть у аккаунта.
 //
 // Возвращает true только если копирование реально произошло.
 async function copyToClipboard(text, okMsg) {
   const s = (text === null || text === undefined) ? '' : String(text);
-  if (!s) { toast('Нечего копировать'); return false; }
+  if (!s) { toast('⚠️ Нечего копировать'); return false; }
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(s);
@@ -25953,7 +25953,7 @@ function initPayment(planKey, label, price) {
     const botUsername = window._botUsername || 'infragram_bot';
     tg.openTelegramLink(`https://t.me/${botUsername}?start=pay_${planKey}`);
   } else {
-    toast(`Для оплаты перейдите в бот и выберите тариф "${label}" (${price})`);
+    toast(`❗ Для оплаты перейдите в бот и выберите тариф «${label}» (${price})`);
   }
 }
 
@@ -26097,9 +26097,9 @@ async function openAdminBroadcast() {
 
 async function submitAdminBroadcast() {
   const text = document.getElementById('adm-bc-text')?.value?.trim();
-  if (!text) { toast('Введите текст'); return; }
+  if (!text) { toast('❗ Введите текст'); return; }
   const abT = await massTargets('admin_broadcast');
-  if (abT && abT.total === 0) { toast('Некому рассылать: активных пользователей нет'); return; }
+  if (abT && abT.total === 0) { toast('⚠️ Некому рассылать: активных пользователей нет'); return; }
   if (!await askConfirm('Разослать сообщение всем пользователям платформы'
       + massScale(abT, 'человек', 'человека', 'человек') + '?'
       + '\n\nСообщения уйдут живым людям — отменить отправку нельзя.')) return;
@@ -26182,7 +26182,7 @@ async function untrackRankingKeyword(id, el) {
   if (!await confirmDelete('Снять слово с отслеживания', el, 'История замеров по нему удалится.')) return;
   try {
     await api('/api/miniapp/ranking/untrack', {method:'POST', body:JSON.stringify({keyword_id:id})});
-    toast('Слово снято с отслеживания');
+    toast('✅ Слово снято с отслеживания');
     loadRanking();
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
@@ -26267,7 +26267,7 @@ function filterRanking(filter, el) {
 }
 
 function openRankingAddModal() {
-  if (!BOTS.length) { toast('Сначала загрузите боты'); return; }
+  if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
   document.getElementById('rkAddBot').innerHTML = BOTS.map(b => {
     const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + b.bot_id);
     return `<option value="${b.bot_id}">${esc(name)}</option>`;
@@ -26370,7 +26370,7 @@ async function loadNetworkBuilder() {
 
 // Превью-план развёртывания связки (Фаза 1: только план, без исполнения).
 async function showNetDeployPlan() {
-  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
   txt('netDeployPlan','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const p = await api('/api/miniapp/networks/'+_currentNetId+'/deploy_plan');
@@ -26394,7 +26394,7 @@ async function showNetDeployPlan() {
   }
 }
 async function deployNet() {
-  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
   if (!await askConfirm('Развернуть связку? Будут созданы недостающие каналы/группы и назначены admin-связи. Действие необратимо.')) return;
   try {
     const r = await api('/api/miniapp/networks/'+_currentNetId+'/deploy', {method:'POST', body:'{}'});
@@ -26406,7 +26406,7 @@ async function deployNet() {
 // «Развернул связку → раздал одной ссылкой»: собираем общую папку прямо из
 // каналов связки, без ручного отбора на отдельном экране.
 async function folderFromNet() {
-  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
   if (!await askConfirm('Собрать общую папку из каналов этой связки и получить одну ссылку-приглашение?')) return;
   try {
     const r = await api('/api/miniapp/chatlist_folders', {method:'POST', body:JSON.stringify({instance_id:_currentNetId})});
@@ -26545,7 +26545,7 @@ async function applyNetTemplate(template) {
 }
 
 function openNetAddNodeModal() {
-  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
   document.getElementById('nbNodeId').value = '';
   document.getElementById('nbNodeLabel').value = '';
   document.getElementById('nbNodeErr').style.display = 'none';
@@ -26578,9 +26578,9 @@ async function removeNetNode(nodeId, _el) {
 }
 
 function openNetAddEdgeModal() {
-  if (!_currentNetId) { toast('Выберите сеть'); return; }
+  if (!_currentNetId) { toast('❗ Выберите сеть'); return; }
   const nodes = document.querySelectorAll('#netNodesList .li');
-  if (nodes.length < 2) { toast('Нужно минимум 2 узла'); return; }
+  if (nodes.length < 2) { toast('❗ Нужно минимум 2 узла'); return; }
   selectNetwork(_currentNetId).then(() => {
     const d = window._lastNetData;
     if (!d) return;
@@ -26663,7 +26663,7 @@ async function loadWorkflows() {
 }
 
 function openWorkflowCreateModal() {
-  if (!BOTS.length) { toast('Сначала загрузите боты'); return; }
+  if (!BOTS.length) { toast('❗ Сначала загрузите боты'); return; }
   document.getElementById('wfCreateBot').innerHTML = '<option value="">Не привязан</option>' + BOTS.map(b => {
     const name = b.username ? '@' + b.username : (b.first_name || 'Бот #' + b.bot_id);
     return `<option value="${b.bot_id}">${esc(name)}</option>`;
