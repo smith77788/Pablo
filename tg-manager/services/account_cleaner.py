@@ -41,6 +41,11 @@ async def leave_all_chats(
     from services import account_manager
 
     client = account_manager._make_client(session_string, acc)
+    # Потолок на КАЖДЫЙ запрос. Эти три функции зовут обработчики бота, а
+    # у aiogram таймаута шлюза нет: мёртвый прокси открывает соединение и
+    # замолкает, и владелец, нажавший кнопку, не получает НИ ответа, ни
+    # ошибки — навсегда. См. account_manager._Timeboxed.
+    client = account_manager.timeboxed(client)
     left = 0
     skipped = 0
     errors = []
@@ -112,6 +117,11 @@ async def delete_contacts(
     from services import account_manager
 
     client = account_manager._make_client(session_string, acc)
+    # Потолок на КАЖДЫЙ запрос. Эти три функции зовут обработчики бота, а
+    # у aiogram таймаута шлюза нет: мёртвый прокси открывает соединение и
+    # замолкает, и владелец, нажавший кнопку, не получает НИ ответа, ни
+    # ошибки — навсегда. См. account_manager._Timeboxed.
+    client = account_manager.timeboxed(client)
     deleted = 0
 
     try:
@@ -149,6 +159,11 @@ async def get_chat_list_for_cleanup(
     from services import account_manager
 
     client = account_manager._make_client(session_string, acc)
+    # Потолок на КАЖДЫЙ запрос. Эти три функции зовут обработчики бота, а
+    # у aiogram таймаута шлюза нет: мёртвый прокси открывает соединение и
+    # замолкает, и владелец, нажавший кнопку, не получает НИ ответа, ни
+    # ошибки — навсегда. См. account_manager._Timeboxed.
+    client = account_manager.timeboxed(client)
     chats = []
 
     try:

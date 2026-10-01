@@ -50,7 +50,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # таймаут, ответ владельцу не зависнет навсегда, и аккаунт эти модули у арбитра
 # не берут. Второй — фоновая уборка, которая тоже ничего не держит.
 ALLOWED_MODULES = {
-    "account_cleaner": "фоновая уборка аккаунта, аккаунт у арбитра не берёт",
     "rest_api": "внешний REST: путь HTTP-запроса, у шлюза свой таймаут",
     "session_importer": "импорт сессий: путь HTTP-запроса",
     "entity_analyzer": "анализ сущности: путь HTTP-запроса",
@@ -109,8 +108,27 @@ def _is_client_context(node) -> bool:
                and it.context_expr.id in _CLIENT_NAMES for it in node.items)
 
 
+def _is_boxed_scope(scope) -> bool:
+    """Весь узел работает с клиентом под потолком (account_manager.timeboxed).
+
+    Обёртка ставится одной строкой на функцию и ограничивает КАЖДЫЙ запрос — для
+    функции с тремя десятками вызовов это единственный способ не забыть один из
+    них. Разбор по AST потолка внутри обёртки не видит, поэтому признаём его
+    здесь, но ТОЛЬКО когда клиент в узле один: второй, созданный мимо обёртки,
+    снова остался бы без потолка.
+    """
+    src = ast.unparse(scope)
+    return "timeboxed(" in src and src.count("_make_client(") == 1
+
+
 def naked_in_scope(scope) -> list[int]:
-    """Строки запросов к Telegram внутри узла, не обёрнутых в asyncio.wait_for."""
+    """Строки запросов к Telegram внутри узла, не обёрнутых в потолок.
+
+    Потолком считается asyncio.wait_for вокруг вызова или обёртка клиента
+    account_manager.timeboxed на весь узел (см. _is_boxed_scope).
+    """
+    if _is_boxed_scope(scope):
+        return []
     wrapped: set[int] = set()
     for n in ast.walk(scope):
         if isinstance(n, ast.Call) and _is_wait_for(n) and n.args:
@@ -124,7 +142,21 @@ def naked_in_scope(scope) -> list[int]:
 
 
 def naked_requests(src: str) -> list[int]:
-    return naked_in_scope(ast.parse(src))
+    """Голые запросы в модуле, по ФУНКЦИЯМ.
+
+    По файлу целиком считать нельзя: обёртка timeboxed ставится на функцию, и
+    одна обёрнутая функция не делает безопасным весь модуль.
+    """
+    tree = ast.parse(src)
+    out: list[int] = []
+    seen: set[int] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out.extend(naked_in_scope(node))
+            seen.update(range(node.lineno, node.end_lineno + 1))
+    # Запросы вне функций верхнего уровня (внутри классов, на уровне модуля).
+    out.extend(l for l in naked_in_scope(tree) if l not in seen)
+    return sorted(set(out))
 
 
 def _modules_with_clients() -> dict[str, str]:
@@ -269,3 +301,54 @@ def test_account_manager_operation_path_is_actually_guarded():
     assert not dirty, f"функции пути операций снова без потолка: {dirty}"
     missing = sorted(set(guarded) - seen)
     assert not missing, f"охраняемые функции исчезли из модуля: {missing}"
+
+
+# ── Сторожа признания обёртки timeboxed ───────────────────────────────────────
+
+_BOXED_OK = '''
+async def f(session_string, acc):
+    client = account_manager._make_client(session_string, acc)
+    client = account_manager.timeboxed(client)
+    await client.get_entity("@x")
+    await client(SomeRequest())
+'''
+
+_BOXED_BUT_SECOND_CLIENT = '''
+async def f(session_string, acc):
+    client = account_manager._make_client(session_string, acc)
+    client = account_manager.timeboxed(client)
+    await client.get_entity("@x")
+    other = account_manager._make_client(session_string, acc)
+    await other.get_entity("@y")
+'''
+
+_ONE_FUNCTION_BOXED_OTHER_NOT = '''
+async def boxed(session_string, acc):
+    client = account_manager._make_client(session_string, acc)
+    client = account_manager.timeboxed(client)
+    await client.get_entity("@x")
+
+async def naked(session_string, acc):
+    client = account_manager._make_client(session_string, acc)
+    await client.get_entity("@y")
+'''
+
+
+def test_the_wrapper_counts_as_a_ceiling():
+    """Иначе обёрнутый модуль пришлось бы вносить в исключения — и он перестал
+    бы охраняться вовсе."""
+    assert naked_requests(_BOXED_OK) == []
+
+
+def test_a_second_client_is_not_excused_by_the_wrapper():
+    """Клиент, созданный мимо обёртки, снова без потолка — и это должно быть
+    видно, а не спрятано словом timeboxed где-то выше."""
+    assert naked_requests(_BOXED_BUT_SECOND_CLIENT), (
+        "обёртка объявлена, но второй клиент прошёл незамеченным")
+
+
+def test_one_boxed_function_does_not_cover_the_whole_module():
+    """Считать по файлу целиком нельзя: обёртка ставится на функцию."""
+    found = naked_requests(_ONE_FUNCTION_BOXED_OTHER_NOT)
+    assert found, "голая функция рядом с обёрнутой осталась незамеченной"
+    assert len(found) == 1, f"найдено лишнее: {found}"

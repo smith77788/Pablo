@@ -36,6 +36,22 @@ _DB_CALL = re.compile(
 _SQL_VERB = re.compile(r"\b(SELECT|UPDATE|DELETE\s+FROM|INSERT\s+INTO)\b", re.I)
 _OWNER = re.compile(r"\b(owner_id|added_by|created_by|user_id|uid)\b", re.I)
 
+# Признанные проверки доступа по id из ПУТИ. Хендлер, который зовёт такую
+# проверку и отказывает по её результату, безопасен даже когда в его собственном
+# SQL колонки владения нет: owner-скоуп живёт внутри проверки.
+#
+# Так выглядит `bot_auto_replies`: `_user_can_use_bot(pool, uid, bot_id)` →
+# 404, а дальше запрос по bot_id. До свода четырёх дословных копий в один
+# помощник скоуп стоял в самом SQL, и храповик его видел; после свода — покраснел
+# на правильной правке. Признаём проверку, а не требуем копировать условие в
+# каждый запрос.
+#
+# Список короткий НАМЕРЕННО, каждая запись разобрана поимённо. Добавлять сюда
+# можно только fail-closed проверку: ошибка базы обязана ЗАКРЫВАТЬ доступ
+# (у `_user_can_use_bot` это `_safe_count`, отдающий 0). Проверка, которая при
+# сбое пускает, превратила бы храповик в разрешение на дыру.
+_ACCESS_GATES = ("_user_can_use_bot",)
+
 
 def _sql_literals(fn: ast.AST) -> list[str]:
     """Все SQL-строки функции — в любых кавычках, включая f-строки (у f-строк
@@ -87,9 +103,26 @@ def _handlers_with_path_param(src: str):
             yield fn.name, stmts
 
 
+def _calls_access_gate(fn: ast.AST) -> bool:
+    """Хендлер проверяет доступ к id из пути признанной проверкой."""
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        name = f.attr if isinstance(f, ast.Attribute) else (
+            f.id if isinstance(f, ast.Name) else "")
+        if name in _ACCESS_GATES:
+            return True
+    return False
+
+
 def _unscoped(src: str) -> list[str]:
+    tree = ast.parse(src)
+    gated = {fn.name for fn in ast.walk(tree)
+             if isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef))
+             and _calls_access_gate(fn)}
     return [name for name, stmts in _handlers_with_path_param(src)
-            if not any(_OWNER.search(s) for s in stmts)]
+            if name not in gated and not any(_OWNER.search(s) for s in stmts)]
 
 
 # ── Сам храповик ───────────────────────────────────────────────────────────
@@ -165,3 +198,42 @@ async def mine(request):
     return await pool.fetch("SELECT id FROM tg_accounts WHERE owner_id=$1", uid)
 '''
     assert list(_handlers_with_path_param(src)) == []
+
+
+# ── Сторожа признанных проверок доступа ───────────────────────────────────────
+
+_GATED = """
+async def gated(request):
+    uid = _get_uid(request)
+    bot_id = int(request.match_info["bot_id"])
+    if not await _user_can_use_bot(pool, uid, bot_id):
+        return _err("Бот не найден", 404)
+    return await pool.fetch("SELECT id FROM auto_replies WHERE bot_id=$1", bot_id)
+"""
+
+
+def test_a_recognised_access_gate_counts_as_scope():
+    assert _unscoped(_GATED) == [], (
+        "проверка доступа не признана — пришлось бы копировать условие владения "
+        "в каждый запрос, а это те самые четыре копии, которые уже разъезжались")
+
+
+def test_an_unknown_gate_does_not_count():
+    """Иначе достаточно было бы завести функцию с похожим именем."""
+    fake = _GATED.replace("_user_can_use_bot", "_looks_like_a_check")
+    assert _unscoped(fake) == ["gated"]
+
+
+def test_every_recognised_gate_exists_and_is_fail_closed():
+    """Проверка из списка обязана существовать и закрываться при сбое базы.
+
+    `_safe_count` отдаёт 0 при ошибке, то есть доступ закрывается. Проверка,
+    которая при сбое пускает, сделала бы запись в списке разрешением на дыру.
+    """
+    for gate in _ACCESS_GATES:
+        assert f"async def {gate}(" in _SRC, f"{gate} в списке, но в коде нет"
+        start = _SRC.index(f"async def {gate}(")
+        body = _SRC[start:start + 1500]
+        assert "_safe_count(" in body or "_safe_fetchval(" in body, (
+            f"{gate} не пользуется fail-closed помощником — при ошибке базы она "
+            f"может ОТКРЫТЬ доступ, и признавать её нельзя")
