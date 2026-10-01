@@ -598,7 +598,10 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
    после «Фабрики» это сотни карточек, и нужную можно было найти только
    прокруткой. Высота чипа — 34px: меньше не попасть пальцем на телефоне. */
 .lst-search{width:100%;box-sizing:border-box;margin:0 0 8px}
-.lf-chips{display:flex;gap:6px;overflow-x:auto;padding:0 16px 8px;scrollbar-width:none}
+/* Ряды чипов переносятся, а не прокручиваются вбок со спрятанным ползунком:
+   на 320px последние варианты уезжали за край без единого намёка. Это те же
+   ряды выбора, что и фильтры, — там перенос уже сделан. */
+.lf-chips{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 8px}
 .lf-chips::-webkit-scrollbar{display:none}
 .lf-chip{flex:none;cursor:pointer;font-size:12px;min-height:34px;display:inline-flex;align-items:center;padding:6px 12px;border-radius:20px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:var(--text);white-space:nowrap}
 .lf-chip.on{border-color:var(--accent);background:var(--accent-soft-2)}
@@ -964,7 +967,7 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .copilot-apply:active{transform:scale(.95)}
 .copilot-apply:disabled{opacity:.6}
 /* Пресеты в формах ввода (шаблоны в один тап) */
-.preset-row{display:flex;gap:6px;overflow-x:auto;padding:0 0 8px;scrollbar-width:none}
+.preset-row{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 8px}
 .preset-row::-webkit-scrollbar{display:none}
 .preset-chip{flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;white-space:nowrap;transition:transform .1s,border-color .12s}
 .preset-chip:active{transform:scale(.94)}
@@ -972,7 +975,7 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .copilot-x{position:absolute;top:2px;right:4px;font-size:12px;color:var(--hint);opacity:.55;line-height:1;border-radius:8px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center}
 .copilot-x:active{opacity:1;background:var(--bg)}
 /* Часто используемые разделы */
-.freq-row{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.freq-row{display:flex;flex-wrap:wrap;gap:8px;padding:2px 0 4px}
 .freq-row::-webkit-scrollbar{display:none}
 .freq-chip{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:74px;max-width:92px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:9px 8px;cursor:pointer;box-shadow:var(--shadow);transition:transform .12s,opacity .12s}
 .freq-chip:active{transform:scale(.93);opacity:.75}
