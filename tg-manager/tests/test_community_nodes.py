@@ -73,16 +73,28 @@ def test_add_channel_goes_through_op():
     assert "async def _exec_community_add_channel" in ow
     i = ow.index("async def _exec_community_add_channel")
     assert "create_community_channel" in ow[i:i + 900]
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = open(os.path.join(ROOT, "services", "mini_app_community.py"),
+               encoding="utf-8").read()
     i2 = api.index("async def community_channel_add")
     assert "operation_bus.submit" in api[i2:i2 + 1400]
 
 
 def test_endpoints_and_routes():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
-    for r in ('"/api/miniapp/community/nodes"', '"/api/miniapp/community/node"',
-              '"/api/miniapp/community/node/{node_id}/channels"'):
-        assert r in api
+    """Спрашиваем РОУТЕР, а не текст файла.
+
+    Раньше здесь искались строки путей в `services/mini_app_api.py` — проверка
+    держалась на том, в каком файле лежит код, и упала на переносе группы в
+    `services/mini_app_community.py`. К тому же строка в исходнике и не значила,
+    что маршрут зарегистрирован.
+    """
+    from tests.miniapp_routes import registered_routes
+
+    live = {ln.split(" ", 1)[1] for ln in registered_routes()}
+    for r in ("/api/miniapp/community/nodes", "/api/miniapp/community/node",
+              "/api/miniapp/community/node/{node_id}/channels"):
+        assert r in live, f"роут не зарегистрирован: {r}"
+    api = open(os.path.join(ROOT, "services", "mini_app_community.py"),
+               encoding="utf-8").read()
     for fn in ("community_nodes_list", "community_node_create", "community_channel_add"):
         assert f"async def {fn}" in api
 
@@ -145,11 +157,13 @@ def test_liven_and_staff_ops_and_schema():
 
 
 def test_members_endpoints_and_ui():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
-    for r in ('"/api/miniapp/community/node/{node_id}/members"',
-              '"/api/miniapp/community/node/{node_id}/liven"',
-              '"/api/miniapp/community/node/{node_id}/staff"'):
-        assert r in api
+    from tests.miniapp_routes import registered_routes
+
+    live = {ln.split(" ", 1)[1] for ln in registered_routes()}
+    for r in ("/api/miniapp/community/node/{node_id}/members",
+              "/api/miniapp/community/node/{node_id}/liven",
+              "/api/miniapp/community/node/{node_id}/staff"):
+        assert r in live, f"роут не зарегистрирован: {r}"
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
     assert "function livenCommunity" in html and "function setCommunityStaff" in html
     assert 'id="s-communitymembers"' in html
