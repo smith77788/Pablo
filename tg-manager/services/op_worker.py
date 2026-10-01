@@ -525,27 +525,9 @@ async def _requeue_op_no_accounts(
             waiting_since = waiting_since.replace(tzinfo=__dt.timezone.utc)
         waited = __dt.datetime.now(__dt.timezone.utc) - waiting_since
         if waited > __dt.timedelta(minutes=_ACCT_WAIT_MAX_MIN):
-            await _safe_execute(
-                pool,
-                "UPDATE operation_queue SET status='failed', finished_at=now(), "
-                "error_msg=$2 WHERE id=$1"
-                f" AND status NOT IN {op_status.sql_terminal_list()}",
-                op_id,
-                f"Флот занят другими операциями — не дождались свободных аккаунтов "
-                f"за {int(waited.total_seconds() // 60)} мин",
-                log_ctx=f"[requeue_no_acc_fail op={op_id}]")
-            # Этот провал НЕ проходит через общий блок уведомлений в
-            # _run_op_task (он ниже по коду, а мы делаем return), поэтому
-            # раньше операция владельца умирала совершенно молча: он видел
-            # «ожидает», потом ничего.
-            await _notify_owner_about_op(
-                pool, bot, owner_id,
-                f"❌ <b>Операция #{op_id}</b> не запустилась: все аккаунты "
-                f"{int(waited.total_seconds() // 60)} мин были заняты другими "
-                f"операциями.\n\nЗапустите её снова, когда очередь разгрузится, "
-                f"или добавьте аккаунтов.",
-                dedup_key=f"no-accounts:{op_id}",
-            )
+            await _finish_fleet_starved_op(
+                pool, op_id, owner_id,
+                waited_min=int(waited.total_seconds() // 60), bot=bot)
             return
     await _safe_execute(
         pool,
@@ -808,7 +790,17 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
         return 0, 0
     if not row:
         return 0, 0
-    return int(row["ok_n"] or 0), int(row["failed_n"] or 0)
+    # Разбор итогов тоже под защитой, а не только сам запрос. Докстринг обещает
+    # (0, 0) на любой неудаче чтения, и обещание должно держаться буквально:
+    # оба вызова этого помощника стоят на путях закрытия операции, причём на
+    # пути падения — ВНУТРИ обработки чужого исключения. Вторичная ошибка там
+    # не диагностика, а потеря отчёта: операция осталась бы в 'running' до
+    # сторожа, держа слот параллельности владельца.
+    try:
+        return int(row["ok_n"] or 0), int(row["failed_n"] or 0)
+    except (KeyError, TypeError, ValueError, IndexError):
+        log_exc_swallow(log, f"op_worker: итоги журнала op={op_id} не разобраны")
+        return 0, 0
 
 
 async def _finish_cancelled_op(
@@ -874,6 +866,130 @@ async def _finish_cancelled_op(
             params=params if isinstance(params, dict) else None)
     except Exception:
         pass
+
+
+async def _finish_fleet_starved_op(
+    pool: "asyncpg.Pool", op_id: int, owner_id: int | None,
+    waited_min: int, bot=None,
+) -> None:
+    """Закрыть операцию, так и не дождавшуюся свободного флота, — честно.
+
+    Это последний путь завершения, который закрывался одним UPDATE и `return`
+    (те же потери уже разобраны у `_finish_cancelled_op` и на пути падения):
+
+      * статус. Писался ровный `failed` независимо от того, что в журнале.
+        А попасть сюда можно УЖЕ ПОСЛЕ РАБОТЫ: рассылка берёт 300 целей,
+        Telegram назначает часовую паузу, `_defer_op_for_flood` возвращает
+        операцию в очередь — и на возобновлении флот оказывается занят. Через
+        _ACCT_WAIT_MAX_MIN владелец получал «не запустилась», хотя 300
+        приглашений ушло. Статус теперь считает та же классификация, что и на
+        остальных путях: взятые цели называются `partial`.
+      * `result`. Операция закрывалась с result=NULL, то есть ни бот, ни
+        мини-апп не могли показать ни одной цифры — ровно в том случае, когда
+        «сколько успело уйти» и есть главный вопрос.
+      * метрика. Голодание по флоту не попадало ни на `infragram_operations_total`,
+        ни на собственный счётчик: снаружи операции просто «не доезжали».
+      * `compliance_engine.record` и событие `op_done`. Аудит-трейл обещает
+        единый choke point и ВСЕ операции, а память организма учится на
+        исходах; этот исход не видел ни один из них.
+
+    Счётчики берём из журнала целей, а не из `done_items`: он переживает
+    возвраты в очередь, а `done_items` на каждом из них обнуляется.
+    """
+    row = await _safe_fetchrow(
+        pool,
+        "SELECT op_type, params, done_items, total_items FROM operation_queue "
+        "WHERE id=$1",
+        op_id, log_ctx=f"[fleet_starved op={op_id}]")
+    # Строку разбираем через dict и .get: не прочитали её или не доехала
+    # колонка — операция всё равно обязана закрыться. Исключение здесь оставило
+    # бы её в 'running' до сторожа, то есть ценой диагностики стал бы час
+    # фантомного слота параллельности.
+    try:
+        info = dict(row) if row else {}
+    except (TypeError, ValueError):
+        info = {}
+    op_type = info.get("op_type") or "unknown"
+    params = info.get("params")
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except (ValueError, TypeError):
+            params = None
+    if not isinstance(params, dict):
+        params = {}
+
+    ok_n, failed_n = await _journal_counters(pool, op_id)
+    status = op_status.classify_final(
+        op_status.FAILED, ok=ok_n, failed=failed_n,
+        done_items=info.get("done_items"), total_items=info.get("total_items"))
+    reason = (f"Флот занят другими операциями — не дождались свободных "
+              f"аккаунтов за {waited_min} мин")
+    summary = (
+        f"⚠️ Успело {ok_n}, остальные цели не дождались свободных аккаунтов "
+        f"за {waited_min} мин"
+        if ok_n else
+        f"❌ Не запустилась: все аккаунты {waited_min} мин были заняты "
+        f"другими операциями"
+    )
+    result = _normalize_result(
+        {"status": status, "ok": ok_n, "failed": failed_n,
+         "reason": reason, "summary": summary},
+        op_type, 0.0)
+    res = await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status=$3, finished_at=now(), error_msg=$2, "
+        "result=$4::jsonb, acct_wait_since=NULL WHERE id=$1"
+        f" AND status NOT IN {op_status.sql_terminal_list()}",
+        op_id, reason, status, json.dumps(result, ensure_ascii=False),
+        log_ctx=f"[fleet_starved_fail op={op_id}]")
+    # Ноль строк = операция уже терминальна, и почти всегда это отмена
+    # владельцем, пока она стояла в очереди. Отмену не переписываем и о провале
+    # не докладываем: иначе владелец получает «❌» на то, что сам остановил.
+    if str(res or "").strip().endswith(" 0"):
+        log.info(
+            "op_worker: op=%d уже в терминальном статусе — провал по занятому "
+            "флоту не записываем", op_id)
+        return
+    log.warning(
+        "op_worker: op=%d op_type=%s → %s: флот был занят %d мин (ok=%d failed=%d)",
+        op_id, op_type, status, waited_min, ok_n, failed_n)
+    _reliability_metric("infragram_op_fleet_starved_total", op_type=op_type)
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_operations_total",
+               {"op_type": op_type, "status": status})
+    except Exception:
+        pass
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "op_done", {
+            "op_id": op_id, "op_type": op_type, "status": status,
+            "ok": ok_n, "failed": failed_n, "summary": summary[:300]})
+    except Exception:
+        pass
+    try:
+        from services import compliance_engine
+        await compliance_engine.record(
+            pool, owner_id, None, op_type, status, op_id=op_id,
+            params=params if isinstance(params, dict) else None)
+    except Exception:
+        pass
+    # Этот исход НЕ проходит через общий блок уведомлений в _run_op_task (он
+    # ниже по коду, а путь делает return), поэтому раньше операция владельца
+    # умирала молча: он видел «ожидает», потом ничего.
+    await _notify_owner_about_op(
+        pool, bot, owner_id,
+        (f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей уже "
+         f"отработано, остальные {waited_min} мин ждали свободный аккаунт и "
+         f"не дождались.\n\nПовтор продолжит с того же места — уже "
+         f"отработанные цели он пропустит."
+         if ok_n else
+         f"❌ <b>Операция #{op_id}</b> не запустилась: все аккаунты "
+         f"{waited_min} мин были заняты другими операциями.\n\nЗапустите её "
+         f"снова, когда очередь разгрузится, или добавьте аккаунтов."),
+        dedup_key=f"no-accounts:{op_id}",
+    )
 
 
 async def _defer_op_for_flood(

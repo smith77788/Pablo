@@ -179,6 +179,48 @@ def test_the_fleet_path_gives_up_after_its_own_deadline(pool):
         "соблюдение правил платформы")
 
 
+def test_the_fleet_path_counts_the_work_it_already_did(pool):
+    """Голодание по флоту настигает операцию и ПОСЛЕ работы — отчёт обязан это знать.
+
+    Путь сюда: рассылка взяла часть целей, Telegram назначил длинную паузу,
+    `_defer_op_for_flood` вернул операцию в очередь, а на возобновлении флот
+    занят. Через предел операция закрывается — и закрывалась ровным `failed` с
+    текстом «не запустилась», хотя цели ушли.
+
+    Проверяем на живой базе, потому что проверять нечего, кроме СВЯЗЫВАНИЯ:
+    статус и `result` теперь параметры запроса, а не литералы в тексте.
+    """
+    async def _go():
+        from services import op_worker as w
+        old = await pool.fetchval(
+            f"SELECT now() - interval '{w._ACCT_WAIT_MAX_MIN + 10} minutes'")
+        op_id = await _op(pool, acct_wait_since=old, created_at=old)
+        for n, target in enumerate(("@a", "@b", "@c"), start=1):
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status) "
+                "VALUES($1, $2, $3, 'ok')", op_id, n, target)
+        await pool.execute(
+            "INSERT INTO operation_log(op_id, step_num, target, status) "
+            "VALUES($1, 4, '@d', 'error')", op_id)
+        await w._requeue_op_no_accounts(pool, op_id, 90)
+        return await pool.fetchrow(
+            "SELECT status, result, error_msg, acct_wait_since, finished_at "
+            "FROM operation_queue WHERE id=$1", op_id)
+
+    row = _run(_go())
+    assert row["status"] == "partial", (
+        "операция, успевшая взять цели, закрыта ровным провалом: владелец "
+        "читает «не запустилась» на уже отправленных приглашениях"
+    )
+    assert row["result"], "закрыта с result=NULL — показать нечего"
+    res = json.loads(row["result"])
+    assert (res["ok"], res["failed"]) == (3, 1), res
+    assert row["finished_at"] is not None
+    assert row["acct_wait_since"] is None, (
+        "накопленное ожидание флота осталось на закрытой операции"
+    )
+
+
 # ── Сторож зависших при старте воркера ───────────────────────────────────────
 #
 # Railway шлёт SIGTERM на каждом деплое, поэтому этот путь срабатывает в проде

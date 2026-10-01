@@ -106,10 +106,26 @@ def test_defer_never_fails_the_operation():
 
 
 def test_defer_is_a_separate_path_from_fleet_wait():
-    """Путь ожидания флота обязан сохранить свой предел — его не смешиваем."""
-    fleet = _fn(_read("services/op_worker.py"), "_requeue_op_no_accounts")
+    """Путь ожидания флота обязан сохранить свой предел — его не смешиваем.
+
+    Сам провал по истечении предела переехал в `_finish_fleet_starved_op`
+    (операция закрывается с результатом, метрикой и подписью, а не одним
+    UPDATE), поэтому проверяем смысл: предел считается здесь, а закрытие
+    делегируется финализатору, который пишет терминальный статус.
+    """
+    src = _read("services/op_worker.py")
+    fleet = _fn(src, "_requeue_op_no_accounts")
     assert "_ACCT_WAIT_MAX_MIN" in fleet
-    assert "status='failed'" in fleet
+    assert "_finish_fleet_starved_op(" in fleet, (
+        "по истечении предела операция обязана закрываться, а не ждать дальше"
+    )
+    closer = _fn(src, "_finish_fleet_starved_op")
+    assert "status=$3" in closer and "finished_at=now()" in closer, (
+        "финализатор обязан писать терминальный статус и время завершения"
+    )
+    assert "status='pending'" not in closer, (
+        "это закрытие операции, а не ещё один возврат в очередь"
+    )
 
 
 def test_defer_explains_itself_to_the_owner():

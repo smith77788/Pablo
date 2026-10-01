@@ -63,14 +63,26 @@ async def test_long_scheduled_operation_gets_its_full_wait():
 
 @pytest.mark.asyncio
 async def test_operation_that_really_waited_too_long_fails():
-    """Обратная сторона: предел обязан наступать, иначе это вечный цикл."""
-    from services import op_worker
+    """Обратная сторона: предел обязан наступать, иначе это вечный цикл.
+
+    Статус пишется параметром, а не литералом: операция, успевшая взять часть
+    целей, закрывается как `partial` (см. _finish_fleet_starved_op). Проверяем
+    то, что важно: статус терминальный, в очередь операция не возвращается, и
+    чужую терминальную запись (отмену владельца) провал не затирает.
+    """
+    from services import op_status, op_worker
 
     pool = _Pool(waiting_since=_minutes_ago(op_worker._ACCT_WAIT_MAX_MIN + 5))
     await op_worker._requeue_op_no_accounts(pool, 7)
 
-    query = pool.executed[0][0]
-    assert "status='failed'" in query
+    query, args = pool.executed[0]
+    assert "status='pending'" not in query, (
+        "предел ожидания не наступил — это вечный цикл"
+    )
+    assert "finished_at=now()" in query
+    assert op_status.FAILED in args, (
+        "без журнала целей закрывать нечем, кроме провала"
+    )
     assert "status NOT IN" in query, "провал затрёт отмену владельца"
 
 
