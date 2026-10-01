@@ -9532,7 +9532,7 @@ function openBotBroadcast() {
   document.getElementById('bbText').value='';
   { const _b=document.getElementById('bbButtons'); if(_b) _b.value=''; }
   document.getElementById('bbErr').textContent='';
-  document.getElementById('bbHint').textContent = `Сообщение получат подписчики ${BOT_SEL.size} выбранных ботов.`;
+  document.getElementById('bbHint').textContent = `Сообщение получат подписчики ${BOT_SEL.size} ${plural(BOT_SEL.size,'выбранному боту','выбранным ботам','выбранным ботам')}.`;
   showModal('mo-bot-broadcast');
 }
 async function submitBotBroadcast() {
@@ -9562,8 +9562,8 @@ async function submitQuickBroadcast() {
   // остаток не подгружен, «всем ботам» было бы неправдой.
   const _partial = (typeof BOT_TOTAL === 'number' && BOT_TOTAL > BOTS.length);
   const preview = (_partial
-      ? `Разослать сообщение ${BOTS.length} загруженным ботам из ${BOT_TOTAL}?\nОстальные не получат — сначала нажмите «Загрузить ещё» в списке ботов.`
-      : `Разослать сообщение всем ${BOTS.length} ботам?`)
+      ? `Разослать сообщение ${BOTS.length} ${plural(BOTS.length,'загруженному боту','загруженным ботам','загруженным ботам')} из ${BOT_TOTAL}?\nОстальные не получат — сначала нажмите «Загрузить ещё» в списке ботов.`
+      : `Разослать сообщение всем ${BOTS.length} ${plural(BOTS.length,'боту','ботам','ботам')}?`)
     + `\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`;
   if(!await askConfirm(preview)) return;
   const btn=document.getElementById('quickBcBtn'); btn.disabled=true; btn.textContent='⏳ Отправка…';
@@ -10270,7 +10270,7 @@ async function massCheckAccounts() {
   if (!await askConfirm('Проверить все аккаунты? Рабочие, ошибочно отключённые, будут восстановлены.')) return;
   try {
     const r = await api('/api/miniapp/accounts/check', {method:'POST'});
-    toast(`🔍 Проверка ${r.count} аккаунтов запущена (#${r.op_id}). Результат придёт в бот.`);
+    toast(`🔍 Проверка ${r.count} ${plural(r.count,'аккаунту','аккаунтам','аккаунтам')} запущена (#${r.op_id}). Результат придёт в бот.`);
   } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
 }
 
@@ -14547,7 +14547,7 @@ async function deployCfPool() {
   try {
     const r = await api('/api/miniapp/cf/pool/deploy', {method:'POST', body: JSON.stringify({count, name_prefix:'tg-relay'})});
     if (r.started) {
-      toast(`☁️ Деплой ${r.count} воркеров запущен в фоне — статус обновится сам`);
+      toast(`☁️ Деплой ${r.count} ${plural(r.count,'воркер','воркера','воркеров')} запущен${plural(r.count,'','о','о')} в фоне — статус обновится сам`);
       // опрашиваем статус ~1 минуту, пока фоновый деплой идёт
       let n=0; const iv=setInterval(()=>{ loadCfPoolStatus(); if(++n>=12) clearInterval(iv); }, 5000);
     } else {
@@ -14589,7 +14589,7 @@ async function checkProxyIsolation() {
     } else {
       if ((r.shared_ip_groups||[]).length) {
         h += `<div style="color:var(--red)">⚠️ Общий IP (риск бана):</div>`;
-        h += r.shared_ip_groups.map(g=>`<div>• <code>${esc(g.ip)}</code> — ${g.count} аккаунтов: ${g.account_ids.join(', ')}</div>`).join('');
+        h += r.shared_ip_groups.map(g=>`<div>• <code>${esc(g.ip)}</code> — ${g.count} ${plural(g.count,'аккаунт','аккаунта','аккаунтов')}: ${g.account_ids.join(', ')}</div>`).join('');
       }
       if ((r.accounts_without_proxy||[]).length) {
         h += `<div style="color:var(--orange);margin-top:4px">🔌 Без изоляции (ни прокси, ни релея): ${r.accounts_without_proxy.length} (${r.accounts_without_proxy.slice(0,20).join(', ')})</div>`;
@@ -16458,7 +16458,7 @@ async function openSeo() {
       <div class="row">
         <div class="row-ico" style="background:var(--bg-green-16)">🔍</div>
         <div class="row-body"><div class="row-name">${esc(k.keyword)}</div></div>
-        <div class="row-right" style="color:var(--hint)">${k.search_count} поисков</div>
+        <div class="row-right" style="color:var(--hint)">${k.search_count} ${plural(k.search_count,'поиск','поиска','поисков')}</div>
       </div>
     `).join('') : empty('🔍','Нет ключевых слов','Добавьте в разделе Позиции'));
     const sug = d.suggestions||[];
@@ -18007,7 +18007,7 @@ async function detectDuplicates() {
     const d = await api('/api/miniapp/uch/duplicates');
     const dupes = d.duplicates||[];
     if (!dupes.length) { txt('dupBody', empty('✅','Дубликатов нет','Все контакты уникальны')); return; }
-    let html = `<div style="padding:12px 16px;font-size:13px;color:var(--hint)">Найдено ${dupes.length} возможных дубликатов</div>`;
+    let html = `<div style="padding:12px 16px;font-size:13px;color:var(--hint)">Найдено ${dupes.length} ${plural(dupes.length,'возможный дубликат','возможных дубликата','возможных дубликатов')}</div>`;
     dupes.forEach(dp=>{
       html += `<div class="li" style="margin:0 16px 8px">
         <div class="li-body"><div class="li-name">${esc(dp.contact_a.name)} ↔ ${esc(dp.contact_b.name)}</div><div class="li-sub">${Math.round(dp.confidence*100)}% · ${dp.reasons.join(', ')}</div></div>
@@ -19047,7 +19047,7 @@ async function openUchGraph() {
     if (d.by_type&&d.by_type.length) {
       html += '<div class="sec">По типам</div>';
       d.by_type.forEach(t=>{
-        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(t.relationship_type)}</div><div class="li-sub">${t.cnt} связей</div></div></div>`;
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(t.relationship_type)}</div><div class="li-sub">${t.cnt} ${plural(t.cnt,'связь','связи','связей')}</div></div></div>`;
       });
     }
     if (d.strongest&&d.strongest.length) {
@@ -19399,7 +19399,7 @@ async function openPersonas() {
       <div class="kpi-card"><div class="kpi-val">${personas.length}</div><div class="kpi-lbl">Персон</div></div>
       <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${active}</div><div class="kpi-lbl">Активных</div></div>
     `);
-    txt('m-persona-val',`${active} активных · ${personas.length} персон`);
+    txt('m-persona-val',`${active} активных · ${personas.length} ${plural(personas.length,'персона','персоны','персон')}`);
     if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Заполните форму ниже и нажмите «Создать персону»')); return; }
     txt('personaList', personas.map(p=>`
       <div class="row">
@@ -19543,7 +19543,7 @@ async function submitPhoneCheck() {
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
     const r = await api('/api/miniapp/phone_check',{method:'POST',body:JSON.stringify({phones})});
-    toast(`📞 Запущена проверка ${r.count} номеров (#${r.op_id})`);
+    toast(`📞 Запущена проверка ${r.count} ${plural(r.count,'номера','номеров','номеров')} (#${r.op_id})`);
     errEl.textContent='';
     openPhoneChecker();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
@@ -19700,7 +19700,7 @@ async function openCommunity() {
   try {
     const d = await api('/api/miniapp/community/nodes');
     const nodes = d.nodes||[];
-    const v = document.getElementById('m-community-val'); if (v) v.textContent = nodes.length?`${nodes.length} сообществ`:'';
+    const v = document.getElementById('m-community-val'); if (v) v.textContent = nodes.length?`${nodes.length} ${plural(nodes.length,'сообщество','сообщества','сообществ')}`:'';
     if (!nodes.length) { txt('communityList', empty('🏛','Нет сообществ','Создайте ноду-сообщество из форум-супергруппы')); return; }
     // Название и chat_id НЕ подставляем в атрибут: JSON.stringify добавляет
     // свои двойные кавычки, а атрибут тоже в двойных — строка обрывалась на
@@ -20262,7 +20262,7 @@ async function openGhost() {
   try {
     const d = await api('/api/miniapp/ghost');
     const profiles = d.profiles||[];
-    txt('m-ghost-val',`${profiles.filter(p=>p.enabled).length} активных · ${profiles.length} профилей`);
+    txt('m-ghost-val',`${profiles.filter(p=>p.enabled).length} активных · ${profiles.length} ${plural(profiles.length,'профиль','профиля','профилей')}`);
     if (!profiles.length) { txt('ghostList', empty('👻','Нет призрачных профилей','Нажмите + Создать')); return; }
     txt('ghostList', profiles.map(p=>`
       <div class="row">
@@ -21356,7 +21356,7 @@ async function submitFolder(){
   const btn=document.getElementById('fcBtn'); btn.disabled=true; btn.textContent='Создаю…';
   try{
     const r=await api('/api/miniapp/chatlist_folders',{method:'POST',body:JSON.stringify({title, chat_ids:ids})});
-    toast(`📁 Папка из ${r.chat_count} чатов создаётся — ссылка появится в списке`);
+    toast(`📁 Папка из ${r.chat_count} ${plural(r.chat_count,'чат','чата','чатов')} создаётся — ссылка появится в списке`);
     if(r.op_id) pollOpResult(r.op_id, 'Общая папка');
     back(); openFolders();
   }catch(e){ err.textContent=e.message||'Ошибка'; }
@@ -22661,7 +22661,7 @@ async function loadWorkspaces() {
         <div class="row-ico" style="background:var(--bg-blue-16)">🏢</div>
         <div class="row-body">
           <div class="row-name">${esc(w.name)}</div>
-          <div class="row-val">${w.member_count} участников · ${w.role==='owner'?'👑 Владелец':'👤 Участник'}</div>
+          <div class="row-val">${w.member_count} ${plural(w.member_count,'участник','участника','участников')} · ${w.role==='owner'?'👑 Владелец':'👤 Участник'}</div>
           ${w.description?`<div class="row-val" style="color:var(--hint)">${esc(w.description)}</div>`:''}
         </div>
           <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="leaveWs(${w.id},'${esc(w.role)}')">${w.role==='owner'?'🗑':'🚪'}</button></div>
@@ -23707,7 +23707,7 @@ async function submitMassReport() {
   const reportText = (document.getElementById('mrText')?.value || '').trim();
   if (!target) { errEl.textContent = 'Укажите цель жалобы'; return; }
   const accIds = [...document.querySelectorAll('.mj-acc-cb:checked')].map(cb=>+cb.value);
-  const scope = accIds.length ? `${accIds.length} выбранных аккаунтов` : 'ВСЕХ ваших активных аккаунтов';
+  const scope = accIds.length ? `${accIds.length} ${plural(accIds.length,'выбранному аккаунту','выбранным аккаунтам','выбранным аккаунтам')}` : 'ВСЕХ ваших активных аккаунтов';
   if (!await askConfirm(`Отправить жалобы на ${target} с ${scope}?\n\nЭто рискованная операция: жалобы идут с реальных аккаунтов и могут привести к ограничениям. Отменить отправленные жалобы нельзя.`)) return;
   try {
     const r = await api('/api/miniapp/mass_report', {method:'POST', body:JSON.stringify({
@@ -24820,7 +24820,7 @@ function toggleNcChannel(id) {
     NC_CHANNELS_SELECTED.add(id);
     if (ico) { ico.textContent='✅'; ico.style.background='rgba(52,211,153,.16)'; }
   }
-  txt('nc-selcount', `Выбрано: ${NC_CHANNELS_SELECTED.size} каналов`);
+  txt('nc-selcount', `Выбрано: ${NC_CHANNELS_SELECTED.size} ${plural(NC_CHANNELS_SELECTED.size,'канал','канала','каналов')}`);
 }
 async function submitNarrativeCreate() {
   const errEl = document.getElementById('nc-err');
@@ -26410,7 +26410,7 @@ async function folderFromNet() {
   if (!await askConfirm('Собрать общую папку из каналов этой связки и получить одну ссылку-приглашение?')) return;
   try {
     const r = await api('/api/miniapp/chatlist_folders', {method:'POST', body:JSON.stringify({instance_id:_currentNetId})});
-    toast(`📁 Папка из ${r.chat_count} чатов создаётся — ссылка появится в «Общих папках»`);
+    toast(`📁 Папка из ${r.chat_count} ${plural(r.chat_count,'чат','чата','чатов')} создаётся — ссылка появится в «Общих папках»`);
     if(r.op_id) pollOpResult(r.op_id, 'Общая папка');
   } catch(e) {
     toast('⚠️ '+(e.message||'Ошибка').substring(0,140));
