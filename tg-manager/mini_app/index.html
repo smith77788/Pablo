@@ -9540,7 +9540,7 @@ async function submitBotBroadcast() {
   const text=document.getElementById('bbText').value.trim();
   if(!text){ errEl.textContent='Введите текст рассылки'; return; }
   const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
-  const preview = `Отправить рассылку по ${BOT_SEL.size} ботам?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+  const preview = `Отправить рассылку по ${BOT_SEL.size} ${plural(BOT_SEL.size,'боту','ботам','ботам')}?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
     + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
   if (!await askConfirm(preview)) return;
   const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
@@ -11548,7 +11548,7 @@ async function submitChMass() {
   if (!val) { errEl.textContent='Введите значение'; return; }
   // Публикация в N каналов необратима → осознанное подтверждение (как mass_publish/
   // invite). Правки метаданных (title/about/username) обратимы — без подтверждения.
-  if (CHM_OP==='post' && !await askConfirm(`Опубликовать пост в ${CH_SEL.size} каналов? После публикации отменить нельзя.\n\nСовет: каждый канал получит свой вариант, если использовать Spintax {A|B}.`)) return;
+  if (CHM_OP==='post' && !await askConfirm(`Опубликовать пост в ${CH_SEL.size} ${plural(CH_SEL.size,'канал','канала','каналов')}? После публикации отменить нельзя.\n\nСовет: каждый канал получит свой вариант, если использовать Spintax {A|B}.`)) return;
   const body = {op:CHM_OP, channel_ids:[...CH_SEL]};
   if (CHM_OP==='post') body.text = val; else body.value = val.replace(/^@/,'');
   const btn=document.getElementById('chmBtn'); btn.disabled=true; btn.textContent='Применяю…';
@@ -11561,7 +11561,7 @@ async function submitChMass() {
 }
 async function runChMass(op) {
   if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
-  if (op==='promote' && !await askConfirm(`Назначить аккаунты администраторами в ${CH_SEL.size} каналах?`)) return;
+  if (op==='promote' && !await askConfirm(`Назначить аккаунты администраторами в ${CH_SEL.size} ${plural(CH_SEL.size,'канале','каналах','каналах')}?`)) return;
   try {
     const r = await api('/api/miniapp/channels/mass', {method:'POST', body:JSON.stringify({op, channel_ids:[...CH_SEL]})});
     toast(`✅ Поставлено в очередь для ${r.count||CH_SEL.size} каналов`);
@@ -14816,7 +14816,7 @@ async function proxyPoolCheckAll() {
 async function proxyPoolCleanDead() {
   const dead = _proxyPoolData.filter(p=>p.is_alive===false);
   if (!dead.length) { toast('🟢 Нет мёртвых прокси'); return; }
-  if (!await askConfirm(`Удалить ${dead.length} мёртвых прокси?`)) return;
+  if (!await askConfirm(`Удалить ${dead.length} ${plural(dead.length,'мёртвый','мёртвых','мёртвых')} прокси?`)) return;
   try {
     for (const p of dead) { await api('/api/miniapp/proxy/'+p.id, {method:'DELETE'}); }
     toast(`🧹 Удалено ${dead.length} прокси`);
@@ -15980,7 +15980,7 @@ async function submitReporter() {
   const acc_count = parseInt(document.getElementById('reporterAccCount').value)||5;
   const errEl = document.getElementById('reporterErr');
   if (!target) { errEl.textContent='Укажите цель'; return; }
-  if (!await askConfirm(`Отправить ${acc_count} репортов на "${target}"?`)) return;
+  if (!await askConfirm(`Отправить ${acc_count} ${plural(acc_count,'репорта','репортов','репортов')} на "${target}"?`)) return;
   const btn = document.getElementById('reporterBtn');
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
@@ -17241,7 +17241,7 @@ async function bulkFavSelected() {
 }
 
 async function bulkDeleteSelected() {
-  if (!await askConfirm('Удалить '+CONTACT_SELECTED.size+' контактов?')) return;
+  if (!await askConfirm('Удалить '+CONTACT_SELECTED.size+' '+plural(CONTACT_SELECTED.size,'контакт','контакта','контактов')+'?')) return;
   try {
     await api('/api/miniapp/uch/bulk/delete', {method:'POST', body:JSON.stringify({contact_ids:[...CONTACT_SELECTED]})});
     toast('🗑 Удалено');
@@ -17524,7 +17524,7 @@ async function submitContactWrite() {
   if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
   const seg = SEGMENT_TARGET;
   const who = seg ? 'СЕГМЕНТУ' : 'контакту';
-  if (!await askConfirm(`Отправить ${file?'медиа':'сообщение'} ${who} с ${accIds.length} аккаунт(ов)?\nУйдёт реальным людям — отменить нельзя.`)) return;
+  if (!await askConfirm(`Отправить ${file?'медиа':'сообщение'} ${who} с ${accIds.length} ${plural(accIds.length,'аккаунта','аккаунтов','аккаунтов')}?\nУйдёт реальным людям — отменить нельзя.`)) return;
   try {
     let r;
     if (seg) {
@@ -17723,7 +17723,7 @@ async function submitContactInvite() {
   const accIds = _contactPickedAccs();
   if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
   const seg = SEGMENT_TARGET;
-  if (seg && !await askConfirm(`Пригласить весь сегмент в «${group}» с ${accIds.length} аккаунт(ов)?`)) return;
+  if (seg && !await askConfirm(`Пригласить весь сегмент в «${group}» с ${accIds.length} ${plural(accIds.length,'аккаунта','аккаунтов','аккаунтов')}?`)) return;
   try {
     let r;
     if (seg) {
@@ -19341,7 +19341,7 @@ async function submitBotFactory() {
     const cnt = Math.max(1, parseInt(document.getElementById('bfCount').value) || 1);
     if (!accts.length) { errEl.textContent = 'Выберите хотя бы один аккаунт для @BotFather'; return; }
     const total = accts.length * cnt;
-    if (!await askConfirm(`Создать ${total} бот(ов) через @BotFather на ${accts.length} аккаунт(ах)? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
+    if (!await askConfirm(`Создать ${total} бот(ов) через @BotFather на ${accts.length} ${plural(accts.length,'аккаунте','аккаунтах','аккаунтах')}? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
     btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь...';
     try {
       const bfNameMode = document.getElementById('bfNameMode')?.value || 'keywords';
@@ -19828,7 +19828,7 @@ async function setCommunityStaff(role) {
   if (!_CUR_CNODE) return;
   const ids = [..._CMEMBER_SEL];
   if (!ids.length) { toast('Отметьте аккаунты'); return; }
-  if (!await askConfirm(`Назначить ${ids.length} аккаунт(ов) ${role==='admin'?'админами':'модераторами'} ноды?`)) return;
+  if (!await askConfirm(`Назначить ${ids.length} ${plural(ids.length,'аккаунта','аккаунтов','аккаунтов')} ${role==='admin'?'админами':'модераторами'} ноды?`)) return;
   try {
     const r = await api('/api/miniapp/community/node/'+_CUR_CNODE+'/staff',{method:'POST',body:JSON.stringify({role, account_ids:ids})});
     toast('🛡 Роли назначаются'+(r.op_id?` · операция #${r.op_id}`:''));
@@ -21313,7 +21313,7 @@ async function openFolders(keep) {
       return `<div class="row" style="border-left:3px solid ${color}">
         <div class="row-ico" style="background:var(--bg2)">📁</div>
         <div class="row-body" ${st==='ready'?`onclick="copyText('${esc(f.invite_link||'')}')" style="cursor:pointer"`:''}>
-          <div class="row-name">${esc(f.title)} · ${f.chat_count} чат(ов)${f.join_count?' · добавили '+f.join_count:''}</div>
+          <div class="row-name">${esc(f.title)} · ${f.chat_count} ${plural(f.chat_count,'чат','чата','чатов')}${f.join_count?' · добавили '+f.join_count:''}</div>
           <div class="row-val" style="word-break:break-all">${esc(String(line).substring(0,90))}</div>
         </div>
         <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить">🗑</button></div>
@@ -23847,7 +23847,7 @@ async function submitMassMembership(kind) {
   const isJoin = kind === 'join';
   const word = isJoin ? 'вступить в' : 'выйти из';
   // Действие затрагивает реальные аккаунты и обратимо только вручную → подтверждаем.
-  if (!await askConfirm(`Массово ${word} ${targets.length} чат(ов) с ${accIds.length} аккаунт(ов)?\n\nТемп: ${document.getElementById('mjDelay').selectedOptions[0].textContent}\nВсего действий: ${targets.length*accIds.length}`)) return;
+  if (!await askConfirm(`Массово ${word} ${targets.length} ${plural(targets.length,'чате','чатах','чатах')} с ${accIds.length} ${plural(accIds.length,'аккаунта','аккаунтов','аккаунтов')}?\n\nТемп: ${document.getElementById('mjDelay').selectedOptions[0].textContent}\nВсего действий: ${targets.length*accIds.length}`)) return;
   try {
     // URL пишем целиком, а не склейкой: статические гейты (мёртвые роуты)
     // не умеют разрешать динамические пути, да и грепается так честнее.
@@ -24113,7 +24113,7 @@ async function submitChannelFactory() {
   if (firstPost) _extra += `\n• первый пост${pinFirst?' + закреп':''}`;
   if (seedCount>0) _extra += `\n• автопосев: +${seedCount} подписчиков на каждый`;
   if (engageCount>0) _extra += `\n• оживление: реакции и просмотры от ${engageCount} аккаунтов`;
-  if (!await askConfirm(`Создать ${total} ${what} на ${accts.length} аккаунт(ах)?${_extra?('\nПосле создания:'+_extra):''}\nОни реально появятся в Telegram — отменить создание нельзя.`)) return;
+  if (!await askConfirm(`Создать ${total} ${what} на ${accts.length} ${plural(accts.length,'аккаунте','аккаунтах','аккаунтах')}?${_extra?('\nПосле создания:'+_extra):''}\nОни реально появятся в Telegram — отменить создание нельзя.`)) return;
   try {
     const r = await api('/api/miniapp/channels/bulk_create',{method:'POST',body:JSON.stringify({
       account_ids: accts, channel_count: count, title, about, is_group: isGroup, name_mode: nameMode,
