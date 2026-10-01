@@ -3847,7 +3847,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор операции", 400)
         try:
             row = await pool.fetchrow(
-                """UPDATE operation_queue SET status='paused'
+                # acct_wait_since=NULL: это отметка начала ожидания свободных
+                # аккаунтов, по которой op_worker проваливает операцию через
+                # _ACCT_WAIT_MAX_MIN. Пауза владельца — не ожидание флота, и
+                # время под паузой в этот предел идти не должно. Без сброса
+                # операция, постоявшая на паузе дольше двадцати минут,
+                # проваливалась на ПЕРВОЙ же встрече с занятым флотом после
+                # возобновления, не прождав ни секунды, — ровно тот класс,
+                # который однажды уже чинили для отложенного старта.
+                """UPDATE operation_queue SET status='paused', acct_wait_since=NULL
                    WHERE id=$1 AND owner_id=$2 AND status='pending'
                    RETURNING id""", op_id, uid)
             if not row:
@@ -3900,7 +3908,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор операции", 400)
         try:
             row = await pool.fetchrow(
-                """UPDATE operation_queue SET status='pending'
+                # acct_wait_since=NULL — и на возобновлении тоже: отметку могла
+                # поставить пауза, сделанная до этой правки, а провалить
+                # возобновлённую операцию за «ждёт слишком долго» нельзя.
+                """UPDATE operation_queue SET status='pending', acct_wait_since=NULL
                    WHERE id=$1 AND owner_id=$2 AND status='paused'
                    RETURNING id""", op_id, uid)
             if not row:
@@ -4004,7 +4015,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             res = await pool.execute(
-                "UPDATE operation_queue SET status='paused' "
+                # acct_wait_since=NULL — см. пояснение у паузы одной операции:
+                # время под паузой не идёт в предел ожидания свободного флота.
+                "UPDATE operation_queue SET status='paused', acct_wait_since=NULL "
                 "WHERE owner_id=$1 AND status='pending'", uid)
             tail = str(res).rsplit(" ", 1)[-1]
             paused = int(tail) if tail.isdigit() else 0
@@ -4024,7 +4037,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             res = await pool.execute(
-                "UPDATE operation_queue SET status='pending' "
+                "UPDATE operation_queue SET status='pending', acct_wait_since=NULL "
                 "WHERE owner_id=$1 AND status='paused'", uid)
             tail = str(res).rsplit(" ", 1)[-1]
             resumed = int(tail) if tail.isdigit() else 0
