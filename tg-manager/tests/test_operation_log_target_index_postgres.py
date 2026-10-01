@@ -33,6 +33,15 @@ _OP_ID = 999_228          # свой номер операции, чтобы н�
 _ACC_ID = 999_229
 _OWNER = 999_230
 _ROWS = 20_000
+# Операций в очереди тоже должно быть МНОГО. План этого запроса выбирается из
+# двух: зайти со стороны журнала по индексу (target, created_at) или со стороны
+# operation_queue и для каждой операции лезть в журнал по op_id. Второй путь
+# дёшев ровно до тех пор, пока очередь маленькая, — а на свежей базе в ней
+# десяток строк, и планировщик честно берёт именно его. Тест при этом падал,
+# «обнаружив» потерю индекса, которого никто не терял. Сеем очередь сами, а не
+# надеемся на то, что лежит в базе от других прогонов.
+_QUEUE_ROWS = 5_000
+_QUEUE_ID_BASE = 999_300_000
 
 _LOOP = None
 
@@ -68,7 +77,16 @@ def conn():
                       CASE WHEN i % 7 = 0 THEN 'error' ELSE 'ok' END,
                       now() - INTERVAL '1 hour'
                  FROM generate_series(1, $2) i""", _OP_ID, _ROWS)
+        await c.execute(
+            "DELETE FROM operation_queue WHERE id >= $1 AND id < $2",
+            _QUEUE_ID_BASE, _QUEUE_ID_BASE + _QUEUE_ROWS)
+        await c.execute(
+            """INSERT INTO operation_queue(id, owner_id, op_type, status)
+               SELECT $1 + i, $2, 'mass_invite', 'done'
+                 FROM generate_series(0, $3 - 1) i""",
+            _QUEUE_ID_BASE, _OWNER, _QUEUE_ROWS)
         await c.execute("ANALYZE operation_log")
+        await c.execute("ANALYZE operation_queue")
 
     _run(_seed())
     yield c
@@ -76,6 +94,9 @@ def conn():
     async def _cleanup():
         await c.execute("DELETE FROM operation_log WHERE op_id=$1", _OP_ID)
         await c.execute("DELETE FROM operation_queue WHERE id=$1", _OP_ID)
+        await c.execute(
+            "DELETE FROM operation_queue WHERE id >= $1 AND id < $2",
+            _QUEUE_ID_BASE, _QUEUE_ID_BASE + _QUEUE_ROWS)
         await c.close()
 
     _run(_cleanup())

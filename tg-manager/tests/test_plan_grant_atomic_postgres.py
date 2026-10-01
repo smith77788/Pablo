@@ -79,6 +79,16 @@ async def _очистить(p):
                     _REFERRER, _REFERRED)
     await p.execute("DELETE FROM subscriptions WHERE user_id = ANY($1::bigint[])",
                     [_REFERRER, _REFERRED])
+    # platform_users убирается последней: на неё ссылаются строки выше. Без
+    # этой строки двое подопытных оставались в базе навсегда, и следующий
+    # прогон по той же базе ронял test_admin_broadcast_confirm — та проверяет
+    # «рассылка дошла до всех», а «всех» на два человека больше. В CI база
+    # каждый раз новая, поэтому пряталось: падало только локально и выглядело
+    # как плавающий тест.
+    await p.execute("DELETE FROM platform_referral_codes "
+                    "WHERE user_id = ANY($1::bigint[])", [_REFERRER, _REFERRED])
+    await p.execute("DELETE FROM platform_users WHERE user_id = ANY($1::bigint[])",
+                    [_REFERRER, _REFERRED])
 
 
 async def _срыв_подписки_для(p, user_id: int):

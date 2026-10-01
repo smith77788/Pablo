@@ -15770,6 +15770,8 @@ const AUDIT_RU = {
   join:              'вступление',
   leave:             'выход',
   publish:           'публикация',
+  view:              'просмотры',
+  reaction:          'реакции',
 };
 function auditRu(a) { return AUDIT_RU[String(a || '').toLowerCase()] || opRu(a); }
 
@@ -22895,6 +22897,7 @@ const IH_ANOMALY = {
   flood_wave:     ['🌊 Волна флуд-ожиданий', "healthGoAccounts('cooldown','')"],
   trust_collapse: ['💔 Обвал доверия аккаунтов', 'openHealth()'],
   latency_spike:  ['🐌 Операции стали медленнее', 'openOps()'],
+  queue_frozen:   ['🧊 Очередь не разбирается', 'openOps()'],
 };
 const IH_RECOVERY = {account:'аккаунт', operation:'операция', proxy:'прокси', queue:'очередь'};
 const IH_ACTION = {

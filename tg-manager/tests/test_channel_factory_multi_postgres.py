@@ -34,7 +34,11 @@ def test_bulk_create_channels_multi_per_account_postgres(monkeypatch):
         calls = []          # (title, megagroup)
         seq = {"n": 5000}
 
-        async def fake_create(session_string, title, about="", megagroup=False, _acc=None):
+        # brand_promo — настоящий параметр create_channel (бренд-бот только
+        # для free-tier). Заглушка обязана повторять сигнатуру, иначе тест
+        # падает на TypeError, а не на том, что проверяет.
+        async def fake_create(session_string, title, about="", megagroup=False,
+                              _acc=None, brand_promo=True):
             seq["n"] += 1
             calls.append((title, bool(megagroup)))
             return {"channel_id": seq["n"], "title": title,

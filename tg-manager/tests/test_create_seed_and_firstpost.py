@@ -45,7 +45,11 @@ def _install(monkeypatch, submitted, posts):
     monkeypatch.setattr(op_worker, "_is_cancelled", _cancelled)
 
     from services import account_manager, session_simulator, operation_bus
-    async def _create_channel(session, title, about="", megagroup=False, _acc=None):
+    # brand_promo — настоящий параметр account_manager.create_channel:
+    # бренд-бот в новом канале только для free-tier. Заглушка обязана
+    # повторять сигнатуру, иначе падает на TypeError, а не на сути.
+    async def _create_channel(session, title, about="", megagroup=False,
+                              _acc=None, brand_promo=True):
         return {"channel_id": 1000 + int(_acc["id"]), "access_hash": 7, "type": "channel"}
     async def _set_username(session, ch_id, cand, _acc=None):
         return ""                                   # успех: @ ставится с первого раза

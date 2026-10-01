@@ -29,6 +29,12 @@ def test_every_getElementById_target_is_defined_somewhere():
     src = _load()
     # Определённые id: статические атрибуты И шаблонные строки, создающие DOM.
     defined = set(re.findall(r"""\bid=["']([\w-]+)["']""", src))
+    # Третий способ задать id — присвоением уже созданному элементу
+    # (`el.id = 'accPoolBanner'` в createElement-коде). Без этой строки
+    # пробник считал такой элемент несуществующим и ловил сам себя: функция
+    # сначала ищет прежний баннер, чтобы его убрать, и только потом создаёт
+    # новый — null на первом вызове там предусмотрен (`if (old) old.remove()`).
+    defined |= set(re.findall(r"""\.id\s*=\s*["']([\w-]+)["']""", src))
     # Обращения только по строковому литералу (динамический id по переменной — не наш кейс).
     refs = set(re.findall(r"""getElementById\(\s*["']([\w-]+)["']\s*\)""", src))
     missing = sorted(refs - defined)

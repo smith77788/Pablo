@@ -1155,12 +1155,20 @@ async def safe_count(pool: asyncpg.Pool, query: str, *args: object) -> int:
 
 
 async def get_audience_count(pool: asyncpg.Pool, bot_id: int) -> int:
-    # suspect=FALSE — накрученных (флаг ставит flood_guard, только если защита
-    # включена) не считаем аудиторией; для ботов без защиты флаг всегда FALSE.
+    """Сколько человек реально получат рассылку.
+
+    Условия ОДИН В ОДИН с `get_audience_user_ids` ниже, иначе счётчик обещает
+    не то, что уйдёт. Сюда забыли `is_blocked=FALSE`: заблокировавший с ещё не
+    снятым `is_active` попадал в число на экране, но не в список адресатов, и
+    владелец видел аудиторию больше настоящей.
+
+    suspect=FALSE — накрученных (флаг ставит flood_guard, только если защита
+    включена) не считаем аудиторией; для ботов без защиты флаг всегда FALSE.
+    """
     return await safe_count(
         pool,
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
-        "AND suspect=FALSE",
+        "AND is_blocked=FALSE AND suspect=FALSE",
         bot_id,
     )
 
