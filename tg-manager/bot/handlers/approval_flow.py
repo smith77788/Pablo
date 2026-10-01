@@ -98,10 +98,11 @@ async def cb_approval_cancel(
         await callback.answer("Операция не найдена или нет прав.", show_alert=True)
         return
     try:
-        await pool.execute(
-            "UPDATE operation_queue SET status='cancelled' WHERE id=$1 AND status='waiting_approval'",
-            op_id,
-        )
+        from services import operation_bus as _obus
+
+        await _obus.cancel(
+            pool, op_id, callback.from_user.id,
+            allow=("waiting_approval",))
     except Exception:
         await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
         return

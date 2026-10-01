@@ -3816,12 +3816,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # 'paused' обязателен: приостановленную операцию иначе нельзя было ни
             # отменить, ни снять поштучно — она навсегда висела в очереди, пока
             # пользователь не возобновит ВСЮ очередь целиком.
-            row = await pool.fetchrow(
-                """UPDATE operation_queue SET status='cancelled'
-                   WHERE id=$1 AND owner_id=$2
-                     AND status IN ('pending','running','paused')
-                   RETURNING id""",
-                op_id, uid)
+            row = await _obus.cancel(
+                pool, op_id, uid,
+                allow=("pending", "running", "paused"))
             if not row:
                 return _err("Операция не найдена или уже завершена", 404)
             return _json_resp({"ok": True})

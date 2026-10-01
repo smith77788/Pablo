@@ -817,25 +817,111 @@ async def submit(
     return op_id
 
 
-async def cancel(pool: asyncpg.Pool, op_id: int, owner_id: int) -> bool:
+# Из каких состояний операцию можно отменить. Поверхности просят разные наборы:
+# мини-апп — ещё и 'paused' (иначе приостановленную операцию нельзя было ни
+# отменить, ни снять поштучно), экран апрува — 'waiting_approval'.
+CANCELLABLE = ("pending", "running")
+
+
+async def cancel(
+    pool: asyncpg.Pool, op_id: int, owner_id: int,
+    allow: "tuple[str, ...]" = CANCELLABLE,
+) -> bool:
     """Отменить операцию. Возвращает True если операция найдена и отменена.
 
-    Только pending/running операции могут быть отменены.
+    ЕДИНСТВЕННАЯ ДВЕРЬ ОТМЕНЫ — как submit() для постановки. Раньше её не было:
+    отмена жила пятью сырыми UPDATE по разным поверхностям (мини-апп, два экрана
+    бота, экран апрува, массовые операции), и каждая расходилась с остальными:
+
+      * три из пяти не ставили `finished_at` вовсе — у отменённой операции не
+        было времени завершения, то есть «сколько шла» и «когда закончилась» не
+        мог ответить никто;
+      * одна не фильтровала статус совсем и могла отменить уже завершённую;
+      * ни одна не дописывала `result` и не объявляла исход, поэтому отмена из
+        очереди не попадала ни на график исходов, ни в подписанный аудит-трейл,
+        ни в память организма — хотя `op_queued` из submit() обещает полный
+        жизненный цикл.
+
+    `allow` — из каких состояний отмена разрешена этой поверхности; сужать и
+    расширять набор можно, но проверка статуса остаётся внутри запроса, а не на
+    стороне вызывающего (между SELECT и UPDATE операция успевает стартовать).
+
     Проверяет owner_id для защиты от несанкционированной отмены.
     """
-    result = await pool.execute(
-        """UPDATE operation_queue
-           SET status = 'cancelled', finished_at = NOW()
-           WHERE id = $1
-             AND owner_id = $2
-             AND status IN ('pending', 'running')""",
+    # Старый статус нужен, чтобы знать, успел ли воркер взять операцию. CTE с
+    # FOR UPDATE делает это в том же запросе: отдельным SELECT'ом до UPDATE
+    # ответ мог бы устареть ровно в ту миллисекунду, когда поллер её подхватил.
+    row = await pool.fetchrow(
+        """WITH before AS (
+               SELECT id, status FROM operation_queue
+                WHERE id = $1 AND owner_id = $2
+                  FOR UPDATE
+           )
+           UPDATE operation_queue q
+              SET status = 'cancelled', finished_at = NOW()
+             FROM before b
+            WHERE q.id = b.id
+              AND b.status = ANY($3::text[])
+        RETURNING b.status AS was_status, q.op_type, q.params""",
         op_id,
         owner_id,
+        [str(x) for x in allow],
     )
-    cancelled = str(result).endswith("1")
-    if cancelled:
-        log.info("operation_bus: op_id=%d cancelled by owner=%d", op_id, owner_id)
-    return cancelled
+    cancelled = row is not None
+    if not cancelled:
+        return False
+    log.info("operation_bus: op_id=%d cancelled by owner=%d", op_id, owner_id)
+    # ОЖИДАЮЩУЮ операцию закрываем до конца здесь же. Запущенную закроет
+    # op_worker._finish_cancelled_op: он увидит 'cancelled' и допишет result,
+    # метрику, событие и подпись. А ожидающую воркер не подхватит НИКОГДА —
+    # значит, без этой ветки она навсегда остаётся с result=NULL, без исхода на
+    # графике, без подписи в аудит-трейле и без события `op_done`. Пара к
+    # `op_queued` из submit() обещает полный жизненный цикл в памяти организма,
+    # и ровно на отменённой из очереди операции цикл не замыкался.
+    if str(row["was_status"]) == "running":
+        return True
+    await _close_cancelled_pending(pool, op_id, owner_id,
+                                   str(row["op_type"] or "unknown"), row["params"])
+    return True
+
+
+async def _close_cancelled_pending(
+    pool: asyncpg.Pool, op_id: int, owner_id: int, op_type: str, params,
+) -> None:
+    """Дописать итог отменённой ОЖИДАЮЩЕЙ операции. Никогда не бросает.
+
+    Счётчики берём из журнала целей: «ожидающая» не значит «ничего не делала».
+    Операция возвращается в очередь после флуд-паузы, рестарта воркера и
+    занятого флота, поэтому на момент отмены у неё могут быть взятые цели — и
+    для владельца именно их число отвечает на вопрос «продолжать ли с нуля».
+    """
+    try:
+        from services import op_status
+        from services import op_worker as _ow
+
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except (ValueError, TypeError):
+                params = None
+        if not isinstance(params, dict):
+            params = {}
+        ok_n, failed_n = await _ow._journal_counters(pool, op_id)
+        summary = (f"🚫 Отменена из очереди, успело {ok_n}"
+                   if ok_n else "🚫 Отменена до запуска")
+        result = {"status": op_status.CANCELLED, "ok": ok_n, "failed": failed_n,
+                  "total": ok_n + failed_n, "summary": summary,
+                  "duration_s": 0.0, "op_type": op_type}
+        await pool.execute(
+            "UPDATE operation_queue SET result=$2::jsonb, acct_wait_since=NULL "
+            "WHERE id=$1 AND status='cancelled'",
+            op_id, json.dumps(result, ensure_ascii=False),
+        )
+        await _ow._announce_op_outcome(
+            pool, op_id, owner_id, op_type, params, op_status.CANCELLED,
+            ok_n, failed_n, summary)
+    except Exception as e:
+        log.warning("operation_bus: итог отмены op=%d не записан: %s", op_id, e)
 
 
 async def get_status(pool: asyncpg.Pool, op_id: int) -> dict | None:

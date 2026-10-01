@@ -828,17 +828,15 @@ async def cb_cancel_op(
 ) -> None:
     # Cancel both pending and running operations
     try:
-        result = await pool.execute(
-            "UPDATE operation_queue SET status='cancelled', finished_at=now() "
-            "WHERE id=$1 AND owner_id=$2 AND status IN ('pending','running')",
-            callback_data.op_id,
-            callback.from_user.id,
-        )
+        from services import operation_bus as _obus
+
+        result = await _obus.cancel(
+            pool, callback_data.op_id, callback.from_user.id)
     except Exception as exc:
         mark_handled_error(f"cancel_op: {exc}")
         await callback.answer(f"Ошибка БД: {exc}", show_alert=True)
         return
-    if result == "UPDATE 0":
+    if not result:
         await callback.answer("Операция уже завершена или не найдена.", show_alert=True)
         return
     # cb_queue calls callback.answer() itself; calling it here would cause double answer

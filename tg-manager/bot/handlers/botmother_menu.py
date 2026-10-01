@@ -1887,13 +1887,9 @@ async def cb_plan_cancel(
 
     uid = callback.from_user.id
     try:
-        updated = await pool.fetchval(
-            """UPDATE operation_queue SET status='cancelled'
-               WHERE id=$1 AND owner_id=$2 AND status='pending'
-               RETURNING id""",
-            op_id,
-            uid,
-        )
+        from services import operation_bus as _obus
+
+        updated = await _obus.cancel(pool, op_id, uid, allow=("pending",))
     except Exception:
         updated = None
     if updated:
@@ -2550,11 +2546,14 @@ async def cb_op_cancel(
         return
 
     try:
-        await pool.execute(
-            "UPDATE operation_queue SET status='cancelled', finished_at=now() WHERE id=$1 AND owner_id=$2",
-            op_id,
-            user_id,
-        )
+        from services import operation_bus as _obus
+
+        # Набор состояний теперь в запросе, а не только в прочитанной выше
+        # карточке: между чтением статуса и этой записью операция успевает
+        # стартовать или завершиться, и запрос без фильтра переписывал её итог.
+        await _obus.cancel(
+            pool, op_id, user_id,
+            allow=("pending", "running", "paused", "waiting_approval"))
     except Exception:
         await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
         return
