@@ -3714,7 +3714,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          конфликтам/тегам/напоминаниям/экспорту — отсюда, а не отдельными
          плитками. «🔄 Синхронизация» ведёт в центр синхронизации (где виден
          статус и кнопка запуска), чтобы синхронизация была ОДНОЙ поверхностью. -->
-    <div style="display:flex;gap:6px;padding:8px 0 4px;overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <!-- Двенадцать инструментов стояли развёрнутыми и занимали 246px: вместе с
+         поиском, фильтрами и счётчиками список контактов начинался за нижним
+         краем экрана — ради чего на экран и заходят, видно не было. Свернули
+         тем же раскрывающимся блоком, что и «⚙️ Действия с аккаунтом»: ни один
+         инструмент не убран, счётчик в заголовке говорит, сколько их внутри. -->
+    <details class="acc-actions" style="margin:8px 16px 4px;background:var(--bg2);border-radius:12px">
+      <summary style="cursor:pointer;font-size:14px;font-weight:500;padding:13px 14px;display:flex;align-items:center;gap:8px">
+        <span style="flex:1">🧰 Инструменты контактов</span>
+        <span style="font-size:12px;color:var(--hint);font-weight:400">ещё 12</span>
+        <span class="acc-chev" style="color:var(--hint)">▾</span>
+      </summary>
+    <div style="display:flex;gap:6px;padding:2px 12px 12px;flex-wrap:wrap">
       <span class="chip" style="flex:0 0 auto" onclick="openUchSyncCenter()">🔄 Синхронизация</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchGraph()">🕸 Граф связей</span>
       <span class="chip" style="flex:0 0 auto" onclick="detectDuplicates()">🔍 Дубликаты</span>
@@ -3728,6 +3739,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <span class="chip" style="flex:0 0 auto" onclick="openUchExport()">📤 Экспорт</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchCleanup()">🧹 Чистка / личные</span>
     </div>
+    </details>
     <div style="padding:6px 0">
       <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов..." oninput="searchContacts()" class="inp">
     </div>
