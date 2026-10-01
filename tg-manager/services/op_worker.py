@@ -742,6 +742,42 @@ async def _single_account_parked(
     return None
 
 
+async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int]":
+    """Сколько ЦЕЛЕЙ закрыто успехом и сколько ошибкой — по журналу операции.
+
+    Единственный источник правды об объёме сделанного, когда исполнитель
+    оборвался исключением: своих счётчиков он вернуть не успел, и операция,
+    взявшая 150 целей из 380, закрывалась ровным 'failed' без единой цифры.
+
+    Считаем по цели, а не по строкам журнала: у одной цели может быть и
+    'error', и следующий за ним 'ok' (ретрай внутри прогона) — тогда верный
+    итог «успех», а не «успех и провал». Строки со статусом 'info' —
+    примечания исполнителя, а не приговор цели, поэтому в счёт не идут.
+    Читаем всю цепочку повторов (journal_op_ids), как completed_targets.
+
+    (0, 0) — журнала нет (этот исполнитель его не пишет) или чтение не
+    удалось; вызывающий тогда остаётся при прежнем поведении.
+    """
+    try:
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT count(*) FILTER (WHERE ok) AS ok_n, "
+            "       count(*) FILTER (WHERE NOT ok) AS failed_n "
+            "  FROM (SELECT target, bool_or(status='ok') AS ok "
+            "          FROM operation_log "
+            "         WHERE op_id = ANY($1::bigint[]) AND target IS NOT NULL "
+            "           AND status IN ('ok', 'error') "
+            "         GROUP BY target) t",
+            await journal_op_ids(pool, op_id),
+            log_ctx=f"[journal_counters op={op_id}]")
+    except Exception:
+        log_exc_swallow(log, f"op_worker: журнал целей op={op_id} не прочитан")
+        return 0, 0
+    if not row:
+        return 0, 0
+    return int(row["ok_n"] or 0), int(row["failed_n"] or 0)
+
+
 async def _finish_cancelled_op(
     pool: "asyncpg.Pool", op_id: int, owner_id: int, op_type: str,
     params: dict, result: dict, duration_s: float,
@@ -3714,12 +3750,38 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             requeued = await _maybe_requeue(pool, op_id, e, params, op_type,
                                             bot=bot, owner_id=owner_id)
             if not requeued:
+                # Исключение не отменяет того, что уже сделано. Исполнитель не
+                # успел вернуть result, поэтому счётчики берём из журнала
+                # целей, а статус — у той же классификации, что и на успешном
+                # пути: недоведённая работа по модели состояний называется
+                # 'partial', а не 'failed' (см. services/op_status). Раньше
+                # операция, разославшая 150 приглашений из 380 и упавшая,
+                # показывала владельцу ровный провал без цифр — то есть
+                # «ничего не вышло» на израсходованном лимите 150 аккаунтов.
+                _crash_ok, _crash_failed = await _journal_counters(pool, op_id)
+                _crash_prog = await _safe_fetchrow(
+                    pool,
+                    "SELECT done_items, total_items FROM operation_queue WHERE id=$1",
+                    op_id, log_ctx=f"[run_op_crash_progress op={op_id}]")
+                _crash_status = op_status.classify_final(
+                    op_status.FAILED, ok=_crash_ok, failed=_crash_failed,
+                    done_items=(_crash_prog["done_items"] if _crash_prog else None),
+                    total_items=(_crash_prog["total_items"] if _crash_prog else None))
+                _crash_result = _normalize_result(
+                    {"status": _crash_status, "ok": _crash_ok,
+                     "failed": _crash_failed, "reason": str(e)[:300],
+                     "summary": (f"Операция оборвалась: {str(e)[:120]}"
+                                 + (f" · успело: {_crash_ok}" if _crash_ok else ""))},
+                    op_type, round(time.monotonic() - _t_start, 1))
                 _fail_res = await _safe_execute(
                     pool,
-                    "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 "
+                    "UPDATE operation_queue SET status=$3, finished_at=now(), error_msg=$1, "
+                    "result=$4::jsonb, acct_wait_since=NULL "
                     f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
                     str(e)[:500],
                     op_id,
+                    _crash_status,
+                    json.dumps(_crash_result, ensure_ascii=False),
                     log_ctx=f"[run_op_failed op={op_id}]",
                 )
                 # Ноль строк = операция уже в терминальном статусе, и почти
@@ -3734,6 +3796,34 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         "— провал не записываем", op_id,
                     )
                     return
+                # Метрика и подпись — как на успешном пути. Без них самая
+                # важная категория исхода (операция упала) не попадала ни на
+                # график infragram_operations_total, ни в подписанный
+                # аудит-трейл, который обещает единый choke point и ВСЕ
+                # операции. Видно её было только в логе процесса.
+                try:
+                    from services import metrics as _m
+                    _m.inc("infragram_operations_total",
+                           {"op_type": op_type, "status": _crash_status})
+                    _m.observe("infragram_operation_seconds",
+                               time.monotonic() - _t_started, {"op_type": op_type})
+                except Exception:
+                    pass
+                try:
+                    from services.organism import spine
+                    await spine.emit(pool, owner_id, "op_done", {
+                        "op_id": op_id, "op_type": op_type,
+                        "status": _crash_status, "ok": _crash_ok,
+                        "failed": _crash_failed, "summary": str(e)[:300]})
+                except Exception:
+                    pass
+                try:
+                    from services import compliance_engine
+                    await compliance_engine.record(
+                        pool, owner_id, None, op_type, _crash_status, op_id=op_id,
+                        params=params if isinstance(params, dict) else None)
+                except Exception:
+                    pass
                 # Circuit breaker: record failure
                 await _circuit_breaker_record(owner_id, False)
                 # ML pacing engine: feed failure with flood/ban granularity
@@ -3749,6 +3839,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     log.warning("pacing_engine record_result (error) failed for op %d: %s", op_id, e3)
                 # Audit trail: write final failure to operation_audit for all related accounts
                 _err_str = str(e)[:400]
+                # Исход в аудите согласован со статусом, как на успешном пути:
+                # операция, взявшая часть целей, не пишется как чистый провал.
+                _crash_outcome = (
+                    "partial" if _crash_status == op_status.PARTIAL else "failed")
                 _acc_ids_for_audit = params.get("account_ids") or []
                 if _acc_ids_for_audit:
                     for _audit_acc_id in _acc_ids_for_audit:
@@ -3756,7 +3850,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                             pool,
                             owner_id,
                             op_type,
-                            "failed",
+                            _crash_outcome,
                             operation_id=op_id,
                             account_id=int(_audit_acc_id),
                             error_msg=_err_str,
@@ -3767,7 +3861,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         pool,
                         owner_id,
                         op_type,
-                        "failed",
+                        _crash_outcome,
                         operation_id=op_id,
                         error_msg=_err_str,
                     )
