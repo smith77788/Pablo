@@ -852,6 +852,16 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .acc-kpi-card:active{opacity:.7}
 .acc-kpi-num{font-size:18px;font-weight:700;letter-spacing:-.3px}
 .acc-kpi-lbl{font-size:10px;color:var(--hint);margin-top:1px;white-space:nowrap}
+/* Четвёртая карточка в ленте KPI не влезала: при 320px от неё оставалось 27px
+   из 85 — обрезанный столбик, который читается как сбой отрисовки, а не как
+   «листайте дальше». А прятался там как раз самый нужный счётчик: «Ошибки»,
+   «Оповещения». Четыре и больше карточек раскладываем в два столбца: лента
+   выше на один ряд, зато все числа видны сразу и ничего листать не нужно.
+   Начиная с 401px четыре карточки и так помещаются в строку — там не трогаем. */
+@media (max-width:400px){
+.acc-kpi:has(> :nth-child(4)){flex-wrap:wrap;gap:6px;overflow-x:visible}
+.acc-kpi:has(> :nth-child(4)) > .acc-kpi-card{flex:1 1 calc(50% - 3px);min-width:0}
+}
 
 /* ─── Filter chip row ────────────────────────────────────── */
 /* Ряд фильтров переносится, а не прокручивается: последний чип обрезался на
@@ -900,6 +910,12 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 /* ─── Dashboard KPI scroll ──────────────────────────────── */
 .kpi-scroll{display:flex;gap:6px;padding:8px 16px 4px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
 .kpi-scroll::-webkit-scrollbar{display:none}
+/* В ленте десять плиток, а при 320px видно три с половиной: от четвёртой
+   торчало 6px, остальные шесть были за краем вообще без намёка, что они есть,
+   и «Ошибок 24ч» — самое важное число на главной — владелец никогда не видел.
+   Разложить в столбцы нельзя (пять рядов съели бы весь первый экран), поэтому
+   правый край растворяем: обрыв на полуплитке читается как продолжение. */
+.kpi-scroll{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
 .kpi-chip{background:var(--bg2);border-radius:var(--radius-lg);padding:10px 14px;flex-shrink:0;min-width:82px;cursor:pointer;transition:transform .18s var(--spring),box-shadow .2s var(--ease);border:1px solid var(--border);box-shadow:var(--shadow)}
 .kpi-chip:active{transform:translateY(1px) scale(.96)}
 .kpi-chip.hi{border-color:rgba(45,212,191,.25);box-shadow:var(--shadow-glow)}
