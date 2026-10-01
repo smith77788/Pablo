@@ -36,7 +36,13 @@ def test_mass_publish_applies_spintax_per_channel():
 def test_ui_hints_spintax_in_mass_publish():
     from pathlib import Path
     html = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
-    # у поля публикации есть подсказка про Spintax
+    # У поля публикации есть подсказка про спинтакс. Слово пишется кириллицей:
+    # владелец не читает по-английски, латинские названия из интерфейса убраны.
     i = html.index('id="mpText"')
     seg = html[i:i + 400]
-    assert "Spintax" in seg or "spintax" in seg.lower()
+    assert "спинтакс" in seg.lower() or "spintax" in seg.lower(), (
+        "у публикатора пропала подсказка про спинтакс"
+    )
+    assert "{Привет|Здравствуйте}" in seg, (
+        "подсказка без примера синтаксиса не объясняет, что писать"
+    )

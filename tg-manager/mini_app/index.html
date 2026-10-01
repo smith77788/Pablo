@@ -1646,7 +1646,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="copilot-list"></div>
     </div>
     <div style="display:flex;gap:8px;padding:6px 0 2px">
-      <button class="btn btn-s" onclick="openSpintax()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🎲 Spintax</button>
+      <button class="btn btn-s" onclick="openSpintax()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🎲 Спинтакс</button>
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
       <button class="btn btn-s" onclick="openExperiments()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
     </div>
@@ -1863,7 +1863,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="mgmt-tile" onclick="openSpintax()">
         <div class="mgmt-tile-ico">🎲</div>
-        <div class="mgmt-tile-lbl">Spintax</div>
+        <div class="mgmt-tile-lbl">Спинтакс</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <div class="mgmt-tile" onclick="openBotFactory()">
@@ -2700,7 +2700,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="daText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст сообщения…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="number" id="daDelay" value="30" min="5" max="600" title="Задержка между сообщениями, сек" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
-        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · spintax обязателен</div>
+        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · спинтакс обязателен</div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="number" id="daPerAcc" min="1" max="500" placeholder="—" title="Максимум сообщений с одного аккаунта за эту рассылку" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
@@ -2759,7 +2759,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="">Выберите аккаунт...</option>
       </select>
       <textarea id="gaText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст объявления…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
-      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Spintax {{вариант1|вариант2}} обязателен: одинаковый текст в десятки групп — палевная сигнатура. Вариант подбирается для каждой группы отдельно.</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Спинтакс {{вариант1|вариант2}} обязателен: одинаковый текст в десятки групп — палевная сигнатура. Вариант подбирается для каждой группы отдельно.</div>
       <button class="btn btn-p" style="width:100%" onclick="submitGroupAnnounce()">📣 Разослать по группам</button>
       <div id="gaErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
@@ -4088,8 +4088,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div id="mpTargets" style="margin-bottom:12px;font-size:13px;color:var(--hint);line-height:1.45"></div>
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
-        <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
-        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-flex;align-items:center;min-height:32px;padding:0 4px;margin:0 -4px">📝 Вставить шаблон</a></div>
+        <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации... Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
+        <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Спинтакс {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
       </div>
       <div class="field" id="mpPillarWrap" style="margin-bottom:12px;display:none">
         <label>Рубрика</label>
@@ -4576,8 +4576,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Текст публикации</div>
     <div style="padding:8px 16px">
       <div class="preset-row" id="qpPresetRow"></div>
-      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка Spintax: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
-      <div class="field-note">🎲 Spintax {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-flex;align-items:center;min-height:32px;padding:0 4px;margin:0 -4px">📝 Вставить шаблон</a></div></div>
+      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста... Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
+      <div class="field-note">🎲 Спинтакс {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div></div>
     </div>
     <div class="sec">Выберите каналы</div>
     <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4613,12 +4613,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-spintax">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">🎲 Spintax</div>
+    <div class="hdr-title">🎲 Спинтакс</div>
   </div>
   <div class="sub-sb">
     <div class="sec">Текст сценария</div>
     <div style="padding:8px 16px">
-      <div class="field"><textarea id="spinText" rows="5" placeholder="Пришлите обычный текст сообщения — соберу из него spintax-варианты…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
+      <div class="field"><textarea id="spinText" rows="5" placeholder="Пришлите обычный текст сообщения — соберу из него варианты…" style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea></div>
     </div>
     <div style="font-size:12px;color:var(--hint);padding:0 2px 4px">Синонимы в <code>{вариант1|вариант2}</code>, каждый вариант проверяется движком. Сверху — пример, снизу — сам шаблон для копирования в софт.</div>
     <div class="field-err" id="spinErr"></div>
@@ -5146,7 +5146,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <textarea id="massInviteLinkMsg" rows="3" placeholder="{Привет|Здравствуйте}! Заходите к нам: {link}" style="width:100%;box-sizing:border-box;padding:9px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
         <div style="font-size:12px;color:var(--hint);margin-top:4px">
           <code>{link}</code> — куда подставить ссылку (без него добавится в конец).
-          Поддерживается <b>spintax</b>: <code>{Привет|Здравствуйте}</code> — каждому
+          Поддерживается <b>спинтакс</b>: <code>{Привет|Здравствуйте}</code> — каждому
           уйдёт свой вариант. Пусто — текст по умолчанию, одинаковый для всех:
           десяток аккаунтов с одинаковым сообщением ловит ограничения быстрее всего.
         </div>
@@ -5918,15 +5918,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="showPromoTab('panels')" id="promoTabPanels">📡 Панели</button>
     </div>
     <div id="promoOrdersTab">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div class="sec" style="margin:0">Заказы</div>
+      <div class="sec-row" style="margin-bottom:8px">
+        <div class="sec">Заказы</div>
         <button class="btn btn-p" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="openPromoOrderModal()">+ Создать</button>
       </div>
       <div class="lst" id="promoOrderList"><div class="spin-wrap"><div class="spin"></div></div></div>
     </div>
     <div id="promoBotsTab" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div class="sec" style="margin:0">Склад ботов</div>
+      <div class="sec-row" style="margin-bottom:8px">
+        <div class="sec">Склад ботов</div>
         <button class="btn btn-p" style="flex:0 0 auto;padding:6px 12px;font-size:12px" onclick="openPromoBotModal()">+ Добавить</button>
       </div>
       <div class="card" style="font-size:12px;color:var(--hint);margin-bottom:8px">Новый бот → 21 день созревания → готов к продвижению.<br>Статусы: ⏳ Созревает → ✅ Готов → 🚀 Работает → 🏆 В топе</div>
@@ -6702,8 +6702,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст сообщения</label>
       <div class="preset-row" id="cmpPresetRow"></div>
-      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Spintax: {Привет|Здравствуйте}, {name}!"></textarea>
-      <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до Spintax</div>
+      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения... Спинтакс: {Привет|Здравствуйте}, {name}!"></textarea>
+      <div class="field-note">Персонализация: <b>{name}</b> — имя, иначе ник · <b>{first_name}</b> · <b>{username}</b>. Подставляется до спинтакса</div>
       <input type="text" id="cmpNameFb" maxlength="32" placeholder="Если имени нет, писать: друг">
       <div class="field-note">Чем заменить {name}, когда у получателя нет ни имени, ни ника</div>
       <div class="field-note"><span id="cmpLen">0</span>/4096 · <a href="#" onclick="previewCmpSpintax();return false" style="color:var(--accent)">🎲 Показать вариант</a> · <a href="#" onclick="openTemplates('cmpText');return false" style="color:var(--accent);display:inline-flex;align-items:center;min-height:32px;padding:0 4px;margin:0 -4px">📝 Вставить шаблон</a></div>
@@ -8043,6 +8043,7 @@ const MODULE_KEYWORDS = {
   'Дашборд':'аналитика метрики статистика сводка отчёт',
   'Аудитория+':'аналитика метрики статистика сегменты',
   'Звёзды':'stars монетизация оплата донат',
+  'Спинтакс':'spintax синонимы варианты уникализация текста рандом',
   'Тариф':'подписка оплата биллинг лимиты платёж',
   'Настройки':'уведомления прокси политика вебхук язык настройка',
 };
@@ -8147,7 +8148,7 @@ const MODULE_DESCS = {
   'Экосистемы':'Управление сетями ресурсов','Сетки':'Сети ресурсов','Сеть ботов':'Связанная сеть ботов','Топология':'Карта связей ресурсов','Граф связей':'Граф связей аккаунтов/ресурсов','Граф-хаб':'Инструменты графа связей','Ноды':'Узлы распределённой сети','Связки (бот+каналы)':'Связка бота с каналами',
   'ИИ Память':'ИИ-память по проекту','Нарратив':'ИИ-нарративы и легенды','Персоны':'Профили-персоны для аккаунтов','Умные теги':'Авто-теги контактов/контента','Физика':'Модель «физики» поведения','Призрак':'Скрытный режим присутствия','Рой':'Роевые операции аккаунтов','Агент роста':'ИИ-агент роста','Инфра':'Инфраструктура и её здоровье','Здоровье инфры':'Здоровье инфраструктуры и оповещения',
   'Звёзды':'Telegram Stars','Перевод подарков':'Перенос подарков между аккаунтами','Авторег':'Авторегистрация аккаунтов','Авторег Pro':'Авторегистрация (расширенно)',
-  'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Spintax':'Генерация вариаций текста (spintax)',
+  'Профили':'Массовая установка профилей аккаунтов','Шаблоны':'Шаблоны имён/описаний/контента','Спинтакс':'Генерация вариантов текста: {Привет|Здравствуйте}',
   'API Ключи':'Ключи API и интеграции','Тариф':'Ваша подписка и лимиты','Настройки':'Настройки приложения','Пользователи':'Управление пользователями (админ)',
   'Глобальный поиск':'Поиск каналов, групп, ботов и людей по всему Telegram',
 };
@@ -11402,7 +11403,7 @@ function openChMass(op) {
   if (!CH_SEL.size) { toast('Выберите хотя бы один канал'); return; }
   CHM_OP = op;
   const cfg = {
-    post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах. Spintax {A|B} — свой вариант на канал (меньше палева).`, ph:'Текст поста… Spintax: {Привет|Здравствуйте}!'},
+    post:{t:'📤 Пост в каналы', h:`Текст будет опубликован в ${CH_SEL.size} каналах. Спинтакс {A|B} — свой вариант на канал (меньше палева).`, ph:'Текст поста… Спинтакс: {Привет|Здравствуйте}!'},
     title:{t:'📛 Новое название', h:`Название изменится в ${CH_SEL.size} каналах.`, ph:'Новое название…'},
     about:{t:'✏️ Новое описание', h:`Описание изменится в ${CH_SEL.size} каналах.`, ph:'Новое описание…'},
     username:{t:'🔗 Новый username', h:'Без @. Применяется по одному каналу (username уникален).', ph:'newusername'},
@@ -12628,7 +12629,7 @@ async function loadAnalytics() {
     } else {
       // «Нет данных» не отличало «ботов нет» от «за неделю никто не пришёл».
       document.getElementById('growthChart').innerHTML =
-        `<div class="empty-txt" style="width:100%;text-align:center;color:var(--hint)">${
+        `<div class="empty-txt" style="width:100%;text-align:center;color:var(--hint);align-self:center">${
           (d.bots_total||0) ? 'За семь дней новых подписчиков не было' : 'Ботов пока нет — считать некого'}</div>`;
       document.getElementById('growthTotal').textContent = '';
     }
@@ -23163,7 +23164,7 @@ async function openGlobalPresence() {
   txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/global_presence');
-    if (!rows.length) { txt('gpList', empty('🌍','Планов нет','Создайте глобальное развёртывание через бота')); return; }
+    if (!rows.length) { txt('gpList', empty('🌍','Планов нет','Нажмите + Создать в шапке экрана')); return; }
     txt('gpList', rows.map(r => {
       const done=r.done_targets||0, total=r.total_targets||0;
       const pct=total>0?Math.round(done/total*100):0;

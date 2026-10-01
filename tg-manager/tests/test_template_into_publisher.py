@@ -57,6 +57,12 @@ def test_quick_post_reuses_mass_publish_for_spintax():
 
 def test_quick_post_ui_hints_spintax():
     i = HTML.index('id="quickPostText"')
-    # подсказка про spintax рядом с полем
+    # Подсказка про спинтакс рядом с полем. Слово пишется кириллицей: владелец
+    # не читает по-английски, и латинские названия из интерфейса убраны.
     seg = HTML[i - 200:i + 400]
-    assert "Spintax" in seg or "spintax" in seg.lower()
+    assert "спинтакс" in seg.lower() or "spintax" in seg.lower(), (
+        "у быстрого поста пропала подсказка про спинтакс"
+    )
+    assert "{Привет|Здравствуйте}" in seg, (
+        "подсказка без примера синтаксиса не объясняет, что писать"
+    )
