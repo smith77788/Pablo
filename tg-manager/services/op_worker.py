@@ -742,6 +742,71 @@ async def _single_account_parked(
     return None
 
 
+async def _finish_cancelled_op(
+    pool: "asyncpg.Pool", op_id: int, owner_id: int, op_type: str,
+    params: dict, result: dict, duration_s: float,
+) -> None:
+    """Закрыть отменённую операцию так же полно, как завершённую.
+
+    Отмена — терминальный статус наравне с done/partial/failed, но закрывалась
+    она двумя короткими UPDATE и `return`, теряя по дороге всё, что считается
+    итогом операции:
+
+      * `result` — владелец видел «Отменено» без единой цифры, хотя до стопа
+        часть целей уже отработана. Именно по этой цифре решается, продолжать
+        ли и с какого места: для инвайта или рассылки «сколько успело уйти» —
+        главный вопрос после отмены.
+      * `acct_wait_since` — накопленное ожидание свободного флота не
+        сбрасывалось, и повтор этой же операции наследовал старую отметку, по
+        которой `_requeue_op_no_accounts` проваливает операцию за «ждёт
+        слишком долго».
+      * метрика `infragram_operations_total` — отмены не было видно на графике
+        вовсе, то есть «владелец всё отменяет» выглядело как тишина.
+      * `compliance_engine.record` — аудит-трейл обещает единый choke point и
+        ВСЕ операции, а отменённые в него не попадали.
+      * событие шины `op_done` — память организма об отмене не узнавала.
+
+    Статус в очереди не воскрешаем: UPDATE трогает строку только если она уже
+    'cancelled' (отменил владелец) либо ещё не терминальная (отменил сам
+    исполнитель). `finished_at` сохраняем первый — он ближе к моменту отмены.
+    """
+    result = _normalize_result(result, op_type, duration_s)
+    result["status"] = op_status.CANCELLED
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status='cancelled', "
+        "finished_at=COALESCE(finished_at, now()), result=$1::jsonb, "
+        "acct_wait_since=NULL WHERE id=$2 AND (status='cancelled' OR status NOT IN "
+        f"{op_status.sql_terminal_list()})",
+        json.dumps(result, ensure_ascii=False), op_id,
+        log_ctx=f"[run_op_cancelled op={op_id}]")
+    log.info("op_worker: op_id=%d op_type=%s → cancelled in %.1fs (ok=%s failed=%s)",
+             op_id, op_type, duration_s, result.get("ok"), result.get("failed"))
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_operations_total",
+               {"op_type": op_type, "status": op_status.CANCELLED})
+        _m.observe("infragram_operation_seconds", float(duration_s),
+                   {"op_type": op_type})
+    except Exception:
+        pass
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "op_done", {
+            "op_id": op_id, "op_type": op_type, "status": op_status.CANCELLED,
+            "ok": result.get("ok"), "failed": result.get("failed"),
+            "summary": (result.get("summary") or "")[:300]})
+    except Exception:
+        pass
+    try:
+        from services import compliance_engine
+        await compliance_engine.record(
+            pool, owner_id, None, op_type, op_status.CANCELLED, op_id=op_id,
+            params=params if isinstance(params, dict) else None)
+    except Exception:
+        pass
+
+
 async def _defer_op_for_flood(
     pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = "",
     bot=None, owner_id: int | None = None,
@@ -3330,31 +3395,23 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         pool, op_id, bot=bot, owner_id=owner_id)
                 return
 
-            # Не перезаписывать статус если операция была отменена в процессе
-            if result.get("status") == "cancelled":
-                await _safe_execute(
+            # Отмена — такой же терминальный статус, как done/partial/failed, и
+            # закрывается так же полно: см. _finish_cancelled_op. Статус мог
+            # поставить и сам исполнитель (вернул 'cancelled'), и владелец
+            # кнопкой (в очереди уже 'cancelled') — оба случая один путь.
+            _said_cancelled = result.get("status") == "cancelled"
+            if not _said_cancelled:
+                current = await _safe_fetchrow(
                     pool,
-                    "UPDATE operation_queue SET status='cancelled', finished_at=now() "
-                    f"WHERE id=$1 AND status NOT IN {op_status.sql_terminal_list()}",
+                    "SELECT status FROM operation_queue WHERE id=$1",
                     op_id,
-                    log_ctx=f"[run_op_cancelled op={op_id}]",
+                    log_ctx=f"[run_op_check_cancel op={op_id}]",
                 )
-                return
-
-            current = await _safe_fetchrow(
-                pool,
-                "SELECT status FROM operation_queue WHERE id=$1",
-                op_id,
-                log_ctx=f"[run_op_check_cancel op={op_id}]",
-            )
-            if current and current["status"] == "cancelled":
-                await _safe_execute(
-                    pool,
-                    "UPDATE operation_queue SET finished_at=now() "
-                    "WHERE id=$1 AND status='cancelled' AND finished_at IS NULL",
-                    op_id,
-                    log_ctx=f"[run_op_cancelled_finish op={op_id}]",
-                )
+                _said_cancelled = bool(current and current["status"] == "cancelled")
+            if _said_cancelled:
+                await _finish_cancelled_op(
+                    pool, op_id, owner_id, op_type, params, result,
+                    round(time.monotonic() - _t_start, 1))
                 return
 
             elapsed = time.monotonic() - _t_start
