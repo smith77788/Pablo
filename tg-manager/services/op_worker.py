@@ -1,6 +1,7 @@
 """Фоновый воркер для выполнения очереди операций (параллельный режим)."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -1553,6 +1554,62 @@ _shutting_down = False
 
 # Per-owner semaphores: не более _MAX_PARALLEL_PER_OWNER параллельных операций на владельца
 _owner_semaphores: dict[int, asyncio.Semaphore] = {}
+
+# Сколько ждать место в семафоре владельца, прежде чем вернуть операцию в очередь.
+#
+# Почему ждать нельзя бесконечно. Авторитетный гейт параллельности на владельца
+# стоит в SQL поллера (`owner_running` + `running_count + owner_pending_rank <=
+# лимит`) и считает ВСЕ процессы, а не свой. Семафор остался как местная
+# подстраховка, и он только блокирует — пропустить лишнее он не может. Но
+# блокирует он ПОСЛЕ того, как поллер уже поставил операции status='running' и
+# записал её в _active_op_ids. Пока она стоит в семафоре, владелец видит
+# «выполняется» с нулевым прогрессом, операция держит слот из восьми общих, а
+# сторож зависших её НЕ трогает — именно потому, что она в _active_op_ids. То
+# есть ждать здесь значит повторить ровно тот симптом, ради которого гейт и
+# переносили в SQL (см. комментарий в _process_pending).
+#
+# 30 секунд — с запасом на штатную причину занятости: соседняя задача того же
+# владельца вернула операцию в очередь изнутри себя и доигрывает finally
+# (освобождение аккаунтов, уведомление владельцу). Не дождались — не висим в
+# 'running', а честно уходим в очередь с короткой отсрочкой.
+_OWNER_SEM_WAIT_S = _int_env("OP_OWNER_SEM_WAIT_SEC", 30, 1, 600)
+
+# Отсрочка повтора, когда место в семафоре не освободилось.
+_OWNER_SEM_DEFER_S = 20
+
+
+@contextlib.asynccontextmanager
+async def _releasing(sem: asyncio.Semaphore):
+    """Отпустить УЖЕ захваченный семафор на выходе из блока.
+
+    Нужен, чтобы захват шёл с потолком по времени (`wait_for(acquire())`), а
+    освобождение осталось таким же надёжным, как у `async with sem`.
+    """
+    try:
+        yield
+    finally:
+        sem.release()
+
+
+async def _release_op_for_owner_limit(pool: "asyncpg.Pool", op_id: int) -> None:
+    """Вернуть операцию в очередь, если место в семафоре владельца не дождались.
+
+    Тот же приём, что у открытой цепи предохранителя
+    (`_release_op_for_circuit`): операция уже помечена 'running' поллером, и
+    выйти из задачи, не вернув её в очередь, значило бы оставить фантомный слот
+    до сторожа зависших, то есть на час. done_items=0 — как у всех возвратов в
+    очередь: при следующем прогоне прогресс считается заново, иначе счётчик
+    копится поверх прошлого (класс «done > total»).
+    """
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
+        f" AND status NOT IN {op_status.sql_terminal_list()}",
+        op_id,
+        float(_OWNER_SEM_DEFER_S),
+        log_ctx=f"[owner_sem_release op={op_id}]",
+    )
 _owner_sem_lock = asyncio.Lock()
 
 
@@ -2982,7 +3039,25 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         "op_worker: starting op_id=%d op_type=%s owner=%d", op_id, op_type, owner_id
     )
 
-    async with owner_sem:
+    # Захват с потолком, а не бессрочное ожидание: подробности — у
+    # _OWNER_SEM_WAIT_S. Не дождались — операция возвращается в очередь, а не
+    # стоит в 'running' без прогресса.
+    try:
+        await asyncio.wait_for(owner_sem.acquire(), timeout=_OWNER_SEM_WAIT_S)
+    except asyncio.TimeoutError:
+        log.warning(
+            "op_worker: место в семафоре владельца %d не освободилось за %dс — "
+            "операция %d возвращается в очередь", owner_id, _OWNER_SEM_WAIT_S, op_id)
+        _reliability_metric("infragram_op_owner_sem_defers_total", 1)
+        try:
+            await _release_op_for_owner_limit(pool, op_id)
+        except Exception:
+            log_exc_swallow(log, f"op_worker: owner_sem release failed op={op_id}")
+        async with _active_lock:
+            _active_op_ids.discard(op_id)
+        return
+
+    async with _releasing(owner_sem):
         try:
             # Уведомить пользователя о старте
             try:

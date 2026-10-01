@@ -42,15 +42,34 @@ def _fn(src: str, name: str) -> str:
     return src[start:start + 10 + m.start()] if m else src[start:]
 
 
+def _emitted_counters() -> set[str]:
+    """Имена, которые исполнитель РЕАЛЬНО пишет через _reliability_metric.
+
+    Список в `_EXPECTED` рукописный, и потому неполный: `infragram_op_stalls_total`
+    писался в код и не был описан в реестре — на графике это строка без подписи,
+    и смысл её знал бы только тот, кто полез в исходник. Поэтому проверяем не
+    список, а код.
+    """
+    ow = _read("services/op_worker.py")
+    return set(re.findall(r'_reliability_metric\(\s*"([a-z0-9_]+)"', ow))
+
+
 def test_every_counter_is_documented_in_the_registry():
     """Метрика без описания — строка, которую некому прочитать на графике."""
     from services.metrics import _HELP
 
-    for name in _EXPECTED:
+    for name in sorted(set(_EXPECTED) | _emitted_counters()):
         assert name in _HELP, f"{name} не описан в реестре метрик"
         assert re.search(r"[а-яА-Я]", _HELP[name]), (
             f"{name}: описание читает владелец, оно должно быть на русском"
         )
+
+
+def test_the_detector_sees_the_counters_at_all():
+    """Пустой разбор сделал бы проверку выше вечно зелёной."""
+    found = _emitted_counters()
+    assert len(found) >= 5, f"найдено счётчиков: {sorted(found)} — разбор сломан"
+    assert "infragram_op_revives_total" in found
 
 
 def test_every_counter_is_actually_emitted():

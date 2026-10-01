@@ -44,6 +44,9 @@ _HELP = {
     "infragram_op_poisoned_total": "Операции, остановленные по исчерпании бюджета живучести",
     "infragram_op_flood_defers_total": "Операции, отложенные до конца длинной флуд-паузы",
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
+    "infragram_op_owner_sem_defers_total":
+        "Операции, возвращённые в очередь: место на владельца не освободилось",
+    "infragram_op_stalls_total": "Операции, о застревании которых предупредили владельца",
     "infragram_session_deaths_total": "Смерти сессий (auth key убит)",
     "infragram_db_pool_connections": "Соединения пула БД",
 }
