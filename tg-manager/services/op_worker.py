@@ -624,6 +624,55 @@ async def bounded_flood_sleep(seconds: float, where: str = "") -> float:
     return actual
 
 
+async def _note_flood_penalty(
+    pool: "asyncpg.Pool", acc_id: int, wait_s: float, action: str,
+    op_id: int | None = None,
+) -> None:
+    """Записать назначенную Telegram паузу в flood_engine.
+
+    bounded_flood_sleep обещает, что урезанная пауза лимиты Telegram не
+    обходит: «штраф аккаунту уже записан в flood_engine». Для части
+    исполнителей это было неправдой — FloodWait попадал только в отчёт
+    («пропущен») и в журнал целей, а в движок темпа не доходил. Аккаунт
+    выглядел отдохнувшим: следующая операция брала его сразу и шла за новым
+    штрафом, а флот (resource_selector, fleet_pulse, подборщики
+    flood_engine) не знал, что аккаунт под паузой.
+
+    fail-open: сбой записи не валит публикацию, но остаётся в логе.
+    """
+    try:
+        if int(wait_s or 0) <= 0:
+            return
+        from services.flood_engine import record_flood
+
+        await record_flood(pool, int(acc_id), int(wait_s), action, op_id)
+    except Exception:
+        log_exc_swallow(log, f"op_worker {action}: запись флуд-штрафа не сработала")
+
+
+def _flood_cooldown_left(acc_id: int) -> float:
+    """Сколько секунд аккаунту ещё нельзя работать после FloodWait (0.0 — можно).
+
+    Пауза Telegram назначается АККАУНТУ на метод, а не цели, поэтому
+    следующая цель тем же аккаунтом внутри окна — это повторный запрос в
+    паузу: Telegram вернёт новый FloodWait и продлит штраф. Прогоны,
+    перебирающие цели одним аккаунтом, спрашивают этот остаток перед каждой
+    целью.
+
+    fail-open: без движка темпа (или при сбое) возвращаем 0.0 — лучше
+    работать, чем встать из-за вспомогательного сигнала. Остаток живёт в
+    памяти процесса, то есть после рестарта он забывается; дальше аккаунт
+    держат карантин и пейсинг, а сам Telegram ответит FloodWait повторно.
+    """
+    try:
+        from services.flood_engine import seconds_until_ready
+
+        return max(0.0, float(seconds_until_ready(int(acc_id))))
+    except Exception:
+        log_exc_swallow(log, "op_worker: остаток флуд-паузы не прочитан")
+        return 0.0
+
+
 async def _defer_op_for_flood(
     pool: "asyncpg.Pool", op_id: int, wait_s: int, reason: str = "",
     bot=None, owner_id: int | None = None,
@@ -4165,6 +4214,37 @@ async def _exec_mass_publish(
             for _acc in target_entry["accounts"]
             if _acc["id"] not in isolated_accounts
         ]
+        # Остывание после FloodWait — такая же причина не брать аккаунт, как
+        # сетевая изоляция. Пауза назначена АККАУНТУ на метод публикации, а не
+        # каналу: пост в окно паузы вернёт новый FloodWait и продлит штраф.
+        # Этот канал нередко ведут несколько аккаунтов — берём отдохнувший;
+        # если все остывают, короткий остаток досиживаем, а длинный ждём в
+        # очереди (повтор пропустит уже опубликованные каналы).
+        _ready_accounts = [
+            _acc for _acc in candidate_accounts
+            if _flood_cooldown_left(int(_acc["id"])) <= 0
+        ]
+        if candidate_accounts and not _ready_accounts:
+            _cool_left = min(
+                _flood_cooldown_left(int(_acc["id"])) for _acc in candidate_accounts)
+            if _cool_left > _FLOOD_INLINE_MAX_S:
+                log.warning(
+                    "mass_publish op=%d: все аккаунты канала %s под паузой ещё "
+                    "%.0fс — откладываем операцию, слот и флот не держим",
+                    op_id, dialog["id"], _cool_left)
+                await release_accounts(mp_used_acc_ids)
+                return {
+                    "status": "requeue",
+                    "defer_s": int(_cool_left) + 60,
+                    "reason": (
+                        f"Telegram назначил паузу {int(_cool_left) // 60} мин — "
+                        f"операция продолжится автоматически"),
+                    "ok": ok_count,
+                    "failed": fail_count,
+                }
+            await asyncio.sleep(_cool_left + random.uniform(2, 8))
+        else:
+            candidate_accounts = _ready_accounts
         acc = candidate_accounts[0] if candidate_accounts else None
         if await _is_cancelled(pool, op_id):
             await release_accounts(mp_used_acc_ids)
@@ -9713,6 +9793,19 @@ async def _exec_bulk_post_to_channel(
                 await _safe_execute(
                         pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
+            # Аккаунт под паузой Telegram: запрос всё равно вернёт FloodWait
+            # и только продлит штраф (record_flood добавляет к паузе штраф за
+            # каждый подряд идущий флуд). Остальные аккаунты списка здоровы —
+            # пропускаем этот, а не тратим на него запрос в окно паузы.
+            _cool_left = _flood_cooldown_left(int(acc["id"]))
+            if _cool_left > 0:
+                err_list.append(
+                    f"\u23f3 {label}: пауза Telegram ещё {int(_cool_left)}с, пропущен")
+                await _log_acc(idx, _key, False,
+                               f"Пауза Telegram ещё {int(_cool_left)}с — пропущен")
+                await _safe_execute(
+                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             _body = _expand_spintax(text_to_post)  # свой вариант текста от этого аккаунта
             try:
                 result = await account_manager.post_to_channel(
@@ -9739,6 +9832,11 @@ async def _exec_bulk_post_to_channel(
             elif result.get("flood_wait"):
                 err_list.append(f"⏳ {label}: flood_wait, пропущен")
                 await _log_acc(idx, _key, False, "FloodWait — пропущен")
+                # Без этой записи пауза оставалась только в отчёте: аккаунт
+                # выглядел отдохнувшим, и следующая операция брала его сразу.
+                await _note_flood_penalty(
+                    pool, int(acc["id"]), result.get("flood_wait") or 0,
+                    "publish", op_id)
             elif "msg_id" in result:
                 ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
                 await _log_acc(idx, _key, True, f"msg_id={result['msg_id']}")
@@ -10258,6 +10356,30 @@ async def _exec_bulk_post_chans(
                 continue
             access_hash = ch.get("access_hash", 0) or 0
             ch_username = ch.get("username") or ""
+            # Весь прогон идёт ОДНИМ аккаунтом, а пауза Telegram назначается
+            # аккаунту на метод публикации, а не каналу. Поэтому следующий
+            # канал внутри окна — повторный запрос в паузу: Telegram вернёт
+            # новый FloodWait и продлит штраф. Короткий остаток досиживаем
+            # здесь, длинный ждём в очереди: повтор пропустит уже
+            # опубликованные каналы (completed_targets), дублей не будет.
+            _cool_left = _flood_cooldown_left(acc_id)
+            if _cool_left > 0:
+                if _cool_left > _FLOOD_INLINE_MAX_S:
+                    log.warning(
+                        "bulk_post_chans op=%d: аккаунту %d осталось %.0fс паузы — "
+                        "откладываем операцию, слот и аккаунт не держим",
+                        op_id, acc_id, _cool_left)
+                    return {
+                        "status": "requeue",
+                        "defer_s": int(_cool_left) + 60,
+                        "reason": (
+                            f"Telegram назначил аккаунту паузу "
+                            f"{int(_cool_left) // 60} мин — операция продолжится "
+                            f"автоматически"),
+                        "ok": ok_count,
+                        "fail": err_count,
+                    }
+                await asyncio.sleep(_cool_left + random.uniform(2, 8))
             _body = _expand_spintax(text)  # свой вариант текста в этот канал
             try:
                 last_result = await account_manager.post_to_channel(
@@ -10312,6 +10434,10 @@ async def _exec_bulk_post_chans(
                 attempt = 0
             else:
                 attempt += 1
+            # Пауза уходит в flood_engine: иначе она жила только в этом
+            # прогоне, а следующая операция брала аккаунт как отдохнувший.
+            await _note_flood_penalty(
+                pool, acc_id, last_result.get("flood_wait") or 0, "publish", op_id)
             # Тот же класс, что в bulk_post: max() не ограничивал flood_wait.
             slept = await bounded_flood_sleep(
                 last_result.get("flood_wait", 0) or 0, "bulk_publish")
