@@ -59,14 +59,16 @@ ALLOWED_MODULES = {
     # исполнитель операций, и сторожит их поимённо соседний тест
     # tests/test_join_leave_request_timeout.py. Целиком — отдельной задачей;
     # у функций пути HTTP-запроса есть таймаут шлюза, у операции его нет.
-    "account_manager": "пройден по функциям пути операций; сторожат поимённо "
-                       "tests/test_join_leave_request_timeout.py (вступление/выход) "
-                       "и tests/test_strike_request_timeout.py (strike). Путь "
-                       "strike шёл сюда ДВУМЯ хопами (op_worker → strike_engine → "
-                       "report_peer_deep_v2) и потому не был виден: 20 запросов "
-                       "без потолка. Закрыто обёрткой account_manager.timeboxed. "
-                       "Остальные функции модуля — путь HTTP-запроса, у шлюза "
-                       "свой таймаут; целиком — отдельной задачей",
+    "account_manager": "сторожат поимённо tests/test_join_leave_request_timeout.py "
+                       "(вступление/выход) и tests/test_strike_request_timeout.py "
+                       "(14 функций под обёрткой account_manager.timeboxed + "
+                       "храповик на список исключений). Путь strike шёл сюда ДВУМЯ "
+                       "хопами (op_worker → strike_engine → report_peer_deep_v2) и "
+                       "потому не был виден: 20 запросов без потолка. Ещё 22 были в "
+                       "функциях пути БОТА, где таймаута шлюза нет вовсе. Без "
+                       "потолка осталось 9 функций входа в аккаунт и импорта сессии "
+                       "— там ожидание человека законно (QR ждут, пока его не "
+                       "отсканируют), перечислены в UNBOXED_BY_DESIGN",
 }
 
 _CLIENT_NAMES = {"client", "cl", "c"}

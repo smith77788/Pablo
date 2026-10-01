@@ -3830,6 +3830,7 @@ async def get_channel_members_count(
 ) -> int:
     """Возвращает количество участников канала/группы по username. При ошибке — -1."""
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_username)
@@ -3899,6 +3900,7 @@ async def get_full_channel_info(
     from telethon.tl.functions.channels import GetFullChannelRequest
 
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         uname = (username or "").strip().lstrip("@")
@@ -4956,6 +4958,7 @@ async def get_channel_invite_link(
     from telethon.tl.functions.messages import ExportChatInviteRequest
 
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await _resolve_channel_peer(client, channel_id, access_hash)
@@ -5068,6 +5071,7 @@ async def delete_channel(
     from telethon.tl.functions.channels import DeleteChannelRequest
 
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -5094,6 +5098,7 @@ async def get_channel_members(
     from telethon.tl.types import ChannelParticipantsRecent
 
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -5162,6 +5167,7 @@ async def invite_users_to_channel(
     failed: list[str] = []
     batches_done = 0
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
 
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -5570,6 +5576,7 @@ async def kick_from_channel(
     from telethon.tl.types import ChatBannedRights
 
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         channel = await client.get_entity(channel_id)
@@ -6251,6 +6258,7 @@ async def send_reaction(
     from telethon.tl.types import ReactionEmoji
 
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
@@ -8112,6 +8120,7 @@ async def check_username_available(
         return False  # invalid format, treat as unavailable
 
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         try:
@@ -8635,6 +8644,7 @@ async def list_bots_via_botfather(
     Returns {"bots": [{"username": "..."}]} or {"error": "..."}.
     """
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
@@ -8712,6 +8722,7 @@ async def transfer_bot_via_botfather(
     Returns {"ok": True, "message": text} or {"error": "..."}.
     """
     client = _make_client(session_string, _acc)
+    client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 

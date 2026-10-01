@@ -126,7 +126,19 @@ def _fn_src(name: str) -> str:
     raise AssertionError(f"функция {name} не найдена")
 
 
-@pytest.mark.parametrize("fn", ["report_peer_deep_v2", "strike_map_target"])
+BOXED = [
+    # Путь strike: op_worker → strike_engine → сюда.
+    "report_peer_deep_v2", "strike_map_target", "report_peer_deep",
+    # Путь бота: у aiogram нет таймаута шлюза. Нажал кнопку — и не
+    # происходит НИЧЕГО и никогда, а состояние диалога остаётся висеть.
+    "kick_from_channel", "list_bots_via_botfather", "get_channel_members_count",
+    "delete_channel", "get_channel_members", "invite_users_to_channel",
+    "send_reaction", "get_full_channel_info", "get_channel_invite_link",
+    "check_username_available", "transfer_bot_via_botfather",
+]
+
+
+@pytest.mark.parametrize("fn", BOXED)
 def test_strike_functions_box_their_client(fn):
     body = _fn_src(fn)
     assert "client = timeboxed(client)" in body, (
@@ -135,10 +147,66 @@ def test_strike_functions_box_their_client(fn):
         "обёртка ставится до создания клиента — часть вызовов останется голой")
 
 
-@pytest.mark.parametrize("fn", ["report_peer_deep_v2", "strike_map_target"])
+@pytest.mark.parametrize("fn", BOXED)
 def test_only_one_client_is_created_per_function(fn):
     """Второй клиент, созданный ниже обёртки, вышел бы из-под потолка молча."""
     body = _fn_src(fn)
     assert body.count("_make_client(") == 1, (
         f"{fn} создаёт клиент больше одного раза — обёртка накрывает только "
         f"первый, остальные запросы снова без потолка")
+
+
+# Единственные функции модуля, которым потолок на запрос НЕ поставлен, и почему.
+# Все они — путь HTTP-запроса мини-аппа (у шлюза свой таймаут) и вход в аккаунт,
+# где ожидание человека законно: QR-код ждут, пока его не отсканируют.
+# Клиент входа к тому же живёт между запросами в _pending_qr, и подмена его
+# обёрткой сломала бы код, который достаёт оттуда настоящий клиент.
+UNBOXED_BY_DESIGN = {
+    "confirm_code", "confirm_2fa", "confirm_qr_2fa",
+    "start_qr_login", "wait_qr_login",
+    "get_client_info_and_session", "get_account_info",
+    "import_from_tdata", "validate_session_import",
+}
+
+
+def test_the_list_of_unbounded_functions_does_not_grow():
+    """Храповик: новая функция без потолка не должна появиться незаметно.
+
+    Считаем по ТОП-УРОВНЕВЫМ функциям: вложенные замыкания работают с клиентом
+    внешней, поэтому отдельно их считать нельзя — на этом сбилась первая
+    прикидка (у разных внешних функций вложенные называются одинаково, и в
+    словаре по именам они затирали друг друга).
+    """
+    from tests.test_no_unbounded_telegram_request import naked_in_scope
+
+    src = open(am.__file__, encoding="utf-8").read()
+    lines = src.split("\n")
+    naked = set()
+    for node in ast.parse(src).body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = "\n".join(lines[node.lineno - 1:node.end_lineno])
+        if "client = timeboxed(client)" in body:
+            continue
+        if naked_in_scope(node):
+            naked.add(node.name)
+
+    new = naked - UNBOXED_BY_DESIGN
+    assert not new, (
+        "запросы к Telegram без потолка в новых функциях: " + ", ".join(sorted(new))
+        + ". Поставьте `client = timeboxed(client)` сразу после _make_client — "
+        "или внесите функцию в UNBOXED_BY_DESIGN с объяснением, почему ожидание "
+        "там законно.")
+
+    gone = UNBOXED_BY_DESIGN - naked
+    assert not gone, (
+        "эти функции уже с потолком — уберите их из UNBOXED_BY_DESIGN, иначе "
+        "список перестанет что-либо означать: " + ", ".join(sorted(gone)))
+
+
+def test_the_probe_sees_the_boxed_functions_at_all():
+    """Проба, которая ничего не находит, выглядит зелёной и потому опасна."""
+    src = open(am.__file__, encoding="utf-8").read()
+    assert src.count("client = timeboxed(client)") == len(BOXED), (
+        f"обёрток в модуле {src.count('client = timeboxed(client)')}, "
+        f"а в списке {len(BOXED)} — список и код разошлись")
