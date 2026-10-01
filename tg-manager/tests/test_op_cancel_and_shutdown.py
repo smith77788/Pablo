@@ -72,9 +72,14 @@ def test_no_status_write_without_terminal_guard():
         # выраженный подзапросом, поэтому смотрим и начало литерала запроса.
         lit = src.rfind('"""', 0, m.start())
         prefix = src[lit:m.start()] if lit > 0 and m.start() - lit < 2000 else ""
+        # `status='failed'` — тоже отбор, а не его отсутствие: такой запрос
+        # УТОЧНЯЕТ строку, которую сторож бюджета живучести только что погасил
+        # сам (`_finish_poisoned_op` переписывает ровный `failed` на `partial`,
+        # когда журнал показывает взятые цели). Отмену владельца он не тронет по
+        # построению: 'cancelled' под это условие не попадает.
         has_guard = (
             "sql_terminal_list" in where_part
-            or re.search(r"status\s*=\s*'(running|cancelled)'", where_part)
+            or re.search(r"status\s*=\s*'(running|cancelled|failed)'", where_part)
             or re.search(r"status\s*=\s*'pending'", prefix)
         )
         if not has_guard:

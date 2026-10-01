@@ -2163,7 +2163,110 @@ def _calculate_speed(op_id: int, done: int) -> str | None:
         return f"{int(speed)}"
 
 
-async def _reset_stale_running(pool: asyncpg.Pool) -> None:
+async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
+                             bot=None) -> None:
+    """Дозакрыть операцию, остановленную по исчерпании бюджета живучести.
+
+    Оба сторожа гасят такие операции одним общим UPDATE — он атомарен и это
+    правильно, но дальше операция оставалась недозакрытой:
+
+      * статус. Ровный `failed` при любом объёме сделанного. А бюджет
+        живучести тратят именно ДЛИННЫЕ операции: многочасовая рассылка,
+        попавшая под три деплоя Railway, успевает взять большую часть целей.
+        Статус считает та же классификация, что и на остальных путях.
+      * `result`. Операция закрывалась с result=NULL: ни бот, ни мини-апп не
+        могли показать ни одной цифры — только текст «остановлена».
+      * `infragram_operations_total`, событие `op_done`,
+        `compliance_engine.record`. Счётчик `infragram_op_poisoned_total` у
+        этого исхода был, но на общем графике исходов, в памяти организма и в
+        подписанном аудит-трейле его не было вовсе.
+      * слово владельцу. Про соседние случаи (флуд-пауза, занятый флот,
+        возврат в очередь) ему пишут, а здесь операция просто исчезала из
+        «выполняется». Это худший случай для молчания: сама она больше не
+        стартует никогда.
+
+    `source` — кто погасил ('startup' или 'watchdog'); нужен только логам.
+    Строку берём из RETURNING того же UPDATE, поэтому гонки нет: мы дозакрываем
+    то, что уже перевели в 'failed' сами, и условие `status='failed'` не даёт
+    переписать чужой терминальный статус.
+    """
+    try:
+        info = dict(row) if row else {}
+    except (TypeError, ValueError):
+        info = {}
+    op_id = info.get("id")
+    if not op_id:
+        return
+    op_id = int(op_id)
+    owner_id = info.get("owner_id")
+    op_type = info.get("op_type") or "unknown"
+    params = info.get("params")
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except (ValueError, TypeError):
+            params = None
+    if not isinstance(params, dict):
+        params = {}
+
+    ok_n, failed_n = await _journal_counters(pool, op_id)
+    status = op_status.classify_final(
+        op_status.FAILED, ok=ok_n, failed=failed_n,
+        done_items=info.get("done_items"), total_items=info.get("total_items"))
+    summary = (
+        f"⚠️ Успело {ok_n}, дальше операция {_MAX_REVIVES} раз(а) прерывалась "
+        f"и была остановлена"
+        if ok_n else
+        f"❌ Остановлена: {_MAX_REVIVES} раз(а) прерывалась, не сделав ни одной цели"
+    )
+    result = _normalize_result(
+        {"status": status, "ok": ok_n, "failed": failed_n,
+         "reason": _POISON_ERROR.format(n=_MAX_REVIVES), "summary": summary},
+        op_type, 0.0)
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status=$2, result=$3::jsonb, "
+        "acct_wait_since=NULL WHERE id=$1 AND status='failed'",
+        op_id, status, json.dumps(result, ensure_ascii=False),
+        log_ctx=f"[poisoned_finish op={op_id}]")
+    log.error(
+        "op_worker: op=%d op_type=%s → %s по бюджету живучести (%s, ok=%d failed=%d)",
+        op_id, op_type, status, source, ok_n, failed_n)
+    try:
+        from services import metrics as _m
+        _m.inc("infragram_operations_total",
+               {"op_type": op_type, "status": status})
+    except Exception:
+        pass
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, "op_done", {
+            "op_id": op_id, "op_type": op_type, "status": status,
+            "ok": ok_n, "failed": failed_n, "summary": summary[:300]})
+    except Exception:
+        pass
+    try:
+        from services import compliance_engine
+        await compliance_engine.record(
+            pool, owner_id, None, op_type, status, op_id=op_id,
+            params=params if isinstance(params, dict) else None)
+    except Exception:
+        pass
+    await _notify_owner_about_op(
+        pool, bot, owner_id,
+        (f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей успело "
+         f"отработать, дальше она {_MAX_REVIVES} раз(а) прерывалась и не "
+         f"продвигалась.\n\nЗапустите её заново — уже отработанные цели "
+         f"повтор пропустит."
+         if ok_n else
+         f"❌ <b>Операция #{op_id}</b> остановлена: {_MAX_REVIVES} раз(а) "
+         f"подряд она прерывалась, не сделав ни одной цели.\n\nПроверьте "
+         f"аккаунты и прокси — обычно причина там."),
+        dedup_key=f"poisoned:{op_id}",
+    )
+
+
+async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
     """При старте воркера сбрасывает операции в статусе 'running' обратно в 'pending'.
 
     Нужно после SIGTERM/рестарта: операции могли оказаться в running-состоянии
@@ -2177,26 +2280,29 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
     await _ensure_acct_wait_column(pool)
     # Сначала — исчерпавшие бюджет: честный терминальный статус вместо ещё
     # одного круга. Порядок важен: иначе тот же UPDATE ниже снова поднял бы их.
-    poisoned = await _safe_execute(
+    # RETURNING: гашение атомарно одним UPDATE, но закрыть операцию до конца
+    # (результат, подпись, слово владельцу) можно только по строкам — см.
+    # _finish_poisoned_op.
+    poisoned_rows = await _safe_fetch(
         pool,
         """UPDATE operation_queue
            SET status = 'failed', finished_at = now(), started_at = NULL,
                error_msg = COALESCE(error_msg, $2)
-           WHERE status = 'running' AND COALESCE(revive_count, 0) >= $1""",
+           WHERE status = 'running' AND COALESCE(revive_count, 0) >= $1
+        RETURNING id, owner_id, op_type, params, done_items, total_items""",
         _MAX_REVIVES,
         _POISON_ERROR.format(n=_MAX_REVIVES),
         log_ctx="[reset_stale_poison]",
     )
-    try:
-        poisoned_n = int(str(poisoned).split()[-1])
-    except (ValueError, IndexError):
-        poisoned_n = 0
+    poisoned_n = len(poisoned_rows)
     if poisoned_n:
         log.error(
             "op_worker startup: %d operations exceeded revive budget (%d) → failed",
             poisoned_n, _MAX_REVIVES,
         )
         _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="startup")
+        for _poisoned in poisoned_rows:
+            await _finish_poisoned_op(pool, _poisoned, source="startup", bot=bot)
     result = await _safe_execute(
             pool,
         # done_items=0: операцию подхватит воркер заново и исполнитель прогонит её
@@ -2261,7 +2367,7 @@ async def active_op_ids() -> frozenset[int]:
         return frozenset(_active_op_ids)
 
 
-async def _watchdog_stale(pool: asyncpg.Pool) -> None:
+async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
     """Периодически сбрасывает 'running' операции, которые висят дольше N минут.
 
     Исключает операции, которые реально выполняются в памяти (_active_op_ids),
@@ -2278,26 +2384,32 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
         # раз в 60 минут бесконечно забирала слот и аккаунты флота: сторож
         # исправно возвращал её в pending, воркер исправно подхватывал, и так
         # до ручного вмешательства владельца.
-        poisoned = await pool.execute(
+        # RETURNING — по той же причине, что и в _reset_stale_running:
+        # дозакрыть операцию (результат, подпись, слово владельцу) можно только
+        # по строкам, а гасить её обязан один атомарный UPDATE.
+        poisoned_rows = await pool.fetch(
             """UPDATE operation_queue
                 SET status = 'failed', finished_at = now(), started_at = NULL,
                     error_msg = COALESCE(error_msg, $4)
                 WHERE status = 'running'
                   AND started_at < now() - make_interval(mins => $1)
                   AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
-                  AND COALESCE(revive_count, 0) >= $3""",
+                  AND COALESCE(revive_count, 0) >= $3
+             RETURNING id, owner_id, op_type, params, done_items, total_items""",
             _STALE_RUNNING_TIMEOUT_MIN,
             active_ids_list,
             _MAX_REVIVES,
             _POISON_ERROR.format(n=_MAX_REVIVES),
         )
-        poisoned_n = int((poisoned or "UPDATE 0").split()[-1])
+        poisoned_n = len(poisoned_rows)
         if poisoned_n:
             log.error(
                 "op_worker watchdog: %d hung ops exceeded revive budget (%d) → failed",
                 poisoned_n, _MAX_REVIVES,
             )
             _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
+            for _poisoned in poisoned_rows:
+                await _finish_poisoned_op(pool, _poisoned, source="watchdog", bot=bot)
 
         result = await pool.execute(
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с
@@ -2458,7 +2570,7 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py."""
     log.info("Operation worker started (parallel mode, max=%d)", _MAX_PARALLEL)
-    await _reset_stale_running(pool)
+    await _reset_stale_running(pool, bot)
     _watchdog_tick = 0
     while True:
         # Счётчик двигается ДО работы: иначе сбой в разборе очереди заодно
@@ -2494,7 +2606,7 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
                 await _obus_reg.mark_poller_alive(pool, _WORKER_ID)
             # Run stale-running watchdog every 6 poll cycles (~1 minute)
             if _watchdog_tick % 6 == 0:
-                await _watchdog_stale(pool)
+                await _watchdog_stale(pool, bot)
                 # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
                 # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
                 await _reconcile_in_operation(pool)

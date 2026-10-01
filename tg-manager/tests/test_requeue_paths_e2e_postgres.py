@@ -257,6 +257,39 @@ def test_startup_stops_reviving_a_poisonous_operation(pool):
     assert row["error_msg"], "владелец должен понять, почему она больше не поднимается"
 
 
+def test_poisoned_operation_keeps_the_work_it_did(pool):
+    """Бюджет живучести тратят ДЛИННЫЕ операции — у них есть что предъявить.
+
+    Railway шлёт SIGTERM на каждом деплое, поэтому многочасовая рассылка под три
+    деплоя подряд объявляется ядовитой, успев взять большую часть целей. Раньше
+    она закрывалась ровным `failed` с result=NULL.
+
+    Живая база здесь обязательна: статус и `result` дозакрытия — параметры
+    запроса, а связывание заглушка пула не проверяет в принципе.
+    """
+    async def _go():
+        from services import op_worker as w
+        op_id = await _op(pool, status="running", revive_count=w._MAX_REVIVES)
+        for n, target in enumerate(("@a", "@b", "@c", "@d"), start=1):
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status) "
+                "VALUES($1, $2, $3, $4)",
+                op_id, n, target, "error" if target == "@d" else "ok")
+        await w._reset_stale_running(pool)
+        return await pool.fetchrow(
+            "SELECT status, result, error_msg FROM operation_queue WHERE id=$1",
+            op_id)
+
+    row = _run(_go())
+    assert row["status"] == "partial", (
+        "операция, взявшая цели, объявлена полным провалом"
+    )
+    assert row["result"], "закрыта с result=NULL — показать нечего"
+    res = json.loads(row["result"])
+    assert (res["ok"], res["failed"]) == (3, 1), res
+    assert row["error_msg"], "причина остановки должна остаться на месте"
+
+
 def test_startup_does_not_touch_a_cancelled_operation(pool):
     async def _go():
         from services import op_worker as w

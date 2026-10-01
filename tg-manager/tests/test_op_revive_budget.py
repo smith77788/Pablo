@@ -124,7 +124,10 @@ def test_revive_column_self_heals_on_lag():
     assert "_ensure_revive_column(pool)" in reset
     # Сброс на старте выполняется ДО цикла сторожа — значит колонка есть к первому тику.
     run = _fn(ow, "run")
-    assert run.index("_reset_stale_running(pool)") < run.index("_watchdog_stale(pool)")
+    assert run.index("_reset_stale_running(") < run.index("_watchdog_stale("), (
+        "сторож тика запускается раньше сброса на старте — к первому тику "
+        "колонки может не быть"
+    )
 
 
 def test_error_retry_budget_stays_separate():
