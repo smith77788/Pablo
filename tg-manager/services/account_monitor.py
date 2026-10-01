@@ -258,33 +258,94 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
             if waited_s < limit_s:
                 continue
             _hours = int(waited_s // 3600)
-            await pool.execute(
-                "UPDATE operation_queue SET status='failed', finished_at=NOW(), "
-                "error_msg=$2 "
-                "WHERE id=$1 AND status='running'",
-                op_id,
-                f"Операция зависла: {_hours} ч в работе без завершения — "
-                f"перезапустите вручную",
-            )
-            await db.notify_if_enabled(
-                pool,
-                bot,
-                row["owner_id"],
-                "op_complete",
-                f"⚠️ <b>Операция #{op_id} зависла</b>\n\n"
-                f"Тип: {row['op_type']}\n"
-                f"Операция выполнялась более {_hours} ч без завершения.\n"
-                f"Статус изменён на failed. Перезапустите из раздела Operations → Отчёты.",
-                # Зависших операций у владельца бывает несколько сразу: без
-                # ключа он узнал бы ровно про одну.
-                dedup_key=f"op_stuck:{op_id}",
-            )
+            await _close_orphan_op(pool, bot, op_id, row, _hours)
             log.warning(
                 "account_monitor: операция %d висела %d ч без завершения → failed",
                 op_id, _hours,
             )
     except Exception as exc:
         log.debug("account_monitor: stuck ops check error: %s", exc)
+
+
+async def _close_orphan_op(
+    pool: asyncpg.Pool, bot, op_id: int, row, hours: int,
+) -> None:
+    """Закрыть осиротевшую операцию так же полно, как это делает сам воркер.
+
+    Это ТРЕТИЙ сторож осиротевших операций (два живут в op_worker), и он
+    единственный в другом модуле. Фильтр `status='running'` и слово владельцу у
+    него были, а остального — нет:
+
+      * статус. Ровный `failed` при любом объёме сделанного. Операция висит
+        здесь часами именно потому, что успела поработать и оборвалась на
+        ответе Telegram или прокси, — у неё почти всегда есть взятые цели.
+        Статус теперь считает та же классификация, что и на путях воркера.
+      * `result`. Операция закрывалась с result=NULL: ни бот, ни мини-апп не
+        покажут ни одной цифры.
+      * объявление исхода. Ни графика исходов, ни события шины, ни подписи в
+        аудит-трейле — хотя тот обещает единый choke point и ВСЕ операции.
+
+    И текст владельцу: он содержал «Статус изменён на failed» и «Operations →
+    Отчёты» — английские слова в сообщении, которое читает владелец, плюс сырой
+    идентификатор типа операции вместо названия.
+    """
+    import json as _json
+
+    from services import op_status
+    from services import op_worker as _ow
+
+    owner_id = row["owner_id"]
+    op_type = str(row["op_type"] or "unknown")
+    try:
+        ok_n, failed_n = await _ow._journal_counters(pool, op_id)
+    except Exception:
+        ok_n, failed_n = 0, 0
+    status = op_status.classify_final(op_status.FAILED, ok=ok_n, failed=failed_n)
+    reason = (f"Операция зависла: {hours} ч в работе без завершения — "
+              f"перезапустите вручную")
+    summary = (f"⚠️ Успело {ok_n}, затем операция перестала отвечать"
+               if ok_n else f"❌ Зависла: {hours} ч без единой завершённой цели")
+    result = {"status": status, "ok": ok_n, "failed": failed_n,
+              "total": ok_n + failed_n, "summary": summary,
+              "duration_s": float(hours * 3600), "op_type": op_type}
+    res = await pool.execute(
+        "UPDATE operation_queue SET status=$3, finished_at=NOW(), error_msg=$2, "
+        "result=$4::jsonb WHERE id=$1 AND status='running'",
+        op_id, reason, status, _json.dumps(result, ensure_ascii=False),
+    )
+    # Ноль строк — операцию уже закрыли (чаще всего владелец отменил её сам,
+    # пока она висела). Чужой итог не переписываем и о провале не докладываем.
+    if str(res or "").strip().endswith(" 0"):
+        return
+    try:
+        await _ow._announce_op_outcome(
+            pool, op_id, owner_id, op_type, None, status, ok_n, failed_n, summary)
+    except Exception:
+        log_exc_swallow(log, f"account_monitor: исход op={op_id} не объявлен")
+    # Название типа вместо идентификатора: владельцу «mass_invite» не говорит
+    # ничего, а в реестре операций у каждого типа есть человеческое имя.
+    try:
+        from services.operation_bus import OP_REGISTRY
+
+        label = str((OP_REGISTRY.get(op_type) or {}).get("description") or op_type)
+    except Exception:
+        label = op_type
+    await db.notify_if_enabled(
+        pool,
+        bot,
+        owner_id,
+        "op_complete",
+        f"⚠️ <b>Операция #{op_id} перестала отвечать</b>\n\n"
+        f"Что это было: {label}\n"
+        f"Она была в работе больше {hours} ч и не завершилась, поэтому мы её "
+        f"остановили."
+        + (f"\n\nУспело отработать целей: {ok_n}. Повтор продолжит с того же "
+           f"места — уже отработанные цели он пропустит." if ok_n else "")
+        + "\n\nЗапустить заново можно в разделе «Операции» → «Отчёты».",
+        # Зависших операций у владельца бывает несколько сразу: без ключа он
+        # узнал бы ровно про одну.
+        dedup_key=f"op_stuck:{op_id}",
+    )
 
 
 async def _heal_expired_cooldowns(pool: asyncpg.Pool) -> None:

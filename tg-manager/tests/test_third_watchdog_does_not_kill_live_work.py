@@ -100,7 +100,11 @@ async def test_an_orphan_row_past_its_own_ceiling_is_failed(monkeypatch):
 
     assert pool.updates, "осиротевшая строка очереди осталась в 'running' навсегда"
     query, args = pool.updates[0]
-    assert "status='failed'" in query
+    # Статус — параметр, а не литерал: операция, успевшая взять цели, называется
+    # 'partial' (services/op_status.classify_final), и сверка по слову 'failed'
+    # ломалась бы ровно на том, что статус стал честным.
+    assert "SET status=$3" in query and "finished_at=NOW()" in query
+    assert any(x in args for x in ("failed", "partial")), args
     assert "status='running'" in query, (
         "нет защиты от перезаписи: операция, успевшая завершиться сама, была бы "
         "переписана в провал"
