@@ -10831,7 +10831,7 @@ async function reloadAccountChat() {
     const d = await api('/api/miniapp/account/'+ACC_CONSOLE_ID+'/dialog/'+encodeURIComponent(ACC_CHAT_PEER)+'/history'+_chatQ());
     if (d.peer_name) { ACC_CHAT_NAME = d.peer_name; txt('achat-title', esc(d.peer_name)); }
     const msgs = d.messages || [];
-    if (!msgs.length) { body.innerHTML = '<div style="text-align:center;color:var(--hint);padding:30px 12px">Нет сообщений — напишите первым</div>'; return; }
+    if (!msgs.length) { body.innerHTML = '<div class="empty-inline" style="padding:30px 12px">Нет сообщений — напишите первым</div>'; return; }
     body.innerHTML = msgs.map(m => {
       const out = m.out;
       const media = m.media ? `<div style="opacity:.85;font-size:12px;margin-bottom:2px">${esc(m.media)}</div>` : '';
@@ -12897,7 +12897,7 @@ function buildFunnelDetail(d) {
            <div class="row-name">Итог цепочки</div>
            <div class="row-val">✅ прошли: ${num(d.completed_total||0)} · 🚪 ушли: ${num(d.dropped_total||0)} · ▶️ идут: ${num(d.subs_active||0)}</div>
          </div></div></div>`
-    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Нет шагов.</div></div>`;
+    : `<div class="lst"><div class="empty-inline">Шагов пока нет</div></div>`;
 
   const addStepForm = `
     <div class="sec" style="margin-top:12px" id="fsTitle">➕ Добавить шаг</div>
@@ -17370,7 +17370,7 @@ async function _renderContactAccPicker(containerId, preselectIds) {
   try {
     const accs = await api('/api/miniapp/accounts?filter=active&limit=200');
     const live = (accs.accounts||[]).filter(a=>a.is_active);
-    if (!live.length) { el.innerHTML = '<div style="font-size:13px;color:var(--hint)">Нет активных аккаунтов</div>'; return; }
+    if (!live.length) { el.innerHTML = '<div class="empty-inline">Нет активных аккаунтов</div>'; return; }
     const all = preselectIds === 'all';
     const pre = new Set((all ? [] : (preselectIds||[])).map(Number));
     el.innerHTML = live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14px">
@@ -18543,7 +18543,7 @@ async function openUchSmartTags() {
 
     html += `<div class="sec">Свои правила${custom.length?' · '+custom.length:''}</div>`;
     if (!custom.length) {
-      html += `<div style="font-size:13px;color:var(--hint);padding:6px 0 2px">Пока нет. Ниже можно завести первое.</div>`;
+      html += `<div class="empty-inline">Пока пусто — заведите первое ниже</div>`;
     } else {
       html += '<div class="lst" style="margin-top:6px">';
       custom.forEach(r => {
@@ -22342,7 +22342,7 @@ async function openTakedownKit() {
         <textarea readonly style="width:100%;min-height:96px;font-size:11px;background:var(--bg3);color:var(--fg);border:1px solid var(--line,#333);border-radius:var(--radius);padding:8px">${esc(full)}</textarea>
         <button class="btn" style="width:100%;margin-top:6px;background:var(--bg)" onclick="copyComplaintText(${i})">📄 Скопировать текст</button>
       </div>`;
-    }).join('') || '<div style="color:var(--hint)">Нет доступных каналов</div>';
+    }).join('') || '<div class="empty-inline">Нет доступных каналов</div>';
   } catch(e) {
     box.innerHTML = errHtml(e.message, 'openTakedownKit()');
   }
@@ -24079,7 +24079,7 @@ async function previewFactoryNames(prefix) {
       title, username_template: unameTpl, count: 8, for_bot: isBot,
     })});
     const items = (r && r.items) || [];
-    if (!items.length) { box.innerHTML = '<div style="font-size:12px;color:var(--hint)">Нет вариантов.</div>'; return; }
+    if (!items.length) { box.innerHTML = '<div class="empty-inline">Вариантов пока нет</div>'; return; }
     box.innerHTML =
       '<div style="font-size:12px;color:var(--hint);margin-bottom:4px">Так будут названы первые ресурсы:</div>'
       + '<div style="background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px">'
@@ -26189,7 +26189,7 @@ async function untrackRankingKeyword(id, el) {
 
 function renderRankingAlerts(alerts) {
   if (!alerts.length) {
-    txt('rankingAlerts', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет оповещений</div>');
+    txt('rankingAlerts', '<div class="empty-inline">Нет оповещений</div>');
     return;
   }
   txt('rankingAlerts', alerts.map(a => {
@@ -26494,7 +26494,7 @@ function renderNetNodesEdges(d) {
       <div class="li-sub">${esc(objRu(n.type))} · ID: ${n.object_id}</div>
     </div>
     <div class="li-right"><span class="icon-tap" style="font-size:16px" onclick="removeNetNode(${n.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
-  </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет узлов</div>');
+  </div>`).join('') || '<div class="empty-inline">Нет узлов</div>');
 
   txt('netEdgesList', edges.map(e => `<div class="li">
     <div class="ava ava-green">🔗</div>
@@ -26503,7 +26503,7 @@ function renderNetNodesEdges(d) {
       <div class="li-sub">${esc(objRu(e.type || 'forward'))}</div>
     </div>
     <div class="li-right"><span class="icon-tap" style="font-size:16px" onclick="removeNetEdge(${e.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
-  </div>`).join('') || '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Нет рёбер</div>');
+  </div>`).join('') || '<div class="empty-inline">Нет рёбер</div>');
 }
 
 function openNetBuilderCreateModal() {
@@ -26899,7 +26899,7 @@ function renderAudSegments(segments) {
 
 function renderAudInsights(insights) {
   if (!insights.length) {
-    txt('audInsightsList', '<div style="padding:12px;text-align:center;color:var(--hint);font-size:13px">Пока нет инсайтов</div>');
+    txt('audInsightsList', '<div class="empty-inline">Пока нет инсайтов</div>');
     return;
   }
   const iconMap = { growth: '📈', churn: '📉', activity: '⚡', content: '📝', timing: '⏰', segment: '👥' };
