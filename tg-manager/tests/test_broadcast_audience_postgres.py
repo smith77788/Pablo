@@ -38,7 +38,7 @@ pytestmark = pytest.mark.skipif(
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OWNER = 991802
 BOT = 7718020001
-TOKEN = "7718020001:test-audience-fixture"
+TOKEN = "7718020001:AAHaudience-fixture_0123456789abcdef"
 
 NORMAL, BLOCKED, SUSPECT, GONE = 50001, 50002, 50003, 50004
 
@@ -97,6 +97,13 @@ def audience(pool):
          (BOT, GONE, False, False, False)]))
     yield
     _run(pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", BOT))
+
+
+def _bcast(pool, text="Новость дня") -> int:
+    """Создать рассылку и вернуть её номер."""
+    return _run(pool.fetchval(
+        "INSERT INTO broadcasts(bot_id, message_text, total_users, created_by) "
+        "VALUES($1,$2,0,$3) RETURNING id", BOT, text, OWNER))
 
 
 def _flags(pool, user_id: int) -> dict:
@@ -185,3 +192,99 @@ def test_writing_again_brings_back_only_those_who_are_not_blocked(pool):
 
     assert sorted(_run(db.get_audience_user_ids(pool, BOT))) == [NORMAL, GONE], (
         "вернувшийся не попал в адресаты")
+
+
+# ── весь путь доставки: от 403 до следующей рассылки ──────────────────────────
+
+def test_block_during_a_broadcast_takes_the_subscriber_out_for_good(pool,
+                                                                    monkeypatch):
+    """403 «bot was blocked by the user» → человек выходит из аудитории.
+
+    Это та самая цепочка, из-за которой фикс и начался: Telegram отвечает 403,
+    `bot_api.classify_send_error` называет это 'blocked', цикл рассылки зовёт
+    `mark_user_inactive(reason=...)`, и в базе должны погаснуть ОБА флага. Если
+    гаснет только `is_active`, след блокировки теряется; если ни один — продукт
+    стучится туда же следующей рассылкой.
+
+    Telegram подменён на уровне `bot_api._call`, поэтому разбор ответа работает
+    по-боевому; база настоящая.
+    """
+    from services import bot_api, broadcaster
+
+    monkeypatch.setattr(broadcaster, "BROADCAST_DELAY", 0, raising=False)
+    monkeypatch.setattr(broadcaster, "_GROUP_DELAY", 0, raising=False)
+
+    async def _call(session, token, method, **params):
+        if method == "getMe":
+            return {"ok": True, "result": {"id": BOT, "username": "audience_fixture"}}
+        if params.get("chat_id") == NORMAL:
+            return {"ok": False, "error_code": 403,
+                    "description": "Forbidden: bot was blocked by the user"}
+        return {"ok": True, "result": {"message_id": 1}}
+
+    monkeypatch.setattr(bot_api, "_call", _call)
+
+    async def _free(*a, **k):
+        return False
+
+    monkeypatch.setattr("services.brand_injection.is_free_tier", _free)
+
+    # Снимем прежние пометки: в аудитории должен остаться один NORMAL.
+    _run(pool.execute(
+        "UPDATE bot_users SET is_active=FALSE WHERE bot_id=$1 AND user_id<>$2",
+        BOT, NORMAL))
+    assert _run(__import__("database").db.get_audience_user_ids(pool, BOT)) == [NORMAL]
+
+    bc = _bcast(pool)
+
+    class _Session:
+        async def close(self):
+            return None
+
+    _run(broadcaster.run(pool, _Session(), bc, TOKEN, BOT, "Новость дня"))
+
+    assert _flags(pool, NORMAL) == {"is_active": False, "is_blocked": True}, (
+        "403 «заблокировал» не оставил в базе следа блокировки")
+
+    from database import db
+
+    assert _run(db.get_audience_user_ids(pool, BOT)) == [], (
+        "следующая рассылка снова постучится к заблокировавшему")
+    assert _run(db.get_audience_count(pool, BOT)) == 0, (
+        "на экране аудитория всё ещё есть, хотя писать некому")
+
+    _run(pool.execute("DELETE FROM broadcasts WHERE id=$1", bc))
+
+
+def test_a_broken_text_does_not_cost_the_audience(pool, monkeypatch):
+    """400 по НАШЕЙ разметке — не повод выносить подписчиков из аудитории."""
+    from services import bot_api, broadcaster
+    from database import db
+
+    monkeypatch.setattr(broadcaster, "BROADCAST_DELAY", 0, raising=False)
+    monkeypatch.setattr(broadcaster, "_GROUP_DELAY", 0, raising=False)
+
+    async def _call(session, token, method, **params):
+        if method == "getMe":
+            return {"ok": True, "result": {"id": BOT, "username": "audience_fixture"}}
+        return {"ok": False, "error_code": 400,
+                "description": "Bad Request: can't parse entities: Unmatched end tag"}
+
+    monkeypatch.setattr(bot_api, "_call", _call)
+
+    async def _free(*a, **k):
+        return False
+
+    monkeypatch.setattr("services.brand_injection.is_free_tier", _free)
+
+    before = _run(db.get_audience_user_ids(pool, BOT))
+    assert before == [NORMAL]
+
+    bc = _bcast(pool, "Текст с <b>незакрытой скобкой")
+    _run(broadcaster.run(pool, type("S", (), {"close": lambda s: None})(), bc,
+                         TOKEN, BOT, "Текст с незакрытой скобкой"))
+
+    assert _run(db.get_audience_user_ids(pool, BOT)) == before, (
+        "аудиторию вынесла наша собственная кривая разметка")
+
+    _run(pool.execute("DELETE FROM broadcasts WHERE id=$1", bc))
