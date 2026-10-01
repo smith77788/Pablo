@@ -934,6 +934,41 @@ _CHANNELS_VISIBLE_SQL = """
     )
 """
 
+# Какие боты человек видит: свои, из своих экосистем и из рабочих пространств.
+# Условие тоже жило в файле дважды — в выборке списка и в подсчёте общего числа.
+_BOTS_VISIBLE_SQL = """
+    mb.added_by=$1
+    OR mb.bot_id IN (
+        SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
+        JOIN ecosystems e ON e.id=eb.ecosystem_id
+        WHERE e.owner_id=$1
+           OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
+    )
+    OR mb.bot_id IN (
+        SELECT DISTINCT b.bot_id FROM managed_bots b
+        JOIN workspaces w ON w.owner_id=b.added_by
+        JOIN workspace_members wm ON wm.workspace_id=w.id
+        WHERE wm.user_id=$1
+    )
+"""
+
+async def _user_can_use_bot(pool, uid: int, bot_id: int) -> bool:
+    """Доступен ли пользователю этот бот: свой, из экосистемы или пространства.
+
+    Проверка доступа лежала в файле ЧЕТЫРЬМЯ дословно одинаковыми копиями — по
+    одной на эндпоинт. Разъедься любая, и ровно этот эндпоинт начал бы отдавать
+    чужого бота, а остальные три продолжали бы отказывать правильно: дыра,
+    которую снаружи почти нечем заметить. Теперь копия одна, и она же — условие
+    видимости списка, так что «вижу в списке» и «могу открыть» не разъедутся.
+
+    При ошибке базы `_safe_count` отдаёт 0, то есть доступ закрывается, а не
+    открывается: для проверки прав это единственный безопасный исход.
+    """
+    return bool(await _safe_count(pool,
+        f"""SELECT COUNT(*) FROM managed_bots mb
+            WHERE mb.bot_id=$2 AND ({_BOTS_VISIBLE_SQL})""", uid, bot_id))
+
+
 # Группа и канал различаются полем type, владение — is_creator/is_admin.
 _CHANNEL_IS_GROUP_SQL = "type IN ('supergroup','group','chat')"
 
@@ -2063,17 +2098,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     @_cached_user()
     async def bots(request: web.Request) -> web.Response:
+        """Боты пользователя: страница по limit/offset и честное общее число.
+
+        Эндпоинт не умел offset: «загрузить ещё» перезапрашивало срез побольше
+        (500 → 1000 → …) с потолком в 5000, и на этом потолке экран писал
+        «больше сервер за раз не отдаёт, сузьте поиск». Совет было невозможно
+        выполнить: поиск шёл по тем же загруженным строкам, и боты за потолком
+        оставались недостижимы в принципе. Теперь страница идёт по offset, и
+        потолка нет.
+
+        Серверный поиск и срез по состоянию — отдельная задача: на клиенте
+        `BOTS` служит ещё и источником для выбора бота и для рассылки по сети,
+        и сузить этот набор молча нельзя.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        q = request.rel_url.query
         try:
-            limit = min(validate_integer(request.rel_url.query.get("limit", "500"), min_val=1, max_val=5000) or 500, 5000)
+            limit = min(validate_integer(q.get("limit", "500"), min_val=1, max_val=5000) or 500, 5000)
         except (ValueError, TypeError):
             limit = 500
-        # Показываем ВСЕ боты доступные пользователю:
-        # 1) Личные боты (added_by = uid)
-        # 2) Боты из экосистем пользователя (ecosystem_members)
-        # 3) Боты из рабочих пространств пользователя (workspace_members)
+        try:
+            offset = max(validate_integer(q.get("offset", "0"), min_val=0) or 0, 0)
+        except (ValueError, TypeError):
+            offset = 0
         # Колонки здоровья добавляет inline-миграция на старте. Если она не
         # прошла, список ботов не должен исчезнуть целиком: _safe_fetch вернул
         # бы пустоту, неотличимую от «ботов нет». Поэтому — запасной запрос
@@ -2085,30 +2134,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       COUNT(DISTINCT bu.user_id) AS total_users
                FROM managed_bots mb
                LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
-               WHERE mb.added_by=$1
-                  OR mb.bot_id IN (
-                      SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
-                      JOIN ecosystems e ON e.id=eb.ecosystem_id
-                      WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
-                  )
-                  OR mb.bot_id IN (
-                      SELECT DISTINCT b.bot_id FROM managed_bots b
-                      JOIN workspaces w ON w.owner_id=b.added_by
-                      JOIN workspace_members wm ON wm.workspace_id=w.id
-                      WHERE wm.user_id=$1
-                  )
+               WHERE ({visible})
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active{group}
-               ORDER BY subscriber_count DESC LIMIT $2"""
+               ORDER BY subscriber_count DESC LIMIT $2 OFFSET $3"""
         try:
             rows = await pool.fetch(
-                _BOTS_SQL.format(health=_BOT_HEALTH_COLS,
+                _BOTS_SQL.format(health=_BOT_HEALTH_COLS, visible=_BOTS_VISIBLE_SQL,
                                  group=",\n mb.last_error, mb.fail_streak, mb.last_ok_at"),
-                uid, limit)
+                uid, limit, offset)
         except Exception:
             log.warning("bots uid=%d: нет колонок здоровья, показываем список без них", uid)
             rows = await _safe_fetch(
-                pool, _BOTS_SQL.format(health="", group=""), uid, limit)
+                pool, _BOTS_SQL.format(health="", visible=_BOTS_VISIBLE_SQL, group=""),
+                uid, limit, offset)
         # Честное состояние каждого бота. Раньше бот с отозванным токеном
         # выглядел здесь ровно как рабочий: подписчики ему писали, ответа не
         # было, и об этом знал только серверный лог.
@@ -2118,22 +2156,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rows = [{**dict(r), "health": _bh.describe(dict(r))} for r in (rows or [])]
         except Exception:
             log.debug("bots: состояние ботов недоступно uid=%s", uid)
+        # Считаем то же поле, что отдаёт список (DISTINCT mb.bot_id): один бот
+        # лежит отдельной строкой у каждого владельца, и счёт по строкам обещал
+        # бы страницы, которых нет.
         total = await _safe_count(pool,
-            """SELECT COUNT(DISTINCT bot_id) FROM managed_bots
-               WHERE added_by=$1
-                  OR bot_id IN (
-                      SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
-                      JOIN ecosystems e ON e.id=eb.ecosystem_id
-                      WHERE e.owner_id=$1
-                         OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$1)
-                  )
-                  OR bot_id IN (
-                      SELECT DISTINCT b.bot_id FROM managed_bots b
-                      JOIN workspaces w ON w.owner_id=b.added_by
-                      JOIN workspace_members wm ON wm.workspace_id=w.id
-                      WHERE wm.user_id=$1
-                  )""", uid)
-        return _json_resp({"bots": rows, "total": int(total or 0)})
+            f"""SELECT COUNT(DISTINCT mb.bot_id) FROM managed_bots mb
+                WHERE ({_BOTS_VISIBLE_SQL})""", uid)
+        return _json_resp({"bots": rows, "total": int(total or 0),
+                           "offset": offset, "limit": limit})
 
     async def bot_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -2144,23 +2174,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
         # Проверяем доступ: личный бот ИЛИ бот из экосистемы/рабочего пространства
-        owns = await _safe_count(pool,
-            """SELECT COUNT(*) FROM managed_bots mb
-               WHERE mb.bot_id=$1 AND (
-                   mb.added_by=$2
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
-                       JOIN ecosystems e ON e.id=eb.ecosystem_id
-                       WHERE e.owner_id=$2
-                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
-                   )
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT b.bot_id FROM managed_bots b
-                       JOIN workspaces w ON w.owner_id=b.added_by
-                       JOIN workspace_members wm ON wm.workspace_id=w.id
-                       WHERE wm.user_id=$2
-                   )
-               )""", bot_id, uid)
+        owns = await _user_can_use_bot(pool, uid, bot_id)
         if not owns:
             return _err("Бот не найден или нет доступа", 404)
         bot = await _safe_fetchrow(pool,
@@ -2217,23 +2231,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
-        owns = await _safe_count(pool,
-            """SELECT COUNT(*) FROM managed_bots mb
-               WHERE mb.bot_id=$1 AND (
-                   mb.added_by=$2
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
-                       JOIN ecosystems e ON e.id=eb.ecosystem_id
-                       WHERE e.owner_id=$2
-                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
-                   )
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT b.bot_id FROM managed_bots b
-                       JOIN workspaces w ON w.owner_id=b.added_by
-                       JOIN workspace_members wm ON wm.workspace_id=w.id
-                       WHERE wm.user_id=$2
-                   )
-               )""", bot_id, uid)
+        owns = await _user_can_use_bot(pool, uid, bot_id)
         if not owns:
             return _err("Бот не найден", 404)
         # Счётчик срабатываний из auto_reply_log — аналитика прямо в списке.
@@ -2270,23 +2268,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        owns = await _safe_count(pool,
-            """SELECT COUNT(*) FROM managed_bots mb
-               WHERE mb.bot_id=$1 AND (
-                   mb.added_by=$2
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
-                       JOIN ecosystems e ON e.id=eb.ecosystem_id
-                       WHERE e.owner_id=$2
-                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
-                   )
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT b.bot_id FROM managed_bots b
-                       JOIN workspaces w ON w.owner_id=b.added_by
-                       JOIN workspace_members wm ON wm.workspace_id=w.id
-                       WHERE wm.user_id=$2
-                   )
-                )""", bot_id, uid)
+        owns = await _user_can_use_bot(pool, uid, bot_id)
         if not owns:
             return _err("Бот не найден", 404)
         trigger_type = body.get("trigger_type", "keyword")
@@ -3241,23 +3223,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
-        owns = await _safe_count(pool,
-            """SELECT COUNT(*) FROM managed_bots mb
-               WHERE mb.bot_id=$1 AND (
-                   mb.added_by=$2
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
-                       JOIN ecosystems e ON e.id=eb.ecosystem_id
-                       WHERE e.owner_id=$2
-                          OR e.id IN (SELECT ecosystem_id FROM ecosystem_members WHERE owner_id=$2)
-                   )
-                   OR mb.bot_id IN (
-                       SELECT DISTINCT b.bot_id FROM managed_bots b
-                       JOIN workspaces w ON w.owner_id=b.added_by
-                       JOIN workspace_members wm ON wm.workspace_id=w.id
-                       WHERE wm.user_id=$2
-                   )
-               )""", bot_id, uid)
+        owns = await _user_can_use_bot(pool, uid, bot_id)
         if not owns:
             return _err("Бот не найден", 404)
         try:

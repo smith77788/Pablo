@@ -9144,9 +9144,8 @@ const BOT_GRADS = [
 // остаток молчал: при 700 ботах в шапке стояло «700 ботов», в списке лежало
 // 500 карточек, а «Выбрать все» брал только их — и рассылка уходила по
 // неполному списку, не сказав об этом ни слова.
-let BOT_LIMIT = 500;            // сколько запрошено у сервера сейчас
 const BOT_PAGE = 500;           // шаг «загрузить ещё»
-const BOT_MAX  = 5000;          // потолок эндпоинта
+let BOT_OFFSET = 0;             // сколько уже загружено (следующая страница)
 let BOT_TOTAL = 0;              // сколько всего у пользователя (серверный счёт)
 let BOT_LOADING = false;
 let BOT_SEARCH = '';
@@ -9155,8 +9154,10 @@ let _botSearchT = null;
 
 async function loadBots() {
   try {
-    const d = await api('/api/miniapp/bots?limit=' + BOT_LIMIT);
+    BOT_OFFSET = 0;
+    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0');
     BOTS = d.bots||[];
+    BOT_OFFSET = BOTS.length;
     BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
     const cntEl = document.getElementById('bots-cnt');
     if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
@@ -9168,18 +9169,27 @@ async function loadBots() {
   }
 }
 
-// Эндпоинт ботов не умеет offset, только limit, поэтому «загрузить ещё» — это
-// перезапрос с бóльшим срезом. Выбор хранится по bot_id и перезапрос его не рвёт.
+// «Загрузить ещё» догружает СЛЕДУЮЩУЮ страницу. Раньше эндпоинт не умел offset,
+// и кнопка перезапрашивала срез побольше: 500, потом 1000, потом 1500 — те же
+// строки заново, и всё это с потолком 5000, за которым боты были недостижимы.
+// Выбор хранится по bot_id, догрузка его не рвёт.
 async function loadMoreBots() {
-  if (BOT_LOADING || BOTS.length >= BOT_TOTAL || BOT_LIMIT >= BOT_MAX) return;
+  if (BOT_LOADING || BOTS.length >= BOT_TOTAL) return;
   BOT_LOADING = true;
   const box = document.getElementById('botLoadMore');
   if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
-  BOT_LIMIT = Math.min(BOT_LIMIT + BOT_PAGE, BOT_MAX);
   try {
-    const d = await api('/api/miniapp/bots?limit=' + BOT_LIMIT);
-    BOTS = d.bots||[];
-    BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
+    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=' + BOT_OFFSET);
+    const more = d.bots||[];
+    // Пустая страница (ботов удалили между запросами) — дальше идти некуда,
+    // иначе кнопка «загрузить ещё» осталась бы вечной.
+    if (!more.length) { BOT_TOTAL = BOTS.length; }
+    else {
+      const known = new Set(BOTS.map(b=>String(b.bot_id)));
+      more.forEach(b => { if (!known.has(String(b.bot_id))) BOTS.push(b); });
+      BOT_OFFSET += more.length;
+      if (d.total!=null) BOT_TOTAL = d.total;
+    }
     const cntEl = document.getElementById('bots-cnt');
     if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
     renderBotFilterChips();
@@ -9252,13 +9262,14 @@ function renderBotLoadMore(shownCount) {
   const filtering = !!(BOT_SEARCH || BOT_FILTER !== 'all');
   // Поиск идёт по загруженным: «ничего не найдено» при неполном списке — не
   // ответ, а половина ответа. Говорим, сколько именно просмотрено.
+  //
+  // Прежде здесь была и вторая строка — «больше сервер за раз не отдаёт, сузьте
+  // поиск», — которая появлялась на потолке 5000. Выполнить этот совет было
+  // нельзя: поиск шёл по тем же загруженным строкам, и остальные боты не
+  // доставались никак. Потолка больше нет, страницы идут по offset до конца.
   const note = filtering
     ? `Найдено ${shownCount!=null?shownCount:0} среди загруженных ${loaded} из ${BOT_TOTAL}.`
     : '';
-  if (BOT_LIMIT >= BOT_MAX) {
-    box.innerHTML = `<div class="lst-more-note">Показано ${loaded} из ${BOT_TOTAL} — больше сервер за раз не отдаёт. Сузьте поиск.</div>`;
-    return;
-  }
   box.innerHTML = (note ? `<div class="lst-more-note">${esc(note)}</div>` : '')
     + `<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${loaded} из ${BOT_TOTAL}</button>`;
 }
@@ -9352,7 +9363,15 @@ async function connectOneBot(uname) {
 // Открыть меню управления уже подключённым ботом по его username.
 async function openBotByUsername(uname) {
   try {
-    if (!BOTS || !BOTS.length) { const d = await api('/api/miniapp/bots'); BOTS = d.bots||[]; }
+    // Наполняем тот же кэш, что и экран ботов, вместе с его счётчиками: иначе
+    // следующая «загрузить ещё» пошла бы с нулевого offset и запросила бы
+    // первую страницу заново.
+    if (!BOTS || !BOTS.length) {
+      const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0');
+      BOTS = d.bots||[];
+      BOT_OFFSET = BOTS.length;
+      BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
+    }
     const b = (BOTS||[]).find(x => String(x.username||'').toLowerCase() === String(uname).toLowerCase());
     if (!b) { toast('Бот ещё не появился в списке — обновите раздел «Боты»'); return; }
     openBot(b.bot_id);
