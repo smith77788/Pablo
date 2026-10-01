@@ -1012,9 +1012,9 @@ async def cb_intelligence_report(callback: CallbackQuery, pool: asyncpg.Pool) ->
 
         lines.append("")
         lines.append("⚠️ <b>Оценка рисков:</b>")
-        lines.append(_rl("Bulk Join (50)", risk_join))
+        lines.append(_rl("Массовое вступление (50)", risk_join))
         lines.append(_rl("Публикация (10)", risk_pub))
-        lines.append(_rl("Strike", risk_strike))
+        lines.append(_rl("Массовые жалобы", risk_strike))
 
         # Top risk reason
         for risk in (risk_join, risk_pub, risk_strike):

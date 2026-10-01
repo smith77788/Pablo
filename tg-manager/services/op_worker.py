@@ -13444,7 +13444,7 @@ async def _schedule_strike_continuation(
             pool, owner_id, "strike", nxt,
             total_items=1,
             scheduled_for=when.isoformat(),
-            label=f"Strike → {params.get('target', '')} (эскалация {chain})",
+            label=f"Массовые жалобы → {params.get('target', '')} (эскалация {chain})",
             bypass_plan_check=True,
         )
     except Exception as exc:

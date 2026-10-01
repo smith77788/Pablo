@@ -783,6 +783,15 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
    рендерились без фона/паддинга/радиуса, тогда как на экране аккаунтов
    (.acc-kpi-card) и в .kpi-bar (.kpi-col) карточки были оформлены. Единый вид. */
 .kpi-card{background:var(--bg2);border-radius:var(--radius);padding:9px 12px;text-align:center;flex-shrink:0;min-width:70px}
+/* Полоса счётчиков. Раньше её на каждом экране собирали inline-стилями, и
+   везде одинаково: ряд с боковой прокруткой и спрятанным ползунком. При 320px
+   в него влезало три карточки из пяти-шести, а последние уезжали за край без
+   единого намёка — на экране операций так пропадали «Ошибки», на жалобах —
+   «Целей снято», в контактах — «Взаимные». Теперь это сетка: колонок столько,
+   сколько помещается (три на узком экране, четыре на широком), остальное
+   переносится на следующий ряд. Прокручивать нечего — видно всё. */
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px;padding:8px 16px 4px}
+.kpi-row > .kpi-card{min-width:0}
 /* Число, по которому можно перейти в список. Отличается от обычного
    рамкой и стрелкой в подписи — иначе непонятно, что оно нажимается. */
 .kpi-card.tap-card{cursor:pointer;border:1px solid var(--sep)}
@@ -2575,7 +2584,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <button class="btn btn-s" style="flex:1 1 auto" onclick="seedPresencePack()">🌱 Посеять посты</button>
-      <button class="btn btn-s" style="flex:1 1 auto" onclick="promotePresencePack()">👑 Бот → admin</button>
+      <button class="btn btn-s" style="flex:1 1 auto" onclick="promotePresencePack()">👑 Бот → админ</button>
     </div>
     <div class="field-err" id="ppDetailErr"></div>
   </div>
@@ -2758,7 +2767,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="other">📋 Другое</option>
       </select>
       <input type="text" id="mrText" placeholder="Пояснение (необязательно)" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">⚠️ Жалобы идут с ваших реальных аккаунтов — самая рискованная операция после Strike. При перегрузке инфраструктуры запуск будет отклонён.</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">⚠️ Жалобы идут с ваших реальных аккаунтов — самая рискованная операция после массовых жалоб. При перегрузке инфраструктуры запуск будет отклонён.</div>
       <button class="btn btn-d" style="width:100%" onclick="submitMassReport()">🚨 Отправить жалобы</button>
       <div id="mrErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
@@ -3645,7 +3654,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
   <div class="sub-sb">
-    <div id="opsKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
+    <div id="opsKpi" class="kpi-row"></div>
     <input class="inp lst-search" id="opsSearch" type="text" oninput="onOpsSearch(this.value)"
            placeholder="🔍 Поиск: название или тип операции" autocomplete="off"
            aria-label="Поиск по операциям">
@@ -3742,7 +3751,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <span class="chip contact-stage" data-s="won" style="flex:0 0 auto" onclick="toggleStageFilter('won',this)">Выиграно</span>
       <span class="chip contact-stage" data-s="lost" style="flex:0 0 auto" onclick="toggleStageFilter('lost',this)">Проиграно</span>
     </div>
-    <div id="contactsKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
+    <div id="contactsKpi" class="kpi-row"></div>
     <div id="contactFilterHint" style="display:none;font-size:12px;color:var(--hint);padding:2px 2px 6px;line-height:1.35"></div>
     <div id="contactGroupBar" style="display:none;font-size:13px;padding:7px 12px;margin:0 16px 8px;background:var(--bg2);border:1px solid var(--sep);border-radius:10px"></div>
     <div id="contactBulkBar" style="display:none;padding:8px 16px;background:rgba(96,165,250,.1);border-radius:10px;margin:0 16px 8px">
@@ -3938,7 +3947,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-s" style="padding:7px 12px;font-size:13px" onclick="loadDashboard()">⟳ Обновить</button></div>
   </div>
   <div class="sub-sb">
-    <div id="dashKpi" style="display:flex;gap:8px;padding:8px 16px 4px;overflow-x:auto"></div>
+    <div id="dashKpi" class="kpi-row"></div>
     <div class="sec" style="margin-top:8px">По дням</div>
     <div class="filter-chips" id="dashMetricChips">
       <div class="chip on" onclick="dashSetMetric('operations',this)">Операции</div>
@@ -4193,7 +4202,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <details style="margin-top:8px">
         <summary style="font-size:13px;cursor:pointer;opacity:.85">🧬 Настроить свой IPv6 (уникальный IP без прокси)</summary>
         <div style="padding-top:8px">
-          <div style="font-size:12px;opacity:.7;margin-bottom:6px">Впишите вашу routed IPv6-подсеть (её выдаёт хостер VPS, напр. <code>2a01:4f8:abcd::/64</code>). На сервере также включите AnyIP — инструкция в <code>docs/UNIQUE_IP_IPV6.md</code>. Пусто = выключить.</div>
+          <div style="font-size:12px;opacity:.7;margin-bottom:6px">Впишите свою маршрутизируемую подсеть IPv6 — её выдаёт хостинг сервера (например <code>2a01:4f8:abcd::/64</code>). На самом сервере нужно включить режим ядра AnyIP; как это сделать, описано в документации проекта (<code>docs/UNIQUE_IP_IPV6.md</code>). Оставьте пустым, чтобы выключить.</div>
           <div class="field"><label>IPv6-подсеть (CIDR)</label><input type="text" id="ipv6Subnet" placeholder="2a01:4f8:abcd::/64" autocomplete="off"></div>
           <button class="btn btn-s" id="ipv6SaveBtn" style="width:100%;font-size:13px;padding:9px 6px" onclick="saveIpv6Subnet()">💾 Сохранить IPv6-подсеть</button>
         </div>
@@ -4903,11 +4912,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
-      Ноды — Telegram Forum Groups для управления ресурсами бота.<br>
+      Ноды — форум-группы Telegram, через которые бот управляет ресурсами.<br>
       Чтобы подключить ноду:<br>
-      1. Создайте Forum Group в Telegram<br>
+      1. Создайте в Telegram группу с темами (форум)<br>
       2. Добавьте бота в группу как администратора<br>
-      3. Скопируйте Chat ID и нажмите «+ Добавить»
+      3. Скопируйте идентификатор чата (Chat ID) и нажмите «+ Добавить»
     </div>
     <div id="nodesStats" style="display:flex;gap:10px;padding:4px 16px 10px"></div>
     <div class="lst" id="nodesList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -5027,7 +5036,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 6px">
       Задай исход — планировщик посчитает по <b>реальной ёмкости флота</b>: реально
       ли к сроку, сколько в день и на аккаунт, чего не хватает. Без «магии ИИ» —
-      чистая арифметика ёмкости под ограничением ban-rate.
+      чистая арифметика ёмкости с оглядкой на то, как быстро прилетают баны.
     </div>
     <div style="padding:4px 0 8px;display:flex;flex-direction:column;gap:10px">
       <div class="field"><label>Цель: +N участников</label><input type="number" id="cpGoal" placeholder="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
@@ -5775,7 +5784,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div id="strikeAccessBar"></div>
-    <div id="strikeStats" style="display:flex;gap:10px;padding:6px 16px 4px;overflow-x:auto"></div>
+    <div id="strikeStats" class="kpi-row"></div>
     <div class="sec">Последние операции</div>
     <div class="lst" id="strikeList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -5785,7 +5794,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="mo-strike" onclick="if(event.target===this)closeStrikeModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeStrikeModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title" id="strikeMTitle">⚔️ Новый Strike — Шаг 1/3</div>
+    <div class="modal-title" id="strikeMTitle">⚔️ Новые жалобы — шаг 1 из 3</div>
     <!-- Step 1: Target -->
     <div id="strikeStep1">
       <div style="font-size:13px;color:var(--hint);margin-bottom:10px">
@@ -5838,13 +5847,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </label>
       <div class="field-note" style="margin-top:-6px">Авто-переповтор раз в ~12ч (до 4 заходов), пока проверка не подтвердит снятие цели. Реальные удаления идут во времени, а не одним залпом.</div>
       <div style="font-size:12px;color:var(--hint);margin:10px 0;line-height:1.5">
-        ⚠️ Strike отправляет официальные репорты через Telegram Trust &amp; Safety.
+        ⚠️ Жалобы уходят официально — в службу доверия и безопасности Telegram.
         Результат зависит от решения модераторов Telegram.
       </div>
       <button class="btn" style="width:100%;margin-bottom:8px;background:var(--bg)" onclick="openTakedownKit()">📋 Пакет жалобы (App Store/Google Play/DMCA)</button>
       <div style="display:flex;gap:8px">
         <button class="btn" style="flex:1 1 auto;background:var(--bg)" onclick="strikeBackStep()">← Назад</button>
-        <button class="btn btn-p" style="flex:2;background:var(--red);border-color:var(--red)" onclick="strikeLaunch()" id="strikeLaunchBtn">⚔️ Запустить Strike</button>
+        <button class="btn btn-p" style="flex:2;background:var(--red);border-color:var(--red)" onclick="strikeLaunch()" id="strikeLaunchBtn">⚔️ Отправить жалобы</button>
       </div>
     </div>
   </div>
@@ -7119,7 +7128,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-total">—</div><div class="acc-kpi-lbl">Всего</div></div>
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-active" style="color:var(--green)">—</div><div class="acc-kpi-lbl">Активных</div></div>
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-segments" style="color:var(--purple)">—</div><div class="acc-kpi-lbl">Сегментов</div></div>
-      <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-engagement" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">ER</div></div>
+      <div class="acc-kpi-card"><div class="acc-kpi-num" id="aa-engagement" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">Вовлечённость</div></div>
     </div>
     <div class="sec">Сегменты аудитории</div>
     <div id="audSegmentChips" style="display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto"></div>
@@ -13935,7 +13944,7 @@ async function detachAllProxies() {
 }
 async function saveIpv6Subnet() {
   const subnet = (document.getElementById('ipv6Subnet').value||'').trim();
-  if (subnet && !await askConfirm(`Включить свой IPv6 (${subnet}) для аккаунтов без прокси? Работает только если у сервера routed IPv6-подсеть + AnyIP (см. docs/UNIQUE_IP_IPV6.md).`)) return;
+  if (subnet && !await askConfirm(`Включить свой IPv6 (${subnet}) для аккаунтов без прокси? Сработает только если у сервера есть маршрутизируемая подсеть IPv6 и включён режим ядра AnyIP.`)) return;
   const btn = document.getElementById('ipv6SaveBtn');
   if (btn) { btn.disabled=true; btn.textContent='💾 …'; }
   try {
@@ -17206,7 +17215,7 @@ async function loadContactStats() {
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--green)">${num(d.favorites||0)}</div><div class="kpi-lbl">⭐ Избр.</div></div>
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--purple)">${num(d.premium||0)}</div><div class="kpi-lbl">💎 Premium</div></div>
       <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_phone||0)}</div><div class="kpi-lbl">📱 Телефон</div></div>
-      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_username||0)}</div><div class="kpi-lbl">Username</div></div>
+      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_username||0)}</div><div class="kpi-lbl">С ником</div></div>
       <div class="kpi-card" style="min-width:60px;text-align:center" title="Двусторонняя связь: аккаунт и собеседник добавили друг друга в контакты"><div class="kpi-val">${num(d.mutual||0)}</div><div class="kpi-lbl">↔ Взаимные</div></div>
     `);
   } catch(e) {
@@ -20697,7 +20706,7 @@ async function bulkWarmup() {
   }
   if (!await askConfirm('Запустить прогрев для активных аккаунтов без плана'
       + massScaleCapped(wuT, 'аккаунт', 'аккаунта', 'аккаунтов')
-      + '?\nРежим: Standard, поведение: смешанное.')) return;
+      + '?\nРежим: обычный, поведение: смешанное.')) return;
   toast('🔥 Запускаю массовый прогрев…');
   try {
     const r = await api('/api/miniapp/warmup/bulk_start', {method:'POST', body:JSON.stringify({plan_type:'standard', profile_type:'mixed', niche:'general'})});
@@ -22044,6 +22053,10 @@ function copyApiKey() {
 }
 
 // ── Strike ─────────────────────────────────────────────
+// В базе режим лежит ключом (fast | normal | maximum) — владельцу он уезжал в
+// подпись как есть, и строка читалась «Режим: normal». Показываем по-русски,
+// сам ключ не трогаем: по нему работает движок.
+const STRIKE_MODES = {fast:'быстрый', normal:'обычный', maximum:'максимальный'};
 let _STRIKE_STATUS = null;
 let _STRIKE_TARGET = '';
 let _STRIKE_CAT = null;
@@ -22066,8 +22079,8 @@ async function openStrike() {
       txt('strikeAccessBar', `<div class="strike-access-bar ok">
         <div class="strike-access-ico">✅</div>
         <div class="strike-access-body">
-          <div class="strike-access-title">Strike активен</div>
-          <div class="strike-access-sub">Режим: ${esc(status.mode||'normal')} · Лицензия навсегда</div>
+          <div class="strike-access-title">Жалобы доступны</div>
+          <div class="strike-access-sub">Режим: ${esc(STRIKE_MODES[status.mode] || STRIKE_MODES.normal)} · Лицензия навсегда</div>
         </div>
       </div>`);
       txt('strikeHdrBtn', `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px;background:var(--red);border-color:var(--red)" onclick="openStrikeModal()">+ Запустить</button>`);
@@ -22075,7 +22088,7 @@ async function openStrike() {
       txt('strikeAccessBar', `<div class="strike-access-bar">
         <div class="strike-access-ico">🔒</div>
         <div class="strike-access-body">
-          <div class="strike-access-title">Strike недоступен</div>
+          <div class="strike-access-title">Жалобы недоступны</div>
           <div class="strike-access-sub">Нужна лицензия — её выдают по подписке</div>
         </div>
         <button class="btn btn-p" style="padding:6px 12px;font-size:12px;min-width:0" onclick="openBilling()">Подписка</button>
@@ -22089,15 +22102,15 @@ async function openStrike() {
     const totalReports = doneOps.reduce((s,o)=>s+((o.metrics&&o.metrics.reports_total)||0),0);
     const downCount = doneOps.filter(o=>o.metrics&&o.metrics.verified_down).length;
     document.getElementById('strikeStats').innerHTML=`
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val">${ops.length}</div><div class="kpi-lbl">Операций</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:var(--green)">${doneOps.length}</div><div class="kpi-lbl">Завершено</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:var(--orange)">${running}</div><div class="kpi-lbl">В работе</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:var(--red)">${num(totalReports)}</div><div class="kpi-lbl">Жалоб</div></div>
-      <div class="kpi-card" style="flex:0 0 auto"><div class="kpi-val" style="color:var(--green)">${downCount}</div><div class="kpi-lbl">Целей снято</div></div>
+      <div class="kpi-card"><div class="kpi-val">${ops.length}</div><div class="kpi-lbl">Операций</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${doneOps.length}</div><div class="kpi-lbl">Завершено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--orange)">${running}</div><div class="kpi-lbl">В работе</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--red)">${num(totalReports)}</div><div class="kpi-lbl">Жалоб</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--green)">${downCount}</div><div class="kpi-lbl">Целей снято</div></div>
     `;
 
     if (!ops.length) {
-      txt('strikeList', empty('⚔️','Нет операций Strike', status.has_access ? 'Нажмите «+ Запустить» чтобы создать операцию' : 'Приобретите лицензию в боте'));
+      txt('strikeList', empty('⚔️','Жалоб пока не было', status.has_access ? 'Нажмите «+ Запустить» чтобы создать операцию' : 'Приобретите лицензию в боте'));
       return;
     }
     txt('strikeList', ops.map(op=>{
@@ -22146,7 +22159,7 @@ async function openStrike() {
 }
 
 function openStrikeModal() {
-  if (!_STRIKE_STATUS?.has_access) { toast('Нет доступа к Strike'); return; }
+  if (!_STRIKE_STATUS?.has_access) { toast('Нет доступа к массовым жалобам'); return; }
   _STRIKE_TARGET = '';
   _STRIKE_CAT = null;
   document.getElementById('strikeTargetInput').value = '';
@@ -22154,7 +22167,7 @@ function openStrikeModal() {
   document.getElementById('strikeStep1').style.display = '';
   document.getElementById('strikeStep2').style.display = 'none';
   document.getElementById('strikeStep3').style.display = 'none';
-  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 1/3';
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новые жалобы — шаг 1 из 3';
   showModal('mo-strike');
   setTimeout(()=>document.getElementById('strikeTargetInput').focus(), 200);
 }
@@ -22168,7 +22181,7 @@ function strikeNextStep1() {
   if (!val || val.length < 3) { toast('⚠️ Введите корректный username или ссылку'); return; }
   _STRIKE_TARGET = val;
   document.getElementById('strikeTgtLabel').textContent = val;
-  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 2/3';
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новые жалобы — шаг 2 из 3';
   const cats = _STRIKE_STATUS?.categories || [];
   const SEVER_COLOR = {CRITICAL:'var(--red)',HIGH:'#f59e0b',MEDIUM:'var(--blue)'};
   document.getElementById('strikeCatGrid').innerHTML = cats.map(c=>
@@ -22188,7 +22201,7 @@ function strikeSelectCat(key, label) {
   const el = document.getElementById(`scat-${key}`);
   if (el) el.style.borderColor = 'var(--red)';
   // Show preview
-  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 3/3';
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новые жалобы — шаг 3 из 3';
   txt('strikePreviewBox', `
     <div class="strike-preview-row"><div class="strike-preview-lbl">🎯 Цель:</div><div class="strike-preview-val">${esc(_STRIKE_TARGET)}</div></div>
     <div class="strike-preview-row"><div class="strike-preview-lbl">⚠️ Категория:</div><div class="strike-preview-val">${esc(label)}</div></div>
@@ -22208,7 +22221,7 @@ function strikeSelectCat(key, label) {
       _warnEl.innerHTML = '⚠️ <b>Юридический вектор выключен.</b> Подключены только '
         + 'массовые in-app жалобы — они <b>почти никогда не удаляют канал</b>. '
         + 'Удаление даёт письмо в abuse@/dmca@ Telegram (нужны SMTP-ящики в '
-        + 'настройках Strike) + жалоба в App Store/Google Play на приложение Telegram.';
+        + 'настройках массовых жалоб) + жалоба в App Store/Google Play на приложение Telegram.';
     } else if (_ev && _ev.configured === true) {
       _warnEl.style.display = '';
       _warnEl.innerHTML = '✅ Юридический вектор включён (' + (_ev.accounts||0)
@@ -22225,7 +22238,7 @@ function strikeSelectCat(key, label) {
 function strikeBackStep() {
   document.getElementById('strikeStep3').style.display = 'none';
   document.getElementById('strikeStep2').style.display = '';
-  document.getElementById('strikeMTitle').textContent = '⚔️ Новый Strike — Шаг 2/3';
+  document.getElementById('strikeMTitle').textContent = '⚔️ Новые жалобы — шаг 2 из 3';
 }
 
 async function strikeLaunch() {
@@ -22247,11 +22260,11 @@ async function strikeLaunch() {
       body: JSON.stringify(_payload),
     });
     closeStrikeModal();
-    toast(`✅ Strike запущен — ${d.accounts} аккаунтов, ${d.num_waves||_waves} волн`);
+    toast(`✅ Жалобы пошли — ${d.accounts} аккаунтов, ${d.num_waves||_waves} волн`);
     openStrike();
   } catch(e) {
     toast('⚠️ '+(e.message||'Ошибка').substring(0,60));
-    btn.disabled = false; btn.textContent = '⚔️ Запустить Strike';
+    btn.disabled = false; btn.textContent = '⚔️ Отправить жалобы';
   }
 }
 
@@ -23524,7 +23537,7 @@ const MASS_OP_LABELS = {
   check_owned_restrictions:'🕶 Проверка ограничений',
   reclassify_channels:'🔄 Переопределение инфраструктуры',
   channel_import_all:'📡 Импорт каналов', group_import_all:'📥 Импорт групп',
-  promote_all_admins:'👑 Назначение админами', strike:'⚡ Strike',
+  promote_all_admins:'👑 Назначение админами', strike:'⚔️ Массовые жалобы',
   content_clone:'📋 Клон контента', mass_post:'📨 Масс. публикация',
 };
 // Разовая рассылка в ЛС — операция bulk_dm_adhoc, как в боте.

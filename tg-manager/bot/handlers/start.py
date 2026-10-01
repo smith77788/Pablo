@@ -501,7 +501,7 @@ _NAV_MAP: list[tuple[list[str], str, str]] = [
       "mass publish"], "📤 Публикация / рассылка", MassPubCb(action="menu").pack()),
     (["шаблон", "template"], "📄 Шаблоны", AssetTplCb(action="menu").pack()),
     (["подписка", "subscription", "тариф", "план", "оплата"], "💳 Подписка", SubCb(action="menu").pack()),
-    (["strike", "страйк", "удар"], "⚔️ Strike", StrikeCb(action="menu").pack()),
+    (["жалобы", "жалоба", "strike", "страйк", "удар"], "⚔️ Массовые жалобы", StrikeCb(action="menu").pack()),
     (["присутствие", "presence", "global"], "🌍 Присутствие", GeoPresenceCb(action="menu").pack()),
     (["воронка", "funnel", "авторассылка"], "🔗 Воронки", BmCb(action="pick_bot_for", sub="fn").pack()),
     (["авто-ответ", "auto reply", "автоответ"], "💬 Авто-ответы", BmCb(action="pick_bot_for", sub="ar").pack()),

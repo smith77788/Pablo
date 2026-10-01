@@ -13365,7 +13365,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "account_ids": [r["id"] for r in accs],
                 },
                 total_items=len(accs),
-                label=f"Strike: {normalized} [{cat['label']}] · {num_waves} волн")
+                label=f"Массовые жалобы: {normalized} [{cat['label']}] · {num_waves} волн")
             # Подписанная запись правового основания ДО запуска: жалоба подаётся
             # только по abuse-категории (гейт MINI_CATEGORIES выше), и этот факт
             # фиксируется в аудите вместе с целью — доказательная база кампании.
