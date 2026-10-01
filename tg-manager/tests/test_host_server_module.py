@@ -265,7 +265,17 @@ def test_device_exec_gated_off_by_default(monkeypatch):
 # ── интеграция: роуты API и оплата ───────────────────────────────────────────
 
 def test_all_api_routes_registered():
-    src = (pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py").read_text("utf-8")
+    """Проверяем РОУТЕР, а не текст файла.
+
+    Раньше здесь искались строки путей в `services/mini_app_api.py`. Проверка
+    держалась на том, в каком файле лежит код: маршруты Host-Server переехали в
+    `services/mini_app_host_server.py`, и такой тест упал бы, хотя всё
+    зарегистрировано. А главное — наличие строки в исходнике и не означало, что
+    маршрут зарегистрирован. Теперь спрашиваем у приложения.
+    """
+    from tests.miniapp_routes import registered_routes
+
+    live = {ln.split(" ", 1)[1] for ln in registered_routes()}
     for route in (
         '/api/miniapp/host_server/status',
         '/api/miniapp/host_server/buy',
@@ -277,9 +287,11 @@ def test_all_api_routes_registered():
         '/api/miniapp/host_server/rent',
         '/api/miniapp/host_server/rental/{rental_id}/status',
     ):
-        assert route in src, f"роут не зарегистрирован: {route}"
+        assert route in live, f"роут не зарегистрирован: {route}"
     # админ-гейт на смену цены
-    assert "host_server_set_price" in src and "_is_admin(uid)" in src
+    mod = (pathlib.Path(__file__).resolve().parents[1] / "services"
+           / "mini_app_host_server.py").read_text("utf-8")
+    assert "host_server_set_price" in mod and "_is_admin(uid)" in mod
 
 
 def test_bot_handler_router_loads_and_is_wired():
