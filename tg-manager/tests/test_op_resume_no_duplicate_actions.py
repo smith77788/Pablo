@@ -55,6 +55,12 @@ GUARDED = {
     "_exec_boost_views": "_acc_key",
     "_exec_boost_stories": "_acc_key",
     "_exec_boost_bot_starts": "_acc_key",
+    # Посев Presence Pack: единица работы — канал, его id устойчив. Повтор
+    # публиковал стартовый пост второй раз в те каналы, где он уже стоит, —
+    # видимый дубль у владельца в канале и повторное одинаковое сообщение
+    # подписчикам. Флага пакета для этого не хватает: он ставится один раз в
+    # конце прогона, а опасен именно обрыв посередине.
+    "_exec_seed_presence_pack": "_ch_key",
 }
 
 
@@ -118,8 +124,15 @@ def test_skipped_target_still_counts_as_done(ow, name):
     body = _fn(ow, name)
     seg = body[body.index("in _already_"):]
     seg = seg[:seg.index("continue")]
-    assert "ok_count += 1" in seg, f"{name}: пропущенная цель не засчитана в успех"
-    assert "done_items=done_items+1" in seg, (
+    # Требование — смысловое, а не про одно написание. Счётчик успеха у разных
+    # исполнителей зовётся по-разному (ok_count, success), а прогресс бывает и
+    # абсолютным: у посева Presence Pack часть каналов могла исчезнуть из базы,
+    # и полоса считается от `missing_count + idx`, иначе она врёт. Требовать
+    # ровно `done_items=done_items+1` значило бы ломать эту точность.
+    assert re.search(r"\b(ok_count|success|ok)\s*\+=\s*1", seg), (
+        f"{name}: пропущенная цель не засчитана в успех")
+    assert ("done_items=done_items+1" in seg
+            or re.search(r"done_items=\$\d", seg)), (
         f"{name}: прогресс операции не сдвинулся на пропущенной цели")
 
 

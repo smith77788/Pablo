@@ -8615,10 +8615,36 @@ async def _exec_seed_presence_pack(
         "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
     )
 
+    # Идемпотентность повтора. Повтор здесь штатный: `_maybe_requeue` после
+    # сетевой ошибки, сброс зависшей операции сторожем, перезапуск контейнера
+    # (рабочая ветка едет на Railway, перезапуск — на каждом деплое). Исполнитель
+    # шёл по каналам СНАЧАЛА и публиковал стартовый пост ВТОРОЙ РАЗ в те каналы,
+    # где он уже стоит: владелец видел дубль у себя в канале, а подписчики —
+    # повторное одинаковое сообщение.
+    #
+    # Флага пакета (`mark_presence_pack_seeded`) для этого не хватает, и именно
+    # поэтому он не годится как журнал: он ставится ОДИН РАЗ в конце прогона, а
+    # опасен ровно обрыв ПОСЕРЕДИНЕ — тогда флага нет, а половина постов уже
+    # опубликована. Единица работы — канал, его id устойчив, поэтому ключ
+    # журнала `ch#<channel_id>`.
+    _already_seeded = await completed_targets(pool, op_id)
+    if _already_seeded:
+        log.info("seed_presence_pack op=%d: повтор — в %d каналах пост уже стоит, "
+                 "пропускаем", op_id, len(_already_seeded))
+
     async with _aiohttp.ClientSession() as http:
         for idx, ch in enumerate(channels, 1):
             if await _is_cancelled(pool, op_id):
                 return {"status": "cancelled", "summary": f"Отменено на {idx - 1}/{total}"}
+            _ch_key = f"ch#{ch['channel_id']}"
+            if _ch_key in _already_seeded:
+                # Работа сделана прошлым прогоном — счётчик не должен проседать
+                # только потому, что сделал её не этот прогон.
+                success += 1
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                    missing_count + idx, op_id)
+                continue
             post_text = _ps.build_seed_post(
                 channel_title=ch["title"] or ch.get("username") or pack["name"],
                 bot_username=pack.get("bot_username"),
@@ -8646,18 +8672,34 @@ async def _exec_seed_presence_pack(
                 )
             if posted:
                 success += 1
+                # _safe_execute, а не pool.execute: пост уже опубликован, и
+                # ронять операцию из-за сбоя записи в журнал нельзя. Цена —
+                # возможный повтор в этот канал при возобновлении; это дешевле
+                # сорванной операции.
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status) "
+                    "VALUES($1,$2,$3,'ok')",
+                    op_id, idx, _ch_key,
+                )
             else:
                 fail += 1
                 fail_names.append(chan_name)
-
-            # Update progress in operation_queue (offset by missing so bar is accurate)
-            try:
-                await pool.execute(
-                    "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
-                    missing_count + idx, op_id,
+                await _safe_execute(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, _ch_key, "пост не опубликован",
                 )
-            except Exception as e:
-                log.warning("seed_presence_pack progress update failed for op %d: %s", op_id, e)
+
+            # Update progress in operation_queue (offset by missing so bar is accurate).
+            # _safe_execute вместо собственного try/except: та же гарантия
+            # «запись о сделанном не роняет операцию», но одним идиомом со
+            # остальной очередью.
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                missing_count + idx, op_id,
+                log_ctx=f"[seed_presence_pack progress op={op_id}]")
 
             await asyncio.sleep(2)
 
@@ -8676,9 +8718,11 @@ async def _exec_seed_presence_pack(
         extra = f" (+{len(fail_names) - 3})" if len(fail_names) > 3 else ""
         fail_hint = f"\n❌ Не удалось: {names}{extra}"
 
-    status = "done" if success > 0 or (len(channels) == 0 and missing_count == total) else "done"
+    # Итог считает op_status.classify_final по ok/fail, а не этот исполнитель.
+    # Здесь раньше стоял тройной оператор с одинаковыми ветками ("done" и в той,
+    # и в другой) — он выглядел как разбор случаев, но ничего не выбирал.
     return {
-        "status": status,
+        "status": "done",
         "ok": success,
         "fail": fail,
         "total": total,
