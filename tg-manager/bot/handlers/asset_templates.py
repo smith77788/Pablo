@@ -729,7 +729,7 @@ async def cb_apply(
     elif asset_type == "operation":
         op_type = data.get("op_type", "")
         _OP_LABELS = {
-            "mass_publish": "📤 Массовая публикация",
+            "mass_publish": "📤 Публикация / рассылка",
             "bulk_join": "🔗 Массовый join",
             "bulk_leave": "🚪 Массовый leave",
             "bulk_bot_edit": "✏️ Редактирование ботов",

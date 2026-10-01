@@ -84,7 +84,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 async def cb_mpub_menu(callback: CallbackQuery) -> None:
     await safe_answer(callback)
     await callback.message.edit_text(
-        "📤 <b>Массовая публикация — рассылка в каналы</b>\n\n"
+        "📤 <b>Публикация / рассылка — рассылка в каналы</b>\n\n"
         "Отправляет один пост одновременно во все ваши каналы.\n\n"
         "📢 <b>Все каналы</b> — опубликовать во все каналы всех аккаунтов\n"
         "👤 <b>По аккаунту</b> — выбрать конкретный аккаунт\n"
@@ -128,7 +128,7 @@ async def cb_mpub_start(
 
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Массовая публикация — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            "🔒 <b>Публикация / рассылка — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

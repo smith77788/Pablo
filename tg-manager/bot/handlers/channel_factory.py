@@ -76,7 +76,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="📥 Импорт из Telegram", callback_data=ChanFactCb(action="import"))
     kb.button(text="✏️ Редактировать", callback_data=ChanFactCb(action="bulk_edit"))
     kb.button(
-        text="📤 Массовая публикация",
+        text="📤 Публикация / рассылка",
         callback_data=ChanFactCb(action="mass_pub_redirect"),
     )
     kb.button(text="📊 Статистика каналов", callback_data=ChanFactCb(action="stats"))
@@ -96,7 +96,7 @@ async def cb_chanf_menu(callback: CallbackQuery) -> None:
         "• <b>Массовое создание</b> — несколько каналов с умными задержками\n"
         "• <b>Импорт из Telegram</b> — подключить уже существующие каналы\n"
         "• <b>Редактировать</b> — массово изменить название/описание\n"
-        "• <b>Массовая публикация</b> — опубликовать пост во все каналы\n"
+        "• <b>Публикация / рассылка</b> — опубликовать пост во все каналы\n"
         "• <b>Статистика</b> — подписчики, активность\n"
         "• <b>Генерация ссылок</b> — invite-ссылки для каналов",
         parse_mode="HTML",
@@ -165,7 +165,7 @@ async def cb_chanf_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "📥 <b>Импорт существующих каналов</b>\n\n"
         "Мы загрузим список каналов из выбранного аккаунта "
         "и подключим их к системе. После этого вы сможете:\n"
-        "• публиковать посты через «Массовая публикация»\n"
+        "• публиковать посты через «Публикация / рассылка»\n"
         "• делать invite и операции с участниками\n"
         "• видеть статистику\n\n"
         "Выберите аккаунт:",
@@ -294,12 +294,13 @@ async def cb_chanf_mass_pub_redirect(callback: CallbackQuery) -> None:
     from bot.callbacks import MassPubCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Открыть массовую публикацию", callback_data=MassPubCb(action="menu"))
+    kb.button(text="📤 Открыть публикацию / рассылку", callback_data=MassPubCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        "📤 <b>Массовая публикация</b>\n\n"
-        "Для массовой публикации используйте отдельный модуль Массовая публикация.",
+        "📤 <b>Публикация / рассылка</b>\n\n"
+        "Публикация в каналы живёт в отдельном модуле — он же рассылает "
+        "подписчикам бота и в личные сообщения.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

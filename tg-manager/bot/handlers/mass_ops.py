@@ -199,7 +199,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="🛠️ Построитель операций", callback_data=MassOpCb(action="build"))
     kb.button(
-        text="📤 Массовая публикация", callback_data=MassOpCb(action="mass_publish")
+        text="📤 Публикация / рассылка", callback_data=MassOpCb(action="mass_publish")
     )
     kb.button(
         text="🔗 Массовое вступление в каналы", callback_data=MassOpCb(action="bulk_join")
@@ -247,7 +247,7 @@ async def cb_mass_publish_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовая публикация — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Публикация / рассылка — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -269,7 +269,7 @@ async def cb_mass_publish_start(
     kb.adjust(2, 1, 1)
     await safe_edit(
         callback,
-        "📤 <b>Массовая публикация</b>\n\nШаг 1 из 5: Выберите тип целей:",
+        "📤 <b>Публикация / рассылка</b>\n\nШаг 1 из 5: Выберите тип целей:",
         reply_markup=kb.as_markup(),
     )
 
@@ -307,7 +307,7 @@ async def cb_mp_target_chosen(
     target_label = _TARGET_LABELS.get(_op_type, _op_type)
     await safe_edit(
         callback,
-        f"📤 <b>Массовая публикация</b>\n"
+        f"📤 <b>Публикация / рассылка</b>\n"
         f"Цели: <b>{target_label}</b>\n\n"
         "Шаг 2 из 5: Выберите фильтр аккаунтов:",
         reply_markup=kb.as_markup(),
@@ -349,7 +349,7 @@ async def cb_mp_filter_chosen(
         kb.adjust(1)
         await safe_edit(
             callback,
-            f"📤 <b>Массовая публикация</b>\n"
+            f"📤 <b>Публикация / рассылка</b>\n"
             f"Цели: <b>{target_label}</b>\n\n"
             "Шаг 2б: Выберите аккаунт:",
             reply_markup=kb.as_markup(),
@@ -383,7 +383,7 @@ async def cb_mp_filter_chosen(
         kb.adjust(1)
         await safe_edit(
             callback,
-            f"📤 <b>Массовая публикация</b>\n"
+            f"📤 <b>Публикация / рассылка</b>\n"
             f"Цели: <b>{target_label}</b>\n\n"
             "Шаг 2б: Выберите кластер:",
             reply_markup=kb.as_markup(),
@@ -411,7 +411,7 @@ async def cb_mp_filter_chosen(
         kb.adjust(1)
         await safe_edit(
             callback,
-            f"📤 <b>Массовая публикация</b>\n"
+            f"📤 <b>Публикация / рассылка</b>\n"
             f"Цели: <b>{target_label}</b>\n\n"
             "Шаг 2б: Выберите пул аккаунтов:",
             reply_markup=kb.as_markup(),
@@ -470,7 +470,7 @@ async def _ask_mp_text(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     text = (
-        f"📤 <b>Массовая публикация</b>\n"
+        f"📤 <b>Публикация / рассылка</b>\n"
         f"Цели: <b>{target_label}</b>\n\n"
         "Шаг 3 из 5: Введите текст поста (поддерживается HTML)\n"
         "или загрузите <b>.txt файл</b> с текстом:"
@@ -497,7 +497,7 @@ async def _proceed_mp_text(text: str, message: Message, state: FSMContext) -> No
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        "📤 <b>Массовая публикация</b>\n\nШаг 4 из 5: Выберите задержку между постами:",
+        "📤 <b>Публикация / рассылка</b>\n\nШаг 4 из 5: Выберите задержку между постами:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -763,7 +763,7 @@ async def cb_mp_confirm(
     await safe_edit(
         callback,
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
-        f"Тип: 📤 Массовая публикация\n"
+        f"Тип: 📤 Публикация / рассылка\n"
         f"Цели: <b>{target_label}</b>\n"
         f"Каналов: <b>~{channel_count}</b>\n"
         f"Задержка: <b>{delay_label}</b>"
@@ -2486,7 +2486,7 @@ async def cb_bulk_leave_confirm(
 _OP_TYPE_META = {
     "mass_publish": {
         "icon": "📤",
-        "label": "Массовая публикация",
+        "label": "Публикация / рассылка",
         "desc": "Отправить пост во все каналы/группы",
         "plan": "starter",
     },
