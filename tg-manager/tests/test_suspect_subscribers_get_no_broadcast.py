@@ -135,3 +135,23 @@ def test_miniapp_preview_counts_the_same_audience():
         chunk = _flat(body[i: i + 220])
         assert "is_blocked=false" in chunk and "suspect=false" in chunk, (
             f"{handler}: счётчик обещает больше, чем уйдёт:\n{chunk}")
+
+
+def test_admin_broadcast_through_bots_skips_suspects_and_marks_blocks():
+    """Рассылка администратора через управляемых ботов — тоже отправка.
+
+    У неё своя выборка и своя пометка «мёртвых»: категорию недоставки она
+    складывала в один список, поэтому заблокировавший получал только
+    `is_active=FALSE`, а след блокировки терялся. И накрученных она не
+    отсекала, хотя flood_guard помечает их ровно затем.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "bot" / "handlers" / "admin.py").read_text(encoding="utf-8")
+    i = src.index("SELECT user_id FROM bot_users ")
+    chunk = _flat(src[i: i + 400])
+    assert "is_blocked,false)=false" in chunk, chunk
+    assert "suspect,false)=false" in chunk, (
+        "админская рассылка через ботов берёт накрученных:\n" + chunk)
+
+    j = src.index("UPDATE bot_users SET is_active=FALSE, is_blocked=TRUE")
+    assert j > 0, "блокировка снова неотличима от удалённого аккаунта"

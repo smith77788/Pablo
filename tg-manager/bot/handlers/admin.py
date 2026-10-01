@@ -1889,13 +1889,22 @@ async def _do_broadcast_bots(msg: Message, pool: asyncpg.Pool, http: aiohttp.Cli
     # выглядит необъяснимо. Большинство «ошибок» при рассылке через ботов —
     # это пользователи, заблокировавшие бота или удалившие аккаунт.
     err_cats = {"blocked": 0, "deactivated": 0, "not_started": 0, "flood": 0, "other": 0}
-    dead_to_mark: list[tuple[int, int]] = []  # (bot_id, user_id) для деактивации
+    # Причину недоставки держим рядом с адресатом: «заблокировал» и «удалился»
+    # выводят из аудитории одинаково, но блокировку надо ещё и отметить. Без
+    # неё единственным следом остаётся is_active=FALSE, неотличимый от
+    # удалённого аккаунта, и фильтры is_blocked=FALSE (воронки, сеть ботов)
+    # считают такого человека незаблокированным.
+    dead_to_mark: list[tuple[int, int]] = []     # (bot_id, user_id) — удалились
+    blocked_to_mark: list[tuple[int, int]] = []  # (bot_id, user_id) — заблокировали
     for b in bots:
         try:
             audience = await pool.fetch(
                 "SELECT user_id FROM bot_users "
                 "WHERE bot_id=$1 AND COALESCE(is_active,true)=true "
-                "AND COALESCE(is_blocked,false)=false ORDER BY user_id",
+                "AND COALESCE(is_blocked,false)=false "
+                # Накрученных сюда не берём: flood_guard помечает их именно
+                # затем, чтобы они не попадали в рассылки.
+                "AND COALESCE(suspect,false)=false ORDER BY user_id",
                 b["bot_id"],
             )
         except Exception:
@@ -1917,7 +1926,9 @@ async def _do_broadcast_bots(msg: Message, pool: asyncpg.Pool, http: aiohttp.Cli
                 err_cats[cat if cat in err_cats else "other"] += 1
                 # «Мёртвые» подписчики (заблокировали/удалились) — деактивируем,
                 # чтобы следующие рассылки их не били и статистика очистилась.
-                if cat in ("blocked", "deactivated"):
+                if cat == "blocked":
+                    blocked_to_mark.append((b["bot_id"], u["user_id"]))
+                elif cat == "deactivated":
                     dead_to_mark.append((b["bot_id"], u["user_id"]))
             await asyncio.sleep(0.05)
         bots_done += 1
@@ -1938,9 +1949,19 @@ async def _do_broadcast_bots(msg: Message, pool: asyncpg.Pool, http: aiohttp.Cli
                 "UPDATE bot_users SET is_active=FALSE WHERE bot_id=$1 AND user_id=$2",
                 dead_to_mark,
             )
-            cleaned = len(dead_to_mark)
+            cleaned += len(dead_to_mark)
         except Exception:
             log_exc_swallow(log, "broadcast_bots: deactivate dead users failed")
+    if blocked_to_mark:
+        try:
+            await pool.executemany(
+                "UPDATE bot_users SET is_active=FALSE, is_blocked=TRUE "
+                "WHERE bot_id=$1 AND user_id=$2",
+                blocked_to_mark,
+            )
+            cleaned += len(blocked_to_mark)
+        except Exception:
+            log_exc_swallow(log, "broadcast_bots: mark blocked users failed")
     breakdown = (
         f"   • заблокировали бота: <b>{err_cats['blocked']}</b>\n"
         f"   • удалённые аккаунты: <b>{err_cats['deactivated']}</b>\n"

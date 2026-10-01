@@ -58,7 +58,15 @@ def pool():
     import asyncpg
 
     async def _mk():
-        p = await asyncpg.create_pool(DSN, min_size=1, max_size=4)
+        # lock_timeout: схему ниже накатывают ВСЕ модули на живой базе, а
+        # `CREATE TABLE IF NOT EXISTS` берёт блокировку таблицы. Если
+        # предыдущий модуль оставил открытую транзакцию (а закрытый цикл
+        # событий именно это и делает), накат встаёт намертво и весь прогон
+        # висит без единого сообщения. С таймаутом файл просто пропускается —
+        # таблица к этому моменту всё равно уже создана.
+        p = await asyncpg.create_pool(
+            DSN, min_size=1, max_size=4,
+            server_settings={"lock_timeout": "3000"})
         files = ["schema.sql"] + sorted(
             glob.glob(os.path.join(ROOT, "schema_v*.sql")),
             key=lambda f: int(re.search(r"schema_v(\d+)", f).group(1)))
