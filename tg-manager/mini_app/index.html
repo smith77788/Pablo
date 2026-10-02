@@ -1479,7 +1479,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="hint" style="font-size:11px;color:var(--hint);margin-top:4px">Основной текст — вариант A. Каждый вариант уйдёт своей равной доле. <span onclick="openAbResults()" style="color:var(--accent);cursor:pointer">Результаты последнего A/B →</span></div>
       </div>
     </div>
-    <label style="display:block;font-size:12px;color:var(--hint);margin:8px 0 2px">📎 Медиа (необязательно, до 50 МБ):</label>
+    <label style="display:block;font-size:12px;color:var(--hint);margin:8px 0 2px">📎 Медиа (необязательно, до 50 МБ)</label>
     <input type="file" id="ccwFile" style="width:100%;box-sizing:border-box;font-size:12px">
     <div id="ccwErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitContactWrite()">🚀 Отправить</button>
@@ -4236,8 +4236,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <button class="btn btn-s" id="cfSaveCredsBtn" style="width:100%;font-size:13px;padding:9px 6px" onclick="saveCfCreds()">💾 Сохранить доступы</button>
         </div>
       </details>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="number" id="cfPoolCount" value="10" min="1" max="100" class="inp" style="width:80px" title="Сколько воркеров (0/пусто = по числу аккаунтов)">
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <!-- Голое поле с числом «10» рядом с кнопкой не говорило, что это за
+             число: пояснение жило в title, а подсказка по наведению на телефоне
+             не показывается никогда. -->
+        <div style="flex:0 0 auto"><label style="font-size:11px;color:var(--hint);display:block;margin-bottom:3px">Воркеров</label><input type="number" id="cfPoolCount" value="10" min="1" max="100" class="inp" style="width:80px" title="Сколько воркеров (0 или пусто — по числу аккаунтов)"></div>
         <button class="btn btn-p" id="cfDeployBtn" style="flex:1 1 auto;font-size:13px;padding:9px 6px" onclick="deployCfPool()">☁️ Задеплоить пул</button>
       </div>
       <div id="cfAutoHint" style="font-size:12px;opacity:.7;margin-top:6px"></div>
@@ -4562,8 +4565,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="growthHubTotals" style="display:flex;gap:8px;padding:6px 16px 4px;flex-wrap:wrap"></div>
     <div class="sec">🎯 Цель роста</div>
     <div style="display:flex;gap:8px;padding:4px 0 2px;align-items:flex-end;flex-wrap:wrap">
-      <div style="flex:1;min-width:110px"><label style="font-size:11px;color:var(--hint)">+подписчиков</label><input type="number" id="ghGoal" value="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
-      <div style="flex:1;min-width:90px"><label style="font-size:11px;color:var(--hint)">за дней</label><input type="number" id="ghDays" value="14" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <div style="flex:1;min-width:110px"><label style="font-size:11px;color:var(--hint)">Сколько подписчиков</label><input type="number" id="ghGoal" value="1000" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
+      <div style="flex:1;min-width:90px"><label style="font-size:11px;color:var(--hint)">За сколько дней</label><input type="number" id="ghDays" value="14" min="1" class="inp" style="width:100%;box-sizing:border-box"></div>
       <button class="btn btn-p" style="flex:0 0 auto" onclick="runGrowthPlan()">План →</button>
     </div>
     <div id="growthHubPlan" style="padding:2px 16px"></div>
