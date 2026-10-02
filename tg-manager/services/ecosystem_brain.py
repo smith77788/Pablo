@@ -1531,27 +1531,89 @@ async def sync_ecosystem_members(
     ok_count = 0
     removed_count = 0
 
+    # Один запрос на ТИП объекта, а не на участника. Раньше цикл делал fetchrow
+    # на каждого участника плюс отдельный DELETE на каждого выпавшего:
+    # экосистема на триста аккаунтов — это триста обращений к базе подряд,
+    # и всё это внутри запроса владельца.
+    #
+    # Сбой выборки типа НЕ означает «участников больше нет»: при пустой карте
+    # цикл удалил бы из экосистемы всех. Поэтому тип с упавшей выборкой
+    # пропускается целиком (fail-open) — лучше несинхронизированный отчёт, чем
+    # вычищенная по ошибке базы экосистема.
+    _by_type: dict[str, list[int]] = {}
+    for _m in members:
+        try:
+            _by_type.setdefault(_m["object_type"], []).append(int(_m["object_id"]))
+        except (TypeError, ValueError):
+            continue
+
+    _accounts: dict[int, dict] = {}
+    _proxies: dict[int, dict] = {}
+    _alive_channels: set[int] = set()
+    _alive_bots: set[int] = set()
+    _failed_types: set[str] = set()
+
+    async def _prefetch(types: tuple[str, ...], sql: str, sink) -> None:
+        ids = sorted({i for t in types for i in _by_type.get(t, [])})
+        if not ids:
+            return
+        try:
+            for r in await pool.fetch(sql, ids, owner_id):
+                sink(r)
+        except Exception as e:
+            _failed_types.update(types)
+            log.warning("sync_members eco=%d: выборка %s не удалась (%s) — "
+                        "участники этих типов пропущены, ничего не удаляем",
+                        ecosystem_id, "/".join(types), e)
+
+    await _prefetch(
+        ("account",),
+        "SELECT id, is_active, acc_status, trust_score, "
+        "COALESCE(first_name, phone, 'id'||id::text) AS label "
+        "FROM tg_accounts WHERE id = ANY($1::bigint[]) AND owner_id=$2",
+        lambda r: _accounts.__setitem__(int(r["id"]), dict(r)),
+    )
+    await _prefetch(
+        ("proxy",),
+        "SELECT id, is_active, is_alive, proxy_url FROM user_proxies "
+        "WHERE id = ANY($1::bigint[]) AND owner_id=$2",
+        lambda r: _proxies.__setitem__(int(r["id"]), dict(r)),
+    )
+    # Каналы живут в двух таблицах (managed_channels по channel_id и
+    # tg_channels по id) — объединение, как и было в поштучной проверке.
+    await _prefetch(
+        ("channel", "group"),
+        "SELECT channel_id AS oid FROM managed_channels "
+        "WHERE channel_id = ANY($1::bigint[]) AND owner_id=$2",
+        lambda r: _alive_channels.add(int(r["oid"])),
+    )
+    await _prefetch(
+        ("channel", "group"),
+        "SELECT id AS oid FROM tg_channels WHERE id = ANY($1::bigint[]) AND owner_id=$2",
+        lambda r: _alive_channels.add(int(r["oid"])),
+    )
+    await _prefetch(
+        ("bot",),
+        "SELECT bot_id AS oid FROM managed_bots "
+        "WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
+        lambda r: _alive_bots.add(int(r["oid"])),
+    )
+
+    # Удаления копятся и уходят одним запросом на тип.
+    to_delete: dict[str, list[int]] = {}
+
     for m in members:
         otype = m["object_type"]
         oid = m["object_id"]
+        if otype in _failed_types:
+            continue
 
         try:
             if otype == "account":
-                row = await pool.fetchrow(
-                    "SELECT id, is_active, acc_status, trust_score, "
-                    "COALESCE(first_name, phone, 'id'||id::text) AS label "
-                    "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-                    oid,
-                    owner_id,
-                )
+                row = _accounts.get(int(oid))
                 if not row:
                     removed_count += 1
-                    await pool.execute(
-                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
-                        ecosystem_id,
-                        otype,
-                        oid,
-                    )
+                    to_delete.setdefault(otype, []).append(int(oid))
                 elif row["acc_status"] == "banned":
                     stale.append(
                         {
@@ -1583,19 +1645,10 @@ async def sync_ecosystem_members(
                     ok_count += 1
 
             elif otype == "proxy":
-                row = await pool.fetchrow(
-                    "SELECT id, is_active, is_alive, proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2",
-                    oid,
-                    owner_id,
-                )
+                row = _proxies.get(int(oid))
                 if not row:
                     removed_count += 1
-                    await pool.execute(
-                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
-                        ecosystem_id,
-                        otype,
-                        oid,
-                    )
+                    to_delete.setdefault(otype, []).append(int(oid))
                 elif not row["is_active"]:
                     stale.append(
                         {
@@ -1618,44 +1671,19 @@ async def sync_ecosystem_members(
                     ok_count += 1
 
             elif otype in ("channel", "group"):
-                # Channels are added from managed_channels (channel_id); check there first,
-                # then fall back to tg_channels so both sources work correctly.
-                row = await pool.fetchrow(
-                    "SELECT 1 FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
-                    oid,
-                    owner_id,
-                )
-                if not row:
-                    row = await pool.fetchrow(
-                        "SELECT id FROM tg_channels WHERE id=$1 AND owner_id=$2",
-                        oid,
-                        owner_id,
-                    )
-                if not row:
+                # Канал может лежать в managed_channels (по channel_id) или в
+                # tg_channels (по id) — выше собрано объединение обеих таблиц,
+                # как и было в поштучной проверке.
+                if int(oid) not in _alive_channels:
                     removed_count += 1
-                    await pool.execute(
-                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
-                        ecosystem_id,
-                        otype,
-                        oid,
-                    )
+                    to_delete.setdefault(otype, []).append(int(oid))
                 else:
                     ok_count += 1
 
             elif otype == "bot":
-                row = await pool.fetchrow(
-                    "SELECT id FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-                    oid,
-                    owner_id,
-                )
-                if not row:
+                if int(oid) not in _alive_bots:
                     removed_count += 1
-                    await pool.execute(
-                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
-                        ecosystem_id,
-                        otype,
-                        oid,
-                    )
+                    to_delete.setdefault(otype, []).append(int(oid))
                 else:
                     ok_count += 1
             else:
@@ -1663,6 +1691,19 @@ async def sync_ecosystem_members(
 
         except Exception as e:
             log.debug("sync_members eco=%d obj=%s/%d: %s", ecosystem_id, otype, oid, e)
+
+    for _otype, _ids in to_delete.items():
+        try:
+            await pool.execute(
+                "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 "
+                "AND object_id = ANY($3::bigint[])",
+                ecosystem_id, _otype, _ids,
+            )
+        except Exception as e:
+            # Не удалилось — не врать в отчёте, что удалено.
+            removed_count -= len(_ids)
+            log.warning("sync_members eco=%d: удаление %s×%d не удалось: %s",
+                        ecosystem_id, _otype, len(_ids), e)
 
     await record_event(
         pool,
