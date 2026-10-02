@@ -808,6 +808,7 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
             "  FROM (SELECT target, bool_or(status='ok') AS ok "
             "          FROM operation_log "
             "         WHERE op_id = ANY($1::bigint[]) AND target IS NOT NULL "
+            + _obus_reg.REAL_TARGET_SQL +
             "           AND status IN ('ok', 'error') "
             "         GROUP BY target) t",
             await journal_op_ids(pool, op_id),
@@ -856,6 +857,7 @@ async def _own_journal_coverage(pool: "asyncpg.Pool", op_id: int) -> int:
             pool,
             "SELECT count(DISTINCT target) AS n FROM operation_log "
             " WHERE op_id=$1 AND target IS NOT NULL "
+            + _obus_reg.REAL_TARGET_SQL +
             "   AND status IN ('ok', 'error')",
             op_id, log_ctx=f"[journal_coverage op={op_id}]")
         return int(row["n"] or 0) if row else 0
@@ -1522,7 +1524,9 @@ async def _chain_welcome(pool, owner_id: int, op_id: int, params: dict) -> None:
             pool,
             "SELECT DISTINCT target FROM operation_log WHERE op_id=$1 AND status='ok' "
             "AND message='joined' AND target IS NOT NULL", op_id)
-        _meta = {"promote", "promote_trick"}
+        # Служебные строки журнала — общий список в operation_bus (здесь он
+        # когда-то и появился, но без 'link_fallback').
+        _meta = set(_obus_reg.SERVICE_TARGETS)
         targets = [r["target"] for r in (rows or []) if r["target"] and r["target"] not in _meta]
         if not targets:
             return
@@ -2870,7 +2874,8 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     rows = await _safe_fetch(
         pool,
         "SELECT DISTINCT target FROM operation_log "
-        " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND target IS NOT NULL",
+        " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND target IS NOT NULL"
+        + _obus_reg.REAL_TARGET_SQL,
         await journal_op_ids(pool, op_id),
         log_ctx=f"[completed_targets op={op_id}]",
     )
@@ -2936,6 +2941,7 @@ async def settled_targets(pool: asyncpg.Pool, op_id: int) -> dict[str, str]:
         "SELECT DISTINCT ON (target) target, status FROM operation_log "
         " WHERE op_id = ANY($1::bigint[]) AND status IN ('ok','skip') "
         "   AND target IS NOT NULL "
+        + _obus_reg.REAL_TARGET_SQL +
         " ORDER BY target, (status='ok') DESC",
         await journal_op_ids(pool, op_id),
         log_ctx=f"[settled_targets op={op_id}]",

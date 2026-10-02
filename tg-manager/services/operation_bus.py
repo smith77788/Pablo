@@ -26,6 +26,25 @@ log = logging.getLogger(__name__)
 # коротко, чтобы подавить намеренный повторный запуск позже.
 DEFAULT_DEDUP_WINDOW_SEC = 20
 
+# ── Служебные строки журнала целей ───────────────────────────────────────────
+# В operation_log исполнитель инвайта пишет не только цели, но и ШАГИ: выдачу
+# админки ('promote'), промоут-трюк ('promote_trick'), фолбэк ссылкой в ЛС
+# ('link_fallback'). Это строки о работе, а не о людях, и считать их целями
+# нельзя — иначе:
+#   * прогресс обгоняет аудиторию: «16 из 15» при 15 приглашённых;
+#   * размер повтора считается как «всего минус закрытые» и выходит меньше
+#     остатка — до трёх настоящих целей не пробуются повторно НИКОГДА;
+#   * `collect_failed_targets` возвращает «promote_trick» как цель, и повтор
+#     пытается пригласить пользователя с таким именем.
+# Знание об этом уже жило в одном месте (`_dm_invite_followup` в op_worker,
+# и даже там без 'link_fallback'); остальные пять читателей журнала считали
+# служебные строки целями. Правда одна — здесь.
+SERVICE_TARGETS: tuple[str, ...] = ("promote", "promote_trick", "link_fallback")
+# Готовый фрагмент для SQL: без параметров, чтобы вставлять в любой запрос, не
+# перенумеровывая $1..$N у вызывающего.
+REAL_TARGET_SQL = (
+    " AND target NOT IN ('promote', 'promote_trick', 'link_fallback') ")
+
 
 class PlanRequiredError(PermissionError):
     """Операция требует платной подписки, а у владельца её нет.
@@ -1204,6 +1223,7 @@ async def collect_failed_targets(pool: asyncpg.Pool, op_id: int, op_type: str) -
         rows = await pool.fetch(
             "SELECT target, status FROM operation_log "
             " WHERE op_id = ANY($1::bigint[]) AND target IS NOT NULL "
+            + REAL_TARGET_SQL +
             " ORDER BY step_num, id",
             await retry_family_ids(pool, op_id),
         )
@@ -1372,6 +1392,7 @@ async def closed_targets_count(pool: asyncpg.Pool, op_id: int) -> int:
         row = await pool.fetchrow(
             "SELECT count(DISTINCT target) AS n FROM operation_log "
             " WHERE op_id = ANY($1::bigint[]) AND target IS NOT NULL "
+            + REAL_TARGET_SQL +
             "   AND status = 'ok'",
             [int(i) for i in ids] or [int(op_id)])
         return int(row["n"] or 0) if row else 0

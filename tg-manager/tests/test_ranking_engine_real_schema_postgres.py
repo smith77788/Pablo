@@ -270,8 +270,10 @@ def test_stats_survive_a_broken_part(pool):
 
 def test_post_route_for_adding_a_keyword_is_registered():
     """Фронт добавляет ключ POST-ом; без маршрута кнопка отвечала 405."""
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"),
-               encoding="utf-8").read()
-    assert 'add_post("/api/miniapp/ranking/keywords"' in src, (
+    # Спрашиваем сам роутер, а не текст файла: группа «Рейтинг» вынесена в
+    # services/mini_app_ranking.py, и поиск подстроки в mini_app_api.py
+    # проверял бы расположение кода, а не наличие маршрута.
+    from tests.miniapp_routes import registered_routes
+    assert "POST /api/miniapp/ranking/keywords" in registered_routes(), (
         "маршрут POST /api/miniapp/ranking/keywords не зарегистрирован — "
         "экран «Рейтинг» нельзя наполнить")
