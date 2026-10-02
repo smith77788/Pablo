@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import ast
 import os
 import re
 
@@ -124,14 +125,26 @@ def test_stuck_alert_text_matches_actual_behaviour():
     Устаревшее обещание здесь хуже отсутствия текста.
     """
     body = _fn(_read("services/op_worker.py"), "_watchdog_alerts")
-    # Именно текст, который уходит владельцу, а не комментарий рядом с ним:
-    # выше по функции старая формулировка цитируется в пояснении к другому фиксу.
-    tail = body[body.index('lines.append(\n        "\\n<i>pending не разбирается'):]
-    tail = tail[:400]
+    # Ищем именно ту строку, которая уходит владельцу, по её смыслу, а не по
+    # дословному началу: формулировку переписывали (бот больше не говорит
+    # владельцу «pending»), и привязка к литералу делала проверку ложно-зелёной.
+    # Границы — один вызов `.append(...)`, то есть одно сообщение.
+    tail = ""
+    for call in ast.walk(ast.parse(body.strip())):
+        if not isinstance(call, ast.Call):
+            continue
+        if not (isinstance(call.func, ast.Attribute) and call.func.attr == "append"):
+            continue
+        seg = ast.dump(call)
+        if "помечается ошибкой" in seg:
+            tail = seg
+            break
+    assert tail, (
+        "в тексте алерта больше нет обещания про предел воскрешений: владелец "
+        "читает его и решает, ждать или вмешаться")
     assert "_MAX_REVIVES" in tail, (
         "текст обязан называть предел воскрешений, а не обещать вечный авто-сброс"
     )
-    assert "помечается ошибкой" in tail
 
 
 def test_metrics_module_accepts_the_value_argument():

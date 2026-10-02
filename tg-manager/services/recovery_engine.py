@@ -597,6 +597,11 @@ async def _queue_recovery(
                         """UPDATE operation_queue
                            SET status='pending', error_msg=$1,
                                started_at=NULL,
+                               -- Возобновление — новая попытка: накопленное
+                               -- ожидание флота к ней не относится, иначе первый
+                               -- же занятый флот закроет её словами «не
+                               -- дождались за N мин» с чужим N.
+                               acct_wait_since=NULL,
                                last_error=$1,
                                retry_count=retry_count+1,
                                scheduled_for=now() + ($2 * INTERVAL '1 second')

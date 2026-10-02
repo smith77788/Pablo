@@ -448,6 +448,11 @@ async def _release_op_for_circuit(pool: "asyncpg.Pool", op_id: int, cooldown_s: 
         # cooldown исполнитель считает прогресс заново, иначе done копится поверх
         # прошлого прогона → счётчик done>total (класс #8).
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        # Новая попытка, а не продолжение ожидания флота: накопленную отметку
+        # снимаем. Иначе операция, однажды подождавшая аккаунты, на первом же
+        # занятом флоте закрылась бы текстом «не дождались за N мин», где N —
+        # время с прошлого раза, а не с этого.
+        "acct_wait_since=NULL, "
         "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id,
@@ -1085,6 +1090,12 @@ async def _defer_op_for_flood(
     await _safe_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        # Часы ожидания флота снимаем: пауза назначена Telegram, а не дефицитом
+        # аккаунтов. Без этого операция, однажды подождавшая флот, после часовой
+        # флуд-паузы закрывалась текстом «не дождались свободных аккаунтов за
+        # 65 мин» — ровно то наказание за соблюдение правил платформы, которого
+        # этот путь и должен избегать.
+        "acct_wait_since=NULL, "
         "last_error=$3, scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, float(delay), (reason or "")[:300],
@@ -2378,6 +2389,10 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         # «done>total»/«34/17», как и в _maybe_requeue).
         """UPDATE operation_queue
            SET status = 'pending', started_at = NULL, done_items = 0,
+               -- Новая попытка: накопленное ожидание флота к ней не
+               -- относится, иначе первый же занятый флот закроет её словами
+               -- «не дождались за N мин», где N — время с прошлого раза.
+               acct_wait_since = NULL,
                revive_count = COALESCE(revive_count, 0) + 1,
                last_error = $1
            WHERE status = 'running'""",
@@ -2484,6 +2499,8 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
             # нуля, счётчик не должен копиться поверх прошлого (класс «done>total»).
             """UPDATE operation_queue
                 SET status = 'pending', started_at = NULL, done_items = 0,
+                    -- та же причина, что в _reset_stale_running
+                    acct_wait_since = NULL,
                     revive_count = COALESCE(revive_count, 0) + 1,
                     last_error = $3
                 WHERE status = 'running'
@@ -2772,6 +2789,8 @@ async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
             # operation_log (иначе класс «done > total»).
             """UPDATE operation_queue
                   SET status='pending', started_at=NULL, done_items=0,
+                      -- остановка воркера: следующий подхватит с чистого листа
+                      acct_wait_since=NULL,
                       last_error=$2
                 WHERE id = ANY($1::bigint[]) AND status='running'""",
             [int(i) for i in op_ids],
