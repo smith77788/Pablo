@@ -165,7 +165,8 @@ def test_the_screen_does_not_promise_execution_that_does_not_exist():
     """Пока шаги не исполняет никто, «Активен» нельзя оставлять без пояснения."""
     html = INDEX.read_text("utf-8")
     i = html.index('<div class="hdr-title">🔄 Воркфлоу</div>')
-    head = html[i:i + 2000]
+    # Границы — по разделу шаблонов, не окном фиксированной длины.
+    head = html[i:html.index('<div class="sec">Шаблоны воркфлоу</div>', i)]
     assert "пока не выполняется" in head, (
         "с экрана исчезло предупреждение, что сценарий не исполняется — "
         "«🟢 Активен» снова читается как «работает»")

@@ -209,8 +209,11 @@ def test_the_list_returns_the_description_so_the_screen_can_show_it():
 def test_a_planned_node_does_not_print_id_null():
     """Узел шаблона ещё не привязан к объекту: «ID: null» читается как поломка."""
     html = INDEX.read_text("utf-8")
+    # Границы — по соседнему выражению, а не окном фиксированной длины: от окна
+    # отрицательная проверка ниже молча выключилась бы, стоит коду сдвинуться
+    # (это ловит храповик test_no_silently_disabled_guards).
     i = html.index("txt('netNodesList'")
-    block = html[i:i + 700]
-    assert "ID: ' + n.object_id" in block or "n.object_id ?" in block, (
+    block = html[i:html.index("txt('netEdgesList'", i)]
+    assert "n.object_id ?" in block, (
         "подпись узла снова печатает object_id без проверки")
     assert "· ID: ${n.object_id}" not in block
