@@ -152,3 +152,41 @@ def test_the_door_survives_a_broken_channel():
         loop.run_until_complete(_go())
     finally:
         loop.close()
+
+
+def _run_op_task_source() -> str:
+    for name, body in _functions(_read("services/op_worker.py")):
+        if name == "_run_op_task":
+            return body
+    raise AssertionError("в op_worker.py нет функции _run_op_task")
+
+
+def test_a_close_that_changed_nothing_does_not_report_a_second_outcome():
+    """Успешный финал поверх уже закрытой строки не докладывается.
+
+    Строку могли закрыть, пока исполнитель работал: сторож зависших операций,
+    dead letter из recovery_engine, отмена владельцем в зазоре перед записью.
+    Статус в таком случае не переписывается — условие `status NOT IN
+    (терминальные)` даёт ноль строк. Но дальше шло всё остальное завершение по
+    ВЫЧИСЛЕННОМУ статусу: владельцу «✅ выполнена» по частичной операции,
+    продление расписания поверх закрытия и ВТОРОЙ исход той же операции в
+    метриках и подписанном аудите.
+
+    Путь падения эту развилку разбирает давно — здесь храповик на то, чтобы
+    успешный путь её не потерял. Проверяется порядок: результат записи
+    сохранён, проверен на ноль строк и путь прерван ДО доклада об исходе.
+    """
+    body = _run_op_task_source()
+    assert "_close_res = await _safe_execute(" in body, (
+        "результат закрывающей записи снова не сохраняется: ноль строк "
+        "(строку закрыл кто-то другой) опять неотличим от успешной записи")
+    flat = body.replace(" ", "")
+    guard = flat.find('ifstr(_close_res or"").strip().endswith("0")'.replace(" ", ""))
+    assert guard > 0, "нет проверки «запись не изменила ни одной строки»"
+    close = flat.find("_close_res=await_safe_execute(")
+    report = flat.find("await_announce_op_outcome(", close)
+    assert close < guard < report, (
+        "проверка нулевой записи стоит не между закрытием и докладом об "
+        f"исходе: {close} / {guard} / {report}")
+    assert "return" in flat[guard:report], (
+        "после нулевой записи путь не прерывается — исход доложат вторым")

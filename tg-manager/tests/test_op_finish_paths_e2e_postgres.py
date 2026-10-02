@@ -293,15 +293,17 @@ def test_crash_finish_reports_zero_rows_on_a_cancelled_operation(pool):
 # от 'running' до терминального статуса на настоящей базе. Связку в прежних
 # тестах видно только по исходнику, а она и есть то, что получает владелец.
 
-async def _drive(pool, handler, *, max_retries=0, total=3):
+async def _drive(pool, handler, *, max_retries=0, total=3, params=None):
     """Провести операцию через воркер с подменённым исполнителем."""
     from services import op_worker as w
 
     op_id = await _new_op(pool, status="pending", total_items=total,
                           max_retries=max_retries)
     rows = await pool.fetch(
-        "UPDATE operation_queue SET status='running', started_at=now() WHERE id=$1 "
-        "RETURNING id, owner_id, op_type, params", op_id)
+        "UPDATE operation_queue SET status='running', started_at=now(), "
+        "params=$2::jsonb WHERE id=$1 "
+        "RETURNING id, owner_id, op_type, params", op_id,
+        json.dumps(params or {}))
     _orig = w.handler_for
     w.handler_for = lambda _op_type: handler
     try:
@@ -411,3 +413,55 @@ def test_a_normal_limit_still_retries(pool):
     _op_id, row = _run(_go())
     assert row["status"] == "pending", (
         "операция с разрешёнными повторами обязана вернуться в очередь")
+
+
+def test_a_run_finished_after_the_row_was_closed_reports_nothing(pool):
+    """Строку закрыл сторож, исполнитель дошёл до конца — второго финала нет.
+
+    ЧТО БЫЛО. Сторож зависших операций (или dead letter из recovery_engine)
+    закрывает строку, пока исполнитель ещё жив. Тот доходит до конца и пишет
+    финал: условие `status NOT IN (терминальные)` статус не даёт переписать —
+    ноль строк, — а дальше шло всё остальное завершение по ВЫЧИСЛЕННОМУ статусу.
+    Владельцу уходило «✅ выполнена» по операции, минуту назад закрытой как
+    частичная; расписание повторяющейся операции продлевалось, хотя guard против
+    этого есть; исход уходил в метрики и подписанный аудит второй раз, и на
+    графике одна операция давала два разных исхода.
+    """
+    from services import metrics
+
+    async def _handler(p, bot, op_id, owner_id, params):
+        await _log_ok(p, op_id, ["a", "b", "c"])
+        # ровно то, что делает сторож: закрыл раньше, чем исполнитель вернулся
+        await p.execute(
+            "UPDATE operation_queue SET status='partial', finished_at=now(), "
+            "error_msg='закрыта сторожем' WHERE id=$1", op_id)
+        return {"status": "done", "ok": 3, "failed": 0, "summary": "Готово: 3"}
+
+    async def _go():
+        # Подписка нужна, иначе шина откажет продлению по тарифу и проверка
+        # «расписание не продлилось» прошла бы по чужой причине.
+        await pool.execute(
+            "INSERT INTO subscriptions(user_id, plan, is_active, expires_at) "
+            "VALUES($1,'pro',true, now() + interval '30 days') "
+            "ON CONFLICT DO NOTHING", OWNER)
+        before = await pool.fetchval(
+            "SELECT count(*) FROM operation_queue WHERE owner_id=$1", OWNER)
+        metrics.reset()
+        res = await _drive(pool, _handler, params={"repeat_interval_min": 60,
+                                                  "channel": "@c"})
+        after = await pool.fetchval(
+            "SELECT count(*) FROM operation_queue WHERE owner_id=$1", OWNER)
+        return res, before, after
+
+    (op_id, row), before, after = _run(_go())
+    assert row["status"] == "partial", (
+        f"чужое закрытие переписано успешным финалом: {dict(row)}")
+    assert after == before + 1, (
+        "расписание повторяющейся операции продлилось поверх закрытия: "
+        f"операций было {before}, стало {after}")
+    counters = metrics.snapshot().get("counters") or {}
+    done_marks = [k for k in counters if "infragram_operations_total" in k
+                  and "done" in k]
+    assert not done_marks, (
+        "исход доложен вторым, успешным: на графике одна операция даёт два "
+        f"разных исхода — {done_marks}")
