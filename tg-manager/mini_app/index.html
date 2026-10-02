@@ -9013,6 +9013,34 @@ document.addEventListener('keydown', function(ev) {
 });
 // Единый делегированный слушатель: ловит клики по плиткам каталога и
 // быстрым действиям, чтобы запоминать реально используемые разделы.
+// Главная кнопка экрана запускает долгое действие — проверку флота, рассылку,
+// разогрев — и до этой правки на экране не менялось ничего: ни подписи, ни
+// вида. Палец считает, что промахнулся, и жмёт второй раз, а действие уходит
+// дважды. Замер нашёл 29 таких кнопок.
+//
+// Разметку и обработчики не трогаем: ловим нажатие на уровне документа и
+// сразу после того, как сработал собственный обработчик кнопки (отсюда
+// setTimeout 0 — выключить кнопку прямо в разборе события значит рискнуть
+// тем, что обработчик не успеет выполниться), показываем песочные часы и
+// запираем кнопку на 1200мс. Срок фиксированный, а не «пока идёт запрос»:
+// связать кнопку с её запросом здесь нечем, а от второго тапа подряд —
+// того единственного, что реально вредит, — хватает и этого.
+document.addEventListener('click', function(ev) {
+  const b = ev.target && ev.target.closest && ev.target.closest('button.btn-p');
+  // В окнах не трогаем: там мастера, где «Далее» жмут подряд по шагам, и
+  // запуск в окне обычно уже сам гасит свою кнопку.
+  if (!b || b.disabled || b.dataset.waiting || (b.closest && b.closest('.mbg'))) return;
+  const was = b.innerHTML;
+  b.dataset.waiting = '1';
+  setTimeout(function(){
+    b.disabled = true; b.style.opacity = '.65'; b.innerHTML = '⏳';
+    setTimeout(function(){
+      b.disabled = false; b.style.opacity = ''; b.innerHTML = was;
+      delete b.dataset.waiting;
+    }, 1200);
+  }, 0);
+}, true);
+
 document.addEventListener('click', function(ev) {
   try {
     const tile = ev.target.closest && ev.target.closest('.mgmt-tile, .qa-tile');
