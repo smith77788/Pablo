@@ -278,10 +278,14 @@ function _vaArea(id, label, val, max, ph, rows) {
 function _vaBusinessHtml(b) {
   const share = b.sales_share == null ? '' : String(b.sales_share);
   return '<div class="field-note" style="margin:0 0 10px;font-weight:600">Бизнес — на это администратор опирается в каждом посте</div>' +
+    _vaBizFill(b) +
     '<div class="field"><label>Цель канала</label><select id="vaGoal">' +
       _VA_GOALS.map(function (g) { return _vaOpt(g[0], b.goal || '', g[1]); }).join('') + '</select></div>' +
     _vaArea('vaProducts', 'Товары и услуги с ценами', b.products, 1500, 'Например: стрижка — 1500 ₽, окрашивание — от 4000 ₽', 3) +
-    _vaArea('vaPromo', 'Действующая акция', b.promo, 300, 'Например: −20% на первый визит до конца месяца') +
+    _vaArea('vaPromo', 'Действующая акция', b.promo, 300, 'Например: −20% на первый визит') +
+    '<div class="field"><label>Акция действует до</label><input type="date" id="vaPromoUntil" value="' + esc(b.promo_until || '') + '">' +
+      '<div class="field-note">' + (_vaPromoOver(b) ? '⚠️ Срок прошёл — администратор больше не упоминает эту акцию.' :
+        'Пусто — бессрочно. После этой даты акция пропадёт из постов сама.') + '</div></div>' +
     _vaArea('vaUsp', 'Чем вы лучше конкурентов', b.usp, 300, 'Например: выезд в день обращения, гарантия год') +
     _vaArea('vaPains', 'Боли и частые вопросы клиентов', b.pains, 600, 'С чем к вам приходят и о чём спрашивают') +
     _vaArea('vaFacts', 'Факты и цифры, которые можно приводить', b.facts, 800, 'Опыт, число клиентов, сроки. Других цифр ИИ не выдумает', 3) +
@@ -299,10 +303,32 @@ function _vaBusinessHtml(b) {
     '<div class="field-note" style="margin:0 0 14px">Доля считается по последним 10 постам: лишний продающий пост администратор заменит полезным.</div>';
 }
 
+function _vaPromoOver(b) {
+  if (!b.promo || !b.promo_until) return false;
+  const d = new Date();
+  const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return b.promo_until < today;
+}
+
+// Что ещё не рассказано о бизнесе — с самого важного для точности постов.
+const _VA_BIZ_KEYS = [
+  ['goal', 'цель канала'], ['products', 'товары и цены'], ['facts', 'факты и цифры'],
+  ['pains', 'боли клиентов'], ['usp', 'чем вы лучше'], ['address', 'обращение'],
+  ['banned_topics', 'запретные темы'],
+];
+
+function _vaBizFill(b) {
+  const miss = _VA_BIZ_KEYS.filter(function (k) { return !b[k[0]]; });
+  const done = _VA_BIZ_KEYS.length - miss.length;
+  if (!miss.length) return '<div class="field-note" style="margin:0 0 12px">✅ Всё главное о бизнесе заполнено.</div>';
+  return '<div class="field-note" style="margin:0 0 12px">Заполнено ' + done + ' из ' + _VA_BIZ_KEYS.length +
+    '. Посты станут точнее, если указать: ' + miss.slice(0, 3).map(function (k) { return k[1]; }).join(', ') + '.</div>';
+}
+
 function _vaBusinessVal() {
   const share = _vaVal('vaShare');
   return {
-    goal: _vaVal('vaGoal') || '', products: _vaVal('vaProducts') || '', promo: _vaVal('vaPromo') || '',
+    goal: _vaVal('vaGoal') || '', products: _vaVal('vaProducts') || '', promo: _vaVal('vaPromo') || '', promo_until: _vaVal('vaPromoUntil') || '',
     usp: _vaVal('vaUsp') || '', pains: _vaVal('vaPains') || '', facts: _vaVal('vaFacts') || '',
     banned_topics: _vaVal('vaBanned') || '', competitors: _vaVal('vaRivals') || '',
     address: _vaVal('vaAddr') || '', sales_share: share === '' || share == null ? null : Number(share),

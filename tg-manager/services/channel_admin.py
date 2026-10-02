@@ -39,7 +39,7 @@ import logging
 import random
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Optional
 
 from services import channel_brain as cb
@@ -145,6 +145,12 @@ def validate_business(v: Any) -> tuple[dict, list[str]]:
             out["address"] = addr
         else:
             errors.append("Обращение: на «ты» или на «вы»")
+    until = str(v.get("promo_until") or "").strip()
+    if until:
+        try:
+            out["promo_until"] = date.fromisoformat(until).isoformat()
+        except ValueError:
+            errors.append("Срок акции: дата в формате ГГГГ-ММ-ДД")
     share = v.get("sales_share")
     if share not in (None, ""):
         try:
@@ -174,14 +180,54 @@ def competitor_names(row: dict) -> list[str]:
     return [n.strip() for n in re.split(r"[,;\n]", raw) if len(n.strip()) >= 2][:20]
 
 
+_VOWEL_END = "аяоеёыиуюйь"
+
+
+def _word_pattern(word: str) -> str:
+    """Слово названия → шаблон, который ловит его в любом падеже («Ромашка» → «в Ромашке»)."""
+    w = word.lower()
+    if len(w) >= 4 and re.fullmatch(r"[а-яё-]+", w):
+        stem = w[:-1] if w[-1] in _VOWEL_END else w
+        return re.escape(stem) + r"[а-яё]{0,3}"
+    return re.escape(w)
+
+
 def mentioned_competitors(text: str, names: list[str]) -> list[str]:
     low = (text or "").lower()
-    return [n for n in names if re.search(r"(?<!\w)" + re.escape(n.lower()) + r"(?!\w)", low)]
+    found = []
+    for n in names:
+        pat = r"\s+".join(_word_pattern(w) for w in n.split())
+        if pat and re.search(r"(?<!\w)" + pat + r"(?!\w)", low):
+            found.append(n)
+    return found
 
 
-def _business_lines(profile: dict) -> list[str]:
+def promo_active(b: dict, today: Optional[date] = None) -> bool:
+    """Акция задана и не закончилась (последний день срока — ещё действует)."""
+    if not b.get("promo"):
+        return False
+    until = b.get("promo_until")
+    if not until:
+        return True
+    try:
+        return date.fromisoformat(until) >= (today or datetime.now(timezone.utc).date())
+    except ValueError:
+        return True
+
+
+def _local_today(profile: dict) -> date:
+    tz = profile.get("tz_offset")
+    return (datetime.now(timezone.utc) + timedelta(hours=int(tz if tz is not None else 3))).date()
+
+
+def _business_lines(profile: dict, today: Optional[date] = None) -> list[str]:
     """Слова владельца о бизнесе — в промпт поста и плана."""
-    b = _business_obj(profile)
+    b = dict(_business_obj(profile))
+    today = today or _local_today(profile)
+    if not promo_active(b, today):
+        b.pop("promo", None)  # закончившуюся акцию не рекламируем
+    elif b.get("promo_until"):
+        b["promo"] += f" (действует до {date.fromisoformat(b['promo_until']).strftime('%d.%m')})"
     out: list[str] = []
     if b.get("goal"):
         out.append(f"Главная цель канала: {BUSINESS_GOALS[b['goal']]}")
@@ -696,7 +742,7 @@ def build_plan_prompt(profile: dict, slot_pillars: list[str], recent_texts: list
         lines.append(f"Пожелания владельца: {profile['notes']}")
     lines.extend(_brief_lines(profile))
     lines.extend(_business_lines(profile))
-    if _business_obj(profile).get("promo"):
+    if promo_active(_business_obj(profile), _local_today(profile)):
         lines.append("Продающие слоты строй вокруг действующей акции.")
     if recent_texts:
         lines.append("Недавние посты (темы не повторять):")

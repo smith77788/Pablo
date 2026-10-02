@@ -354,6 +354,28 @@ def test_competitor_mention_is_detected_by_whole_word():
     row = {"business": {"competitors": "Ромашка, Lux; Би"}}
     names = ca.competitor_names(row)
     assert names == ["Ромашка", "Lux", "Би"]
-    assert ca.mentioned_competitors("Не то что в ромашке — у нас Lux-сервис", names) == ["Lux"]
+    assert ca.mentioned_competitors("Не то что в ромашке — у нас Lux-сервис", names) == ["Ромашка", "Lux"]
     assert ca.mentioned_competitors("Ромашка рядом", names) == ["Ромашка"]
     assert ca.mentioned_competitors("Обычный пост", names) == []
+
+
+def test_competitor_found_in_any_case_form():
+    names = ca.competitor_names({"business": {"competitors": "Ромашка, Мебель Плюс, Lux"}})
+    assert ca.mentioned_competitors("Не то что в ромашке", names) == ["Ромашка"]
+    assert ca.mentioned_competitors("у мебели плюс дороже", names) == ["Мебель Плюс"]
+    assert ca.mentioned_competitors("Ромашковое поле и роман", names) == []
+    assert ca.mentioned_competitors("luxury-сервис", names) == []
+
+
+def test_expired_promo_leaves_prompts():
+    from datetime import date
+    b = {"promo": "−20%", "promo_until": "2026-10-05"}
+    clean, errors = ca.validate_settings({"business": b})
+    assert errors == [] and clean["business"] == b
+    assert ca.validate_settings({"business": {"promo_until": "5 октября"}})[1]
+    profile = {"business": b}
+    live = ca._business_lines(profile, today=date(2026, 10, 5))
+    assert any("−20% (действует до 05.10)" in x for x in live)
+    gone = ca._business_lines(profile, today=date(2026, 10, 6))
+    assert not any("−20%" in x for x in gone)
+    assert ca.promo_active({"promo": "x"}) and not ca.promo_active({"promo_until": "2030-01-01"})
