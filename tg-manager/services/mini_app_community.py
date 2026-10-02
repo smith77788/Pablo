@@ -29,9 +29,10 @@ def setup_routes(app: web.Application, pool) -> None:
         from services import nodes_engine
         try:
             return _json_resp({"nodes": await nodes_engine.list_community_nodes(pool, uid)})
-        except Exception as exc:
+        except Exception:
             log.exception("community_nodes_list uid=%d", uid)
-            return _err(str(exc), 500)
+            log.exception("community_nodes_list uid=%s", uid)
+            return _err("Не удалось загрузить список форумов", 500)
 
     async def community_node_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -53,9 +54,10 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             node = await nodes_engine.register_community_node(pool, uid, tg_chat_id, title, description)
             return _json_resp({"ok": True, "node": node})
-        except Exception as exc:
+        except Exception:
             log.exception("community_node_create uid=%d", uid)
-            return _err(str(exc), 500)
+            log.exception("community_node_create uid=%s", uid)
+            return _err("Не удалось создать форум", 500)
 
     async def community_node_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -165,9 +167,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("community_channel_add uid=%d", uid)
-            return _err(str(exc), 500)
+            log.exception("community_channel_add uid=%s", uid)
+            return _err("Не удалось подключить канал к форуму", 500)
 
     async def community_members_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -208,9 +211,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("community_liven uid=%d", uid)
-            return _err(str(exc), 500)
+            log.exception("community_liven uid=%s", uid)
+            return _err("Не удалось запустить оживление", 500)
 
     async def community_set_staff(request: web.Request) -> web.Response:
         """Назначить участников-флот ноды модераторами/админами: op community_set_staff."""
@@ -236,9 +240,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("community_set_staff uid=%d", uid)
-            return _err(str(exc), 500)
+            log.exception("community_set_staff uid=%s", uid)
+            return _err("Не удалось изменить роль участника", 500)
 
     app.router.add_get("/api/miniapp/community/nodes", community_nodes_list)
     app.router.add_post("/api/miniapp/community/node", community_node_create)

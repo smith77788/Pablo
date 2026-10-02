@@ -692,6 +692,14 @@ def _json_resp(data: Any, status: int = 200) -> web.Response:
     )
 
 
+# Что видит человек, когда на сервере сломалось. Раньше здесь был `str(exc)`:
+# внутренний текст исключения, по-английски — «'NoneType' object has no attribute
+# 'id'», «relation "vault_messages" does not exist». Владелец английского не
+# читает вовсе, а действовать по такому тексту нельзя и тому, кто читает.
+# Подробности уходят в лог, наружу — одна русская фраза.
+_INTERNAL_ERROR = "Внутренняя ошибка сервера. Повторите позже."
+
+
 def _err(msg: str, status: int = 400) -> web.Response:
     # Единственная дверь наружу для текста ошибки, а текст этот чаще всего —
     # str(исключения). Ошибки asyncpg несут строку подключения, ошибки Telethon
@@ -1699,7 +1707,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             raise  # штатные HTTP-ответы (404/302/…) — не глушим
         except Exception:
             log.exception("unhandled API error: %s %s", request.method, request.rel_url.path)
-            return _err("Внутренняя ошибка сервера. Повторите позже.", 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     @web.middleware
     async def compress_middleware(request: web.Request, handler) -> web.StreamResponse:
@@ -1979,9 +1987,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channel_rankings_check uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Dashboard ────────────────────────────────────────────────────────────
 
@@ -2378,7 +2386,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)
-            return _err("Failed to create auto reply", 500)
+            return _err("Не удалось создать автоответ", 500)
 
     async def toggle_auto_reply(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -2398,7 +2406,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
         except Exception:
-            return _err("Failed to toggle", 500)
+            log.exception("toggle_auto_reply")
+            return _err("Не удалось переключить", 500)
 
     async def delete_auto_reply(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -2415,7 +2424,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 reply_id, uid)
             return _json_resp({"ok": True})
         except Exception:
-            return _err("Failed to delete", 500)
+            log.exception("delete_auto_reply")
+            return _err("Не удалось удалить", 500)
 
     async def bot_funnels(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -2457,7 +2467,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
         except Exception:
-            return _err("Failed to toggle", 500)
+            log.exception("toggle_funnel")
+            return _err("Не удалось переключить", 500)
 
     # ── Broadcast ────────────────────────────────────────────────────────────
 
@@ -2579,7 +2590,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("create_broadcast bot=%d uid=%d", bot_id_int, uid)
-            return _err("Failed to create broadcast", 500)
+            return _err("Не удалось создать рассылку", 500)
 
     async def broadcast_recipients(request: web.Request) -> web.Response:
         """Точное число получателей для бота+сегмента — честный предпросмотр.
@@ -2735,7 +2746,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(result.get("error", "Failed"), 400)
         except Exception:
             log.exception("broadcast_schedule uid=%d bot=%d", uid, bot_id_int)
-            return _err("Failed to create scheduled broadcast", 500)
+            return _err("Не удалось создать отложенную рассылку", 500)
 
     async def broadcast_ab_test(request: web.Request) -> web.Response:
         """A/B тестирование рассылок: POST /api/miniapp/broadcast/ab_test"""
@@ -2767,7 +2778,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(result.get("error", "Failed"), 400)
         except Exception:
             log.exception("broadcast_ab_test uid=%d bot=%d", uid, bot_id_int)
-            return _err("Failed to create A/B test broadcast", 500)
+            return _err("Не удалось создать A/B-рассылку", 500)
 
     async def broadcast_analytics(request: web.Request) -> web.Response:
         """Аналитика рассылки: GET /api/miniapp/broadcast/{id}/analytics"""
@@ -2786,7 +2797,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(result.get("error", "Not found"), 404)
         except Exception:
             log.exception("broadcast_analytics uid=%d bc=%d", uid, bc_id)
-            return _err("Failed to get analytics", 500)
+            return _err("Не удалось получить аналитику", 500)
 
     # ── Channels ─────────────────────────────────────────────────────────────
 
@@ -3354,7 +3365,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": row["id"], "total_targets": total_targets})
         except Exception:
             log.exception("create_dm_campaign uid=%d", uid)
-            return _err("Failed to create campaign", 500)
+            return _err("Не удалось создать кампанию", 500)
 
     async def post_to_channel(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3406,7 +3417,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("post_to_channel ch=%d uid=%d", ch_id, uid)
-            return _err("Failed to enqueue post", 500)
+            return _err("Не удалось поставить публикацию в очередь", 500)
 
     async def pin_channel_last_post(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3437,7 +3448,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("pin_channel_last_post ch=%d uid=%d", ch_id, uid)
-            return _err("Failed to enqueue pin", 500)
+            return _err("Не удалось поставить закрепление в очередь", 500)
 
     async def channel_invite_link(request: web.Request) -> web.Response:
         """Сгенерировать/получить инвайт-ссылку канала (инлайн, один Telethon-вызов).
@@ -4008,7 +4019,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "deleted": deleted})
         except Exception as e:
             log.warning("clear_operations uid=%d: %s", uid, e)
-            return _err("Failed to clear", 500)
+            return _err("Не удалось очистить", 500)
 
     async def pause_operations(request: web.Request) -> web.Response:
         """Приостановить ОЧЕРЕДЬ: pending → paused.
@@ -4034,7 +4045,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "paused": paused})
         except Exception as e:
             log.warning("pause_operations uid=%d: %s", uid, e)
-            return _err("Failed to pause", 500)
+            return _err("Не удалось приостановить", 500)
 
     async def resume_operations(request: web.Request) -> web.Response:
         """Возобновить приостановленные: paused → pending (воркер подхватит).
@@ -4054,7 +4065,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "resumed": resumed})
         except Exception as e:
             log.warning("resume_operations uid=%d: %s", uid, e)
-            return _err("Failed to resume", 500)
+            return _err("Не удалось возобновить", 500)
 
     async def retry_operation(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -4178,7 +4189,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("retry_operation op_id=%d uid=%d", op_id, uid)
-            return _err("Failed to retry", 500)
+            return _err("Не удалось повторить", 500)
 
     # ── Deeplinks ────────────────────────────────────────────────────────────
 
@@ -4230,7 +4241,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
             log.exception("create_deeplink bot=%d uid=%d", bot_id, uid)
-            return _err("Failed to create deeplink", 500)
+            return _err("Не удалось создать ссылку", 500)
 
     async def delete_deeplink(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -4248,7 +4259,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception as e:
             log.warning("delete_deeplink link=%d uid=%d: %s", link_id, uid, e)
-            return _err("Failed to delete", 500)
+            return _err("Не удалось удалить", 500)
 
     # ── Engagement segments ───────────────────────────────────────────────────
 
@@ -4311,9 +4322,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("bot_note uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Не найдено", 404)
         return _json_resp({"note": row["note"] or ""})
@@ -4336,9 +4347,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid, note or None,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("save_bot_note uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if res == "UPDATE 0":
             return _err("Не найдено", 404)
         return _json_resp({"ok": True})
@@ -4358,9 +4369,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("bot_commands uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Не найдено", 404)
         try:
@@ -4368,9 +4379,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             import aiohttp as _ahttp
             async with _ahttp.ClientSession() as sess:
                 cmds = await bot_api.get_my_commands(sess, row["token"])
-        except Exception as exc:
+        except Exception:
             log.exception("bot_commands get_my_commands uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"commands": cmds})
 
     async def set_bot_commands(request: web.Request) -> web.Response:
@@ -4398,9 +4409,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("set_bot_commands uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Не найдено", 404)
         try:
@@ -4411,12 +4422,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     ok = await bot_api.set_my_commands(sess, row["token"], commands)
                 else:
                     ok = await bot_api.delete_my_commands(sess, row["token"])
-        except Exception as exc:
+        except Exception:
             log.exception("set_bot_commands tg_api uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if ok:
             return _json_resp({"ok": True, "count": len(commands)})
-        return _err("Telegram API error", 500)
+        return _err("Telegram отклонил запрос", 500)
 
     async def bot_profile(request: web.Request) -> web.Response:
         """Изменить профиль бота: имя, описание, краткое описание (Bot API)."""
@@ -4466,9 +4477,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     except Exception as e:
                         results[key] = False
                         results[key + "_error"] = str(e)[:80]
-        except Exception as exc:
+        except Exception:
             log.exception("bot_profile uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         ok_any = any(v is True for k, v in results.items() if not k.endswith("_error"))
         return _json_resp({"ok": ok_any, "results": results})
 
@@ -4549,18 +4560,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             owned = await pool.fetchval(
                 "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
-        except Exception as exc:
+        except Exception:
             log.exception("bot_stats uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not owned:
             return _err("Не найдено", 404)
         from database import db as _db
         try:
             stats = await _db.get_bot_stats(pool, bot_id)
             daily = await _db.get_audience_daily_growth(pool, bot_id, days=7)
-        except Exception as exc:
+        except Exception:
             log.exception("bot_stats bot=%d uid=%d", bot_id, uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         daily_list = [{"date": str(r["d"]), "count": int(r["cnt"])} for r in daily]
         return _json_resp({**stats, "daily_growth": daily_list})
 
@@ -4577,9 +4588,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("profile_setter_status uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"available_accounts": int(total or 0)})
 
     async def profile_setter_submit(request: web.Request) -> web.Response:
@@ -4603,9 +4614,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("profile_setter_submit fetchval uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         total = int(total or 0)
         use = min(acc_count, total) if acc_count > 0 else total
         if use == 0:
@@ -4618,9 +4629,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
                 uid, use,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("profile_setter_submit fetch uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         account_ids = [r["id"] for r in rows]
         params: dict = {"op": op, "account_ids": account_ids}
         if op == "name":
@@ -4651,9 +4662,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("profile_setter_submit insert uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(account_ids)})
 
     # ── Account Cleaner ────────────────────────────────────────────────────────
@@ -4671,9 +4682,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    ORDER BY added_at""",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("cleaner_accounts uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"accounts": [
             {
                 "id": r["id"],
@@ -4703,9 +4714,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
                 account_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("cleaner_submit fetchrow uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Аккаунт не найден или нет сессии", 404)
         label_map = {"leave_all_chats": "Выход из чатов", "delete_contacts": "Удаление контактов"}
@@ -4718,9 +4729,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("cleaner_submit insert uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
     # ── Topology Map ──────────────────────────────────────────────────────────
@@ -4757,9 +4768,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "accounts": accs, "channels": channels, "bots": bots,
                 "channel_links": links, "bot_users_total": bot_users_total,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("topology_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def topology_links(request: web.Request) -> web.Response:
         """Drill-down for the Topology Map: which account owns which channels/groups,
@@ -4813,9 +4824,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for r in bot_rows
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("topology_links uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Infra Analytics ────────────────────────────────────────────────────────
 
@@ -5009,9 +5020,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("accounts_check uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     def _build_profile_params(op: str, body: dict, ids: list) -> tuple:
         """Собрать params для profile_setter. Возвращает (params, label) или (None, error)."""
@@ -5208,9 +5219,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("accounts_mass uid=%d op=%s", uid, op)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_profile(request: web.Request) -> web.Response:
         """Сменить профиль аккаунта: имя/bio | аватар | 2FA (op).
@@ -5385,9 +5396,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("find_contact uid=%d", uid)
-            return _err(str(exc)[:160], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_login_code(request: web.Request) -> web.Response:
         """Получить последний код входа Telegram для аккаунта (инлайн, из чата 777000).
@@ -5536,9 +5547,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channel_edit uid=%d ch=%d op=%s", uid, ch_id, op)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channel_promote(request: web.Request) -> web.Response:
         """Назначить все аккаунты администраторами канала (promote_all_admins)."""
@@ -5566,9 +5577,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channels_mass(request: web.Request) -> web.Response:
         """Массовое действие над выбранными каналами.
@@ -5642,9 +5653,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channels_mass uid=%d op=%s", uid, op)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channel_add(request: web.Request) -> web.Response:
         """Вступить в существующий канал/группу по ссылке и добавить в управление."""
@@ -5675,9 +5686,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channel_add uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channel_remove(request: web.Request) -> web.Response:
         """Убрать канал из управления (запись managed_channels)."""
@@ -5694,9 +5705,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if str(res).endswith(" 0"):
                 return _err("Канал не найден", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("channel_remove uid=%d ch=%d", uid, ch_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_toggle(request: web.Request) -> web.Response:
         """Вкл/выкл аккаунта (is_active)."""
@@ -5717,9 +5728,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE tg_accounts SET is_active=$1 WHERE id=$2 AND owner_id=$3",
                 new_state, acc_id, uid)
             return _json_resp({"ok": True, "is_active": new_state})
-        except Exception as exc:
+        except Exception:
             log.exception("account_toggle uid=%d acc=%d", uid, acc_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_delete(request: web.Request) -> web.Response:
         """Удалить аккаунт."""
@@ -5740,9 +5751,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await record_manual_action(
                 pool, uid, "account_delete", target=str(acc_id))
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("account_delete uid=%d acc=%d", uid, acc_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_action(request: web.Request) -> web.Response:
         """Операция от имени одного аккаунта: scan | leave_all.
@@ -5785,9 +5796,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 from services.account_reset import reset_account
                 await reset_account(pool, acc_id, uid)
                 return _json_resp({"ok": True, "message": "⚡ Кулдаун и риск-карантин сброшены"})
-            except Exception as exc:
+            except Exception:
                 log.exception("reset_cooldown uid=%d acc=%d", uid, acc_id)
-                return _err(str(exc)[:120], 500)
+                return _err(_INTERNAL_ERROR, 500)
         elif act == "export_session":
             # СИНХРОННО (раньше фантомный op → r.session никогда не приходил).
             # Владелец экспортирует СВОЮ сессию (owner-scoped), расшифровываем.
@@ -5821,9 +5832,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("account_action uid=%d acc=%d act=%s", uid, acc_id, act)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_post_story(request: web.Request) -> web.Response:
         """Story Manager: опубликовать историю на СВОЙ аккаунт из media_url.
@@ -6181,9 +6192,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import vault_service as _v
         try:
             chats = await _v.list_chats(pool, uid, limit=200)
-        except Exception as exc:
+        except Exception:
             log.exception("vault_chats uid=%s", uid)
-            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"chats": chats, "total": len(chats)})
 
     async def vault_messages(request: web.Request) -> web.Response:
@@ -6216,9 +6227,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # недостижимы вовсе. offset здесь — шаг назад по истории.
             res = await _v.list_messages(pool, uid, chat_id, limit=limit, offset=offset,
                                          filters=filters, newest_first=True)
-        except Exception as exc:
+        except Exception:
             log.exception("vault_messages uid=%s chat=%s", uid, chat_id)
-            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"messages": res["messages"], "has_more": res["has_more"],
                            "limit": limit, "offset": offset})
 
@@ -6233,9 +6244,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import vault_service as _v
         try:
             items = await _v.recent_activity(pool, uid, kind, limit=100)
-        except Exception as exc:
+        except Exception:
             log.exception("vault_recent uid=%s", uid)
-            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"items": items, "kind": kind, "total": len(items)})
 
     async def vault_settings(request: web.Request) -> web.Response:
@@ -6272,9 +6283,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import vault_service as _v
         try:
             data = await _v.export_data(pool, uid, chat_id)
-        except Exception as exc:
+        except Exception:
             log.exception("vault_export uid=%s", uid)
-            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
         if fmt == "json":
             body = json.dumps(data, ensure_ascii=False, indent=2)
             ctype, ext = "application/json; charset=utf-8", "json"
@@ -6300,9 +6311,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import vault_service as _v
         try:
             res = await _v.search_messages(pool, uid, q, limit=100)
-        except Exception as exc:
+        except Exception:
             log.exception("vault_search uid=%s", uid)
-            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
         # complete=False → архив просмотрен не до конца. Без этого «ничего не
         # найдено» было бы неправдой: раньше поиск молча брал только последние
         # 4000 сообщений.
@@ -6342,9 +6353,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         _b = _Bot(token=token)
         try:
             res = await _v.fetch_media(pool, _b, uid, chat_id, msg_id)
-        except Exception as exc:
+        except Exception:
             log.exception("vault_media uid=%s chat=%s msg=%s", uid, chat_id, msg_id)
-            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
         finally:
             try:
                 await _b.session.close()
@@ -6391,9 +6402,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         _b = _Bot(token=token)
         try:
             res = await _v.send_reply(pool, _b, uid, chat_id, text)
-        except Exception as exc:
+        except Exception:
             log.exception("vault_reply uid=%s chat=%s", uid, chat_id)
-            return _err(f"Ошибка: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
         finally:
             try:
                 await _b.session.close()
@@ -6477,9 +6488,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
                 proxy_id, acc_id, uid)
             return _json_resp({"ok": True, "proxy_id": proxy_id})
-        except Exception as exc:
+        except Exception:
             log.exception("account_set_proxy uid=%d acc=%d", uid, acc_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_set_note(request: web.Request) -> web.Response:
         """Заметка к аккаунту (account_notes)."""
@@ -6499,9 +6510,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if str(res).endswith(" 0"):
                 return _err("Аккаунт не найден", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("account_set_note uid=%d acc=%d", uid, acc_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_set_meta(request: web.Request) -> web.Response:
         """Привязка аккаунта к кластеру и/или переименование метки (first_name)."""
@@ -6547,9 +6558,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if str(res).endswith(" 0"):
                 return _err("Аккаунт не найден", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("account_set_meta uid=%d acc=%d", uid, acc_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def account_check_one(request: web.Request) -> web.Response:
         """Проверить один аккаунт (с реактивацией если рабочий)."""
@@ -6574,9 +6585,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("account_check_one uid=%d acc=%d", uid, acc_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def diag(request: web.Request) -> web.Response:
         """Сквозная диагностика исполнения: креды/транспорт, аккаунты, очередь,
@@ -6876,9 +6887,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("boost_submit uid=%d type=%s", uid, btype)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def growth_submit(request: web.Request) -> web.Response:
         """Growth Agent: постинг промо-текста в нишевых группах."""
@@ -6924,9 +6935,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("growth_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ai_comment_submit(request: web.Request) -> web.Response:
         """AI Commenting: контекстные LLM-комментарии под постами целевых каналов.
@@ -6973,9 +6984,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("ai_comment_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def compliance_scan_submit(request: web.Request) -> web.Response:
         """Resource Compliance Scan: read-only проверка ресурсов на запрещённую
@@ -7018,9 +7029,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("compliance_scan_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def rotate_proxies(request: web.Request) -> web.Response:
         """Безопасная ротация назначений прокси по пулу (anti-detection), без потери
@@ -7040,9 +7051,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Единая реализация ротации (эффект+транзакция) — общая с ботом.
             result = await proxy_rotation.apply_rotation(pool, uid, acc_ids, pool_ids_in)
             return _json_resp(result)
-        except Exception as exc:
+        except Exception:
             log.exception("rotate_proxies uid=%d", uid)
-            return _err(str(exc)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def reporter_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -7067,9 +7078,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("reporter_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Quick Post ─────────────────────────────────────────────────────────────
 
@@ -7129,9 +7140,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("quick_post_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── SEO Overview ───────────────────────────────────────────────────────────
 
@@ -7174,9 +7185,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 ],
                 "keywords": [dict(k) for k in keywords],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("seo_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def seo_apply(request: web.Request) -> web.Response:
         """Применить AI SEO-предложение к каналу в один клик (замыкает петлю
@@ -7204,9 +7215,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services.seo_apply import apply_seo_to_channel
         try:
             res = await apply_seo_to_channel(pool, uid, chan_id, fields)
-        except Exception as exc:
+        except Exception:
             log.exception("seo_apply uid=%d chan=%d", uid, chan_id)
-            return _err(str(exc)[:200], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
         if res.get("ok"):
             return _json_resp(res)
@@ -7257,9 +7268,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import bot_reoptimizer
         try:
             res = await bot_reoptimizer.apply_bot_seo(pool, uid, bot_id, fields)
-        except Exception as exc:
+        except Exception:
             log.exception("seo_apply_bot uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc)[:200], 500)
+            return _err(_INTERNAL_ERROR, 500)
         if res.get("ok"):
             return _json_resp(res)
         return _err(res.get("error") or "Не удалось применить", 400)
@@ -7281,9 +7292,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    VALUES($1,$2,TRUE)
                    ON CONFLICT(owner_id) DO UPDATE SET auto_reoptimize=$2""",
                 uid, enabled)
-        except Exception as exc:
+        except Exception:
             log.exception("reopt_setting uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "enabled": enabled})
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
@@ -7308,9 +7319,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for r in recent
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("bot_factory_status uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ai_status(request: web.Request) -> web.Response:
         """Статус AI для ВЛАДЕЛЬЦА (раньше был только у админа) — чтобы понимать,
@@ -7340,9 +7351,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "providers": [{"name": p.name, "model": (p.models[0] if p.models else None)}
                               for p in provs],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("ai_status uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ai_test(request: web.Request) -> web.Response:
         """Live-проверка AI провайдеров для владельца (реюз ping_providers).
@@ -7357,9 +7368,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "any_ok": any(r.get("ok") for r in results),
                 "providers": results,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("ai_test uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def bot_add(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -7421,9 +7432,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "ok": True, "already_exists": False,
                 "bot_id": bot_id, "username": username, "first_name": first_name,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("bot_add uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def bot_factory_create(request: web.Request) -> web.Response:
         """Создание ботов со всеми настройками из Mini App."""
@@ -7516,9 +7527,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "first_name": bot_info.get("first_name", ""),
                 "applied_settings": applied,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("bot_factory_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def bot_factory_create_new(request: web.Request) -> web.Response:
         """Реальное создание НОВЫХ ботов через @BotFather (паритет с ботом).
@@ -7583,9 +7594,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _json_resp({"ok": True, "op_id": op_id, "count": total})
             except PermissionError as exc:
                 return _err(str(exc) or "Требуется подписка", 403)
-            except Exception as exc:
+            except Exception:
                 log.exception("bot_factory_create_new(multi) uid=%d", uid)
-                return _err(str(exc), 500)
+                return _err(_INTERNAL_ERROR, 500)
 
         acc_id = validate_integer(data.get("acc_id"), min_val=1)
         if not acc_id:
@@ -7626,9 +7637,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # operation_bus.PlanRequiredError наследует PermissionError:
             # отказ по тарифу отдаём честным 403, а не сырым 500.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("bot_factory_create_new uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channels_bulk_create(request: web.Request) -> web.Response:
         """Массовое создание каналов аккаунтом (паритет с ботом).
@@ -7708,9 +7719,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _json_resp({"ok": True, "op_id": op_id, "count": total})
             except PermissionError as exc:
                 return _err(str(exc) or "Требуется подписка", 403)
-            except Exception as exc:
+            except Exception:
                 log.exception("channels_bulk_create(multi) uid=%d", uid)
-                return _err(str(exc), 500)
+                return _err(_INTERNAL_ERROR, 500)
 
         acc_id = validate_integer(data.get("acc_id"), min_val=1)
         if not acc_id:
@@ -7749,9 +7760,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "count": count})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channels_bulk_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     _JOIN_DELAY_MODES = ("fast", "normal", "slow", "smart")
 
@@ -7828,9 +7839,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("_mass_membership_op(%s) uid=%d", kind, uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def _import_all_op(request: web.Request, kind: str) -> web.Response:
         """Импорт каналов/групп со ВСЕХ активных аккаунтов (паритет с ботом).
@@ -7865,9 +7876,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("_import_all_op(%s) uid=%d", kind, uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # Поля массового редактирования — ровно те, что понимают исполнители.
     # Источник правды: _exec_bulk_edit_channels / _exec_bulk_bot_edit /
@@ -7935,9 +7946,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "total": total, "field": field})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("_bulk_edit_op(%s) uid=%d", kind, uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def _alive_accounts(uid: int, wanted: list[int] | None = None) -> list[int]:
         """Свои активные аккаунты с сессией; пустой wanted = все."""
@@ -8354,9 +8365,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "can_launch": usable > 0,
                 "warnings": warnings,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("invite_preflight uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def invite_rights_check(request: web.Request) -> web.Response:
         """Живая проверка прав ДО запуска: есть ли среди аккаунтов админ ЦЕЛЕВОГО
@@ -8409,9 +8420,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "checked": checked,
                 "usable": len(rows),
             })
-        except Exception as exc:
+        except Exception:
             log.exception("invite_rights_check uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def organism_pulse(request: web.Request) -> web.Response:
         """Живой пульс организма: единый контекст + цепочки следующих действий."""
@@ -8421,9 +8432,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.organism import brain
             return _json_resp(await brain.pulse(pool, uid))
-        except Exception as exc:
+        except Exception:
             log.exception("organism_pulse uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def onboarding_status(request: web.Request) -> web.Response:
         """Чеклист активации новичка: 2–3 шага до первого результата, скрывается
@@ -8464,9 +8475,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.organism import digest
             return _json_resp(await digest.build(pool, uid))
-        except Exception as exc:
+        except Exception:
             log.exception("organism_digest uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def chatwarmup_sessions(request: web.Request) -> web.Response:
         """Список сессий разогрева чатов владельца."""
@@ -8476,9 +8487,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import chat_warmup
             return _json_resp({"ok": True, "sessions": await chat_warmup.list_sessions(pool, uid)})
-        except Exception as e:
+        except Exception:
             log.exception("chatwarmup_sessions uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def chatwarmup_create(request: web.Request) -> web.Response:
         """Создать сессию разогрева: {chat_ref, account_ids[], mode, topics, intensity}.
@@ -8510,9 +8521,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             s = await chat_warmup.create_session(pool, uid, chat_ref, acc_ids,
                                                  mode=mode, topics=topics, intensity=intensity)
             return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids)})
-        except Exception as e:
+        except Exception:
             log.exception("chatwarmup_create uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def chatwarmup_status(request: web.Request) -> web.Response:
         """Сменить статус сессии: {status: active|paused|stopped}."""
@@ -8541,9 +8552,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import fleet_doctor
             return _json_resp(await fleet_doctor.diagnose(pool, uid))
-        except Exception as e:
+        except Exception:
             log.exception("fleet_diagnose uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def chatwarmup_accounts(request: web.Request) -> web.Response:
         """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
@@ -8626,9 +8637,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 pass
             return _json_resp(rep)
-        except Exception as exc:
+        except Exception:
             log.exception("campaign_plan uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def fleet_governor_status(request: web.Request) -> web.Response:
         """Состояние глобального губернатора темпа: уровень, множитель, причина."""
@@ -8638,9 +8649,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services import fleet_governor
             return _json_resp(await fleet_governor.status(pool, uid))
-        except Exception as exc:
+        except Exception:
             log.exception("fleet_governor_status uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def invite_fleet_readiness(request: web.Request) -> web.Response:
         """Паритет с ботом (пре-флайт): по целевой группе показать готовность
@@ -8661,9 +8672,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # шлюза (полный флот проверяется по факту при самой операции).
             rep = await run_preflight(pool, uid, group, account_ids=_acc, limit=16)
             return _json_resp(rep)
-        except Exception as exc:
+        except Exception:
             log.exception("invite_fleet_readiness uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def invite_join_all(request: web.Request) -> web.Response:
         """Паритет с ботом: вступить всеми аккаунтами в группу (для прямого
@@ -8717,9 +8728,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("invite_join_all uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def invite_grant_admin(request: web.Request) -> web.Response:
         """В один тап: найти аккаунт-админа чата и через него выдать ОСТАЛЬНЫМ
@@ -8776,9 +8787,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("invite_grant_admin uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def invite_advice(request: web.Request) -> web.Response:
         """Аналитик инвайтинга: не «что произошло», а «что теперь делать».
@@ -8895,9 +8906,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         name = validate_string(data.get("name"), max_len=64) or "Анна"
         try:
             from services.dm_engine import expand_spintax, personalize
-        except Exception as exc:  # pragma: no cover - импорт движка
+        except Exception:  # pragma: no cover - импорт движка
             log.exception("dm_preview import uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         target = {"first_name": name, "username": name.lower()}
         # Показываем три варианта, а решаем «текст одинаковый для всех» по
         # восьми: на шаблоне из двух вариантов три совпавших броска выпадают в
@@ -8999,9 +9010,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "eta_seconds": int(len(usernames) * delay)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("dm_adhoc_send uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mass_targets(request: web.Request) -> web.Response:
         """Сколько адресатов получит массовое действие — ДО нажатия.
@@ -9126,9 +9137,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "channels": len(channel_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channels_bulk_post uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     _REPORT_REASONS = {"spam", "violence", "porn", "drugs", "fake", "personal", "other"}
 
@@ -9184,9 +9195,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("mass_report_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channels_bulk_edit(request: web.Request) -> web.Response:
         return await _bulk_edit_op(request, "channels")
@@ -9262,9 +9273,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 log.debug("accounts_revive: op_worker release skipped", exc_info=True)
             return _json_resp({"ok": True, "revived": revived})
-        except Exception as e:
+        except Exception:
             log.exception("accounts_revive uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def groups_announce(request: web.Request) -> web.Response:
         """Объявление во все группы аккаунта (паритет с ботом).
@@ -9324,9 +9335,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "groups": int(cnt)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("groups_announce uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channels_import_all(request: web.Request) -> web.Response:
         return await _import_all_op(request, "channels")
@@ -9368,9 +9379,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channels_reclassify uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channels_bulk_join(request: web.Request) -> web.Response:
         return await _mass_membership_op(request, "join")
@@ -9396,9 +9407,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE managed_bots SET is_active=FALSE WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("bot_remove uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Persona Hub ───────────────────────────────────────────────────────────
 
@@ -9424,9 +9435,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for r in rows
             ]})
-        except Exception as exc:
+        except Exception:
             log.exception("persona_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def persona_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9447,9 +9458,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE persona_profiles SET is_active=$1 WHERE id=$2 AND owner_id=$3", new_val, persona_id, uid
             )
             return _json_resp({"is_active": new_val})
-        except Exception as exc:
+        except Exception:
             log.exception("persona_toggle uid=%d persona=%d", uid, persona_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def persona_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9464,9 +9475,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("persona_delete uid=%d persona=%d", uid, persona_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def persona_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9539,9 +9550,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for r in recent
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("autoreg_status uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def autoreg_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9573,9 +9584,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("autoreg_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Phone Checker ─────────────────────────────────────────────────────────
 
@@ -9608,9 +9619,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("phone_check_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Referral Dashboard ────────────────────────────────────────────────────
 
@@ -9680,9 +9691,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for r in top_refs
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("referral_overview_detail uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── AI Memory ─────────────────────────────────────────────────────────────
 
@@ -9708,9 +9719,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for r in rows
             ]})
-        except Exception as exc:
+        except Exception:
             log.exception("ai_memory_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ai_memory_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9731,9 +9742,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, title, mem_body,
             )
             return _json_resp({"id": row["id"]})
-        except Exception as exc:
+        except Exception:
             log.exception("ai_memory_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ai_memory_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9748,9 +9759,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM botmother_memory WHERE id=$1 AND owner_id=$2", mem_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("ai_memory_delete uid=%d mem=%d", uid, mem_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Nodes Hub (Forum Workspaces) ───────────────────────────────────────────
 
@@ -9773,9 +9784,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {**dict(n), "created_at": n["created_at"].isoformat() if n["created_at"] else None}
                 for n in nodes
             ]})
-        except Exception as exc:
+        except Exception:
             log.exception("nodes_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def node_threads(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9804,9 +9815,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for t in threads
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("node_threads uid=%d node=%d", uid, node_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def node_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9837,9 +9848,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, tg_chat_id, node_type, name,
             )
             return _json_resp({"id": nid, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("node_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def node_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9854,9 +9865,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2", node_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("node_delete uid=%d node=%d", uid, node_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Gift Transfer ──────────────────────────────────────────────────────────
 
@@ -9896,9 +9907,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for i in items
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("gift_inventory uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def gift_scan_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -9913,9 +9924,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("gift_scan_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Mass Inviter ───────────────────────────────────────────────────────────
 
@@ -10119,9 +10130,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("mass_inviter_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Stars Hub ─────────────────────────────────────────────────────────────
 
@@ -10158,9 +10169,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for e in exps
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("stars_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def stars_experiment_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10194,9 +10205,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 int(bot_id), uid, name, content_type, price_a, price_b,
             )
             return _json_resp({"id": eid, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("stars_experiment_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def stars_experiment_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10217,9 +10228,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE stars_experiments SET status=$1 WHERE id=$2 AND owner_id=$3", new_status, eid, uid
             )
             return _json_resp({"status": new_status})
-        except Exception as exc:
+        except Exception:
             log.exception("stars_experiment_toggle uid=%d exp=%d", uid, eid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Ghost Engine ───────────────────────────────────────────────────────────
 
@@ -10241,9 +10252,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
                 for r in rows
             ]})
-        except Exception as exc:
+        except Exception:
             log.exception("ghost_profiles uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ghost_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10264,9 +10275,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2 AND owner_id=$3", new_val, profile_id, uid
             )
             return _json_resp({"enabled": new_val})
-        except Exception as exc:
+        except Exception:
             log.exception("ghost_toggle uid=%d profile=%d", uid, profile_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ghost_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10281,9 +10292,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("ghost_delete uid=%d profile=%d", uid, profile_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ghost_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10326,9 +10337,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 active_hours_start, active_hours_end, daily_cap, cooldown_minutes,
             )
             return _json_resp({"id": pid, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("ghost_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Bot Webhook ────────────────────────────────────────────────────────────
 
@@ -10345,9 +10356,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 bot_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("bot_webhook_info uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -10363,9 +10374,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "allowed_updates": info.get("allowed_updates", []),
                 "bot_username": row["username"],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("bot_webhook_info uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def bot_webhook_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10379,9 +10390,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             row = await pool.fetchrow(
                 "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
-        except Exception as exc:
+        except Exception:
             log.exception("bot_webhook_delete uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Бот не найден", 404)
         try:
@@ -10390,9 +10401,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 from services import bot_api as _bapi
                 result = await _bapi.delete_webhook(sess, row["token"])
             return _json_resp({"ok": result.get("ok", False)})
-        except Exception as exc:
+        except Exception:
             log.exception("bot_webhook_delete uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Reg Checker (Registration Date) ───────────────────────────────────────
 
@@ -10418,9 +10429,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for r in rows
             ]})
-        except Exception as exc:
+        except Exception:
             log.exception("reg_check_history uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def reg_check_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10442,9 +10453,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("reg_check_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── DM Campaigns ───────────────────────────────────────────────────────────
 
@@ -10488,9 +10499,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 d["created_at"] = r["created_at"].isoformat() if r["created_at"] else None
                 out.append(d)
             return _json_resp({"campaigns": out, "total": int(total or 0)})
-        except Exception as exc:
+        except Exception:
             log.exception("dm_campaigns_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def dm_campaign_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10658,9 +10669,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     uid, name, text, target_type, int(target_id) if target_id else None, total_targets,
                 )
             return _json_resp({"id": row["id"], "total_targets": total_targets})
-        except Exception as exc:
+        except Exception:
             log.exception("dm_campaign_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def dm_campaign_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10675,9 +10686,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT id, name, status FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
                 campaign_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("dm_campaign_launch fetch uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Не найдено", 404)
         if row["status"] == "running":
@@ -10713,9 +10724,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("dm_campaign_launch uid=%d cid=%d", uid, campaign_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def dm_campaign_update(request: web.Request) -> web.Response:
         """Отредактировать неидущую кампанию: название, текст и настройки темпа.
@@ -10836,9 +10847,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 f"WHERE id=${len(args) - 1} AND owner_id=${len(args)}",
                 *args,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("dm_campaign_update uid=%d cid=%d", uid, campaign_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True})
 
     async def dm_campaign_report(request: web.Request) -> web.Response:
@@ -10942,9 +10953,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 campaign_id, uid,
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("dm_campaign_pause uid=%d cid=%d", uid, campaign_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def dm_campaign_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10959,9 +10970,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2", campaign_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("dm_campaign_delete uid=%d cid=%d", uid, campaign_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Account Warmup ─────────────────────────────────────────────────────────
 
@@ -11022,9 +11033,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "attention": attention,
                 "plans": out,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def warmup_plan_log(request: web.Request) -> web.Response:
         """Журнал действий прогрева по плану.
@@ -11342,9 +11353,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services.organism import spine as _spine
         try:
             ov = await _vl.overview(pool, uid)
-        except Exception as exc:
+        except Exception:
             log.exception("vlayer_overview uid=%s", uid)
-            return _err(str(exc)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
         events = []
         try:
             raw = await _spine.recent_events(
@@ -11391,9 +11402,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор", 400)
         try:
             data = await _vl.entity_history(pool, uid, etype, eid)
-        except Exception as exc:
+        except Exception:
             log.exception("vlayer_entity uid=%s type=%s", uid, etype)
-            return _err(str(exc)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
         data["transitions"] = [
             {**t, "at": t["at"].isoformat() if t.get("at") else None}
             for t in data["transitions"]]
@@ -11455,9 +11466,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             payload={"text": text} if text else {})
         try:
             await bot_mesh.create_task(pool, env)
-        except Exception as exc:
+        except Exception:
             log.exception("mesh_task_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
         # Физическая отправка bot→bot требует включённого режима у ОБОИХ ботов
         # (@BotFather). Если Telegram отказал — цепочка не «висит запущенной»,
@@ -11686,9 +11697,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    VALUES ($1,$2,$3,$4, now(), now() + ($5 || ' hours')::interval, now())
                    RETURNING id""",
                 uid, channel.lstrip("@"), msg_id, advertiser, str(hours))
-        except Exception as exc:
+        except Exception:
             log.exception("notary_create uid=%s", uid)
-            return _err(str(exc)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "id": wid})
 
     async def notary_detail(request: web.Request) -> web.Response:
@@ -11779,9 +11790,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             state = await _no.observe(pool, dict(row))
         except PermissionError as exc:
             return _err(str(exc) or "Недоступно на вашем тарифе", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("notary_check_now uid=%s watch=%s", uid, wid)
-            return _err(str(exc)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "state": state})
 
     async def notary_cancel(request: web.Request) -> web.Response:
@@ -11997,9 +12008,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT id, session_str, acc_status, is_active "
                 "FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
             )
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_create_plan fetchrow uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not acc:
             return _err("Аккаунт не найден", 404)
         if not acc["session_str"]:
@@ -12084,9 +12095,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_create_plan uid=%d acc=%s", uid, account_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def warmup_bulk_start(request: web.Request) -> web.Response:
         """Массовый прогрев: создать планы для ВСЕХ подходящих аккаунтов сразу
@@ -12108,9 +12119,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 niche=body.get("niche") or "general",
             )
             return _json_resp(result)
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_bulk_start uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def warmup_delete_plan(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12125,9 +12136,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM account_warmup_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_delete_plan uid=%d plan=%d", uid, plan_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def warmup_pause_plan(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12151,9 +12162,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not row:
                 return _err("Активный план не найден", 404)
             return _json_resp({"ok": True, "status": "paused"})
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_pause_plan uid=%d plan=%d", uid, plan_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def warmup_resume_plan(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12201,9 +12212,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 log.warning("warmup_resume_plan: acc_status update failed plan=%d", plan_id)
             return _json_resp({"ok": True, "status": "active"})
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_resume_plan uid=%d plan=%d", uid, plan_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def warmup_cancel_plan(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12231,9 +12242,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 log.warning("warmup_cancel_plan: acc_status reset failed plan=%d", plan_id)
             return _json_resp({"ok": True, "status": "cancelled"})
-        except Exception as exc:
+        except Exception:
             log.exception("warmup_cancel_plan uid=%d plan=%d", uid, plan_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── A/B Experiments ────────────────────────────────────────────────────────
 
@@ -12256,9 +12267,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
                 for r in rows
             ]})
-        except Exception as exc:
+        except Exception:
             log.exception("experiments_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def experiment_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12288,9 +12299,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "created_at": exp["created_at"].isoformat() if exp["created_at"] else None,
                 "variants": [dict(v) for v in variants],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("experiment_detail uid=%d exp=%d", uid, exp_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def experiment_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12306,9 +12317,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 exp_id, uid,
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("experiment_delete uid=%d exp=%d", uid, exp_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def experiment_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12349,9 +12360,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                             min(100, max(1, int(v.get("weight", 50)))),
                         )
             return _json_resp({"id": exp_id, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("experiment_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Health Dashboard ───────────────────────────────────────────────────────
 
@@ -12408,9 +12419,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     for e in events
                 ],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("health_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Account Shield ─────────────────────────────────────────────────────────
 
@@ -12447,9 +12458,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.account_shield import save_shield_config
             cfg = await save_shield_config(pool, uid, **fields)
-        except Exception as exc:
+        except Exception:
             log.exception("shield_config_save uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "config": {
             "risk_threshold": cfg.risk_threshold,
             "ban_prob_threshold": cfg.ban_prob_threshold,
@@ -12489,9 +12500,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             cfg = await pool.fetchrow(
                 "SELECT * FROM shield_configs WHERE owner_id=$1", uid
             )
-        except Exception as exc:
+        except Exception:
             log.exception("shield_summary uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({
             "stats": {k: int(row[k] or 0) for k in ("total_active","cooling","threatened","high_ban","ok_count")} if row else {},
             "config": {
@@ -12541,9 +12552,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM ad_advertisers WHERE owner_id=$1""",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("ad_intel_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         avg_score = sum(r["quality_score"] or 0 for r in top) / max(len(top), 1)
         return _json_resp({
             "total_channels": int(total or 0),
@@ -12592,9 +12603,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("ad_intel_add_channel uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Network / Cluster Overview ─────────────────────────────────────────────
 
@@ -12608,9 +12619,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM managed_bots WHERE added_by=$1 ORDER BY cluster, bot_role""",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("network_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         # Group by cluster
         clusters: dict = {}
         for r in bots:
@@ -12655,9 +12666,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if res == "UPDATE 0":
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("set_bot_role_api uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Relay (Inbox) ─────────────────────────────────────────────────────────
 
@@ -12673,9 +12684,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             owned = await pool.fetchval(
                 "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
             )
-        except Exception as exc:
+        except Exception:
             log.exception("relay_sessions_list ownership uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not owned:
             return _err("Не найдено", 404)
         try:
@@ -12684,9 +12695,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM relay_sessions WHERE bot_id=$1 ORDER BY last_activity DESC LIMIT 50""",
                 bot_id,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("relay_sessions uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"sessions": [
             {
                 "id": r["id"],
@@ -12715,9 +12726,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE rs.id=$1 AND mb.added_by=$2""",
                 session_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("relay_session_messages ownership uid=%d sess=%d", uid, session_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not row:
             return _err("Не найдено", 404)
         try:
@@ -12728,9 +12739,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM relay_messages WHERE session_id=$1", session_id)
-        except Exception as exc:
+        except Exception:
             log.exception("relay_session_messages msgs uid=%d sess=%d", uid, session_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"total": total, "messages": [
             {
                 "id": r["id"],
@@ -12759,9 +12770,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if res == "UPDATE 0":
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True, "relay_enabled": enabled})
-        except Exception as exc:
+        except Exception:
             log.exception("relay_toggle uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── API Keys (API Hub) ─────────────────────────────────────────────────────
 
@@ -12775,9 +12786,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM api_keys WHERE user_id=$1 ORDER BY created_at DESC""",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("api_keys_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"keys": [
             {
                 "id": r["id"], "name": r["name"] or "",
@@ -12805,9 +12816,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if res == "UPDATE 0":
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("revoke_api_key uid=%d key=%d", uid, key_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def create_api_key(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -12829,9 +12840,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, key_hash, prefix, name,
             )
             return _json_resp({"ok": True, "id": row["id"], "key": raw_key, "prefix": prefix, "name": name})
-        except Exception as exc:
+        except Exception:
             log.exception("create_api_key uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Multigeo (per-language bot profile) ───────────────────────────────────
 
@@ -12850,7 +12861,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
         except Exception as e:
             log.warning("multigeo_get db error: %s", e)
-            return _err("db error", 500)
+            return _err("Ошибка базы данных", 500)
         if not row:
             return _err("Бот не найден", 404)
         import aiohttp as _aiohttp
@@ -12868,8 +12879,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                             result.append({"lang": lc or "default", "name": name, "description": desc, "short_description": short})
                     except Exception as e:
                         log.warning("multigeo_get get locale %s: %s", lc, e)
-        except Exception as exc:
-            return _err(str(exc), 500)
+        except Exception:
+            log.exception("multigeo_get")
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"profiles": result})
 
     async def multigeo_set(request: web.Request) -> web.Response:
@@ -12897,7 +12909,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
         except Exception as e:
             log.warning("multigeo_set db error: %s", e)
-            return _err("db error", 500)
+            return _err("Ошибка базы данных", 500)
         if not row:
             return _err("Бот не найден", 404)
         import aiohttp as _aiohttp
@@ -12917,8 +12929,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     ok = await _bapi.set_short_description(session, row["token"], short_description, lang)
                     if not ok:
                         errors.append("short_description")
-        except Exception as exc:
-            return _err(str(exc), 500)
+        except Exception:
+            log.exception("multigeo_set")
+            return _err(_INTERNAL_ERROR, 500)
         if errors:
             return _json_resp({"ok": False, "errors": errors})
         return _json_resp({"ok": True})
@@ -12952,9 +12965,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 30""",
                 uid)
-        except Exception as exc:
+        except Exception:
             log.exception("strike_history uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
         import datetime as _dt
         _now = _dt.datetime.now(_dt.timezone.utc)
@@ -13060,9 +13073,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "accounts": int(_email_cnt or 0) if _email_cnt is not None else 0,
                 },
             })
-        except Exception as exc:
+        except Exception:
             log.exception("strike_status uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def strike_takedown_kit(request: web.Request) -> web.Response:
         """Готовый «пакет жалобы» по цели: App Store/Google Play/DMCA/NCMEC + текст.
@@ -13082,9 +13095,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.strike_engine import build_takedown_kit
             kit = build_takedown_kit(target, reason)
             return _json_resp(kit)
-        except Exception as exc:
+        except Exception:
             log.exception("strike_takedown_kit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def strike_launch(request: web.Request) -> web.Response:
         """Создаёт Strike операцию и ставит её в очередь."""
@@ -13189,9 +13202,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("strike_launch uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Audience Parser (read-only history) ───────────────────────────────────
 
@@ -13215,9 +13228,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             saved_total = await _safe_count(pool,
                 "SELECT COALESCE(SUM(total_saved),0) FROM parser_runs "
                 "WHERE owner_id=$1 AND status='done'", uid)
-        except Exception as exc:
+        except Exception:
             log.exception("parser_runs uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"total": total, "saved_total": saved_total, "runs": [
             {
                 "id": r["id"],
@@ -13269,9 +13282,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM parsed_audiences WHERE owner_id=$1""",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("parsed_audience uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({
             "total": int(total or 0),
             "slices": {k: int(slices[k] or 0) for k in ("premium", "with_username", "with_phone", "active")} if slices else {},
@@ -13312,9 +13325,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     ORDER BY parsed_at DESC LIMIT 50000""",
                 uid, *filt_params,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("parsed_audience_export uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if fmt == "csv":
             header = ["tg_user_id", "username", "first_name", "last_name", "phone",
                       "is_premium", "is_bot", "is_active", "source", "parsed_at"]
@@ -13381,9 +13394,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("submit_parse_job uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── CRM Deals ─────────────────────────────────────────────────────────────
 
@@ -13405,9 +13418,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "FROM crm_deals WHERE owner_id=$1 ORDER BY updated_at DESC LIMIT 50",
                     uid,
                 )
-        except Exception as exc:
+        except Exception:
             log.exception("crm_deals uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         # Also get pipeline summary
         try:
             summary_rows = await pool.fetch(
@@ -13456,9 +13469,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
                 uid, title, contact or None, stage, value, notes or None,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("create_crm_deal uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "deal_id": deal_id})
 
     async def update_crm_deal_stage(request: web.Request) -> web.Response:
@@ -13482,9 +13495,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if res == "UPDATE 0":
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("update_crm_deal_stage uid=%d deal=%d", uid, deal_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def delete_crm_deal(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -13501,9 +13514,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if res == "DELETE 0":
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("delete_crm_deal uid=%d deal=%d", uid, deal_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Workspaces ─────────────────────────────────────────────────────────────
 
@@ -13521,9 +13534,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE w.is_active=TRUE ORDER BY w.created_at DESC""",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("workspaces_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"workspaces": [
             {
                 "id": r["id"], "name": r["name"] or "",
@@ -13555,9 +13568,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "INSERT INTO workspace_members(workspace_id, user_id, role, invited_by) VALUES($1,$2,'owner',$2)",
                 ws_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("create_workspace uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "ws_id": ws_id})
 
     async def leave_workspace(request: web.Request) -> web.Response:
@@ -13574,9 +13587,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
                 ws_id, uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("leave_workspace role uid=%d ws=%d", uid, ws_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not role:
             return _err("Вы не участник", 404)
         try:
@@ -13588,9 +13601,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, uid
                 )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("leave_workspace delete uid=%d ws=%d", uid, ws_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Promo Platform ────────────────────────────────────────────────────────
 
@@ -13614,9 +13627,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT id, name, api_url, is_active FROM smm_panels WHERE owner_id=$1 ORDER BY created_at DESC",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("promo_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({
             "orders": [
                 {
@@ -13663,9 +13676,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if res == "UPDATE 0":
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("promo_cancel_order uid=%d order=%d", uid, order_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def promo_create_order_api(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -13712,9 +13725,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 panel_id_val,
                 int(target_subs) if target_subs else None,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("promo_create_order uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "order_id": order_id})
 
     async def promo_order_boost(request: web.Request) -> web.Response:
@@ -13801,9 +13814,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    VALUES($1,$2,'aging',$3,$4) RETURNING id""",
                 uid, bot_username, now, ready_at,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("promo_add_warehouse_bot uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "bot_id": bot_id, "ready_at": ready_at.isoformat()})
 
     # ── Error Reports ─────────────────────────────────────────────────────────
@@ -13829,9 +13842,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, description,
                 __import__("json").dumps(context) if context else None,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("submit_error_report uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"ok": True, "report_id": report_id})
 
     async def my_error_reports(request: web.Request) -> web.Response:
@@ -13844,9 +13857,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
                 uid,
             )
-        except Exception as exc:
+        except Exception:
             log.exception("my_error_reports uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"reports": [
             {
                 "id": r["id"],
@@ -13876,7 +13889,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Бот не найден", 404)
             return _json_resp({"ok": True, "is_active": row["is_active"]})
         except Exception:
-            return _err("Failed to toggle bot", 500)
+            log.exception("toggle_bot")
+            return _err("Не удалось переключить бота", 500)
 
     # ── Funnel Steps ──────────────────────────────────────────────────────────
 
@@ -13988,7 +14002,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "funnel_id": funnel_id})
         except Exception:
             log.exception("create_funnel bot=%d uid=%d", bot_id, uid)
-            return _err("Failed to create funnel", 500)
+            return _err("Не удалось создать воронку", 500)
 
     async def add_funnel_step(request: web.Request) -> web.Response:
         """Добавить шаг в воронку (multi-step drip). funnel_steps умел delay_minutes и
@@ -14149,7 +14163,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
             log.exception("add_competitor uid=%d", uid)
-            return _err("Failed to add competitor", 500)
+            return _err("Не удалось добавить конкурента", 500)
 
     async def delete_competitor(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14164,7 +14178,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM competitors WHERE id=$1 AND owner_id=$2", comp_id, uid)
             return _json_resp({"ok": True})
         except Exception:
-            return _err("Failed to delete", 500)
+            log.exception("delete_competitor")
+            return _err("Не удалось удалить", 500)
 
     # ── Network Broadcast (all bots) ──────────────────────────────────────────
 
@@ -14239,7 +14254,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("network_broadcast op_queue uid=%d", uid)
-            return _err("Failed to queue broadcast", 500)
+            return _err("Не удалось поставить рассылку в очередь", 500)
 
     # ── CRM Contacts ─────────────────────────────────────────────────────────
 
@@ -14321,9 +14336,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 tags, notes,
             )
             return _json_resp({"id": cid, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("crm_contact_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def crm_contact_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14338,9 +14353,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM crm_contacts WHERE id=$1 AND owner_id=$2", contact_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("crm_contact_delete uid=%d cid=%d", uid, contact_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def bot_audience(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14430,7 +14445,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
             log.exception("add_keyword uid=%d", uid)
-            return _err("Failed to add keyword", 500)
+            return _err("Не удалось добавить ключевое слово", 500)
 
     async def delete_keyword(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14445,7 +14460,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM tracked_keywords WHERE id=$1 AND owner_id=$2", kw_id, uid)
             return _json_resp({"ok": True})
         except Exception:
-            return _err("Failed to delete", 500)
+            log.exception("delete_keyword")
+            return _err("Не удалось удалить", 500)
 
     # ── Account Warmup control ────────────────────────────────────────────────
 
@@ -14498,9 +14514,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("start_warmup acc=%d uid=%d", acc_id, uid)
-            return _err(f"Ошибка запуска прогрева: {exc}", 500)
+            log.exception("warmup_start")
+            return _err("Не удалось запустить прогрев", 500)
 
     async def pause_warmup(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14519,7 +14536,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Активного прогрева нет", 404)
             return _json_resp({"ok": True})
         except Exception:
-            return _err("Failed to pause", 500)
+            log.exception("pause_warmup")
+            return _err("Не удалось приостановить", 500)
 
     # ── Schedules ────────────────────────────────────────────────────────────
 
@@ -14583,7 +14601,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": row["id"], "repeat_min": repeat_min})
         except Exception:
             log.exception("create_schedule bot=%d uid=%d", bot_id, uid)
-            return _err("Failed to create schedule", 500)
+            return _err("Не удалось создать расписание", 500)
 
     async def cancel_schedule(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14602,7 +14620,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Не найдено или уже выполнено", 404)
             return _json_resp({"ok": True})
         except Exception:
-            return _err("Failed to cancel", 500)
+            log.exception("cancel_schedule")
+            return _err("Не удалось отменить", 500)
 
     # ── Templates ────────────────────────────────────────────────────────────
 
@@ -14647,7 +14666,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception:
             log.exception("create_template uid=%d", uid)
-            return _err("Failed to create template", 500)
+            return _err("Не удалось создать шаблон", 500)
 
     async def delete_template(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -14662,7 +14681,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid)
             return _json_resp({"ok": True})
         except Exception:
-            return _err("Failed to delete", 500)
+            log.exception("delete_template")
+            return _err("Не удалось удалить", 500)
 
     # ── Mass Publish ─────────────────────────────────────────────────────────
 
@@ -14777,7 +14797,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("mass_publish uid=%d", uid)
-            return _err("Failed to enqueue mass publish", 500)
+            return _err("Не удалось поставить массовую публикацию в очередь", 500)
 
     # ── Проверка ограничений/теневого бана наших каналов/чатов/ботов ───────
     async def check_owned_restrictions_targets(request: web.Request) -> web.Response:
@@ -15304,9 +15324,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                  WHERE a.owner_id=$1 AND a.proxy_id=up.id)""", uid) or 0
             return _json_resp({"ok": True, "removed": len(removed),
                                "skipped_assigned": int(skipped)})
-        except Exception as e:
+        except Exception:
             log.exception("proxy_cleanup_dead uid=%d", uid)
-            return _err(str(e)[:120], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def proxy_export(request: web.Request) -> web.Response:
         """Выгрузить список прокси (CSV/JSON) для аудита. Креды замаскированы —
@@ -15351,9 +15371,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 it["last_check"], "да" if it["backup"] else "нет", it["assigned"],
             ] for it in items]
             return _csv_resp("proxies.csv", header, data)
-        except Exception as e:
+        except Exception:
             log.exception("proxy_export uid=%d", uid)
-            return _err(str(e)[:120], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def check_proxy(request: web.Request) -> web.Response:
         """Проверить живость прокси (probe → api.telegram.org), сохранить is_alive/last_check.
@@ -15418,9 +15438,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, **res})
         except asyncio.TimeoutError:
             return _err("Проверка прокси заняла слишком долго — повторите", 400)
-        except Exception as e:
+        except Exception:
             log.exception("proxy_failover uid=%s", uid)
-            return _err(str(e)[:160], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def proxy_evacuate(request: web.Request) -> web.Response:
         """Переселить аккаунты с мёртвых прокси на живые.
@@ -15488,9 +15508,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.proxy_selector import audit_proxy_isolation
             return _json_resp(await audit_proxy_isolation(pool, uid))
-        except Exception as e:
+        except Exception:
             log.exception("proxies_isolation_check uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def check_all_proxies(request: web.Request) -> web.Response:
         """Проверить все прокси владельца (ограниченная конкурентность)."""
@@ -15740,7 +15760,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception as e:
             log.warning("user_settings_save uid=%d: %s", uid, e)
-            return _err("save failed", 500)
+            return _err("Не удалось сохранить", 500)
 
     async def payments_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -15803,9 +15823,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Было — голый массив; экран показывал первые 50 как «всё, что есть».
             # Теперь ответ несёт настоящий итог (потребитель один — mini_app).
             return _json_resp({"items": [dict(r) for r in rows], "total": total})
-        except Exception as exc:
+        except Exception:
             log.exception("asset_templates_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def asset_template_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -15822,9 +15842,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not tpl:
                 return _err("Не найдено", 404)
             return _json_resp(dict(tpl))
-        except Exception as exc:
+        except Exception:
             log.exception("asset_template_detail uid=%d tpl=%d", uid, tpl_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def asset_template_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -15841,9 +15861,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if result == "DELETE 0":
                 return _err("Не найдено", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("asset_template_delete uid=%d tpl=%d", uid, tpl_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Infra Health Center ───────────────────────────────────────────────────
 
@@ -15935,9 +15955,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("swarm_metrics uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Presence Packs ────────────────────────────────────────────────────────
 
@@ -15993,9 +16013,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM presence_packs WHERE owner_id=$1", uid)
             # Было — голый массив; плитка «N пакетов» считала показанное, а не всё.
             return _json_resp({"items": [dict(r) for r in rows], "total": total})
-        except Exception as exc:
+        except Exception:
             log.exception("presence_packs_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def presence_pack_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16032,9 +16052,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if pack_id is None:
                 return _err("Бот не найден или не принадлежит вам", 404)
             return _json_resp({"ok": True, "id": pack_id})
-        except Exception as exc:
+        except Exception:
             log.exception("presence_pack_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def presence_pack_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16049,9 +16069,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("presence_pack_delete uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     def _presence_pack_dict(pack) -> dict:
         d = dict(pack)
@@ -16073,9 +16093,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not pack:
                 return _err("Пакет не найден", 404)
             return _json_resp(_presence_pack_dict(pack))
-        except Exception as exc:
+        except Exception:
             log.exception("presence_pack_detail uid=%d pack_id=%d", uid, pack_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def presence_pack_config(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16136,9 +16156,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
             updated = await db.get_presence_pack(pool, pack_id, uid)
             return _json_resp(_presence_pack_dict(updated))
-        except Exception as exc:
+        except Exception:
             log.exception("presence_pack_config uid=%d pack_id=%d", uid, pack_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def presence_pack_seed(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16166,9 +16186,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("presence_pack_seed uid=%d pack_id=%d", uid, pack_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def presence_pack_promote(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16205,9 +16225,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("presence_pack_promote uid=%d pack_id=%d", uid, pack_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Global Presence ───────────────────────────────────────────────────────
 
@@ -16233,9 +16253,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("global_presence_plans uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def global_presence_plan_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16278,9 +16298,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "dressing": dict(dressing) if dressing else {},
                 }
             )
-        except Exception as exc:
+        except Exception:
             log.exception("global_presence_plan_detail uid=%d plan=%d", uid, plan_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def global_presence_create(request: web.Request) -> web.Response:
         """Create a new Global Presence plan with channels/groups/bots."""
@@ -16401,9 +16421,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "name_pattern": name_pattern, "username_pattern": username_pattern,
                 "targets": len(targets), "geo_source": geo_source, "preview": preview,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("global_presence_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def geo_presets(request: web.Request) -> web.Response:
         """Список гео-пресетов (страны/города мира) для Global Presence.
@@ -16453,9 +16473,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("global_presence_launch uid=%d plan=%d", uid, plan_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def global_presence_bulk_apply(request: web.Request) -> web.Response:
         """Пакетное оформление объектов проекта: описания и/или аватары.
@@ -16520,9 +16540,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("global_presence_bulk_apply uid=%d plan=%d", uid, plan_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Mass Ops ──────────────────────────────────────────────────────────────
 
@@ -16541,9 +16561,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("mass_ops_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Ecosystems ────────────────────────────────────────────────────────────
 
@@ -16568,9 +16588,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("ecosystems_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ecosystem_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16604,9 +16624,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "members": [dict(m) for m in members],
                 "events": [dict(ev) for ev in events],
             })
-        except Exception as exc:
+        except Exception:
             log.exception("ecosystem_detail uid=%d eco=%d", uid, eco_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ecosystem_auto_discover(request: web.Request) -> web.Response:
         """Авто-наполнение экосистемы объектами (аккаунты/каналы/боты по region/пулам).
@@ -16627,9 +16647,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             added = await ecosystem_brain.auto_discover_members(pool, eco_id, uid)
             total = sum(int(v) for v in (added or {}).values())
             return _json_resp({"ok": True, "added": added or {}, "total": total})
-        except Exception as exc:
+        except Exception:
             log.exception("ecosystem_auto_discover uid=%d eco=%d", uid, eco_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ecosystem_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16652,9 +16672,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, name, description or None, ecosystem_type, region or None,
             )
             return _json_resp({"ok": True, "id": row["id"]})
-        except Exception as exc:
+        except Exception:
             log.exception("ecosystem_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ecosystem_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16669,9 +16689,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("ecosystem_delete uid=%d eco=%d", uid, eco_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Channel Factory ───────────────────────────────────────────────────────
 
@@ -16710,9 +16730,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("channel_factory_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def channel_factory_recent(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16728,9 +16748,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
             # Было — голый массив; экран показывал 20 последних как весь список.
             return _json_resp({"items": [dict(r) for r in rows], "total": total})
-        except Exception as exc:
+        except Exception:
             log.exception("channel_factory_recent uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Group Factory ─────────────────────────────────────────────────────────
 
@@ -16769,9 +16789,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("group_factory_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Physics Hub ──────────────────────────────────────────────────────────
 
@@ -16794,9 +16814,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("physics_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def physics_account_telemetry(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16823,9 +16843,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 account_id,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("physics_account_telemetry uid=%d acc=%d", uid, account_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Graph Hub ─────────────────────────────────────────────────────────────
 
@@ -16863,9 +16883,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp(dict(stats) if stats else {"nodes": 0, "edges": 0, "strong_overlaps": 0})
-        except Exception as exc:
+        except Exception:
             log.exception("graph_stats uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def graph_overlaps(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -16892,9 +16912,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("graph_overlaps uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Compliance Hub ────────────────────────────────────────────────────────
 
@@ -16925,9 +16945,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "recent": [dict(r) for r in recent],
                 "report": report or {},
             })
-        except Exception as exc:
+        except Exception:
             log.exception("compliance_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def compliance_export(request: web.Request) -> web.Response:
         """Текстовый отчёт соответствия за период (для выгрузки/аудита)."""
@@ -16943,9 +16963,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services import compliance_engine
             text = await compliance_engine.export_text(pool, uid, days=days)
             return _json_resp({"text": text, "days": days})
-        except Exception as exc:
+        except Exception:
             log.exception("compliance_export uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Content Cloner ───────────────────────────────────────────────────────
 
@@ -16960,9 +16980,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("content_cloner_history uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def content_cloner_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17019,9 +17039,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("content_cloner_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Clone Adapt ───────────────────────────────────────────────────────────
 
@@ -17047,9 +17067,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM clone_adapt_history WHERE owner_id=$1", uid)
             # Было — голый массив; история обрывалась на 30 записях молча.
             return _json_resp({"items": [dict(r) for r in rows], "total": total})
-        except Exception as exc:
+        except Exception:
             log.exception("clone_adapt_history uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Content Mesh ──────────────────────────────────────────────────────────
 
@@ -17075,9 +17095,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("content_meshes_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def content_mesh_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17098,9 +17118,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3", new_state, mesh_id, uid
             )
             return _json_resp({"enabled": new_state})
-        except Exception as exc:
+        except Exception:
             log.exception("content_mesh_toggle uid=%d mesh=%d", uid, mesh_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def clone_adapt_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17143,9 +17163,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("clone_adapt_submit uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def content_mesh_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17174,9 +17194,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 delay_minutes, append_text,
             )
             return _json_resp({"id": mid, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("content_mesh_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def content_mesh_targets_list(request: web.Request) -> web.Response:
         """Список целевых каналов меша. Без целей меш ничего не репостит (runner
@@ -17270,9 +17290,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM narrative_campaigns WHERE owner_id=$1", uid)
             # Было — голый массив; плитка «N кампаний» считала показанное, а не всё.
             return _json_resp({"items": [dict(r) for r in rows], "total": total})
-        except Exception as exc:
+        except Exception:
             log.exception("narrative_campaigns_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def narrative_campaign_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17294,9 +17314,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 cid,
             )
             return _json_resp({"campaign": dict(campaign), "posts": [dict(p) for p in posts]})
-        except Exception as exc:
+        except Exception:
             log.exception("narrative_campaign_detail uid=%d cid=%d", uid, cid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def narrative_campaign_pause(request: web.Request) -> web.Response:
         """Пауза нарратив-кампании (движок умел, но UI/роут не выводили)."""
@@ -17313,9 +17333,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not ok:
                 return _err("Кампанию нельзя приостановить (не найдена/не активна)", 404)
             return _json_resp({"ok": True, "status": "paused"})
-        except Exception as exc:
+        except Exception:
             log.exception("narrative_campaign_pause uid=%d cid=%d", uid, cid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def narrative_campaign_resume(request: web.Request) -> web.Response:
         """Возобновить приостановленную нарратив-кампанию."""
@@ -17332,9 +17352,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not ok:
                 return _err("Кампанию нельзя возобновить (не найдена/не на паузе)", 404)
             return _json_resp({"ok": True, "status": "active"})
-        except Exception as exc:
+        except Exception:
             log.exception("narrative_campaign_resume uid=%d cid=%d", uid, cid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def narrative_campaign_create(request: web.Request) -> web.Response:
         """Создаёт и сразу запускает кампанию (как мастер в боте) — а не пустой
@@ -17392,9 +17412,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 ai_provider=ai_provider,
             )
             return _json_resp({"id": cid, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("narrative_campaign_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Spintax ──────────────────────────────────────────────────────────────
 
@@ -17467,9 +17487,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("self_promo_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def self_promo_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17499,9 +17519,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid, style, title, content, cta_text, cta_url, add_referral,
             )
             return _json_resp({"id": tid, "ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("self_promo_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def self_promo_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17518,9 +17538,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if result == "DELETE 0":
                 return _err("Шаблон не найден или нельзя удалить системный шаблон", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("self_promo_delete uid=%d tpl=%d", uid, tpl_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def self_promo_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17547,9 +17567,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 new_state, tpl_id, uid,
             )
             return _json_resp({"active": new_state})
-        except Exception as exc:
+        except Exception:
             log.exception("self_promo_toggle uid=%d tpl=%d", uid, tpl_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def self_promo_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17576,9 +17596,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("self_promo_launch uid=%d tpl=%d", uid, tpl_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Semantic Memory ───────────────────────────────────────────────────────
 
@@ -17603,9 +17623,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("semantic_memory_overview uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def semantic_memory_bot(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17628,9 +17648,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM bot_user_facts WHERE bot_id=$1", bot_id)
             # Было — голый массив; сотня фактов выдавалась за всю память бота.
             return _json_resp({"items": [dict(r) for r in facts], "total": total})
-        except Exception as exc:
+        except Exception:
             log.exception("semantic_memory_bot uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Audience DNA ─────────────────────────────────────────────────────────
 
@@ -17653,9 +17673,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("audience_dna_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def audience_dna_profile(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17681,9 +17701,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data["computed"] = True
             data["recommendations"] = dna_svc.generate_recommendations(dna)
             return _json_resp(data)
-        except Exception as exc:
+        except Exception:
             log.exception("audience_dna_profile uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def audience_dna_compute(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17706,9 +17726,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data["computed"] = True
             data["recommendations"] = dna_svc.generate_recommendations(dna)
             return _json_resp(data)
-        except Exception as exc:
+        except Exception:
             log.exception("audience_dna_compute uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def audience_dna_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17728,9 +17748,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
             history = await dna_svc.get_dna_history(pool, bot_id, limit=10)
             return _json_resp([_dna_to_dict(snap) for snap in history])
-        except Exception as exc:
+        except Exception:
             log.exception("audience_dna_history uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Auto Funnels ──────────────────────────────────────────────────────────
 
@@ -17757,9 +17777,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp([dict(r) for r in rows])
-        except Exception as exc:
+        except Exception:
             log.exception("auto_funnels_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def auto_funnel_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17773,9 +17793,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             funnel = await pool.fetchrow(
                 "SELECT enabled FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
             )
-        except Exception as exc:
+        except Exception:
             log.exception("auto_funnel_toggle fetch uid=%d fid=%d", uid, fid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not funnel:
             return _err("Не найдено", 404)
         new_state = not funnel["enabled"]
@@ -17783,9 +17803,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await pool.execute(
                 "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3", new_state, fid, uid
             )
-        except Exception as exc:
+        except Exception:
             log.exception("auto_funnel_toggle update uid=%d fid=%d", uid, fid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"enabled": new_state})
 
     async def auto_funnel_detail(request: web.Request) -> web.Response:
@@ -17812,9 +17832,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", fid
             )
             return _json_resp({"funnel": dict(funnel), "steps": [dict(s) for s in steps]})
-        except Exception as exc:
+        except Exception:
             log.exception("auto_funnel_detail uid=%d fid=%d", uid, fid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def auto_funnel_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17854,9 +17874,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     fid, first_message,
                 )
             return _json_resp({"ok": True, "id": fid})
-        except Exception as exc:
+        except Exception:
             log.exception("auto_funnel_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def auto_funnel_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17871,9 +17891,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
             )
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("auto_funnel_delete uid=%d fid=%d", uid, fid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def topology_nodes(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -17901,8 +17921,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             for b in bots:
                 nodes.append({"id": f"bot_{b['bot_id']}", "type": "bot", "name": f"@{b['username']}" if b['username'] else b['first_name'] or f"#{b['bot_id']}", "active": b['is_active']})
             return _json_resp({"nodes": nodes})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("topology_nodes")
+            return _err(_INTERNAL_ERROR, 500)
 
     # ПРИМЕЧАНИЕ: дубль topology_links (co-membership граф, отдавал {links}) удалён —
     # он затенял основной topology_links выше (accounts/bots drill-down, ~стр. 2830)
@@ -17938,9 +17959,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as e:
+        except Exception:
             log.exception("schedule_post uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── SSE ──────────────────────────────────────────────────────────────────
 
@@ -18472,9 +18493,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "provider": p})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("mp_register uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_mine(request):
         uid = _get_uid(request)
@@ -18482,9 +18503,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             return _json_resp({"providers": await _mp.list_providers(pool, owner_id=uid)})
-        except Exception as e:
+        except Exception:
             log.exception("mp_mine uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_provider_detail(request):
         uid = _get_uid(request)
@@ -18515,9 +18536,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             p = await _mp.update_provider_profile(pool, pid, uid, **d)
             return _json_resp({"ok": True, "provider": p})
-        except Exception as e:
+        except Exception:
             log.exception("mp_provider_update uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_apikey_issue(request):
         uid = _get_uid(request)
@@ -18533,9 +18554,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # api_key возвращается ОДИН раз — фронт обязан показать и попросить сохранить
             return _json_resp({"ok": True, "key": await _mp.issue_api_key(
                 pool, pid, actor_id=uid)})
-        except Exception as e:
+        except Exception:
             log.exception("mp_apikey_issue uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_apikey_revoke(request):
         uid = _get_uid(request)
@@ -18576,9 +18597,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "service": s})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("mp_service_create uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_service_update(request):
         uid = _get_uid(request)
@@ -18599,9 +18620,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "service": upd})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("mp_service_update uid=%s sid=%s", uid, sid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_service_toggle(request):
         uid = _get_uid(request)
@@ -18630,9 +18651,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 resource_kind=q.get("kind") or None, q=q.get("q") or None,
                 limit=int(q.get("limit", 50)), offset=int(q.get("offset", 0)))
             return _json_resp({"items": items})
-        except Exception as e:
+        except Exception:
             log.exception("mp_catalog uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_admin_status(request):
         uid = _get_uid(request)
@@ -18651,9 +18672,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "provider": p})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("mp_admin_status uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def mp_admin_providers(request):
         uid = _get_uid(request)
@@ -18702,9 +18723,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "persona": p})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_create uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_detail(request):
         uid = _get_uid(request)
@@ -18740,9 +18761,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "persona": await _bsp.update_persona(pool, pid, uid, **d)})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_update uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_delete(request):
         uid = _get_uid(request)
@@ -18809,9 +18830,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "product": prod})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_product_add uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_product_update(request):
         uid = _get_uid(request)
@@ -18831,9 +18852,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "product": r})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_product_update uid=%s prid=%s", uid, prid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_product_delete(request):
         uid = _get_uid(request)
@@ -18890,9 +18911,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             reply = await _bsp.sandbox_reply(pool, p, text, d.get("history") or [])
             return _json_resp({"ok": True, "reply": reply})
-        except Exception as e:
+        except Exception:
             log.exception("sp_chat uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── База знаний (FAQ) ──────────────────────────────────────────────────
     async def sp_faq_add(request):
@@ -18914,9 +18935,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "faq": faq})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_faq_add uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_faq_update(request):
         uid = _get_uid(request)
@@ -18961,9 +18982,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "example": ex})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_example_add uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_example_delete(request):
         uid = _get_uid(request)
@@ -18996,9 +19017,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "delivery": r})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_delivery_add uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_delivery_delete(request):
         uid = _get_uid(request)
@@ -19031,9 +19052,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "promo": r})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as e:
+        except Exception:
             log.exception("sp_promo_add uid=%s pid=%s", uid, pid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def sp_promo_delete(request):
         uid = _get_uid(request)
@@ -19139,9 +19160,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, bot_id, uid, mode=d.get("mode"),
                 threshold_per_min=d.get("threshold_per_min"))
             return _json_resp({"ok": True, "config": cfg})
-        except Exception as e:
+        except Exception:
             log.exception("fg_set uid=%s bot=%s", uid, bot_id)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def fg_flag_recent(request):
         uid = _get_uid(request)
@@ -19409,8 +19430,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # «всё в порядке», пока воркер стоит на паузе.
             status = await _opw.circuit_breaker_status(uid)
             return _json_resp(status)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("circuit_breaker_status")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def proxy_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -19449,9 +19471,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     **s,
                 })
             return _json_resp({"proxies": stats})
-        except Exception as e:
+        except Exception:
             log.exception("proxy_stats uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ecosystem_recommendations(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -19461,8 +19483,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services import ecosystem_brain as _eb
             recs = await _eb.get_ecosystem_recommendations(pool, uid)
             return _json_resp({"recommendations": recs})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("ecosystem_recommendations")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ecosystem_overlaps(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -19493,8 +19516,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     overlaps = await _eb.analyze_audience_overlap(pool, ch_ids)
                     return _json_resp(overlaps)
             return _json_resp({"overlaps": {}})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("ecosystem_overlaps")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def next_actions(request: web.Request) -> web.Response:
         """Copilot «Что делать дальше» — контекстные подсказки следующего шага
@@ -19662,9 +19686,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "seo": await _seo_vitals(uid),
                 "geo": await _geo_vitals(uid),
             })
-        except Exception as e:
+        except Exception:
             log.exception("dashboard_realtime uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def _seo_vitals(uid: int) -> dict:
         """SEO-орган: ключи на отслеживании + непринятые авто-подсказки реоптимизации
@@ -19943,9 +19967,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.infra_memory import get_account_health
             return _json_resp(await get_account_health(pool, uid))
-        except Exception as e:
+        except Exception:
             log.exception("accounts_health uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def audience_analytics(request: web.Request) -> web.Response:
         """Audience Analytics — owner-агрегат аудитории ботов в форме экрана
@@ -20018,9 +20042,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "avg_engagement": avg_eng, "segments": segments,
                 "insights": insights, "heatmap": heatmap,
             })
-        except Exception as e:
+        except Exception:
             log.exception("audience_analytics uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def networks_list(request: web.Request) -> web.Response:
         """Network Builder — список сеток владельца (форма экрана s-network-builder)."""
@@ -20035,9 +20059,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM network_instances ni WHERE ni.owner_id=$1 ORDER BY ni.created_at DESC""",
                 uid)
             return _json_resp({"networks": [dict(r) for r in (rows or [])]})
-        except Exception as e:
+        except Exception:
             log.exception("networks_list uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_create_plural(request: web.Request) -> web.Response:
         """Создать сетку. body: {name, template?, description?}."""
@@ -20056,9 +20080,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "INSERT INTO network_instances(owner_id, name, status) "
                 "VALUES($1,$2,'active') RETURNING id", uid, name)
             return _json_resp({"ok": True, "id": nid})
-        except Exception as e:
+        except Exception:
             log.exception("network_create uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_detail_plural(request: web.Request) -> web.Response:
         """Детали сети: узлы/рёбра в форме, которую рисует граф (from_id/to_id/labels)."""
@@ -20143,9 +20167,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "create": plan["create"], "wire": plan["wire"]})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("network_deploy uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def crosspost_links_list(request: web.Request) -> web.Response:
         """Правила кросспостинга владельца (связки 2c)."""
@@ -20193,9 +20217,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("crosspost_run uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_add_node(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -20283,9 +20307,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "INSERT INTO workflow_definitions(owner_id, name, description, steps, is_active) "
                 "VALUES($1,$2,$3,'[]'::jsonb, FALSE) RETURNING id", uid, name, desc)
             return _json_resp({"ok": True, "id": wid})
-        except Exception as e:
+        except Exception:
             log.exception("workflow_create_plural uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def workflow_detail_plural(request: web.Request) -> web.Response:
         """Детали воркфлоу: {id,name,active,steps[]} (шаги хранятся inline jsonb)."""
@@ -20384,8 +20408,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 str(r["created_at"] or ""), str(r["finished_at"] or ""),
             ] for r in rows]
             return _csv_resp("operations.csv", header, data)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("operation_export")
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/circuit_breaker", circuit_breaker_status)
     app.router.add_get("/api/miniapp/proxy_stats", proxy_stats)
@@ -20448,8 +20473,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp({"members": [dict(r) for r in rows]})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("team_members")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def audit_trail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -20467,8 +20493,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid,
             )
             return _json_resp({"entries": [dict(r) for r in rows]})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("audit_trail")
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/team/members", team_members)
     app.router.add_get("/api/miniapp/audit", audit_trail)
@@ -20491,11 +20518,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # внутри import_sessions.
             result = await import_sessions(pool, uid, raw, proxy, proxy_id=proxy_id)
             return _json_resp(result)
-        except Exception as exc:
+        except Exception:
             # Раньше сырой текст исключения уходил клиенту и никуда не писался:
             # пользователю — непонятная внутренняя строка, разработчику — ничего.
             log.exception("import_sessions uid=%s", uid)
-            return _err(f"Не удалось импортировать: {str(exc)[:140]}", 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_post("/api/miniapp/import_sessions", import_sessions_api)
 
@@ -20791,8 +20818,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    ORDER BY ol.created_at DESC LIMIT 200"""
             )
             return _json_resp({"entries": [dict(r) for r in rows]})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("team_audit")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def user_activity_log(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -20807,8 +20835,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 uid
             )
             return _json_resp({"log": [dict(r) for r in rows]})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("user_activity_log")
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/team/audit", team_audit)
     app.router.add_get("/api/miniapp/my_activity", user_activity_log)
@@ -20853,8 +20882,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result['offset'] = offset
             result['limit'] = limit
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contacts")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -20872,8 +20902,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 pass
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_detail")
+            return _err(_INTERNAL_ERROR, 500)
 
     def _uch_msg_ref(c: dict) -> str | None:
         """Куда писать в ЛС: @username надёжнее всего, иначе числовой ID (send_dm
@@ -20940,9 +20971,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_contact_message uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_media(request: web.Request) -> web.Response:
         """Отправить контакту МЕДИА (фото/видео/док) с подписью выбранными
@@ -21011,11 +21042,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             try: _os.unlink(path)
             except Exception: pass
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             try: _os.unlink(path)
             except Exception: pass
             log.exception("uch_contact_media uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_invite(request: web.Request) -> web.Response:
         """Пригласить контакт в канал/чат выбранными аккаунтами.
@@ -21069,9 +21100,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_contact_invite uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Сегмент → действие флотом ────────────────────────────────────────────
     _SEG_DM_CHUNK = 1000       # кап получателей на одну bulk_dm_adhoc; больше — авто-разбивка
@@ -21243,9 +21274,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "ab_batch": ab_batch})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_segment_message uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ab_results(request: web.Request) -> web.Response:
         """Сводка последнего A/B-теста рассылки: доставка по вариантам + победитель.
@@ -21294,9 +21325,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"batch": int(batch), "variants": variants,
                                "winner": winner_label, "leader": leader_label,
                                "confident": win.get("confident", False)})
-        except Exception as exc:
+        except Exception:
             log.exception("ab_results uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def ab_followup(request: web.Request) -> web.Response:
         """Follow-up по победителю A/B: дослать ПОБЕДИВШИЙ текст получателям
@@ -21420,9 +21451,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("ab_followup uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_segment_media(request: web.Request) -> web.Response:
         """Медиа всему сегменту. Multipart: file + text + account_ids + фильтры.
@@ -21488,9 +21519,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "recipients": len(refs), "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_segment_media uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_segment_invite(request: web.Request) -> web.Response:
         """Пригласить весь сегмент в канал/чат. mass_invite (source=import_list)
@@ -21548,9 +21579,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(f"Инфраструктура перегружена: {exc}", 429)
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_segment_invite uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_segments_list(request: web.Request) -> web.Response:
         """Сохранённые сегменты владельца (+ актуальный размер каждого)."""
@@ -21560,9 +21591,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.contacts_hub.repository import list_segments
             return _json_resp({"segments": await list_segments(pool, uid)})
-        except Exception as exc:
+        except Exception:
             log.exception("uch_segments_list uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_segment_save(request: web.Request) -> web.Response:
         """Сохранить текущий срез как сегмент (имя + фильтры)."""
@@ -21581,9 +21612,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.repository import save_segment
             sid = await save_segment(pool, uid, name, filters)
             return _json_resp({"ok": True, "id": sid})
-        except Exception as exc:
+        except Exception:
             log.exception("uch_segment_save uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_segment_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21605,9 +21636,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rules = await intent_sensor.list_rules(pool, uid)
             return _json_resp({"rules": rules, "stages": list(intent_sensor.VALID_STAGES)})
-        except Exception as exc:
+        except Exception:
             log.exception("uch_intent_rules uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_intent_rule_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21625,9 +21656,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "id": rid})
         except ValueError as exc:
             return _err(str(exc), 400)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_intent_rule_create uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_intent_rule_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21669,9 +21700,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ok = await intent_sensor.update_rule(pool, uid, rid, **kwargs)
         except ValueError as exc:
             return _err(str(exc), 400)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_intent_rule_update uid=%s rule=%s", uid, rid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         if not ok:
             return _err("Правило не найдено", 404)
         return _json_resp({"ok": True})
@@ -21690,9 +21721,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import intent_sensor
         try:
             hits = await intent_sensor.recent_hits(pool, uid, rid, limit=50)
-        except Exception as exc:
+        except Exception:
             log.exception("uch_intent_hits uid=%s", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"hits": hits})
 
     async def uch_intent_rule_toggle(request: web.Request) -> web.Response:
@@ -21727,8 +21758,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not success: return _err("Не найдено", 404)
             await log_contact_history(pool, contact_id, uid, 'edit', source='user')
             return _json_resp({'ok': True})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_update")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21739,8 +21771,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             success = await delete_contact(pool, contact_id, uid)
             if not success: return _err("Не найдено", 404)
             return _json_resp({'ok': True})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_delete")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_search(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21751,8 +21784,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.search_engine import search_contacts
             results = await search_contacts(pool, uid, query)
             return _json_resp({'results': results, 'total': len(results)})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_search")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21762,8 +21796,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             stats = await get_full_stats(pool, uid)
             account_stats = await get_account_stats(pool, uid)
             return _json_resp({**stats, 'account_stats': account_stats})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_stats")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_sync(request: web.Request) -> web.Response:
         """Запустить синхронизацию контактов флота в ФОНЕ (operation_bus).
@@ -21790,9 +21825,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "queued": True, "op_id": op_id, "accounts": int(n)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception as e:
+        except Exception:
             log.exception("uch_sync submit uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_groups(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21801,8 +21836,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.repository import get_contact_groups
             groups = await get_contact_groups(pool, uid)
             return _json_resp({'groups': groups})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_groups")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_group_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21812,8 +21848,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import create_group
             gid = await create_group(pool, uid, data.get('name', ''), data.get('color'))
             return _json_resp({'ok': True, 'id': gid})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_group_create")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_group_update(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21824,8 +21861,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import update_group
             ok = await update_group(pool, gid, uid, data.get('name'), data.get('color'))
             return _json_resp({'ok': ok})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_group_update")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_group_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21835,8 +21873,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import delete_group
             ok = await delete_group(pool, gid, uid)
             return _json_resp({'ok': ok})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_group_delete")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_toggle_favorite(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21849,8 +21888,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             new_val = not row['is_favorite']
             await update_contact(pool, cid, uid, {'is_favorite': new_val})
             return _json_resp({'ok': True, 'is_favorite': new_val})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_toggle_favorite")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_add_to_group(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21861,8 +21901,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.repository import add_contact_to_group
             ok = await add_contact_to_group(pool, cid, gid)
             return _json_resp({'ok': ok})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_add_to_group")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_remove_from_group(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21873,8 +21914,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.repository import remove_contact_from_group
             ok = await remove_contact_from_group(pool, cid, gid)
             return _json_resp({'ok': ok})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_remove_from_group")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21889,8 +21931,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 'SELECT COUNT(*) FROM contact_history WHERE contact_id=$1 AND owner_id=$2',
                 cid, uid)
             return _json_resp({'history': [dict(r) for r in rows], 'total': total})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_history")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_invite_history(request: web.Request) -> web.Response:
         """Кому/куда/когда пытались пригласить этот контакт (по всем группам).
@@ -21905,8 +21948,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             history = await invite_history_for_contact(pool, uid, cid)
             opted_out = await is_contact_opted_out(pool, uid, cid)
             return _json_resp({'history': history, 'opted_out': opted_out})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_invite_history")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_opt_out(request: web.Request) -> web.Response:
         """Пометить контакт «не приглашать» — сразу по всем его формам
@@ -21921,8 +21965,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contact_invite_link import opt_out_contact
             stored = await opt_out_contact(pool, uid, cid, reason=reason)
             return _json_resp({'ok': bool(stored), 'targets': stored})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_opt_out")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_allow_invite(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21932,8 +21977,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contact_invite_link import allow_contact_invite
             removed = await allow_contact_invite(pool, uid, cid)
             return _json_resp({'ok': removed})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_allow_invite")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_contact_versions(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21943,8 +21989,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.versioning_engine import get_versions
             versions = await get_versions(pool, cid, uid)
             return _json_resp({'versions': versions})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_contact_versions")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_rollback(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -21956,8 +22003,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ok = await rollback_to_version(pool, cid, uid, vnum)
             if not ok: return _err("Версия не найдена", 404)
             return _json_resp({'ok': True})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_rollback")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_timeline(request: web.Request) -> web.Response:
         """Карточка-360: единая лента касаний контакта из всех подсистем —
@@ -22004,8 +22052,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             truncated = len(history or []) >= 60 or len(events or []) >= 60
             return _json_resp({'timeline': out, 'count': len(out),
                                'truncated': truncated})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_timeline")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_relationships(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22015,8 +22064,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.relationship_engine import get_relationships
             rels = await get_relationships(pool, uid, cid)
             return _json_resp({'relationships': rels})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_relationships")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_identity(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22027,8 +22077,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             graph = await build_identity_graph(pool, uid, cid)
             last_active = await get_last_active(pool, cid)
             return _json_resp({**graph, 'last_active': last_active})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_identity")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_crm_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22039,8 +22090,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             crm = await get_crm_data(pool, uid, cid)
             activity = await get_crm_activity(pool, uid, cid)
             return _json_resp({'crm': crm, 'activity': activity})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_crm_get")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_crm_upsert(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22067,8 +22119,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await log_crm_activity(pool, uid, cid, data.get('type', 'note'),
                                    data.get('description'), data.get('metadata'))
             return _json_resp({'ok': True})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_crm_activity")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_crm_activity_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22078,8 +22131,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.crm_engine import get_crm_activity
             activity = await get_crm_activity(pool, uid, cid)
             return _json_resp({'activity': activity})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_crm_activity_list")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_crm_reminder(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22108,9 +22162,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 'next_reminder_text': data.get('text', ''),
             })
             return _json_resp({'ok': True})
-        except Exception as e:
+        except Exception:
             log.exception("uch_crm_reminder uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_duplicates(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22119,8 +22173,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.trust_engine import detect_smart_duplicates
             dupes = await detect_smart_duplicates(pool, uid)
             return _json_resp({'duplicates': dupes, 'count': len(dupes)})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_duplicates")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_merge(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22134,8 +22189,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.merge_engine import manual_merge
             result = await manual_merge(pool, primary_id, secondary_id, uid)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_merge")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_conflicts(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22144,8 +22200,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.trust_engine import get_conflicts
             conflicts = await get_conflicts(pool, uid)
             return _json_resp({'conflicts': conflicts})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_conflicts")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_resolve_conflict(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22157,8 +22214,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ok = await resolve_conflict(pool, cid, uid, data.get('resolution', 'accepted'),
                                         data.get('value'), uid)
             return _json_resp({'ok': ok})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_resolve_conflict")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_smart_tags(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22167,8 +22225,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.smart_tags_engine import get_smart_tags
             tags = await get_smart_tags(pool, uid)
             return _json_resp({'tags': tags})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_smart_tags")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_smart_tag_rules(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22177,8 +22236,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.smart_tags_engine import get_smart_tag_rules
             rules = await get_smart_tag_rules(pool, uid)
             return _json_resp({'rules': rules})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_smart_tag_rules")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_smart_tags_apply(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22187,8 +22247,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.smart_tags_engine import apply_smart_tags
             result = await apply_smart_tags(pool, uid)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_smart_tags_apply")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_smart_tag_rule_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22199,8 +22260,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             rid = await create_smart_tag_rule(pool, uid, data.get('name', ''),
                                               data.get('tag', ''), data.get('conditions', {}))
             return _json_resp({'ok': True, 'id': rid})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_smart_tag_rule_create")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_smart_tag_rule_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22210,8 +22272,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.smart_tags_engine import delete_smart_tag_rule
             ok = await delete_smart_tag_rule(pool, rid, uid)
             return _json_resp({'ok': ok})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_smart_tag_rule_delete")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_smart_tag_rule_toggle(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22221,8 +22284,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.smart_tags_engine import toggle_smart_tag_rule
             active = await toggle_smart_tag_rule(pool, rid, uid)
             return _json_resp({'ok': True, 'is_active': active})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_smart_tag_rule_toggle")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_tag(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22232,8 +22296,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_tag
             result = await bulk_tag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_tag")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_untag(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22243,8 +22308,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_untag
             result = await bulk_untag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_untag")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_favorite(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22254,8 +22320,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_favorite
             result = await bulk_set_favorite(pool, uid, data.get('contact_ids', []), data.get('is_favorite', True))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_favorite")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22265,8 +22332,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_delete
             result = await bulk_delete(pool, uid, data.get('contact_ids', []))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_delete")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_exclude(request: web.Request) -> web.Response:
         """Пометить/снять «личный» (исключить из рабочих сегментов) по списку id."""
@@ -22278,8 +22346,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await set_excluded(pool, uid, data.get('contact_ids', []),
                                         bool(data.get('excluded', True)))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_exclude")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_filter_preview(request: web.Request) -> web.Response:
         """Сколько контактов попадёт под фильтр (страна/тег/источник) — до действия."""
@@ -22293,8 +22362,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 tag=(d.get('tag') or None),
                 account_id=(int(d['account_id']) if d.get('account_id') else None))
             return _json_resp({'count': n})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_filter_preview")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_filter_exclude(request: web.Request) -> web.Response:
         """Пометить «личными»/снять пометку у всех под фильтр (страна/тег/источник)."""
@@ -22308,8 +22378,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 country=(d.get('country') or None), tag=(d.get('tag') or None),
                 account_id=(int(d['account_id']) if d.get('account_id') else None))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_filter_exclude")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_filter_delete(request: web.Request) -> web.Response:
         """Массовое удаление контактов под фильтр (страна/тег/источник). Требует
@@ -22328,8 +22399,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 tag=(d.get('tag') or None),
                 account_id=(int(d['account_id']) if d.get('account_id') else None))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_filter_delete")
+            return _err(_INTERNAL_ERROR, 500)
 
     # ── Telegram-облако (шифрованное распределённое хранилище файлов) ──────────
     async def cloud_status(request: web.Request) -> web.Response:
@@ -22350,8 +22422,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 # файла, иначе пользователь ждёт загрузку ради отказа в конце.
                 'max_upload_bytes': tg_cloud.MAX_FILE_BYTES,
             })
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("cloud_status")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cloud_list(request: web.Request) -> web.Response:
         """Список файлов владельца (манифест + здоровье избыточности, без содержимого)."""
@@ -22368,8 +22441,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 except Exception:
                     f['min_replicas'] = None
             return _json_resp({'files': files, 'target_replicas': tg_cloud.REPLICAS})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("cloud_list")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cloud_heal(request: web.Request) -> web.Response:
         """Восстановить избыточность файла (долить реплики на уцелевших хранителях)
@@ -22383,8 +22457,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("файл не найден", 404)
             res = await tg_cloud.heal_file(pool, uid, fid)
             return _json_resp(res)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("cloud_heal")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cloud_upload(request: web.Request) -> web.Response:
         """Загрузить файл в облако.
@@ -22447,8 +22522,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e) or "нет доступа к облаку — требуется подписка", 403)
         except tg_cloud.QuotaExceeded as e:
             return _err(str(e), 413)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("cloud_upload")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cloud_download(request: web.Request) -> web.Response:
         """Скачать файл: собираем куски, расшифровываем, отдаём как поток байт."""
@@ -22478,8 +22554,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 })
         except FileNotFoundError:
             return _err("файл не найден", 404)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("cloud_download")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cloud_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22489,8 +22566,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             fid = int(request.match_info['file_id'])
             ok = await tg_cloud.delete_file(pool, uid, fid)
             return _json_resp({'deleted': bool(ok)})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("cloud_delete")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cloud_set_paid(request: web.Request) -> web.Response:
         """Выдать/снять платный доступ к облаку другому пользователю. Только
@@ -22509,8 +22587,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             q = await tg_cloud.set_paid(pool, target, bool(d.get('paid', True)),
                                         limit_bytes=(int(lim) if lim else None))
             return _json_resp({'quota': q})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("cloud_set_paid")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_group(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22527,8 +22606,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 from services.contacts_hub.bulk_ops_engine import bulk_remove_from_group
                 result = await bulk_remove_from_group(pool, uid, data.get('contact_ids', []), gid)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_group")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_merge(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22540,8 +22620,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_merge
             result = await bulk_merge(pool, uid, pairs)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_merge")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_export(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22556,8 +22637,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return web.Response(
                 body=result['data'], content_type=content_types.get(fmt, 'application/json'),
                 headers={'Content-Disposition': f'attachment; filename="contacts.{fmt}"'})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_export")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_importance(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22569,8 +22651,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_importance
             result = await bulk_set_importance(pool, uid, contact_ids, level)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_importance")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_bulk_rating(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22582,8 +22665,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_rating
             result = await bulk_set_rating(pool, uid, contact_ids, rating)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_bulk_rating")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_export_csv(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22593,8 +22677,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             csv_data = await export_csv(pool, uid)
             return web.Response(body=csv_data, content_type='text/csv',
                                 headers={'Content-Disposition': 'attachment; filename="contacts.csv"'})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_export_csv")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_export_vcf(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22604,8 +22689,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             vcf_data = await export_vcf(pool, uid)
             return web.Response(body=vcf_data, content_type='text/vcard',
                                 headers={'Content-Disposition': 'attachment; filename="contacts.vcf"'})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_export_vcf")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_export_json(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22615,8 +22701,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             json_data = await export_json(pool, uid)
             return web.Response(body=json_data, content_type='application/json',
                                 headers={'Content-Disposition': 'attachment; filename="contacts.json"'})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_export_json")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_reminders(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22626,8 +22713,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             upcoming = await get_upcoming_reminders(pool, uid)
             overdue = await get_crm_overdue(pool, uid)
             return _json_resp({'upcoming': upcoming, 'overdue': overdue})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_reminders")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_graph_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22636,8 +22724,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.relationship_engine import get_graph_stats
             stats = await get_graph_stats(pool, uid)
             return _json_resp(stats)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_graph_stats")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_graph_compute(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22646,8 +22735,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.relationship_engine import compute_relationships
             result = await compute_relationships(pool, uid)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_graph_compute")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_trust_update(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22656,8 +22746,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.trust_engine import update_trust_scores
             updated = await update_trust_scores(pool, uid)
             return _json_resp({'updated': updated})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_trust_update")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_ai_query(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22669,8 +22760,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.ai_assistant import process_ai_query
             result = await process_ai_query(pool, uid, query)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_ai_query")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def uch_spotlight(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -22681,8 +22773,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.contacts_hub.search_engine import search_contacts_spotlight
             results = await search_contacts_spotlight(pool, uid, q)
             return _json_resp({'results': results, 'total': len(results)})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("uch_spotlight")
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
@@ -22810,9 +22903,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if last:
                 status["last_deploy"] = last
             return _json_resp(status)
-        except Exception as e:
+        except Exception:
             log.exception("cf_pool_status uid=%s", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cf_credentials_save(request: web.Request) -> web.Response:
         """Сохранить доступы CF в приложении (без Railway). Токен шифруется в БД.
@@ -22832,9 +22925,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from database import db
             await db.set_cf_credentials(pool, uid, api_token or None, account_id, subdomain)
             return _json_resp({"ok": True})
-        except Exception as e:
+        except Exception:
             log.exception("cf_credentials_save uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cf_pool_deploy(request: web.Request) -> web.Response:
         """Деплой пула CF Workers. Долгая операция (N×2 запросов к CF API) → НЕ
@@ -22913,9 +23006,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.cf_pool_manager import check_pool
             return _json_resp(await check_pool(pool, uid))
-        except Exception as e:
+        except Exception:
             log.exception("cf_pool_check uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cf_pool_assign(request: web.Request) -> web.Response:
         """Раздать существующий пул аккаунтам без релея (напр. добавленным после
@@ -22925,9 +23018,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             from services.cf_pool_manager import sync_relay_assignment
             return _json_resp(await sync_relay_assignment(pool, uid))
-        except Exception as e:
+        except Exception:
             log.exception("cf_pool_assign uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def cf_pool_clear(request: web.Request) -> web.Response:
         """Снести пул: удалить воркеры в CF, очистить БД, снять cf_relay_url."""
@@ -22938,9 +23031,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             c = await _cf_resolve_creds(uid)
             return _json_resp(await clear_pool(pool, uid, c["api_token"],
                                                c["account_id"]))
-        except Exception as e:
+        except Exception:
             log.exception("cf_pool_clear uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def transport_get(request: web.Request) -> web.Response:
         """Текущий способ получения IP на аккаунт: прокси / IPv6 / CF-релей / прямое.
@@ -22970,9 +23063,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "ipv6_subnet": ipv6, "cf_ready": cf_ready,
                 "default_mode_for_naked": default_mode,
             })
-        except Exception as e:
+        except Exception:
             log.exception("transport_get uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def transport_ipv6_save(request: web.Request) -> web.Response:
         """Сохранить/выключить IPv6-подсеть владельца (уникальный IP без прокси).
@@ -22989,9 +23082,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "ipv6_subnet": norm})
         except ValueError as ve:
             return _err(str(ve), 400)
-        except Exception as e:
+        except Exception:
             log.exception("transport_ipv6_save uid=%s", uid)
-            return _err(str(e)[:150], 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
     app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)
@@ -23013,8 +23106,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.network_builder import get_templates
             templates = await get_templates(pool, uid)
             return _json_resp({'templates': templates})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("network_templates")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_template_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23027,8 +23121,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                            data.get('template_type', 'channel_group'),
                                            data.get('nodes'), data.get('edges'))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("network_template_create")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_template_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23038,8 +23133,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.network_builder import delete_template
             result = await delete_template(pool, uid, template_id)
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("network_template_delete")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_instances(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23048,8 +23144,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.network_builder import get_instances
             instances = await get_instances(pool, uid)
             return _json_resp({'instances': instances})
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("network_instances")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_instance_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23060,8 +23157,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await create_instance(pool, uid, data.get('template_id', 0),
                                            data.get('name', ''))
             return _json_resp(result)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("network_instance_create")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_instance_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23073,8 +23171,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not detail:
                 return _err("Не найдено", 404)
             return _json_resp(detail)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("network_instance_detail")
+            return _err(_INTERNAL_ERROR, 500)
 
     async def network_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23083,8 +23182,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.network_builder import get_network_stats
             stats = await get_network_stats(pool, uid)
             return _json_resp(stats)
-        except Exception as e:
-            return _err(str(e), 500)
+        except Exception:
+            log.exception("network_stats")
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/network/templates", network_templates)
     app.router.add_post("/api/miniapp/network/template", network_template_create)
@@ -23118,9 +23218,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "last_run": r["last_run"].isoformat() if r["last_run"] else None,
             } for r in (rows or [])]
             return _json_resp({"workflows": workflows})
-        except Exception as exc:
+        except Exception:
             log.exception("workflow_list uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def workflow_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23148,13 +23248,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # молча терялись.
             res = await create_workflow(pool, uid, name, steps=steps)
             if not res.get("ok"):
-                return _err(str(res.get("error") or "Не удалось создать воркфлоу"), 500)
+                log.warning("workflow_create: %s", res.get("error"))
+                return _err("Не удалось создать воркфлоу", 500)
             return _json_resp({"ok": True, "workflow_id": res.get("id")})
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as exc:
+        except Exception:
             log.exception("workflow_create uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def workflow_execute(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23172,9 +23273,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 404)
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as exc:
+        except Exception:
             log.exception("workflow_execute uid=%d wf=%d", uid, wf_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def workflow_status(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23190,9 +23291,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp(status)
         except LookupError as e:
             return _err(str(e), 404)
-        except Exception as exc:
+        except Exception:
             log.exception("workflow_status uid=%d wf=%d", uid, wf_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def workflow_pause(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23210,9 +23311,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 404)
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as exc:
+        except Exception:
             log.exception("workflow_pause uid=%d wf=%d", uid, wf_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def workflow_resume(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23230,9 +23331,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(e), 404)
         except ValueError as e:
             return _err(str(e), 400)
-        except Exception as exc:
+        except Exception:
             log.exception("workflow_resume uid=%d wf=%d", uid, wf_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def workflow_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23248,9 +23349,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not ok:
                 return _err("Workflow не найден", 404)
             return _json_resp({"ok": True})
-        except Exception as exc:
+        except Exception:
             log.exception("workflow_delete uid=%d wf=%d", uid, wf_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/workflows", workflow_list)
     app.router.add_post("/api/miniapp/workflows", workflow_create_plural)
@@ -23303,9 +23404,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "retention_30d": overview.retention_30d,
                 "avg_session_duration_min": overview.avg_session_duration_min,
             })
-        except Exception as exc:
+        except Exception:
             log.exception("audience_analyze uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def audience_segment(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23330,9 +23431,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for s in segments
             ]})
-        except Exception as exc:
+        except Exception:
             log.exception("audience_segment uid=%d bot=%d", uid, bot_id)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/audience/analyze/{bot_id}", audience_analyze)
     app.router.add_get("/api/miniapp/audience/segment/{bot_id}", audience_segment)
@@ -23346,9 +23447,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.analytics_dashboard import get_dashboard_stats
             stats = await get_dashboard_stats(pool, uid)
             return _json_resp(stats)
-        except Exception as exc:
+        except Exception:
             log.exception("analytics_dashboard uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def analytics_realtime(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23357,9 +23458,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.analytics_dashboard import get_realtime_metrics
             metrics = await get_realtime_metrics(pool, uid)
             return _json_resp(metrics)
-        except Exception as exc:
+        except Exception:
             log.exception("analytics_realtime uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def analytics_historical(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23373,9 +23474,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.analytics_dashboard import get_historical_data
             data = await get_historical_data(pool, uid, metric, days)
             return _json_resp({"metric": metric, "days": days, "data": data})
-        except Exception as exc:
+        except Exception:
             log.exception("analytics_historical uid=%d", uid)
-            return _err(str(exc), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/analytics/dashboard", analytics_dashboard)
     app.router.add_get("/api/miniapp/analytics/realtime", analytics_realtime)
@@ -23416,9 +23517,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           registered_at AS created_at, last_seen AS last_active_at
                    FROM platform_users ORDER BY registered_at DESC LIMIT 100""")
             return _json_resp({"users": [dict(r) for r in rows]})
-        except Exception as e:
+        except Exception:
             log.exception("admin_users uid=%d", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_stats(request: web.Request) -> web.Response:
         """Системная статистика (только для админов)."""
@@ -23440,9 +23541,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             stats["ops_running"] = int(await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE status='running'") or 0)
             return _json_resp(stats)
-        except Exception as e:
+        except Exception:
             log.exception("admin_stats uid=%d", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_user_detail(request: web.Request) -> web.Response:
         """Детали пользователя (только для админов)."""
@@ -23471,9 +23572,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "channels": int(channels),
                 "accounts": int(accounts),
             })
-        except Exception as e:
+        except Exception:
             log.exception("admin_user_detail uid=%d target=%d", uid, target_id)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_broadcast(request: web.Request) -> web.Response:
         """Рассылка всем пользователям (только для админов)."""
@@ -23489,9 +23590,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нужен текст")
         try:
             return _json_resp(await _admin_broadcast_core(pool, uid, text))
-        except Exception as e:
+        except Exception:
             log.exception("admin_broadcast uid=%d", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def _admin_target(request: web.Request):
         """Общая проверка админ-действия: (uid, target_id) или (None, error-resp)."""
@@ -23526,9 +23627,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from database import db as _db
             await _db.grant_plan_to_user(pool, target_id, uid, "paid", months)
             return _json_resp({"ok": True, "months": months})
-        except Exception as e:
+        except Exception:
             log.exception("admin_user_grant uid=%d target=%d", uid, target_id)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_user_revoke(request: web.Request) -> web.Response:
         """Отозвать подписку пользователя."""
@@ -23543,9 +23644,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from database import db as _db
             await _db.revoke_plan_from_user(pool, target_id, uid)
             return _json_resp({"ok": True})
-        except Exception as e:
+        except Exception:
             log.exception("admin_user_revoke uid=%d target=%d", uid, target_id)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_user_ban(request: web.Request) -> web.Response:
         """Забанить пользователя (нельзя банить админов и себя)."""
@@ -23562,9 +23663,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from database import db as _db
             await _db.ban_user(pool, target_id, uid, "Забанен из mini app")
             return _json_resp({"ok": True})
-        except Exception as e:
+        except Exception:
             log.exception("admin_user_ban uid=%d target=%d", uid, target_id)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_user_unban(request: web.Request) -> web.Response:
         """Разбанить пользователя."""
@@ -23579,9 +23680,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from database import db as _db
             await _db.unban_user(pool, target_id, uid)
             return _json_resp({"ok": True})
-        except Exception as e:
+        except Exception:
             log.exception("admin_user_unban uid=%d target=%d", uid, target_id)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_audit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23599,9 +23700,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
                 for r in rows
             ]})
-        except Exception as e:
+        except Exception:
             log.exception("admin_audit uid=%d", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     async def admin_ops_stats(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -23621,9 +23722,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 {k: (round(float(v), 2) if k == "avg_duration_s" else int(v) if v is not None else 0) for k, v in dict(r).items()}
                 for r in rows
             ]})
-        except Exception as e:
+        except Exception:
             log.exception("admin_ops_stats uid=%d", uid)
-            return _err(str(e), 500)
+            return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/admin/users", admin_users)
     app.router.add_get("/api/miniapp/admin/stats", admin_stats)
