@@ -23,13 +23,18 @@ class _Err(Exception):
         self.status_code = status
 
 
-def _fake_openai(monkeypatch, *, live, catalog, calls):
+def _fake_openai(monkeypatch, *, live, catalog, calls, cut=()):
     class _Completions:
         async def create(self, *, model, **kw):
             calls.append(model)
+            if model in cut:
+                msg = types.SimpleNamespace(content="Але давайте подивимось на реальність")
+                return types.SimpleNamespace(choices=[types.SimpleNamespace(
+                    message=msg, finish_reason="length")])
             if model in live:
                 msg = types.SimpleNamespace(content="готовый пост")
-                return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+                return types.SimpleNamespace(choices=[types.SimpleNamespace(
+                    message=msg, finish_reason="stop")])
             raise _Err(404, f"Error code: 404 - No endpoints found for {model}.")
 
     class _Models:
@@ -83,3 +88,31 @@ def test_dead_mistral_not_in_defaults(monkeypatch):
     monkeypatch.delenv("OPENROUTER_MODELS", raising=False)
     prov = [p for p in ai_providers.configured_providers() if p.name == "openrouter"][0]
     assert "mistralai/mistral-7b-instruct:free" not in prov.models
+
+
+def test_cut_answer_is_not_returned_next_model_is_tried(monkeypatch):
+    """Пост в канале обрывался на полуслове: ответ, упёршийся в лимит, принимался."""
+    calls: list = []
+    _fake_openai(monkeypatch, live={"dead/b:free"}, catalog=[], calls=calls, cut={"dead/a:free"})
+    assert asyncio.run(spintax_ai.complete("s", "u")) == "готовый пост"
+    assert calls[:2] == ["dead/a:free", "dead/b:free"]
+
+
+def test_only_cut_answers_give_human_error(monkeypatch):
+    calls: list = []
+    _fake_openai(monkeypatch, live=set(), catalog=[], calls=calls,
+                 cut={"dead/a:free", "dead/b:free", "mistralai/mistral-7b-instruct:free"})
+    with pytest.raises(SpintaxServiceError) as e:
+        asyncio.run(spintax_ai.complete("s", "u"))
+    assert "оборван" in str(e.value)
+
+
+def test_thinking_models_go_last_in_live_catalog():
+    class _Models:
+        async def list(self):
+            return types.SimpleNamespace(data=[types.SimpleNamespace(id=i) for i in (
+                "deepseek/deepseek-r1:free", "qwen/qwq-32b:free", "meta-llama/llama-3.3-70b:free")])
+
+    client = types.SimpleNamespace(models=_Models())
+    got = asyncio.run(spintax_ai._live_free_models(client))
+    assert got[0] == "meta-llama/llama-3.3-70b:free"

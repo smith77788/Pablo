@@ -91,10 +91,17 @@ async def complete(system: str, user: str) -> str:
                     max_tokens=2500,
                     temperature=_SPIN_TEMPERATURE,
                 )
-                text = response.choices[0].message.content or ""
-                if text.strip():
+                choice = response.choices[0]
+                text = choice.message.content or ""
+                if getattr(choice, "finish_reason", None) == "length":
+                    # Модель упёрлась в лимит ответа (у «думающих» моделей его съедают
+                    # рассуждения): текст оборван на полуслове — в канал такой не отдаём.
+                    failures.append((f"{provider.name}/{model}", _CUT))
+                    log.warning("ИИ: %s/%s — %s", provider.name, model, _CUT)
+                elif text.strip():
                     return text
-                failures.append((f"{provider.name}/{model}", "пустой ответ"))
+                else:
+                    failures.append((f"{provider.name}/{model}", "пустой ответ"))
             except Exception as exc:  # noqa: BLE001 - failover по провайдерам
                 reason = explain_error(exc)
                 failures.append((f"{provider.name}/{model}", reason))
@@ -111,6 +118,7 @@ async def complete(system: str, user: str) -> str:
 
 
 _GONE = "модель снята у провайдера"
+_CUT = "ответ оборван по лимиту длины"
 
 
 def explain_error(exc: Exception) -> str:
@@ -160,6 +168,9 @@ async def _live_free_models(client, limit: int = 4) -> list[str]:
     prefer = ("deepseek", "llama-3.3", "qwen", "gemini", "mistral-small", "gemma")
 
     def rank(mid: str) -> int:
+        # «Думающие» модели тратят лимит ответа на рассуждения и обрывают текст — в конец.
+        if any(k in mid for k in ("-r1", "think", "reason", "qwq")):
+            return len(prefer) + 1
         for n, key in enumerate(prefer):
             if key in mid:
                 return n

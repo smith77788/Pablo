@@ -68,6 +68,7 @@ _MISSED_SLOT_H = 6          # слот, просроченный дольше, �
 _DRAFT_TTL_H = 48           # черновик на одобрении живёт двое суток
 _RECENT_FOR_PROMPT = 6      # сколько недавних постов показать ИИ
 _SALES_WINDOW = 10          # окно, в котором держится доля продающих постов
+_UNFINISHED = "пост оборван на полуслове"
 _MAX_ATTEMPTS = 3           # попыток написать пост, который пропустит редактор
 _ALERT_AFTER_FAILS = 3      # сколько сбоев подряд, прежде чем звать владельца
 
@@ -615,7 +616,35 @@ def clean_generated(text: str, max_chars: int = 4096) -> str:
     # Фигурные скобки и | публикация развернула бы как spintax.
     t = t.replace("{", "(").replace("}", ")").replace("|", "/")
     t = re.sub(r"\n{3,}", "\n\n", t)
-    return t[:max_chars].strip()
+    if len(t) > max_chars:
+        # Длиннее лимита Telegram — режем по концу предложения, а не посреди фразы.
+        head = t[:max_chars]
+        cut = max(head.rfind(". "), head.rfind("! "), head.rfind("? "), head.rfind("\n"))
+        t = head[:cut + 1] if cut > max_chars // 2 else head
+    return t.strip()
+
+
+_END_OK = ".!?…»\"')]*"
+_TAIL_OK_RE = re.compile(r"@\w|https?://|t\.me/|#\w|\+?\d[\d\s()\-]{6,}")
+
+
+def looks_unfinished(text: str) -> bool:
+    """Пост оборван на полуслове: последняя строка — начатая фраза без точки.
+
+    Подпись, контакт, ссылка, хэштеги и эмодзи в конце — нормальное окончание.
+    """
+    t = (text or "").rstrip()
+    if not t:
+        return True
+    last = t[-1]
+    if last in _END_OK or ord(last) >= 0x2190:
+        return False
+    line = t.splitlines()[-1]
+    if _TAIL_OK_RE.search(line):
+        return False
+    if last in ",;:-—–(":
+        return True
+    return len(line.split()) >= 4
 
 
 _SYSTEM_PROFILE = (
@@ -1277,6 +1306,12 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
         text = clean_generated(raw, rules.max_chars)
         if not text:
             feedback = ["ответ пустой — нужен текст поста"]
+            continue
+        if looks_unfinished(text):
+            # Оборванный пост в канал не уходит: просим дописать, а не публикуем кусок.
+            reasons = [_UNFINISHED]
+            feedback = ["прошлый текст оборвался на полуслове — напиши пост целиком, "
+                        "короче, и закончи последнюю мысль"]
             continue
         verdict = await editorial_review.review_draft(pool, owner_id, text,
                                                       channel_key=str(channel_id))

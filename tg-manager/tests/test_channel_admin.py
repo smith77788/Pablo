@@ -399,3 +399,72 @@ def test_bot_reason_buttons_fit_callback_limit():
     from bot.callbacks import VaCb
     for code in ca.REJECT_REASONS:
         assert len(VaCb(action="why", id=2**40, r=code).pack().encode()) <= 64
+
+
+# ── Оборванные посты (владелец 02.10: в канал ушёл кусок поста) ─────────────
+
+@pytest.mark.parametrize("text, cut", [
+    ("Звучить красиво, чи не так?\n\nАле давайте подивимось на реальність", True),
+    ("Первое, второе,", True),
+    ("Пост закончен.", False),
+    ("Готово!\n\nПишите: @manager", False),
+    ("Итог 🔥", False),
+    ("Спасибо, что с нами\nВаш Иван", False),
+    ("Новости дня\n#новости #украина", False),
+    ("Звоните +7 999 123-45-67", False),
+    ("", True),
+])
+def test_looks_unfinished(text, cut):
+    assert ca.looks_unfinished(text) is cut
+
+
+def test_clean_generated_cuts_long_text_at_sentence_end():
+    text = "Первое предложение. " * 30 + "Хвост без конца"
+    out = ca.clean_generated(text, max_chars=200)
+    assert len(out) <= 200 and out.endswith(".")
+
+
+def test_unfinished_post_is_rewritten_and_never_autopublished(monkeypatch):
+    from services import content_memory, editorial_review
+
+    async def _admin_row(*a, **k):
+        return {"topic": "новости", "intro_pending": False, "tz_offset": 3}
+
+    async def _ch(*a, **k):
+        return {"title": "Новини"}
+
+    async def _empty(*a, **k):
+        return []
+
+    async def _pillars(*a, **k):
+        return ["Новости"], {"Новости": 1}, None
+
+    async def _rules(*a, **k):
+        return cb.BrandRules()
+
+    async def _review(*a, **k):
+        class V:
+            needs_review = False
+            reasons = []
+        return V()
+
+    answers = iter(["Але давайте подивимось на реальність", "Повний пост, з крапкою."])
+    prompts: list = []
+
+    async def _complete(system, user):
+        prompts.append(user)
+        return next(answers)
+
+    for name, fn in (("get_admin", _admin_row), ("channel_row", _ch), ("_pillars", _pillars),
+                     ("_rules", _rules), ("_best_texts", _empty), ("owner_lessons", _empty)):
+        monkeypatch.setattr(ca, name, fn)
+    monkeypatch.setattr(content_memory, "recent_texts", _empty)
+    monkeypatch.setattr(content_memory, "recent_pillars", _empty)
+    monkeypatch.setattr(editorial_review, "review_draft", _review)
+    d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
+    assert d.ok and d.text == "Повний пост, з крапкою."
+    assert "оборвался на полуслове" in prompts[1]
+
+    answers = iter(["Обрыв номер раз без точки"] * 3)
+    d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
+    assert not d.ok and d.reasons == ["пост оборван на полуслове"]
