@@ -31,7 +31,7 @@ class _Pool:
         self.row = {"id": 31, "owner_id": 555, "op_type": op_type,
                     "status": status, "params": {"targets": ["a"]},
                     "label": "Приглашение", "total_items": 380,
-                    "done_items": 203}
+                    "done_items": 203, "err_cnt": 0}
         self.writes: list[str] = []
 
     async def fetchrow(self, query, *args):

@@ -55,6 +55,10 @@ class _Pool:
         return rows[: int(m.group(1))] if m else rows
 
     async def fetchrow(self, query, *args):
+        # Подсчёт закрытых целей по журналу — отдельный запрос; у операции без
+        # журнала он не находит ничего.
+        if "count(DISTINCT target)" in query:
+            return None
         if "operation_queue" not in query:
             return None
         if "WHERE id=$1" in query:
@@ -72,9 +76,11 @@ class _Pool:
 
 
 def _row(op_id, status=op_status.PARTIAL, op_type="mass_invite"):
+    # err_cnt приходит подзапросом по журналу: гейт повторяемости
+    # (operation_retry.can_retry) смотрит на него наравне со счётчиками.
     return {"id": op_id, "owner_id": 555, "op_type": op_type, "status": status,
             "params": {"targets": ["a", "b"]}, "label": "Приглашение",
-            "total_items": 380, "done_items": 203}
+            "total_items": 380, "done_items": 203, "err_cnt": 0}
 
 
 @pytest.fixture
@@ -83,7 +89,8 @@ def submitted(monkeypatch):
 
     async def _fake_submit(pool, owner_id, op_type, params, **kw):
         seen.append({"owner_id": owner_id, "op_type": op_type,
-                     "params": params, "total_items": kw.get("total_items")})
+                     "params": params, "total_items": kw.get("total_items"),
+                     "label": kw.get("label")})
         return 9000 + len(seen)
 
     monkeypatch.setattr(operation_bus, "submit", _fake_submit)
@@ -162,14 +169,23 @@ def test_resubmit_one_falls_back_to_whole_operation(monkeypatch, submitted):
 
 
 def test_resubmit_one_refuses_finished_and_foreign(submitted):
-    pool = _Pool([_row(13, op_status.DONE), _row(14, op_status.PARTIAL)])
+    """Доведённую до конца операцию повторять нечем, чужую — нельзя.
+
+    «Доведённая» здесь честная: все цели закрыты и ошибок нет. Операция со
+    статусом done, но с недобором по целям, повторяемой как раз остаётся — это
+    и есть «упавшая» с точки зрения человека (services/operation_retry).
+    """
+    finished = _row(13, op_status.DONE)
+    finished["done_items"] = finished["total_items"]
+    pool = _Pool([finished, _row(14, op_status.PARTIAL)])
     pool.rows[1]["owner_id"] = 999
 
     done = asyncio.run(operation_bus.resubmit_one(pool, 555, 13))
     alien = asyncio.run(operation_bus.resubmit_one(pool, 555, 14))
 
-    assert done["ok"] is False and "неудачей" in done["reason"]
-    assert alien["ok"] is False and "не найдена" in alien["reason"]
+    assert done["ok"] is False and done["code"] == 409, done
+    assert "выполнена полностью" in done["reason"], done["reason"]
+    assert alien["ok"] is False and alien["code"] == 404
     assert submitted == []
 
 
@@ -232,7 +248,9 @@ class _JournalPool(_Pool):
         self.closed = closed
 
     async def fetchrow(self, query, *args):
-        if "operation_log" in query:
+        # Именно подсчёт целей, а не любое упоминание журнала: сама выборка
+        # операции тоже читает operation_log (подзапрос err_cnt).
+        if "count(DISTINCT target)" in query:
             return {"n": self.closed}
         return await super().fetchrow(query, *args)
 
@@ -271,6 +289,82 @@ def test_retry_keeps_the_parent_size_without_a_journal(monkeypatch, submitted):
     res = asyncio.run(operation_bus.resubmit_one(pool, 555, 92))
 
     assert res["ok"] and submitted[0]["total_items"] == 380
+
+
+# ── Одна дверь знает всё, что знал самый полный из трёх повторов ─────────────
+
+def test_cancelled_operation_can_be_restarted(monkeypatch, submitted):
+    """Отменённую операцию можно запустить заново — это решение can_retry.
+
+    Бот считал повторяемой только 'failed', поэтому отменённая операция и
+    операция, закрывшаяся 'done' с недобором по целям, кнопкой не повторялись,
+    хотя для человека это ровно та же недоделанная работа.
+    """
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    res = asyncio.run(operation_bus.resubmit_one(
+        _Pool([_row(20, op_status.CANCELLED)]), 555, 20))
+    assert res["ok"], f"отменённую операцию не дали запустить заново: {res}"
+
+
+def test_done_with_a_shortfall_can_be_retried(monkeypatch, submitted):
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    res = asyncio.run(operation_bus.resubmit_one(
+        _Pool([_row(21, op_status.DONE)]), 555, 21))     # 203 из 380
+    assert res["ok"], f"'done' с недобором по целям не повторяется: {res}"
+
+
+def test_publication_retries_only_the_failed_channels(monkeypatch, submitted):
+    """Публикация повторяется по упавшим каналам, а не отказом «из карточки»."""
+    async def _failed(p, op_id, op_type):
+        return [101, 102]
+
+    monkeypatch.setattr(operation_bus, "collect_failed_targets", _failed)
+    res = asyncio.run(operation_bus.resubmit_one(
+        _Pool([_row(22, op_type="mass_publish")]), 555, 22))
+
+    assert res["ok"] and res["kind"] == "channels" and res["count"] == 2, res
+    assert submitted[0]["params"]["channel_ids"] == [101, 102]
+    assert submitted[0]["total_items"] == 2, (
+        "повтор публикации встал на размер предка, а не на упавшие каналы")
+
+
+def test_publication_without_failed_channels_says_so(monkeypatch, submitted):
+    async def _none(p, op_id, op_type):
+        return []
+
+    monkeypatch.setattr(operation_bus, "collect_failed_targets", _none)
+    res = asyncio.run(operation_bus.resubmit_one(
+        _Pool([_row(23, op_type="mass_publish")]), 555, 23))
+    assert res["ok"] is False and res["code"] == 400
+    assert "неудавшихся каналов" in res["reason"].lower()
+    assert submitted == []
+
+
+def test_recurring_label_loses_its_mark(monkeypatch, submitted):
+    """Метку «↻» ставит планировщик кругов: у разового повтора её быть не должно."""
+    row = _row(24, op_type="mass_join")
+    row["params"] = {"repeat_interval_min": 45}
+    row["label"] = "Вступление ↻"
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    asyncio.run(operation_bus.resubmit_one(_Pool([row]), 555, 24))
+
+    assert submitted[0]["label"] == "Вступление", (
+        f"метка расписания осталась и врёт владельцу в очереди: "
+        f"{submitted[0]['label']!r}")
+
+
+def test_vanished_op_type_gets_a_clear_refusal(monkeypatch, submitted):
+    """Тип убрали из реестра: повтор отказывает понятно, а не падает 500."""
+    async def _gone(pool, owner_id, op_type, params, **kw):
+        raise ValueError("unknown op_type")
+
+    monkeypatch.setattr(operation_bus, "submit", _gone)
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    res = asyncio.run(operation_bus.resubmit_one(
+        _Pool([_row(25, op_type="legacy_thing")]), 555, 25))
+
+    assert res["ok"] is False and res["code"] == 400
+    assert "больше не поддерживается" in res["reason"]
 
 
 # ── Храповик на класс: повтор не возвращается к сбросу строки ────────────────

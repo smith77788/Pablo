@@ -4142,10 +4142,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # доведена, и жмёт «Повторить» дважды. Получались ДВЕ одинаковые
             # операции — двойная рассылка тем же адресатам, двойной пост в те же
             # каналы, двойной расход лимитов аккаунтов.
+            # Размер повтора — ОСТАТОК работы, а не потолок предка. С
+            # унаследованным потолком повтор, доделавший всё (177 целей из 380,
+            # где 203 уже закрыты), по недобору прогресса объявлялся «частично
+            # выполненным» — и его снова предлагали повторить: круг ложных
+            # «недоведено» (operation_bus._retry_total_items).
+            _retry_total = await _obus._retry_total_items(
+                pool, op_id, row["total_items"])
+            if int(row["total_items"] or 0) > 0 and _retry_total == 0:
+                return _err("Повторять нечего: все цели уже закрыты", 409)
             try:
                 new_id = await _obus.submit(
                     pool, uid, row["op_type"], _retry_params,
-                    total_items=row["total_items"] or 0, label=_retry_label)
+                    total_items=_retry_total, label=_retry_label)
             except ValueError:
                 # Тип операции больше не поддерживается (переименован или убран из
                 # реестра). Раньше копирование строки очереди воскрешало такую

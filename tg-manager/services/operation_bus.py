@@ -1458,43 +1458,56 @@ async def resubmit_unfinished(
 
 
 async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
-    """Повторить одну недоведённую операцию — через шину, а не сбросом строки.
+    """Повторить одну недоведённую операцию — единственная дверь для всех поверхностей.
 
-    Сначала пробуем точечный повтор только по упавшим целям: он дешевле и
-    безопаснее. Тип без точечного повтора перепоставляем целиком — исходная
-    строка при этом остаётся с ЧЕСТНОЙ историей, вместо того чтобы терять свои
-    счётчики и причину под сбросом в 'pending'.
+    До этого повтор одной операции был написан ТРИ раза: в мини-аппе (самый
+    полный вариант), в двух бот-хендлерах (сырой сброс строки очереди) и здесь.
+    Каждая знала не всё: бот не умел повторять публикацию по упавшим каналам, не
+    снимал метку расписания «↻» и считал повторяемой только `failed`, хотя
+    «упавшая» для человека — это недоведённая работа, в том числе `done` с
+    недобором и `cancelled`.
 
-    Возвращает {"ok": bool, "op_id": int|None, "count": int, "reason": str}.
+    Порядок решений:
+      1. можно ли повторять вообще — `operation_retry.can_retry` (он же объясняет
+         отказ словами, которые видит владелец);
+      2. публикация — ТОЛЬКО упавшие каналы, иначе успешные получат дубль поста;
+      3. тип с точечным повтором — только упавшие цели;
+      4. остальное — операция целиком, размером в ОСТАТОК работы.
+
+    Возвращает {"ok", "op_id", "count", "kind", "reason", "code",
+    "dropped_recurrence", "note"}. `kind` — что именно повторяется: "channels"
+    (упавшие каналы публикации), "targets" (упавшие цели) или "whole" (операция
+    целиком); поверхность по нему подписывает цифру. `code` — чтобы поверхность отдала честный ответ: 404 нет операции,
+    409 повторять нечего, 400 нечего повторять у публикации или тип убран из
+    реестра.
+
+    PlanRequiredError и ImmunityBlockedError НЕ перехватываются: отказ по тарифу
+    и предохранитель Ban Weather обязаны дойти до поверхности как есть (403), а
+    не превратиться в «не удалось повторить».
     """
-    from services import op_status as _ost
+    from services import operation_retry as _oretry
 
     row = await pool.fetchrow(
-        "SELECT owner_id, op_type, params, label, total_items, status "
-        "FROM operation_queue WHERE id=$1", op_id)
+        "SELECT owner_id, op_type, params, label, status, total_items, done_items, "
+        "       (SELECT COUNT(*) FROM operation_log ol "
+        "          WHERE ol.op_id = operation_queue.id AND ol.status='error') AS err_cnt "
+        "  FROM operation_queue WHERE id=$1", op_id)
     if not row or int(row["owner_id"]) != int(owner_id):
-        return {"ok": False, "op_id": None, "count": 0,
+        return {"ok": False, "op_id": None, "count": 0, "code": 404,
                 "reason": "Операция не найдена"}
-    if row["status"] not in _ost.UNFINISHED:
-        return {"ok": False, "op_id": None, "count": 0,
-                "reason": "Повторять нечего: операция не завершилась неудачей"}
 
-    # Точечный повтор — только если упавшие цели ЕСТЬ. Их отсутствие не значит
-    # «повторять нечего»: недоведённая операция могла остановиться до того, как
-    # дошла до остальных целей (кончились аккаунты, флуд, лимит) — тогда у неё
-    # ноль упавших и сотня нетронутых, и продолжить её нужно целиком. Повтор
-    # целиком безопасен: уже взятые цели исполнитель пропустит.
-    if retry_targets_meta(row["op_type"]):
-        res = await submit_retry_failed(pool, owner_id, op_id)
-        if res.get("ok"):
-            return res
+    # Через dict и .get: не доехала колонка — решение всё равно принимается, а
+    # не падает KeyError на нажатии кнопки. can_retry трактует пустые счётчики
+    # как «не подтверждено выполненной», то есть в пользу владельца.
+    info = dict(row)
+    _can, _why = _oretry.can_retry(
+        info.get("status"), info.get("done_items"),
+        info.get("total_items"), info.get("err_cnt"))
+    if not _can:
+        return {"ok": False, "op_id": None, "count": 0, "code": 409,
+                "reason": f"Повтор невозможен: {_why}"}
 
-    if row["op_type"] == "mass_publish":
-        return {"ok": False, "op_id": None, "count": 0,
-                "reason": "Для публикации повторяются только упавшие каналы — "
-                          "из карточки операции"}
-
-    params = row["params"]
+    params = info.get("params")
     if isinstance(params, str):
         try:
             params = json.loads(params or "{}")
@@ -1502,21 +1515,80 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
             params = {}
     if not isinstance(params, dict):
         params = {}
+
+    _dropped = drops_recurrence(params)
+    # Метку «↻» ставит планировщик кругов; у разового повтора расписания нет, и
+    # метка врала бы владельцу прямо в очереди.
+    _label = info.get("label")
+    if _dropped and isinstance(_label, str) and _label.endswith(" ↻"):
+        _label = _label[:-2].rstrip()
+    _note = ("Повтор запущен один раз — расписание исходной операции не "
+             "копируется.") if _dropped else ""
+
+    async def _submit(op_type, new_params, total_items, label):
+        """Поставить повтор, переведя исчезнувший тип операции в понятный отказ."""
+        try:
+            return await submit(pool, owner_id, op_type, new_params,
+                                total_items=total_items, label=label), None
+        except ValueError:
+            # Тип переименован или убран из реестра. Копирование строки очереди
+            # раньше воскрешало такую операцию, и она навсегда зависала
+            # 'pending': воркер её не знает.
+            return None, (f"Тип операции «{op_type}» больше не поддерживается — "
+                          "повтор невозможен")
+
+    # Публикация: только упавшие каналы. Список собирает collect_failed_targets —
+    # он исключает цели, закрывшиеся успехом позже (канал упал на первой попытке
+    # и опубликовался на второй), и строго разбирает формат target.
+    _op_type = info.get("op_type") or ""
+    if _op_type in ("mass_publish", "quick_post"):
+        failed_ids = [int(x) for x in await collect_failed_targets(
+            pool, op_id, _op_type)]
+        if not failed_ids:
+            return {"ok": False, "op_id": None, "count": 0, "code": 400,
+                    "reason": "Нет неудавшихся каналов для повтора"}
+        base = params_for_retry(op_id, params)
+        base["channel_ids"] = failed_ids
+        new_id, err = await _submit(
+            _op_type, base, len(failed_ids),
+            f"Повтор неудавшихся ({len(failed_ids)})")
+        if err:
+            return {"ok": False, "op_id": None, "count": 0, "code": 400,
+                    "reason": err}
+        return {"ok": True, "op_id": new_id, "count": len(failed_ids),
+                "kind": "channels", "reason": "",
+                "dropped_recurrence": _dropped, "note": _note}
+
+    # Точечный повтор — только если упавшие цели ЕСТЬ. Их отсутствие не значит
+    # «повторять нечего»: недоведённая операция могла остановиться до того, как
+    # дошла до остальных целей (кончились аккаунты, флуд, лимит) — тогда у неё
+    # ноль упавших и сотня нетронутых, и продолжить её нужно целиком. Повтор
+    # целиком безопасен: уже взятые цели исполнитель пропустит по журналу предка.
+    if retry_targets_meta(_op_type):
+        res = await submit_retry_failed(pool, owner_id, op_id)
+        if res.get("ok"):
+            res.setdefault("dropped_recurrence", _dropped)
+            res.setdefault("note", _note)
+            res.setdefault("kind", "targets")
+            return res
+
     # Размер повтора — остаток, а не потолок предка: иначе повтор, доделавший
     # всё, объявлялся бы «частично выполненным» по недобору прогресса.
-    total = await _retry_total_items(pool, op_id, row["total_items"])
-    if int(row["total_items"] or 0) > 0 and total == 0:
-        return {"ok": False, "op_id": None, "count": 0,
+    total = await _retry_total_items(pool, op_id, info.get("total_items"))
+    try:
+        _src_total = int(info.get("total_items") or 0)
+    except (TypeError, ValueError):
+        _src_total = 0
+    if _src_total > 0 and total == 0:
+        return {"ok": False, "op_id": None, "count": 0, "code": 409,
                 "reason": "Повторять нечего: все цели уже закрыты"}
-    # Та же причина, что в resubmit_unfinished: ссылка на журнал предка плюс
-    # отброшенное расписание. Точечный повтор выше идёт тем же путём — внутри
-    # submit_retry_failed.
-    _dropped = drops_recurrence(params)
-    new_id = await submit(pool, owner_id, row["op_type"],
-                          params_for_retry(op_id, params),
-                          total_items=total, label=row["label"])
-    return {"ok": True, "op_id": new_id, "count": total, "reason": "",
-            "dropped_recurrence": _dropped}
+    new_id, err = await _submit(
+        _op_type, params_for_retry(op_id, params), total, _label)
+    if err:
+        return {"ok": False, "op_id": None, "count": 0, "code": 400,
+                "reason": err}
+    return {"ok": True, "op_id": new_id, "count": total, "kind": "whole",
+            "reason": "", "dropped_recurrence": _dropped, "note": _note}
 
 
 # ── Признак жизни исполнителя операций ───────────────────────────────────────
