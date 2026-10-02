@@ -893,6 +893,14 @@ async def cb_retry_all_failed(
         return
     reset_count = int(res.get("retried") or 0)
     if reset_count == 0:
+        # Правду про причину: «нечего повторять» и «тариф не пускает» — разные
+        # ответы, и второй владелец должен услышать как отказ, а не как «у вас
+        # всё в порядке».
+        if int(res.get("plan_blocked") or 0):
+            await callback.answer(
+                "Эти операции недоступны на вашем тарифе — повтор не поставлен.",
+                show_alert=True)
+            return
         await callback.answer("Нет неудачных операций для повторного запуска.", show_alert=True)
         return
     await callback.answer(

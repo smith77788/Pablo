@@ -1422,7 +1422,7 @@ async def resubmit_unfinished(
              AND created_at > NOW() - ($2 * INTERVAL '1 hour')
            ORDER BY created_at DESC LIMIT {int(limit)}""",
         owner_id, hours)
-    retried, skipped, dropped = 0, 0, 0
+    retried, skipped, dropped, plan_blocked = 0, 0, 0, 0
     for r in (rows or []):
         if r["op_type"] == "mass_publish":
             skipped += 1
@@ -1450,11 +1450,15 @@ async def resubmit_unfinished(
                          total_items=_left, label=r["label"])
             retried += 1
         except PlanRequiredError:
+            # Отдельно от skipped: «нечего повторять» и «тариф не пускает» — это
+            # разные ответы. Поверхность, которая их смешивала, говорила «нет
+            # неудачных операций» владельцу, у которого они есть.
+            plan_blocked += 1
             skipped += 1
         except Exception as exc:
             log.debug("resubmit_unfinished op_type=%s: %s", r["op_type"], exc)
     return {"ok": True, "retried": retried, "skipped": skipped,
-            "recurrence_dropped": dropped}
+            "recurrence_dropped": dropped, "plan_blocked": plan_blocked}
 
 
 async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:

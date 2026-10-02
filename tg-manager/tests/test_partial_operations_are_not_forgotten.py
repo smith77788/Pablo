@@ -209,10 +209,27 @@ def test_no_reader_of_unfinished_work_filters_failed_alone():
         # конец функции — следующее определение на нулевом отступе
         m = re.search(r"\n(?:async def |def |class )", src[start:])
         body = src[start:start + (m.start() if m else len(src))]
-        marker = ("UNFINISHED" if func == "resubmit_one"
-                  else "sql_unfinished_list()")
-        assert marker in body, (
-            f"{rel}:{func} ищет недоделанную работу без {marker}")
+        # Повтор одной операции решает не списком статусов, а общим гейтом
+        # `operation_retry.can_retry`: он смотрит ещё и на счётчики (done у
+        # `cancelled`, недобор у `done`). Поэтому здесь годится либо имя списка,
+        # либо делегирование гейту — но не собственная проверка статуса.
+        markers = (("UNFINISHED", "can_retry(") if func == "resubmit_one"
+                   else ("sql_unfinished_list()",))
+        assert any(m in body for m in markers), (
+            f"{rel}:{func} ищет недоделанную работу без {' / '.join(markers)}")
         assert "status='failed'" not in body.replace(" ", ""), (
             f"{rel}:{func} снова фильтрует только status='failed' — "
             "операции с частично сделанной работой опять потеряются")
+
+
+def test_shared_retry_gate_lets_partial_through():
+    """Гейт, которому делегирует `resubmit_one`, обязан пускать `partial`.
+
+    Без этой проверки храповик выше можно было бы удовлетворить делегированием
+    гейту, который сам отказывает недоведённой операции.
+    """
+    from services import operation_retry
+
+    ok, reason = operation_retry.can_retry(op_status.PARTIAL, 203, 380, 0)
+    assert ok, f"гейт повтора отказывает недоведённой операции: {reason}"
+    assert operation_retry.can_retry(op_status.FAILED, 0, 380, 380)[0]

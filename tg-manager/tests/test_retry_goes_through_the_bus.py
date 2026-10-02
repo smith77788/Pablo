@@ -137,6 +137,9 @@ def test_resubmit_unfinished_survives_plan_refusal(monkeypatch):
     pool = _Pool([_row(1), _row(2)])
     res = asyncio.run(operation_bus.resubmit_unfinished(pool, 555))
     assert res["retried"] == 1 and res["skipped"] == 1
+    assert res["plan_blocked"] == 1, (
+        "отказ по тарифу неотличим от «нечего повторять»: поверхность скажет "
+        f"владельцу, что упавших операций нет — {res}")
 
 
 def test_resubmit_one_prefers_pointwise_retry(monkeypatch, submitted):
@@ -407,3 +410,49 @@ def test_no_retry_by_resetting_the_queue_row():
         "повтор операции снова сбрасывает строку очереди вместо шины — это "
         "постановка в работу мимо гейта тарифа, предохранителя и дедупа:\n"
         + "\n".join(offenders))
+
+
+def _root():
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+def _surfaces_reading_the_bulk_retry():
+    """Функции поверхностей, которые зовут `resubmit_unfinished`.
+
+    Границы берём из AST (тело функции целиком), а не окном фиксированной
+    длины: окно рассыпается от любой правки выше и выключает проверку молча —
+    это запрещено `tests/test_no_silently_disabled_guards.py`.
+    """
+    import ast
+
+    found: list[tuple[str, str, str]] = []
+    for rel in ("bot/handlers/mass_ops.py", "bot/handlers/botmother_menu.py"):
+        src = (_root() / rel).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            body = ast.get_source_segment(src, node) or ""
+            if "resubmit_unfinished" in body:
+                found.append((rel, node.name, body))
+    return found
+
+
+def test_every_bulk_retry_surface_tells_the_truth_about_the_plan():
+    """Отказ по тарифу не выдаётся за «нет упавших операций».
+
+    Владелец на бесплатном тарифе жмёт «повторить все упавшие»: шина честно
+    отказывает по тарифу каждой операции, `retried` остаётся нулём — и
+    поверхность говорила «Нет неудачных операций для повторного запуска».
+    То есть продукт отрицал существование работы, которую владелец видит
+    своими глазами, вместо того чтобы назвать причину.
+    """
+    surfaces = _surfaces_reading_the_bulk_retry()
+    assert len(surfaces) >= 2, (
+        f"поверхности массового повтора потерялись: {[s[:2] for s in surfaces]}")
+    for rel, name, body in surfaces:
+        assert "plan_blocked" in body, (
+            f"{rel}:{name} читает только retried: владельцу, которому тариф не "
+            "дал повторить, скажут, что упавших операций нет")
+        assert "тариф" in body, (
+            f"{rel}:{name} не называет причину отказа владельцу")

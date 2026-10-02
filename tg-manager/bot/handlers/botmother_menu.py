@@ -811,6 +811,11 @@ async def cb_ops_retry_all_failed(
         return
     reset_count = int(res.get("retried") or 0)
     if reset_count == 0:
+        if int(res.get("plan_blocked") or 0):
+            await callback.answer(
+                "Эти операции недоступны на вашем тарифе — повтор не поставлен.",
+                show_alert=True)
+            return
         await callback.answer("Нет неудачных операций для повторного запуска.", show_alert=True)
         return
     await callback.answer(
