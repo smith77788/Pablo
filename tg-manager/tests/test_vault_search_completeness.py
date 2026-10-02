@@ -122,7 +122,8 @@ def test_messages_without_text_do_not_crash():
 # ── Доведено до пользователя ──────────────────────────────────────────────────
 
 def test_endpoint_exposes_completeness():
-    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    # Обработчик vault_search вынесен в services/mini_app_vault.py (2026-10-02).
+    api = (_ROOT / "services" / "mini_app_vault.py").read_text(encoding="utf-8")
     start = api.index("async def vault_search")
     body = api[start:start + 1600]
     for field in ('"complete"', '"scanned"', '"archive_total"'):

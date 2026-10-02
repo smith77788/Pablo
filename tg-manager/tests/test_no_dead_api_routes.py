@@ -18,14 +18,29 @@ _SCREENS = "\n".join(
     p.read_text(encoding="utf-8") for p in sorted((ROOT / "mini_app" / "screens").glob("*.js"))
 ) if (ROOT / "mini_app" / "screens").is_dir() else ""
 HTML = HTML + "\n" + _SCREENS
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
 
 
 def _route_patterns() -> list[re.Pattern]:
-    """Маршруты бэка → регэкспы: {param} матчит любой непустой сегмент."""
+    """Маршруты бэка → регэкспы: {param} матчит любой непустой сегмент.
+
+    Список снимается с СОБРАННОГО приложения, а не с текста `mini_app_api.py`.
+    Текстовый поиск врал ровно наоборот нужному: обработчики переехали в
+    `services/mini_app_*.py`, живые маршруты стали «несуществующими», и тест
+    начал требовать ослабить себя вместо того, чтобы ловить мёртвую кнопку.
+    """
+    from tests.miniapp_routes import registered_routes
+
+    routes = registered_routes()
+    assert len(routes) > 800, "инвентарь маршрутов пуст — проверка измеряет не то"
+    # OPTIONS /api/miniapp/{path} — общий ответ на preflight, он матчит
+    # ЛЮБОЙ путь и делал бы проверку слепой: мёртвая кнопка «нашла бы»
+    # себе маршрут. Preflight — не эндпоинт, его не считаем.
     pats = []
-    for m in re.finditer(r"""add_(?:get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]""", API):
-        route = m.group(1).split("?")[0]
+    for entry in routes:
+        method, _, path = entry.partition(" ")
+        if method == "OPTIONS":
+            continue
+        route = path.split("?")[0]
         rx = "^" + re.sub(r"\{[^}]+\}", r"[^/]+", re.escape(route).replace(r"\{", "{").replace(r"\}", "}")) + "$"
         pats.append(re.compile(rx))
     return pats

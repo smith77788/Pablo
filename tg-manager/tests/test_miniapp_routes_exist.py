@@ -18,13 +18,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
 
 
 def _backend_static_routes() -> set[str]:
-    routes = set(re.findall(
-        r"""add_(?:get|post|route)\([^,]*?['"](/api/miniapp/[^'"]+)['"]""", API))
-    return {r for r in routes if "{" not in r}
+    """Маршруты СОБРАННОГО приложения, а не строки в тексте одного файла:
+    обработчики режутся по модулям `services/mini_app_*.py`, и текстовый поиск
+    объявлял живые маршруты несуществующими."""
+    from tests.miniapp_routes import registered_routes
+
+    entries = registered_routes()
+    assert len(entries) > 800, "инвентарь маршрутов пуст — проверка измеряет не то"
+    # OPTIONS /api/miniapp/{path} — общий ответ на preflight, он матчит
+    # ЛЮБОЙ путь и делал бы проверку слепой: мёртвая кнопка «нашла бы»
+    # себе маршрут. Preflight — не эндпоинт, его не считаем.
+    routes = {e.split(" ", 1)[1] for e in entries
+              if not e.startswith("OPTIONS ")}
+    return {r for r in routes if "{" not in r and r.startswith("/api/miniapp/")}
 
 
 def _frontend_static_calls() -> set[str]:

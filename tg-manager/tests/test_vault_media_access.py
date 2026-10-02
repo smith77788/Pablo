@@ -14,7 +14,8 @@ import pathlib
 from services import vault_service as V
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Обработчики «Хранилища» вынесены в свой модуль (2026-10-02).
+_API = (_ROOT / "services" / "mini_app_vault.py").read_text(encoding="utf-8")
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 
@@ -122,7 +123,13 @@ def _endpoint() -> str:
 
 
 def test_route_registered():
-    assert '"/api/miniapp/vault/media/{chat_id}/{msg_id}"' in _API
+    """Спрашиваем РОУТЕР, а не текст файла: иначе проверка краснеет на
+    переносе кода и молчит на настоящей потере маршрута."""
+    from tests.miniapp_routes import registered_routes
+
+    routes = set(registered_routes())
+    assert len(routes) > 800, "инвентарь маршрутов пуст — проверка измеряет не то"
+    assert "GET /api/miniapp/vault/media/{chat_id}/{msg_id}" in routes
 
 
 def test_bot_token_never_leaves_the_server():

@@ -14,7 +14,10 @@ import pathlib
 from services import vault_service as V
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Исходник мини-аппа режется на модули (services/mini_app*.py), поэтому
+# смотрим на них сразу все: иначе проверка краснеет на переносе кода.
+_API = "\n".join(f.read_text(encoding="utf-8")
+        for f in sorted((_ROOT / "services").glob("mini_app*.py")))
 
 
 class _Row(dict):

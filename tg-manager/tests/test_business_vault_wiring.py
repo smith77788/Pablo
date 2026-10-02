@@ -12,7 +12,10 @@ from types import SimpleNamespace as N
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "main.py").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Исходник мини-аппа режется на модули (services/mini_app*.py), поэтому
+# смотрим на них сразу все: иначе проверка краснеет на переносе кода.
+API = "\n".join(f.read_text(encoding="utf-8")
+       for f in sorted((ROOT / "services").glob("mini_app*.py")))
 HANDLER = (ROOT / "bot" / "handlers" / "business_vault.py").read_text(encoding="utf-8")
 HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
