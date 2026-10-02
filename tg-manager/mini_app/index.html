@@ -832,9 +832,12 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 
 /* ─── Broadcast mini-table ───────────────────────────────── */
 .bc-table{margin:0 16px;border-radius:var(--radius);overflow:hidden;background:var(--bg2)}
-.bc-head{display:grid;grid-template-columns:1fr 50px 50px 60px;padding:7px 10px;border-bottom:1px solid var(--sep)}
+/* Колонка статуса была 60px, и значок со словом в неё не влезал (86px хватает на «⏳ Ожидает»): «⏳ Ож…»,
+   «❌ Ош…», «▶ Раб…» — обрывок вместо состояния рассылки, ради которого в
+   таблицу и смотрят. Счётчики «✓» и «✕» держат двузначные числа и в 38px. */
+.bc-head{display:grid;grid-template-columns:1fr 36px 36px 86px;padding:7px 10px;border-bottom:1px solid var(--sep)}
 .bc-head span{font-size:10px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.04em}
-.bc-row{display:grid;grid-template-columns:1fr 50px 50px 60px;padding:8px 10px;border-bottom:1px solid var(--sep);align-items:center}
+.bc-row{display:grid;grid-template-columns:1fr 36px 36px 86px;padding:8px 10px;border-bottom:1px solid var(--sep);align-items:center}
 .bc-row:last-child{border-bottom:none}
 .bc-cell{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bc-num{font-size:11px;font-weight:600;text-align:center}
@@ -4111,7 +4114,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <!-- Единый вход для всех рассылок: раньше «Быстрый пост», «Массовая
          публикация» и «Рассылки» были тремя отдельными модулями с разными
-         настройками, хотя это один функционал (текст+spintax по выбранным
+         настройками, хотя это один функционал (текст и спинтакс по выбранным
          получателям). Теперь один экран с выбором получателя. Публикация в
          каналы — ниже; подписчики бота и ЛС ведут в свои проверенные потоки
          (разный транспорт доставки, слить в один вызов нельзя). -->
@@ -11894,7 +11897,7 @@ async function resendBcast(id) {
 
 function renderCmps(items) {
   const el = document.getElementById('cmpList');
-  if (!items.length) { el.innerHTML=empty('📨','Нет Кампаний в ЛС','Аудитория + текст со spintax → рассылка в личные сообщения',{label:'➕ Создать кампанию',fn:'openCmpModal()'}); return; }
+  if (!items.length) { el.innerHTML=empty('📨','Кампаний в ЛС пока нет','Аудитория + текст со спинтаксом → рассылка в личные сообщения',{label:'➕ Создать кампанию',fn:'openCmpModal()'}); return; }
   el.innerHTML = items.map(c=>{
     const [bc,bl]=stb(c.status);
     return `<div class="li tap" onclick="openDmCampaigns()">
@@ -11989,7 +11992,7 @@ document.getElementById('bcastText').addEventListener('input', function(){
   saveDraft('bcast', this.value);  // не теряем набранный текст
 });
 
-// Пресеты сообщений рассылки — типовые шаблоны в один тап (spintax-совместимы).
+// Пресеты сообщений рассылки — типовые шаблоны в один тап (совместимы со спинтаксом).
 // Заполняют текст, дальше пользователь правит и отправляет.
 const BCAST_PRESETS = [
   {k:'welcome', t:'👋 Приветствие', v:'Привет! 👋 Рады видеть тебя с нами. {Если есть вопросы|Если что понадобится} — просто напиши, поможем!'},
@@ -13582,7 +13585,7 @@ async function loadTemplates() {
     const items = d.templates||[];
     const tplTotal = (d.total!=null?d.total:items.length);
     txt('m-tpl-cnt', tplTotal ? tplTotal+' шаблонов' : '');
-    if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Сохраните текст со spintax — и вставляйте в публикатор/рассылку в один тап',{label:'➕ Создать шаблон',fn:'openTplModal()'})); return; }
+    if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Сохраните текст со спинтаксом — и вставляйте в публикатор/рассылку в один тап',{label:'➕ Создать шаблон',fn:'openTplModal()'})); return; }
     txt('tplList', items.map(t=>{
       const txt2 = (t.template?.text || '').substring(0, 60);
       return `<div class="li">
@@ -15353,7 +15356,7 @@ function previewCmpSpintax() {
   const raw = document.getElementById('cmpText').value;
   const el = document.getElementById('cmpSpinPreview');
   if (!raw.trim()) { el.style.display='none'; return; }
-  // Порядок обязан совпадать с движком: сначала персонализация, потом spintax.
+  // Порядок обязан совпадать с движком: сначала персонализация, потом спинтакс.
   // Иначе предпросмотр показывал бы «Привет, name!» — ровно тот текст, который
   // раньше и уходил получателям.
   let t = raw
@@ -25630,7 +25633,7 @@ function txt(id, html) {
   if(el) el.innerHTML=html;
 }
 function stb(s) {
-  return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],partial:['b-or','⚠ Частично'],empty:['b-gy','∅ Пусто'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено']}[s]||['b-gy',s||'—'];
+  return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],partial:['b-or','⚠ Частично'],empty:['b-gy','∅ Пусто'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено'],ok:['b-bl','✓ Готово'],success:['b-bl','✓ Готово'],sent:['b-bl','✓ Отправлено'],error:['b-rd','✕ Ошибка'],queued:['b-or','⏳ В очереди'],active:['b-gr','▶ Работает'],stopped:['b-gy','⏹ Остановлено']}[String(s||'').toLowerCase()]||['b-gy',s||'—'];
 }
 // Владелец не читает по-английски (CLAUDE.md), а в интерфейс раз за разом
 // утекали сырые значения из БД: severity «critical», тип объекта «channel»,
