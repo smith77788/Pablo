@@ -26442,6 +26442,7 @@ async function loadNetworkBuilder() {
         <div class="li-body">
           <div class="li-name">${esc(n.name)}</div>
           <div class="li-sub">${n.node_count || 0} узлов · ${n.edge_count || 0} рёбер</div>
+          ${n.description ? `<div class="li-sub">${esc(n.description)}</div>` : ''}
         </div>
         <div class="li-right"><span>${status}</span><span class="chev">›</span></div>
       </div>`;
@@ -26570,11 +26571,14 @@ function renderNetNodesEdges(d) {
   const edges = d.edges || [];
   const icoMap = { bot: '🤖', channel: '📡', group: '👥', account: '📱' };
 
+  // Узел шаблона ещё не привязан к объекту: object_id у него пуст. Печатать
+  // «ID: null» нельзя — это читается как поломка, а не как «создадим при
+  // развёртывании».
   txt('netNodesList', nodes.map(n => `<div class="li">
     <div class="ava ava-blue">${icoMap[n.type] || '⚫'}</div>
     <div class="li-body">
-      <div class="li-name">${esc(n.label || n.type + ' #' + n.object_id)}</div>
-      <div class="li-sub">${esc(objRu(n.type))} · ID: ${n.object_id}</div>
+      <div class="li-name">${esc(n.label || objRu(n.type))}</div>
+      <div class="li-sub">${esc(objRu(n.type))} · ${n.object_id ? 'ID: ' + n.object_id : 'создастся при развёртывании'}</div>
     </div>
     <div class="li-right"><span class="icon-tap" style="font-size:16px" onclick="removeNetNode(${n.id}, this)" role="button" tabindex="0" aria-label="Удалить">🗑</span></div>
   </div>`).join('') || '<div class="empty-inline">Нет узлов</div>');
@@ -26608,10 +26612,14 @@ async function submitNetCreate() {
   const btn = document.getElementById('nbCreateBtn');
   btn.disabled = true; btn.textContent = '⏳ Создание...';
   try {
-    await api('/api/miniapp/networks', { method: 'POST', body: JSON.stringify({ name, template, description: desc }) });
+    const r = await api('/api/miniapp/networks', { method: 'POST', body: JSON.stringify({ name, template, description: desc }) });
     closeModal('mo-net-create');
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Сеть создана');
+    // Подпись называет то, что создалось: раньше шаблон не применялся вовсе, а
+    // сообщение было одно и то же — «Сеть создана».
+    toast(r && r.template_error ? '⚠️ Сеть создана, но шаблон не применён: ' + r.template_error
+          : r && r.nodes ? `✅ Сеть создана · ${r.nodes} узлов, ${r.edges} рёбер`
+          : '✅ Сеть создана');
     loadNetworkBuilder();
   } catch(e) {
     errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block';
@@ -26622,7 +26630,8 @@ async function applyNetTemplate(template) {
   if (!await askConfirm('Создать сеть по шаблону "' + template + '"?')) return;
   try {
     const d = await api('/api/miniapp/networks', { method: 'POST', body: JSON.stringify({ name: template.replace(/_/g, ' '), template }) });
-    toast('✅ Сеть по шаблону создана');
+    toast(d && d.template_error ? '⚠️ Сеть создана, но шаблон не применён: ' + d.template_error
+          : `✅ Сеть по шаблону создана · ${d.nodes || 0} узлов, ${d.edges || 0} рёбер`);
     loadNetworkBuilder();
   } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
 }

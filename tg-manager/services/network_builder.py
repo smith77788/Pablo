@@ -274,6 +274,88 @@ async def get_network_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
 
 # ── Развёртывание связки: чистое планирование (без БД/Telegram) ──────────────
 
+# ── Шаблоны топологии ────────────────────────────────────────────────────────
+# Экран создания сети давал выбрать шаблон (хаб-спицы, цепочка, меш, дерево) и
+# даже отдельное действие «Создать сеть по шаблону» с подтверждением, а параметр
+# `template` обработчик не читал вовсе: получалась ПУСТАЯ сеть с подписью
+# «✅ Сеть по шаблону создана». Здесь шаблон описан данными, применяется одним
+# проходом и проверяется тестом.
+#
+# Узлы — каналы: их умеет создавать фабрика (`_NODE_FACTORY["channel"]`), значит
+# план развёртывания по такой сети выполним, а не декоративен. Рёбра —
+# `crosspost`: это то, ради чего связку каналов и строят.
+TOPOLOGY_TEMPLATES: dict[str, dict] = {
+    "hub_spoke": {
+        "label": "Хаб-спицы",
+        "labels": ["Хаб", "Спица 1", "Спица 2", "Спица 3", "Спица 4"],
+        # Из хаба материал расходится по спицам.
+        "edges": [(0, 1), (0, 2), (0, 3), (0, 4)],
+    },
+    "chain": {
+        "label": "Цепочка",
+        "labels": ["Звено 1", "Звено 2", "Звено 3", "Звено 4"],
+        "edges": [(0, 1), (1, 2), (2, 3)],
+    },
+    "mesh": {
+        "label": "Меш",
+        "labels": ["Узел 1", "Узел 2", "Узел 3", "Узел 4"],
+        # Каждый с каждым, по одному ребру на пару.
+        "edges": [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)],
+    },
+    "tree": {
+        "label": "Дерево",
+        "labels": ["Корень", "Ветка 1", "Ветка 2",
+                   "Лист 1", "Лист 2", "Лист 3", "Лист 4"],
+        "edges": [(0, 1), (0, 2), (1, 3), (1, 4), (2, 5), (2, 6)],
+    },
+}
+
+_TEMPLATE_NODE_TYPE = "channel"
+_TEMPLATE_EDGE_TYPE = "crosspost"
+
+
+def topology_template(name: str) -> dict | None:
+    """Описание шаблона: {label, nodes:[{type,label}], edges:[(i,j,type)]}.
+
+    Чистая функция — ею же проверяется, что в шаблоне нет ребра в несуществующий
+    узел и нет узла, который фабрика не умеет создавать.
+    """
+    tpl = TOPOLOGY_TEMPLATES.get((name or "").strip().lower())
+    if not tpl:
+        return None
+    return {
+        "key": (name or "").strip().lower(),
+        "label": tpl["label"],
+        "nodes": [{"type": _TEMPLATE_NODE_TYPE, "label": lbl} for lbl in tpl["labels"]],
+        "edges": [(i, j, _TEMPLATE_EDGE_TYPE) for i, j in tpl["edges"]],
+    }
+
+
+async def apply_template(pool: asyncpg.Pool, instance_id: int, name: str) -> dict:
+    """Создать узлы и рёбра шаблона в уже существующей сети.
+
+    Рёбра ставятся ПОСЛЕ узлов и по их настоящим id: ребро на несозданный узел
+    сделало бы связку «не готовой к развёртыванию» (`plan_deployment.ready`), и
+    человек получил бы сеть, которую нельзя развернуть.
+    """
+    tpl = topology_template(name)
+    if not tpl:
+        return {"ok": False, "error": "Неизвестный шаблон"}
+    ids: list[int] = []
+    for node in tpl["nodes"]:
+        res = await add_node(pool, instance_id, node["type"], node["label"])
+        if not res.get("ok"):
+            return {"ok": False, "error": "Не удалось создать узлы шаблона",
+                    "nodes": len(ids), "edges": 0}
+        ids.append(res["id"])
+    edges = 0
+    for i, j, etype in tpl["edges"]:
+        res = await add_edge(pool, instance_id, ids[i], ids[j], etype)
+        if res.get("ok"):
+            edges += 1
+    return {"ok": True, "label": tpl["label"], "nodes": len(ids), "edges": edges}
+
+
 _NODE_FACTORY = {
     "channel": {"label": "канал", "factory": "channel"},
     "group": {"label": "группу", "factory": "group"},

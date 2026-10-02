@@ -83,6 +83,8 @@ _CACHE_MAX_ENTRIES = 512
 # (schema_v*.sql их НЕ содержат).
 INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT",
+    # v231: описание сети — форма его спрашивала, хранить было негде.
+    "ALTER TABLE network_instances ADD COLUMN IF NOT EXISTS description TEXT",
     # v215: связывание устройства — автономный вход вне Telegram (PWA/Android).
     """CREATE TABLE IF NOT EXISTS device_pairings (
         id             BIGSERIAL PRIMARY KEY,
@@ -19738,6 +19740,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await _safe_fetch(pool,
                 """SELECT ni.id, ni.name, COALESCE(ni.status,'active') AS status,
+                     COALESCE(ni.description,'') AS description,
                      (SELECT COUNT(*) FROM network_nodes n WHERE n.instance_id=ni.id) AS node_count,
                      (SELECT COUNT(*) FROM network_edges e WHERE e.instance_id=ni.id) AS edge_count
                    FROM network_instances ni WHERE ni.owner_id=$1 ORDER BY ni.created_at DESC""",
@@ -19759,14 +19762,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         name = validate_string(body.get("name"), max_len=100)
         if not name:
             return _err("Укажите название сети", 400)
+        from services import network_builder as _nb
+        # Шаблон и описание экран присылал с самого начала, а обработчик читал
+        # только название: человек выбирал «🎯 Хаб-спицы», получал пустую сеть и
+        # подпись «✅ Сеть по шаблону создана». Неизвестный шаблон — отказ, а не
+        # тихо пустая сеть.
+        template = (validate_string(body.get("template"), max_len=40,
+                                    required=False) or "").strip().lower()
+        if template and not _nb.topology_template(template):
+            return _err("Неизвестный шаблон сети", 400)
+        description = validate_string(body.get("description"), max_len=1000,
+                                      required=False) or ""
         try:
             nid = await pool.fetchval(
-                "INSERT INTO network_instances(owner_id, name, status) "
-                "VALUES($1,$2,'active') RETURNING id", uid, name)
-            return _json_resp({"ok": True, "id": nid})
+                "INSERT INTO network_instances(owner_id, name, status, description) "
+                "VALUES($1,$2,'active',$3) RETURNING id", uid, name, description)
         except Exception:
             log.exception("network_create uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
+        out = {"ok": True, "id": nid, "nodes": 0, "edges": 0}
+        if template:
+            res = await _nb.apply_template(pool, nid, template)
+            if not res.get("ok"):
+                # Сеть уже создана: сообщаем ровно то, что получилось, а не
+                # «готово» и не «ошибка» — иначе человек не знает, что у него есть.
+                log.warning("network_create template=%s uid=%s: %s",
+                            template, uid, res.get("error"))
+                out["template_error"] = res.get("error") or "Шаблон не применён"
+            else:
+                out.update(template=template, template_label=res.get("label"),
+                           nodes=res.get("nodes", 0), edges=res.get("edges", 0))
+        return _json_resp(out)
 
     async def network_detail_plural(request: web.Request) -> web.Response:
         """Детали сети: узлы/рёбра в форме, которую рисует граф (from_id/to_id/labels)."""
@@ -19792,7 +19818,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                  for e in d["edges"]]
         inst = d["instance"]
         return _json_resp({"id": nid, "name": inst.get("name"),
-                           "status": inst.get("status"), "nodes": nodes, "edges": edges})
+                           "status": inst.get("status"),
+                           "description": inst.get("description") or "",
+                           "nodes": nodes, "edges": edges})
 
     async def network_deploy_plan(request: web.Request) -> web.Response:
         """Превью-план развёртывания связки: топология → упорядоченные шаги.
