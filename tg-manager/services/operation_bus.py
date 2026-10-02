@@ -1352,6 +1352,106 @@ async def submit_retry_failed(
     return {"ok": True, "op_id": op_id, "count": len(failed), "reason": ""}
 
 
+async def resubmit_unfinished(
+    pool: asyncpg.Pool, owner_id: int, hours: int = 24, limit: int = 100
+) -> dict:
+    """Перепоставить недоведённые операции владельца за последние `hours` часов.
+
+    Единственная дверь для «повторить упавшие» на ВСЕХ поверхностях. Бот делал
+    это сырым UPDATE: `status='pending', retry_count=0, done_items=0` прямо по
+    `operation_queue`. Такой сброс — это постановка операции в работу (поллер
+    тут же её забирает), но мимо гейта тарифа, предохранителя Ban Weather и
+    дедупа двойного тапа; храповик сырых INSERT'ов его не ловил, потому что
+    INSERT'а там нет. Вторая кнопка делала это сразу по ВСЕМ упавшим операциям
+    владельца без потолка — включая `mass_invite`, самую баноопасную операцию
+    продукта. Заодно `done_items=0` стирал память о сделанном: журнал целей
+    оставался, и операция навсегда показывала «обработано меньше, чем сделано».
+
+    Повтор безопасен: дедуп инвайта живёт по (owner_id, group_key), а не по
+    номеру операции, поэтому уже приглашённые второй раз не получат инвайт.
+    `mass_publish` пропускаем — его безопасный повтор только по упавшим каналам
+    делается точечно, иначе успешные каналы получили бы дубль поста.
+
+    Возвращает {"ok": True, "retried": int, "skipped": int}.
+    """
+    from services import op_status as _ost
+
+    rows = await pool.fetch(
+        f"""SELECT id, op_type, params, label, total_items FROM operation_queue
+           WHERE owner_id=$1 AND status IN {_ost.sql_unfinished_list()}
+             AND created_at > NOW() - ($2 * INTERVAL '1 hour')
+           ORDER BY created_at DESC LIMIT {int(limit)}""",
+        owner_id, hours)
+    retried, skipped = 0, 0
+    for r in (rows or []):
+        if r["op_type"] == "mass_publish":
+            skipped += 1
+            continue
+        params = r["params"]
+        if isinstance(params, str):
+            try:
+                params = json.loads(params or "{}")
+            except (TypeError, ValueError):
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
+        try:
+            await submit(pool, owner_id, r["op_type"], params,
+                         total_items=int(r["total_items"] or 0), label=r["label"])
+            retried += 1
+        except PlanRequiredError:
+            skipped += 1
+        except Exception as exc:
+            log.debug("resubmit_unfinished op_type=%s: %s", r["op_type"], exc)
+    return {"ok": True, "retried": retried, "skipped": skipped}
+
+
+async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
+    """Повторить одну недоведённую операцию — через шину, а не сбросом строки.
+
+    Сначала пробуем точечный повтор только по упавшим целям: он дешевле и
+    безопаснее. Тип без точечного повтора перепоставляем целиком — исходная
+    строка при этом остаётся с ЧЕСТНОЙ историей, вместо того чтобы терять свои
+    счётчики и причину под сбросом в 'pending'.
+
+    Возвращает {"ok": bool, "op_id": int|None, "count": int, "reason": str}.
+    """
+    from services import op_status as _ost
+
+    row = await pool.fetchrow(
+        "SELECT owner_id, op_type, params, label, total_items, status "
+        "FROM operation_queue WHERE id=$1", op_id)
+    if not row or int(row["owner_id"]) != int(owner_id):
+        return {"ok": False, "op_id": None, "count": 0,
+                "reason": "Операция не найдена"}
+    if row["status"] not in _ost.UNFINISHED:
+        return {"ok": False, "op_id": None, "count": 0,
+                "reason": "Повторять нечего: операция не завершилась неудачей"}
+
+    if retry_targets_meta(row["op_type"]):
+        res = await submit_retry_failed(pool, owner_id, op_id)
+        if res.get("ok") or res.get("reason") == "Неудавшихся целей не осталось":
+            return res
+
+    if row["op_type"] == "mass_publish":
+        return {"ok": False, "op_id": None, "count": 0,
+                "reason": "Для публикации повторяются только упавшие каналы — "
+                          "из карточки операции"}
+
+    params = row["params"]
+    if isinstance(params, str):
+        try:
+            params = json.loads(params or "{}")
+        except (TypeError, ValueError):
+            params = {}
+    if not isinstance(params, dict):
+        params = {}
+    total = int(row["total_items"] or 0)
+    new_id = await submit(pool, owner_id, row["op_type"], params,
+                          total_items=total, label=row["label"])
+    return {"ok": True, "op_id": new_id, "count": total, "reason": ""}
+
+
 # ── Признак жизни исполнителя операций ───────────────────────────────────────
 #
 # ЧТО ЛОМАЛОСЬ. Остановку исполнителя операций не замечал НИКТО. Поллер живёт в

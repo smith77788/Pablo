@@ -799,21 +799,17 @@ async def cb_ops_retry_all_failed(
 ) -> None:
     """Retry ALL failed operations for this user from the ops dashboard."""
     user_id = callback.from_user.id
+    # Через шину, а не сбросом строк: сырой сброс ставил операции в работу мимо
+    # гейта тарифа, предохранителя Ban Weather и дедупа, без потолка и с
+    # обнулением done_items (память о сделанном терялась).
+    from services import operation_bus as _obus
+
     try:
-        result = await pool.execute(
-            "UPDATE operation_queue SET status='pending', last_error=NULL, error_msg=NULL, "
-            "retry_count=0, started_at=NULL, finished_at=NULL, done_items=0, "
-            "scheduled_for=NULL "
-            "WHERE owner_id=$1 AND status='failed'",
-            user_id,
-        )
+        res = await _obus.resubmit_unfinished(pool, user_id)
     except Exception as e:
-        await callback.answer(f"Ошибка БД: {e}", show_alert=True)
+        await callback.answer(f"Не удалось повторить: {e}", show_alert=True)
         return
-    try:
-        reset_count = int(str(result).split()[-1])
-    except (ValueError, IndexError):
-        reset_count = 0
+    reset_count = int(res.get("retried") or 0)
     if reset_count == 0:
         await callback.answer("Нет неудачных операций для повторного запуска.", show_alert=True)
         return
@@ -2465,30 +2461,30 @@ async def cb_op_retry(
         )
     except Exception:
         row = None
-    if not row or row["status"] != "failed":
-        await callback.answer(
-            "Операция не найдена или не в статусе failed.", show_alert=True
-        )
+    if not row:
+        await callback.answer("Операция не найдена.", show_alert=True)
         return
 
+    # Повтор идёт через шину. Сброс строки ставил операцию в работу мимо гейта
+    # тарифа и предохранителя, а второй UPDATE писал done_items=0 ВООБЩЕ без
+    # фильтра статуса — то есть мог обнулить счётчик уже подхваченной операции.
+    # Отсечка «только failed» тоже ушла: 'partial' — такая же недоведённая
+    # работа, и повторять её нужно в первую очередь.
+    from services import operation_bus as _obus_retry
+
     try:
-        # Reset retry_count and last_error so the operation gets a fresh retry budget
-        await pool.execute(
-            "UPDATE operation_queue SET status='pending', error_msg=NULL, "
-            "started_at=NULL, finished_at=NULL, retry_count=0, last_error=NULL, "
-            "scheduled_for=NULL "
-            "WHERE id=$1 AND owner_id=$2",
-            op_id,
-            user_id,
-        )
-        await pool.execute(
-            "UPDATE operation_queue SET done_items=0 WHERE id=$1 AND owner_id=$2",
-            op_id,
-            user_id,
-        )
+        res = await _obus_retry.resubmit_one(pool, user_id, op_id)
+    except _obus_retry.PlanRequiredError as exc:
+        await callback.answer(str(exc) or "Операция недоступна на вашем тарифе.",
+                              show_alert=True)
+        return
     except Exception as exc:
         mark_handled_error(f"op_retry update: {exc}")
         await callback.answer(f"Ошибка при перезапуске: {str(exc)[:80]}", show_alert=True)
+        return
+    if not res.get("ok"):
+        await callback.answer(res.get("reason") or "Повторять нечего.",
+                              show_alert=True)
         return
 
     # Write audit trail for manual retry
@@ -2524,7 +2520,8 @@ async def cb_op_retry(
         pass  # Recovery log must not block retry
 
     await callback.answer(
-        f"✅ Операция #{op_id} поставлена в очередь повторно.", show_alert=True
+        f"✅ Повтор поставлен в очередь: операция #{res['op_id']}.",
+        show_alert=True,
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Назад к отчётам", callback_data=BmCb(action="op_reports"))

@@ -196,19 +196,23 @@ def test_no_reader_of_unfinished_work_filters_failed_alone():
 
     root = pathlib.Path(__file__).resolve().parent.parent
     places = {
-        "services/mini_app_api.py": "_retry_failed_ops_core",
+        # Повтор на всех поверхностях (мини-апп и бот) идёт одной дверью шины.
+        "services/operation_bus.py": "resubmit_unfinished",
+        "services/operation_bus.py#one": "resubmit_one",
         "services/recovery_engine.py": "_operation_recovery",
         "services/fleet_doctor.py": "diagnose",
     }
-    for rel, func in places.items():
+    for key, func in places.items():
+        rel = key.split("#")[0]
         src = (root / rel).read_text(encoding="utf-8")
         start = src.index(f"def {func}(")
         # конец функции — следующее определение на нулевом отступе
         m = re.search(r"\n(?:async def |def |class )", src[start:])
         body = src[start:start + (m.start() if m else len(src))]
-        assert "sql_unfinished_list()" in body, (
-            f"{rel}:{func} ищет недоделанную работу без "
-            "op_status.sql_unfinished_list()")
+        marker = ("UNFINISHED" if func == "resubmit_one"
+                  else "sql_unfinished_list()")
+        assert marker in body, (
+            f"{rel}:{func} ищет недоделанную работу без {marker}")
         assert "status='failed'" not in body.replace(" ", ""), (
             f"{rel}:{func} снова фильтрует только status='failed' — "
             "операции с частично сделанной работой опять потеряются")

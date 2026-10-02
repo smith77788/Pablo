@@ -1563,39 +1563,12 @@ async def _persist_proxy_verdicts(
 
 
 async def _retry_failed_ops_core(pool: asyncpg.Pool, uid: int, hours: int = 24) -> dict:
-    """Перезапустить упавшие операции владельца за последние `hours` часов —
-    через operation_bus (единые аудит/ретраи/проверка тарифа, а не прямой INSERT).
-    mass_publish пропускаем: его безопасный повтор (только упавшие каналы) делается
-    точечно из карточки операции, иначе успешные каналы получили бы дубли поста."""
-    rows = await _safe_fetch(pool,
-        # 'partial' обязателен: это честное имя недоведённой работы, и без него
-        # «повторить упавшие» молча пропускал операции с САМЫМ БОЛЬШИМ объёмом
-        # незакрытого — те, что взяли часть целей и оборвались. Повтор безопасен:
-        # исполнитель пропустит уже взятые цели по журналу.
-        f"""SELECT op_type, params, label, total_items FROM operation_queue
-           WHERE owner_id=$1 AND status IN {op_status.sql_unfinished_list()}
-             AND created_at > NOW() - ($2 * INTERVAL '1 hour')
-           ORDER BY created_at DESC LIMIT 100""", uid, hours)
-    retried, skipped = 0, 0
-    for r in (rows or []):
-        if r["op_type"] == "mass_publish":
-            skipped += 1
-            continue
-        params = r["params"]
-        if isinstance(params, str):
-            try:
-                params = _json.loads(params or "{}")
-            except (TypeError, ValueError):
-                params = {}
-        if not isinstance(params, dict):
-            params = {}
-        try:
-            await _obus.submit(pool, uid, r["op_type"], params,
-                               total_items=int(r["total_items"] or 0), label=r["label"])
-            retried += 1
-        except Exception as e:
-            log.debug("retry_failed_ops op_type=%s: %s", r["op_type"], e)
-    return {"ok": True, "retried": retried, "skipped": skipped}
+    """Перезапустить недоведённые операции владельца за последние `hours` часов.
+
+    Логика живёт в `operation_bus.resubmit_unfinished` — одна дверь на все
+    поверхности (мини-апп и бот), чтобы «повторить упавшие» нигде не превращался
+    в сырой сброс строки мимо гейта тарифа и предохранителя."""
+    return await _obus.resubmit_unfinished(pool, uid, hours)
 
 
 async def _build_ecosystem_core(pool: asyncpg.Pool, uid: int) -> dict:

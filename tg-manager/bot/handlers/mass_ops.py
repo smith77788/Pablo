@@ -847,22 +847,28 @@ async def cb_cancel_op(
 async def cb_retry_op(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
 ) -> None:
+    # Повтор идёт через шину, а не сбросом строки в 'pending': сброс ставил
+    # операцию в работу мимо гейта тарифа, предохранителя Ban Weather и дедупа,
+    # а `done_items=0` стирал память о уже сделанном.
     try:
-        result = await pool.execute(
-            "UPDATE operation_queue SET status='pending', last_error=NULL, error_msg=NULL, "
-            "retry_count=0, started_at=NULL, finished_at=NULL, done_items=0, "
-            "scheduled_for=NULL "
-            "WHERE id=$1 AND owner_id=$2 AND status='failed'",
-            callback_data.op_id,
-            callback.from_user.id,
-        )
+        res = await operation_bus.resubmit_one(
+            pool, callback.from_user.id, callback_data.op_id)
+    except operation_bus.PlanRequiredError as e:
+        await callback.answer(str(e) or "Операция недоступна на вашем тарифе.",
+                              show_alert=True)
+        return
     except Exception as e:
-        await callback.answer(f"Ошибка БД: {e}", show_alert=True)
+        log_exc_swallow(log, f"retry_op #{callback_data.op_id}")
+        await callback.answer(f"Не удалось повторить: {e}", show_alert=True)
         return
-    if result == "UPDATE 0":
-        await callback.answer("Операция не найдена или уже выполнена.", show_alert=True)
+    if not res.get("ok"):
+        await callback.answer(res.get("reason") or "Повторять нечего.",
+                              show_alert=True)
         return
-    await callback.answer(f"✅ Операция #{callback_data.op_id} поставлена в очередь повторно.", show_alert=True)
+    await callback.answer(
+        f"✅ Повтор поставлен в очередь: операция #{res['op_id']}"
+        + (f", целей {res['count']}" if res.get("count") else ""),
+        show_alert=True)
     # Re-render queue view — re-use cb_queue to avoid duplicate rendering logic
     await cb_queue(callback, callback_data, pool)
 
@@ -872,21 +878,16 @@ async def cb_retry_all_failed(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
 ) -> None:
     """Сбросить ВСЕ неудачные операции пользователя в статус pending для повторного выполнения."""
+    # Та же единственная дверь, что у мини-аппа: сырой сброс ВСЕХ упавших
+    # операций владельца разом шёл мимо гейта тарифа и предохранителя и не имел
+    # потолка — включая mass_invite, самую баноопасную операцию продукта.
     try:
-        result = await pool.execute(
-            "UPDATE operation_queue SET status='pending', last_error=NULL, error_msg=NULL, "
-            "retry_count=0, started_at=NULL, finished_at=NULL, done_items=0, "
-            "scheduled_for=NULL "
-            "WHERE owner_id=$1 AND status='failed'",
-            callback.from_user.id,
-        )
+        res = await operation_bus.resubmit_unfinished(pool, callback.from_user.id)
     except Exception as e:
-        await callback.answer(f"Ошибка БД: {e}", show_alert=True)
+        log_exc_swallow(log, "retry_all_failed")
+        await callback.answer(f"Не удалось повторить: {e}", show_alert=True)
         return
-    try:
-        reset_count = int(str(result).split()[-1])
-    except (ValueError, IndexError):
-        reset_count = 0
+    reset_count = int(res.get("retried") or 0)
     if reset_count == 0:
         await callback.answer("Нет неудачных операций для повторного запуска.", show_alert=True)
         return
