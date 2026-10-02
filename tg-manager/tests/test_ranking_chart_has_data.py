@@ -91,4 +91,9 @@ def test_keyword_can_be_untracked():
 
 
 def test_screen_error_has_a_way_out():
-    assert "errHtml(e.message, 'loadRanking()')" in _js_func("loadRanking")
+    # Смысл проверки — выход с экрана ошибки (кнопка повтора), а не форма
+    # текста: текст теперь идёт через errRu, чтобы не показывать английский
+    # текст исключения.
+    body = _js_func("loadRanking")
+    assert "'loadRanking()')" in body, "с экрана ошибки нет кнопки повтора"
+    assert "errHtml(errRu(e)" in body, "текст ошибки снова показывается как есть"

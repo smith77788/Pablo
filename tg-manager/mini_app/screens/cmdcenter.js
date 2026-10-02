@@ -105,7 +105,7 @@ function _ccBar(label, value, total, color, onclick) {
   return `<div${tap} style="${onclick ? 'cursor:pointer;' : ''}margin:7px 0">` +
     '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">' +
     `<span style="color:var(--hint)">${esc(label)}${onclick ? ' \u203a' : ''}</span>` +
-    `<span style="font-weight:700;color:var(--fg)">${value}</span></div>` +
+    `<span style="font-weight:700;color:var(--fg)">${Number(value) || 0}</span></div>` +
     '<div style="height:8px;border-radius:6px;background:rgba(128,128,128,.15);overflow:hidden">' +
     `<div style="height:100%;width:${pct}%;background:${color};border-radius:6px"></div></div></div>`;
 }
@@ -118,15 +118,18 @@ function _ccRender(d) {
   const now = d.ops_now || {};
 
   // ── Аккаунты: кольцо + легенда ──
-  const accTotal = accounts.reduce((s, a) => s + a.count, 0);
+  // Пустое поле в ответе давало NaN в центре кольца и «undefined» в легенде:
+  // для человека это неотличимо от поломки продукта.
+  const _n = (x) => Number(x) || 0;
+  const accTotal = accounts.reduce((s, a) => s + _n(a.count), 0);
   // 'ok' и 'active' — один и тот же статус в базе, и в легенде они давали две
   // строки «Активные» подряд. Сводим по подписи.
   const merged = [];
   accounts.forEach(a => {
     const st = _ccStatus(a.status);
     const same = merged.find(m => m.label === st.label);
-    if (same) { same.count += a.count; return; }
-    merged.push({ status: a.status, label: st.label, c: st.c, go: st.go, count: a.count });
+    if (same) { same.count += _n(a.count); return; }
+    merged.push({ status: a.status, label: st.label, c: st.c, go: st.go, count: _n(a.count) });
   });
   const donutParts = merged.map(a => ({ value: a.count, color: a.c }));
   // Число в легенде — это срез списка аккаунтов, а не просто цифра: строка
@@ -181,15 +184,15 @@ function _ccRender(d) {
     '</div></div>');
 
   // ── Операции за 7 дней (спарклайн-бары) ──
-  const maxOps = Math.max(1, ...ops.map(o => o.done + o.failed));
+  const maxOps = Math.max(1, ...ops.map(o => _n(o.done) + _n(o.failed)));
   const bars = ops.length
     ? ops.map(o => {
-        const hDone = Math.round((o.done) / maxOps * 60);
-        const hFail = Math.round((o.failed) / maxOps * 60);
+        const hDone = Math.round(_n(o.done) / maxOps * 60);
+        const hFail = Math.round(_n(o.failed) / maxOps * 60);
         return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">' +
           '<div style="display:flex;flex-direction:column;justify-content:flex-end;height:64px;width:60%">' +
-          `<div style="background:#ef4444;height:${hFail}px;border-radius:3px 3px 0 0" title="ошибок ${o.failed}"></div>` +
-          `<div style="background:#2dd4bf;height:${hDone}px;border-radius:${hFail?0:'3px 3px 0 0'}" title="успешно ${o.done}"></div>` +
+          `<div style="background:#ef4444;height:${hFail}px;border-radius:3px 3px 0 0" title="ошибок ${_n(o.failed)}"></div>` +
+          `<div style="background:#2dd4bf;height:${hDone}px;border-radius:${hFail?0:'3px 3px 0 0'}" title="успешно ${_n(o.done)}"></div>` +
           '</div>' +
           `<div style="font-size:10px;color:var(--hint)">${esc(o.day)}</div></div>`;
       }).join('')

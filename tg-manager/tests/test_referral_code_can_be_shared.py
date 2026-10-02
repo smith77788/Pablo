@@ -114,4 +114,6 @@ def test_empty_state_offers_sharing_instead_of_advising_it():
 
 
 def test_error_has_a_way_out():
-    assert "errHtml(e.message, 'openReferral()')" in _js_func("openReferral")
+    body = _js_func("openReferral")
+    assert "'openReferral()')" in body, "с экрана ошибки нет кнопки повтора"
+    assert "errHtml(errRu(e)" in body, "текст ошибки снова показывается как есть"

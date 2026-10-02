@@ -185,7 +185,9 @@ def test_cap_is_admitted():
 
 
 def test_error_has_a_way_out():
-    assert "errHtml(e.message, 'openShield()')" in _js_func("openShield")
+    body = _js_func("openShield")
+    assert "'openShield()')" in body, "с экрана ошибки нет кнопки повтора"
+    assert "errHtml(errRu(e)" in body, "текст ошибки снова показывается как есть"
 
 
 def test_screen_speaks_russian():

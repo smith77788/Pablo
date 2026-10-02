@@ -107,5 +107,5 @@ def test_apply_reports_what_actually_changed():
 
 def test_error_has_a_way_out():
     body = _js_func("openUchSmartTags")
-    assert "errHtml(e.message, 'openUchSmartTags()')" in body, (
+    assert "'openUchSmartTags()')" in body and "errHtml(errRu(e)" in body, (
         "ошибка на экране правил оставляет тупик")
