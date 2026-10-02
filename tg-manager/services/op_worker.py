@@ -4082,6 +4082,24 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     text=f"🔁 Повторить неудавшиеся ({_failed})",
                     callback_data=MassOpCb(action="retry_targets", op_id=op_id),
                 )
+            elif _final_status == op_status.PARTIAL:
+                # Недоведённая операция с НУЛЁМ упавших целей: она остановилась
+                # до того, как дошла до остальных (кончились аккаунты, флуд,
+                # лимит). Кнопки повтора упавших здесь быть не может, и без этой
+                # ветки владелец читал «частично выполнена» вообще без выхода —
+                # продолжить можно было только через меню. Повтор безопасен:
+                # уже взятые цели исполнитель пропустит.
+                _left_items = 0
+                try:
+                    _total_items = int((_progress["total_items"] if _progress else 0) or 0)
+                    _left_items = max(0, _total_items - _done_n)
+                except (TypeError, ValueError):
+                    _left_items = 0
+                kb.button(
+                    text=("▶️ Продолжить"
+                          + (f" (осталось {_left_items})" if _left_items else "")),
+                    callback_data=MassOpCb(action="retry_op", op_id=op_id),
+                )
             kb.button(
                 text="📋 Детали операции",
                 callback_data=BmCb(action="op_detail", op_id=op_id),

@@ -2496,7 +2496,8 @@ async def cb_op_retry(
             op_id,
             row["op_type"] or "unknown",
             "manual_retry",
-            f"Пользователь вручную перезапустил операцию (предыдущая ошибка: {(row['error_msg'] or '')[:200]})",
+            f"Пользователь вручную перезапустил операцию → #{res.get('op_id')} "
+            f"(предыдущая ошибка: {(row['error_msg'] or '')[:200]})",
         )
     except Exception:
         pass  # Audit write must not block retry
@@ -2513,7 +2514,10 @@ async def cb_op_retry(
             action="manual_retry",
             severity="info",
             details={"op_type": row["op_type"], "prev_error": (row["error_msg"] or "")[:200]},
-            outcome={"new_status": "pending", "retry_count_reset": True},
+            # Повтор ставится как НОВАЯ операция (через шину), поэтому в
+            # журнале восстановления должен стоять её номер: иначе след ведёт в
+            # старую строку, которая так и осталась недоведённой.
+            outcome={"new_status": "pending", "new_op_id": res.get("op_id")},
             status="success",
         )
     except Exception:

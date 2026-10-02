@@ -1428,9 +1428,14 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
         return {"ok": False, "op_id": None, "count": 0,
                 "reason": "Повторять нечего: операция не завершилась неудачей"}
 
+    # Точечный повтор — только если упавшие цели ЕСТЬ. Их отсутствие не значит
+    # «повторять нечего»: недоведённая операция могла остановиться до того, как
+    # дошла до остальных целей (кончились аккаунты, флуд, лимит) — тогда у неё
+    # ноль упавших и сотня нетронутых, и продолжить её нужно целиком. Повтор
+    # целиком безопасен: уже взятые цели исполнитель пропустит.
     if retry_targets_meta(row["op_type"]):
         res = await submit_retry_failed(pool, owner_id, op_id)
-        if res.get("ok") or res.get("reason") == "Неудавшихся целей не осталось":
+        if res.get("ok"):
             return res
 
     if row["op_type"] == "mass_publish":
