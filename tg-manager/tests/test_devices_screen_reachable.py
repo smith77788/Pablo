@@ -80,4 +80,4 @@ def test_screen_admits_the_server_cap():
 
 
 def test_error_has_a_way_out():
-    assert "errHtml(e.message, 'openDevices()')" in _js_func("openDevices")
+    assert "errHtml(errRu(e), 'openDevices()')" in _js_func("openDevices")

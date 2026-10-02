@@ -109,8 +109,8 @@ def test_both_screens_have_a_way_out():
         head = h[i:i + 700]
         assert 'class="back"' in head, f"на экране {sid} нет кнопки «назад»"
     # Упавший запрос предлагает повтор, а не тупик.
-    assert "errHtml(e.message, 'openBotMesh()')" in h, "список без повтора при ошибке"
-    assert "errHtml(e.message, 'retryBotMeshTask()')" in h, "трасса без повтора при ошибке"
+    assert "errHtml(errRu(e), 'openBotMesh()')" in h, "список без повтора при ошибке"
+    assert "errHtml(errRu(e), 'retryBotMeshTask()')" in h, "трасса без повтора при ошибке"
     assert re.search(r"function\s+retryBotMeshTask\s*\(", h), (
         "повтор трассы зовёт несуществующую функцию")
 

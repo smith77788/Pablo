@@ -90,7 +90,7 @@ def test_empty_period_is_not_zero_and_error_is_not_empty():
     body = _js_func("loadDashboardSeries")
     assert "записей нет" in body, "пустой период выдаётся за ноль"
     assert "errHtml" in body, "ошибка запроса выдаётся за пустую аналитику"
-    assert "errHtml(e.message, 'loadDashboard()')" in _js_func("loadDashboard")
+    assert "errHtml(errRu(e), 'loadDashboard()')" in _js_func("loadDashboard")
 
 
 def test_owner_payments_are_not_called_revenue():

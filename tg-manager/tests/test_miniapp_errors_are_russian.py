@@ -103,3 +103,41 @@ def test_the_helper_exists_in_one_place():
     assert src.count("function errRu(") == 1
     assert src.count("errRu(") > 300, (
         "показ ошибок перестал ходить через errRu — проверка выше ослепнет")
+
+
+def test_no_call_is_glued_to_another_call():
+    """Массовая замена склеивает имена — и путь ошибки падает молча.
+
+    Я это и сделал: вместо `toast(errRu(e,'Ошибка'))` в 23 местах вышло
+    `toasterrRu(e,'Ошибка')` (а в одном — `errHtmlerrRu`). Синтаксис такой
+    склейки верный, `node --check` молчит, в браузере она не исполняется,
+    пока пользователь не попадёт на ошибку, — и тогда вместо сообщения он
+    получает `ReferenceError: toasterrRu is not defined`, то есть пустой
+    экран вместо объяснения. Нашлось это случайно, тестом другого экрана.
+
+    Проверяем все помощники показа: имя помощника не может быть склеено с
+    предшествующим идентификатором.
+    """
+    files = [INDEX] + sorted((INDEX.parent / "screens").glob("*.js"))
+    helpers = ("errRu", "errHtml", "toast", "esc", "num", "txt")
+    glued = []
+    for f in files:
+        src = f.read_text("utf-8")
+        for h in helpers:
+            for m in re.finditer(r"[A-Za-z0-9_$]" + h + r"\(", src):
+                frag = src[max(0, m.start() - 24):m.end()]
+                # Законные случаи: имя функции само кончается на помощника
+                # (`_opEsc(`, `window.toast(`) — слева тогда стоит `.` или
+                # имя объявлено. Отсекаем только склейку двух ВЫЗОВОВ.
+                if frag.rstrip()[-len(h) - 2:-len(h) - 1] == ".":
+                    continue
+                name = re.search(r"([A-Za-z0-9_$]+)" + h + r"\($", frag)
+                if not name:
+                    continue
+                full = name.group(1) + h
+                if re.search(r"(function\s+|const\s+|let\s+|var\s+)" + re.escape(full) + r"\b", src):
+                    continue   # такая функция и правда объявлена
+                glued.append(f"{f.name}:{src[:m.start()].count(chr(10)) + 1}: {full}(")
+    assert not glued, (
+        "вызов склеен с другим вызовом — путь ошибки упадёт на ReferenceError:\n"
+        + "\n".join(glued[:20]))

@@ -129,4 +129,4 @@ def test_empty_states_say_what_would_be_here():
 
 
 def test_error_has_a_way_out():
-    assert "errHtml(e.message, 'openInfra()')" in _js_func("openInfra")
+    assert "errHtml(errRu(e), 'openInfra()')" in _js_func("openInfra")

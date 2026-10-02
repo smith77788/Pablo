@@ -21,7 +21,12 @@ def test_api_middleware_catches_all_unhandled():
     body = src[i:i + 1400]
     assert "except web.HTTPException:" in body and "raise" in body   # штатные ответы не глушим
     assert "except Exception" in body                                # ловим ВСЁ остальное
-    assert 'return _err("Внутренняя ошибка сервера' in body          # чистый JSON-500
+    # Текст внутренней ошибки живёт в одной константе `_INTERNAL_ERROR`
+    # (раньше здесь была дословная строка в каждом из 398 обработчиков).
+    assert "return _err(_INTERNAL_ERROR" in body                     # чистый JSON-500
+    from services.mini_app_api import _INTERNAL_ERROR
+    assert "Внутренняя ошибка сервера" in _INTERNAL_ERROR, (
+        "ответ на 500 обязан быть по-русски: владелец английского не читает")
     assert "log.exception" in body                                   # с логом для диагностики
 
 

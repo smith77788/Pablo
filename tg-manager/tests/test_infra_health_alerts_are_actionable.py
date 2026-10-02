@@ -111,7 +111,7 @@ def test_row_click_does_not_swallow_the_button():
 
 
 def test_error_has_a_way_out():
-    assert "errHtml(e.message, 'openInfraHealth()')" in _js_func("openInfraHealth")
+    assert "errHtml(errRu(e), 'openInfraHealth()')" in _js_func("openInfraHealth")
 
 
 def test_empty_state_says_what_is_being_watched():

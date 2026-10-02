@@ -10349,7 +10349,7 @@ async function reauthAccount(id) {
   try {
     const r = await api(`/api/miniapp/account/${id}/action/reauth`, {method:'POST'});
     // Переавторизация интерактивна (код из Telegram) → показываем инструкцию, ведущую в бота.
-    await askConfirmerrRu(r,'Переавторизация выполняется в боте: Аккаунты → 🔄 Переавторизатор → Релог.');
+    await askConfirm(errRu(r,'Переавторизация выполняется в боте: Аккаунты → 🔄 Переавторизатор → Релог.'));
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
 
@@ -10371,7 +10371,7 @@ async function exportAccSession(id) {
     if (r.session) {
       await copyToClipboard(r.session, '💾 Сессия скопирована в буфер обмена');
     } else {
-      toasterrRu(r,'⚠️ Не удалось экспортировать');
+      toast(errRu(r,'⚠️ Не удалось экспортировать'));
     }
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
@@ -12578,7 +12578,7 @@ function renderOpLog() {
     el.innerHTML = OPLOG_ROWS.length
       ? OPLOG_ROWS.map(l=>`<div class="row"><div class="row-body">
           <div class="row-name">${esc(l.target||'')}</div>
-          <div class="row-val" style="white-space:normal">${escerrRu(l,'').substring(0,160)} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
+          <div class="row-val" style="white-space:normal">${esc(l.message||'').substring(0,160)} <span class="badge ${_opLogOk(l.status)?'b-gr':'b-rd'}">${esc(_opLogStRu(l.status))}</span></div>
         </div></div>`).join('')
       : `<div style="padding:14px;font-size:13px;color:var(--hint);text-align:center">${OPLOG_Q ? 'По этому поиску записей нет.' : 'По этому срезу записей нет.'}</div>`;
   }
@@ -14666,7 +14666,7 @@ async function checkProxyIsolation() {
       h += `<div style="color:var(--orange);margin-top:4px">🏢 Datacenter IP: ${r.datacenter_count}</div>`;
     }
     box.innerHTML = h;
-  } catch(e) { box.innerHTML = '<div class="err-msg-txt">⚠️ '+escerrRu(e,'Ошибка')+'</div>'; }
+  } catch(e) { box.innerHTML = '<div class="err-msg-txt">⚠️ '+esc(errRu(e,'Ошибка'))+'</div>'; }
 }
 async function submitProxyImport() {
   const raw = document.getElementById('proxyImport').value.trim();
@@ -15682,7 +15682,7 @@ async function _botNoteLoad(botId) {
     // Поле остаётся закрытым: сохранить сейчас — значит затереть заметку,
     // которой мы так и не увидели.
     ta.placeholder = 'Заметка не загрузилась';
-    err.innerHTML = escerrRu(e,'Не удалось загрузить заметку')
+    err.innerHTML = esc(errRu(e,'Не удалось загрузить заметку'))
       + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
       + `onclick="_botNoteLoad(${Number(botId)})">↺ Повторить</span>`;
   }
@@ -16947,7 +16947,7 @@ async function loadOlderVaultMessages() {
     if (more) more.outerHTML = olderBtn + msgs.map(m => vaultBubble(m)).join('');
     body.scrollTop += body.scrollHeight - before;
   } catch(e) {
-    if (more) more.innerHTML = `<div style="font-size:12px;color:var(--red)">${escerrRu(e,'Ошибка')}</div>`;
+    if (more) more.innerHTML = `<div style="font-size:12px;color:var(--red)">${esc(errRu(e,'Ошибка'))}</div>`;
   }
 }
 
@@ -16999,7 +16999,7 @@ async function openVaultMedia(msgId) {
           <button class="btn btn-s" style="padding:8px 16px;font-size:13px" onclick="closeVaultMedia()">Закрыть</button>
         </div></div>`;
   } catch(e) {
-    ov.innerHTML = `<div style="color:#fff;font-size:14px;text-align:center">${escerrRu(e,'Ошибка загрузки')}
+    ov.innerHTML = `<div style="color:#fff;font-size:14px;text-align:center">${esc(errRu(e,'Ошибка загрузки'))}
         <div style="margin-top:14px"><button class="btn btn-s" onclick="closeVaultMedia()">Закрыть</button></div></div>`;
   }
 }
@@ -17134,7 +17134,7 @@ async function openVaultSettings() {
   } catch(e) {
     if (err) err.innerHTML =
       '<div style="font-size:12px;color:var(--red);padding:6px 0">⚠️ Не удалось загрузить настройки: '
-      + escerrRu(e,'ошибка связи')
+      + esc(errRu(e,'ошибка связи'))
       + '. Переключатели отключены, чтобы не затереть то, что стоит на сервере.'
       + '</div><button class="btn btn-s" style="font-size:12px" onclick="openVaultSettings()">↺ Повторить</button>';
   }
@@ -17338,7 +17338,7 @@ async function cdToggleExclude(excluded) {
       body: JSON.stringify({ contact_ids: [CURRENT_CONTACT_ID], excluded: excluded }) });
     toast(excluded ? 'Помечен личным — вне рассылок/инвайтов' : 'Возвращён в работу');
     openContactDetail(CURRENT_CONTACT_ID);
-  } catch (e) { toasterrRu(e,'Ошибка'); }
+  } catch (e) { toast(errRu(e,'Ошибка')); }
 }
 
 async function openContactDetail(id) {
@@ -18808,7 +18808,7 @@ async function uchClPreview() {
   try {
     const d = await api('/api/miniapp/uch/filter/preview', { method: 'POST', body: JSON.stringify(f) });
     document.getElementById('uchClCount').textContent = 'Под фильтр попадает: ' + (d.count || 0) + ' контактов';
-  } catch (e) { toasterrRu(e,'Ошибка'); }
+  } catch (e) { toast(errRu(e,'Ошибка')); }
 }
 
 async function uchClExclude(excluded) {
@@ -18817,7 +18817,7 @@ async function uchClExclude(excluded) {
   try {
     const d = await api('/api/miniapp/uch/filter/exclude', { method: 'POST', body: JSON.stringify({ ...f, excluded: excluded }) });
     toast((excluded ? 'Помечено личными: ' : 'Снято пометок: ') + (d.updated || 0));
-  } catch (e) { toasterrRu(e,'Ошибка'); }
+  } catch (e) { toast(errRu(e,'Ошибка')); }
 }
 
 async function uchClDelete() {
@@ -18841,7 +18841,7 @@ async function uchClDelete() {
     const d = await api('/api/miniapp/uch/filter/delete', { method: 'POST', body: JSON.stringify({ ...f, confirm: true }) });
     toast('✅ Удалено: ' + (d.deleted || 0));
     document.getElementById('uchClCount').textContent = '';
-  } catch (e) { toasterrRu(e,'Ошибка'); }
+  } catch (e) { toast(errRu(e,'Ошибка')); }
 }
 
 // ── Облако: шифрованное распределённое хранилище файлов ──────────────────────
@@ -18962,7 +18962,7 @@ async function cloudRefreshList() {
         <button class="btn btn-s" style="padding:6px 10px;font-size:12px;color:var(--red)" onclick="cloudDelete(${f.id})" title="Удалить">🗑</button>
       </div>`;
     }).join('');
-  } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${escerrRu(e,'Ошибка')}</div>`; }
+  } catch (e) { box.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(errRu(e,'Ошибка'))}</div>`; }
 }
 
 // Потолок одной загрузки — с сервера (см. openCloud). 0 = ещё не знаем.
@@ -19001,7 +19001,7 @@ async function cloudUpload(input) {
   } catch (e) {
     say('');
     input.value = '';
-    toasterrRu(e,'Ошибка загрузки');
+    toast(errRu(e,'Ошибка загрузки'));
   }
 }
 
@@ -19030,7 +19030,7 @@ async function cloudSave(fileId) {
     a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
-  } catch (e) { toasterrRu(e,'Ошибка'); }
+  } catch (e) { toast(errRu(e,'Ошибка')); }
 }
 
 // Открыть файл в приложении: картинку/видео/аудио показываем прямо здесь (сразу
@@ -19073,7 +19073,7 @@ async function cloudOpenFile(fileId) {
           <button class="btn btn-s" style="padding:8px 16px;font-size:13px" onclick="closeVaultMedia()">Закрыть</button>
         </div></div>`;
   } catch (e) {
-    ov.innerHTML = `<div style="color:#fff;font-size:14px;text-align:center">${escerrRu(e,'Ошибка')}
+    ov.innerHTML = `<div style="color:#fff;font-size:14px;text-align:center">${esc(errRu(e,'Ошибка'))}
         <div style="margin-top:14px"><button class="btn btn-s" onclick="closeVaultMedia()">Закрыть</button></div></div>`;
   }
 }
@@ -19084,7 +19084,7 @@ async function cloudDelete(fileId) {
     await api('/api/miniapp/cloud/file/' + fileId + '/delete', { method: 'POST', body: '{}' });
     toast('✅ Удалено');
     await openCloud();
-  } catch (e) { toasterrRu(e,'Ошибка'); }
+  } catch (e) { toast(errRu(e,'Ошибка')); }
 }
 
 async function cloudHeal(fileId) {
@@ -19094,7 +19094,7 @@ async function cloudHeal(fileId) {
     if (r.unhealable) toast('⚠️ Восстановлено копий: ' + (r.restored || 0) + ', но ' + r.unhealable + ' кусков потеряны безвозвратно');
     else toast('✅ Избыточность восстановлена (+' + (r.restored || 0) + ' копий)');
     await cloudRefreshList();
-  } catch (e) { toasterrRu(e,'Ошибка'); }
+  } catch (e) { toast(errRu(e,'Ошибка')); }
 }
 
 async function openUchGraph() {
@@ -20096,7 +20096,7 @@ async function computeCampaignPlan() {
         ${p.extra_accounts?row('Не хватает аккаунтов', '+'+p.extra_accounts):''}
       </div>
       <button class="btn btn-p" style="width:100%;margin-top:10px" onclick="launchFromPlan()">🚀 Открыть инвайт с этими настройками</button>`;
-  } catch(e){ el.innerHTML = '<div style="color:var(--red);font-size:13px">'+escerrRu(e,'Ошибка')+'</div>'; }
+  } catch(e){ el.innerHTML = '<div style="color:var(--red);font-size:13px">'+esc(errRu(e,'Ошибка'))+'</div>'; }
 }
 async function launchFromPlan() {
   if (!CAMPAIGN_PLAN) return;
@@ -20214,7 +20214,7 @@ async function loadFleetReadiness() {
       + `🎯 Готовы инвайтить: <b>${d.ready||0}</b> из <b>${d.total||0}</b>`
       + reasonsHtml
       + `<div style="margin-top:6px;color:var(--hint)">💡 ${esc(d.verdict||'')}</div></div>`;
-  } catch(e) { el.innerHTML = '<span style="color:#ef4444">'+escerrRu(e,'Ошибка проверки')+'</span>'; }
+  } catch(e) { el.innerHTML = '<span style="color:#ef4444">'+esc(errRu(e,'Ошибка проверки'))+'</span>'; }
 }
 
 // Вступить всеми аккаунтами в группу (для прямого инвайта нужно членство).
@@ -20236,7 +20236,7 @@ async function joinAllToGroup() {
     const r = await api('/api/miniapp/invite/join_all', {method:'POST', body:JSON.stringify({group})});
     if (el) el.innerHTML = `<div style="padding:8px 10px;background:var(--bg2);border-radius:10px;line-height:1.6">🚪 Вступление запущено фоном (операция #${r.op_id}) — ${r.accounts||0} акк. вступают в «${esc(group)}». Прогресс — в разделе «Операции».</div>`;
     toast('✅ Вступление запущено (операция #'+r.op_id+')');
-  } catch(e) { if (el) el.innerHTML = '<span style="color:#ef4444">'+escerrRu(e,'Ошибка')+'</span>'; }
+  } catch(e) { if (el) el.innerHTML = '<span style="color:#ef4444">'+esc(errRu(e,'Ошибка'))+'</span>'; }
 }
 
 // Один тап: выдать всем аккаунтам право приглашать в этом чате (операция
@@ -24158,7 +24158,7 @@ async function previewFactoryNames(prefix) {
           + `<span style="color:var(--text)">${esc(it.title||'—')}</span>`
           + `<span style="color:var(--accent)">${esc(it.username||'')}</span></div>`).join('')
       + '</div>';
-  } catch(e) { box.innerHTML = `<div style="font-size:12px;color:var(--red)">${escerrRu(e,'Ошибка')}</div>`; }
+  } catch(e) { box.innerHTML = `<div style="font-size:12px;color:var(--red)">${esc(errRu(e,'Ошибка'))}</div>`; }
 }
 
 async function submitChannelFactory() {
@@ -24337,7 +24337,7 @@ async function _gfLoadAccounts(q) {
     sel.innerHTML = '<option value="">Аккаунты не загрузились</option>';
     // Причина отказа не должна оставаться только в консоли: без неё непонятно,
     // повторить сейчас или чинить связь.
-    document.getElementById('gfErr').innerHTML = escerrRu(e,'Ошибка загрузки')
+    document.getElementById('gfErr').innerHTML = esc(errRu(e,'Ошибка загрузки'))
       + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="_gfLoadAccounts()">↺ Повторить</span>';
     _gfSetSubmit(false, 'Аккаунты не загрузились');
   }
@@ -26022,7 +26022,7 @@ async function openBilling() {
     // есть. Тем же правилом чуть выше объяснён состав тарифа: выдумывать то,
     // по чему принимают решение о покупке, нельзя. Честный ответ — «не знаем».
     txt('billingPlanName','Тариф не загрузился');
-    txt('billingExpires', escerrRu(e,'Нет связи с сервером'));
+    txt('billingExpires', esc(errRu(e,'Нет связи с сервером')));
     const bb = document.getElementById('billingPlanBadge');
     if (bb) bb.style.display = 'none';
     txt('billingFeaturesList', `<div class="card" style="padding:12px 16px;font-size:13px;color:var(--hint)">
@@ -26301,7 +26301,7 @@ function renderRankingAlerts(alerts) {
       <div class="ava" style="background:${color}22;color:${color}">${type}</div>
       <div class="li-body">
         <div class="li-name">${esc(a.keyword)}</div>
-        <div class="li-sub" style="color:${color}">${escerrRu(a,'')}</div>
+        <div class="li-sub" style="color:${color}">${esc(a.message||'')}</div>
       </div>
       <div class="li-right"><span style="font-size:11px;color:var(--hint)">${ago(a.created_at)}</span></div>
     </div>`;
