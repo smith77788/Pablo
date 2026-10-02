@@ -55,7 +55,25 @@ async def va_skip(callback: CallbackQuery, callback_data: VaCb, pool) -> None:
         await callback.answer(str(e), show_alert=True)
         return
     await callback.answer("Пропущено")
-    await _done(callback, "✖️ Пропущено. Следующий пост будет по плану.")
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    kb = InlineKeyboardBuilder()
+    for code, label in ca.REJECT_REASONS.items():
+        kb.button(text=label, callback_data=VaCb(action="why", id=callback_data.id, r=code))
+    kb.adjust(2)
+    try:
+        await callback.message.edit_text(
+            (callback.message.html_text or "") + "\n\n✖️ Пропущено. Почему? Администратор "
+            "учтёт это в следующих постах.", parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        await _done(callback, "✖️ Пропущено. Следующий пост будет по плану.")
+
+
+@router.callback_query(VaCb.filter(F.action == "why"))
+async def va_why(callback: CallbackQuery, callback_data: VaCb, pool) -> None:
+    ok = await ca.set_reject_reason(pool, callback.from_user.id, callback_data.id, callback_data.r)
+    await callback.answer("Учту" if ok else "Черновик уже обработан")
+    label = ca.REJECT_REASONS.get(callback_data.r, "")
+    await _done(callback, f"Учту: {html.escape(label)}." if ok and label else "Следующий пост будет по плану.")
 
 
 @router.callback_query(VaCb.filter(F.action == "regen"))

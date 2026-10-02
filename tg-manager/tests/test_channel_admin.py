@@ -239,6 +239,7 @@ def test_write_post_on_empty_channel_writes_intro(monkeypatch):
     monkeypatch.setattr(ca, "_pillars", _pillars)
     monkeypatch.setattr(ca, "_rules", _rules)
     monkeypatch.setattr(ca, "_best_texts", _empty)
+    monkeypatch.setattr(ca, "owner_lessons", _empty)
     monkeypatch.setattr(editorial_review, "review_draft", _review)
     d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
     assert d.is_intro and d.pillar == ca.INTRO_PILLAR and d.ok
@@ -285,10 +286,16 @@ def test_write_post_retries_with_editor_feedback(monkeypatch):
     monkeypatch.setattr(ca, "_pillars", _pillars)
     monkeypatch.setattr(ca, "_rules", _rules)
     monkeypatch.setattr(ca, "_best_texts", _none)
+
+    async def _lessons(*a, **k):
+        return ["слишком рекламно (3)"]
+
+    monkeypatch.setattr(ca, "owner_lessons", _lessons)
     monkeypatch.setattr(editorial_review, "review_draft", _review)
     d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
     assert d.ok and d.text == "вариант 2"
     assert "отклонил редактор" in prompts[1] and "повтор" in prompts[1]
+    assert "Владелец отклонял прошлые посты по причинам: слишком рекламно (3)" in prompts[0]
 
 
 # ── проводка ────────────────────────────────────────────────────────────────
@@ -379,3 +386,16 @@ def test_expired_promo_leaves_prompts():
     gone = ca._business_lines(profile, today=date(2026, 10, 6))
     assert not any("−20%" in x for x in gone)
     assert ca.promo_active({"promo": "x"}) and not ca.promo_active({"promo_until": "2030-01-01"})
+
+
+def test_reject_reason_codes_and_free_text():
+    assert ca.reject_reason("ads") == "слишком рекламно"
+    assert ca.reject_reason("  не  про нас ") == "не про нас"
+    assert ca.reject_reason("") == "" and ca.reject_reason(None) == ""
+    assert len(ca.reject_reason("х" * 500)) == 200
+
+
+def test_bot_reason_buttons_fit_callback_limit():
+    from bot.callbacks import VaCb
+    for code in ca.REJECT_REASONS:
+        assert len(VaCb(action="why", id=2**40, r=code).pack().encode()) <= 64

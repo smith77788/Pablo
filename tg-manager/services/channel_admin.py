@@ -531,6 +531,7 @@ def build_post_prompt(
     is_intro: bool = False,
     rules: Optional[cb.BrandRules] = None,
     feedback: list[str] = (),
+    lessons: list[str] = (),
 ) -> tuple[str, str]:
     """Промпт на пост → (system, user)."""
     rules = rules or cb.BrandRules()
@@ -589,6 +590,10 @@ def build_post_prompt(
         lines.append("")
         lines.append("Недавние посты канала — НЕ повторяй их темы, вступления и формулировки:")
         lines.append(_fence(list(recent_texts)[:_RECENT_FOR_PROMPT], cap=400))
+    if lessons:
+        lines.append("")
+        lines.append("Владелец отклонял прошлые посты по причинам: " + "; ".join(lessons[:5])
+                     + ". Не повторяй этих ошибок.")
     if feedback:
         lines.append("")
         lines.append("Прошлый вариант отклонил редактор. Исправь: " + "; ".join(feedback[:6]) + ".")
@@ -1258,12 +1263,13 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
                              cap=sales_cap(admin)) or names[0]
         topic = ""
     best = await _best_texts(pool, owner_id, channel_id)
+    lessons = await owner_lessons(pool, owner_id, channel_id)
     feedback: list[str] = []
     text, reasons = "", []
     for _ in range(_MAX_ATTEMPTS):
         system, user = build_post_prompt(
             profile, pillar=pillar, topic_hint=topic, recent_texts=recent[:_RECENT_FOR_PROMPT],
-            best_texts=best, is_intro=is_intro, rules=rules, feedback=feedback)
+            best_texts=best, is_intro=is_intro, rules=rules, feedback=feedback, lessons=lessons)
         try:
             raw = await complete(system, user)
         except Exception as e:
@@ -1386,20 +1392,66 @@ async def publish_draft(pool, owner_id: int, draft_id: int) -> dict:
     return {"op_id": op_id, "channel_id": str(d["channel_id"])}
 
 
-async def reject_draft(pool, owner_id: int, draft_id: int) -> dict:
+# Почему владелец отклонил черновик. Причина копится и уходит автору
+# следующих постов: администратор учится на отказах, а не повторяет их.
+REJECT_REASONS = {
+    "offtopic": "не по теме канала",
+    "ads": "слишком рекламно",
+    "invented": "выдуманные факты или цифры",
+    "tone": "не тот тон",
+    "boring": "скучно, без пользы",
+    "long": "слишком длинно",
+}
+_LESSON_DAYS = 30
+
+
+def reject_reason(raw: Any) -> str:
+    """Код причины или свои слова владельца → текст причины (пусто — без причины)."""
+    text = " ".join(str(raw or "").split())
+    return REJECT_REASONS.get(text, text[:200])
+
+
+async def set_reject_reason(pool, owner_id: int, draft_id: int, reason: Any) -> bool:
+    """Дописать причину к уже отклонённому черновику (бот спрашивает её после «Пропустить»)."""
+    text = reject_reason(reason)
+    if not text:
+        return False
+    r = await pool.execute(
+        "UPDATE va_admin_drafts SET reject_reason=$3 WHERE id=$1 AND owner_id=$2 "
+        "AND status='rejected'", int(draft_id), int(owner_id), text)
+    return str(r).endswith(" 1")
+
+
+async def owner_lessons(pool, owner_id: int, channel_id: int) -> list[str]:
+    """Частые причины отказов владельца за месяц: «слишком рекламно (3)»."""
+    rows = await pool.fetch(
+        "SELECT reject_reason AS r, count(*) AS n FROM va_admin_drafts "
+        "WHERE owner_id=$1 AND channel_id=$2 AND status='rejected' AND reject_reason IS NOT NULL "
+        "AND decided_at > now() - make_interval(days => $3) "
+        "GROUP BY reject_reason ORDER BY count(*) DESC, max(decided_at) DESC LIMIT 5",
+        int(owner_id), int(channel_id), _LESSON_DAYS)
+    return [f"{r['r']} ({r['n']})" if r["n"] > 1 else r["r"] for r in rows or []]
+
+
+async def reject_draft(pool, owner_id: int, draft_id: int, reason: Any = "") -> dict:
     d = await _claim_draft(pool, owner_id, draft_id, "rejected")
     if not d:
         raise ChannelAdminError("Черновик уже обработан или не найден")
-    await log_event(pool, owner_id, d["channel_id"], "rejected", "Владелец отклонил черновик")
+    why = reject_reason(reason)
+    if why:
+        await set_reject_reason(pool, owner_id, draft_id, why)
+    await log_event(pool, owner_id, d["channel_id"], "rejected",
+                    "Владелец отклонил черновик" + (f": {why}" if why else ""))
     return {"channel_id": str(d["channel_id"])}
 
 
 async def regenerate_draft(pool, owner_id: int, draft_id: int, *,
-                           complete: Optional[Complete] = None) -> dict:
+                           complete: Optional[Complete] = None, reason: Any = "") -> dict:
     """Отклонить черновик и написать другой вариант на ту же рубрику."""
     d = await _claim_draft(pool, owner_id, draft_id, "rejected")
     if not d:
         raise ChannelAdminError("Черновик уже обработан или не найден")
+    await set_reject_reason(pool, owner_id, draft_id, reason)
     new = await write_post(pool, owner_id, d["channel_id"], complete=complete,
                            plan_item={"pillar": d["pillar"] or "", "topic": ""})
     new_id = await save_draft(pool, owner_id, d["channel_id"], new)

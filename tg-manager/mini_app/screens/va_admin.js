@@ -158,16 +158,29 @@ function _vaDraftsHtml(drafts, ctx) {
       '<div style="display:flex;gap:8px;margin-top:10px">' +
         '<button class="btn btn-p" style="flex:1" onclick="vaDraftAct(' + x.id + ',\'publish\')">✅ Опубликовать</button>' +
         '<button class="btn btn-s" style="flex:1" onclick="vaDraftAct(' + x.id + ',\'regenerate\')">🔄 Другой</button>' +
-        '<button class="btn btn-s" onclick="vaDraftAct(' + x.id + ',\'reject\')" aria-label="Пропустить черновик">✖️</button>' +
-      '</div></div>';
+        '<button class="btn btn-s" onclick="vaDraftWhy(' + x.id + ')" aria-label="Пропустить черновик">✖️</button>' +
+      '</div><div id="vaWhy' + x.id + '"></div></div>';
   }).join('');
 }
 
-async function vaDraftAct(id, action) {
+// Причины отказа — те же коды, что channel_admin.REJECT_REASONS.
+const _VA_WHY = [['offtopic', 'Не по теме'], ['ads', 'Слишком рекламно'], ['invented', 'Выдуманные факты'],
+  ['tone', 'Не тот тон'], ['boring', 'Скучно'], ['long', 'Слишком длинно'], ['', 'Просто пропустить']];
+
+function vaDraftWhy(id) {
+  const box = document.getElementById('vaWhy' + id);
+  if (!box) return vaDraftAct(id, 'reject');
+  box.innerHTML = '<div style="font-size:12px;color:var(--hint);margin:10px 0 6px">Почему пропускаете? Администратор учтёт это в следующих постах.</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px">' + _VA_WHY.map(function (w) {
+      return '<button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="vaDraftAct(' + id + ',\'reject\',\'' + w[0] + '\')">' + w[1] + '</button>';
+    }).join('') + '</div>';
+}
+
+async function vaDraftAct(id, action, reason) {
   const msgs = { publish: 'Публикую…', regenerate: 'Пишу другой вариант…', reject: 'Пропускаю…' };
   toast(msgs[action] || '…');
   try {
-    await api('/api/miniapp/va/drafts/' + id + '/' + action, { method: 'POST', body: '{}', timeoutMs: 180000 });
+    await api('/api/miniapp/va/drafts/' + id + '/' + action, { method: 'POST', body: JSON.stringify({ reason: reason || '' }), timeoutMs: 180000 });
     toast(action === 'publish' ? '✅ Отправлено в канал' : (action === 'regenerate' ? '✅ Новый вариант готов' : 'Пропущено'));
   } catch (e) {
     toast('⚠️ ' + ((e && e.message) || 'Не получилось'));

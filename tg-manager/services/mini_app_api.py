@@ -14836,8 +14836,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import channel_admin as _ca
         fn = {"publish": _ca.publish_draft, "reject": _ca.reject_draft,
               "regenerate": _ca.regenerate_draft}[action]
+        kw = {}
+        if action != "publish":
+            body = await _va_body(request) or {}
+            kw["reason"] = body.get("reason") or ""
         try:
-            res = await fn(pool, uid, did)
+            res = await fn(pool, uid, did, **kw)
         except _ca.ChannelAdminError as e:
             return _err(str(e), 400)
         return _json_resp({"ok": True, **res})

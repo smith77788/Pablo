@@ -205,8 +205,10 @@ def test_empty_channel_is_administered_end_to_end(pool, stubs):
         assert bot.sent and bot.sent[-1][2].get("reply_markup") is not None
         drafts = await ca.list_drafts(pool, OWNER, CID)
         assert len(drafts) == 1
-        new = await ca.regenerate_draft(pool, OWNER, drafts[0]["id"], complete=ai)
+        new = await ca.regenerate_draft(pool, OWNER, drafts[0]["id"], complete=ai, reason="ads")
         assert new["id"] != drafts[0]["id"]
+        assert await ca.owner_lessons(pool, OWNER, CID) == ["слишком рекламно"]
+        assert not await ca.set_reject_reason(pool, OWNER + 1, drafts[0]["id"], "tone")  # чужой
         out = await ca.publish_draft(pool, OWNER, new["id"])
         assert out["op_id"]
         with pytest.raises(ca.ChannelAdminError):

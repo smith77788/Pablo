@@ -469,8 +469,9 @@ class WorkspaceCb(CallbackData, prefix="ws"):
 
 class VaCb(CallbackData, prefix="va"):
     """Виртуальный администратор канала: решение по черновику поста."""
-    action: str  # pub, regen, skip
+    action: str  # pub, regen, skip, why
     id: int = 0  # va_admin_drafts.id
+    r: str = ""  # why: код причины отказа (channel_admin.REJECT_REASONS)
 
 
 class QuickPostCb(CallbackData, prefix="qp"):
