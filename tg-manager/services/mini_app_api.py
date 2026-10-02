@@ -1560,8 +1560,12 @@ async def _retry_failed_ops_core(pool: asyncpg.Pool, uid: int, hours: int = 24) 
     mass_publish пропускаем: его безопасный повтор (только упавшие каналы) делается
     точечно из карточки операции, иначе успешные каналы получили бы дубли поста."""
     rows = await _safe_fetch(pool,
-        """SELECT op_type, params, label, total_items FROM operation_queue
-           WHERE owner_id=$1 AND status='failed'
+        # 'partial' обязателен: это честное имя недоведённой работы, и без него
+        # «повторить упавшие» молча пропускал операции с САМЫМ БОЛЬШИМ объёмом
+        # незакрытого — те, что взяли часть целей и оборвались. Повтор безопасен:
+        # исполнитель пропустит уже взятые цели по журналу.
+        f"""SELECT op_type, params, label, total_items FROM operation_queue
+           WHERE owner_id=$1 AND status IN {op_status.sql_unfinished_list()}
              AND created_at > NOW() - ($2 * INTERVAL '1 hour')
            ORDER BY created_at DESC LIMIT 100""", uid, hours)
     retried, skipped = 0, 0

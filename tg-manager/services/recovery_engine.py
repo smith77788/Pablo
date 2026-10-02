@@ -569,12 +569,16 @@ async def _operation_recovery(
     try:
         from services import op_status as _ost_reason
 
+        # 'partial' здесь обязателен наравне с 'failed': операция, взявшая часть
+        # целей и исчерпавшая попытки, недоведена ровно так же, и её владелец
+        # должен узнать. Пока фильтр был только по 'failed', эскалация молча
+        # пропускала как раз те операции, где незакрытой работы больше всего.
         terminal_failed = await pool.fetch(
             f"""SELECT id, op_type, retry_count, max_retries,
                       {_ost_reason.sql_error_reason()} AS error_msg, created_at
                FROM operation_queue
                WHERE owner_id=$1
-                 AND status='failed'
+                 AND status IN {_ost_reason.sql_unfinished_list()}
                  AND retry_count >= COALESCE(max_retries, 3)
                  AND finished_at > NOW() - INTERVAL '1 hour'
                  AND (notified_at IS NULL OR notified_at < NOW() - INTERVAL '3 hours')

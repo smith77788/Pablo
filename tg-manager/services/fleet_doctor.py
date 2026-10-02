@@ -206,11 +206,14 @@ async def diagnose(pool, owner_id: int) -> dict:
         # error_msg и им же фильтровал, поэтому упавшая операция, чья причина
         # легла в last_error, из «последних реальных ошибок» просто исчезала:
         # владелец видел пустой список там, где сбои были.
+        # Статус тоже по обоим недоведённым исходам: 'partial' — такая же
+        # незакрытая работа, и её причина нужна в «последних реальных ошибках».
         _reason = _ost_reason.sql_error_reason()
         er = await pool.fetch(
             f"SELECT COALESCE(label, op_type) AS op, {_reason} AS error_msg, "
             "finished_at "
-            "FROM operation_queue WHERE owner_id=$1 AND status='failed' "
+            "FROM operation_queue WHERE owner_id=$1 "
+            f"AND status IN {_ost_reason.sql_unfinished_list()} "
             f"AND COALESCE({_reason}, '') <> '' "
             "ORDER BY finished_at DESC NULLS LAST LIMIT 5", owner_id)
         out["recent_errors"] = [
