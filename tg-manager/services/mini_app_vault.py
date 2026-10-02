@@ -19,6 +19,19 @@ import json
 from aiohttp import web
 
 
+# Что показываем на месте, а не отдаём файлом. Список намеренно короткий и
+# закрытый: тип приходит от собеседника, и всё незнакомое безопаснее отдать
+# вложением. `image/svg+xml` здесь НЕТ — SVG исполняет скрипты.
+_INLINE_SAFE_MIME = frozenset({
+    "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp",
+    "image/heic", "image/heif", "image/avif",
+    "video/mp4", "video/webm", "video/quicktime", "video/3gpp",
+    "audio/mpeg", "audio/ogg", "audio/mp4", "audio/aac", "audio/wav",
+    "audio/webm", "audio/flac", "audio/x-wav",
+    "application/pdf",
+})
+
+
 def setup_routes(app: web.Application, pool) -> None:
     """Регистрирует маршруты «Хранилища» на общем приложении мини-аппа."""
     # Общие помощники живут в mini_app_api, а он импортирует этот модуль —
@@ -262,13 +275,23 @@ def setup_routes(app: web.Application, pool) -> None:
         # плюс RFC 5987 для юникодного имени.
         import urllib.parse as _up
         ascii_name = "".join(c for c in name if 32 <= ord(c) < 127 and c not in '"\\') or "file"
+        # Тип файла тоже задаёт собеседник. Показывать на месте (`inline`) можно
+        # только то, что браузер не исполняет: иначе присланный `.html` или
+        # `.svg` выполнится на НАШЕМ origin, а там в localStorage лежит
+        # `ig_device_token` — ключ автономного входа в аккаунт.
+        mime = (str(res.get("mime") or "").split(";")[0]).strip().lower()
+        inline = mime in _INLINE_SAFE_MIME
         return web.Response(
             body=res["data"],
             headers={
-                "Content-Type": res.get("mime") or "application/octet-stream",
+                "Content-Type": mime if inline else "application/octet-stream",
                 "Content-Disposition":
-                    f'inline; filename="{ascii_name}"; '
+                    f'{"inline" if inline else "attachment"}; '
+                    f'filename="{ascii_name}"; '
                     f"filename*=UTF-8''{_up.quote(name)}",
+                # Браузер не должен передумывать насчёт типа сам: иначе
+                # «текстовый» файл с разметкой внутри он покажет как страницу.
+                "X-Content-Type-Options": "nosniff",
                 "Cache-Control": "private, max-age=300",
             },
         )
