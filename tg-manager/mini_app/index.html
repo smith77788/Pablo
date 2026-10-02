@@ -16711,7 +16711,7 @@ async function loadVaultAnalytics() {
     const rr = a.reply_rate_pct != null ? a.reply_rate_pct + '%' : '—';
     const mr = a.median_response_min != null
       ? (a.median_response_min < 60 ? Math.round(a.median_response_min) + ' мин'
-          : (a.median_response_min / 60).toFixed(1) + ' ч')
+          : (a.median_response_min / 60).toFixed(1).replace('.',',') + ' ч')
       : '—';
     const bh = a.busiest_hour != null ? a.busiest_hour + ':00' : '—';
     const cell = (v, l) => `<div style="flex:1;text-align:center">
@@ -16895,7 +16895,7 @@ function fmtBytes(n) {
   n = Number(n)||0;
   if (n < 1024) return n + ' Б';
   if (n < 1024*1024) return Math.round(n/1024) + ' КБ';
-  return (n/1024/1024).toFixed(1) + ' МБ';
+  return (n/1024/1024).toFixed(1).replace('.',',') + ' МБ';
 }
 
 // Файл тянем авторизованным запросом и показываем прямо в приложении: прямая
@@ -18789,9 +18789,9 @@ function _cloudBytes(n) {
   n = Number(n) || 0;
   if (n <= 0) return '0 Б';
   if (n < 1024) return n + ' Б';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' КБ';
-  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' МБ';
-  return (n / 1024 / 1024 / 1024).toFixed(2) + ' ГБ';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace('.',',') + ' КБ';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1).replace('.',',') + ' МБ';
+  return (n / 1024 / 1024 / 1024).toFixed(2).replace('.',',') + ' ГБ';
 }
 
 async function openCloud() {
@@ -19575,7 +19575,7 @@ async function openReferral() {
       <div class="kpi-card"><div class="kpi-val">${REFERRAL_TIER[d.tier]||d.tier||'—'}</div><div class="kpi-lbl">Уровень</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.referral_count||0}</div><div class="kpi-lbl">Рефералов</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.paid_count||0}</div><div class="kpi-lbl">Оплативших</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.total_earned,'green')}">$${Number(d.total_earned||0).toFixed(2)}</div><div class="kpi-lbl">Заработано</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.total_earned,'green')}">$${Number(d.total_earned||0).toFixed(2).replace('.',',')}</div><div class="kpi-lbl">Заработано</div></div>
     `);
     txt('m-ref-val',`${d.referral_count||0} рефералов · ${d.commission_rate||0}% комиссия`);
     // Экран показывал голый код и писал «Поделитесь кодом!» — поделиться было
@@ -20193,8 +20193,8 @@ async function openStars() {
     const exps = d.experiments||[];
     if (!exps.length) { txt('starsExps', empty('⭐','Нет экспериментов','Нажмите + A/B тест')); return; }
     txt('starsExps', exps.map(e=>{
-      const crA = e.impressions_a>0?((e.conversions_a/e.impressions_a)*100).toFixed(1)+'%':'—';
-      const crB = e.impressions_b>0?((e.conversions_b/e.impressions_b)*100).toFixed(1)+'%':'—';
+      const crA = e.impressions_a>0?((e.conversions_a/e.impressions_a)*100).toFixed(1).replace('.',',')+'%':'—';
+      const crB = e.impressions_b>0?((e.conversions_b/e.impressions_b)*100).toFixed(1).replace('.',',')+'%':'—';
       const winner = e.winner?` · 🏆 ${e.winner.toUpperCase()}`:'';
       const isActive = e.status === 'active';
       return `<div class="row">
@@ -21248,7 +21248,7 @@ async function openNotaryCert(id) {
       <div class="lst">
         <div class="row"><div class="row-body"><div class="row-name">Впервые зафиксирован</div><div class="row-val">${f.first_seen_at?new Date(f.first_seen_at).toLocaleString('ru-RU'):'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Последний раз на месте</div><div class="row-val">${f.last_seen_at?new Date(f.last_seen_at).toLocaleString('ru-RU'):'—'}</div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Подтверждённое удержание</div><div class="row-val">${f.held_min_h!=null?('не менее '+Number(f.held_min_h).toFixed(1)+' ч'):'—'}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Подтверждённое удержание</div><div class="row-val">${f.held_min_h!=null?('не менее '+Number(f.held_min_h).toFixed(1).replace('.',',')+' ч'):'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Просмотры</div><div class="row-val">${f.views_first!=null?(num(f.views_first)+' → '+num(f.views_last)):'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Наблюдений</div><div class="row-val">${num(f.n_total||0)} · покрытие ${Math.round((f.coverage||0)*100)}%</div></div></div>
         ${sigRow}
@@ -21548,7 +21548,7 @@ async function openExpDetail(id, name) {
       </div>
       <div class="sec">Варианты</div>
       <div class="lst">${vars.map(v=>{
-        const cr = v.impressions>0?((v.conversions/v.impressions)*100).toFixed(1)+'%':'—';
+        const cr = v.impressions>0?((v.conversions/v.impressions)*100).toFixed(1).replace('.',',')+'%':'—';
         const winner = d.winner_variant_id===v.id?' 🏆':'';
         return `<div class="row">
           <div class="row-body">
@@ -21885,7 +21885,7 @@ async function openAdIntel() {
         <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
         <div class="row-body">
           <div class="row-name">${esc(c.title || (c.username ? '@'+c.username : 'Канал'))}</div>
-          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1)}%${c.ad_price_est?' · ~'+num(c.ad_price_est):''}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1).replace('.',',')}%${c.ad_price_est?' · ~'+num(c.ad_price_est):''}</div>
         </div>
         <div class="row-right" style="color:var(--orange);font-size:13px">${(Number(c.quality_score)||0).toFixed(0)}⭐</div>
       </div>
@@ -21933,7 +21933,7 @@ async function openNetwork() {
           <div class="row-ico" style="background:var(--bg-blue-16)">🤖</div>
           <div class="row-body">
             <div class="row-name">@${esc(b.name)} ${b.is_active?'🟢':'🔴'}</div>
-            <div class="row-val">${ROLE_LABELS[b.role]||b.role}${b.swarm?' · ⚡ swarm ×'+b.weight.toFixed(1):''}</div>
+            <div class="row-val">${ROLE_LABELS[b.role]||b.role}${b.swarm?' · ⚡ swarm ×'+b.weight.toFixed(1).replace('.',','):''}</div>
           </div>
           <div class="row-right"><button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openNetRoleModal(${b.bot_id},'${esc(b.name)}','${b.role||'general'}')">✏️ Роль</button></div>
         </div>
@@ -23108,9 +23108,9 @@ async function openSwarm() {
     const rows = await api('/api/miniapp/swarm');
     if (!rows.length) { txt('swarmList', empty('🐝','Нет данных','Рой включается на карточке бота в Telegram-боте — оттуда же пойдут метрики')); return; }
     txt('swarmList', rows.map(r=>{
-      const score = r.score?r.score.toFixed(2):'—';
-      const ctr = r.ctr?(r.ctr*100).toFixed(1)+'%':'—';
-      const cvr = r.conversion_rate?(r.conversion_rate*100).toFixed(1)+'%':'—';
+      const score = r.score?r.score.toFixed(2).replace('.',','):'—';
+      const ctr = r.ctr?(r.ctr*100).toFixed(1).replace('.',',')+'%':'—';
+      const cvr = r.conversion_rate?(r.conversion_rate*100).toFixed(1).replace('.',',')+'%':'—';
       const d1 = r.retention_d1?(r.retention_d1*100).toFixed(0)+'%':'—';
       const d7 = r.retention_d7?(r.retention_d7*100).toFixed(0)+'%':'—';
       return `
@@ -24305,7 +24305,7 @@ async function openPhysics() {
           <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
           <div class="row-val">${riskLabel(r.risk_score||0)} · Риск: ${((r.risk_score||0)*100).toFixed(0)}%</div>
           <div class="row-val">Бан-вер.: ${((r.ban_probability||0)*100).toFixed(0)}% · Ops/24h: ${r.ops_24h||0}</div>
-          ${r.flood_rate_1h?`<div class="row-val" style="color:var(--orange)">Флуд за час: ${(r.flood_rate_1h).toFixed(1)}</div>`:''}
+          ${r.flood_rate_1h?`<div class="row-val" style="color:var(--orange)">Флуд за час: ${(r.flood_rate_1h).toFixed(1).replace('.',',')}</div>`:''}
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
         </div>
         ${r.account_id?'<div class="row-right chev">›</div>':''}
@@ -24339,7 +24339,7 @@ async function openGraph() {
       <div class="row">
         <div class="row-body">
           <div class="row-name">${esc(r.title_a||r.username_a||'?')} ⟷ ${esc(r.title_b||r.username_b||'?')}</div>
-          <div class="row-val">Пересечение: ${((r.overlap_pct||0)*100).toFixed(1)}% · Общих: ${r.shared_users||0}</div>
+          <div class="row-val">Пересечение: ${((r.overlap_pct||0)*100).toFixed(1).replace('.',',')}% · Общих: ${r.shared_users||0}</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
         </div>
       </div>
@@ -25102,7 +25102,7 @@ async function openAudienceDna() {
       'Откройте бота в разделе «Боты» и запустите первый разбор аудитории',
       {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
     txt('dnaList', rows.map(r => {
-      const er = r.avg_engagement_rate ? r.avg_engagement_rate.toFixed(1)+'%' : '—';
+      const er = r.avg_engagement_rate ? r.avg_engagement_rate.toFixed(1).replace('.',',')+'%' : '—';
       const risk = r.churn_risk_pct||0;
       const riskE = risk>40?'🔴':risk>20?'🟡':'🟢';
       const peaks = (r.peak_hours||[]).slice(0,3).map(h=>h+':00').join(', ')||'—';
@@ -25131,7 +25131,7 @@ function _renderDnaProfile(d) {
   if (!d.computed) {
     return empty('📭','ДНК-профиль ещё не вычислен','Нажмите «🔄 Пересчитать» вверху для первичного анализа аудитории');
   }
-  const er = d.avg_engagement_rate ? d.avg_engagement_rate.toFixed(1)+'%' : 'нет данных';
+  const er = d.avg_engagement_rate ? d.avg_engagement_rate.toFixed(1).replace('.',',')+'%' : 'нет данных';
   const risk = d.churn_risk_pct||0;
   const riskE = risk>40?'🔴':risk>20?'🟡':'🟢';
   const peaksH = (d.peak_hours||[]).map(h=>h+':00').join(', ')||'нет данных';
@@ -26849,7 +26849,7 @@ async function loadAudienceAnalytics() {
     document.getElementById('aa-total').textContent = num(d.total_users || 0);
     document.getElementById('aa-active').textContent = num(d.active_users || 0);
     document.getElementById('aa-segments').textContent = segments.length;
-    document.getElementById('aa-engagement').textContent = d.avg_engagement ? d.avg_engagement.toFixed(1) + '%' : '—';
+    document.getElementById('aa-engagement').textContent = d.avg_engagement ? d.avg_engagement.toFixed(1).replace('.',',') + '%' : '—';
 
     renderAudSegmentChips(segments);
     renderAudSegments(segments);
@@ -26882,8 +26882,8 @@ function renderAudSegments(segments) {
     return;
   }
   txt('audSegmentsList', filtered.map(s => {
-    const pct = s.percentage ? s.percentage.toFixed(1) + '%' : '—';
-    const growth = s.growth_pct != null ? (s.growth_pct > 0 ? '📈 +' : '📉 ') + s.growth_pct.toFixed(1) + '%' : '';
+    const pct = s.percentage ? s.percentage.toFixed(1).replace('.',',') + '%' : '—';
+    const growth = s.growth_pct != null ? (s.growth_pct > 0 ? '📈 +' : '📉 ') + s.growth_pct.toFixed(1).replace('.',',') + '%' : '';
     const growthColor = s.growth_pct > 0 ? 'var(--green)' : s.growth_pct < 0 ? 'var(--red)' : 'var(--hint)';
     const barW = Math.min(s.percentage || 0, 100);
     return `<div class="li">
