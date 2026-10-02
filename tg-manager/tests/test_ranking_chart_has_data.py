@@ -19,7 +19,8 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
+# Группа ranking_* вынесена из mini_app_api в свой модуль (2026-10-02).
+RANKING = os.path.join(ROOT, "services", "mini_app_ranking.py")
 ENGINE = os.path.join(ROOT, "services", "ranking_engine.py")
 
 
@@ -59,7 +60,7 @@ def test_chart_reads_history_and_server_sends_it():
     chart = _js_func("renderRankingChart")
     assert "k.history" in chart, "график перестал читать историю — проверка ниже пуста"
 
-    overview = _py_func(API, "ranking_overview")
+    overview = _py_func(RANKING, "ranking_overview")
     assert '"history"' in overview, "свод не отдаёт историю, график не появится никогда"
     assert "get_history_for_all" in overview, "история берётся не одним запросом"
 

@@ -8,11 +8,12 @@ HTML + бэкенд /api/miniapp/ranking/* добавили одним комм�
 """
 from __future__ import annotations
 
-import inspect
 import os
 import re
+from pathlib import Path
 
-from services import mini_app_api
+from services import mini_app_ranking
+from tests.miniapp_routes import registered_routes
 
 _HTML = os.path.join(os.path.dirname(__file__), "..", "mini_app", "index.html")
 
@@ -33,24 +34,36 @@ def test_ranking_screen_functions_defined():
 
 
 def test_ranking_backend_routes_registered():
-    src = inspect.getsource(mini_app_api)
-    for path in ("/api/miniapp/ranking/positions", "/api/miniapp/ranking/stats",
-                 "/api/miniapp/ranking/alerts", "/api/miniapp/ranking/track",
-                 "/api/miniapp/ranking/untrack"):
-        assert f'"{path}"' in src, f"маршрут {path} должен быть зарегистрирован"
+    """Проверяется РОУТЕР, а не текст исходника.
+
+    Раньше здесь искали строку с путём в `mini_app_api`. Когда группа переехала
+    в `services/mini_app_ranking.py`, тест покраснел на живых маршрутах — и это
+    худший исход: проверка, которая срабатывает на переносе файла и молчит на
+    настоящей потере маршрута, заставляет её ослабить. Теперь список снимается
+    с собранного приложения, и ему всё равно, в каком модуле лежит обработчик.
+    """
+    routes = set(registered_routes())
+    assert len(routes) > 800, "инвентарь маршрутов пуст — проверка измеряет не то"
+    for method, path in (("GET", "/api/miniapp/ranking/positions"),
+                         ("GET", "/api/miniapp/ranking/stats"),
+                         ("GET", "/api/miniapp/ranking/alerts"),
+                         ("POST", "/api/miniapp/ranking/track"),
+                         ("POST", "/api/miniapp/ranking/untrack")):
+        assert f"{method} {path}" in routes, (
+            f"маршрут {method} {path} должен быть зарегистрирован")
 
 
 def test_ranking_bare_overview_route_exists():
     """loadRanking (фронт) зовёт bare /api/miniapp/ranking — маршрут ДОЛЖЕН быть
     (иначе экран Рейтинг не грузит данные, 404). Отдаёт keywords+alerts."""
-    src = inspect.getsource(mini_app_api)
-    assert re.search(r'add_get\(\s*"/api/miniapp/ranking"\s*,\s*ranking_overview', src), (
-        "bare-маршрут /api/miniapp/ranking должен быть зарегистрирован"
-    )
-    m = re.search(r"async def ranking_overview\(.*?\n(.*?)async def ", src, re.DOTALL)
-    assert m, "ranking_overview handler not found"
+    assert "GET /api/miniapp/ranking" in set(registered_routes()), (
+        "bare-маршрут /api/miniapp/ranking должен быть зарегистрирован")
+    src = Path(mini_app_ranking.__file__).read_text("utf-8")
+    m = re.search(r"async def ranking_overview\(.*?\n(.*?)    async def ",
+                  src, re.DOTALL)
+    assert m, "обработчик ranking_overview не найден"
     body = m.group(1)
     # Кавычки — вопрос стиля, а не контракта: проверяем ИМЕНА полей ответа.
     for field in ("keywords", "alerts"):
-        assert re.search(rf"""["']{field}["']\s*:""", body), (
+        assert re.search(rf"""["\']{field}["\']\s*:""", body), (
             f"ranking_overview должен отдавать {field} (форма для loadRanking)")
