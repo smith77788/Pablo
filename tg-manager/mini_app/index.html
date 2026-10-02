@@ -1103,7 +1103,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="freqWrap" style="display:none">
       <div class="sec-row" style="margin-top:4px">
         <div class="sec">⭐ Часто используемые</div>
-        <span class="sec-btn" onclick="clearFrequent()">Очистить</span>
+        <span class="sec-btn" onclick="clearFrequent()">🗑 Очистить</span>
       </div>
       <div class="freq-row" id="freqList"></div>
     </div>
@@ -1324,7 +1324,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Массовые действия по аккаунтам -->
     <div style="display:flex;gap:8px;padding:4px 0 8px">
       <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
-      <button class="btn btn-s" onclick="openMassOps()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">⚡ История</button>
+      <button class="btn btn-s" onclick="openMassOps()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🕓 История</button>
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
       <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 JSON</button>
     </div>
@@ -2867,7 +2867,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div style="font-size:12px;color:var(--hint);margin:2px 0 6px">Аккаунты — создаём у каждого выбранного (по «на аккаунт» штук):</div>
       <div style="display:flex;gap:8px;margin-bottom:6px">
         <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="cfAccAll(true)">Выбрать все</button>
-        <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="cfAccAll(false)">Очистить</button>
+        <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="cfAccAll(false)">🗑 Очистить</button>
       </div>
       <div id="cfAccts" style="max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px;margin-bottom:10px"></div>
       <button class="btn btn-p" style="width:100%" onclick="submitChannelFactory()">🏭 Создать</button>
@@ -4721,7 +4721,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <label>Аккаунты для @BotFather * (можно несколько)</label>
           <div style="display:flex;gap:8px;margin-bottom:6px">
             <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="bfAccAll(true)">Выбрать все</button>
-            <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="bfAccAll(false)">Очистить</button>
+            <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:6px" onclick="bfAccAll(false)">🗑 Очистить</button>
           </div>
           <div id="bfAccts" style="max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:8px 12px"></div>
           <div class="field-note">Каждый выбранный аккаунт напишет @BotFather и создаст ботов. Нужны активные аккаунты с сессией.</div>
@@ -5898,7 +5898,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div style="display:flex;gap:8px;padding:4px 0 10px">
-      <button class="btn btn-p" onclick="showParserTab('runs')" id="parserTabRuns">⏱ История</button>
+      <button class="btn btn-p" onclick="showParserTab('runs')" id="parserTabRuns">🕓 История</button>
       <button class="btn btn-s" onclick="showParserTab('audience')" id="parserTabAudience">👥 Аудитория</button>
     </div>
     <div id="parserRunsPane">
@@ -6029,7 +6029,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">🔐 Секрет вебхука</span>
-        <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">Изменить</button>
+        <button class="btn btn-s" onclick="openWebhookSecretModal()" style="padding:6px 12px;font-size:12px">✏️ Изменить</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">💻 Связанные устройства</span>
@@ -6404,7 +6404,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note">Авто раскладывает партию по вашим живым прокси, по одному аккаунту на прокси, пока их хватает — общий IP связывает аккаунты между собой. Если выбрать один прокси, за ним окажется вся партия.</div>
       <div style="display:flex;gap:6px;margin-top:8px">
         <input type="text" id="accImportProxyNew" placeholder="или вставьте новый: socks5://user:pass@host:port" style="flex:1;padding:9px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:13px;box-sizing:border-box">
-        <button type="button" class="btn" id="accImportProxyAddBtn" onclick="addAccImportProxy()" style="white-space:nowrap;padding:9px 12px">＋ Добавить</button>
+        <button type="button" class="btn" id="accImportProxyAddBtn" onclick="addAccImportProxy()" style="white-space:nowrap;padding:9px 12px">+ Добавить</button>
       </div>
       <div class="field-note">Новый прокси сохранится в ваш список и сразу закрепится за импортируемыми аккаунтами.</div>
     </div>
@@ -7491,7 +7491,7 @@ function errHtml(msg, retryFn) {
     // вкладки, лежит в стеке один, и при `> 1` эта ветка не срабатывала: кнопки
     // не было ни одной, а таббар на подэкране скрыт — выхода не оставалось.
     // back() при глубине 1 корректно возвращает на экран текущей вкладки.
-    btn = `<button class="err-retry" onclick="back()">◀️ Назад</button>`;
+    btn = `<button class="err-retry" onclick="back()">← Назад</button>`;
   } else {
     btn = `<button class="err-retry" onclick="reloadView()">↺ Повторить</button>`;
   }
@@ -7856,7 +7856,7 @@ function showOpComplete(op) {
     <div class="od-title">${head}</div>
     <div class="od-sum">${esc(body)}</div>
     <div class="od-actions" style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      ${_qaButtons(op) || (ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↻ Повторить</button>`)}
+      ${_qaButtons(op) || (ok ? _opNextBtn(op) : `<button class="btn btn-p" style="flex:0 0 auto;padding:7px 14px;font-size:13px" onclick="event.stopPropagation();hideOpDone();retryOp(${op.id})">↺ Повторить</button>`)}
       <span style="font-size:12px;color:var(--accent)">Открыть детали →</span>
     </div>`;
   el.onclick = () => { hideOpDone(); openOpDetail(op.id); };
@@ -9250,7 +9250,7 @@ async function loadMoreBots() {
   } catch(e) {
     toast('⚠️ '+((e.message||'Ошибка').substring(0,60)));
     // Не оставляем застрявшую крутилку: у сценария всегда есть видимый выход.
-    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
   } finally { BOT_LOADING = false; }
 }
 
@@ -10482,7 +10482,7 @@ async function loadMoreAccounts() {
     toast('⚠️ '+(e.message||'Ошибка'));
     // Не оставляем застрявшую крутилку — возвращаем кнопку для повтора (сценарий
     // «загрузить ещё» доходит до результата: успех или явная возможность повторить).
-    if(box) box.innerHTML='<button class="btn btn-s" onclick="loadMoreAccounts()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+    if(box) box.innerHTML='<button class="btn btn-s" onclick="loadMoreAccounts()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
   }
   finally { ACC_LOADING=false; }
 }
@@ -11371,7 +11371,7 @@ async function loadMoreChannels() {
     if (CH_SEL_MODE) updateChSelBar();
   } catch(e) {
     toast('⚠️ '+((e.message||'Ошибка').substring(0,60)));
-    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreChannels()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreChannels()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
   } finally { CH_LOADING = false; }
 }
 
@@ -12259,7 +12259,7 @@ async function loadMoreOps() {
     renderOps();
   } catch(e) {
     toast('⚠️ '+((e.message||'Ошибка').substring(0,60)));
-    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreOps()" style="width:100%;font-size:13px;padding:10px">↻ Повторить загрузку</button>';
+    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreOps()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
   } finally { OPS_LOADING = false; }
 }
 
@@ -14175,7 +14175,7 @@ async function addAccImportProxy(){
     inp.value=''; _accErr('');
     tg.HapticFeedback?.notificationOccurred?.('success');
   }catch(e){ _accErr('Ошибка сети при добавлении прокси'); }
-  finally{ btn.disabled=false; btn.textContent='＋ Добавить'; }
+  finally{ btn.disabled=false; btn.textContent='+ Добавить'; }
 }
 function accStopQrPoll(){ if(_accQrTimer){ clearInterval(_accQrTimer); _accQrTimer=null; } }
 
@@ -14257,7 +14257,7 @@ async function accQrStart(){
     document.getElementById('accQrHint').style.display='block';
     accStopQrPoll();
     _accQrTimer=setInterval(accQrPoll, 3000);
-  }catch(e){ _accErr(String(e&&e.message||e)); box.innerHTML='<button class="btn btn-p" onclick="accQrStart()" style="width:100%">🔁 Повторить</button>'; }
+  }catch(e){ _accErr(String(e&&e.message||e)); box.innerHTML='<button class="btn btn-p" onclick="accQrStart()" style="width:100%">↺ Повторить</button>'; }
 }
 async function accQrPoll(){
   try{
@@ -17076,7 +17076,7 @@ async function openVaultSettings() {
       '<div style="font-size:12px;color:var(--red);padding:6px 0">⚠️ Не удалось загрузить настройки: '
       + esc(e.message||'ошибка связи')
       + '. Переключатели отключены, чтобы не затереть то, что стоит на сервере.'
-      + '</div><button class="btn btn-s" style="font-size:12px" onclick="openVaultSettings()">Повторить</button>';
+      + '</div><button class="btn btn-s" style="font-size:12px" onclick="openVaultSettings()">↺ Повторить</button>';
   }
 }
 
@@ -20554,7 +20554,7 @@ async function openDmCampaigns() {
           ${c.status==='draft'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Запустить" onclick="launchDm(${c.id},'draft')">▶</button>`:''}
           ${c.status==='paused'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Возобновить (продолжит с места остановки)" onclick="launchDm(${c.id},'paused')">▶ Возобновить</button>`:''}
           ${c.status==='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Пауза — можно будет возобновить с места остановки" onclick="pauseDm(${c.id})">⏸</button>`:''}
-          ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↻ Повторить</button>`:''}
+          ${c.status==='failed'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" title="Повторить запуск (уже отправленным повторно не пойдёт)" onclick="launchDm(${c.id},'failed')">↺ Повторить</button>`:''}
           ${c.status!=='running'?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" title="Изменить текст и настройки" onclick="editDm(${c.id})">✏️</button>`:''}
           <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id},'${c.status}', this)" aria-label="Удалить">🗑</button>
         </div>
@@ -25556,11 +25556,11 @@ function empty(ico,txt2,sub,action) {
     btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="${action.fn}">${esc(action.label)}</button>`;
   } else if (isErr && atRoot) {
     // Ошибка загрузки корневой вкладки → один тап, чтобы повторить запрос.
-    btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="reloadView()">↻ Повторить</button>`;
+    btn = `<button class="btn btn-p" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="reloadView()">↺ Повторить</button>`;
   } else if (isErr && typeof STACK !== 'undefined' && STACK.length) {
     // `STACK.length`, а не `> 1`: подэкран, открытый с вкладки, лежит в стеке
     // один, и при `> 1` кнопки не появлялось вовсе — тот же тупик, что в errHtml.
-    btn = `<button class="btn btn-s" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">◀️ Назад</button>`;
+    btn = `<button class="btn btn-s" style="margin-top:14px;padding:10px 20px;font-size:14px" onclick="back()">← Назад</button>`;
   } else {
     // Спокойное пустое состояние — не ошибка и не тупик: «Нет флуд-событий за
     // 7 дней» это ХОРОШАЯ новость внутри раздела, где вокруг есть содержимое, а
