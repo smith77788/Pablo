@@ -10836,7 +10836,7 @@ async function reloadAccountChat() {
       const out = m.out;
       const media = m.media ? `<div style="opacity:.85;font-size:12px;margin-bottom:2px">${esc(m.media)}</div>` : '';
       const text = m.text ? `<div style="white-space:pre-wrap;word-break:break-word">${esc(m.text)}</div>` : '';
-      const time = m.date ? new Date(m.date).toLocaleString('ru') : '';
+      const time = m.date ? new Date(m.date).toLocaleString('ru-RU') : '';
       return `<div style="display:flex;${out?'justify-content:flex-end':''};margin-bottom:8px">
         <div style="max-width:82%;padding:8px 12px;border-radius:14px;font-size:14px;${out?'background:var(--accent);color:var(--text);border-bottom-right-radius:4px':'background:var(--sep);color:var(--text);border-bottom-left-radius:4px'}">
           ${media}${text}<div style="font-size:10px;opacity:.5;margin-top:3px;text-align:right">${time}</div>
@@ -12326,7 +12326,7 @@ function renderOps() {
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
             <div class="li-name">${esc(o.label||o.op_type||'операция')}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰</span>':''}</div>
-            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru'):`<span data-op-cnt="${o.id}">${num(dDone)+'/'+num(o.total_items||0)}</span> · `+ago(o.created_at)}</div>
+            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru-RU'):`<span data-op-cnt="${o.id}">${num(dDone)+'/'+num(o.total_items||0)}</span> · `+ago(o.created_at)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
@@ -12367,9 +12367,9 @@ async function openOpDetail(opId) {
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || o.op_type || '')}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)</div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru'):''}</div></div></div>
-        ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru')}</div></div></div>`:''}
-        ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru')}</div></div></div>`:''}
+        <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru-RU'):''}</div></div></div>
+        ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru-RU')}</div></div></div>`:''}
+        ${o.finished_at?`<div class="row"><div class="row-body"><div class="row-name">Завершено</div><div class="row-val">${new Date(o.finished_at).toLocaleString('ru-RU')}</div></div></div>`:''}
         ${(o.summary&&o.summary!==o.error_msg)?`<div class="row"><div class="row-body"><div class="row-name">Итог</div><div class="row-val" style="white-space:pre-line">${esc(o.summary)}</div></div></div>`:''}
         ${o.error_msg?`<div class="row"><div class="row-body"><div class="row-name">${o.status==='failed'?'Причина ошибки':'Ошибка'}</div><div class="row-val" style="color:var(--red)">${esc(o.error_msg)}</div></div></div>`:''}
       </div>
@@ -13778,7 +13778,7 @@ async function loadMpOps() {
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-purple">📡</div>
           <div class="li-body">
-            <div class="li-name">Массовая публикация${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰ '+new Date(o.scheduled_for).toLocaleString('ru')+'</span>':''}</div>
+            <div class="li-name">Массовая публикация${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰ '+new Date(o.scheduled_for).toLocaleString('ru-RU')+'</span>':''}</div>
             <div class="li-sub">${progFrac(o)} каналов · ${ago(o.created_at)}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' · <a href="#" onclick="cancelOp('+o.id+');return false" style="color:var(--red)">отменить</a>':''}</div>
           </div>
           <span class="badge ${bc}">${bl}</span>
@@ -13823,7 +13823,7 @@ async function loadMpChannelPicker() {
         '<div class="row-ico" id="mpc-'+c.id+'" style="background:rgba(96,165,250,.16)">📢</div>' +
         '<div class="row-body">' +
           '<div class="row-name">'+esc(c.title||c.username||c.id)+'</div>' +
-          '<div class="row-val">'+(c.username?'@'+esc(c.username)+' · ':'')+((c.member_count||c.members_count||0).toLocaleString())+' подп.</div>' +
+          '<div class="row-val">'+(c.username?'@'+esc(c.username)+' · ':'')+((c.member_count||c.members_count||0).toLocaleString('ru-RU'))+' подп.</div>' +
         '</div></div>'; }).join('');
     box.dataset.loaded = '1';
   } catch(e) {
@@ -13892,7 +13892,7 @@ async function sendMassPublish() {
     // Ручной выбор каналов (поглощённый «Быстрый пост»): публикуем ровно в
     // отмеченные. Канарейка тут не нужна — набор и так ограничен вручную.
     const when = scheduled_for
-      ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru')+'. До этого операцию можно отменить в «Очереди операций».'
+      ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU')+'. До этого операцию можно отменить в «Очереди операций».'
       : '\n\nПосле старта публикацию нельзя отменить.';
     if (!(await askConfirm(edNote+'Опубликовать в '+pickedIds.length+' '+plural(pickedIds.length,'выбранный канал','выбранных канала','выбранных каналов')+'?'+when))) return;
     channel_ids = pickedIds;
@@ -13926,7 +13926,7 @@ async function sendMassPublish() {
       ? 'во все ваши каналы — их '+MP_TOTAL
       : 'во ВСЕ ваши каналы (узнать их число не удалось)';
     const when = scheduled_for
-      ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru')+'. До этого момента операцию можно отменить в «Очереди операций».'
+      ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU')+'. До этого момента операцию можно отменить в «Очереди операций».'
       : '\n\nПосле старта публикацию нельзя отменить. Совет: сначала протестируйте на нескольких.';
     // Отложенная публикация раньше уходила вообще без подтверждения: достаточно
     // было заполнить дату — и пост уезжал во все каналы с одного нажатия.
@@ -13945,7 +13945,7 @@ async function sendMassPublish() {
     { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
     { const _e=document.getElementById('mpEditorial'); if(_e) _e.innerHTML=''; }
     tg.HapticFeedback?.notificationOccurred('success');
-    const _when = scheduled_for ? (' на '+new Date(scheduled_for).toLocaleString('ru')) : '';
+    const _when = scheduled_for ? (' на '+new Date(scheduled_for).toLocaleString('ru-RU')) : '';
     toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+d.total+' '+plural(d.total,'канал','канала','каналов')+' · операция #'+d.op_id);
     { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
     renderMpCanaryNote();
@@ -14879,7 +14879,7 @@ function renderBcScheduleList(items) {
   if (!items.length) { el.innerHTML=empty('📅','Нет запланированных','Создайте через + '); return; }
   el.innerHTML = items.map(b=>{
     const [bc,bl]=stb(b.status);
-    const time = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru') : '—';
+    const time = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('ru-RU') : '—';
     const bot = b.bot_username?'@'+b.bot_username:'#'+b.bot_id;
     return `<div class="li">
       <div class="ava ava-blue">📅</div>
@@ -15058,7 +15058,7 @@ function renderAutoregProList(items) {
     const sc = status==='active'?'b-gr':status==='banned'?'b-rd':status==='pending'?'b-or':'b-gy';
     const phone = a.phone||'—';
     const name = a.first_name||a.username||phone;
-    const date = (a.added_at||a.created_at) ? new Date(a.added_at||a.created_at).toLocaleDateString('ru') : '';
+    const date = (a.added_at||a.created_at) ? new Date(a.added_at||a.created_at).toLocaleDateString('ru-RU') : '';
     return `<div class="li">
       <div class="ava ava-green">📱</div>
       <div class="li-body">
@@ -15073,7 +15073,7 @@ function renderAutoregProHistory(items) {
   const el = document.getElementById('autoregProHistory');
   if (!items.length) { el.innerHTML=empty('📜','Нет истории',''); return; }
   el.innerHTML = items.slice(0,15).map(a=>{
-    const date = (a.added_at||a.created_at) ? new Date(a.added_at||a.created_at).toLocaleString('ru') : '—';
+    const date = (a.added_at||a.created_at) ? new Date(a.added_at||a.created_at).toLocaleString('ru-RU') : '—';
     const status = a.acc_status||'—';
     const sc = status==='active'?'b-gr':status==='banned'?'b-rd':'b-gy';
     return `<div class="li" style="cursor:default">
@@ -15941,7 +15941,7 @@ async function openInfra() {
         <div class="row-ico" style="background:rgba(${_auditOk(a.result)?'52,211,153':'248,113,113'},.16)">${_auditOk(a.result)?'✅':'❌'}</div>
         <div class="row-body">
           <div class="row-name">${esc(auditRu(a.action))}</div>
-          <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru'):''}</div>
+          <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru-RU'):''}</div>
         </div>
       </div>
     `).join('') : empty('📋','Записей пока нет','Здесь появятся последние действия над аккаунтами и операциями'));
@@ -16391,7 +16391,7 @@ async function openQuickPost() {
         <div class="row-ico" id="qpc-${c.id}" style="background:var(--bg-blue-16)">📢</div>
         <div class="row-body">
           <div class="row-name">${esc(c.title||c.username||c.id)}</div>
-          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''} ${(c.member_count||c.members_count||0).toLocaleString()} подп.</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''} ${(c.member_count||c.members_count||0).toLocaleString('ru-RU')} подп.</div>
         </div>
       </div>
     `).join(''));
@@ -17832,7 +17832,7 @@ async function openContactTimeline(id) {
     if (!items.length) { txt('cdBody', empty('📅','Нет событий','Касания появятся здесь: правки, источники, сигналы намерений')); return; }
     let html = '<div style="padding:12px 16px">';
     items.forEach(t=>{
-      const date = t.ts ? new Date(t.ts).toLocaleString('ru') : '';
+      const date = t.ts ? new Date(t.ts).toLocaleString('ru-RU') : '';
       html += `<div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-start">
         <div style="min-width:20px;text-align:center;font-size:15px">${t.icon||'•'}</div>
         <div style="flex:1"><div style="font-size:13px;color:var(--hint)">${esc(date)}</div><div style="font-size:14px;margin-top:2px">${esc(t.title||t.kind||'')}</div>
@@ -17861,7 +17861,7 @@ async function openContactVersions(id) {
     if (!vers.length) { txt('cdBody', empty('📜','Нет версий','Версии создаются при изменениях')); return; }
     let html = '<div style="padding:12px 16px">';
     vers.forEach(v=>{
-      const date = v.created_at ? new Date(v.created_at).toLocaleString('ru') : '';
+      const date = v.created_at ? new Date(v.created_at).toLocaleString('ru-RU') : '';
       html += `<div class="li"><div class="li-body"><div class="li-name">v${v.version_num} · ${esc(v.changed_by||'sync')}</div><div class="li-sub">${esc(date)}${v.change_summary?' · '+esc(v.change_summary):''}</div></div>
         <div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="rollbackVersion('${id}',${v.version_num})">Откат</button></div></div>`;
     });
@@ -17939,12 +17939,12 @@ async function openContactCRM(id) {
       <button class="btn btn-p" onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
     </div>`;
     if (crm.next_reminder_at) {
-      html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(251,191,36,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
+      html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(251,191,36,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru-RU')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
     }
     if (activity.length) {
       html += `<div class="sec" style="margin:0 16px">📝 Активность</div><div class="lst" style="margin:0 16px">`;
       activity.forEach(a=>{
-        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(a.activity_type)}</div><div class="li-sub">${esc(a.description||'')} · ${a.created_at?new Date(a.created_at).toLocaleString('ru'):''}</div></div></div>`;
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(a.activity_type)}</div><div class="li-sub">${esc(a.description||'')} · ${a.created_at?new Date(a.created_at).toLocaleString('ru-RU'):''}</div></div></div>`;
       });
       html += '</div>';
     }
@@ -19081,13 +19081,13 @@ async function openUchReminders() {
     if (overdue.length) {
       html += '<div class="sec" style="color:var(--red)">⚠️ Просроченные</div>';
       overdue.forEach(r=>{
-        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru'):''}</div></div></div>`;
+        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru-RU'):''}</div></div></div>`;
       });
     }
     if (upcoming.length) {
       html += '<div class="sec" style="margin-top:8px">⏰ Ближайшие</div>';
       upcoming.forEach(r=>{
-        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru'):''}</div></div></div>`;
+        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru-RU'):''}</div></div></div>`;
       });
     }
     if (!overdue.length && !upcoming.length) { html = empty('⏰','Напоминаний нет',
@@ -19109,7 +19109,7 @@ async function loadSyncCenter() {
     let html = `<div style="padding:12px 16px">
       <div class="kpi-card" style="margin-bottom:12px;text-align:center"><div class="kpi-val">${num(d.total||0)}</div><div class="kpi-lbl">Всего контактов</div></div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <div class="kpi-card" style="flex:1;text-align:center"><div class="kpi-val" style="font-size:18px">${d.last_sync?new Date(d.last_sync).toLocaleString('ru'):'—'}</div><div class="kpi-lbl">Последняя синхр.</div></div>
+        <div class="kpi-card" style="flex:1;text-align:center"><div class="kpi-val" style="font-size:18px">${d.last_sync?new Date(d.last_sync).toLocaleString('ru-RU'):'—'}</div><div class="kpi-lbl">Последняя синхр.</div></div>
       </div>`;
     const accs = d.account_stats||[];
     if (accs.length) {
@@ -19236,7 +19236,7 @@ async function openContactStats() {
         <div class="row-body"><div class="row-name">Групп</div><div class="row-val">📂 ${num(d.groups||0)}</div></div>
         <div class="row-right"><span class="chev">›</span></div>
       </div>
-      ${plain('Последняя синхронизация', d.last_sync?new Date(d.last_sync).toLocaleString('ru'):'—')}
+      ${plain('Последняя синхронизация', d.last_sync?new Date(d.last_sync).toLocaleString('ru-RU'):'—')}
     </div>`;
     if (accs.length) {
       html += `<div class="sec" style="margin-top:8px">📡 По аккаунтам</div><div class="lst" style="margin:0 16px">`;
@@ -19313,7 +19313,7 @@ async function openBotFactory() {
         <div class="row-ico" style="background:var(--bg-green-16)">${b.is_active?'🟢':'🔴'}</div>
         <div class="row-body">
           <div class="row-name">@${esc(b.username||b.first_name||b.bot_id)}</div>
-          <div class="row-val">${(b.added_at||b.created_at)?new Date(b.added_at||b.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-val">${(b.added_at||b.created_at)?new Date(b.added_at||b.created_at).toLocaleDateString('ru-RU'):''}</div>
         </div>
       </div>
     `).join('') : empty('🤖','Нет ботов','Добавьте первый бот'));
@@ -19485,7 +19485,7 @@ async function openAutoreg() {
         <div class="row-ico" style="background:var(--bg-green-16)">📱</div>
         <div class="row-body">
           <div class="row-name">${esc(a.first_name||a.phone)}</div>
-          <div class="row-val">${esc(a.phone)} · ${esc(accRu(a.acc_status))} · ${(a.added_at||a.created_at)?new Date(a.added_at||a.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-val">${esc(a.phone)} · ${esc(accRu(a.acc_status))} · ${(a.added_at||a.created_at)?new Date(a.added_at||a.created_at).toLocaleDateString('ru-RU'):''}</div>
         </div>
       </div>
     `).join(''));
@@ -19615,7 +19615,7 @@ async function openReferral() {
         <div class="row-ico" style="background:var(--bg-green-16)">👤</div>
         <div class="row-body">
           <div class="row-name">@${esc(r.username||r.id)}</div>
-          <div class="row-val">${REF_ST[r.status]||'📋 Зарегистрирован'} · ${r.created_at?new Date(r.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-val">${REF_ST[r.status]||'📋 Зарегистрирован'} · ${r.created_at?new Date(r.created_at).toLocaleDateString('ru-RU'):''}</div>
         </div>
       </div>
     `).join(''));
@@ -20489,7 +20489,7 @@ async function openRegCheck(keep) {
         <div class="row-ico" style="background:var(--bg-blue-16)">${c.entity_type==='channel'?'📢':'👤'}</div>
         <div class="row-body">
           <div class="row-name">${esc(c.entity_name||c.username||c.entity_id)}</div>
-          <div class="row-val">${c.reg_date?'📅 '+new Date(c.reg_date).toLocaleDateString('ru'):'❓ Дата не определена'} · ${c.method||''}</div>
+          <div class="row-val">${c.reg_date?'📅 '+new Date(c.reg_date).toLocaleDateString('ru-RU'):'❓ Дата не определена'} · ${c.method||''}</div>
         </div>
       </div>
     `).join('') + moreBtn(checks.length, rcTotal, 'openRegCheckMore()'));
@@ -20929,7 +20929,7 @@ async function openVLayer() {
         const who = e.entity_id ? (e.name || _vlWho(e)) : '';
         return `<div class="row"${open}>
         <div class="row-body"><div class="row-name">${esc(e.label)}</div>
-          <div class="row-val">${who?esc(who)+' · ':''}${e.at?new Date(e.at).toLocaleString('ru'):''}</div></div>
+          <div class="row-val">${who?esc(who)+' · ':''}${e.at?new Date(e.at).toLocaleString('ru-RU'):''}</div></div>
       </div>`; }).join('') + '</div>';
     }
     html += '<div style="height:16px"></div>';
@@ -20978,7 +20978,7 @@ async function openVLayerEntity(entityType, entityId) {
       html += '<div class="lst">' + tr.slice().reverse().map(t => `<div class="row">
         <div class="row-body">
           <div class="row-name">${t.from_label ? esc(t.from_label) + ' → ' : ''}${esc(t.to_label || '')}</div>
-          <div class="row-val">${t.at ? new Date(t.at).toLocaleString('ru') : ''}${t.reason ? ' · ' + esc(t.reason) : ''}</div>
+          <div class="row-val">${t.at ? new Date(t.at).toLocaleString('ru-RU') : ''}${t.reason ? ' · ' + esc(t.reason) : ''}</div>
         </div></div>`).join('') + '</div>';
     }
     html += '<div style="height:16px"></div>';
@@ -21246,8 +21246,8 @@ async function openNotaryCert(id) {
       </div>
       ${burst}
       <div class="lst">
-        <div class="row"><div class="row-body"><div class="row-name">Впервые зафиксирован</div><div class="row-val">${f.first_seen_at?new Date(f.first_seen_at).toLocaleString('ru'):'—'}</div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Последний раз на месте</div><div class="row-val">${f.last_seen_at?new Date(f.last_seen_at).toLocaleString('ru'):'—'}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Впервые зафиксирован</div><div class="row-val">${f.first_seen_at?new Date(f.first_seen_at).toLocaleString('ru-RU'):'—'}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Последний раз на месте</div><div class="row-val">${f.last_seen_at?new Date(f.last_seen_at).toLocaleString('ru-RU'):'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Подтверждённое удержание</div><div class="row-val">${f.held_min_h!=null?('не менее '+Number(f.held_min_h).toFixed(1)+' ч'):'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Просмотры</div><div class="row-val">${f.views_first!=null?(num(f.views_first)+' → '+num(f.views_last)):'—'}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Наблюдений</div><div class="row-val">${num(f.n_total||0)} · покрытие ${Math.round((f.coverage||0)*100)}%</div></div></div>
@@ -21264,7 +21264,7 @@ async function openNotaryCert(id) {
         const lbl = o.state==='present'?'на месте':o.state==='absent'?'отсутствует':'не удалось';
         return `<div class="row"><div class="row-body">
           <div class="row-name">${ico} ${lbl}${o.views!=null?(' · '+num(o.views)):''}</div>
-          <div class="row-val">${o.observed_at?new Date(o.observed_at).toLocaleString('ru'):''}${o.detail?(' · '+esc(String(o.detail).substring(0,60))):''}</div>
+          <div class="row-val">${o.observed_at?new Date(o.observed_at).toLocaleString('ru-RU'):''}${o.detail?(' · '+esc(String(o.detail).substring(0,60))):''}</div>
         </div></div>`;
       }).join('') || '<div style="padding:10px;color:var(--hint);font-size:13px">Наблюдений пока нет</div>'}</div>
       <div style="height:16px"></div>`);
@@ -22164,7 +22164,7 @@ async function openStrike() {
         const bar = op.total ? `<div style="height:3px;background:var(--sep);border-radius:3px;margin-top:4px"><div style="height:3px;background:var(--red);border-radius:3px;width:${pct}%"></div></div>` : '';
         // Отложенный заход настойчивой эскалации — отдельная подача, не «в очереди».
         if (op.escalation) {
-          const when = op.scheduled_for ? new Date(op.scheduled_for).toLocaleString('ru') : '';
+          const when = op.scheduled_for ? new Date(op.scheduled_for).toLocaleString('ru-RU') : '';
           return `<div class="row">
             <div class="row-ico" style="background:var(--bg-red-16)">🔁</div>
             <div class="row-body">
