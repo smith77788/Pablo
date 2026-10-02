@@ -34,6 +34,13 @@ class _FakePool:
     async def fetch(self, query, *args):
         return list(self._rows)
 
+    async def fetchrow(self, query, *args):
+        # Персистентный анти-повтор алерта: первая попытка проходит (в проде
+        # INSERT .. ON CONFLICT .. RETURNING отдаёт строку).
+        if "notification_dedup" in query:
+            return {"user_id": 424242}
+        return None
+
 
 def _row(op_id, status, owner_id, age_min, op_type="mass_invite"):
     return {"id": op_id, "op_type": op_type, "status": status,
@@ -50,7 +57,6 @@ def _run(coro):
 
 def _fire(pool, monkeypatch, active_ids):
     monkeypatch.setenv("ADMIN_IDS", "424242")
-    op_worker._alerted_stuck_ops.clear()
     op_worker._active_op_ids.clear()
     for i in active_ids:
         op_worker._active_op_ids.add(i)

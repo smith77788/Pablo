@@ -84,7 +84,6 @@ async def test_bulk_create_channels_multi_no_accounts():
 async def test_watchdog_alerts_dedup():
     """Алерт не спамит: повторный прогон с теми же op_id не шлёт заново."""
     from services import op_worker as w
-    w._alerted_stuck_ops.clear()
     rows = [{"id": 7, "op_type": "mass_publish", "status": "pending",
              "owner_id": 42, "age_min": 20.0}]
     sent = []
@@ -93,19 +92,44 @@ async def test_watchdog_alerts_dedup():
         async def send_message(self, aid, text, **k):
             sent.append(aid)
 
+    class _DedupPool:
+        """Пул, повторяющий контракт персистентного анти-повтора.
+
+        Дедуп алертов переехал из памяти процесса в notification_dedup (окно
+        переживает рестарт — раньше деплой присылал админам тот же список
+        заново). Поэтому фейк обязан вести себя как INSERT .. ON CONFLICT ..
+        RETURNING: первый раз для ключа отдаёт строку, дальше — ничего.
+        """
+
+        def __init__(self):
+            self.seen: set = set()
+
+        async def fetch(self, query, *args):
+            return list(rows)
+
+        async def fetchrow(self, query, *args):
+            if "notification_dedup" in query:
+                key = (args[0], args[1])
+                if key in self.seen:
+                    return None
+                self.seen.add(key)
+                return {"user_id": args[0]}
+            return None
+
+    pool = _DedupPool()
+
     # монки: pool.fetch → rows, админы → {1}
     import bot.utils.subscription as sub
     orig_admins = sub._admin_ids
     sub._admin_ids = lambda: {1}
     try:
-        await w._watchdog_alerts(FakePool(fetch=rows), _CountBot())
+        await w._watchdog_alerts(pool, _CountBot())
         first = list(sent)
-        await w._watchdog_alerts(FakePool(fetch=rows), _CountBot())  # тот же op — без алерта
+        await w._watchdog_alerts(pool, _CountBot())  # тот же op — без алерта
         assert first == [1]
         assert sent == [1]  # второй раз не добавилось
     finally:
         sub._admin_ids = orig_admins
-        w._alerted_stuck_ops.clear()
 
 
 # ── Circuit Breaker Tests ──────────────────────────────────────────────────

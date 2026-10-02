@@ -2514,7 +2514,17 @@ async def _reconcile_in_operation(pool: asyncpg.Pool) -> None:
 # Алертинг о застрявших операциях (наблюдаемость очереди).
 _STUCK_PENDING_MIN = 15   # pending дольше N минут = очередь не разбирается
 _LONG_RUNNING_MIN = 45    # running дольше N минут = вероятно завис (до reset на 60)
-_alerted_stuck_ops: set[int] = set()
+# Как часто можно повторить алерт про ОДНУ застрявшую операцию одному админу.
+# Было in-memory множество `_alerted_stuck_ops`, и у него было три беды:
+# множество жило в памяти процесса (деплой — и админам приходит тот же список
+# заново, а деплой это ровно тот момент, когда операции и застревают); при
+# переполнении оно чистилось ЦЕЛИКОМ, то есть на следующем тике «свежими»
+# становились все ранее объявленные операции сразу; и операция помечалась
+# объявленной ДО отправки, поэтому пустой список админов или ошибка доставки
+# теряли алерт навсегда. Персистентное окно решает все три: повтор не приходит
+# внутри окна, переживает рестарт, а потерянный алерт вернётся, пока операция
+# ещё застрявшая.
+_STUCK_ALERT_REPEAT_S = 6 * 3600
 
 
 async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -2522,7 +2532,8 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
 
     - pending > _STUCK_PENDING_MIN: очередь не разбирается (перегруз/неизвестный op_type)
     - running > _LONG_RUNNING_MIN: вероятно завис (приближается к авто-reset)
-    Дедуп по op_id (_alerted_stuck_ops), чтобы не спамить.
+    Повтор про одну операцию одному админу — не чаще
+    _STUCK_ALERT_REPEAT_S, и это окно переживает рестарт процесса.
     """
     try:
         rows = await pool.fetch(
@@ -2561,17 +2572,10 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
         if not (r["status"] == "running" and int(r["id"]) in active_now)
     ]
 
-    fresh = [r for r in rows if int(r["id"]) not in _alerted_stuck_ops]
-    if not fresh:
-        # подчистим множество от уже завершённых, чтобы не росло бесконечно
-        if len(_alerted_stuck_ops) > 500:
-            _alerted_stuck_ops.clear()
+    if not rows:
         return
-
-    for r in fresh:
-        _alerted_stuck_ops.add(int(r["id"]))
     log.warning("op_worker: %d stuck operations detected: %s",
-                len(fresh), [(int(r["id"]), r["status"]) for r in fresh])
+                len(rows), [(int(r["id"]), r["status"]) for r in rows])
 
     try:
         from bot.utils.subscription import _admin_ids
@@ -2580,23 +2584,40 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
         log.debug('admin_ids fallback: returning empty set')
         admin_ids = set()
     if not admin_ids:
+        # Список админов пуст — алерт НЕ помечаем объявленным: иначе он
+        # потерялся бы навсегда, хотя никому не ушёл.
         return
 
-    lines = ["⚠️ <b>Застрявшие операции</b>\n"]
-    for r in fresh[:10]:
-        icon = "🕐" if r["status"] == "pending" else "⏳"
-        lines.append(
-            f"{icon} #{r['id']} <code>{r['op_type']}</code> — "
-            f"{r['status']} {int(r['age_min'])} мин (owner {r['owner_id']})"
-        )
-    lines.append(
-        "\n<i>pending не разбирается → проверьте воркер/op_type; "
-        f"running зависло → будет авто-сброшено (не более {_MAX_REVIVES} раз, "
-        "дальше операция помечается ошибкой).</i>")
-    text = "\n".join(lines)
     for aid in admin_ids:
+        # Окно у каждого админа своё: админ, которому доставка не удалась,
+        # получит алерт на следующем круге, а не потеряет его из-за соседа.
+        new_rows = []
+        for r in rows:
+            try:
+                if await db.notify_dedup_ok(
+                    pool, aid, f"op-stuck-alert:{int(r['id'])}",
+                    _STUCK_ALERT_REPEAT_S):
+                    new_rows.append(r)
+            except Exception:
+                # Fail-open: сбой анти-повтора не повод молчать о застрявшей
+                # операции.
+                new_rows.append(r)
+        if not new_rows:
+            continue
+        lines = ["⚠️ <b>Застрявшие операции</b>\n"]
+        for r in new_rows[:10]:
+            icon = "🕐" if r["status"] == "pending" else "⏳"
+            lines.append(
+                f"{icon} #{r['id']} <code>{r['op_type']}</code> — "
+                f"{op_status.label(r['status'])}, {int(r['age_min'])} мин "
+                f"(владелец {r['owner_id']})"
+            )
+        lines.append(
+            "\n<i>«ожидает» не разбирается → проверьте воркер и тип операции; "
+            f"«выполняется» зависло → будет авто-сброшено (не более "
+            f"{_MAX_REVIVES} раз, дальше операция помечается ошибкой).</i>")
         try:
-            await bot.send_message(aid, text, parse_mode="HTML")
+            await bot.send_message(aid, "\n".join(lines), parse_mode="HTML")
         except Exception:
             log_exc_swallow(log, f"op_worker alert send to {aid} failed")
 

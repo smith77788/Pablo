@@ -100,9 +100,9 @@ def test_watchdog_ignores_scheduled_ops(pool, monkeypatch):
 
     sched_id, stuck_id = _run(_seed())
 
-    # Админ есть, дедуп сброшен, бот — фейковый (ловим текст алерта).
+    # Админ есть, бот — фейковый (ловим текст алерта). Дедуп сбрасывать не
+    # нужно: он персистентный и привязан к op_id, а операции здесь новые.
     monkeypatch.setenv("ADMIN_IDS", "424242")
-    op_worker._alerted_stuck_ops.clear()
     bot = _FakeBot()
     _run(op_worker._watchdog_alerts(pool, bot))
 

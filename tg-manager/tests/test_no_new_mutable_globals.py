@@ -220,7 +220,6 @@ DB_BACKED: dict[str, str] = {
 
 # Расхождение реально стоит качества, но пока принято. СПИСОК НЕ ДОЛЖЕН РАСТИ.
 KNOWN_DIVERGENCE: dict[str, str] = {
-    "services/op_worker.py:_alerted_stuck_ops": "то же, дедуп «операция зависла»",
     "services/recovery_engine.py:_last_account_recovery":
         "троттл восстановления: реплики могут повторить попытку",
     "services/recovery_engine.py:_last_proxy_recovery": "то же для прокси",
