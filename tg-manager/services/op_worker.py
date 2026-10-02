@@ -3451,7 +3451,17 @@ async def _reschedule_recurring(
             pool, bot, owner_id, op_id, op_type,
             "у подписки больше нет доступа к этому типу операций")
     except Exception as _e:
+        # Не только лог. У двух именованных отказов выше владелец узнаёт, что
+        # расписание оборвалось, а у всех остальных причин оно обрывалось МОЛЧА:
+        # канал просто перестаёт наполняться, и владелец замечает это через
+        # неделю, если замечает вообще. Это ровно тот худший вид отказа, про
+        # который написан _notify_recurring_stopped — и он тут не вызывался.
         log.warning("autopost v2: reschedule failed op=%d: %s", op_id, _e)
+        _reliability_metric("infragram_recurring_reschedule_failures_total",
+                            op_type=op_type)
+        await _notify_recurring_stopped(
+            pool, bot, owner_id, op_id, op_type,
+            "следующий запуск не удалось поставить из-за технической ошибки")
 
 
 async def _run_with_stall_guard(pool: asyncpg.Pool, coro, op_id: int, op_type: str,

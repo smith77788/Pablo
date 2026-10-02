@@ -46,6 +46,8 @@ _HELP = {
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
     "infragram_op_fleet_starved_total":
         "Операции, закрытые из-за того, что свободных аккаунтов так и не стало",
+    "infragram_recurring_reschedule_failures_total":
+        "Повторяющиеся операции, у которых не удалось поставить следующий запуск",
     "infragram_op_owner_sem_defers_total":
         "Операции, возвращённые в очередь: место на владельца не освободилось",
     "infragram_op_stalls_total": "Операции, о застревании которых предупредили владельца",
