@@ -876,6 +876,10 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .acc-kpi:has(> :nth-child(4)){flex-wrap:wrap;gap:6px;overflow-x:visible}
 .acc-kpi:has(> :nth-child(4)) > .acc-kpi-card{flex:1 1 calc(50% - 3px);min-width:0}
 }
+/* Пять и больше карточек в два столбца дают три-четыре ряда — лента съедает
+   треть экрана. С пяти переходим на сетку: колонок столько, сколько влезает. */
+.acc-kpi:has(> :nth-child(5)){display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:6px;overflow-x:visible}
+.acc-kpi:has(> :nth-child(5)) > .acc-kpi-card{min-width:0}
 
 /* ─── Filter chip row ────────────────────────────────────── */
 /* Ряд фильтров переносится, а не прокручивается: последний чип обрезался на
@@ -904,7 +908,9 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .acc-row:active{background:rgba(255,255,255,.03)}
 .acc-ava{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
 .acc-body{flex:1;min-width:0}
-.acc-name{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Имя аккаунта обрывалось на первой строке — длинные имена у аккаунтов
+   обычное дело, и по обрывку их не отличить. Две строки, как у ботов. */
+.acc-name{font-size:14px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
 .acc-phone{font-size:11px;color:var(--hint);margin-top:1px;display:flex;align-items:center;gap:4px}
 .acc-trust{height:2px;border-radius:1px;background:var(--sep);margin-top:4px;overflow:hidden;width:70px}
 .acc-trust-fill{height:100%;border-radius:1px}
@@ -1328,7 +1334,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-p" onclick="massCheckAccounts()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🔍 Проверить все</button>
       <button class="btn btn-s" onclick="openMassOps()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">🕓 История</button>
       <button class="btn btn-s" id="accSelToggle" onclick="toggleAccSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать</button>
-      <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 JSON</button>
+      <button class="btn btn-s" onclick="exportAccountsJson()" title="Экспорт метаданных аккаунтов в JSON (без секретов)" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📤 Выгрузить список</button>
     </div>
     <!-- Поднять флот: снять залипшие блокировки с недавно переподключённых аккаунтов -->
     <button class="btn btn-g" onclick="reviveFleet()" title="Снять залипшие блокировки (in_operation/кулдаун/траст) с переподключённого флота, чтобы он сразу заработал" style="width:100%;margin:0 0 8px">🚀 Поднять флот</button>
