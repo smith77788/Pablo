@@ -825,6 +825,40 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
         return 0, 0
 
 
+async def _own_journal_coverage(pool: "asyncpg.Pool", op_id: int) -> int:
+    """Сколько РАЗНЫХ целей эта операция закрыла за ВСЕ свои прогоны.
+
+    Зачем отдельно от `done_items`. Счётчик прогресса в очереди обнуляется на
+    каждой новой попытке (`done_items=0` в `_maybe_retry_op` и у всех путей
+    возврата в очередь), а `total_items` остаётся от ПЕРВОГО замаха. Поэтому
+    операция на 380 целей, которая взяла 203, ушла в повтор и добрала
+    остальные 177, закрывалась с `done_items=177` при `total_items=380` — и
+    `classify_final` по этому недобору честно, но ошибочно объявляла
+    ПОЛНОСТЬЮ выполненную работу «частичной». После этого её же предлагали
+    повторить и о ней же присылали эскалацию.
+
+    Журнал обнуления не знает: он пишется по цели и живёт между попытками.
+    Считаем РАЗНЫЕ цели и только у ЭТОЙ операции (не по цепочке повторов, в
+    отличие от `_journal_counters`): у дочерней операции-повтора свой
+    `total_items` — только по упавшим целям родителя, и цели родителя
+    раздували бы её покрытие.
+
+    0 — журнала нет (этот исполнитель его не пишет) или чтение не удалось;
+    вызывающий тогда остаётся при прежнем поведении.
+    """
+    try:
+        row = await _safe_fetchrow(
+            pool,
+            "SELECT count(DISTINCT target) AS n FROM operation_log "
+            " WHERE op_id=$1 AND target IS NOT NULL "
+            "   AND status IN ('ok', 'error')",
+            op_id, log_ctx=f"[journal_coverage op={op_id}]")
+        return int(row["n"] or 0) if row else 0
+    except Exception:
+        log_exc_swallow(log, f"op_worker: покрытие журнала op={op_id} не прочитано")
+        return 0
+
+
 async def _announce_op_outcome(
     pool: "asyncpg.Pool", op_id: int, owner_id, op_type: str, params,
     status: str, ok, failed, summary: str = "",
@@ -3838,11 +3872,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 op_id,
                 log_ctx=f"[run_op_progress op={op_id}]",
             )
+            # Прогресс берём не только из очереди: `done_items` обнуляется на
+            # каждой новой попытке, а `total_items` остаётся от первого замаха,
+            # поэтому доведённая со второй попытки операция выглядела
+            # «частичной». Журнал обнуления не знает — см. _own_journal_coverage.
+            _done_q = int((_progress["done_items"] if _progress else 0) or 0)
+            _done_n = max(_done_q, await _own_journal_coverage(pool, op_id))
             _final_status = op_status.classify_final(
                 result.get("status"),
                 ok=_ok,
                 failed=_failed,
-                done_items=(_progress["done_items"] if _progress else None),
+                done_items=_done_n,
                 total_items=(_progress["total_items"] if _progress else None),
             )
             # result["status"] обязан совпадать с тем, что легло в очередь: его
@@ -3912,12 +3952,18 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 # причине унаследовал бы старую отметку и провалился бы на первом
                 # же занятом флоте.
                 "acct_wait_since=NULL, "
+                # Счётчик прогресса доводим до покрытия журнала: иначе статус
+                # говорил «выполнено», а полоса рядом — «177 из 380», потому что
+                # done_items обнулился на повторе. Только вперёд (GREATEST),
+                # чтобы не отнять уже показанное.
+                "done_items=GREATEST(COALESCE(done_items, 0), $5::int), "
                 "error_msg=COALESCE($4, error_msg) "
                 f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
                 json.dumps(result, ensure_ascii=False),
                 op_id,
                 _final_status,
                 _err_text,
+                _done_n,
                 log_ctx=f"[run_op_done op={op_id}]",
             )
             # Графики, память организма и подписанный аудит — одной дверью:

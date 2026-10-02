@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import os
 
@@ -30,6 +31,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _read(rel: str) -> str:
     with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
         return f.read()
+
+
+def _func_source(rel: str, name: str) -> str:
+    """Исходник одной функции целиком — по границам из AST."""
+    src = _read(rel)
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name == name:
+            return ast.get_source_segment(src, node) or ""
+    raise AssertionError(f"в {rel} нет функции {name}")
 
 
 class _Pool:
@@ -110,9 +121,11 @@ def test_the_memory_set_is_gone():
         "дедуп снова живёт в памяти процесса — деплой пришлёт тот же список "
         "заново, а деплой это и есть момент, когда операции застревают"
     )
-    body = _read("services/op_worker.py")
-    start = body.index("async def _watchdog_alerts(")
-    seg = body[start:start + 4000]
+    # Границы берём у AST, а не окном фиксированной длины: сдвинулся код —
+    # окно промахнулось — «искомого нет» стало бы правдой, и отрицательная
+    # проверка ниже выключилась бы молча (храповик
+    # test_no_silently_disabled_guards ловит ровно это).
+    seg = _func_source("services/op_worker.py", "_watchdog_alerts")
     assert "notify_dedup_ok(" in seg, "анти-повтор алертов не персистентный"
     assert ".clear()" not in seg, (
         "множество объявленных чистится целиком — на следующем тике все "
