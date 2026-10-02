@@ -75,14 +75,15 @@ async def complete(system: str, user: str) -> str:
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    last_error: Exception | None = None
+    failures: list[tuple[str, str]] = []
     for provider in providers:
-        for model in models_for(provider):
-            client = AsyncOpenAI(
-                api_key=provider.api_key,
-                base_url=provider.base_url,
-                timeout=45.0,
-            )
+        client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url, timeout=45.0)
+        tried: list[str] = []
+        models = list(models_for(provider))
+        discovered = False
+        while models:
+            model = models.pop(0)
+            tried.append(model)
             try:
                 response = await client.chat.completions.create(
                     model=model,
@@ -93,10 +94,75 @@ async def complete(system: str, user: str) -> str:
                 text = response.choices[0].message.content or ""
                 if text.strip():
                     return text
+                failures.append((f"{provider.name}/{model}", "пустой ответ"))
             except Exception as exc:  # noqa: BLE001 - failover по провайдерам
-                last_error = exc
-                log_exc_swallow(log, f"spin: провайдер {provider.name}/{model} не ответил")
-                continue
-    raise SpintaxServiceError(
-        f"ни один AI-провайдер не ответил: {last_error}" if last_error else "AI недоступен"
-    )
+                reason = explain_error(exc)
+                failures.append((f"{provider.name}/{model}", reason))
+                log.warning("ИИ: %s/%s не ответил — %s", provider.name, model, reason)
+            # Бесплатные модели OpenRouter снимают без предупреждения, и зашитый
+            # список целиком превращается в «404 No endpoints found». Когда
+            # заготовленные кончились, а хоть одна оказалась снятой, берём
+            # живые бесплатные модели прямо из каталога провайдера.
+            if (not models and not discovered and provider.name == "openrouter"
+                    and any(r == _GONE for _, r in failures)):
+                discovered = True
+                models = [m for m in await _live_free_models(client) if m not in tried]
+    raise SpintaxServiceError(summarize_failures(failures))
+
+
+_GONE = "модель снята у провайдера"
+
+
+def explain_error(exc: Exception) -> str:
+    """Ошибка провайдера → короткая причина по-русски (для журнала и экрана)."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    if status == 404 or "no endpoints found" in text or "model_not_found" in text \
+            or "does not exist" in text:
+        return _GONE
+    if status == 401 or "invalid api key" in text or "unauthorized" in text:
+        return "ключ не принят"
+    if status == 402 or "insufficient" in text or "credits" in text:
+        return "на счёте нет средств"
+    if status == 429 or "rate limit" in text:
+        return "превышен лимит запросов"
+    if "timeout" in text or "timed out" in text:
+        return "не ответила вовремя"
+    if isinstance(status, int) and status >= 500:
+        return "сбой на стороне провайдера"
+    return "ошибка: " + str(exc)[:80]
+
+
+def summarize_failures(failures: list[tuple[str, str]]) -> str:
+    """Все попытки → одно понятное сообщение: какие модели пробовали и почему нет."""
+    if not failures:
+        return "ИИ недоступен"
+    by_reason: dict[str, list[str]] = {}
+    for model, reason in failures:
+        by_reason.setdefault(reason, []).append(model)
+    parts = []
+    for reason, models in by_reason.items():
+        shown = ", ".join(models[:3]) + (f" и ещё {len(models) - 3}" if len(models) > 3 else "")
+        parts.append(f"{reason}: {shown}")
+    return (f"ИИ не ответил — перепробовано моделей: {len(failures)}. "
+            + "; ".join(parts))[:600]
+
+
+async def _live_free_models(client, limit: int = 4) -> list[str]:
+    """Живые бесплатные модели из каталога OpenRouter (сильные семейства первыми)."""
+    try:
+        page = await client.models.list()
+        ids = [m.id for m in getattr(page, "data", []) or []]
+    except Exception as exc:  # noqa: BLE001 - каталог недоступен — просто нечего добавить
+        log.warning("ИИ: каталог моделей OpenRouter недоступен — %s", explain_error(exc))
+        return []
+    free = [i for i in ids if isinstance(i, str) and i.endswith(":free")]
+    prefer = ("deepseek", "llama-3.3", "qwen", "gemini", "mistral-small", "gemma")
+
+    def rank(mid: str) -> int:
+        for n, key in enumerate(prefer):
+            if key in mid:
+                return n
+        return len(prefer)
+
+    return sorted(free, key=rank)[:limit]

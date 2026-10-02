@@ -83,8 +83,10 @@ def configured_providers() -> list[AiProvider]:
                             "OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free"
                         ),
                         "google/gemini-2.0-flash-exp:free",
-                        "meta-llama/llama-3.2-3b-instruct:free",
-                        "mistralai/mistral-7b-instruct:free",
+                        # mistral-7b-instruct:free и llama-3.2-3b-instruct:free
+                        # OpenRouter снял («404 No endpoints found»): каждый вызов
+                        # тратил на них попытку. Снятые дальше подбираются из
+                        # живого каталога (services/spintax_ai._live_free_models).
                     ]
                 ),
             ),
