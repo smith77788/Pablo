@@ -20014,14 +20014,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not name:
             return _err("Укажите название воркфлоу", 400)
         desc = validate_string(body.get("description"), max_len=500) or None
+        from services import workflow_engine as _wf
+        # Шаблон экран присылал с самого начала («Создать воркфлоу по шаблону
+        # "💧 Дрип-серия"?» → «✅ создан»), а обработчик его не читал: сценарий
+        # получался пустой. Неизвестный шаблон — отказ, а не пустой сценарий.
+        template = (validate_string(body.get("template"), max_len=40,
+                                    required=False) or "").strip().lower()
+        tpl = _wf.workflow_template(template) if template else None
+        if template and not tpl:
+            return _err("Неизвестный шаблон сценария", 400)
+        steps = tpl["steps"] if tpl else []
         try:
             wid = await pool.fetchval(
                 "INSERT INTO workflow_definitions(owner_id, name, description, steps, is_active) "
-                "VALUES($1,$2,$3,'[]'::jsonb, FALSE) RETURNING id", uid, name, desc)
-            return _json_resp({"ok": True, "id": wid})
+                "VALUES($1,$2,$3,$4::jsonb, FALSE) RETURNING id",
+                uid, name, desc, _json.dumps(steps))
         except Exception:
             log.exception("workflow_create_plural uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
+        out = {"ok": True, "id": wid, "steps": len(steps)}
+        if tpl:
+            out.update(template=tpl["key"], template_label=tpl["label"])
+        return _json_resp(out)
 
     async def workflow_detail_plural(request: web.Request) -> web.Response:
         """Детали воркфлоу: {id,name,active,steps[]} (шаги хранятся inline jsonb)."""

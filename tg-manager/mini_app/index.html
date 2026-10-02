@@ -7057,6 +7057,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-running" style="color:var(--blue)">—</div><div class="acc-kpi-lbl">Выполняется</div></div>
       <div class="acc-kpi-card"><div class="acc-kpi-num" id="wf-failed" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Ошибки</div></div>
     </div>
+    <div class="hint" style="margin:0 14px 10px">Сценарий сохраняется как схема шагов. Автоматически он пока не выполняется — запуска по событию и по расписанию ещё нет.</div>
     <div class="sec">Шаблоны воркфлоу</div>
     <div style="display:flex;gap:8px;padding:4px 16px 8px;overflow-x:auto">
       <div class="mgmt-tile" onclick="createWorkflowFromTemplate('welcome')" style="min-width:100px;flex:1">
@@ -26792,8 +26793,8 @@ async function createWorkflowFromTemplate(tpl) {
   const tplNames = { welcome: '👋 Приветствие', drip: '💧 Дрип-серия', react: '⚡ Реакция на событие', condition: '🔀 Условная логика' };
   if (!await askConfirm('Создать воркфлоу по шаблону "' + tplNames[tpl] + '"?')) return;
   try {
-    await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name: tplNames[tpl], template: tpl }) });
-    toast('✅ Воркфлоу по шаблону создан');
+    const d = await api('/api/miniapp/workflows', { method: 'POST', body: JSON.stringify({ name: tplNames[tpl], template: tpl }) });
+    toast(`✅ Воркфлоу по шаблону создан · ${(d && d.steps) || 0} шагов`);
     loadWorkflows();
   } catch(e) { toast('⚠️ ' + (e.message || 'Ошибка')); }
 }

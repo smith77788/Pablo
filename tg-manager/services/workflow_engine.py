@@ -14,6 +14,70 @@ import asyncpg
 log = logging.getLogger(__name__)
 
 
+# ── Шаблоны сценариев ────────────────────────────────────────────────────────
+# Экран предлагал четыре шаблона («👋 Приветствие», «💧 Дрип-серия», «⚡ Реакция
+# на событие», «🔀 Условная логика»), спрашивал подтверждение и отвечал
+# «✅ Воркфлоу по шаблону создан», а обработчик параметр `template` не читал
+# вовсе: создавался сценарий с `steps = '[]'` — пустой.
+#
+# Шаги описаны в той же форме, что складывает экран добавления шага
+# (`{type, text|delay_minutes|condition…}`), и типы — ровно те, что экран умеет
+# показывать: message, delay, condition, action, webhook.
+WORKFLOW_TEMPLATES: dict[str, dict] = {
+    "welcome": {
+        "label": "Приветствие",
+        "steps": [
+            {"type": "message",
+             "text": "Привет! Спасибо за подписку — рассказываю, что здесь есть."},
+            {"type": "delay", "delay_minutes": 60},
+            {"type": "message",
+             "text": "Если остались вопросы — напишите, отвечу лично."},
+        ],
+    },
+    "drip": {
+        "label": "Дрип-серия",
+        "steps": [
+            {"type": "message", "text": "Письмо 1: с чего начать."},
+            {"type": "delay", "delay_minutes": 1440},
+            {"type": "message", "text": "Письмо 2: разбор частой ошибки."},
+            {"type": "delay", "delay_minutes": 2880},
+            {"type": "message", "text": "Письмо 3: что делать дальше."},
+        ],
+    },
+    "react": {
+        "label": "Реакция на событие",
+        "steps": [
+            {"type": "condition", "condition": "event", "condition_value": "new_subscriber"},
+            {"type": "message", "text": "Вижу, вы только присоединились — держите короткий гид."},
+        ],
+    },
+    "condition": {
+        "label": "Условная логика",
+        "steps": [
+            {"type": "condition", "condition": "has_tag", "condition_value": "клиент"},
+            {"type": "message", "text": "Для клиентов: отдельные условия и поддержка."},
+            {"type": "delay", "delay_minutes": 720},
+            {"type": "message", "text": "Напоминание: предложение ещё в силе."},
+        ],
+    },
+}
+
+# Типы шагов, которые экран умеет показать. Шаг неизвестного типа в шаблоне
+# означал бы строку «⚫ undefined» в деталях сценария.
+WORKFLOW_STEP_TYPES = frozenset({"message", "delay", "condition", "action", "webhook"})
+
+
+def workflow_template(name: str) -> dict | None:
+    """Описание шаблона: {key, label, steps[]}. Чистая функция."""
+    tpl = WORKFLOW_TEMPLATES.get((name or "").strip().lower())
+    if not tpl:
+        return None
+    key = (name or "").strip().lower()
+    # Копия: вызывающий складывает шаги в jsonb и может их править.
+    return {"key": key, "label": tpl["label"],
+            "steps": [dict(step) for step in tpl["steps"]]}
+
+
 async def init_workflow_tables(pool: asyncpg.Pool) -> None:
     """Create workflow tables."""
     await pool.execute('''
