@@ -20115,7 +20115,14 @@ async function loadGovernorBar() {
     const c = g.level === 'red' ? 'var(--red)' : 'var(--orange)';
     el.style.display = 'block';
     el.style.background = g.level === 'red' ? 'rgba(248,113,113,.12)' : 'rgba(251,191,36,.12)';
-    el.innerHTML = `<b style="color:${c}">${g.emoji||''} Губернатор темпа: ×${g.multiplier}</b> · давление ${g.score}/100<br>`
+    // Числа печатаем через проверку: при частичном ответе сервера в баннер
+    // уезжало «Губернатор темпа: ×undefined · давление undefined/100», а это
+    // владелец читает как поломку, а не как «нет данных». И десятичный
+    // разделитель русский: «×1,5», а не «×1.5».
+    const gm = (typeof g.multiplier === 'number' && isFinite(g.multiplier))
+      ? String(+g.multiplier.toFixed(2)).replace('.', ',') : '—';
+    const gs = (typeof g.score === 'number' && isFinite(g.score)) ? g.score : '—';
+    el.innerHTML = `<b style="color:${c}">${g.emoji||''} Губернатор темпа: ×${gm}</b> · давление ${gs}/100<br>`
       + `<span style="color:var(--hint)">${esc(g.explain||'')}</span>`;
   } catch(e) { el.style.display = 'none'; }
 }

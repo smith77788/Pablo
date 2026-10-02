@@ -93,3 +93,44 @@ def test_op_worker_scales_base_delay(monkeypatch):
     out = _run(op_worker._governed_delay(None, 1, 10.0))
     assert out == 25.0
 
+
+
+def test_explain_uses_russian_decimal_comma():
+    """«×1,5», а не «×1.5»: строка уходит прямо в баннер мини-аппа и в бота.
+
+    Владелец не читает по-английски, и десятичная точка в русском тексте —
+    такая же чужая деталь, как латинская буква. Тот же класс, что «12.8K»
+    вместо «12,8К» в карточках счётчиков.
+    """
+    assert fg._mult_ru(1.5) == "1,5"
+    assert fg._mult_ru(2.0) == "2"          # целое без хвоста «,0»
+    for level in ("amber", "red"):
+        txt = fg._explain(level, 1.5)
+        assert "×1,5" in txt, txt
+        assert "1.5" not in txt, txt
+
+
+def test_governor_bar_prints_no_undefined():
+    """Баннер не печатает «×undefined · давление undefined/100».
+
+    Частичный ответ сервера (поле не пришло) давал владельцу именно эту
+    строку, а он читает её как поломку, а не как «нет данных» — ровно то же,
+    что исправили в num() с «NaN». Честный прочерк вместо сырого undefined.
+    """
+    import pathlib
+    import re
+    html = (pathlib.Path(__file__).resolve().parents[1]
+            / "mini_app" / "index.html").read_text(encoding="utf-8")
+    i = html.index("async function loadGovernorBar(")
+    # искать следующее объявление надо ПОСЛЕ заголовка, иначе regex
+    # совпадёт с ним же и срез окажется пустым (тест был бы вечно зелёным).
+    nxt = re.compile(r"^(?:async )?function \w+\(", re.M).search(html, i + 20)
+    body = html[i:nxt.start() if nxt else len(html)]
+    assert len(body) > 300, "разбор границ функции сломался"
+    assert "×${g.multiplier}" not in body, (
+        "множитель печатается сырым полем ответа — при его отсутствии в баннере "
+        "окажется «×undefined»")
+    assert "${g.score}/100" not in body, "давление печатается сырым полем ответа"
+    assert "isFinite(g.multiplier)" in body and "isFinite(g.score)" in body, (
+        "нет проверки, что пришло число")
+    assert "'—'" in body, "нет честного прочерка на случай отсутствующего поля"
