@@ -106,3 +106,40 @@ def test_a_server_refusal_leaves_a_trace_in_the_log():
     assert not silent, (
         "обработчик отвечает 500 и ничего не пишет в лог — о поломке не "
         "узнает никто:\n" + "\n".join(silent[:20]))
+
+# ── Отказы 4xx ───────────────────────────────────────────────────────────────
+
+def test_literal_refusals_speak_russian_at_any_status():
+    """4xx тут уже в порядке — тест держит это состояние.
+
+    Из 1666 литеральных сообщений с кодом 4xx по-английски было два:
+    `Unauthorized` (619 раз) и `Invalid Telegram initData`. Оба с кодом 401, и
+    до человека их текст не доходит — мини-апп на 401 показывает свою фразу
+    «Сессия истекла, перезапустите приложение». Остальное — русское, и пусть
+    таким остаётся.
+
+    Вычисленные сообщения (`_err(str(ve), 400)`) намеренно не проверяются: в
+    `services/account_manager.py` ValueError поднимают русским текстом именно
+    для показа человеку («Неверный код — проверьте и введите снова»). Запрет
+    пробросить его обратил бы осмысленную подсказку в общую фразу.
+    """
+    allowed = {"Unauthorized", "Invalid Telegram initData"}
+    bad = []
+    for p in _modules():
+        for node in ast.walk(ast.parse(p.read_text("utf-8"))):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "_err"):
+                continue
+            status = node.args[1] if len(node.args) > 1 else ast.Constant(400)
+            code = status.value if isinstance(status, ast.Constant) else None
+            if not isinstance(code, int) or code >= 500:
+                continue
+            msg = node.args[0]
+            if not (isinstance(msg, ast.Constant) and isinstance(msg.value, str)):
+                continue
+            v = msg.value
+            if v in allowed or CYRILLIC.search(v) or not re.search("[A-Za-z]{3}", v):
+                continue
+            bad.append(f"{p.name}:{node.lineno} {v!r}")
+    assert not bad, (
+        "человеку показывают английский отказ:\n" + "\n".join(bad[:20]))

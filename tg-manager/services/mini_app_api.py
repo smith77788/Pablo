@@ -2717,7 +2717,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await mass_broadcast_with_scheduling(pool, uid, bot_id_int, text, schedule)
             if result.get("ok"):
                 return _json_resp(result)
-            return _err(result.get("error", "Failed"), 400)
+            return _err(result.get("error") or "Не удалось поставить рассылку", 400)
         except Exception:
             log.exception("broadcast_schedule uid=%d bot=%d", uid, bot_id_int)
             return _err("Не удалось создать отложенную рассылку", 500)
@@ -2749,7 +2749,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             result = await ab_test_broadcast(pool, uid, bot_id_int, variants)
             if result.get("ok"):
                 return _json_resp(result)
-            return _err(result.get("error", "Failed"), 400)
+            return _err(result.get("error") or "Не удалось поставить рассылку", 400)
         except Exception:
             log.exception("broadcast_ab_test uid=%d bot=%d", uid, bot_id_int)
             return _err("Не удалось создать A/B-рассылку", 500)
