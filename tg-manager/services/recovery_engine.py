@@ -446,6 +446,93 @@ async def _active_op_ids_here() -> frozenset[int] | None:
         return None
 
 
+async def _dead_letter_op(pool, owner_id: int, op_id: int, stuck_min: int,
+                          retry: int, max_ret: int) -> tuple[str, str] | None:
+    """Закрывает зависшую операцию, исчерпавшую повторы, — ЧЕСТНЫМ исходом.
+
+    Это четвёртый путь закрытия операции в продукте (после двух сторожей
+    op_worker и голодания флота), и он единственный писал 'failed' вслепую:
+    операция взяла 203 цели из 380, зависла — владелец всё равно читал
+    «не запустилась». Исход решают счётчики журнала, а не место закрытия.
+
+    Тем же вслепую терялись метрика, событие шины и журнал соответствия: этот
+    путь не ходил через единственную дверь `_announce_op_outcome`, поэтому
+    операция исчезала из статистики целиком, как будто её не было.
+
+    `started_at` здесь НЕ обнуляем (в отличие от возврата в очередь): строка
+    терминальная, и время старта — единственный источник длительности для
+    метрики и карточки.
+
+    Возвращает (итоговый статус, текст причины) либо None, если строку уже
+    закрыл кто-то другой.
+    """
+    from services import op_status as _ost
+    from services import op_worker as _ow
+
+    ok_n, failed_n = await _ow._journal_counters(pool, op_id)
+    msg = (f"Остановлена автоматически: операция не отвечала {stuck_min} мин "
+           f"и исчерпала повторы ({retry} из {max_ret}).")
+    if ok_n:
+        msg += f" Успешно обработано целей: {ok_n}."
+    row = await pool.fetchrow(
+        """UPDATE operation_queue
+              SET status=$2, error_msg=$3, last_error=$3,
+                  finished_at=COALESCE(finished_at, now()),
+                  acct_wait_since=NULL
+            WHERE id=$1 AND status='running'
+        RETURNING op_type, params, done_items, total_items,
+                  EXTRACT(EPOCH FROM (now() - started_at)) AS dur_s""",
+        op_id, _ost.FAILED, msg)
+    if not row:
+        return None
+    info = dict(row)
+    op_type = info.get("op_type") or "unknown"
+    params = info.get("params")
+    if isinstance(params, str):
+        try:
+            import json as _json
+
+            params = _json.loads(params)
+        except (TypeError, ValueError):
+            params = None
+    if not isinstance(params, dict):
+        params = {}
+    status = _ost.classify_final(
+        _ost.FAILED, ok=ok_n, failed=failed_n,
+        done_items=info.get("done_items"), total_items=info.get("total_items"))
+    summary = (f"⚠️ Успело {ok_n}, остальные цели остались незакрытыми: "
+               f"операция не отвечала {stuck_min} мин"
+               if ok_n else
+               f"❌ Не запустилась: не отвечала {stuck_min} мин")
+    try:
+        dur_s = float(info.get("dur_s")) if info.get("dur_s") is not None else None
+    except (TypeError, ValueError):
+        dur_s = None
+    try:
+        import json as _json
+
+        from services.op_errors import _normalize_result
+
+        result = _normalize_result(
+            {"status": status, "ok": ok_n, "failed": failed_n,
+             "reason": msg, "summary": summary},
+            op_type, dur_s or 0.0)
+        await pool.execute(
+            "UPDATE operation_queue SET status=$2, result=$3::jsonb "
+            "WHERE id=$1 AND status='failed'",
+            op_id, status, _json.dumps(result, ensure_ascii=False))
+    except Exception as e:
+        log.debug("recovery: итог операции op=%d не уточнён: %s", op_id, e)
+        status = _ost.FAILED
+    try:
+        await _ow._announce_op_outcome(
+            pool, op_id, owner_id, op_type, params, status, ok_n, failed_n,
+            summary=summary, duration_s=dur_s)
+    except Exception as e:
+        log.debug("recovery: итог операции op=%d не объявлен: %s", op_id, e)
+    return status, msg
+
+
 async def _queue_recovery(
     pool: asyncpg.Pool, bot, owner_id: int
 ) -> list[RecoveryAction]:
@@ -491,12 +578,17 @@ async def _queue_recovery(
                 new_status = "pending"
                 # Exponential backoff: 60s, 120s, 240s, ... capped at 30min
                 backoff_s = min(60 * (2 ** retry), 1800)
-                new_msg = f"Авто-восстановление: операция зависла на {stuck_min}мин, возобновлена (backoff={backoff_s}s)"
+                new_msg = (f"Операция не отвечала {stuck_min} мин — "
+                           f"возобновим автоматически через "
+                           f"{max(1, round(backoff_s / 60))} мин")
                 action_name = "resume"
             else:
+                # Текст владельцу — по-русски и без жаргона: он читает его в
+                # карточке операции. Раньше здесь было «retry_count=3/3 —
+                # помечена как failed (dead letter)».
                 new_status = "failed"
                 backoff_s = 0
-                new_msg = f"Авто-восстановление: операция зависла {stuck_min}мин, retry_count={retry}/{max_ret} — помечена как failed (dead letter)"
+                new_msg = ""
                 action_name = "fail"
 
             try:
@@ -514,15 +606,11 @@ async def _queue_recovery(
                         op_id,
                     )
                 else:
-                    await pool.execute(
-                        """UPDATE operation_queue
-                           SET status='failed', error_msg=$1,
-                               started_at=NULL,
-                               finished_at=COALESCE(finished_at, now())
-                           WHERE id=$2 AND status='running'""",
-                        new_msg,
-                        op_id,
-                    )
+                    closed = await _dead_letter_op(
+                        pool, owner_id, op_id, stuck_min, retry, max_ret)
+                    if not closed:
+                        continue
+                    new_status, new_msg = closed
             except Exception as e:
                 log.debug("recovery queue update failed op=%d: %s", op_id, e)
                 continue
