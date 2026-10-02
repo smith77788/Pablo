@@ -1874,7 +1874,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
              class="input-l">
     </div>
     <!-- Категории действий -->
-    <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 16px 4px;-ms-overflow-style:none;scrollbar-width:none"></div>
+    <!-- Одиннадцать разделов: переносом они дают пять рядов и отодвигают сам
+         каталог на 170px вниз — дороже, чем польза. Оставляем прокрутку, но
+         правый край растворяем, как у ленты на главной: иначе четвёртый раздел
+         просто обрывался на половине слова, и что за ним есть ещё семь, понять
+         было нельзя. -->
+    <div id="moreCatBar" style="display:flex;gap:8px;overflow-x:auto;padding:8px 16px 4px;-ms-overflow-style:none;scrollbar-width:none;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)"></div>
     <div id="moreNoResult"  class="empty-inline" style="display:none">Ничего не найдено</div>
 
     <!-- ⚡ Быстрые действия (всегда наверху) -->
