@@ -20119,9 +20119,13 @@ async function loadGovernorBar() {
     // уезжало «Губернатор темпа: ×undefined · давление undefined/100», а это
     // владелец читает как поломку, а не как «нет данных». И десятичный
     // разделитель русский: «×1,5», а не «×1.5».
-    const gm = (typeof g.multiplier === 'number' && isFinite(g.multiplier))
-      ? String(+g.multiplier.toFixed(2)).replace('.', ',') : '—';
-    const gs = (typeof g.score === 'number' && isFinite(g.score)) ? g.score : '—';
+    const gmOk = typeof g.multiplier === 'number' && isFinite(g.multiplier);
+    const gsOk = typeof g.score === 'number' && isFinite(g.score);
+    // Ни множителя, ни давления — предупреждать не о чем: жёлтая полоса без
+    // единой цифры только пугает. Молчим, как и при спокойном флоте.
+    if (!gmOk && !gsOk) { el.style.display = 'none'; return; }
+    const gm = gmOk ? String(+g.multiplier.toFixed(2)).replace('.', ',') : '—';
+    const gs = gsOk ? g.score : '—';
     el.innerHTML = `<b style="color:${c}">${g.emoji||''} Губернатор темпа: ×${gm}</b> · давление ${gs}/100<br>`
       + `<span style="color:var(--hint)">${esc(g.explain||'')}</span>`;
   } catch(e) { el.style.display = 'none'; }
