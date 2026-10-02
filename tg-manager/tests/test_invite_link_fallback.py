@@ -111,9 +111,15 @@ def test_still_blocked_excludes_only_actually_added_targets():
     block = body[i:j]
     assert "_still_blocked_keys = {str(v) for v in _tried_blocked}" in block
     assert "_added_by_trick = [x for x in _uniq_blocked" in block
-    assert "invited_this_run.update(str(x) for x in _added_by_trick)" in block, (
-        "в invited_this_run обязаны попадать только РЕАЛЬНО добавленные "
-        "трюком цели, не весь пакет разом"
+    # Дедуп пополняется через _remember_invited (он же сразу пишет в
+    # invite_target_log), но смысл проверки тот же: передаётся список РЕАЛЬНО
+    # добавленных целей, а не весь пакет.
+    assert "await _remember_invited(_added_by_trick)" in block, (
+        "в дедуп обязаны попадать только РЕАЛЬНО добавленные трюком цели, "
+        "не весь пакет разом"
+    )
+    assert "_remember_invited(_uniq_blocked" not in block, (
+        "в дедуп уходит весь пакет — не добавленные цели тихо потеряются"
     )
 
 

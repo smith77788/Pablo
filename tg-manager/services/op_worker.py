@@ -15132,6 +15132,30 @@ async def _exec_mass_invite(
     flood_storm = False
     flood_streak = 0
     invited_this_run: set = set()  # цели, реально отданные движку — для дедупа впредь
+
+    async def _remember_invited(targets) -> None:
+        """Записать обработанные цели в дедуп СРАЗУ, а не в конце прогона.
+
+        `invited_this_run` копился в памяти процесса всю операцию — а это часы
+        пейсинга против банов. Запись шла одним запросом в самом конце, поэтому
+        любой обрыв до финала (рестарт воркера, потолок прогона, длинная
+        флуд-пауза, отмена, падение контейнера) терял дедуп ЦЕЛИКОМ, и следующая
+        попытка приглашала тех же людей второй раз. Для самой баноопасной
+        операции продукта это худший возможный исход, и обещание «взятые цели
+        сохранены — повтор продолжит с того же места» было неправдой.
+
+        Журнал операции тут не помогает: он привязан к номеру операции, а дедуп
+        инвайта живёт по (owner_id, group_key) и обязан работать для НОВОЙ
+        операции-повтора.
+
+        Запись идемпотентна (ON CONFLICT DO NOTHING), один запрос на пачку —
+        пачки идут минутами друг от друга, так что цена незаметна.
+        """
+        _new = {str(t) for t in targets if t is not None} - invited_this_run
+        if not _new:
+            return
+        invited_this_run.update(_new)
+        await _record_invited_targets(pool, owner_id, _group_key, op_id, _new)
     _phones_not_found = 0          # номеров не в Telegram (для честного отчёта)
     _ok_logged = 0                 # сколько успешных целей записано в лог (для CSV)
     _ok_seen: set = set()          # уже залогированные 'ok' цели (без дублей в отчёте)
@@ -15601,10 +15625,10 @@ async def _exec_mass_invite(
                 if by_phone:
                     # Дедупим только УСПЕШНО приглашённые номера; «не в Telegram»
                     # не помечаем — их можно пробовать позже.
-                    invited_this_run.update(res.get("invited_phones") or [])
+                    await _remember_invited(res.get("invited_phones") or [])
                     _phones_not_found += len(res.get("not_found_phones") or [])
                 else:
-                    invited_this_run.update(batch[:attempted])
+                    await _remember_invited(batch[:attempted])
             total_ok += ok_n
             total_fail += fail_n
 
@@ -15848,7 +15872,7 @@ async def _exec_mass_invite(
                                        if str(x) not in _still_blocked_keys]
                     await bump_daily_stats(pool, int(_promoter["id"]),
                                            ok=_trick_ok, invites=_trick_ok)
-                    invited_this_run.update(str(x) for x in _added_by_trick)
+                    await _remember_invited(_added_by_trick)
                     await _safe_execute(
                         pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
                         op_id, _trick_ok)
@@ -15896,7 +15920,7 @@ async def _exec_mass_invite(
                 if _link_fallback_ok:
                     await bump_daily_stats(pool, int(_dm_sender["id"]),
                                            ok=_link_fallback_ok, invites=_link_fallback_ok)
-                    invited_this_run.update(str(x) for x in _uniq_fallback)
+                    await _remember_invited(_uniq_fallback)
                     await _safe_execute(
                         pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
                         op_id, _link_fallback_ok)
@@ -15909,6 +15933,9 @@ async def _exec_mass_invite(
                 log.warning("mass_invite op=%d: фолбэк-ссылка в ЛС сбой: %s", op_id, _lfe)
 
     # Запомнить обработанные цели, чтобы следующий прогон их не тыкал повторно.
+    # Страховка: цели пишутся в дедуп по ходу прогона (_remember_invited), и к
+    # этому моменту новых обычно нет. Вызов оставлен на случай пути, который
+    # пополнил набор мимо помощника — запись идемпотентна.
     await _record_invited_targets(pool, owner_id, _group_key, op_id, invited_this_run)
 
     total = total_ok + total_fail

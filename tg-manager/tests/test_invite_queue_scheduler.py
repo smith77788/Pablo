@@ -577,8 +577,12 @@ def test_phones_dedup_between_runs(stand):
     assert r2["ok"] == 0
 
 
-def test_invited_targets_written_in_one_query(stand):
-    """Запись дедупа — один запрос, а не по запросу на цель."""
+def test_invited_targets_written_once_per_batch(stand):
+    """Запись дедупа — запрос на ПАЧКУ, а не на цель и не один на весь прогон.
+
+    Один запрос на весь прогон был дешевле, но держал весь дедуп в памяти
+    процесса часами: обрыв до финала терял его целиком, и повтор приглашал тех
+    же людей второй раз (см. test_dedup_survives_an_interrupted_run)."""
     s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
 
     class _CountingPool(_LogPool):
@@ -594,9 +598,46 @@ def test_invited_targets_written_in_one_query(stand):
     pool = _CountingPool()
     _run(pool, list(TARGETS))
     assert len(pool.log) == len(TARGETS)
-    assert pool.log_writes == 1, (
-        f"на {len(TARGETS)} целей ушло {pool.log_writes} запросов — должен быть один"
-    )
+    # 20 целей пачками по 5 — четыре пачки плюс финальная страховка.
+    assert 1 <= pool.log_writes <= 6, (
+        f"на {len(TARGETS)} целей ушло {pool.log_writes} запросов — должен быть "
+        "один на пачку, а не на цель")
+    assert pool.log_writes < len(TARGETS), (
+        "запись вернулась к запросу на цель: прогон на 2000 успехов даст "
+        "2000 round-trip'ов")
+
+
+def test_dedup_survives_an_interrupted_run(stand):
+    """Обрыв посреди прогона не теряет уже приглашённых.
+
+    Рестарт воркера, потолок прогона, длинная флуд-пауза, отмена — любой обрыв
+    до финала раньше терял дедуп ЦЕЛИКОМ, потому что он писался одним запросом
+    в самом конце. Следующая попытка приглашала тех же людей второй раз — для
+    самой баноопасной операции продукта это худший исход.
+    """
+    calls = {"n": 0}
+
+    def _inviter(acc_id, refs, dry=False):
+        calls["n"] += 1
+        if calls["n"] >= 3:
+            # Именно отмена, а не обычная ошибка: так прогон снимают потолок
+            # времени, сторож застоя, остановка воркера и отмена владельцем —
+            # то есть все пути, на которых финальная запись НЕ выполняется.
+            raise asyncio.CancelledError()
+        return _ok(len(refs))
+
+    stand(_inviter)
+    pool = _LogPool()
+    try:
+        _run(pool, list(TARGETS))
+    except BaseException:
+        pass
+
+    assert pool.log, (
+        "прогон оборвался — и в дедупе НИ ОДНОЙ цели: следующая попытка "
+        "пригласит уже приглашённых второй раз")
+    assert len(pool.log) < len(TARGETS), (
+        "в дедупе оказались цели, до которых прогон не дошёл")
 
 
 # ── Темп: настройка обязана доходить до движка ───────────────────────────────
