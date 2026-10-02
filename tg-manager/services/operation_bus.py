@@ -1352,6 +1352,46 @@ async def submit_retry_failed(
     return {"ok": True, "op_id": op_id, "count": len(failed), "reason": ""}
 
 
+async def closed_targets_count(pool: asyncpg.Pool, op_id: int) -> int:
+    """Сколько РАЗНЫХ целей уже закрыто успехом по всей семье повторов.
+
+    Нужно, чтобы повтор целиком получил ЧЕСТНЫЙ размер работы. Без этого он
+    наследовал `total_items` предка: операция на 380 целей, где 203 уже сделаны,
+    получала повтор с потолком 380, закрывала оставшиеся 177 — и по недобору
+    прогресса (177 из 380) объявлялась «частично выполненной», хотя сделала всё.
+    Дальше её снова предлагали повторить: круг из ложных «недоведено».
+
+    Цели, закрытые ОШИБКОЙ, незакрытыми и считаются: их повтор как раз и должен
+    попробовать снова.
+
+    0 — журнала нет (этот тип операции его не пишет) или чтение не удалось;
+    вызывающий тогда остаётся при размере предка, как было раньше.
+    """
+    try:
+        ids = await retry_family_ids(pool, op_id)
+        row = await pool.fetchrow(
+            "SELECT count(DISTINCT target) AS n FROM operation_log "
+            " WHERE op_id = ANY($1::bigint[]) AND target IS NOT NULL "
+            "   AND status = 'ok'",
+            [int(i) for i in ids] or [int(op_id)])
+        return int(row["n"] or 0) if row else 0
+    except Exception as exc:
+        log.debug("closed_targets_count op=%s: %s", op_id, exc)
+        return 0
+
+
+async def _retry_total_items(pool: asyncpg.Pool, op_id: int, src_total) -> int:
+    """Размер повтора: сколько целей предка ещё не закрыто успехом."""
+    try:
+        total = int(src_total or 0)
+    except (TypeError, ValueError):
+        total = 0
+    if total <= 0:
+        return total
+    done = await closed_targets_count(pool, op_id)
+    return max(0, total - done) if done else total
+
+
 async def resubmit_unfinished(
     pool: asyncpg.Pool, owner_id: int, hours: int = 24, limit: int = 100
 ) -> dict:
@@ -1404,9 +1444,10 @@ async def resubmit_unfinished(
         if drops_recurrence(params):
             dropped += 1
         try:
+            _left = await _retry_total_items(pool, int(r["id"]), r["total_items"])
             await submit(pool, owner_id, r["op_type"],
                          params_for_retry(int(r["id"]), params),
-                         total_items=int(r["total_items"] or 0), label=r["label"])
+                         total_items=_left, label=r["label"])
             retried += 1
         except PlanRequiredError:
             skipped += 1
@@ -1461,7 +1502,12 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
             params = {}
     if not isinstance(params, dict):
         params = {}
-    total = int(row["total_items"] or 0)
+    # Размер повтора — остаток, а не потолок предка: иначе повтор, доделавший
+    # всё, объявлялся бы «частично выполненным» по недобору прогресса.
+    total = await _retry_total_items(pool, op_id, row["total_items"])
+    if int(row["total_items"] or 0) > 0 and total == 0:
+        return {"ok": False, "op_id": None, "count": 0,
+                "reason": "Повторять нечего: все цели уже закрыты"}
     # Та же причина, что в resubmit_unfinished: ссылка на журнал предка плюс
     # отброшенное расписание. Точечный повтор выше идёт тем же путём — внутри
     # submit_retry_failed.

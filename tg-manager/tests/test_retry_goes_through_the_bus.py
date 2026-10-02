@@ -222,6 +222,57 @@ def test_retry_without_a_schedule_says_nothing_about_it(monkeypatch, submitted):
     assert res.get("dropped_recurrence") is False
 
 
+# ── Размер повтора — остаток, а не потолок предка ────────────────────────────
+
+class _JournalPool(_Pool):
+    """Очередь плюс журнал целей: повтор обязан считать по нему остаток."""
+
+    def __init__(self, rows, closed=0):
+        super().__init__(rows)
+        self.closed = closed
+
+    async def fetchrow(self, query, *args):
+        if "operation_log" in query:
+            return {"n": self.closed}
+        return await super().fetchrow(query, *args)
+
+
+def test_retry_is_sized_by_what_is_left(monkeypatch, submitted):
+    """Повтор на 380 целей, где 203 закрыты, обязан встать на 177.
+
+    Унаследованный потолок 380 означал, что повтор, доделавший всё, по недобору
+    прогресса (177 из 380) объявлялся «частично выполненным» — и его снова
+    предлагали повторить. Круг ложных «недоведено».
+    """
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    pool = _JournalPool([_row(90)], closed=203)
+    res = asyncio.run(operation_bus.resubmit_one(pool, 555, 90))
+
+    assert res["ok"] and submitted[0]["total_items"] == 177, (
+        "повтор унаследовал потолок предка вместо остатка: "
+        f"{submitted[0]['total_items']}")
+    assert res["count"] == 177
+
+
+def test_retry_refuses_when_everything_is_closed(monkeypatch, submitted):
+    """Все цели закрыты — повторять нечего, и это не «ок, поставлено»."""
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    pool = _JournalPool([_row(91)], closed=380)
+    res = asyncio.run(operation_bus.resubmit_one(pool, 555, 91))
+
+    assert res["ok"] is False and "закрыты" in res["reason"]
+    assert submitted == []
+
+
+def test_retry_keeps_the_parent_size_without_a_journal(monkeypatch, submitted):
+    """Типы без журнала целей ведут себя как раньше: размер предка."""
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    pool = _JournalPool([_row(92)], closed=0)
+    res = asyncio.run(operation_bus.resubmit_one(pool, 555, 92))
+
+    assert res["ok"] and submitted[0]["total_items"] == 380
+
+
 # ── Храповик на класс: повтор не возвращается к сбросу строки ────────────────
 
 _RESET_RE = re.compile(
