@@ -12929,7 +12929,7 @@ function buildFunnelDetail(d) {
           : 'сразу';
         const st = statFor(i);
         const statLine = st
-          ? `<div class="ffstep-delay">📊 дошли: <b>${num(st.delivered)}</b> (${st.conversion_pct}%)${
+          ? `<div class="ffstep-delay">📊 дошли: <b>${num(st.delivered)}</b> (${pctRu(st.conversion_pct)}%)${
                st.lost_after ? ` · <span style="color:var(--red)">отвал дальше: ${num(st.lost_after)}</span>` : ''}</div>`
           : '';
         return `<div class="ffstep">
@@ -14470,7 +14470,7 @@ async function toggleProxyStats() {
     let h = '<div style="opacity:.6;margin-bottom:6px">Здоровье — durable (из «Проверить все»); скорость/успешность — с момента старта воркера (не durable).</div>';
     h += list.map(p=>{
       const health = (p.alive==null?'⚪ не проверен':(p.alive?'🟢 живой':'🔴 мёртв'));
-      const rate = (p.total_checks>0? `${p.success_rate}% · ${p.avg_latency_ms}мс · ${p.total_checks} пров.` : 'нет замеров');
+      const rate = (p.total_checks>0? `${pctRu(p.success_rate)}% · ${p.avg_latency_ms}мс · ${p.total_checks} пров.` : 'нет замеров');
       const assigned = p.assigned>0? `🔗 ${p.assigned} акк.` : 'не назначен';
       const nm = esc(p.label||p.url||('Прокси #'+p.id));
       return `<div class="li" style="display:block;padding:8px 10px">
@@ -16556,7 +16556,7 @@ async function openAbResults() {
     h += d.variants.map(v=>{
       const w = Math.round((v.rate/maxRate)*100);
       return `<div style="padding:8px 0">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(v.label)}</b><span>${v.rate}% · ${num(v.delivered)}/${num(v.sent)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(v.label)}</b><span>${pctRu(v.rate)}% · ${num(v.delivered)}/${num(v.sent)}</span></div>
         <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
       </div>`;
     }).join('');
@@ -25483,6 +25483,18 @@ async function deleteEcosystem(id, btn) {
 }
 
 // ── Utils ──────────────────────────────────────────────
+function pctRu(v) {
+  // Процент в русском виде: запятая вместо точки и прочерк вместо пустого поля.
+  // Сервер округляет до десятых (`round(x, 1)`), и значение уходило в текст
+  // сырым: владелец видел «93.8%» — точка в русском тексте такая же чужая
+  // деталь, как латинская буква. А когда считать было нечего, сервер присылал
+  // null, и на экране оказывалось «null%».
+  if (v === null || v === undefined || v === '') return '—';
+  v = +v;
+  if (!isFinite(v)) return '—';
+  const s = (Math.round(v * 10) / 10).toFixed(1);
+  return (s.endsWith('.0') ? s.slice(0, -2) : s).replace('.', ',');
+}
 function num(v) {
   if (v===null||v===undefined) return '—';
   v=+v;

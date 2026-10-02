@@ -70,3 +70,23 @@ def test_operation_names_map_covers_the_mass_actions():
     for op in ("mass_invite", "mass_publish", "run_broadcast", "phone_check",
                "boost_views", "group_announce"):
         assert op + ":" in body, f"{op} остался техническим идентификатором на экране"
+
+
+def test_percents_use_a_russian_comma_and_a_dash_for_nothing():
+    """Процент из ответа сервера не печатается сырым полем.
+
+    Сервер округляет до десятых (`round(x, 1)`), и значение уходило в текст как
+    есть: владелец видел «93.8%» — десятичная точка в русском тексте такая же
+    чужая деталь, как латинская буква (тот же класс, что «12.8K» в карточках
+    счётчиков). А там, где считать было нечего, сервер присылает null, и на
+    экране оказывалось «null%».
+    """
+    assert re.search(r"function pctRu\s*\(", UI), "нет хелпера pctRu"
+    body = UI[UI.index("function pctRu"):]
+    body = body[:body.index("\nfunction ")]
+    assert "'—'" in body, "нет честного прочерка вместо пустого значения"
+    assert "replace('.', ',')" in body, "точка не заменяется на запятую"
+    for field in ("st.conversion_pct", "p.success_rate", "v.rate"):
+        assert "${" + field + "}%" not in UI, (
+            f"{field} печатается сырым полем: при округлении до десятых это "
+            "«93.8%» с точкой, а при пустом ответе — «null%»")
