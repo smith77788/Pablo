@@ -2105,35 +2105,50 @@ async def cb_op_reports(
     if page == 0:
         try:
             stats = await pool.fetchrow(
+                # 'partial' считается отдельно и обязательно. Это терминальное
+                # состояние недоведённой работы, и им закрывается всё, что
+                # оборвалось на половине: не дождалась аккаунтов, исчерпала
+                # бюджет перезапусков, зависла, упала до старта. Пока в запросе
+                # были только 'done' и 'failed', такие операции не попадали НИ В
+                # ОДИН счётчик — просто исчезали из статистики владельца, а доля
+                # успеха считалась по тому, что осталось, и завышала её.
                 """SELECT
                        COUNT(*) FILTER (WHERE status='done')      AS done_cnt,
+                       COUNT(*) FILTER (WHERE status='partial')   AS partial_cnt,
                        COUNT(*) FILTER (WHERE status='failed')    AS failed_cnt,
                        COUNT(*) FILTER (WHERE status='running')   AS running_cnt,
                        ROUND(AVG(
                            EXTRACT(EPOCH FROM (finished_at - started_at))
-                       ) FILTER (WHERE status='done' AND finished_at IS NOT NULL AND started_at IS NOT NULL)
+                       ) FILTER (WHERE status IN ('done', 'partial')
+                                   AND finished_at IS NOT NULL
+                                   AND started_at IS NOT NULL)
                        )::int AS avg_secs
                    FROM operation_queue WHERE owner_id=$1""",
                 user_id,
             )
             if stats:
                 done_c = stats["done_cnt"] or 0
+                part_c = stats["partial_cnt"] or 0
                 fail_c = stats["failed_cnt"] or 0
                 run_c = stats["running_cnt"] or 0
                 avg_s = stats["avg_secs"]
-                success_rate = (
-                    round(done_c / (done_c + fail_c) * 100)
-                    if (done_c + fail_c) > 0
-                    else 0
-                )
+                # Доля — от ВСЕХ закрытых операций, включая недоведённые. Иначе
+                # она двигалась от того, как работа разложилась по статусам, а не
+                # от того, насколько хорошо прошла.
+                _closed = done_c + part_c + fail_c
+                success_rate = round(done_c / _closed * 100) if _closed else 0
                 avg_str = f"{avg_s // 60}м {avg_s % 60}с" if avg_s else "—"
                 # Visual success bar (10 chars)
                 sr_filled = round(success_rate / 10)
                 sr_bar = "█" * sr_filled + "░" * (10 - sr_filled)
                 summary_line = (
-                    f"\n✅ {done_c} завершено  ❌ {fail_c} ошибок"
+                    f"\n✅ {done_c} завершено"
+                    + (f"  {_ost.icon('partial')} {part_c} частично"
+                       if part_c else "")
+                    + f"  ❌ {fail_c} ошибок"
                     + (f"  🔄 {run_c} активно" if run_c else "")
-                    + f"\n<b>📈 Успех: [{sr_bar}] {success_rate}%</b>  ⏱ Avg: {avg_str}\n"
+                    + f"\n<b>📈 Доведено до конца: [{sr_bar}] {success_rate}%</b>"
+                    + f"  ⏱ в среднем {avg_str}\n"
                 )
         except Exception:
             log_exc_swallow(

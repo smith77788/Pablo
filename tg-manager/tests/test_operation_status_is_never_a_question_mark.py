@@ -109,3 +109,42 @@ def test_the_detector_sees_the_screens_at_all():
     assert 'op["status"]' in src, (
         "экраны очереди больше не показывают статус операции — тест устарел"
     )
+
+
+# ── Статистика не теряет недоведённые операции ───────────────────────────────
+
+def test_the_owner_statistics_count_partial_operations():
+    """Иначе операция, взявшая часть целей, исчезает из статистики владельца.
+
+    В сводке у владельца считались только 'done' и 'failed'. `partial` —
+    терминальное состояние недоведённой работы, и им закрывается всё, что
+    оборвалось на половине (нехватка аккаунтов, исчерпанные перезапуски, сбой до
+    старта, зависший прогон). Такие операции не попадали НИ В ОДИН счётчик, а
+    доля успеха считалась по тому, что осталось, и завышала себя.
+    """
+    offenders = []
+    for rel in ("bot/handlers/botmother_menu.py", "services/mini_app_api.py"):
+        src = _read(rel)
+        for m in re.finditer(r"FILTER \(WHERE status='done'\)", src):
+            # Берём весь запрос вокруг: соседние строки с FILTER по статусам.
+            start = max(0, m.start() - 600)
+            seg = src[start:m.start() + 900]
+            if "operation_queue" not in seg:
+                continue                      # другая таблица, другие статусы
+            if "status='partial'" in seg:
+                continue
+            offenders.append(f"  {rel}:{src[:m.start()].count(chr(10)) + 1}")
+    assert not offenders, (
+        "статистика по операциям не считает 'partial' — недоведённая работа "
+        "исчезает из сводки владельца:\n" + "\n".join(offenders)
+    )
+
+
+def test_the_success_rate_counts_all_closed_operations():
+    src = _read("bot/handlers/botmother_menu.py")
+    i = src.index("success_rate = ")
+    seg = src[i - 400:i + 200]
+    assert "part_c" in seg, (
+        "доля успеха считается без недоведённых — она двигается от того, как "
+        "работа разложилась по статусам, а не от того, как прошла"
+    )

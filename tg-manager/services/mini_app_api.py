@@ -2110,8 +2110,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                               WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id)) AS assigned
                    FROM user_proxies WHERE owner_id=$1""", uid),
             "ops7d": _safe_fetch(pool,
+                # 'partial' — терминальное состояние недоведённой работы; без
+                # него операция, взявшая часть целей, не попадала НИ В ОДИН
+                # счётчик и просто исчезала из графика.
                 """SELECT to_char(date_trunc('day', created_at),'MM-DD') AS day,
                           COUNT(*) FILTER (WHERE status='done') AS done,
+                          COUNT(*) FILTER (WHERE status='partial') AS partial,
                           COUNT(*) FILTER (WHERE status='failed') AS failed
                    FROM operation_queue
                    WHERE owner_id=$1 AND created_at > now() - INTERVAL '7 days'
@@ -6604,6 +6608,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FILTER (WHERE status='pending') AS pending, "
                 "COUNT(*) FILTER (WHERE status='running') AS running, "
                 "COUNT(*) FILTER (WHERE status='done' AND finished_at>now()-interval '24 hours') AS done_24h, "
+                # Недоведённые операции не должны выпадать из сводки за сутки:
+                # ими закрывается всё, что оборвалось на половине.
+                "COUNT(*) FILTER (WHERE status='partial' AND finished_at>now()-interval '24 hours') AS partial_24h, "
                 "COUNT(*) FILTER (WHERE status='failed' AND finished_at>now()-interval '24 hours') AS failed_24h "
                 "FROM operation_queue WHERE owner_id=$1", uid)
             report["queue"] = {k: int(v or 0) for k, v in dict(q).items()} if q else {}
