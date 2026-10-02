@@ -78,7 +78,8 @@ cd tg-manager
 python -m pytest tests/test_no_duplicate_definitions.py <тесты затронутой зоны>
 python -m pytest tests/test_no_undefined_names.py tests/test_no_dead_buttons.py \
     tests/test_no_wrong_call_arity.py tests/test_no_new_mutable_globals.py \
-    tests/test_no_shadowed_module_imports.py
+    tests/test_no_shadowed_module_imports.py \
+    tests/test_no_silently_disabled_guards.py
 ruff check . --select F821,F822,F823,F601,F602,F632,F702,E711,E714,F502,F506,F522,F901
 ```
 
