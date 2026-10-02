@@ -263,6 +263,52 @@ function _vaBriefHtml(b) {
     rows.join('<br>') + '</div>';
 }
 
+// Бизнес-настройки: слова владельца, которые ИИ ставит выше своих догадок о нише.
+const _VA_GOALS = [
+  ['', 'Пусть решит администратор'], ['sales', 'Продажи'], ['leads', 'Заявки и обращения'],
+  ['brand', 'Доверие и узнаваемость'], ['audience', 'Рост подписчиков'],
+  ['community', 'Живое обсуждение'], ['expert', 'Экспертность автора'],
+];
+
+function _vaArea(id, label, val, max, ph, rows) {
+  return '<div class="field"><label>' + label + '</label><textarea id="' + id + '" rows="' + (rows || 2) +
+    '" maxlength="' + max + '" placeholder="' + esc(ph) + '">' + esc(val || '') + '</textarea></div>';
+}
+
+function _vaBusinessHtml(b) {
+  const share = b.sales_share == null ? '' : String(b.sales_share);
+  return '<div class="field-note" style="margin:0 0 10px;font-weight:600">Бизнес — на это администратор опирается в каждом посте</div>' +
+    '<div class="field"><label>Цель канала</label><select id="vaGoal">' +
+      _VA_GOALS.map(function (g) { return _vaOpt(g[0], b.goal || '', g[1]); }).join('') + '</select></div>' +
+    _vaArea('vaProducts', 'Товары и услуги с ценами', b.products, 1500, 'Например: стрижка — 1500 ₽, окрашивание — от 4000 ₽', 3) +
+    _vaArea('vaPromo', 'Действующая акция', b.promo, 300, 'Например: −20% на первый визит до конца месяца') +
+    _vaArea('vaUsp', 'Чем вы лучше конкурентов', b.usp, 300, 'Например: выезд в день обращения, гарантия год') +
+    _vaArea('vaPains', 'Боли и частые вопросы клиентов', b.pains, 600, 'С чем к вам приходят и о чём спрашивают') +
+    _vaArea('vaFacts', 'Факты и цифры, которые можно приводить', b.facts, 800, 'Опыт, число клиентов, сроки. Других цифр ИИ не выдумает', 3) +
+    _vaArea('vaBanned', 'Запретные темы', b.banned_topics, 600, 'Например: политика, здоровье, сравнение цен') +
+    _vaArea('vaRivals', 'Конкуренты — не упоминать', b.competitors, 300, 'Названия через запятую. Пост с ними уйдёт вам на проверку') +
+    '<div style="display:flex;gap:10px">' +
+      '<div class="field" style="flex:1"><label>Обращение</label><select id="vaAddr">' +
+        _vaOpt('', b.address || '', 'Как пойдёт') + _vaOpt('vy', b.address || '', 'На «вы»') +
+        _vaOpt('ty', b.address || '', 'На «ты»') + '</select></div>' +
+      '<div class="field" style="flex:1"><label>Продающих постов</label><select id="vaShare">' +
+        _vaOpt('', share, 'По рубрикам') +
+        [0, 10, 20, 30, 40, 50, 60].map(function (n) { return _vaOpt(String(n), share, 'до ' + n + ' %'); }).join('') +
+      '</select></div>' +
+    '</div>' +
+    '<div class="field-note" style="margin:0 0 14px">Доля считается по последним 10 постам: лишний продающий пост администратор заменит полезным.</div>';
+}
+
+function _vaBusinessVal() {
+  const share = _vaVal('vaShare');
+  return {
+    goal: _vaVal('vaGoal') || '', products: _vaVal('vaProducts') || '', promo: _vaVal('vaPromo') || '',
+    usp: _vaVal('vaUsp') || '', pains: _vaVal('vaPains') || '', facts: _vaVal('vaFacts') || '',
+    banned_topics: _vaVal('vaBanned') || '', competitors: _vaVal('vaRivals') || '',
+    address: _vaVal('vaAddr') || '', sales_share: share === '' || share == null ? null : Number(share),
+  };
+}
+
 function _vaChannelHtml(d) {
   const ch = d.channel || {}, s = d.settings || {};
   if (!s.installed) return _vaInstallHtml(ch, s);
@@ -289,6 +335,7 @@ function _vaChannelHtml(d) {
   h += '<div class="sec">Настройки</div><div class="lst" style="padding:14px">' +
     '<div class="field"><label>О проекте своими словами</label><textarea id="vaProject" rows="3" maxlength="2000">' + esc(s.project_info) + '</textarea></div>' +
     '<div class="field"><label>Куда вести клиентов</label><input id="vaContact" maxlength="200" value="' + esc(s.lead_contact) + '" placeholder="@manager, сайт или номер"></div>' +
+    _vaBusinessHtml(s.business || {}) +
     '<div class="field"><label>Тематика канала</label><textarea id="vaTopic" rows="2" maxlength="500">' + esc(s.topic) + '</textarea></div>' +
     '<div class="field"><label>Аудитория</label><input id="vaAudience" maxlength="300" value="' + esc(s.audience) + '"></div>' +
     '<div class="field"><label>Голос канала</label><input id="vaTone" maxlength="200" value="' + esc(s.tone) + '"></div>' +
@@ -366,6 +413,7 @@ async function vaSave() {
         project_info: _vaVal('vaProject'), lead_contact: _vaVal('vaContact'),
         topic: _vaVal('vaTopic'), audience: _vaVal('vaAudience'), tone: _vaVal('vaTone'),
         notes: _vaVal('vaNotes'), pillars: _vaVal('vaPillars') || '',
+        business: _vaBusinessVal(),
         posts_per_day: Number(_vaVal('vaPpd')), tz_offset: Number(_vaVal('vaTz')),
         window_start: Number(_vaVal('vaWs')), window_end: Number(_vaVal('vaWe')),
         publish_mode: _vaVal('vaMode'), auto_tune: !!document.getElementById('vaTune').checked,

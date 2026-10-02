@@ -279,6 +279,13 @@ def test_miniapp_routes_over_real_db(pool, stubs, monkeypatch):
                             "window_start": 10, "window_end": 20})
         assert st == 200 and d["settings"]["tone"] == "дружелюбный"
         assert [p["name"] for p in d["pillars"]] == ["Советы", "Акции"]
+        biz = {"goal": "sales", "products": "Диван — 30 000 ₽", "sales_share": 20, "address": "vy"}
+        st, d = await call("PUT", f"/api/miniapp/va/channel/{CID}", {"business": biz})
+        assert st == 200 and d["settings"]["business"] == biz
+        st, d = await call("PUT", f"/api/miniapp/va/channel/{CID}", {"tone": "строгий"})
+        assert st == 200 and d["settings"]["business"] == biz  # другие поля бизнес не затирают
+        st, _ = await call("PUT", f"/api/miniapp/va/channel/{CID}", {"business": {"goal": "деньги"}})
+        assert st == 400
         st, d = await call("PUT", f"/api/miniapp/va/channel/{CID}",
                            {"window_start": 20, "window_end": 10})
         assert st == 400

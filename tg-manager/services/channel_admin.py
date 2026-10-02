@@ -67,6 +67,7 @@ _PLAN_MIN_AHEAD_H = 48      # план достраивается, когда в
 _MISSED_SLOT_H = 6          # слот, просроченный дольше, пропускается (не залп после простоя)
 _DRAFT_TTL_H = 48           # черновик на одобрении живёт двое суток
 _RECENT_FOR_PROMPT = 6      # сколько недавних постов показать ИИ
+_SALES_WINDOW = 10          # окно, в котором держится доля продающих постов
 _MAX_ATTEMPTS = 3           # попыток написать пост, который пропустит редактор
 _ALERT_AFTER_FAILS = 3      # сколько сбоев подряд, прежде чем звать владельца
 
@@ -93,6 +94,122 @@ def _str_list(v: Any, n: int = 8, cap: int = 160) -> list[str]:
         if t and t not in out:
             out.append(t)
     return out[:n]
+
+
+# Бизнес-настройки владельца. В отличие от brief (его собирает ИИ при изучении
+# канала и переписывает при «Изучить заново»), это слова самого владельца:
+# переизучение их не трогает, а в промпте они стоят выше догадок ИИ.
+BUSINESS_GOALS = {
+    "sales": "продажи — посты подводят читателя к покупке",
+    "leads": "заявки — читатель должен написать или оставить контакт",
+    "brand": "доверие и узнаваемость бренда",
+    "audience": "рост аудитории — посты, которые хочется переслать",
+    "community": "живое сообщество — обсуждения и ответы в комментариях",
+    "expert": "экспертность автора — польза и разборы",
+}
+ADDRESS_FORMS = {"ty": "на «ты»", "vy": "на «вы»"}
+_BUSINESS_TEXT = (
+    ("products", 1500), ("promo", 300), ("usp", 300), ("pains", 600),
+    ("facts", 800), ("banned_topics", 600), ("competitors", 300),
+)
+
+
+def validate_business(v: Any) -> tuple[dict, list[str]]:
+    """Бизнес-настройки из Mini App → (чистый объект целиком, ошибки)."""
+    if not isinstance(v, dict):
+        return {}, ["Бизнес-настройки: ожидался объект"]
+    out: dict = {}
+    errors: list[str] = []
+    for key, cap in _BUSINESS_TEXT:
+        raw = v.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, str):
+            errors.append("Текстовые поля должны быть строкой")
+            continue
+        text = raw.strip()
+        if len(text) > cap:
+            errors.append(f"Слишком длинно: до {cap} символов")
+            continue
+        if text:
+            out[key] = text
+    goal = str(v.get("goal") or "").strip()
+    if goal:
+        if goal in BUSINESS_GOALS:
+            out["goal"] = goal
+        else:
+            errors.append("Неизвестная цель канала")
+    addr = str(v.get("address") or "").strip()
+    if addr:
+        if addr in ADDRESS_FORMS:
+            out["address"] = addr
+        else:
+            errors.append("Обращение: на «ты» или на «вы»")
+    share = v.get("sales_share")
+    if share not in (None, ""):
+        try:
+            n = int(share)
+        except (TypeError, ValueError):
+            errors.append("Доля продающих постов: нужно целое число")
+        else:
+            if 0 <= n <= 60:
+                out["sales_share"] = n
+            else:
+                errors.append("Доля продающих постов: от 0 до 60 %")
+    return out, errors
+
+
+def _business_obj(row: dict) -> dict:
+    b = (row or {}).get("business") or {}
+    if isinstance(b, str):
+        try:
+            b = json.loads(b)
+        except (ValueError, TypeError):
+            b = {}
+    return b if isinstance(b, dict) else {}
+
+
+def competitor_names(row: dict) -> list[str]:
+    raw = _business_obj(row).get("competitors") or ""
+    return [n.strip() for n in re.split(r"[,;\n]", raw) if len(n.strip()) >= 2][:20]
+
+
+def mentioned_competitors(text: str, names: list[str]) -> list[str]:
+    low = (text or "").lower()
+    return [n for n in names if re.search(r"(?<!\w)" + re.escape(n.lower()) + r"(?!\w)", low)]
+
+
+def _business_lines(profile: dict) -> list[str]:
+    """Слова владельца о бизнесе — в промпт поста и плана."""
+    b = _business_obj(profile)
+    out: list[str] = []
+    if b.get("goal"):
+        out.append(f"Главная цель канала: {BUSINESS_GOALS[b['goal']]}")
+    for key, label in (("products", "Товары и услуги (цены — только отсюда)"),
+                       ("promo", "Действующая акция или предложение"),
+                       ("usp", "Чем мы лучше конкурентов (со слов владельца)"),
+                       ("pains", "Боли и вопросы клиентов (со слов владельца)"),
+                       ("facts", "Факты и цифры, которые можно приводить")):
+        if b.get(key):
+            out.append(f"{label}: {b[key]}")
+    if b.get("facts"):
+        out.append("Других цифр, сроков и цен не придумывай.")
+    if b.get("banned_topics"):
+        out.append(f"Запретные темы — не затрагивать: {b['banned_topics']}")
+    if b.get("competitors"):
+        out.append(f"Конкуренты — не упоминать ни по названию, ни намёком: {b['competitors']}")
+    if b.get("address") in ADDRESS_FORMS:
+        out.append(f"Обращайся к читателю {ADDRESS_FORMS[b['address']]}.")
+    return out
+
+
+def sales_cap(profile: dict) -> Optional[float]:
+    share = _business_obj(profile).get("sales_share")
+    return None if share is None else max(0, min(60, int(share))) / 100
+
+
+def is_selling(pillar: str) -> bool:
+    return pillar_goal(pillar) == _GOALS["sell"]
 
 
 def validate_settings(payload: Any) -> tuple[dict, list[str]]:
@@ -148,6 +265,11 @@ def validate_settings(payload: Any) -> tuple[dict, list[str]]:
     for key in ("enabled", "intro_pending", "auto_tune"):
         if key in payload:
             out[key] = bool(payload.get(key))
+    if "business" in payload:
+        biz, b_err = validate_business(payload.get("business"))
+        errors += b_err
+        if not b_err:
+            out["business"] = biz
     return out, errors
 
 
@@ -201,13 +323,29 @@ def first_slot(now: datetime, *, window_start: int, window_end: int, tz_offset: 
                      window_end=window_end, tz_offset=tz_offset, rng=rng)
 
 
+def pick_pillar(seq: list[str], pillars: list[str], weights: dict[str, float], *,
+                max_streak: int = 2, cap: Optional[float] = None) -> Optional[str]:
+    """Следующая рубрика по миксу; продающих не больше доли cap в последних 10 постах."""
+    p = cb.pick_next_pillar(seq, pillars, max_streak=max_streak, weights=weights or None)
+    if cap is None or not p or not is_selling(p):
+        return p
+    window = seq[-(_SALES_WINDOW - 1):] + [p]
+    if sum(1 for x in window if is_selling(x)) <= cap * _SALES_WINDOW:
+        return p
+    rest = [x for x in pillars if not is_selling(x)]
+    if not rest:
+        return p
+    return cb.pick_next_pillar(seq, rest, max_streak=max_streak,
+                               weights={k: v for k, v in (weights or {}).items() if k in rest} or None) or rest[0]
+
+
 def plan_pillars(recent: list[str], pillars: list[str], weights: dict[str, float],
-                 n: int, *, max_streak: int = 2) -> list[str]:
+                 n: int, *, max_streak: int = 2, cap: Optional[float] = None) -> list[str]:
     """Рубрики на n слотов вперёд по контент-миксу (учитывая уже вышедшие)."""
     seq = list(recent)
     out: list[str] = []
     for _ in range(max(0, n)):
-        p = cb.pick_next_pillar(seq, pillars, max_streak=max_streak, weights=weights or None)
+        p = pick_pillar(seq, pillars, weights, max_streak=max_streak, cap=cap)
         if not p:
             break
         out.append(p)
@@ -364,6 +502,7 @@ def build_post_prompt(
     if profile.get("notes"):
         lines.append(f"Пожелания владельца: {profile['notes']}")
     lines.extend(_brief_lines(profile))
+    lines.extend(_business_lines(profile))
     lines.append("")
     if is_intro:
         lines.append(
@@ -556,6 +695,9 @@ def build_plan_prompt(profile: dict, slot_pillars: list[str], recent_texts: list
     if profile.get("notes"):
         lines.append(f"Пожелания владельца: {profile['notes']}")
     lines.extend(_brief_lines(profile))
+    lines.extend(_business_lines(profile))
+    if _business_obj(profile).get("promo"):
+        lines.append("Продающие слоты строй вокруг действующей акции.")
     if recent_texts:
         lines.append("Недавние посты (темы не повторять):")
         lines.append(_fence(recent_texts[:8], cap=200))
@@ -597,6 +739,7 @@ def settings_public(row: Optional[dict]) -> dict:
         "project_info": r.get("project_info") or "",
         "lead_contact": r.get("lead_contact") or "",
         "brief": _brief_obj(r),
+        "business": _business_obj(r),
         "posts_per_day": int(r.get("posts_per_day") or 2),
         "window_start": int(r.get("window_start") if r.get("window_start") is not None else 9),
         "window_end": int(r.get("window_end") or 21),
@@ -616,7 +759,7 @@ def settings_public(row: Optional[dict]) -> dict:
 
 _ADMIN_COLS = (
     "id, owner_id, channel_id, enabled, topic, audience, tone, notes, project_info, "
-    "lead_contact, brief, posts_per_day, "
+    "lead_contact, brief, business, posts_per_day, "
     "window_start, window_end, tz_offset, publish_mode, intro_pending, next_post_at, "
     "last_post_at, last_error, fail_streak, setup_done, last_op_id, alerted_at, "
     "auto_tune, members_count, last_stats_at, last_report_at"
@@ -706,8 +849,8 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
     await pool.execute(
         "INSERT INTO va_channel_admin (owner_id, channel_id, enabled, topic, audience, tone, "
         " notes, posts_per_day, window_start, window_end, tz_offset, publish_mode, "
-        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, updated_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now()) "
+        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, business, updated_at) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb, now()) "
         "ON CONFLICT (owner_id, channel_id) DO UPDATE SET enabled=EXCLUDED.enabled, "
         " topic=EXCLUDED.topic, audience=EXCLUDED.audience, tone=EXCLUDED.tone, "
         " notes=EXCLUDED.notes, posts_per_day=EXCLUDED.posts_per_day, "
@@ -715,12 +858,13 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
         " window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end, "
         " tz_offset=EXCLUDED.tz_offset, publish_mode=EXCLUDED.publish_mode, "
         " intro_pending=EXCLUDED.intro_pending, auto_tune=EXCLUDED.auto_tune, "
-        " next_post_at=EXCLUDED.next_post_at, updated_at=now()",
+        " next_post_at=EXCLUDED.next_post_at, business=EXCLUDED.business, updated_at=now()",
         int(owner_id), int(channel_id), bool(merged["enabled"]), merged["topic"],
         merged["audience"], merged["tone"], merged["notes"], int(merged["posts_per_day"]),
         int(merged["window_start"]), int(merged["window_end"]), int(merged["tz_offset"]),
         merged["publish_mode"], bool(merged["intro_pending"]), bool(merged["auto_tune"]),
         next_at, merged["project_info"], merged["lead_contact"],
+        json.dumps(merged["business"], ensure_ascii=False),
     )
     if schedule_changed and prev:
         # Расписание сменилось — старый план не совпадает с новыми слотами.
@@ -969,8 +1113,8 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
         "SELECT pillar FROM va_admin_plan WHERE owner_id=$1 AND channel_id=$2 "
         "AND status='planned' ORDER BY slot_at", int(owner_id), int(channel_id))
     history = [p for p in recent_p if p in names] + [r["pillar"] for r in planned or []]
-    pillars = plan_pillars(history, names, weights,
-                           len(slots), max_streak=getattr(brain, "max_streak", 2) or 2)
+    pillars = plan_pillars(history, names, weights, len(slots),
+                           max_streak=getattr(brain, "max_streak", 2) or 2, cap=sales_cap(admin))
     intro = bool(admin.get("intro_pending")) and not last_at and not planned
     if intro and pillars:
         pillars[0] = INTRO_PILLAR
@@ -1064,8 +1208,8 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
         pillar, topic = plan_item["pillar"], plan_item.get("topic") or ""
     else:
         recent_p = await content_memory.recent_pillars(pool, owner_id, str(channel_id))
-        pillar = cb.pick_next_pillar([p for p in recent_p if p in names], names,
-                                     weights=weights or None) or names[0]
+        pillar = pick_pillar([p for p in recent_p if p in names], names, weights,
+                             cap=sales_cap(admin)) or names[0]
         topic = ""
     best = await _best_texts(pool, owner_id, channel_id)
     feedback: list[str] = []
@@ -1085,7 +1229,10 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
         verdict = await editorial_review.review_draft(pool, owner_id, text,
                                                       channel_key=str(channel_id))
         reasons = list(verdict.reasons)
-        if not verdict.needs_review:
+        rivals = mentioned_competitors(text, competitor_names(admin))
+        if rivals:
+            reasons.append("упомянут конкурент: " + ", ".join(rivals[:3]))
+        if not verdict.needs_review and not rivals:
             return Draft(pillar, text, [], is_intro, True,
                          plan_item.get("id") if plan_item else None)
         feedback = reasons

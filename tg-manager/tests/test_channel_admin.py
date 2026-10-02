@@ -304,3 +304,56 @@ def test_mass_publish_records_msg_id_for_statistics():
     src = open(os.path.join(ROOT, "services", "op_worker.py"), encoding="utf-8").read()
     i = src.index("content_memory.record_published(")
     assert "msg_id=" in src[i:i + 300]
+
+
+# ── Бизнес-настройки владельца ───────────────────────────────────────────────
+
+def test_validate_business_keeps_owner_words_and_rejects_garbage():
+    clean, errors = ca.validate_settings({"business": {
+        "goal": "leads", "products": "  Стрижка — 1500 ₽ ", "address": "vy", "sales_share": "20",
+        "competitors": "", "unknown": "x"}})
+    assert errors == []
+    assert clean["business"] == {"goal": "leads", "products": "Стрижка — 1500 ₽",
+                                 "address": "vy", "sales_share": 20}
+    for bad in ({"goal": "money"}, {"address": "сэр"}, {"sales_share": 90},
+                {"sales_share": "много"}, {"products": "x" * 1501}, {"promo": 5}):
+        clean, errors = ca.validate_settings({"business": bad})
+        assert errors and "business" not in clean, bad
+    assert ca.validate_settings({"business": "строка"})[1]
+
+
+def test_business_settings_reach_post_and_plan_prompts():
+    profile = {"title": "Салон", "topic": "стрижки", "business": json.dumps({
+        "goal": "leads", "products": "Стрижка — 1500 ₽", "promo": "−20% до пятницы",
+        "facts": "12 лет работы", "banned_topics": "политика", "competitors": "Барбершоп Ромашка",
+        "address": "vy"}, ensure_ascii=False)}
+    _, post = ca.build_post_prompt(profile, pillar="Польза")
+    for needle in ("Главная цель канала: заявки", "Стрижка — 1500 ₽", "−20% до пятницы",
+                   "12 лет работы", "Других цифр", "политика", "Барбершоп Ромашка", "на «вы»"):
+        assert needle in post, needle
+    _, plan = ca.build_plan_prompt(profile, ["Польза", "Акции"], [])
+    assert "−20% до пятницы" in plan and "вокруг действующей акции" in plan
+    _, bare = ca.build_post_prompt({"title": "Салон"}, pillar="Польза")
+    assert "Главная цель" not in bare and "Конкуренты" not in bare
+
+
+def test_sales_share_caps_selling_pillars():
+    pillars, weights = ["Акции", "Польза"], {"Акции": 9, "Польза": 1}
+    free = ca.plan_pillars([], pillars, weights, 20)
+    capped = ca.plan_pillars([], pillars, weights, 20, cap=0.2)
+    assert free.count("Акции") > 10
+    for i in range(len(capped)):
+        assert capped[max(0, i - 9):i + 1].count("Акции") <= 2
+    assert "Акции" in capped
+    assert ca.plan_pillars([], pillars, weights, 10, cap=0.0).count("Акции") == 0
+    assert ca.sales_cap({"business": {"sales_share": 30}}) == 0.3
+    assert ca.sales_cap({}) is None
+
+
+def test_competitor_mention_is_detected_by_whole_word():
+    row = {"business": {"competitors": "Ромашка, Lux; Би"}}
+    names = ca.competitor_names(row)
+    assert names == ["Ромашка", "Lux", "Би"]
+    assert ca.mentioned_competitors("Не то что в ромашке — у нас Lux-сервис", names) == ["Lux"]
+    assert ca.mentioned_competitors("Ромашка рядом", names) == ["Ромашка"]
+    assert ca.mentioned_competitors("Обычный пост", names) == []
