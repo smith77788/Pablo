@@ -511,7 +511,7 @@ _NAV_MAP: list[tuple[list[str], str, str]] = [
     (["топология", "topology", "карта"], "🗺️ Топология", TopoCb(action="menu").pack()),
     (["регистрация", "дата", "regdate", "возраст"], "🔍 Дата регистрации", RegCb(action="start").pack()),
     (["анализ", "analyse", "analyze"], "🔬 Полный анализ", RegCb(action="analyze_start").pack()),
-    (["dm", "директ", "личное сообщение"], "📨 DM-кампании", DmCb(action="menu").pack()),
+    (["лс", "дм", "dm", "директ", "личное сообщение", "личные сообщения"], "📨 Кампании в ЛС", DmCb(action="menu").pack()),
     (["spin", "спин", "спинтакс", "spintax", "рандомизация", "синонимы", "уникализация"], "🎲 Spintax", SpinCb(action="menu").pack()),
 ]
 

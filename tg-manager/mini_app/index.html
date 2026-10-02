@@ -1682,7 +1682,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="bcastChips" class="lf-chips"></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="lst-more" id="bcastMore"></div>
-    <div class="sec-row" style="margin-top:4px"><div class="sec">DM-кампании</div><span class="sec-btn" onclick="openCmpModal()">+ Создать</span></div>
+    <div class="sec-row" style="margin-top:4px"><div class="sec">Кампании в ЛС</div><span class="sec-btn" onclick="openCmpModal()">+ Создать</span></div>
     <div class="lst" id="cmpList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:4px"><div class="sec">Воронки</div></div>
     <div class="lst" id="funList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -5407,7 +5407,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-dmcampaigns">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">✉️ DM-кампании</div>
+    <div class="hdr-title">✉️ Кампании в ЛС</div>
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openCmpModal()">+ Новая</button></div>
   </div>
   <div class="sub-sb">
@@ -6705,7 +6705,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="cmpMbg" onclick="if(event.target===this)closeCmpModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeCmpModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">📨 Новая DM-кампания</div>
+    <div class="modal-title">📨 Новая Кампания в ЛС</div>
     <div class="field">
       <label>Название кампании</label>
       <input type="text" id="cmpName" maxlength="100" placeholder="Напр: Весенняя акция">
@@ -11850,7 +11850,7 @@ async function resendBcast(id) {
 
 function renderCmps(items) {
   const el = document.getElementById('cmpList');
-  if (!items.length) { el.innerHTML=empty('📨','Нет DM-кампаний','Аудитория + текст со spintax → рассылка в личные сообщения',{label:'➕ Создать кампанию',fn:'openCmpModal()'}); return; }
+  if (!items.length) { el.innerHTML=empty('📨','Нет Кампаний в ЛС','Аудитория + текст со spintax → рассылка в личные сообщения',{label:'➕ Создать кампанию',fn:'openCmpModal()'}); return; }
   el.innerHTML = items.map(c=>{
     const [bc,bl]=stb(c.status);
     return `<div class="li tap" onclick="openDmCampaigns()">
@@ -12150,7 +12150,7 @@ const OP_CREATE_CATS = [
   {title:'👥 Аудитория', items:[
     {ico:'🔍', name:'Парсер аудитории', sub:'Сбор участников', fn:'openParser'},
     {ico:'👥', name:'Масс-инвайт', sub:'Приглашение в группу', fn:'openMassInvite'},
-    {ico:'📨', name:'DM-кампании', sub:'Личные сообщения', fn:'openDmCampaigns'},
+    {ico:'📨', name:'Кампании в ЛС', sub:'Личные сообщения', fn:'openDmCampaigns'},
   ]},
   {title:'🏭 Создание инфраструктуры', items:[
     {ico:'📡', name:'Фабрика каналов', sub:'Создать каналы', fn:'openChannelFactory'},
@@ -15392,7 +15392,7 @@ async function saveCmp() {
     });
     closeCmpModal();
     tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ DM-кампания создана · '+num(d.total_targets)+' получателей');
+    toast('✅ Кампания в ЛС создана · '+num(d.total_targets)+' получателей');
     LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
   } catch(e) {
     errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
@@ -20499,7 +20499,7 @@ async function openRegCheck(keep) {
 }
 
 // ── DM Campaigns ───────────────────────────────────────
-// Композер DM-кампаний единый — openCmpModal()/saveCmp() (см. выше).
+// Композер Кампаний в ЛС единый — openCmpModal()/saveCmp() (см. выше).
 // Прежний тонкий openDmModal/submitDmCampaign удалён (дубль-путь).
 let CUR_DM_CAMPAIGNS = [];   // кэш списка: правка берёт кампанию отсюда
 const DM_STATUS = {draft:'📝 Черновик',running:'▶️ Выполняется',paused:'⏸ Пауза',done:'✅ Завершена',failed:'❌ Ошибка'};

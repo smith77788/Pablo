@@ -76,7 +76,7 @@ async def cb_dm_menu(
         await safe_answer(callback)
         await _edit(
             callback,
-            locked_text("DM-кампании", "enterprise"),
+            locked_text("Кампании в ЛС", "enterprise"),
             subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
@@ -141,7 +141,7 @@ async def cb_dm_menu(
     else:
         empty_hint = ""
     text = (
-        "<b>📨 DM-кампании</b>\n\n"
+        "<b>📨 Кампании в ЛС</b>\n\n"
         "Отправляйте персонализированные сообщения своим подписчикам.\n\n"
         "📌 <i>Аудитория: подписчики ваших ботов и CRM-контакты.</i>\n"
         f"Кампаний: <b>{len(campaigns)}</b>"
@@ -162,7 +162,7 @@ async def cb_dm_new(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("DM-кампании", "enterprise"),
+            locked_text("Кампании в ЛС", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
@@ -172,7 +172,7 @@ async def cb_dm_new(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
     await callback.message.answer(
-        "📨 <b>Новая DM-кампания</b>\n\nВведите <b>название</b> кампании:",
+        "📨 <b>Новая Кампания в ЛС</b>\n\nВведите <b>название</b> кампании:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -362,7 +362,7 @@ async def cb_dm_target_cohort_pick(
 
         cohort_stats = await _db.get_activity_segments(pool, bot_id)
     except Exception:
-        log_exc_swallow(log, "Ошибка получения статистики когорт для DM-кампании")
+        log_exc_swallow(log, "Ошибка получения статистики когорт для Кампании в ЛС")
         cohort_stats = {"hot": 0, "warm": 0, "cold": 0, "lost": 0}
 
     kb = InlineKeyboardBuilder()
@@ -819,7 +819,7 @@ async def _show_dm_preview(
                 or 0
             )
         except Exception:
-            log_exc_swallow(log, "Ошибка подсчёта размера когорты для DM-кампании")
+            log_exc_swallow(log, "Ошибка подсчёта размера когорты для Кампании в ЛС")
             cnt = 0
         try:
             bot_row = await pool.fetchrow(
@@ -870,7 +870,7 @@ async def _show_dm_preview(
                 )
                 parse_label = "вся аудитория"
         except Exception:
-            log_exc_swallow(log, "Ошибка подсчёта спарсенной аудитории для DM-кампании")
+            log_exc_swallow(log, "Ошибка подсчёта спарсенной аудитории для Кампании в ЛС")
             cnt = 0
             parse_label = "спарсенная"
         recipients_count = int(cnt)
@@ -889,7 +889,7 @@ async def _show_dm_preview(
                 or 0
             )
         except Exception:
-            log_exc_swallow(log, "Ошибка подсчёта аудитории all_bots для DM-кампании")
+            log_exc_swallow(log, "Ошибка подсчёта аудитории all_bots для Кампании в ЛС")
             cnt = 0
         recipients_count = int(cnt)
         audience_str = f"🤖 Все подписчики (все боты): <b>{cnt}</b>"
@@ -953,7 +953,7 @@ async def cb_dm_launch_or_draft(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("DM-кампании", "enterprise"),
+            locked_text("Кампании в ЛС", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
@@ -1055,7 +1055,7 @@ async def cb_dm_launch_or_draft(
                 )
                 return
         except Exception:
-            log_exc_swallow(log, "Ошибка проверки аудитории перед запуском DM-кампании")
+            log_exc_swallow(log, "Ошибка проверки аудитории перед запуском Кампании в ЛС")
 
     import json as _json
 
@@ -1284,7 +1284,7 @@ async def cb_dm_resume(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("DM-кампании", "enterprise"),
+            locked_text("Кампании в ЛС", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
