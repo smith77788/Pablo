@@ -121,6 +121,8 @@ from bot.keyboards import subscription_locked_markup
 from database import db
 from services.logger import log_exc_swallow
 from services import operation_bus
+# Иконки и подписи статусов операции — один источник правды.
+from services import op_status as _ost
 from services.bg_tasks import spawn  # strong-ссылка для fire-and-forget (класс #14)
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
@@ -711,13 +713,11 @@ async def cb_ops_dashboard(
         log_exc_swallow(log, "ops_dashboard: failed to fetch recent operations")
         recent_ops = []
 
-    _STATUS_ICONS = {
-        "pending": "⏳",
-        "running": "🔄",
-        "done": "✅",
-        "failed": "❌",
-        "cancelled": "🚫",
-    }
+    # Иконки статусов — из services/op_status, а не своей картой: три местные
+    # копии в этом файле не знали про 'partial', 'paused' и 'waiting_approval',
+    # и каждый такой статус рисовался знаком вопроса. А 'partial' стал обычным
+    # делом: им закрывается операция, оборвавшаяся на половине работы (нехватка
+    # аккаунтов, исчерпанные перезапуски, сбой до старта, зависший прогон).
 
     lines = ["<b>📊 Дашборд операций</b>\n"]
     if running_count > 0 or pending_count > 0:
@@ -736,7 +736,7 @@ async def cb_ops_dashboard(
         lines.append("<b>Последние операции:</b>")
         failed_count = 0
         for op in recent_ops:
-            icon = _STATUS_ICONS.get(op["status"], "❓")
+            icon = _ost.icon(op["status"])
             otype = html.escape(op["op_type"])
             done = op["done_items"] or 0
             total = op["total_items"] or 0
@@ -2148,18 +2148,16 @@ async def cb_op_reports(
         bar = "█" * filled + "░" * (width - filled)
         return f"[{bar}] {round(pct * 100)}%"
 
-    status_emoji = {
-        "pending": "⏳",
-        "running": "🔄",
-        "done": "✅",
-        "failed": "❌",
-        "cancelled": "🚫",
-    }
+    # Иконки статусов — из services/op_status, а не своей картой: три местные
+    # копии в этом файле не знали про 'partial', 'paused' и 'waiting_approval',
+    # и каждый такой статус рисовался знаком вопроса. А 'partial' стал обычным
+    # делом: им закрывается операция, оборвавшаяся на половине работы (нехватка
+    # аккаунтов, исчерпанные перезапуски, сбой до старта, зависший прогон).
     kb = InlineKeyboardBuilder()
     lines = []
     for op in ops:
         status = op["status"]
-        emoji = status_emoji.get(status, "❓")
+        emoji = _ost.icon(status)
         dt = op["created_at"].strftime("%d.%m %H:%M")
         otype = html.escape(op["op_type"])
         total_i = op["total_items"] or 0
@@ -2251,14 +2249,12 @@ async def cb_op_detail(
         and _retry_count >= _max_retries
     )
 
-    status_emoji = {
-        "pending": "⏳",
-        "running": "🔄",
-        "done": "✅",
-        "failed": "❌",
-        "cancelled": "🚫",
-    }
-    emoji = "☠️" if _is_dead_letter else status_emoji.get(op["status"], "❓")
+    # Иконки статусов — из services/op_status, а не своей картой: три местные
+    # копии в этом файле не знали про 'partial', 'paused' и 'waiting_approval',
+    # и каждый такой статус рисовался знаком вопроса. А 'partial' стал обычным
+    # делом: им закрывается операция, оборвавшаяся на половине работы (нехватка
+    # аккаунтов, исчерпанные перезапуски, сбой до старта, зависший прогон).
+    emoji = "☠️" if _is_dead_letter else _ost.icon(op["status"])
     dt_created = op["created_at"].strftime("%d.%m.%Y %H:%M")
     dt_finished = (
         op["finished_at"].strftime("%d.%m.%Y %H:%M") if op["finished_at"] else "—"

@@ -57,6 +57,13 @@ SUCCESSFUL = frozenset({DONE})
 # не повод открывать цепь, реальные цели были взяты.
 PRODUCTIVE = frozenset({DONE, PARTIAL})
 
+# Состояния ожидания ставят отдельные подсистемы (пауза владельцем, отложенный
+# старт, апрув). Они не часть основного жизненного цикла, но на экранах
+# появляются наравне с остальными — без них статус рисовался знаком вопроса.
+PAUSED = "paused"
+SCHEDULED = "scheduled"
+WAITING_APPROVAL = "waiting_approval"
+
 ICONS: dict[str, str] = {
     PENDING: "⏳",
     RUNNING: "🔄",
@@ -64,6 +71,9 @@ ICONS: dict[str, str] = {
     PARTIAL: "⚠️",
     FAILED: "❌",
     CANCELLED: "🚫",
+    PAUSED: "⏸",
+    SCHEDULED: "🕒",
+    WAITING_APPROVAL: "🔐",
 }
 
 LABELS: dict[str, str] = {
@@ -73,6 +83,9 @@ LABELS: dict[str, str] = {
     PARTIAL: "завершена частично",
     FAILED: "завершилась с ошибкой",
     CANCELLED: "отменена",
+    PAUSED: "на паузе",
+    SCHEDULED: "запустится позже",
+    WAITING_APPROVAL: "ждёт подтверждения",
 }
 
 
