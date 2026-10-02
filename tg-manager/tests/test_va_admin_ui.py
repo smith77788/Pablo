@@ -38,3 +38,53 @@ def test_ai_banner_says_where_to_enter_key(monkeypatch):
     monkeypatch.setattr(ai_providers, "configured_providers", lambda: [])
     ok, note = ca.ai_ready()
     assert not ok and "/admin" in note and "AI-ключи" in note
+
+
+def _va():
+    return _read("mini_app", "screens", "va_admin.js")
+
+
+def test_collapsed_settings_still_save_every_field():
+    """Свёрнутые группы настроек остаются в разметке — «Сохранить» шлёт всё.
+
+    Экран настроек шёл одной простынёй из двадцати полей: на телефоне до
+    кнопки «Сохранить» было четыре пролистывания, и до неё не добирались.
+    Поля убрали в две группы `<details>`. Опасность ровно одна: вынести поле
+    из разметки и молча потерять его при сохранении — тогда владелец правит
+    значение, жмёт «Сохранить», а оно не уходит.
+    """
+    va = _va()
+    # что читается при сохранении
+    saved = set(re.findall(r"_vaVal\('(va[A-Za-z]+)'\)", va))
+    saved.discard("vaErr")
+    # что есть в разметке: часть полей строит _vaArea(id, ...)
+    rendered = set(re.findall(r'id="(va[A-Za-z]+)"', va)) | set(
+        re.findall(r"_vaArea\('(va[A-Za-z]+)'", va))
+    assert saved, "разбор сломался: не нашли ни одного читаемого поля"
+    missing = sorted(saved - rendered)
+    assert not missing, (
+        "поля читаются при сохранении, но их нет в разметке — правка владельца "
+        f"пропадёт молча: {missing}")
+
+
+def test_long_settings_are_grouped_not_one_sheet():
+    va = _va()
+    assert va.count("<details class=\"acc-actions\"") >= 2, (
+        "настройки снова одной простынёй — кнопка «Сохранить» уезжает за "
+        "четыре пролистывания")
+    # группы сворачиваются, а не прячутся: display:none унёс бы поля из потока
+    assert "display:none" not in va.split("<details")[1][:400]
+
+
+def test_draft_buttons_do_not_share_one_narrow_row():
+    """Три кнопки черновика в один ряд при 360px ломали надписи на две строки.
+
+    Главное действие — во всю ширину, второстепенные рядом и с подписями:
+    безымянный «✖️» не говорил, что он делает.
+    """
+    va = _va()
+    i = va.index("function _vaDraftsHtml")
+    body = va[i:va.index("\nasync function vaDraftAct")]
+    assert "'publish')\">✅ Опубликовать</button>" in body.replace("\\'", "'")
+    assert 'style="width:100%"' in body, "главное действие не во всю ширину"
+    assert "Пропустить</button>" in body, "у кнопки отказа нет подписи"

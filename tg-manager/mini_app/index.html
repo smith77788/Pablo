@@ -795,6 +795,13 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
    переносится на следующий ряд. Прокручивать нечего — видно всё. */
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px;padding:8px 16px 4px}
 .kpi-row > .kpi-card{min-width:0}
+/* Ровно четыре счётчика на узком экране: сетка клала три в ряд и один под
+   ними, рядом с пустым местом в две карточки, а подпись третьей ломалась на
+   две строки и ряды переставали совпадать по высоте. Два на два — ровно.
+   То же решение, что для .acc-kpi на экране аккаунта. */
+@media (max-width:400px){
+.kpi-row:has(> :nth-child(4)):not(:has(> :nth-child(5))){grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 /* Число, по которому можно перейти в список. Отличается от обычного
    рамкой и стрелкой в подписи — иначе непонятно, что оно нажимается. */
 .kpi-card.tap-card{cursor:pointer;border:1px solid var(--sep)}
@@ -23352,7 +23359,7 @@ async function openPresenceMap() {
         <div class="row-body"><div class="row-name">${esc(c.name||cc)}</div><div class="row-val">развёрнуто ${num(c.done||0)}/${num(c.planned||0)} — ${num(c.pending||0)} в очереди</div></div></div>`;
     }).join('') : empty('✅','Пробелов нет','Запланированное присутствие развёрнуто'));
   } catch(e) {
-    txt('pmGeo', errHtmlerrRu(e,'Не удалось загрузить', 'openPresenceMap()'));
+    txt('pmGeo', errHtml(errRu(e, 'Не удалось загрузить'), 'openPresenceMap()'));
   }
 }
 async function openGlobalPresence() {

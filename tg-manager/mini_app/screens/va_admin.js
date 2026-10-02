@@ -104,20 +104,23 @@ function _vaNetworkHtml(n) {
   if (!n || !n.admins_installed) return '';
   // Числа целиком и по-русски: общий форматтер пишет «1.2K», а латиница в
   // интерфейсе владельцу непонятна.
+  // Полоса счётчиков — общий компонент приложения (.kpi-row/.kpi-card), а не
+  // свой ряд inline-стилями: раньше четыре карточки по 80px при 360px делились
+  // пополам и подписи вроде «постов за 7 дней» ломались на три строки разной
+  // высоты. Сетка сама берёт столько колонок, сколько помещается.
   const kpi = function (val, lbl) {
-    return '<div style="flex:1;min-width:80px;text-align:center;padding:8px 4px">' +
-      '<div style="font-size:20px;font-weight:700">' + val + '</div>' +
-      '<div style="font-size:11px;color:var(--hint)">' + lbl + '</div></div>';
+    return '<div class="kpi-card"><div class="kpi-val">' + val + '</div>' +
+      '<div class="kpi-lbl">' + lbl + '</div></div>';
   };
-  let h = '<div class="sec">Сеть каналов</div><div class="lst" style="padding:6px">' +
-    '<div style="display:flex;flex-wrap:wrap;gap:4px">' +
-      kpi(n.admins_active + '<span style="font-size:13px;color:var(--hint)">/' + n.admins_installed + '</span>', 'ведут каналы') +
-      kpi(n.posts_7d, 'постов за 7 дней') +
+  let h = '<div class="sec">Сеть каналов</div><div class="lst" style="padding:2px 0 8px">' +
+    '<div class="kpi-row">' +
+      kpi(_vaNum(n.admins_active) + '<span style="font-size:13px;color:var(--hint)">/' + _vaNum(n.admins_installed) + '</span>', 'ведут каналы') +
+      kpi(_vaNum(n.posts_7d), 'постов за неделю') +
       kpi(n.avg_views_7d ? _vaNum(n.avg_views_7d) : '—', 'средний охват') +
       kpi(n.members_total ? _vaNum(n.members_total) : '—', 'подписчиков') +
     '</div>';
   if (n.pending_drafts) {
-    h += '<div style="padding:6px 10px;font-size:13px">📝 Ждут вашего решения: <b>' + n.pending_drafts + '</b></div>';
+    h += '<div style="padding:6px 14px;font-size:13px">📝 Ждут вашего решения: <b>' + _vaNum(n.pending_drafts) + '</b></div>';
   }
   h += '</div>';
 
@@ -155,10 +158,16 @@ function _vaDraftsHtml(drafts, ctx) {
       '<div style="font-size:12px;color:var(--hint);margin-bottom:6px">' + esc(x.title || '') +
         (x.pillar ? ' · ' + esc(x.pillar) : '') + '</div>' +
       '<div style="white-space:pre-wrap;font-size:14px;line-height:1.45">' + esc(x.body) + '</div>' + reasons +
-      '<div style="display:flex;gap:8px;margin-top:10px">' +
-        '<button class="btn btn-p" style="flex:1" onclick="vaDraftAct(' + x.id + ',\'publish\')">✅ Опубликовать</button>' +
-        '<button class="btn btn-s" style="flex:1" onclick="vaDraftAct(' + x.id + ',\'regenerate\')">🔄 Другой</button>' +
-        '<button class="btn btn-s" onclick="vaDraftWhy(' + x.id + ')" aria-label="Пропустить черновик">✖️</button>' +
+      // Три кнопки в один ряд при 360px не помещались: «Опубликовать» ломалось
+      // на две строки и вылезало за кнопку, а безымянный «✖️» занимал треть
+      // ряда, не говоря, что он делает. Главное действие во всю ширину,
+      // второстепенные — рядом и с подписями.
+      '<div style="margin-top:10px">' +
+        '<button class="btn btn-p" style="width:100%" onclick="vaDraftAct(' + x.id + ',\'publish\')">✅ Опубликовать</button>' +
+        '<div style="display:flex;gap:8px;margin-top:8px">' +
+          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="vaDraftAct(' + x.id + ',\'regenerate\')">🔄 Другой</button>' +
+          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="vaDraftWhy(' + x.id + ')">✖️ Пропустить</button>' +
+        '</div>' +
       '</div><div id="vaWhy' + x.id + '"></div></div>';
   }).join('');
 }
@@ -218,7 +227,9 @@ function _vaHours(cur) {
 
 function _vaTz(cur) {
   let o = '';
-  for (let i = -12; i <= 14; i++) o += _vaOpt(i, cur, 'UTC' + (i >= 0 ? '+' : '') + i + (i === 3 ? ' (Москва)' : ''));
+  // Без скобок: «UTC+3 (Москва)» не помещалось в селект шириной в половину
+  // экрана и обрезалось на закрывающей скобке.
+  for (let i = -12; i <= 14; i++) o += _vaOpt(i, cur, 'UTC' + (i >= 0 ? '+' : '') + i + (i === 3 ? ' Москва' : ''));
   return o;
 }
 
@@ -249,8 +260,8 @@ function _vaReportHtml(r, s) {
     (r.members_delta_7d >= 0 ? '+' : '') + r.members_delta_7d + ' за неделю)</span>';
   let h = '<div class="sec">Статистика</div><div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.7">' +
     'Подписчиков: <b>' + (r.members !== null && r.members !== undefined ? _vaNum(r.members) : (s.members_count ? _vaNum(s.members_count) : '—')) + '</b>' + delta + '<br>' +
-    'Постов за неделю: <b>' + r.posts_7d + '</b>' + (r.avg_views_7d ? ', в среднем <b>' + _vaNum(r.avg_views_7d) + '</b> ' + plural(r.avg_views_7d, 'просмотр', 'просмотра', 'просмотров') : '') + '<br>' +
-    'Всего постов в памяти: ' + r.posts_total;
+    'Постов за неделю: <b>' + _vaNum(r.posts_7d) + '</b>' + (r.avg_views_7d ? ', в среднем <b>' + _vaNum(r.avg_views_7d) + '</b> ' + plural(r.avg_views_7d, 'просмотр', 'просмотра', 'просмотров') : '') + '<br>' +
+    'Всего постов в памяти: ' + _vaNum(r.posts_total);
   if ((r.pillars || []).length) {
     h += '<br><br>Что заходит аудитории:<br>' + r.pillars.map(function (p) {
       return '• ' + esc(p.name) + ' — <span style="white-space:nowrap">' + _vaNum(p.avg_views) + ' просм. в среднем, ' +
@@ -290,7 +301,19 @@ function _vaArea(id, label, val, max, ph, rows) {
 
 function _vaBusinessHtml(b) {
   const share = b.sales_share == null ? '' : String(b.sales_share);
-  return '<div class="field-note" style="margin:0 0 10px;font-weight:600">Бизнес — на это администратор опирается в каждом посте</div>' +
+  // Поля о бизнесе держим свёрнутыми. Открытыми они растягивали экран настроек
+  // на несколько пролистываний, и кнопка «Сохранить» уезжала так далеко, что до
+  // неё никто не добирался. Заполняют их один раз, а заходят на экран, чтобы
+  // посмотреть, как идут дела. В свёрнутом виде справа видно, сколько заполнено.
+  const bizDone = _VA_BIZ_KEYS.filter(function (k) { return b[k[0]]; }).length;
+  return '<details class="acc-actions" style="margin:0 0 12px;background:var(--bg3);border-radius:12px">' +
+    '<summary style="cursor:pointer;font-size:14px;font-weight:500;padding:12px 12px;display:flex;align-items:center;gap:8px">' +
+      '<span style="flex:1;min-width:0">💼 Бизнес</span>' +
+      '<span style="font-size:12px;color:var(--hint);font-weight:400;white-space:nowrap">' +
+        (bizDone ? bizDone + ' из ' + _VA_BIZ_KEYS.length : 'не заполнено') + '</span>' +
+      '<span class="acc-chev" style="color:var(--hint)">▾</span>' +
+    '</summary>' +
+    '<div style="padding:0 12px 2px">' +
     _vaBizFill(b) +
     '<div class="field"><label>Цель канала</label><select id="vaGoal">' +
       _VA_GOALS.map(function (g) { return _vaOpt(g[0], b.goal || '', g[1]); }).join('') + '</select></div>' +
@@ -313,7 +336,8 @@ function _vaBusinessHtml(b) {
         [0, 10, 20, 30, 40, 50, 60].map(function (n) { return _vaOpt(String(n), share, 'до ' + n + ' %'); }).join('') +
       '</select></div>' +
     '</div>' +
-    '<div class="field-note" style="margin:0 0 14px">Доля считается по последним 10 постам: лишний продающий пост администратор заменит полезным.</div>';
+    '<div class="field-note" style="margin:0 0 10px">Доля считается по последним 10 постам: лишний продающий пост администратор заменит полезным.</div>' +
+    '</div></details>';
 }
 
 function _vaPromoOver(b) {
@@ -371,17 +395,16 @@ function _vaChannelHtml(d) {
     return '<div class="li"><div class="li-body"><div class="li-name">' + esc(p.pillar || 'Пост') + '</div>' +
       '<div class="li-sub">' + _vaWhen(p.slot_at) + (p.topic ? ' · ' + esc(p.topic) : '') + '</div></div></div>';
   }).join('') : '<div style="padding:14px;color:var(--hint);font-size:13px">План появится после того, как администратор изучит канал.</div>') + '</div>';
+  // Настройки шли одной простынёй из двадцати полей, и кнопка «Сохранить»
+  // лежала в самом низу — на телефоне до неё четыре пролистывания. Сверху
+  // оставили то, ради чего на экран заходят (о проекте, куда вести клиентов,
+  // темп и режим), остальное — в двух свёрнутых группах. Поля остаются в
+  // разметке и в закрытой группе, поэтому «Сохранить» по-прежнему отправляет
+  // их все.
   h += '<div class="sec">Настройки</div><div class="lst" style="padding:14px">' +
     '<div class="field"><label>О проекте своими словами</label><textarea id="vaProject" rows="3" maxlength="2000">' + esc(s.project_info) + '</textarea></div>' +
     '<div class="field"><label>Куда вести клиентов</label><input id="vaContact" maxlength="200" value="' + esc(s.lead_contact) + '" placeholder="@manager, сайт или номер"></div>' +
     _vaBusinessHtml(s.business || {}) +
-    '<div class="field"><label>Тематика канала</label><textarea id="vaTopic" rows="2" maxlength="500">' + esc(s.topic) + '</textarea></div>' +
-    '<div class="field"><label>Аудитория</label><input id="vaAudience" maxlength="300" value="' + esc(s.audience) + '"></div>' +
-    '<div class="field"><label>Голос канала</label><input id="vaTone" maxlength="200" value="' + esc(s.tone) + '"></div>' +
-    '<div class="field"><label>Пожелания и запреты</label><textarea id="vaNotes" rows="2" maxlength="1000" placeholder="Например: не упоминать цены, обращаться на «вы»">' + esc(s.notes) + '</textarea></div>' +
-    '<div class="field"><label>Рубрики и доли</label><textarea id="vaPillars" rows="4">' +
-      esc((d.pillars || []).map(function (p) { return p.name + ': ' + p.weight; }).join('\n')) + '</textarea>' +
-      '<div class="field-note">Одна на строку, доля 1–10. Администратор сам подстраивает доли по просмотрам.</div></div>' +
     '<div style="display:flex;gap:10px">' +
       '<div class="field" style="flex:1"><label>Постов в день</label><select id="vaPpd">' +
         [1, 2, 3, 4, 5, 6, 8, 10, 12].map(function (n) { return _vaOpt(n, s.posts_per_day, n); }).join('') + '</select></div>' +
@@ -395,8 +418,25 @@ function _vaChannelHtml(d) {
       _vaOpt('auto', s.publish_mode, 'Полностью сам — публикует без меня') +
       _vaOpt('review', s.publish_mode, 'Присылает пост мне на одобрение') + '</select>' +
       '<div class="field-note">В автономном режиме в канал уходят только посты, к которым у редактора нет замечаний.</div></div>' +
-    '<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0 12px">' +
-      '<input type="checkbox" id="vaTune"' + (s.auto_tune ? ' checked' : '') + '> Подстраивать рубрики по статистике</label>' +
+    '<details class="acc-actions" style="margin:0 0 12px;background:var(--bg3);border-radius:12px">' +
+      '<summary style="cursor:pointer;font-size:14px;font-weight:500;padding:12px 12px;display:flex;align-items:center;gap:8px">' +
+        '<span style="flex:1;min-width:0">📝 Как писать</span>' +
+        '<span style="font-size:12px;color:var(--hint);font-weight:400;white-space:nowrap">заполнил сам</span>' +
+        '<span class="acc-chev" style="color:var(--hint)">▾</span>' +
+      '</summary>' +
+      '<div style="padding:0 12px 2px">' +
+        '<div class="field-note" style="margin:0 0 10px">Тон, рубрики и запреты администратор заполнил сам, когда изучил канал. Меняйте, если он понял что-то не так.</div>' +
+        '<div class="field"><label>Тематика канала</label><textarea id="vaTopic" rows="2" maxlength="500">' + esc(s.topic) + '</textarea></div>' +
+        '<div class="field"><label>Аудитория</label><input id="vaAudience" maxlength="300" value="' + esc(s.audience) + '"></div>' +
+        '<div class="field"><label>Голос канала</label><input id="vaTone" maxlength="200" value="' + esc(s.tone) + '"></div>' +
+        '<div class="field"><label>Пожелания и запреты</label><textarea id="vaNotes" rows="2" maxlength="1000" placeholder="Например: не упоминать цены, обращаться на «вы»">' + esc(s.notes) + '</textarea></div>' +
+        '<div class="field"><label>Рубрики и доли</label><textarea id="vaPillars" rows="4">' +
+          esc((d.pillars || []).map(function (p) { return p.name + ': ' + p.weight; }).join('\n')) + '</textarea>' +
+          '<div class="field-note">Одна на строку, доля 1–10. Администратор сам подстраивает доли по просмотрам.</div></div>' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0 12px">' +
+          '<input type="checkbox" id="vaTune"' + (s.auto_tune ? ' checked' : '') + '> Подстраивать рубрики по статистике</label>' +
+      '</div>' +
+    '</details>' +
     '<div class="field-err" id="vaErr"></div>' +
     '<button class="btn btn-p" id="vaSaveBtn" style="width:100%" onclick="vaSave()">💾 Сохранить</button>' +
     '<div style="display:flex;gap:8px;margin-top:8px">' +
