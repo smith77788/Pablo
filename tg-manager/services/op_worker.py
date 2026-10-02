@@ -464,6 +464,12 @@ _ACCT_WAIT_MAX_MIN = 20  # сколько ждать свободные акка
 _DEFER_NOTIFY_MIN_S = _int_env("OP_DEFER_NOTIFY_MIN_SEC", 30 * 60, 60, 24 * 3600)
 
 
+# Сколько помнить, что о судьбе ЭТОЙ операции владельцу уже сказали. Операция
+# живёт часами и переживает несколько деплоев; сутки с запасом покрывают её срок,
+# а новая операция получает новый op_id и свой ключ.
+_OP_NOTIFY_DEDUP_S = 48 * 3600
+
+
 async def _notify_owner_about_op(
     pool: "asyncpg.Pool", bot, owner_id: int | None, text: str,
     dedup_key: str | None = None,
@@ -478,6 +484,22 @@ async def _notify_owner_about_op(
     """
     if not bot or not owner_id:
         return
+    # Анти-повтор в notify_if_enabled живёт В ПАМЯТИ ПРОЦЕССА и окно у него
+    # минута, поэтому для судьбы операции он не работает дважды: Railway
+    # перезапускает процесс на каждом деплое (и операция возвращается в очередь
+    # ровно по этой причине), а между двумя откладываниями одной операции
+    # проходят десятки минут. Владелец получал одно и то же сообщение заново
+    # после каждого рестарта и на каждом круге — ровно та жалоба, из-за которой
+    # в db.py появился персистентный анти-спам. Исход операции — событие
+    # однократное, поэтому окно берём большое.
+    if dedup_key:
+        try:
+            if not await db.notify_dedup_ok(
+                pool, owner_id, f"op:{dedup_key}", _OP_NOTIFY_DEDUP_S):
+                return
+        except Exception:
+            # Fail-open: сбой анти-спама не повод молчать о судьбе операции.
+            log_exc_swallow(log, f"op_worker: анти-повтор {dedup_key} не сработал")
     try:
         await db.notify_if_enabled(pool, bot, owner_id, "op_complete", text,
                                    dedup_key=dedup_key)
@@ -2109,6 +2131,20 @@ async def _progress_monitor(
                         break
                 if milestone is not None:
                     _progress_milestones[op_id] = milestone
+                    # Веха — событие ОПЕРАЦИИ, а не прогона. `done_items`
+                    # обнуляется на каждом возврате в очередь (иначе счётчик
+                    # копился бы поверх прошлого прогона), и возобновлённый
+                    # прогон заново проходит 25/50/75% по уже взятым целям.
+                    # Память вех живёт в процессе и рестарт не переживает,
+                    # поэтому владелец получал «25%», «50%», «75%» по второму и
+                    # третьему разу за одну операцию.
+                    try:
+                        if not await db.notify_dedup_ok(
+                            pool, owner_id, f"op-milestone:{op_id}:{milestone}",
+                            _OP_NOTIFY_DEDUP_S):
+                            continue
+                    except Exception:
+                        pass
                     bar_filled = milestone // 10
                     bar = "█" * bar_filled + "░" * (10 - bar_filled)
                     from aiogram.utils.keyboard import InlineKeyboardBuilder

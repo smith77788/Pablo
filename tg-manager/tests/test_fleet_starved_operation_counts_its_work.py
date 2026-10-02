@@ -65,6 +65,10 @@ class _Pool:
         self.writes: list[tuple] = []
 
     async def fetchrow(self, query, *args):
+        # Персистентный анти-повтор уведомлений: первая попытка всегда
+        # проходит (в проде INSERT .. RETURNING отдаёт строку).
+        if "notification_dedup" in query:
+            return {"user_id": 555}
         if "acct_wait_since FROM operation_queue" in query:
             return {"acct_wait_since": self.waiting_since}
         if "op_type, params" in query:
