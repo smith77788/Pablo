@@ -46,6 +46,8 @@ _HELP = {
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
     "infragram_op_fleet_starved_total":
         "Операции, закрытые из-за того, что свободных аккаунтов так и не стало",
+    "infragram_invite_dedup_write_failures_total":
+        "Потерянные записи дедупа инвайта (следующий прогон может пригласить повторно)",
     "infragram_recurring_reschedule_failures_total":
         "Повторяющиеся операции, у которых не удалось поставить следующий запуск",
     "infragram_op_owner_sem_defers_total":

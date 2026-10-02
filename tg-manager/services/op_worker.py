@@ -14094,24 +14094,57 @@ async def _load_invited_targets(pool, owner_id: int, group_key: str) -> set:
         return set()
 
 
-async def _record_invited_targets(pool, owner_id: int, group_key: str, op_id: int, targets) -> None:
-    """Запомнить обработанные цели (best-effort, не роняет операцию)."""
+async def _record_invited_targets(pool, owner_id: int, group_key: str, op_id: int, targets) -> bool:
+    """Запомнить обработанные цели. True — запись подтверждена базой.
+
+    Операцию не роняет (дедуп — защита на БУДУЩЕЕ, в текущем прогоне цели
+    держит набор в памяти), но и молчать нельзя: пока эта запись считалась
+    «best-effort» и возвращала None, потеря выглядела как успех. А потеря здесь
+    значит, что СЛЕДУЮЩИЙ прогон пригласит тех же людей второй раз — для самой
+    баноопасной операции продукта это прямой путь к PeerFlood и бану аккаунтов.
+
+    Одна повторная попытка здесь же: типовая причина — мгновенная (занятый пул,
+    блокировка на DDL), и она проходит сама. Если и вторая не удалась, вызывающий
+    узнаёт об этом по False и переносит цели в следующую запись.
+    """
     uniq = {str(t) for t in targets if t is not None}
     if not uniq:
-        return
-    try:
-        await pool.execute(_INVITE_LOG_DDL)
-        # Один запрос вместо N: прогон на 2000 успешных целей давал 2000
-        # round-trip'ов в конце операции — минуты ожидания на ровном месте и
-        # окно, в котором падение процесса теряло ВЕСЬ дедуп прогона.
-        await pool.execute(
-            "INSERT INTO invite_target_log(owner_id, group_key, target, op_id) "
-            "SELECT $1, $2, t, $4 FROM unnest($3::text[]) AS t "
-            "ON CONFLICT DO NOTHING",
-            owner_id, group_key, sorted(uniq), op_id,
-        )
-    except Exception:
-        log_exc_swallow(log, "invite dedup: record failed")
+        return True
+    for _attempt in (1, 2):
+        try:
+            await _invite_log_insert(pool, owner_id, group_key, op_id, uniq)
+            return True
+        except Exception:
+            if _attempt == 1:
+                log.warning(
+                    "invite dedup: запись %d целей не удалась, повторяю", len(uniq))
+                await asyncio.sleep(0.5)
+                continue
+            # Громко: тихий лог здесь стоил бы повторного приглашения людей,
+            # которых уже приглашали, и счёт пришёл бы банами аккаунтов.
+            log.error(
+                "invite dedup: ЗАПИСЬ ПОТЕРЯНА, op=%s owner=%s целей=%d — "
+                "следующий прогон может пригласить их повторно",
+                op_id, owner_id, len(uniq))
+            _reliability_metric(
+                "infragram_invite_dedup_write_failures_total", op_type="mass_invite")
+            return False
+    return False
+
+
+async def _invite_log_insert(pool, owner_id: int, group_key: str, op_id: int,
+                             uniq: set) -> None:
+    """Сама запись дедупа — отдельно, чтобы попытку можно было повторить."""
+    await pool.execute(_INVITE_LOG_DDL)
+    # Один запрос вместо N: прогон на 2000 успешных целей давал 2000
+    # round-trip'ов в конце операции — минуты ожидания на ровном месте и
+    # окно, в котором падение процесса теряло ВЕСЬ дедуп прогона.
+    await pool.execute(
+        "INSERT INTO invite_target_log(owner_id, group_key, target, op_id) "
+        "SELECT $1, $2, t, $4 FROM unnest($3::text[]) AS t "
+        "ON CONFLICT DO NOTHING",
+        owner_id, group_key, sorted(uniq), op_id,
+    )
 
 
 async def _exec_contacts_sync(
@@ -15211,6 +15244,9 @@ async def _exec_mass_invite(
     flood_storm = False
     flood_streak = 0
     invited_this_run: set = set()  # цели, реально отданные движку — для дедупа впредь
+    # Цели, чья запись в дедуп ещё не подтверждена базой: переносятся в
+    # следующую запись, пока не подтвердятся.
+    _dedup_unconfirmed: set = set()
 
     async def _remember_invited(targets) -> None:
         """Записать обработанные цели в дедуп СРАЗУ, а не в конце прогона.
@@ -15231,10 +15267,18 @@ async def _exec_mass_invite(
         пачки идут минутами друг от друга, так что цена незаметна.
         """
         _new = {str(t) for t in targets if t is not None} - invited_this_run
-        if not _new:
-            return
         invited_this_run.update(_new)
-        await _record_invited_targets(pool, owner_id, _group_key, op_id, _new)
+        # Неподтверждённые цели переносятся в СЛЕДУЮЩУЮ запись. Раньше неудачная
+        # запись пачки просто терялась: внутри прогона это не видно (цели держит
+        # набор в памяти), а следующий прогон приглашал тех же людей повторно —
+        # и узнать об этом было негде. Запись идемпотентна, пачки идут минутами
+        # друг от друга, так что повторная отправка той же пачки ничего не стоит.
+        _dedup_unconfirmed.update(_new)
+        if not _dedup_unconfirmed:
+            return
+        if await _record_invited_targets(
+                pool, owner_id, _group_key, op_id, _dedup_unconfirmed):
+            _dedup_unconfirmed.clear()
     _phones_not_found = 0          # номеров не в Telegram (для честного отчёта)
     _ok_logged = 0                 # сколько успешных целей записано в лог (для CSV)
     _ok_seen: set = set()          # уже залогированные 'ok' цели (без дублей в отчёте)

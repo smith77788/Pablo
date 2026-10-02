@@ -127,3 +127,87 @@ def test_dedup_key_is_not_the_operation_id():
     assert "op_id" not in loader.split('"""')[-1], (
         "в выборке дедупа появился номер операции — повтор снова будет "
         "приглашать уже приглашённых")
+
+
+# ── Вторая половина того же класса: запись НЕ УДАЛАСЬ ────────────────────────
+#
+# Писать по ходу прогона мало: сама запись может не пройти (занятый пул,
+# блокировка на DDL, обрыв соединения). Такая потеря выглядела как успех —
+# функция возвращала None и глотала исключение в debug-лог. Внутри прогона это
+# не видно (цели держит набор в памяти), а СЛЕДУЮЩИЙ прогон приглашал тех же
+# людей второй раз, и узнать об этом было негде: ни в метриках, ни в ошибке
+# операции. Для самой баноопасной операции продукта это прямой путь к PeerFlood.
+
+
+class _FlakyPool(_Pool):
+    """Пул, у которого первые `fail_first` записей дедупа не проходят."""
+
+    def __init__(self, fail_first=1):
+        super().__init__()
+        self.fail_left = fail_first
+        self.attempts = 0
+
+    async def execute(self, query, *args):
+        if "INSERT INTO invite_target_log" in query:
+            self.attempts += 1
+            if self.fail_left > 0:
+                self.fail_left -= 1
+                raise RuntimeError("пул соединений занят")
+        return await super().execute(query, *args)
+
+
+def test_a_transient_failure_is_retried_on_the_spot():
+    """Типовая причина мгновенная — одна повторная попытка её закрывает."""
+    pool = _FlakyPool(fail_first=1)
+    ok = asyncio.run(
+        op_worker._record_invited_targets(pool, 555, "chat:1", 7, ["a", "b"]))
+    assert ok is True, "повторная попытка записи не сделана"
+    assert pool.stored == {(555, "chat:1", "a"), (555, "chat:1", "b")}
+    assert pool.attempts == 2
+
+
+def test_a_lost_record_is_reported_not_swallowed():
+    """Потеря дедупа обязана быть видна снаружи, а не только в логе."""
+    from services import metrics
+
+    metrics.reset()
+    pool = _FlakyPool(fail_first=99)
+    ok = asyncio.run(
+        op_worker._record_invited_targets(pool, 555, "chat:1", 7, ["a"]))
+    assert ok is False, (
+        "потерянная запись дедупа возвращает «всё хорошо»: вызывающий не узнает, "
+        "что следующий прогон пригласит тех же людей повторно")
+    counters = metrics.snapshot().get("counters") or {}
+    assert any("infragram_invite_dedup_write_failures_total" in str(k)
+               for k in counters), (
+        f"потеря дедупа не попала в метрики: снаружи она невидима — {counters}")
+    assert ("infragram_invite_dedup_write_failures_total"
+            in metrics._HELP), "у метрики нет описания — она не попадёт в выдачу"
+
+
+def test_nothing_to_write_is_not_a_failure():
+    """Пустая пачка — не потеря: вызывающему нечего переносить."""
+    assert asyncio.run(
+        op_worker._record_invited_targets(_Pool(), 555, "g", 1, [])) is True
+
+
+def test_unconfirmed_targets_are_carried_to_the_next_batch():
+    """Храповик: неподтверждённая пачка переносится в следующую запись.
+
+    Сама запись идемпотентна, пачки идут минутами друг от друга — повторить
+    предыдущую пачку вместе с новой ничего не стоит, зато неудача одной записи
+    перестаёт быть безвозвратной потерей.
+    """
+    helper = _func("_remember_invited", within="_exec_mass_invite")
+    flat = " ".join(helper.split())
+    assert "_dedup_unconfirmed" in flat, (
+        "неудачная запись пачки по-прежнему теряется безвозвратно: следующая "
+        "запись о ней не знает")
+    assert "_record_invited_targets(\n" in helper or "_record_invited_targets(" in flat
+    assert "_dedup_unconfirmed)" in flat or "_dedup_unconfirmed," in flat, (
+        "в дедуп пишется только новая пачка, а не вместе с неподтверждёнными")
+    assert "if await _record_invited_targets(" in flat, (
+        "результат записи не проверяется — перенос не состоится")
+    assert "_dedup_unconfirmed.clear()" in flat, (
+        "подтверждённые цели не снимаются с переноса: пачка будет расти весь "
+        "прогон")
