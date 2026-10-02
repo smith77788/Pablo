@@ -221,10 +221,16 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
         groups.setdefault(key, []).append(r)
 
     for (owner_id, acc_id), channels in groups.items():
+        # owner_id в условии — не придирка: acc_id берётся из managed_channels, и
+        # если он когда-нибудь разойдётся с владельцем канала (перенос канала,
+        # правка строки руками, баг в заведении), цикл подключился бы ЧУЖОЙ
+        # сессией — один владелец ходил бы в Telegram аккаунтом другого. Запасной
+        # аккаунт ниже уже выбирается строго по owner_id, то есть замысел именно
+        # такой; закрываем и основной путь.
         acc = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE id=$1 AND is_active=true AND session_str IS NOT NULL "
-            "AND COALESCE(in_operation, FALSE) = FALSE",
-            acc_id,
+            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=true "
+            "AND session_str IS NOT NULL AND COALESCE(in_operation, FALSE) = FALSE",
+            acc_id, owner_id,
         )
         if not acc:
             # Аккаунт, которым канал заводили, умер (бан, выключен, сессия
@@ -275,6 +281,11 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
             # осмотрен, пусть его возьмёт следующий круг.
             continue
 
+        # Отметки осмотра собираем и пишем ОДНИМ запросом на пачку (ниже, в
+        # finally): по строке это был отдельный round-trip на каждый канал —
+        # до _BATCH_SIZE лишних обращений к базе за группу, причём в цикле,
+        # который и без того держит захваченную сессию аккаунта.
+        _seen: list = []
         try:
             # Карточки всей пачки — за ОДНО подключение и с одним обходом
             # диалогов. Раньше здесь был get_full_channel_info на каждый канал:
@@ -299,11 +310,8 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
             for ch in _batch:
                 info = _infos.get(int(ch["channel_id"]))
 
-                # Always update last_drift_check
-                await pool.execute(
-                    "UPDATE managed_channels SET last_drift_check=now() WHERE id=$1",
-                    ch["id"],
-                )
+                # Осмотрен — независимо от того, удалось ли прочитать карточку.
+                _seen.append(ch["id"])
 
                 if not info:
                     continue
@@ -439,6 +447,10 @@ async def _check_all(pool: asyncpg.Pool, bot) -> bool:
                     )
 
         finally:
+            # Отметка — в finally: при исключении посреди пачки осмотренные
+            # строки иначе остались бы без отметки и забрали бы выборку
+            # следующего круга себе.
+            await _stamp_checked(pool, _seen)
             # Освобождаем ту же сессию, что захватывали выше (при мёртвом
             # «родном» аккаунте это запасной — acc_id указывал бы на чужую).
             await op_worker.release_accounts([_use_acc_id])
