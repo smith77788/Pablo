@@ -2423,7 +2423,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="screen" id="s-admin-stats">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">📊 Статистика</div>
+    <div class="hdr-title">📊 Статистика сервиса</div>
   </div>
   <div class="sb" id="adm-stats-body"></div>
 </div>
@@ -9035,8 +9035,13 @@ document.addEventListener('click', function(ev) {
   setTimeout(function(){
     b.disabled = true; b.style.opacity = '.65'; b.innerHTML = '⏳';
     setTimeout(function(){
-      b.disabled = false; b.style.opacity = ''; b.innerHTML = was;
       delete b.dataset.waiting;
+      // Если за эту секунду обработчик сам переписал кнопку («Запущено»,
+      // «Отправляется…») — значит он ведёт её состояние сам, и трогать его
+      // нельзя: иначе запертая им кнопка снова станет нажимаемой и запуск
+      // уйдёт второй раз. Возвращаем подпись только если часы ещё на месте.
+      if (b.innerHTML !== '⏳') return;
+      b.disabled = false; b.style.opacity = ''; b.innerHTML = was;
     }, 1200);
   }, 0);
 }, true);
@@ -15748,7 +15753,7 @@ async function clearBotCommands() {
 let BSTATS_BOT_ID = null;
 async function openBotStats(botId, botName) {
   BSTATS_BOT_ID = botId;
-  txt('bstats-title', '📊 ' + (botName||'Статистика'));
+  txt('bstats-title', '📊 ' + (botName || 'Статистика бота'));
   push('s-botstats');
   txt('bstatsGrid', '<div class="spin-wrap" style="grid-column:1/-1"><div class="spin"></div></div>');
   txt('bstatsChart', '');
