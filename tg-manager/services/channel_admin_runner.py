@@ -104,6 +104,12 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
         except Exception:
             log.exception("channel_admin_runner: статистика канала %s", a["channel_id"])
 
+    try:
+        from services import va_references
+        stats["references"] = await va_references.refresh_due(pool)
+    except Exception:
+        log.exception("channel_admin_runner: каналы-образцы")
+
     stats["reports"] = await _daily_reports(pool, bot)
     return stats
 

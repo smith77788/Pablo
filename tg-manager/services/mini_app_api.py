@@ -14708,6 +14708,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         """Экран канала: настройки, рубрики, план, черновики, статистика, журнал."""
         from services import channel_admin as _ca
         from services import channel_brain_store as _cbs
+        from services import va_references as _var
         ch = await _ca.channel_row(pool, uid, cid)
         if not ch:
             return None
@@ -14723,6 +14724,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "drafts": await _ca.list_drafts(pool, uid, cid) if admin else [],
             "report": await _ca.channel_report(pool, uid, cid) if admin else None,
             "events": await _ca.events(pool, uid, cid) if admin else [],
+            "references": await _var.list_refs(pool, uid, cid) if admin else [],
         }
 
     async def va_channel_get(request: web.Request) -> web.Response:
@@ -14854,6 +14856,58 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def va_draft_regenerate(request: web.Request) -> web.Response:
         return await _va_draft(request, "regenerate")
+
+    # Каналы-образцы: добавить (и сразу изучить), изучить заново, убрать.
+    async def va_ref_add(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        cid = _va_cid(request)
+        body = await _va_body(request)
+        if cid is None or body is None:
+            return _err("Не удалось разобрать запрос")
+        from services import va_references as _var
+        try:
+            ref = await _var.add_ref(pool, uid, cid, body.get("ref"), body.get("kind") or "competitor")
+        except _var.ReferenceError_ as e:
+            return _err(str(e), 400)
+        log.info("va reference add uid=%s channel=%s ref=%s", uid, cid, ref["username"])
+        await _var.analyze(pool, uid, ref["id"])
+        return await va_channel_get_for(uid, cid)
+
+    async def va_ref_refresh(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info["rid"])
+        except (KeyError, TypeError, ValueError):
+            return _err("Неверный образец")
+        row = await pool.fetchrow(
+            "SELECT channel_id, attempted_at > now() - interval '10 minutes' AS fresh "
+            "FROM va_reference_channels WHERE id=$1 AND owner_id=$2", rid, uid)
+        if not row:
+            return _err("Образец не найден", 404)
+        if row["fresh"]:
+            return _err("Образец только что изучался — повторить можно через 10 минут", 429)
+        from services import va_references as _var
+        await _var.analyze(pool, uid, rid)
+        return await va_channel_get_for(uid, int(row["channel_id"]))
+
+    async def va_ref_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rid = int(request.match_info["rid"])
+        except (KeyError, TypeError, ValueError):
+            return _err("Неверный образец")
+        cid = await pool.fetchval(
+            "SELECT channel_id FROM va_reference_channels WHERE id=$1 AND owner_id=$2", rid, uid)
+        from services import va_references as _var
+        if cid is None or not await _var.delete_ref(pool, uid, rid):
+            return _err("Образец не найден", 404)
+        return await va_channel_get_for(uid, int(cid))
 
     # ── Proxies ──────────────────────────────────────────────────────────────
 
@@ -18025,6 +18079,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/va/drafts/{did}/publish", va_draft_publish)
     app.router.add_post("/api/miniapp/va/drafts/{did}/reject", va_draft_reject)
     app.router.add_post("/api/miniapp/va/drafts/{did}/regenerate", va_draft_regenerate)
+    app.router.add_post("/api/miniapp/va/channel/{cid}/references", va_ref_add)
+    app.router.add_post("/api/miniapp/va/references/{rid}/refresh", va_ref_refresh)
+    app.router.add_delete("/api/miniapp/va/references/{rid}", va_ref_delete)
     app.router.add_post("/api/miniapp/schedule_post", schedule_post)
     # Proxies
     app.router.add_get("/api/miniapp/proxies", proxies)

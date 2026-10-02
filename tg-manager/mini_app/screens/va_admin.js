@@ -372,6 +372,86 @@ function _vaBusinessVal() {
   };
 }
 
+// Каналы-образцы: на кого равняться. Показываем, что администратор понял из каждого.
+const _VA_REF_KINDS = [['competitor', 'Конкурент'], ['own', 'Мой успешный канал'], ['example', 'Просто нравится']];
+
+function _vaRefHtml(r) {
+  const st = r.stats || {}, le = r.lessons || {};
+  let body;
+  if (r.status === 'pending') body = '<div style="color:var(--hint)">⏳ Ещё не изучен — займусь в ближайшие минуты.</div>';
+  else if (r.status === 'error') body = '<div style="color:var(--orange,#fb923c)">⚠️ ' + esc(r.error) + '</div>';
+  else {
+    const facts = [];
+    if (st.members) facts.push(_vaNum(st.members) + ' подписчиков');
+    if (st.per_day) facts.push(String(st.per_day).replace('.', ',') + ' поста в день');
+    if (st.avg_len) facts.push('пост ≈ ' + _vaNum(st.avg_len) + ' знаков');
+    if (st.reach_pct) facts.push('охват ' + String(st.reach_pct).replace('.', ',') + ' %');
+    if ((st.top_hours || []).length) facts.push('чаще пишет в ' + st.top_hours.map(function (x) { return x + ':00'; }).join(', '));
+    const rows = [];
+    if (facts.length) rows.push(facts.map(esc).join(' · '));
+    if (le.summary) rows.push('<b>Чем берёт:</b> ' + esc(le.summary));
+    if (le.style) rows.push('<b>Подача:</b> ' + esc(le.style));
+    if ((le.works || []).length) rows.push('<b>Что заходит:</b> ' + le.works.map(esc).join('; '));
+    if ((le.formats || []).length) rows.push('<b>Приёмы:</b> ' + le.formats.map(esc).join('; '));
+    if ((le.avoid || []).length) rows.push('<b>Заходит хуже:</b> ' + le.avoid.map(esc).join('; '));
+    if (st.length_hint) rows.push(esc(st.length_hint[0].toUpperCase() + st.length_hint.slice(1)));
+    if (!le.summary && !le.style) rows.push('<span style="color:var(--hint)">Разбор подачи не получен — пока учитываю только цифры.</span>');
+    body = rows.join('<br>');
+  }
+  return '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.55">' +
+    '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px">' +
+      '<b>@' + esc(r.username) + '</b><span style="font-size:12px;color:var(--hint)">' + esc(r.kind_label) + '</span></div>' +
+    body +
+    '<div style="display:flex;gap:8px;margin-top:10px">' +
+      '<button class="btn btn-s" style="flex:1;padding:6px" onclick="vaRefAct(' + r.id + ',\'refresh\')">🔄 Изучить заново</button>' +
+      '<button class="btn btn-s" style="padding:6px 12px" onclick="vaRefAct(' + r.id + ',\'delete\')" aria-label="Убрать образец">🗑</button>' +
+    '</div></div>';
+}
+
+function _vaRefsHtml(refs) {
+  return '<div class="sec">Каналы-образцы</div>' +
+    '<div class="field-note" style="margin:0 0 8px">Конкуренты или ваш успешный канал. Администратор изучит, как они пишут и что у них набирает просмотры, и будет писать так же сильно — без копирования текстов.</div>' +
+    refs.map(_vaRefHtml).join('') +
+    (refs.length < 5 ? '<div class="lst" style="padding:12px 14px">' +
+      '<div class="field"><label>Публичный канал</label><input id="vaRefName" maxlength="80" placeholder="@channel или t.me/channel"></div>' +
+      '<div class="field"><label>Это</label><select id="vaRefKind">' +
+        _VA_REF_KINDS.map(function (k) { return _vaOpt(k[0], 'competitor', k[1]); }).join('') + '</select></div>' +
+      '<div class="field-err" id="vaRefErr"></div>' +
+      '<button class="btn btn-p" id="vaRefBtn" style="width:100%" onclick="vaRefAdd()">➕ Добавить и изучить</button>' +
+    '</div>' : '');
+}
+
+async function vaRefAdd() {
+  const btn = document.getElementById('vaRefBtn'), err = document.getElementById('vaRefErr');
+  err.textContent = '';
+  btn.disabled = true; btn.textContent = '⏳ Читаю канал и разбираю…';
+  try {
+    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/references', {
+      method: 'POST', timeoutMs: 180000,
+      body: JSON.stringify({ ref: _vaVal('vaRefName') || '', kind: _vaVal('vaRefKind') || 'competitor' }),
+    });
+    toast('✅ Образец добавлен');
+    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
+  } catch (e) {
+    err.textContent = (e && e.message) || 'Не получилось';
+    btn.disabled = false; btn.textContent = '➕ Добавить и изучить';
+  }
+}
+
+async function vaRefAct(id, action) {
+  if (action === 'delete' && !(await askConfirm('Убрать этот канал из образцов?'))) return;
+  toast(action === 'delete' ? 'Убираю…' : 'Изучаю заново…');
+  try {
+    const d = await api('/api/miniapp/va/references/' + id + (action === 'delete' ? '' : '/refresh'), {
+      method: action === 'delete' ? 'DELETE' : 'POST', body: '{}', timeoutMs: 180000,
+    });
+    toast('✅ Готово');
+    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
+  } catch (e) {
+    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
+  }
+}
+
 function _vaChannelHtml(d) {
   const ch = d.channel || {}, s = d.settings || {};
   if (!s.installed) return _vaInstallHtml(ch, s);
@@ -390,6 +470,7 @@ function _vaChannelHtml(d) {
   h += _vaDraftsHtml(d.drafts || [], 'ch');
   h += _vaReportHtml(d.report, s);
   h += _vaBriefHtml(s.brief || {});
+  h += _vaRefsHtml(d.references || []);
   const plan = d.plan || [];
   h += '<div class="sec">Контент-план</div><div class="lst">' + (plan.length ? plan.slice(0, 14).map(function (p) {
     return '<div class="li"><div class="li-body"><div class="li-name">' + esc(p.pillar || 'Пост') + '</div>' +

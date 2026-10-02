@@ -250,6 +250,14 @@ def _business_lines(profile: dict, today: Optional[date] = None) -> list[str]:
     return out
 
 
+def _reference_lines(profile: dict) -> list[str]:
+    refs = profile.get("references") or []
+    if not refs:
+        return []
+    from services import va_references
+    return va_references.prompt_lines(refs)
+
+
 def sales_cap(profile: dict) -> Optional[float]:
     share = _business_obj(profile).get("sales_share")
     return None if share is None else max(0, min(60, int(share))) / 100
@@ -551,6 +559,7 @@ def build_post_prompt(
         lines.append(f"Пожелания владельца: {profile['notes']}")
     lines.extend(_brief_lines(profile))
     lines.extend(_business_lines(profile))
+    lines.extend(_reference_lines(profile))
     lines.append("")
     if is_intro:
         lines.append(
@@ -776,6 +785,7 @@ def build_plan_prompt(profile: dict, slot_pillars: list[str], recent_texts: list
         lines.append(f"Пожелания владельца: {profile['notes']}")
     lines.extend(_brief_lines(profile))
     lines.extend(_business_lines(profile))
+    lines.extend(_reference_lines(profile))
     if promo_active(_business_obj(profile), _local_today(profile)):
         lines.append("Продающие слоты строй вокруг действующей акции.")
     if recent_texts:
@@ -1202,7 +1212,9 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     try:
         complete = complete or _default_complete()
         recent = await content_memory.recent_texts(pool, owner_id, str(channel_id), limit=8)
-        profile = {**admin, "title": (await channel_row(pool, owner_id, channel_id) or {}).get("title")}
+        from services import va_references
+        profile = {**admin, "title": (await channel_row(pool, owner_id, channel_id) or {}).get("title"),
+                   "references": await va_references.for_prompt(pool, owner_id, channel_id)}
         system, user = build_plan_prompt(profile, pillars, recent)
         topics = parse_plan_topics(await complete(system, user), len(pillars))
     except Exception as e:
@@ -1274,8 +1286,11 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
     admin = await get_admin(pool, owner_id, channel_id)
     if not admin:
         raise ChannelAdminError("Администратор на этом канале не установлен")
+    from services import va_references
     ch = await channel_row(pool, owner_id, channel_id) or {}
-    profile = {**admin, "title": ch.get("title") or ""}
+    refs = await va_references.for_prompt(pool, owner_id, channel_id)
+    profile = {**admin, "title": ch.get("title") or "", "references": refs}
+    rival_names = competitor_names(admin) + va_references.competitor_titles(refs)
     recent = await content_memory.recent_texts(pool, owner_id, str(channel_id), limit=20)
     names, weights, brain = await _pillars(pool, owner_id, channel_id)
     rules = await _rules(pool, owner_id, channel_id)
@@ -1316,7 +1331,7 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
         verdict = await editorial_review.review_draft(pool, owner_id, text,
                                                       channel_key=str(channel_id))
         reasons = list(verdict.reasons)
-        rivals = mentioned_competitors(text, competitor_names(admin))
+        rivals = mentioned_competitors(text, rival_names)
         if rivals:
             reasons.append("упомянут конкурент: " + ", ".join(rivals[:3]))
         if not verdict.needs_review and not rivals:

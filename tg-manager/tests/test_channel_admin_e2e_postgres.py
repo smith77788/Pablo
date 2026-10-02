@@ -288,6 +288,42 @@ def test_miniapp_routes_over_real_db(pool, stubs, monkeypatch):
         assert st == 200 and d["settings"]["business"] == biz  # другие поля бизнес не затирают
         st, _ = await call("PUT", f"/api/miniapp/va/channel/{CID}", {"business": {"goal": "деньги"}})
         assert st == 400
+
+        # Каналы-образцы: добавить → сразу изучен → в промпте поста → убрать.
+        from services import channel_admin as ca
+        from services import va_references as vr
+        base = datetime.now(timezone.utc) - timedelta(days=3)
+
+        async def _read(pool_, owner_id, channel_id, uname):
+            return {"title": "Конкурент", "members_count": 900, "recent": [
+                {"id": i, "text": f"Пост номер {i}. Полезный разбор.", "views": 100 + i,
+                 "date": base + timedelta(hours=8 * i)} for i in range(9)]}
+
+        async def _ai(system, user):
+            return '{"summary": "коротко и с цифрами", "works": ["разборы"]}'
+
+        monkeypatch.setattr(vr, "_read", _read)
+        monkeypatch.setattr(ca, "_default_complete", lambda: _ai)
+        st, d = await call("POST", f"/api/miniapp/va/channel/{CID}/references",
+                           {"ref": "https://t.me/rival_chan", "kind": "competitor"})
+        assert st == 200, d
+        [ref] = d["references"]
+        assert ref["status"] == "ready" and ref["stats"]["posts"] == 9
+        assert ref["lessons"]["summary"] == "коротко и с цифрами"
+        st, d = await call("POST", f"/api/miniapp/va/channel/{CID}/references", {"ref": "@RIVAL_CHAN"})
+        assert st == 400 and "уже есть" in d["error"]
+        st, d = await call("POST", f"/api/miniapp/va/channel/{CID}/references", {"ref": "t.me/+abc"})
+        assert st == 400
+        st, d = await call("POST", f"/api/miniapp/va/references/{ref['id']}/refresh")
+        assert st == 429  # только что изучался
+        refs = await vr.for_prompt(pool, OWNER, CID)
+        _, user = ca.build_post_prompt({"title": "x", "references": refs}, pillar="Польза")
+        assert "@rival_chan" in user and "коротко и с цифрами" in user
+        assert await vr.refresh_due(pool) == 0
+        st, d = await call("DELETE", f"/api/miniapp/va/references/{ref['id']}")
+        assert st == 200 and d["references"] == []
+        st, _ = await call("DELETE", f"/api/miniapp/va/references/{ref['id']}")
+        assert st == 404
         st, d = await call("PUT", f"/api/miniapp/va/channel/{CID}",
                            {"window_start": 20, "window_end": 10})
         assert st == 400
