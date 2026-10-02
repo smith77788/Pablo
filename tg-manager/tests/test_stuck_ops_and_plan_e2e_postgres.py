@@ -85,6 +85,13 @@ def test_watchdog_ignores_scheduled_ops(pool, monkeypatch):
     async def _seed():
         await pool.execute("DELETE FROM operation_queue WHERE owner_id=ANY($1::bigint[])",
                            [OWNER_A, OWNER_B])
+        # Алерт перечисляет лишь первые несколько операций, а в общей тестовой
+        # базе остаются просроченные строки от других e2e-файлов — засеянная
+        # операция до текста не доезжала. Просроченная pending здесь всегда
+        # мусор прошлых прогонов.
+        await pool.execute(
+            "DELETE FROM operation_queue WHERE status IN ('pending','running') "
+            "  AND created_at < now() - interval '30 minutes'")
         # (1) отложенная континуация ЧУЖОГО владельца: pending, создана давно, но
         #     scheduled_for в будущем → НЕ застряла (поллер её ждёт).
         sched = await pool.fetchval(
@@ -120,6 +127,13 @@ def test_watchdog_flags_overdue_pending(pool, monkeypatch):
 
     async def _seed():
         await pool.execute("DELETE FROM operation_queue WHERE owner_id=$1", OWNER_A)
+        # Алерт перечисляет лишь первые несколько операций, а в общей тестовой
+        # базе остаются просроченные строки от других e2e-файлов — засеянная
+        # операция до текста не доезжала. Просроченная pending здесь всегда
+        # мусор прошлых прогонов.
+        await pool.execute(
+            "DELETE FROM operation_queue WHERE status IN ('pending','running') "
+            "  AND created_at < now() - interval '30 minutes'")
         return await pool.fetchval(
             "INSERT INTO operation_queue(owner_id,op_type,status,params,created_at) "
             "VALUES($1,'mass_invite','pending',$2, now()-interval '60 min') RETURNING id",
@@ -127,7 +141,14 @@ def test_watchdog_flags_overdue_pending(pool, monkeypatch):
 
     stuck_id = _run(_seed())
     monkeypatch.setenv("ADMIN_IDS", "424242")
-    op_worker._alerted_stuck_ops.clear()
+    # Анти-повтор алертов теперь персистентный (таблица notification_dedup):
+    # множество в памяти процесса убрано, потому что деплой присылал владельцу
+    # тот же список заново. Чистим окно по этому админу, иначе второй прогон
+    # теста видит объявление уже сделанным.
+    try:
+        _run(pool.execute("DELETE FROM notification_dedup WHERE user_id=$1", 424242))
+    except Exception:
+        pass    # таблицы может не быть в тестовой схеме — гейт тогда fail-open
     bot = _FakeBot()
     _run(op_worker._watchdog_alerts(pool, bot))
     assert any(f"#{stuck_id}" in t for _, t in bot.sent), "здоровый случай обязан детектиться"

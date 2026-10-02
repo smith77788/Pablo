@@ -3906,7 +3906,22 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # поэтому доведённая со второй попытки операция выглядела
             # «частичной». Журнал обнуления не знает — см. _own_journal_coverage.
             _done_q = int((_progress["done_items"] if _progress else 0) or 0)
-            _done_n = max(_done_q, await _own_journal_coverage(pool, op_id))
+            try:
+                _goal = int((_progress["total_items"] if _progress else 0) or 0)
+            except (TypeError, ValueError):
+                _goal = 0
+            # Журналом отвечаем только на один вопрос: закрыта ли ВСЯ цель за все
+            # попытки. Если да — прогресс равен цели, и проверка недобора больше
+            # не называет доведённую работу частичной. Если нет, счётчик очереди
+            # остаётся как есть.
+            #
+            # Почему не «максимум из двух»: журнал пишут не только цели. Инвайт,
+            # например, кладёт туда служебную строку про фолбэк-ссылку, и
+            # покрытие выходило на единицу больше реальной работы — живой
+            # Postgres показал done_items=21 при цели 20 и 13 при 12. Счётчик
+            # прогресса врать не должен ни в одну сторону.
+            _covered = await _own_journal_coverage(pool, op_id)
+            _done_n = _goal if (_goal > 0 and _covered >= _goal) else _done_q
             _final_status = op_status.classify_final(
                 result.get("status"),
                 ok=_ok,
