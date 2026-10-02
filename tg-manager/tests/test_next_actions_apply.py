@@ -28,9 +28,11 @@ async def test_retry_skips_mass_publish_and_submits_rest(monkeypatch):
     monkeypatch.setattr(obus, "submit", fake_submit)
 
     rows = [
-        {"op_type": "mass_invite", "params": {"x": 1}, "label": "Инвайт", "total_items": 10},
-        {"op_type": "mass_publish", "params": {"y": 2}, "label": "Публикация", "total_items": 5},
-        {"op_type": "run_broadcast", "params": '{"z": 3}', "label": "Рассылка", "total_items": 7},
+        # id обязателен: повтор ссылается им на журнал предка (retry_of_op),
+        # иначе уже обработанные цели получат работу второй раз.
+        {"id": 1, "op_type": "mass_invite", "params": {"x": 1}, "label": "Инвайт", "total_items": 10},
+        {"id": 2, "op_type": "mass_publish", "params": {"y": 2}, "label": "Публикация", "total_items": 5},
+        {"id": 3, "op_type": "run_broadcast", "params": '{"z": 3}', "label": "Рассылка", "total_items": 7},
     ]
     res = await _retry_failed_ops_core(_Pool(rows), uid=42)
 
@@ -41,7 +43,7 @@ async def test_retry_skips_mass_publish_and_submits_rest(monkeypatch):
     assert set(op_types) == {"mass_invite", "run_broadcast"}
     # JSON-строка params распарсилась в dict
     br = next(c for c in calls if c["op_type"] == "run_broadcast")
-    assert br["params"] == {"z": 3}
+    assert br["params"]["z"] == 3 and br["params"]["retry_of_op"] == 3
     assert br["total_items"] == 7
 
 
@@ -52,8 +54,8 @@ async def test_retry_handles_broken_params(monkeypatch):
 
     monkeypatch.setattr(obus, "submit", fake_submit)
     rows = [
-        {"op_type": "bulk_join", "params": "not-json", "label": None, "total_items": None},
-        {"op_type": "bulk_leave", "params": None, "label": None, "total_items": 0},
+        {"id": 11, "op_type": "bulk_join", "params": "not-json", "label": None, "total_items": None},
+        {"id": 12, "op_type": "bulk_leave", "params": None, "label": None, "total_items": 0},
     ]
     res = await _retry_failed_ops_core(_Pool(rows), uid=1)
     assert res["retried"] == 2
@@ -65,7 +67,7 @@ async def test_retry_empty(monkeypatch):
 
     monkeypatch.setattr(obus, "submit", fake_submit)
     res = await _retry_failed_ops_core(_Pool([]), uid=1)
-    assert res == {"ok": True, "retried": 0, "skipped": 0}
+    assert (res["ok"], res["retried"], res["skipped"]) == (True, 0, 0)
 
 
 async def test_build_ecosystem_core_creates_and_adds_channels(monkeypatch):

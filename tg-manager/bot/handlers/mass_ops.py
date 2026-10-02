@@ -867,7 +867,11 @@ async def cb_retry_op(
         return
     await callback.answer(
         f"✅ Повтор поставлен в очередь: операция #{res['op_id']}"
-        + (f", целей {res['count']}" if res.get("count") else ""),
+        + (f", целей {res['count']}" if res.get("count") else "")
+        # Правду про расписание говорим сразу: повтор — это «сделай работу ещё
+        # раз», а не «заведи вторую цепочку с тем же интервалом».
+        + ("\n\nРасписание повтор не наследует: прежняя серия идёт сама."
+           if res.get("dropped_recurrence") else ""),
         show_alert=True)
     # Re-render queue view — re-use cb_queue to avoid duplicate rendering logic
     await cb_queue(callback, callback_data, pool)

@@ -2524,7 +2524,9 @@ async def cb_op_retry(
         pass  # Recovery log must not block retry
 
     await callback.answer(
-        f"✅ Повтор поставлен в очередь: операция #{res['op_id']}.",
+        f"✅ Повтор поставлен в очередь: операция #{res['op_id']}."
+        + ("\n\nРасписание повтор не наследует: прежняя серия идёт сама."
+           if res.get("dropped_recurrence") else ""),
         show_alert=True,
     )
     kb = InlineKeyboardBuilder()

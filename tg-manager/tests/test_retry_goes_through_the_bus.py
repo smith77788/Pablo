@@ -105,7 +105,7 @@ def test_resubmit_unfinished_skips_mass_publish(submitted):
     """Публикация — исключение: успешные каналы получили бы дубль поста."""
     pool = _Pool([_row(1, op_type="mass_publish")])
     res = asyncio.run(operation_bus.resubmit_unfinished(pool, 555))
-    assert res == {"ok": True, "retried": 0, "skipped": 1}
+    assert (res["retried"], res["skipped"]) == (0, 1)
     assert submitted == []
 
 
@@ -171,6 +171,55 @@ def test_resubmit_one_refuses_finished_and_foreign(submitted):
     assert done["ok"] is False and "неудачей" in done["reason"]
     assert alien["ok"] is False and "не найдена" in alien["reason"]
     assert submitted == []
+
+
+# ── Повтор не клонирует расписание и не теряет журнал предка ─────────────────
+
+def test_retry_links_the_ancestor_journal_and_drops_the_schedule(submitted):
+    """Главное в params повтора: ссылка на журнал предка и НЕТ расписания.
+
+    Без ссылки повтор идёт со свежим пустым журналом и честно проходит весь
+    список целей заново — рассылка, вставшая на 203 адресатах из 380, присылает
+    этим 203 второе такое же сообщение. А унаследованное `repeat_interval_min`
+    заводит ВТОРУЮ цепочку автопостинга с тем же интервалом: каналы получают
+    посты вдвое чаще, следующий тап — вчетверо, и для флота это прямой путь в
+    бан.
+    """
+    row = _row(77, op_type="mass_publish_dm")
+    row["params"] = {"text": "привет", "repeat_interval_min": 60,
+                     "fail_streak": 2, "targets": ["a", "b"]}
+    pool = _Pool([row])
+    res = asyncio.run(operation_bus.resubmit_unfinished(pool, 555))
+
+    assert res["retried"] == 1
+    p = submitted[0]["params"]
+    assert p.get("retry_of_op") == 77, (
+        "повтор не сослался на журнал предка — уже обработанные цели получат "
+        f"работу второй раз: {p}")
+    assert "repeat_interval_min" not in p, (
+        f"повтор унаследовал расписание — будет вторая цепочка: {p}")
+    assert p["text"] == "привет" and p["targets"] == ["a", "b"], (
+        "повтор потерял содержательные параметры операции")
+    assert res["recurrence_dropped"] == 1
+
+
+def test_single_retry_reports_the_dropped_schedule(monkeypatch, submitted):
+    """Владельцу говорим правду: расписание повтор не наследует."""
+    row = _row(78, op_type="mass_join")
+    row["params"] = {"repeat_interval_min": 30}
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    res = asyncio.run(operation_bus.resubmit_one(_Pool([row]), 555, 78))
+
+    assert res["ok"] and res.get("dropped_recurrence") is True
+    assert submitted[0]["params"].get("retry_of_op") == 78
+    assert "repeat_interval_min" not in submitted[0]["params"]
+
+
+def test_retry_without_a_schedule_says_nothing_about_it(monkeypatch, submitted):
+    """Обратная сторона: у операции без расписания сообщать не о чем."""
+    monkeypatch.setattr(operation_bus, "retry_targets_meta", lambda op_type: None)
+    res = asyncio.run(operation_bus.resubmit_one(_Pool([_row(79)]), 555, 79))
+    assert res.get("dropped_recurrence") is False
 
 
 # ── Храповик на класс: повтор не возвращается к сбросу строки ────────────────

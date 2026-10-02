@@ -1382,7 +1382,7 @@ async def resubmit_unfinished(
              AND created_at > NOW() - ($2 * INTERVAL '1 hour')
            ORDER BY created_at DESC LIMIT {int(limit)}""",
         owner_id, hours)
-    retried, skipped = 0, 0
+    retried, skipped, dropped = 0, 0, 0
     for r in (rows or []):
         if r["op_type"] == "mass_publish":
             skipped += 1
@@ -1395,15 +1395,25 @@ async def resubmit_unfinished(
                 params = {}
         if not isinstance(params, dict):
             params = {}
+        # params ТОЛЬКО через params_for_retry: он добавляет ссылку на журнал
+        # предка (иначе повтор пройдёт весь список заново и пришлёт уже
+        # обработанным целям второе такое же сообщение) и выбрасывает расписание
+        # (иначе один тап по «повторить» заводит ВТОРУЮ цепочку автопостинга с
+        # тем же интервалом — каналы получают посты вдвое чаще, а для флота это
+        # прямой путь в бан).
+        if drops_recurrence(params):
+            dropped += 1
         try:
-            await submit(pool, owner_id, r["op_type"], params,
+            await submit(pool, owner_id, r["op_type"],
+                         params_for_retry(int(r["id"]), params),
                          total_items=int(r["total_items"] or 0), label=r["label"])
             retried += 1
         except PlanRequiredError:
             skipped += 1
         except Exception as exc:
             log.debug("resubmit_unfinished op_type=%s: %s", r["op_type"], exc)
-    return {"ok": True, "retried": retried, "skipped": skipped}
+    return {"ok": True, "retried": retried, "skipped": skipped,
+            "recurrence_dropped": dropped}
 
 
 async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
@@ -1452,9 +1462,15 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
     if not isinstance(params, dict):
         params = {}
     total = int(row["total_items"] or 0)
-    new_id = await submit(pool, owner_id, row["op_type"], params,
+    # Та же причина, что в resubmit_unfinished: ссылка на журнал предка плюс
+    # отброшенное расписание. Точечный повтор выше идёт тем же путём — внутри
+    # submit_retry_failed.
+    _dropped = drops_recurrence(params)
+    new_id = await submit(pool, owner_id, row["op_type"],
+                          params_for_retry(op_id, params),
                           total_items=total, label=row["label"])
-    return {"ok": True, "op_id": new_id, "count": total, "reason": ""}
+    return {"ok": True, "op_id": new_id, "count": total, "reason": "",
+            "dropped_recurrence": _dropped}
 
 
 # ── Признак жизни исполнителя операций ───────────────────────────────────────
