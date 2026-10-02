@@ -2345,7 +2345,14 @@ async def cb_op_detail(
             )
             summary = res.get("summary", "")
             if summary:
-                lines.append(f"\n✅ <b>Итог:</b> {html.escape(summary)}")
+                # Иконка — по статусу операции, а не зелёная галочка всегда. На
+                # провале и на «частично» карточка писала «✅ Итог: ❌ Не
+                # запустилась…»: зелёная галочка над текстом о неудаче. Класс тот
+                # же, что у всех правок закрытия операции — отчёт не должен
+                # противоречить сам себе.
+                lines.append(
+                    f"\n{_ost.icon(op['status'])} <b>Итог:</b> "
+                    f"{html.escape(summary)}")
             skipped = res.get("skipped_accounts", 0)
             if skipped:
                 lines.append(f"⚠️ Пропущено аккаунтов (лимит): {skipped}")

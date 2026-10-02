@@ -86,6 +86,23 @@ def test_the_queue_screens_ask_op_status():
     )
 
 
+def test_the_result_line_does_not_contradict_the_status():
+    """«✅ Итог: ❌ Не запустилась…» — карточка противоречила сама себе.
+
+    Строка итога писалась с жёсткой зелёной галочкой при любом статусе, то есть
+    над текстом о неудаче стоял знак успеха. Иконку берём по статусу операции —
+    тому же источнику, что и остальные экраны очереди.
+    """
+    src = _read("bot/handlers/botmother_menu.py")
+    i = src.index("<b>Итог:</b>")
+    line_start = src.rfind("lines.append(", 0, i)
+    seg = src[line_start:i + 40]
+    assert "✅" not in seg, (
+        "итог операции снова помечен зелёной галочкой при любом статусе"
+    )
+    assert "_ost.icon(" in seg, "иконка итога берётся не из общего источника"
+
+
 def test_the_detector_sees_the_screens_at_all():
     """Детектор, который ничего не находит, зелёный всегда."""
     src = _read("bot/handlers/botmother_menu.py")
