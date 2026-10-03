@@ -14704,6 +14704,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "channels": items, "drafts": drafts,
                            "network": network})
 
+    async def va_network_strategy_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Нет доступа", 401)
+        from services import va_strategy
+        return _json_resp(await va_strategy.get_strategy(pool, uid))
+
+    async def va_network_strategy_save(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Нет доступа", 401)
+        from services import va_strategy
+        try:
+            result = await va_strategy.save_strategy(pool, uid, await _va_body(request))
+        except va_strategy.StrategyError as exc:
+            return _err(str(exc), 400)
+        return _json_resp({"ok": True, **result})
+
+    app.router.add_get("/api/miniapp/va/strategy", va_network_strategy_get)
+    app.router.add_put("/api/miniapp/va/strategy", va_network_strategy_save)
+
     async def _va_payload(uid: int, cid: int) -> dict | None:
         """Экран канала: настройки, рубрики, план, черновики, статистика, журнал."""
         from services import channel_admin as _ca
@@ -14868,7 +14889,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось разобрать запрос")
         from services import va_references as _var
         try:
-            ref = await _var.add_ref(pool, uid, cid, body.get("ref"), body.get("kind") or "competitor")
+            ref = await _var.add_ref(pool, uid, cid, body.get("ref"), body.get("kind") or "competitor",
+                                     focus=body.get("focus", ""))
         except _var.ReferenceError_ as e:
             return _err(str(e), 400)
         log.info("va reference add uid=%s channel=%s ref=%s", uid, cid, ref["username"])

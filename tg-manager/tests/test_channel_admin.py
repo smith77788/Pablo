@@ -18,6 +18,11 @@ from services import channel_brain as cb
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+class _NoStrategyPool:
+    async def fetchrow(self, *args):
+        return None
+
+
 # ── расписание ──────────────────────────────────────────────────────────────
 
 
@@ -241,7 +246,7 @@ def test_write_post_on_empty_channel_writes_intro(monkeypatch):
     monkeypatch.setattr(ca, "_best_texts", _empty)
     monkeypatch.setattr(ca, "owner_lessons", _empty)
     monkeypatch.setattr(editorial_review, "review_draft", _review)
-    d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
+    d = asyncio.run(ca.write_post(_NoStrategyPool(), 1, 5, complete=_complete))
     assert d.is_intro and d.pillar == ca.INTRO_PILLAR and d.ok
     assert "ПЕРВЫЙ пост" in seen["user"]
     assert seen["channel_key"] == "5", "пост проверяется по правилам своего канала"
@@ -292,7 +297,7 @@ def test_write_post_retries_with_editor_feedback(monkeypatch):
 
     monkeypatch.setattr(ca, "owner_lessons", _lessons)
     monkeypatch.setattr(editorial_review, "review_draft", _review)
-    d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
+    d = asyncio.run(ca.write_post(_NoStrategyPool(), 1, 5, complete=_complete))
     assert d.ok and d.text == "вариант 2"
     assert "отклонил редактор" in prompts[1] and "повтор" in prompts[1]
     assert "Владелец отклонял прошлые посты по причинам: слишком рекламно (3)" in prompts[0]
@@ -461,10 +466,10 @@ def test_unfinished_post_is_rewritten_and_never_autopublished(monkeypatch):
     monkeypatch.setattr(content_memory, "recent_texts", _empty)
     monkeypatch.setattr(content_memory, "recent_pillars", _empty)
     monkeypatch.setattr(editorial_review, "review_draft", _review)
-    d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
+    d = asyncio.run(ca.write_post(_NoStrategyPool(), 1, 5, complete=_complete))
     assert d.ok and d.text == "Повний пост, з крапкою."
     assert "оборвался на полуслове" in prompts[1]
 
     answers = iter(["Обрыв номер раз без точки"] * 3)
-    d = asyncio.run(ca.write_post(None, 1, 5, complete=_complete))
+    d = asyncio.run(ca.write_post(_NoStrategyPool(), 1, 5, complete=_complete))
     assert not d.ok and d.reasons == ["пост оборван на полуслове"]

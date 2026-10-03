@@ -4,6 +4,33 @@
 // статистику и подстраивает рубрики. Логика — services/channel_admin.py.
 
 let _vaCid = null;
+let _vaTab = 'overview';
+
+function vaSelectTab(tab) {
+  _vaTab = tab;
+  document.querySelectorAll('#s-va-ch-body [data-va-panel]').forEach(function (el) {
+    el.hidden = el.dataset.vaPanel !== tab;
+  });
+  document.querySelectorAll('#s-va-ch-body [data-va-tab]').forEach(function (el) {
+    const active = el.dataset.vaTab === tab;
+    el.classList.toggle('btn-p', active);
+    el.classList.toggle('btn-s', !active);
+    el.setAttribute('aria-selected', String(active));
+  });
+}
+
+function _vaPanel(name) {
+  return '<section data-va-panel="' + name + '"' + (_vaTab === name ? '' : ' hidden') + '>';
+}
+
+function _vaTabsHtml() {
+  return '<div role="tablist" aria-label="Разделы администратора" style="display:flex;gap:6px;overflow:auto;padding:10px 0">' +
+    [['overview','Обзор'],['knowledge','Знания'],['plan','План'],['settings','Настройки']].map(function (t) {
+      return '<button role="tab" aria-selected="' + (_vaTab === t[0]) + '" data-va-tab="' + t[0] +
+        '" class="btn ' + (_vaTab === t[0] ? 'btn-p' : 'btn-s') +
+        '" style="flex:1;min-width:max-content;padding:9px 12px" onclick="vaSelectTab(\'' + t[0] + '\')">' + t[1] + '</button>';
+    }).join('') + '</div>';
+}
 
 function _vaMkScreen(id, title, bodyId) {
   let el = document.getElementById(id);
@@ -59,7 +86,10 @@ async function _vaLoadList() {
   let h = '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.5;color:var(--hint)">' +
     'Выберите канал и поставьте администратора. Он сам разберётся в нише канала, составит контент-план, ' +
     'будет писать и публиковать посты под рост аудитории и заявки, следить за статистикой и присылать ' +
-    'вам отчёт раз в сутки. Участвовать не нужно.</div>';
+    'вам отчёт раз в сутки. Степень самостоятельности выбираете вы.</div>';
+  h += '<div class="lst"><div class="li tap" onclick="openVaStrategy()"><div class="ava">◎</div>' +
+    '<div class="li-body"><div class="li-name">Единая стратегия сети</div>' +
+    '<div class="li-sub">Общий бизнес, целевой ресурс и роли каналов</div></div><span class="chev">›</span></div></div>';
   // Если ИИ не подключён — администратор не сможет писать посты. Это причина
   // №1 «тишины», и она общая для всех каналов: показываем заметным баннером.
   if (d.network && d.network.ai_ready === false && d.network.ai_note) {
@@ -198,6 +228,7 @@ async function vaDraftAct(id, action, reason) {
 }
 
 async function openVaChannel(cid) {
+  if (_vaCid !== String(cid)) _vaTab = 'overview';
   _vaCid = String(cid);
   _vaMkScreen('s-va-ch', '🧠 Администратор канала', 's-va-ch-body');
   push('s-va-ch');
@@ -325,6 +356,10 @@ function _vaBusinessHtml(b) {
     _vaArea('vaUsp', 'Чем вы лучше конкурентов', b.usp, 300, 'Например: выезд в день обращения, гарантия год') +
     _vaArea('vaPains', 'Боли и частые вопросы клиентов', b.pains, 600, 'С чем к вам приходят и о чём спрашивают') +
     _vaArea('vaFacts', 'Факты и цифры, которые можно приводить', b.facts, 800, 'Опыт, число клиентов, сроки. Других цифр ИИ не выдумает', 3) +
+    _vaArea('vaFaq', 'Вопросы клиентов и точные ответы', b.faq, 1500, 'Доставка, оплата, условия возврата. Только проверенные сведения', 3) +
+    _vaArea('vaObjections', 'Возражения и ответы', b.objections, 1000, 'Почему дорого? Чем отличается? Когда не стоит покупать?', 3) +
+    _vaArea('vaVoice', 'Примеры вашей живой речи', b.voice_examples, 1500, '2–3 коротких примера: как вы обычно объясняете и отвечаете', 3) +
+    _vaArea('vaPolicy', 'Редакционные правила', b.editorial_policy, 1000, 'Что обязательно проверить; каких обещаний не давать', 3) +
     _vaArea('vaBanned', 'Запретные темы', b.banned_topics, 600, 'Например: политика, здоровье, сравнение цен') +
     _vaArea('vaRivals', 'Конкуренты — не упоминать', b.competitors, 300, 'Названия через запятую. Пост с ними уйдёт вам на проверку') +
     '<div style="display:flex;gap:10px">' +
@@ -369,6 +404,9 @@ function _vaBusinessVal() {
     usp: _vaVal('vaUsp') || '', pains: _vaVal('vaPains') || '', facts: _vaVal('vaFacts') || '',
     banned_topics: _vaVal('vaBanned') || '', competitors: _vaVal('vaRivals') || '',
     address: _vaVal('vaAddr') || '', sales_share: share === '' || share == null ? null : Number(share),
+    faq: _vaVal('vaFaq') || '', objections: _vaVal('vaObjections') || '',
+    voice_examples: _vaVal('vaVoice') || '', editorial_policy: _vaVal('vaPolicy') || '',
+    network_role: _vaVal('vaRole') || 'discovery',
   };
 }
 
@@ -401,7 +439,7 @@ function _vaRefHtml(r) {
   return '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.55">' +
     '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px">' +
       '<b>@' + esc(r.username) + '</b><span style="font-size:12px;color:var(--hint)">' + esc(r.kind_label) + '</span></div>' +
-    body +
+    (r.focus ? '<div style="margin-bottom:8px;color:var(--hint)">Ваш ориентир: ' + esc(r.focus) + '</div>' : '') + body +
     '<div style="display:flex;gap:8px;margin-top:10px">' +
       '<button class="btn btn-s" style="flex:1;padding:6px" onclick="vaRefAct(' + r.id + ',\'refresh\')">🔄 Изучить заново</button>' +
       '<button class="btn btn-s" style="padding:6px 12px" onclick="vaRefAct(' + r.id + ',\'delete\')" aria-label="Убрать образец">🗑</button>' +
@@ -416,6 +454,7 @@ function _vaRefsHtml(refs) {
       '<div class="field"><label>Публичный канал</label><input id="vaRefName" maxlength="80" placeholder="@channel или t.me/channel"></div>' +
       '<div class="field"><label>Это</label><select id="vaRefKind">' +
         _VA_REF_KINDS.map(function (k) { return _vaOpt(k[0], 'competitor', k[1]); }).join('') + '</select></div>' +
+      _vaArea('vaRefFocus', 'Что нравится и что не перенимать', '', 600, 'Например: короткие разборы и спокойный тон, но без их рекламных приёмов') +
       '<div class="field-err" id="vaRefErr"></div>' +
       '<button class="btn btn-p" id="vaRefBtn" style="width:100%" onclick="vaRefAdd()">➕ Добавить и изучить</button>' +
     '</div>' : '');
@@ -428,7 +467,7 @@ async function vaRefAdd() {
   try {
     const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/references', {
       method: 'POST', timeoutMs: 180000,
-      body: JSON.stringify({ ref: _vaVal('vaRefName') || '', kind: _vaVal('vaRefKind') || 'competitor' }),
+      body: JSON.stringify({ ref: _vaVal('vaRefName') || '', kind: _vaVal('vaRefKind') || 'competitor', focus: _vaVal('vaRefFocus') || '' }),
     });
     toast('✅ Образец добавлен');
     document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
@@ -467,10 +506,13 @@ function _vaChannelHtml(d) {
         ? '<button class="btn btn-s" style="flex:1 1 45%" onclick="vaToggle(false)">⏸ Остановить</button>'
         : '<button class="btn btn-s" style="flex:1 1 45%" onclick="vaToggle(true)">▶️ Запустить</button>') +
     '</div></div>';
+  h += _vaTabsHtml() + _vaPanel('overview');
   h += _vaDraftsHtml(d.drafts || [], 'ch');
   h += _vaReportHtml(d.report, s);
+  h += '</section>' + _vaPanel('knowledge');
   h += _vaBriefHtml(s.brief || {});
   h += _vaRefsHtml(d.references || []);
+  h += '</section>' + _vaPanel('plan');
   const plan = d.plan || [];
   h += '<div class="sec">Контент-план</div><div class="lst">' + (plan.length ? plan.slice(0, 14).map(function (p) {
     return '<div class="li"><div class="li-body"><div class="li-name">' + esc(p.pillar || 'Пост') + '</div>' +
@@ -482,10 +524,17 @@ function _vaChannelHtml(d) {
   // темп и режим), остальное — в двух свёрнутых группах. Поля остаются в
   // разметке и в закрытой группе, поэтому «Сохранить» по-прежнему отправляет
   // их все.
+  h += '</section>' + _vaPanel('settings');
   h += '<div class="sec">Настройки</div><div class="lst" style="padding:14px">' +
+    '<div class="field"><label>Роль в общей сети</label><select id="vaRole">' +
+    [['discovery','Знакомить новую аудиторию'],['expert','Укреплять доверие'],['community','Развивать сообщество'],
+      ['conversion','Помогать принять решение'],['independent','Работать отдельно']].map(function (r) {
+      return _vaOpt(r[0], (s.business || {}).network_role || 'discovery', r[1]);
+    }).join('') + '</select><div class="field-note">Действует при включённой общей стратегии. Она задаёт единый ресурс для перехода; голос канала сохраняется.</div></div>' +
     '<div class="field"><label>О проекте своими словами</label><textarea id="vaProject" rows="3" maxlength="2000">' + esc(s.project_info) + '</textarea></div>' +
     '<div class="field"><label>Куда вести клиентов</label><input id="vaContact" maxlength="200" value="' + esc(s.lead_contact) + '" placeholder="@manager, сайт или номер"></div>' +
     _vaBusinessHtml(s.business || {}) +
+    '<details class="acc-actions" style="margin:0 0 12px"><summary style="padding:12px;cursor:pointer">Расписание и самостоятельность</summary>' +
     '<div style="display:flex;gap:10px">' +
       '<div class="field" style="flex:1"><label>Постов в день</label><select id="vaPpd">' +
         [1, 2, 3, 4, 5, 6, 8, 10, 12].map(function (n) { return _vaOpt(n, s.posts_per_day, n); }).join('') + '</select></div>' +
@@ -499,7 +548,7 @@ function _vaChannelHtml(d) {
       _vaOpt('auto', s.publish_mode, 'Полностью сам — публикует без меня') +
       _vaOpt('review', s.publish_mode, 'Присылает пост мне на одобрение') + '</select>' +
       '<div class="field-note">В автономном режиме в канал уходят только посты, к которым у редактора нет замечаний.</div></div>' +
-    '<details class="acc-actions" style="margin:0 0 12px;background:var(--bg3);border-radius:12px">' +
+    '</details><details class="acc-actions" style="margin:0 0 12px;background:var(--bg3);border-radius:12px">' +
       '<summary style="cursor:pointer;font-size:14px;font-weight:500;padding:12px 12px;display:flex;align-items:center;gap:8px">' +
         '<span style="flex:1;min-width:0">📝 Как писать</span>' +
         '<span style="font-size:12px;color:var(--hint);font-weight:400;white-space:nowrap">заполнил сам</span>' +
@@ -524,11 +573,12 @@ function _vaChannelHtml(d) {
       '<button class="btn btn-s" style="flex:1" onclick="openEditorialRules(_vaCid)">✍️ Правила редактора</button>' +
       '<button class="btn btn-s" style="flex:1" onclick="vaReconfigure()">🔄 Изучить заново</button>' +
     '</div></div>';
+  h += '</section>';
   const ev = d.events || [];
   if (ev.length) {
-    h += '<div class="sec">Журнал администратора</div><div class="lst" style="padding:10px 14px;font-size:12px;line-height:1.6">' +
+    h += '<details class="acc-actions"><summary style="padding:12px;cursor:pointer">Журнал администратора</summary><div class="lst" style="padding:10px 14px;font-size:12px;line-height:1.6">' +
       ev.map(function (e) { return '<div><span style="color:var(--hint)">' + _vaWhen(e.at) + '</span> · ' + esc(e.text) + '</div>'; }).join('') +
-      '</div>';
+      '</div></details>';
   }
   return h;
 }
@@ -623,4 +673,75 @@ async function vaPostNow() {
     toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
   }
   await _vaLoadChannel();
+}
+
+async function openVaStrategy() {
+  _vaMkScreen('s-va-strategy', 'Стратегия сети', 's-va-strategy-body');
+  push('s-va-strategy');
+  await vaLoadStrategy();
+}
+
+async function vaLoadStrategy() {
+  const body = document.getElementById('s-va-strategy-body');
+  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const data = await api('/api/miniapp/va/strategy');
+    body.dataset.strategy = JSON.stringify(data);
+    body.innerHTML = _vaStrategyHtml(data.settings || {});
+  } catch (e) {
+    body.innerHTML = errHtml(e.message || 'Не удалось загрузить стратегию', 'vaLoadStrategy()');
+  }
+}
+
+function _vaStrategyHtml(s) {
+  const b = s.business || {};
+  return '<div class="lst" style="padding:16px;line-height:1.6;background:linear-gradient(135deg,var(--bg2),var(--bg3))">' +
+    '<b>Одна цель. Разные голоса.</b><br><span style="font-size:13px;color:var(--hint)">Каналы знакомят, объясняют и укрепляют доверие. ' +
+    'Переходы ведут в выбранный ресурс. Стратегия применяется к следующим планам и новым текстам; готовые черновики проверяйте отдельно.</span></div>' +
+    '<div class="lst" style="padding:14px"><label style="display:flex;align-items:center;gap:10px">' +
+    '<input type="checkbox" id="vaNetEnabled"' + (s.enabled ? ' checked' : '') + '> Единая стратегия включена</label>' +
+    '<div class="field-note">Для всех установленных администраторов, кроме каналов с ролью «Работать отдельно». Сохранение само по себе не запускает публикации.</div></div>' +
+    '<details class="acc-actions" open><summary style="padding:14px;cursor:pointer;font-weight:600">1. Куда ведём аудиторию</summary><div class="lst" style="padding:14px">' +
+    _vaArea('vaNetName', 'Название стратегии', s.name, 100, 'Например: сеть каналов школы') +
+    '<div class="field"><label>Единый целевой ресурс</label><input id="vaNetTarget" maxlength="500" value="' + esc(s.destination || '') + '" placeholder="@профиль или https://ваш-сайт"></div>' +
+    _vaArea('vaNetAction', 'Какой следующий шаг нужен читателю', s.action, 300, 'Подписаться на основной канал, записаться на консультацию или изучить каталог') +
+    '</div></details>' +
+    '<details class="acc-actions"><summary style="padding:14px;cursor:pointer;font-weight:600">2. Что сеть знает о бизнесе</summary><div class="lst" style="padding:14px">' +
+    _vaArea('vaNetProject', 'О бизнесе и его пользе', s.project_info, 2000, 'Что делаете, для кого, в чём ваша особенность', 3) +
+    _vaArea('vaNetAudience', 'Общая аудитория', s.audience, 600, 'Кому и на каком этапе вы помогаете') +
+    _vaArea('vaNetProducts', 'Предложение и цены', b.products, 1500, 'Только действующие товары, услуги и условия', 3) +
+    _vaArea('vaNetFacts', 'Проверенные факты', b.facts, 800, 'Факты, на которые можно опираться', 3) +
+    _vaArea('vaNetFaq', 'Частые вопросы и ответы', b.faq, 1500, 'Общие для всех каналов ответы', 3) +
+    _vaArea('vaNetVoice', 'Примеры вашей речи', b.voice_examples, 1500, 'Как вы объясняете своим клиентам', 3) +
+    _vaArea('vaNetBanned', 'Общие запреты', b.banned_topics, 600, 'Темы и обещания, которых следует избегать') +
+    '</div></details>' +
+    '<details class="acc-actions"><summary style="padding:14px;cursor:pointer;font-weight:600">3. Как бережно вести к цели</summary><div class="lst" style="padding:14px">' +
+    '<div class="field"><label>Постов с целевым контактом</label><select id="vaNetShare">' +
+    [0,10,20,30,40,50,60].map(function (n) { return _vaOpt(n, s.cta_share == null ? 20 : s.cta_share, 'До ' + n + ' %'); }).join('') +
+    '</select><div class="field-note">Проверяется по окну из 10 постов каждого канала. Остальные публикации дают самостоятельную пользу. 0 % отключает целевые призывы.</div></div>' +
+    '<div class="field-note">Назначьте каналам разные роли в их настройках. Рост оценивайте по реальным подпискам и заявкам: сумма подписчиков каналов не равна числу уникальных людей.</div>' +
+    '</div></details>' +
+    '<div class="lst" style="padding:14px"><div class="field-err" id="vaNetErr"></div>' +
+    '<button class="btn btn-p" id="vaNetSave" style="width:100%" onclick="vaSaveStrategy()">Сохранить стратегию</button></div>';
+}
+
+async function vaSaveStrategy() {
+  const body = document.getElementById('s-va-strategy-body');
+  const btn = document.getElementById('vaNetSave'), err = document.getElementById('vaNetErr');
+  btn.disabled = true; err.textContent = '';
+  try {
+    const previous = JSON.parse(body.dataset.strategy);
+    const settings = {...previous.settings,
+      enabled: document.getElementById('vaNetEnabled').checked,
+      name: _vaVal('vaNetName'), destination: _vaVal('vaNetTarget'), action: _vaVal('vaNetAction'),
+      project_info: _vaVal('vaNetProject'), audience: _vaVal('vaNetAudience'), cta_share: Number(_vaVal('vaNetShare')),
+      business: {...(previous.settings.business || {}), products: _vaVal('vaNetProducts'), facts: _vaVal('vaNetFacts'),
+        faq: _vaVal('vaNetFaq'), voice_examples: _vaVal('vaNetVoice'), banned_topics: _vaVal('vaNetBanned')},
+    };
+    const saved = await api('/api/miniapp/va/strategy', {method:'PUT', body:JSON.stringify({settings:settings, revision:previous.revision})});
+    body.dataset.strategy = JSON.stringify(saved);
+    toast('Стратегия сохранена');
+  } catch (e) {
+    err.textContent = e.message || 'Не удалось сохранить'; err.style.display = 'block';
+  } finally { btn.disabled = false; }
 }
