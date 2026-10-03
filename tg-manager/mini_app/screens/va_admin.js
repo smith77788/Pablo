@@ -340,6 +340,14 @@ function _vaNetworkHtml(n) {
           '<span class="chev">›</span></div>';
       }).join('') + '</div>';
   }
+  if (n.next_actions && n.next_actions.length) {
+    h += '<div class="sec">Что сделать дальше</div><div class="lst">' +
+      n.next_actions.map(function (a) {
+        return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')">' +
+          '<div class="ava">→</div><div class="li-body"><div class="li-name">' + esc(a.title) + '</div>' +
+          '<div class="li-sub">' + esc(a.reason) + '</div></div><span class="chev">›</span></div>';
+      }).join('') + '</div>';
+  }
   return h;
 }
 
@@ -527,22 +535,6 @@ function _vaControlHtml(control) {
           '<div class="li-sub">' + esc(d.explanation) + '</div></div>' +
           (d.can_revert ? '<button class="btn btn-s" onclick="vaRollbackLearning(' + d.id + ')">Отменить</button>' : '') + '</div>';
       }).join('') + '</div></details>';
-  }
-  if (n.next_actions && n.next_actions.length) {
-    h += '<div class="sec">Что сделать дальше</div><div class="lst">' +
-      n.next_actions.map(function (a) {
-        return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')">' +
-          '<div class="ava">→</div><div class="li-body"><div class="li-name">' + esc(a.title) + '</div>' +
-          '<div class="li-sub">' + esc(a.reason) + '</div></div><span class="chev">›</span></div>';
-      }).join('') + '</div>';
-  }
-  if (n.next_actions && n.next_actions.length) {
-    h += '<div class="sec">Что сделать дальше</div><div class="lst">' +
-      n.next_actions.map(function (a) {
-        return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')">' +
-          '<div class="ava">→</div><div class="li-body"><div class="li-name">' + esc(a.title) + '</div>' +
-          '<div class="li-sub">' + esc(a.reason) + '</div></div><span class="chev">›</span></div>';
-      }).join('') + '</div>';
   }
   return h;
 }

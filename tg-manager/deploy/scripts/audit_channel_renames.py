@@ -33,7 +33,21 @@ async def main() -> None:
                 "previous_titles": [p.get("title") for p in pairs[:5]],
                 "ok": result.get("ok"), "failed": result.get("failed") or result.get("fail"),
             })
-        print(json.dumps(report, ensure_ascii=False, default=str))
+        drift_rows = await conn.fetch(
+            "SELECT id,owner_id,created_at,details FROM restriction_events "
+            "WHERE event_type='drift_detected' AND details ? 'changes' "
+            "AND details->'changes' ? 'title' ORDER BY id DESC LIMIT 200"
+        )
+        drifts = []
+        for row in drift_rows:
+            details = row["details"] if isinstance(row["details"], dict) else json.loads(row["details"] or "{}")
+            change = (details.get("changes") or {}).get("title") or {}
+            drifts.append({"id": row["id"], "owner_id": row["owner_id"],
+                           "created_at": str(row["created_at"]),
+                           "channel_id": details.get("channel_id"),
+                           "old": change.get("old"), "new": change.get("new")})
+        print(json.dumps({"operations": report, "title_drifts": drifts},
+                         ensure_ascii=False, default=str))
     finally:
         await conn.close()
 

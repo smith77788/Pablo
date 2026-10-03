@@ -1,10 +1,12 @@
-"""Virtual Administrator control center explains decisions without changing state."""
+"""Центр решений администратора связывает модули и объясняет выбор."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from services import infra_memory, va_control
+from services import channel_admin as ca
+from services import infra_memory, operation_bus, va_control
 
 
 def test_plan_audit_finds_duplicate_slots_topics_and_sales_overflow():
@@ -71,6 +73,35 @@ async def test_eligible_accounts_excludes_shared_health_quarantine(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_publish_uses_only_accounts_approved_by_shared_health(monkeypatch):
+    pool = AsyncMock()
+    allowed = AsyncMock(return_value=[11])
+    submit = AsyncMock(return_value=44)
+    monkeypatch.setattr(va_control, "eligible_accounts", allowed)
+    monkeypatch.setattr(ca, "channel_row", AsyncMock(return_value={"title": "Канал"}))
+    monkeypatch.setattr(operation_bus, "submit", submit)
+
+    assert await ca.publish(pool, 7, 8, "текст", "Польза") == 44
+
+    allowed.assert_awaited_once_with(pool, 7, 8)
+    payload = submit.await_args.args[3]
+    assert payload["account_ids"] == [11]
+    assert payload["channel_ids"] == [8]
+
+
+@pytest.mark.asyncio
+async def test_publish_stops_before_queue_when_no_healthy_account(monkeypatch):
+    pool = AsyncMock()
+    monkeypatch.setattr(va_control, "eligible_accounts", AsyncMock(return_value=[]))
+    submit = AsyncMock()
+    monkeypatch.setattr(operation_bus, "submit", submit)
+
+    with pytest.raises(ca.ChannelAdminError, match="Нет доступного аккаунта"):
+        await ca.publish(pool, 7, 8, "текст", "Польза")
+    submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_network_actions_prioritize_errors_then_owner_review():
     pool = AsyncMock()
     pool.fetch.return_value = [
@@ -86,3 +117,18 @@ async def test_network_actions_prioritize_errors_then_owner_review():
         "Ошибка работы: нет прав", "Черновики ждут решения", "Нет будущего плана",
     ]
     assert pool.fetch.call_args.args[1:] == (77,)
+
+
+def test_interface_connects_control_cards_network_actions_and_safe_rollback():
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "mini_app/screens/va_admin.js").read_text(encoding="utf-8")
+    api = (root / "services/mini_app_api.py").read_text(encoding="utf-8")
+    network = js[js.index("function _vaNetworkHtml"):js.index("let _vaDraftCtx")]
+    control = js[js.index("function _vaControlHtml"):js.index("function _vaBriefHtml")]
+
+    assert "n.next_actions" in network
+    assert "n.next_actions" not in control
+    assert "openHealth()" in control and "openOps()" in control
+    assert "openEditorialRules(_vaCid)" in control and "openVaStrategy()" in control
+    assert "vaRollbackLearning" in control
+    assert "/learning/rollback" in js and "/learning/rollback" in api

@@ -115,6 +115,20 @@ def test_ui_renders_the_network_summary():
     assert "Требуют внимания" in js
 
 
+def test_network_actions_render_only_in_network_summary():
+    """Подсказки сети не должны обращаться к `n` из карточки одного канала."""
+    js = _read("mini_app/screens/va_admin.js")
+    network_start = js.index("function _vaNetworkHtml")
+    network_end = js.index("\nfunction ", network_start + 10)
+    control_start = js.index("function _vaControlHtml")
+    control_end = js.index("\nfunction ", control_start + 10)
+    network = js[network_start:network_end]
+    control = js[control_start:control_end]
+    assert network.count("n.next_actions") == 3
+    assert "openVaChannel" in network and "Что сделать дальше" in network
+    assert "n.next_actions" not in control
+
+
 def test_summary_hidden_for_a_fresh_owner():
     """Пустому владельцу цифры 0/0 не показываем — вход остаётся чистым."""
     js = _read("mini_app/screens/va_admin.js")
