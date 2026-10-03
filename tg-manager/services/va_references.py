@@ -12,6 +12,7 @@ _REFRESH_H часов), считает цифры — длину, частоту
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -28,6 +29,9 @@ MAX_REFS = 5
 _REFRESH_H = 24 * 7        # образец перечитывается раз в неделю
 _RETRY_H = 6               # после ошибки — не раньше чем через 6 часов
 _READ_POSTS = 50
+_NEWS_FEED_TTL = timedelta(minutes=5)
+_NEWS_ITEM_MAX_AGE = timedelta(minutes=30)
+_NEWS_FEED_BATCH = 3
 _USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
 _LINK_RE = re.compile(r"^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/(?:s/)?([A-Za-z0-9_]+)/?(?:\d+)?/?$",
                       re.IGNORECASE)
@@ -232,13 +236,131 @@ async def delete_ref(pool, owner_id: int, ref_id: int) -> bool:
     return str(r).endswith(" 1")
 
 
-async def _read(pool, owner_id: int, channel_id: int, uname: str) -> Optional[dict]:
+async def _read(pool, owner_id: int, channel_id: int, uname: str, *,
+                recent_limit: int = _READ_POSTS) -> Optional[dict]:
     from services import account_manager, channel_admin as ca
     acc = await ca.channel_account(pool, owner_id, channel_id)
     if not acc:
         raise ReferenceError_("Нет рабочего аккаунта у вашего канала — образец читать нечем")
     return await account_manager.read_channel_snapshot(
-        acc["session_str"], 0, _acc=acc, username=uname, recent_limit=_READ_POSTS)
+        acc["session_str"], 0, _acc=acc, username=uname, recent_limit=recent_limit)
+
+
+def _latest_news_items(snapshot: dict, *, now: datetime | None = None) -> list[dict]:
+    now = now or datetime.now(timezone.utc)
+    items = []
+    for post in (snapshot.get("recent") or [])[:12]:
+        text = " ".join(str(post.get("text") or "").split())
+        at = post.get("date")
+        if not text or not isinstance(at, datetime):
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        at = at.astimezone(timezone.utc)
+        if not now - _NEWS_ITEM_MAX_AGE <= at <= now:
+            continue
+        items.append({"at": at.isoformat(), "text": text[:360]})
+        if len(items) >= 3:
+            break
+    return items
+
+
+def _feed_is_fresh(stats: dict, *, now: datetime | None = None) -> bool:
+    if stats.get("feed_status") != "ready" or not stats.get("latest_topics"):
+        return False
+    try:
+        checked = datetime.fromisoformat(str(stats.get("feed_checked_at")))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    age = (now or datetime.now(timezone.utc)) - checked.astimezone(timezone.utc)
+    return timedelta(0) <= age <= _NEWS_FEED_TTL * 2
+
+
+def _news_terms(text: str) -> set[str]:
+    words = set(re.findall(r"[a-zа-яёіїєґ0-9]{3,}", str(text).casefold()))
+    return words - {"это", "как", "что", "для", "при", "его", "ее", "они", "или", "the", "and"}
+
+
+def has_fresh_news_signals(refs: list[dict]) -> bool:
+    return any(
+        ref.get("kind") == "competitor" and ref.get("status") == "ready"
+        and _feed_is_fresh(ref.get("stats") or {})
+        for ref in refs or []
+    )
+
+
+async def refresh_news_signals(pool, owner_id: int, channel_id: int,
+                               refs: list[dict] | None = None) -> list[dict]:
+    """Refresh a few stale public competitor feeds before a news-channel post."""
+    refs = list(refs if refs is not None else await for_prompt(pool, owner_id, channel_id))
+    now = datetime.now(timezone.utc)
+    deadline = asyncio.get_running_loop().time() + 35
+    candidates = []
+    for ref in refs:
+        if ref.get("kind") != "competitor":
+            continue
+        stats = ref.get("stats") or {}
+        if _feed_is_fresh(stats, now=now):
+            continue
+        try:
+            checked = datetime.fromisoformat(str(stats.get("feed_checked_at")))
+            if checked.tzinfo is None:
+                checked = checked.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            checked = datetime.min.replace(tzinfo=timezone.utc)
+        candidates.append((checked, ref))
+
+    for _, ref in sorted(candidates, key=lambda pair: pair[0])[:_NEWS_FEED_BATCH]:
+        rid = int(ref["id"])
+        claimed = await pool.fetchval(
+            "UPDATE va_reference_channels SET stats=jsonb_set("
+            "jsonb_set(COALESCE(stats,'{}'::jsonb), '{feed_status}', to_jsonb('checking'::text), true), "
+            "'{feed_attempted_at}', to_jsonb(now()::text), true) "
+            "WHERE id=$1 AND owner_id=$2 AND (stats->>'feed_attempted_at' IS NULL OR "
+            "(stats->>'feed_attempted_at')::timestamptz < now() - interval '5 minutes') RETURNING id",
+            rid, int(owner_id),
+        )
+        if not claimed:
+            (ref.setdefault("stats", {}))["feed_status"] = "checking"
+            ref["stats"].pop("latest_topics", None)
+            continue
+        try:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError("Общий лимит времени на чтение источников исчерпан")
+            snapshot = await asyncio.wait_for(
+                _read(pool, owner_id, channel_id, ref["username"], recent_limit=12), timeout=remaining,
+            )
+            if not snapshot:
+                raise ReferenceError_("Источник временно недоступен")
+            stats = dict(ref.get("stats") or {})
+            topics = _latest_news_items(snapshot, now=now)
+            stats.update({"feed_attempted_at": now.isoformat(), "feed_checked_at": now.isoformat(),
+                          "feed_status": "ready" if topics else "empty",
+                          "latest_topics": topics})
+            await pool.execute(
+                "UPDATE va_reference_channels SET stats=$3::jsonb, status='ready', error=NULL "
+                "WHERE id=$1 AND owner_id=$2",
+                rid, int(owner_id), json.dumps(stats, ensure_ascii=False),
+            )
+            ref["status"] = "ready"
+            ref["stats"] = stats
+        except Exception:
+            log.info("va_references: не удалось обновить новостной источник ref=%s", rid, exc_info=True)
+            stats = dict(ref.get("stats") or {})
+            stats.update({"feed_attempted_at": now.isoformat(), "feed_checked_at": now.isoformat(),
+                          "feed_status": "error", "latest_topics": []})
+            try:
+                await pool.execute(
+                    "UPDATE va_reference_channels SET stats=$3::jsonb WHERE id=$1 AND owner_id=$2",
+                    rid, int(owner_id), json.dumps(stats, ensure_ascii=False),
+                )
+            except Exception:
+                log.debug("va_references: не удалось сохранить ошибку новостного источника", exc_info=True)
+            ref["stats"] = stats
+    return refs
 
 
 async def analyze(pool, owner_id: int, ref_id: int, *, complete: Optional[Complete] = None,
@@ -302,7 +424,7 @@ async def refresh_due(pool, limit: int = 2) -> int:
 # ── В промпт ─────────────────────────────────────────────────────────────────
 
 
-def prompt_lines(refs: list[dict]) -> list[str]:
+def prompt_lines(refs: list[dict], *, include_news: bool = False) -> list[str]:
     """Изученные образцы → строки промпта. Только выводы, без текстов чужих постов."""
     ready = [r for r in refs or [] if r.get("status") == "ready"]
     if not ready:
@@ -337,6 +459,39 @@ def prompt_lines(refs: list[dict]) -> list[str]:
         if st.get("length_hint"):
             parts.append(st["length_hint"])
         out.append(_fence([". ".join(parts) + "."], cap=2200))
+    if include_news:
+        candidates = []
+        for ref in ready[:MAX_REFS]:
+            stats = ref.get("stats") or {}
+            if not _feed_is_fresh(stats):
+                continue
+            for item in (stats.get("latest_topics") or [])[:3]:
+                text = str(item.get("text") or "").strip()
+                try:
+                    at = datetime.fromisoformat(str(item.get("at")))
+                    if at.tzinfo is None:
+                        at = at.replace(tzinfo=timezone.utc)
+                except (TypeError, ValueError):
+                    continue
+                if text:
+                    candidates.append((at.astimezone(timezone.utc), ref.get("username") or "источник", text))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        signals, seen_terms = [], []
+        for at, source, text in candidates:
+            terms = _news_terms(text)
+            if terms and any(len(terms & old) / len(terms | old) >= 0.6 for old in seen_terms if old):
+                continue
+            seen_terms.append(terms)
+            signals.append(f"[{at.isoformat()} · @{source}] {text}")
+            if len(signals) >= 6:
+                break
+        if signals:
+            out.append(
+                "СВЕЖИЕ СИГНАЛЫ ДЛЯ НОВОСТНОГО ПОСТА (текст публикации не старше 30 минут, "
+                "источник перечитан не более 10 минут назад; это повод для черновика, а не "
+                "подтверждённый факт; не копируй текст и не выдумывай подробности):"
+            )
+            out.append(_fence(signals, cap=400))
     return out
 
 

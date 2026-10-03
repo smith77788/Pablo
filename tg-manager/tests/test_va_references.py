@@ -62,6 +62,61 @@ def _ref(kind="competitor", status="ready"):
             "lessons": {"summary": "срочность и цифры", "works": ["разборы"], "hooks": ["вопрос в начале"]}}
 
 
+def test_fresh_competitor_topics_reach_only_news_prompts():
+    now = datetime.now(timezone.utc)
+    ref = _ref() | {"stats": {
+        "feed_status": "ready", "feed_checked_at": now.isoformat(),
+        "latest_topics": [{"at": now.isoformat(), "text": "Новое решение парламента"}],
+    }}
+    assert vr.has_fresh_news_signals([ref])
+    lines = vr.prompt_lines([ref], include_news=True)
+    assert any("СВЕЖИЕ СИГНАЛЫ" in line for line in lines)
+    assert any("@rival_news" in line and "Новое решение парламента" in line and "<<<" in line
+               for line in lines)
+    stale = _ref() | {"stats": {"feed_status": "ready", "latest_topics": [
+        {"at": now.isoformat(), "text": "Нельзя брать без времени проверки"}]}}
+    assert not vr.has_fresh_news_signals([stale])
+    assert not any("СВЕЖИЕ СИГНАЛЫ" in line for line in vr.prompt_lines([stale], include_news=True))
+
+
+def test_news_recency_rejects_future_and_old_data():
+    now = datetime.now(timezone.utc)
+    assert not vr._feed_is_fresh({
+        "feed_status": "ready", "feed_checked_at": (now + timedelta(minutes=1)).isoformat(),
+        "latest_topics": [{"text": "Будущее"}],
+    }, now=now)
+    items = vr._latest_news_items({"recent": [
+        {"id": 1, "text": "Слишком старое событие", "date": now - timedelta(minutes=31)},
+        {"id": 2, "text": "Ещё не произошло", "date": now + timedelta(seconds=1)},
+        {"id": 3, "text": "Свежее событие", "date": now - timedelta(minutes=2)},
+    ]}, now=now)
+    assert [item["text"] for item in items] == ["Свежее событие"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_news_signals_reads_and_saves_recent_competitor_updates(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    pool = AsyncMock()
+    pool.fetchval.return_value = 17
+    now = datetime.now(timezone.utc)
+    snap = {"recent": [{"text": "Свежее событие в стране", "date": now - timedelta(minutes=2)}]}
+    seen = {}
+
+    async def _read(*args, **kwargs):
+        seen.update(kwargs)
+        return snap
+
+    monkeypatch.setattr(vr, "_read", _read)
+    ref = _ref() | {"id": 17, "stats": {"title": "Конкурент"}}
+    refreshed = await vr.refresh_news_signals(pool, 44, 55, [ref])
+
+    assert seen["recent_limit"] == 12
+    assert refreshed[0]["status"] == "ready"
+    assert refreshed[0]["stats"]["latest_topics"][0]["text"] == "Свежее событие в стране"
+    assert "owner_id=$2" in pool.execute.await_args.args[0]
+
+
 def test_reference_reaches_post_and_plan_prompts_without_texts():
     profile = {"title": "Мой", "references": [_ref(), _ref("own", "ready") | {"username": "my_old"},
                                               _ref(status="error") | {"username": "broken"}]}

@@ -189,12 +189,14 @@ def test_empty_channel_is_administered_end_to_end(pool, stubs):
         # 4. Исполнитель записал пост с msg_id → статистика и подстройка рубрик.
         for i, pillar in enumerate(["Полезные советы"] * 3 + ["Вопрос подписчикам"] * 3):
             await pool.execute(
-                "INSERT INTO va_channel_posts(owner_id, channel_key, pillar, body, msg_id) "
-                "VALUES($1,$2,$3,$4,$5)", OWNER, str(CID), pillar, f"пост {i}", 10 + i * 50)
+                "INSERT INTO va_channel_posts(owner_id, channel_key, pillar, body, msg_id, published_at) "
+                "VALUES($1,$2,$3,$4,$5,now() - interval '25 hours')",
+                OWNER, str(CID), pillar, f"пост {i}", 10 + i * 50)
         got = await ca.collect_stats(pool, OWNER, CID)
         assert got["posts"] == 6
         tuned = await ca.autotune(pool, OWNER, CID)
         assert tuned and tuned["Вопрос подписчикам"] > 1.0, "рубрика с лучшим откликом должна вырасти"
+        assert await ca.autotune(pool, OWNER, CID) is None
         rep = await ca.channel_report(pool, OWNER, CID)
         assert rep["best_pillar"] == "Вопрос подписчикам" and rep["posts_7d"] >= 6
 

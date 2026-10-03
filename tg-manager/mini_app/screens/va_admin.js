@@ -476,6 +476,12 @@ function _vaReportHtml(r, s) {
   } else {
     h += '<br><span style="color:var(--hint)">Отклик по рубрикам появится, когда наберутся просмотры первых постов.</span>';
   }
+  if (s && s.auto_tune) {
+    h += '<br><br><b>Обучение на новых постах</b><br>' +
+      'Сравниваю отклик через 24–30 часов после публикации: минимум по 3 новых поста в двух рубриках. ' +
+      'Меняю вес максимум на один шаг и не использую те же посты повторно. ' +
+      'Причины решений доступны в журнале. Просмотры не означают заявки или продажи.';
+  }
   return h + '</div>';
 }
 
@@ -607,6 +613,11 @@ function _vaRefHtml(r) {
     if ((le.works || []).length) rows.push('<b>Что заходит:</b> ' + le.works.map(esc).join('; '));
     if ((le.formats || []).length) rows.push('<b>Приёмы:</b> ' + le.formats.map(esc).join('; '));
     if ((le.avoid || []).length) rows.push('<b>Заходит хуже:</b> ' + le.avoid.map(esc).join('; '));
+    if (st.feed_checked_at) rows.push('<b>Новостная лента:</b> ' +
+      (st.feed_status === 'ready' ? 'есть свежие сигналы' : st.feed_status === 'empty' ? 'свежих публикаций пока нет' : 'не удалось обновить') +
+      ' · проверена ' + esc(_vaWhen(st.feed_checked_at)));
+    if ((st.latest_topics || []).length) rows.push('<b>Последние темы:</b> ' +
+      st.latest_topics.slice(0, 2).map(function (item) { return esc(item.text || ''); }).join(' · '));
     if (st.length_hint) rows.push(esc(st.length_hint[0].toUpperCase() + st.length_hint.slice(1)));
     if (!le.summary && !le.style) rows.push('<span style="color:var(--hint)">Разбор подачи не получен — пока учитываю только цифры.</span>');
     body = rows.join('<br>');
@@ -623,7 +634,7 @@ function _vaRefHtml(r) {
 
 function _vaRefsHtml(refs) {
   return '<div class="sec">Каналы-образцы</div>' +
-    '<div class="field-note" style="margin:0 0 8px">Конкуренты или ваш успешный канал. Администратор изучит, как они пишут и что у них набирает просмотры, и будет писать так же сильно — без копирования текстов.</div>' +
+    '<div class="field-note" style="margin:0 0 8px">Добавьте публичные каналы, за которыми следить. Администратор изучит их подачу; для новостного канала будет проверять свежие публикации перед подготовкой черновика. Тексты он не копирует.</div>' +
     refs.map(_vaRefHtml).join('') +
     (refs.length < 5 ? '<div class="lst" style="padding:12px 14px">' +
       '<div class="field"><label>Публичный канал</label><input id="vaRefName" maxlength="80" placeholder="@channel или t.me/channel"></div>' +
@@ -670,8 +681,16 @@ function _vaChannelHtml(d) {
       '<button class="btn btn-p" id="vaNowBtn" style="flex:1 1 45%" onclick="vaPostNow()">✍️ Пост сейчас</button>' +
       (s.enabled
         ? '<button class="btn btn-s" style="flex:1 1 45%" onclick="vaToggle(false)">⏸ Остановить</button>'
-        : '<button class="btn btn-s" style="flex:1 1 45%" onclick="vaToggle(true)">▶️ Запустить</button>') +
+      : '<button class="btn btn-s" style="flex:1 1 45%" onclick="vaToggle(true)">▶️ Запустить</button>') +
     '</div></div>';
+  const isNewsChannel = /новост|новин|news|сводк|происшеств|информационн/i.test(
+    [ch.title, s.topic].filter(Boolean).join(' '));
+  const hasNewsSources = (d.references || []).some(function (ref) { return ref.kind === 'competitor'; });
+  if (isNewsChannel && !hasNewsSources) {
+    h += '<div class="lst" role="status" style="padding:12px 14px;margin-top:8px;color:var(--orange,#fb923c);font-size:13px;line-height:1.5">' +
+      'Для свежих новостных черновиков добавьте публичные каналы-источники во вкладке «Знания». Без свежего повода администратор пропустит публикацию, а не заменит её советами или выдуманными новостями. ' +
+      '<button class="btn btn-s" onclick="vaSelectTab(\'knowledge\')">Добавить источник</button></div>';
+  }
   h += _vaTabsHtml() + _vaPanel('overview');
   h += _vaDraftsHtml(d.drafts || [], 'ch');
   h += _vaReportHtml(d.report, s);

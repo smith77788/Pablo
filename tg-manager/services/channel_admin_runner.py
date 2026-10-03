@@ -83,10 +83,18 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
             log.exception("channel_admin_runner: такт канала %s упал", a["channel_id"])
 
     for a in await _rows(
-            pool, "setup_done AND NOT EXISTS (SELECT 1 FROM va_admin_plan p WHERE "
+            pool, "setup_done AND ("
+                  "NOT EXISTS (SELECT 1 FROM va_admin_plan p WHERE "
                   "p.owner_id=va_channel_admin.owner_id AND p.channel_id=va_channel_admin.channel_id "
-                  "AND p.status='planned' AND p.slot_at > now() + make_interval(hours => $1))",
-            ca._PLAN_MIN_AHEAD_H):
+                  "AND p.status='planned' AND p.slot_at > now() + make_interval(hours => $1)) OR "
+                  "EXISTS (SELECT 1 FROM va_admin_plan p WHERE "
+                  "p.owner_id=va_channel_admin.owner_id AND p.channel_id=va_channel_admin.channel_id "
+                  "AND p.status='planned' AND p.slot_at > now() + make_interval(days => $2)) OR "
+                  "(SELECT count(*) FROM va_admin_plan p WHERE "
+                  "p.owner_id=va_channel_admin.owner_id AND p.channel_id=va_channel_admin.channel_id "
+                  "AND p.status='planned' AND p.slot_at <= now() + make_interval(days => $2)) > "
+                  "LEAST(GREATEST(COALESCE(va_channel_admin.posts_per_day,1),1)*$2,$3))",
+            ca._PLAN_MIN_AHEAD_H, ca._PLAN_DAYS, ca._PLAN_MAX_SLOTS):
         try:
             stats["planned"] += await ca.ensure_plan(pool, a["owner_id"], a["channel_id"], now=now)
         except Exception:
