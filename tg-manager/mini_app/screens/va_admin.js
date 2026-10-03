@@ -485,6 +485,68 @@ function _vaReportHtml(r, s) {
   return h + '</div>';
 }
 
+function _vaControlHtml(control) {
+  control = control || {};
+  const cards = control.cards || [];
+  if (!cards.length) return '';
+  const icon = {ok:'✓', warning:'!', info:'i'};
+  const actions = {
+    knowledge:"vaSelectTab('knowledge')", strategy:'openVaStrategy()', plan:"vaSelectTab('plan')",
+    health:'openHealth()', operations:'openOps()', editorial:'openEditorialRules(_vaCid)'
+  };
+  let h = '<div class="sec">Контроль администратора</div>' +
+    '<div class="field-note" style="margin:0 0 8px">Знания, стратегия, источники, план, аккаунты, операции, редактор и обучение проверяются вместе.</div>' +
+    '<div class="lst">';
+  cards.slice(0, 4).forEach(function (card) {
+    h += '<div class="li"><div style="width:28px;height:28px;border-radius:50%;display:grid;place-items:center;' +
+      'background:var(--bg3);font-weight:700;color:' + (card.level === 'warning' ? 'var(--orange,#fb923c)' : 'var(--accent)') + '">' +
+      esc(icon[card.level] || 'i') + '</div><div class="li-body"><div class="li-name">' + esc(card.title) + '</div>' +
+      '<div class="li-sub">' + esc(card.detail) + '</div></div>' +
+      (actions[card.action] ? '<button class="btn btn-s" onclick="' + actions[card.action] + '">Открыть</button>' : '') + '</div>';
+  });
+  h += '</div>';
+  if (cards.length > 4) {
+    h += '<details class="acc-actions"><summary style="padding:12px;cursor:pointer">Все проверки (' + cards.length + ')</summary>' +
+      '<div class="lst">' + cards.slice(4).map(function (card) {
+        return '<div class="li"><div class="li-body"><div class="li-name">' + esc(card.title) + '</div>' +
+          '<div class="li-sub">' + esc(card.detail) + '</div></div></div>';
+      }).join('') + '</div></details>';
+  }
+  const sources = control.knowledge || [];
+  if (sources.length) {
+    h += '<details class="acc-actions"><summary style="padding:12px;cursor:pointer">Откуда взяты настройки</summary>' +
+      '<div class="lst" style="padding:10px 14px">' + sources.map(function (x) {
+        return '<div style="padding:4px 0"><b>' + esc(x.label) + ':</b> ' + esc(x.source) + '</div>';
+      }).join('') + '</div></details>';
+  }
+  const decisions = control.decisions || [];
+  if (decisions.length) {
+    h += '<details class="acc-actions"><summary style="padding:12px;cursor:pointer">Как менялись рубрики</summary><div class="lst">' +
+      decisions.map(function (d) {
+        return '<div class="li"><div class="li-body"><div class="li-name">' + _vaWhen(d.created_at) + '</div>' +
+          '<div class="li-sub">' + esc(d.explanation) + '</div></div>' +
+          (d.can_revert ? '<button class="btn btn-s" onclick="vaRollbackLearning(' + d.id + ')">Отменить</button>' : '') + '</div>';
+      }).join('') + '</div></details>';
+  }
+  if (n.next_actions && n.next_actions.length) {
+    h += '<div class="sec">Что сделать дальше</div><div class="lst">' +
+      n.next_actions.map(function (a) {
+        return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')">' +
+          '<div class="ava">→</div><div class="li-body"><div class="li-name">' + esc(a.title) + '</div>' +
+          '<div class="li-sub">' + esc(a.reason) + '</div></div><span class="chev">›</span></div>';
+      }).join('') + '</div>';
+  }
+  if (n.next_actions && n.next_actions.length) {
+    h += '<div class="sec">Что сделать дальше</div><div class="lst">' +
+      n.next_actions.map(function (a) {
+        return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')">' +
+          '<div class="ava">→</div><div class="li-body"><div class="li-name">' + esc(a.title) + '</div>' +
+          '<div class="li-sub">' + esc(a.reason) + '</div></div><span class="chev">›</span></div>';
+      }).join('') + '</div>';
+  }
+  return h;
+}
+
 function _vaBriefHtml(b) {
   const rows = [];
   if (b.niche) rows.push('<b>Ниша:</b> ' + esc(b.niche));
@@ -694,6 +756,7 @@ function _vaChannelHtml(d) {
   h += _vaTabsHtml() + _vaPanel('overview');
   h += _vaDraftsHtml(d.drafts || [], 'ch');
   h += _vaReportHtml(d.report, s);
+  h += _vaControlHtml(d.control);
   h += '</section>' + _vaPanel('knowledge');
   h += _vaBriefHtml(s.brief || {});
   h += _vaRefsHtml(d.references || []);
@@ -826,6 +889,13 @@ async function vaPostNow() {
   await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/post_now', {
       method: 'POST', body: '{}', timeoutMs: 240000,
     }, {button:'vaNowBtn', reload:true, success:function (r) { return r.message || 'Готово'; }});
+}
+
+async function vaRollbackLearning(decisionId) {
+  if (!(await askConfirm('Вернуть предыдущие доли рубрик? Новые замеры останутся использованными.'))) return;
+  await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/learning/rollback', {
+    method:'POST', body:JSON.stringify({decision_id:decisionId})
+  }, {success:'Предыдущие доли рубрик восстановлены'});
 }
 
 async function openVaStrategy() {

@@ -1470,7 +1470,8 @@ async def _best_texts(pool, owner_id: int, channel_id: int) -> list[str]:
 
 async def write_post(pool, owner_id: int, channel_id: int, *,
                      complete: Optional[Complete] = None,
-                     plan_item: Optional[dict] = None) -> Draft:
+                     plan_item: Optional[dict] = None,
+                     news_events: Optional[list[dict]] = None) -> Draft:
     """Написать пост для канала и прогнать через редактора канала.
 
     До _MAX_ATTEMPTS попыток: замечания редактора возвращаются автору как
@@ -1506,9 +1507,24 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
     recent = await content_memory.recent_texts(pool, owner_id, str(channel_id), limit=20)
     is_intro = bool(admin.get("intro_pending")) and not recent
     if news_mode and not is_intro:
-        refs = await va_references.refresh_news_signals(pool, owner_id, channel_id, refs)
+        if not news_events:
+            refs = await va_references.refresh_news_signals(pool, owner_id, channel_id, refs)
+        event_refs = []
+        for event in news_events or []:
+            published_at = event.get("published_at")
+            if isinstance(published_at, datetime):
+                published_at = published_at.isoformat()
+            event_refs.append({
+                "kind": "competitor", "status": "ready",
+                "username": str(event.get("source_username") or "source"),
+                "lessons": {},
+                "stats": {"feed_status": "ready", "feed_checked_at": datetime.now(timezone.utc).isoformat(),
+                          "latest_topics": [{"at": published_at,
+                                             "text": str(event.get("source_text") or "")}]},
+            })
+        refs.extend(event_refs)
         profile = {**profile, "references": refs}
-        if not va_references.has_fresh_news_signals(refs):
+        if not news_events and not va_references.has_fresh_news_signals(refs):
             raise ChannelAdminError(
                 "Не нашёл свежих новостных публикаций в источниках. Пост пропущен, "
                 "чтобы не подменять новости советами и не выдумывать события. "
@@ -1599,14 +1615,11 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
 
 async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str) -> int:
     """Опубликовать пост в канал штатной операцией (mass_publish на один канал)."""
-    from services import operation_bus
+    from services import operation_bus, va_control
 
-    acc_rows = await pool.fetch(
-        "SELECT DISTINCT acc_id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-        int(owner_id), int(channel_id))
-    acc_ids = [int(r["acc_id"]) for r in acc_rows or []]
+    acc_ids = await va_control.eligible_accounts(pool, owner_id, channel_id)
     if not acc_ids:
-        raise ChannelAdminError("У канала не осталось аккаунта, который может в него публиковать")
+        raise ChannelAdminError("Нет доступного аккаунта для публикации: проверьте активность, ограничения и карантин")
     ch = await channel_row(pool, owner_id, channel_id) or {}
     try:
         op_id = await operation_bus.submit(
@@ -1687,8 +1700,8 @@ async def publish_draft(pool, owner_id: int, draft_id: int) -> dict:
         raise
     await pool.execute("UPDATE va_admin_drafts SET op_id=$2 WHERE id=$1", d["id"], op_id)
     await _after_publish(pool, owner_id, d["channel_id"], op_id, bool(d["is_intro"]))
-    await log_event(pool, owner_id, d["channel_id"], "published",
-                    f"Опубликован одобренный пост ({d['pillar'] or 'без рубрики'})")
+    await log_event(pool, owner_id, d["channel_id"], "queued",
+                    f"Одобренный пост передан в очередь ({d['pillar'] or 'без рубрики'}), операция №{op_id}")
     return {"op_id": op_id, "channel_id": str(d["channel_id"])}
 
 
@@ -1875,6 +1888,16 @@ async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = No
         if int(today or 0) >= int(admin["posts_per_day"]):
             await _ok(pool, admin, await _next_at(pool, admin, now))
             return "daily_cap"
+        channel = await channel_row(pool, owner_id, channel_id) or {}
+        if is_news_channel({**admin, "title": channel.get("title") or ""}):
+            # News channels are event-driven; the calendar must not create filler.
+            await pool.execute(
+                "UPDATE va_admin_plan SET status='skipped' WHERE id=(SELECT id FROM va_admin_plan "
+                "WHERE owner_id=$1 AND channel_id=$2 AND status='planned' AND slot_at <= $3 "
+                "ORDER BY slot_at LIMIT 1)", owner_id, channel_id, now + timedelta(minutes=30),
+            )
+            await _ok(pool, admin, await _next_at(pool, admin, now))
+            return "news_waiting"
     item_row = await pool.fetchrow(
         "SELECT id, pillar, topic FROM va_admin_plan WHERE owner_id=$1 AND channel_id=$2 "
         "AND status='planned' AND slot_at <= $3 ORDER BY slot_at LIMIT 1",
@@ -1895,8 +1918,9 @@ async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = No
             await _fail(pool, bot, admin, reason[:300], retry_in=timedelta(hours=1))
             return "error"
         await _after_publish(pool, owner_id, channel_id, op_id, d.is_intro)
-        await log_event(pool, owner_id, channel_id, "published",
-                        f"Опубликован пост: {d.pillar}" + (f" — {item['topic']}" if item and item.get('topic') else ""))
+        await log_event(pool, owner_id, channel_id, "queued",
+                        f"Пост передан в очередь: {d.pillar}, операция №{op_id}" +
+                        (f" — {item['topic']}" if item and item.get('topic') else ""))
         await _ok(pool, admin, await _next_at(pool, admin, now))
         return "published"
     if (admin.get("publish_mode") == "auto" and not d.ok and not manual
@@ -1953,7 +1977,7 @@ async def check_last_publish(pool, bot, admin: dict) -> None:
         f"SELECT status, {_ost.sql_error_reason()} AS error_msg, result "
         "FROM operation_queue WHERE id=$1 AND owner_id=$2",
         int(op_id), int(admin["owner_id"]))
-    if not row or row["status"] in ("pending", "running", "queued"):
+    if not row or not _ost.is_terminal(row["status"]):
         return
     res = row["result"]
     if isinstance(res, str):
@@ -1964,14 +1988,20 @@ async def check_last_publish(pool, bot, admin: dict) -> None:
     res = res or {}
     failed = row["status"] in ("failed", "cancelled") or (
         row["status"] == "done" and int(res.get("ok") or 0) == 0)
-    await pool.execute(
-        "UPDATE va_channel_admin SET last_op_id=NULL WHERE owner_id=$1 AND channel_id=$2",
-        int(admin["owner_id"]), int(admin["channel_id"]))
+    claimed = await pool.fetchval(
+        "UPDATE va_channel_admin SET last_op_id=NULL WHERE owner_id=$1 AND channel_id=$2 "
+        "AND last_op_id=$3 RETURNING id",
+        int(admin["owner_id"]), int(admin["channel_id"]), int(op_id))
+    if not claimed:
+        return
     if failed:
         reason = (row["error_msg"] or res.get("summary") or "публикация не прошла")
         # Следующий пост — по расписанию; _fail сдвинет не раньше чем через час.
         await _fail(pool, bot, admin, f"Публикация не прошла: {str(reason)[:300]}",
                     retry_in=timedelta(hours=1))
+    elif int(res.get("ok") or 0) > 0:
+        await log_event(pool, admin["owner_id"], admin["channel_id"], "published",
+                        f"Исполнитель подтвердил публикацию, операция №{op_id}")
 
 
 async def collect_stats(pool, owner_id: int, channel_id: int) -> Optional[dict]:

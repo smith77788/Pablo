@@ -115,6 +115,12 @@ async def autotune(pool, owner_id: int, channel_id: int) -> dict | None:
                 "WHERE owner_id=$1 AND channel_key=$2",
                 owner_id, channel_key, json.dumps(new, ensure_ascii=False),
             )
+            await conn.execute(
+                "INSERT INTO va_learning_decisions(owner_id,channel_id,old_weights,new_weights,"
+                "post_ids,explanation) VALUES($1,$2,$3::jsonb,$4::jsonb,$5::bigint[],$6)",
+                owner_id, int(channel_id), json.dumps(weights, ensure_ascii=False),
+                json.dumps(new, ensure_ascii=False), decision["post_ids"], decision["explanation"],
+            )
         await conn.execute(
             "UPDATE va_channel_posts SET learned_at=now() "
             "WHERE owner_id=$1 AND channel_key=$2 AND id=ANY($3::bigint[])",
@@ -125,3 +131,58 @@ async def autotune(pool, owner_id: int, channel_id: int) -> dict | None:
             owner_id, int(channel_id), decision["explanation"],
         )
         return new if new != weights else None
+
+
+class LearningConflict(ValueError):
+    """A safe rollback is no longer possible without overwriting newer settings."""
+
+
+async def history(pool, owner_id: int, channel_id: int) -> list[dict]:
+    rows = await pool.fetch(
+        "SELECT id, explanation, created_at, reverted_at FROM va_learning_decisions "
+        "WHERE owner_id=$1 AND channel_id=$2 ORDER BY id DESC LIMIT 10",
+        int(owner_id), int(channel_id),
+    )
+    return [{"id": r["id"], "explanation": r["explanation"],
+             "created_at": r["created_at"].isoformat(),
+             "can_revert": i == 0 and r["reverted_at"] is None}
+            for i, r in enumerate(rows)]
+
+
+async def rollback(pool, owner_id: int, channel_id: int, decision_id: int) -> None:
+    owner_id, channel_id = int(owner_id), int(channel_id)
+    async with pool.acquire() as conn, conn.transaction():
+        admin = await conn.fetchrow(
+            "SELECT id FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2 FOR UPDATE",
+            owner_id, channel_id,
+        )
+        if not admin:
+            raise LearningConflict("Администратор канала не найден")
+        brain = await conn.fetchrow(
+            "SELECT pillars, mix_weights FROM va_channel_brain "
+            "WHERE owner_id=$1 AND channel_key=$2 FOR UPDATE", owner_id, str(channel_id),
+        )
+        decision = await conn.fetchrow(
+            "SELECT id,old_weights,new_weights,reverted_at FROM va_learning_decisions "
+            "WHERE owner_id=$1 AND channel_id=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE",
+            owner_id, channel_id,
+        )
+        if not brain or not decision or decision["id"] != int(decision_id) or decision["reverted_at"]:
+            raise LearningConflict("Можно отменить только последнее ещё не отменённое решение")
+        old, new = _decoded(decision["old_weights"]), _decoded(decision["new_weights"])
+        if _decoded(brain["mix_weights"]) != new or set(_decoded(brain["pillars"])) != set(new):
+            raise LearningConflict("Рубрики уже изменились. Отмена затёрла бы более новые настройки")
+        await conn.execute(
+            "UPDATE va_channel_brain SET mix_weights=$3::jsonb, updated_at=now() "
+            "WHERE owner_id=$1 AND channel_key=$2", owner_id, str(channel_id), json.dumps(old),
+        )
+        await conn.execute(
+            "UPDATE va_learning_decisions SET reverted_at=now() WHERE id=$1 AND owner_id=$2",
+            int(decision_id), owner_id,
+        )
+        # Keep the samples consumed: undo must not immediately reproduce the decision.
+        await conn.execute(
+            "INSERT INTO va_admin_events(owner_id,channel_id,kind,text) VALUES($1,$2,'tune',$3)",
+            owner_id, channel_id, "Владелец отменил последнее обучение. Предыдущие веса восстановлены; "
+            "для следующего решения нужны новые публикации.",
+        )

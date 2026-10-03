@@ -13,6 +13,7 @@ _REFRESH_H часов), считает цифры — длину, частоту
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -31,6 +32,7 @@ _RETRY_H = 6               # после ошибки — не раньше че�
 _READ_POSTS = 50
 _NEWS_FEED_TTL = timedelta(minutes=5)
 _NEWS_ITEM_MAX_AGE = timedelta(minutes=30)
+_NEWS_EVENT_MAX_AGE = timedelta(minutes=10)
 _NEWS_FEED_BATCH = 3
 _USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
 _LINK_RE = re.compile(r"^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/(?:s/)?([A-Za-z0-9_]+)/?(?:\d+)?/?$",
@@ -259,7 +261,12 @@ def _latest_news_items(snapshot: dict, *, now: datetime | None = None) -> list[d
         at = at.astimezone(timezone.utc)
         if not now - _NEWS_ITEM_MAX_AGE <= at <= now:
             continue
-        items.append({"at": at.isoformat(), "text": text[:360]})
+        item = {"at": at.isoformat(), "text": text[:360]}
+        try:
+            item["message_id"] = int(post.get("id"))
+        except (TypeError, ValueError):
+            pass
+        items.append(item)
         if len(items) >= 3:
             break
     return items
@@ -283,6 +290,14 @@ def _news_terms(text: str) -> set[str]:
     return words - {"это", "как", "что", "для", "при", "его", "ее", "они", "или", "the", "and"}
 
 
+def news_signal_hash(text: str, *, source: str = "", message_id: int | None = None) -> str:
+    if source and message_id is not None:
+        identity = f"telegram:{source.casefold()}:{int(message_id)}"
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    normalized = " ".join(re.findall(r"[\w]+", str(text).casefold()))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def has_fresh_news_signals(refs: list[dict]) -> bool:
     return any(
         ref.get("kind") == "competitor" and ref.get("status") == "ready"
@@ -292,7 +307,9 @@ def has_fresh_news_signals(refs: list[dict]) -> bool:
 
 
 async def refresh_news_signals(pool, owner_id: int, channel_id: int,
-                               refs: list[dict] | None = None) -> list[dict]:
+                               refs: list[dict] | None = None, *,
+                               force: bool = False,
+                               enqueue_events: bool = False) -> list[dict]:
     """Refresh a few stale public competitor feeds before a news-channel post."""
     refs = list(refs if refs is not None else await for_prompt(pool, owner_id, channel_id))
     now = datetime.now(timezone.utc)
@@ -302,7 +319,15 @@ async def refresh_news_signals(pool, owner_id: int, channel_id: int,
         if ref.get("kind") != "competitor":
             continue
         stats = ref.get("stats") or {}
-        if _feed_is_fresh(stats, now=now):
+        try:
+            attempted = datetime.fromisoformat(str(stats.get("feed_attempted_at")))
+            if attempted.tzinfo is None:
+                attempted = attempted.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            attempted = datetime.min.replace(tzinfo=timezone.utc)
+        if now - attempted.astimezone(timezone.utc) < _NEWS_FEED_TTL:
+            continue
+        if not force and _feed_is_fresh(stats, now=now):
             continue
         try:
             checked = datetime.fromisoformat(str(stats.get("feed_checked_at")))
@@ -337,6 +362,13 @@ async def refresh_news_signals(pool, owner_id: int, channel_id: int,
                 raise ReferenceError_("Источник временно недоступен")
             stats = dict(ref.get("stats") or {})
             topics = _latest_news_items(snapshot, now=now)
+            fresh_events = []
+            if enqueue_events:
+                for item in topics:
+                    published_at = datetime.fromisoformat(item["at"])
+                    if now - published_at > _NEWS_EVENT_MAX_AGE:
+                        continue
+                    fresh_events.append(item)
             stats.update({"feed_attempted_at": now.isoformat(), "feed_checked_at": now.isoformat(),
                           "feed_status": "ready" if topics else "empty",
                           "latest_topics": topics})
@@ -347,6 +379,22 @@ async def refresh_news_signals(pool, owner_id: int, channel_id: int,
             )
             ref["status"] = "ready"
             ref["stats"] = stats
+            ref["new_signal_count"] = 0
+            for item in fresh_events:
+                signal_hash = news_signal_hash(
+                    item["text"], source=str(ref["username"]),
+                    message_id=item.get("message_id"),
+                )
+                inserted = await pool.fetchval(
+                    "INSERT INTO va_news_inbox(owner_id, channel_id, signal_hash, source_username, "
+                    "source_message_id, published_at, source_text) "
+                    "VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id, channel_id, signal_hash) "
+                    "DO NOTHING RETURNING id",
+                    int(owner_id), int(channel_id), signal_hash, str(ref["username"]),
+                    item.get("message_id"), published_at, item["text"],
+                )
+                if inserted:
+                    ref["new_signal_count"] += 1
         except Exception:
             log.info("va_references: не удалось обновить новостной источник ref=%s", rid, exc_info=True)
             stats = dict(ref.get("stats") or {})
@@ -360,6 +408,7 @@ async def refresh_news_signals(pool, owner_id: int, channel_id: int,
             except Exception:
                 log.debug("va_references: не удалось сохранить ошибку новостного источника", exc_info=True)
             ref["stats"] = stats
+            ref["new_signal_count"] = 0
     return refs
 
 
@@ -461,7 +510,7 @@ def prompt_lines(refs: list[dict], *, include_news: bool = False) -> list[str]:
         out.append(_fence([". ".join(parts) + "."], cap=2200))
     if include_news:
         candidates = []
-        for ref in ready[:MAX_REFS]:
+        for ref in ready:
             stats = ref.get("stats") or {}
             if not _feed_is_fresh(stats):
                 continue

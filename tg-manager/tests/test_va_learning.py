@@ -97,18 +97,19 @@ async def test_runtime_locks_policy_consumes_evidence_and_explains_in_one_transa
     assert "learned_at IS NULL" in sql and "interval '30 days'" in sql
     assert (owner, channel, pillars, cap) == (7, "8", ["a", "b"], 10)
     writes = conn.execute.call_args_list
-    assert len(writes) == 3
+    assert len(writes) == 4
     assert "SET mix_weights=" in writes[0].args[0] and "brand_rules=" not in writes[0].args[0]
-    assert writes[1].args[1:] == (7, "8", [1, 2, 3, 20, 21, 22])
-    assert "va_admin_events" in writes[2].args[0]
-    assert "Эти посты повторно" in writes[2].args[3]
+    assert "va_learning_decisions" in writes[1].args[0]
+    assert writes[2].args[1:] == (7, "8", [1, 2, 3, 20, 21, 22])
+    assert "va_admin_events" in writes[3].args[0]
+    assert "Эти посты повторно" in writes[3].args[3]
     tx.__aexit__.assert_awaited_once_with(None, None, None)
 
 
 @pytest.mark.asyncio
 async def test_explanation_failure_rolls_back_weight_update_and_consumption():
     pool, conn, tx = connection()
-    conn.execute.side_effect = ["UPDATE 1", "UPDATE 6", RuntimeError("event failed")]
+    conn.execute.side_effect = ["UPDATE 1", "INSERT 1", "UPDATE 6", RuntimeError("event failed")]
     with pytest.raises(RuntimeError, match="event failed"):
         await learning.autotune(pool, 7, 8)
     assert tx.__aexit__.call_args.args[0] is RuntimeError
@@ -138,6 +139,40 @@ async def test_unchanged_decision_also_consumes_evidence():
     assert await learning.autotune(pool, 7, 8) is None
     assert len(conn.execute.call_args_list) == 2
     assert "SET learned_at=" in conn.execute.call_args_list[0].args[0]
+
+
+@pytest.mark.asyncio
+async def test_rollback_restores_only_latest_matching_decision_and_keeps_samples_consumed():
+    pool, conn, tx = connection()
+    conn.fetchrow.side_effect = [
+        {"id": 1},
+        {"pillars": json.dumps(["a", "b"]), "mix_weights": json.dumps({"a": 2, "b": 4})},
+        {"id": 9, "old_weights": json.dumps({"a": 3, "b": 3}),
+         "new_weights": json.dumps({"a": 2, "b": 4}), "reverted_at": None},
+    ]
+    await learning.rollback(pool, 7, 8, 9)
+    writes = conn.execute.call_args_list
+    assert len(writes) == 3
+    assert "mix_weights" in writes[0].args[0]
+    assert "reverted_at" in writes[1].args[0]
+    assert "va_admin_events" in writes[2].args[0]
+    assert all("va_channel_posts" not in call.args[0] for call in writes)
+    tx.__aexit__.assert_awaited_once_with(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_rollback_refuses_to_overwrite_newer_manual_weights():
+    pool, conn, tx = connection()
+    conn.fetchrow.side_effect = [
+        {"id": 1},
+        {"pillars": json.dumps(["a", "b"]), "mix_weights": json.dumps({"a": 8, "b": 1})},
+        {"id": 9, "old_weights": json.dumps({"a": 3, "b": 3}),
+         "new_weights": json.dumps({"a": 2, "b": 4}), "reverted_at": None},
+    ]
+    with pytest.raises(learning.LearningConflict, match="более новые настройки"):
+        await learning.rollback(pool, 7, 8, 9)
+    conn.execute.assert_not_awaited()
+    assert tx.__aexit__.call_args.args[0] is learning.LearningConflict
 
 
 @pytest.mark.asyncio

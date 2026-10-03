@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from services import channel_admin as ca
-from services import va_references
+from services import va_control, va_references
 from services import va_workspace as workspace
 
 OWNER = 42
@@ -20,6 +20,7 @@ SECTIONS = (
     ("report", ca, "channel_report", "Отчёт"),
     ("events", ca, "events", "Журнал"),
     ("references", va_references, "list_refs", "Каналы-образцы"),
+    ("control", va_control, "load", "Решения и связи"),
 )
 
 
@@ -65,6 +66,7 @@ def env(monkeypatch):
         "report": {"posts_7d": 3, "avg_views_7d": 20, "members": None},
         "events": [{"kind": "info", "text": "Запущено", "at": None}],
         "references": [{"id": 3, "username": "example", "kind": "competitor"}],
+        "control": {"cards": [{"key": "knowledge", "level": "ok"}], "decisions": []},
     }
     calls = []
 
@@ -111,7 +113,7 @@ async def test_uninstalled_channel_keeps_defaults_without_extra_reads(env):
         "ok": True,
         "channel": {"id": str(CHANNEL), "title": "", "username": ""},
         "settings": ca.settings_public(None), "pillars": [],
-        "plan": [], "drafts": [], "report": None, "events": [], "references": [],
+        "plan": [], "drafts": [], "report": None, "events": [], "references": [], "control": {},
         "warnings": [],
     }
     assert env.calls == []
@@ -181,7 +183,7 @@ async def test_optional_failure_or_timeout_preserves_other_sections(
     message = "превышено время ожидания загрузки." if timeout else "не удалось загрузить раздел."
     assert result["warnings"] == [f"{label}: {message}"]
     assert stopped.is_set()
-    assert result[key] == (None if key == "report" else [])
+    assert result[key] == (None if key == "report" else {} if key == "control" else [])
     assert result["settings"] == ca.settings_public(env.pool.admin)
     for other in env.values:
         if other != key:
@@ -204,7 +206,7 @@ async def test_partial_failure_and_timeout_together(env, monkeypatch):
         "Отчёт: не удалось загрузить раздел.",
         "Журнал: превышено время ожидания загрузки.",
     ]
-    for key in ("plan", "drafts", "references"):
+    for key in ("plan", "drafts", "references", "control"):
         assert result[key] == env.values[key]
 
 

@@ -25,7 +25,8 @@ async def database():
         await conn.execute(f'CREATE SCHEMA "{schema}"')
         await conn.execute(f'SET search_path TO "{schema}"')
         for name in ("schema_v222_va_channel_brain.sql", "schema_v223_va_channel_posts.sql",
-                     "schema_v228_va_channel_admin.sql", "schema_v236_va_learning_samples.sql"):
+                     "schema_v228_va_channel_admin.sql", "schema_v236_va_learning_samples.sql",
+                     "schema_v238_va_learning_decisions.sql"):
             await conn.execute((ROOT / name).read_text(encoding="utf-8"))
         # The new migration must also be safe to apply twice.
         await conn.execute((ROOT / "schema_v236_va_learning_samples.sql").read_text(encoding="utf-8"))

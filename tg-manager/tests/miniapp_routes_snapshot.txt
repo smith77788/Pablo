@@ -890,6 +890,7 @@ POST /api/miniapp/uch/smart-tags/rules
 POST /api/miniapp/uch/sync
 POST /api/miniapp/uch/trust/update
 POST /api/miniapp/va/channel/{cid}/install
+POST /api/miniapp/va/channel/{cid}/learning/rollback
 POST /api/miniapp/va/channel/{cid}/post_now
 POST /api/miniapp/va/channel/{cid}/reconfigure
 POST /api/miniapp/va/channel/{cid}/references

@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 60.0
 _BATCH = 20  # каналов на шаг за такт: ИИ и Telegram медленные, не держим цикл
+_NEWS_SCAN_BATCH = 12
+_NEWS_SCAN_CONCURRENCY = 4
 
 
 async def _rows(pool, where: str, *args) -> list[dict]:
@@ -42,6 +44,119 @@ async def _safe(label: str, coro) -> None:
         log.exception("channel_admin_runner: %s упал", label)
 
 
+async def _draft_live_news(pool, bot, admin: dict) -> bool:
+    """Turn the newest unseen source event into one focused reviewed draft."""
+    owner_id, channel_id = int(admin["owner_id"]), int(admin["channel_id"])
+    pending = await pool.fetchval(
+        "SELECT count(*) FROM va_admin_drafts WHERE owner_id=$1 AND channel_id=$2 AND status='pending'",
+        owner_id, channel_id,
+    )
+    if pending:
+        return False
+    published = await pool.fetchval(
+        "SELECT count(*) FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2 "
+        "AND published_at > now() - interval '24 hours'", owner_id, str(channel_id),
+    )
+    if int(published or 0) >= int(admin.get("posts_per_day") or 1):
+        return False
+    events = await pool.fetch(
+        "WITH picked AS (SELECT id FROM va_news_inbox WHERE owner_id=$1 AND channel_id=$2 "
+        "AND attempts < 3 AND (status='pending' OR (status='drafting' AND "
+        "claimed_at < now() - interval '15 minutes')) ORDER BY published_at DESC, id DESC "
+        "FOR UPDATE SKIP LOCKED LIMIT 1) "
+        "UPDATE va_news_inbox n SET status='drafting', attempts=attempts+1, "
+        "claimed_at=now(), updated_at=now() FROM picked WHERE n.id=picked.id RETURNING "
+        "n.id, n.source_username, n.source_message_id, n.published_at, n.source_text",
+        owner_id, channel_id,
+    )
+    if not events:
+        return False
+    event_ids = [int(event["id"]) for event in events]
+    try:
+        draft = await ca.write_post(pool, owner_id, channel_id, news_events=list(events))
+        sources = sorted({
+            f"@{event['source_username']} · {event['published_at'].astimezone(timezone.utc).isoformat()}"
+            for event in events if event.get("source_username") and event.get("published_at")
+        })
+        if sources:
+            draft.reasons.append("Сигналы для проверки: " + "; ".join(sources[:3]))
+        # Draft and consumed inbox rows commit together: a crash cannot make the
+        # same event produce a second review item.
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                draft_id = await ca.save_draft(conn, owner_id, channel_id, draft)
+                await conn.execute(
+                    "UPDATE va_news_inbox SET status='drafted', draft_id=$2, claimed_at=NULL, "
+                    "updated_at=now() WHERE id=ANY($1::bigint[]) AND owner_id=$3 AND channel_id=$4",
+                    event_ids, draft_id, owner_id, channel_id,
+                )
+        await ca.notify_draft(pool, bot, owner_id, channel_id, draft_id, draft)
+        await ca.log_event(pool, owner_id, channel_id, "draft",
+                           f"Новостной черновик из {len(events)} новых сигналов отправлен владельцу")
+        return True
+    except Exception:
+        log.exception("channel_admin_runner: live news draft failed ch=%s", channel_id)
+        await pool.execute(
+            "UPDATE va_news_inbox SET status=CASE WHEN attempts >= 3 THEN 'expired' ELSE 'pending' END, "
+            "claimed_at=NULL, updated_at=now() WHERE id=ANY($1::bigint[]) AND status='drafting'",
+            event_ids,
+        )
+        return False
+
+
+async def _scan_live_news(pool, bot) -> dict:
+    """Poll a bounded batch of due newsrooms; posting slots never invent news."""
+    from services import va_references
+
+    await pool.execute(
+        "UPDATE va_news_inbox SET status='expired', updated_at=now() "
+        "WHERE status='pending' AND published_at < now() - interval '15 minutes'"
+    )
+    rows = await pool.fetch(
+        "SELECT a.*, m.title FROM va_channel_admin a "
+        "JOIN LATERAL (SELECT mc.title FROM managed_channels mc WHERE mc.owner_id=a.owner_id "
+        "AND mc.channel_id=a.channel_id AND mc.type='channel' LIMIT 1) m ON TRUE "
+        "WHERE a.enabled AND a.setup_done "
+        "AND lower(concat_ws(' ',m.title,a.topic,a.project_info,a.brief->>'niche',a.brief->>'offer')) "
+        "LIKE ANY(ARRAY['%новост%','%новин%','%news%','%сводк%','%происшеств%','%информационн%']) "
+        "AND EXISTS ("
+        "SELECT 1 FROM va_reference_channels r WHERE r.owner_id=a.owner_id "
+        "AND r.channel_id=a.channel_id AND r.kind='competitor' AND ("
+        "NULLIF(r.stats->>'feed_attempted_at','') IS NULL OR "
+        "(r.stats->>'feed_attempted_at')::timestamptz < now() - interval '5 minutes')) "
+        "ORDER BY (SELECT MIN(NULLIF(r.stats->>'feed_attempted_at','')::timestamptz) "
+        "FROM va_reference_channels r WHERE r.owner_id=a.owner_id "
+        "AND r.channel_id=a.channel_id AND r.kind='competitor') NULLS FIRST, "
+        "a.owner_id, a.channel_id "
+        f"LIMIT {_NEWS_SCAN_BATCH}"
+    )
+    if not rows:
+        return {"scanned": 0, "drafts": 0}
+
+    semaphore = asyncio.Semaphore(_NEWS_SCAN_CONCURRENCY)
+    owner_locks: dict[int, asyncio.Lock] = {}
+
+    async def scan(admin: dict) -> tuple[int, int]:
+        owner_id = int(admin["owner_id"])
+        owner_lock = owner_locks.setdefault(owner_id, asyncio.Lock())
+        async with semaphore, owner_lock:
+            try:
+                refs = await va_references.for_prompt(
+                    pool, admin["owner_id"], admin["channel_id"])
+                await va_references.refresh_news_signals(
+                    pool, admin["owner_id"], admin["channel_id"], refs,
+                    force=True, enqueue_events=True,
+                )
+                return 1, int(await _draft_live_news(pool, bot, admin))
+            except Exception:
+                log.exception("channel_admin_runner: news scan failed ch=%s", admin["channel_id"])
+                return 1, 0
+
+    outcomes = await asyncio.gather(*(scan(dict(row)) for row in rows))
+    return {"scanned": sum(item[0] for item in outcomes),
+            "drafts": sum(item[1] for item in outcomes)}
+
+
 async def _claim(pool, admin: dict, now: datetime) -> bool:
     """Занять такт канала: сдвинуть next_post_at, только если его никто не сдвинул."""
     row = await pool.fetchrow(
@@ -53,7 +168,8 @@ async def _claim(pool, admin: dict, now: datetime) -> bool:
 
 async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
-    stats = {"setup": 0, "posted": 0, "planned": 0, "stats": 0, "reports": 0}
+    stats = {"setup": 0, "posted": 0, "planned": 0, "stats": 0, "reports": 0,
+             "news_scanned": 0, "news_drafts": 0}
     await _safe("expire drafts", pool.execute(
         "UPDATE va_admin_drafts SET status='expired', decided_at=now() "
         "WHERE status='pending' AND created_at < now() - make_interval(hours => $1)",
@@ -68,6 +184,13 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
             reason = str(e) if isinstance(e, ca.ChannelAdminError) else f"настройка не удалась: {e}"
             await _safe("setup fail", ca._fail(pool, bot, a, reason[:300],
                                                retry_in=_td(minutes=30)))
+
+    try:
+        news_stats = await _scan_live_news(pool, bot)
+        stats["news_scanned"] += news_stats["scanned"]
+        stats["news_drafts"] += news_stats["drafts"]
+    except Exception:
+        log.exception("channel_admin_runner: live news scan failed")
 
     for a in await _rows(pool, "setup_done AND last_op_id IS NOT NULL"):
         await _safe("check publish", ca.check_last_publish(pool, bot, a))

@@ -5,7 +5,7 @@ import asyncio
 
 from services import channel_admin as ca
 from services import channel_brain_store as cbs
-from services import va_references
+from services import va_control, va_references
 
 SECTION_TIMEOUT_SECONDS = 3.0
 
@@ -37,6 +37,7 @@ async def load_workspace(pool, owner_id: int, channel_id: int) -> dict | None:
         "report": None,
         "events": [],
         "references": [],
+        "control": {},
         "warnings": warnings,
     }
     if not admin:
@@ -59,6 +60,7 @@ async def load_workspace(pool, owner_id: int, channel_id: int) -> dict | None:
         ("report", "Отчёт", ca.channel_report),
         ("events", "Журнал", ca.events),
         ("references", "Каналы-образцы", va_references.list_refs),
+        ("control", "Решения и связи", va_control.load),
     )
     tasks = [asyncio.create_task(load_section(*section)) for section in sections]
     try:

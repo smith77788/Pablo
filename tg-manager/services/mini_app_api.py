@@ -14712,6 +14712,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 items = {"channels": await _ca.list_channels(pool, uid)}
             drafts = await _ca.list_drafts(pool, uid) if include_summary else []
             network = await _ca.network_overview(pool, uid) if include_summary else None
+            if network is not None:
+                try:
+                    from services import va_control
+                    network["next_actions"] = await va_control.network_actions(pool, uid)
+                except Exception:
+                    log.debug("va network actions failed uid=%s", uid, exc_info=True)
+                    network["next_actions"] = []
         except Exception:
             log.warning("va_channels failed uid=%s", uid, exc_info=True)
             return _err("Не удалось загрузить каналы", 500)
@@ -14754,6 +14761,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if data is None:
             return _err("Канал не найден среди ваших каналов", 404)
         return _json_resp(data)
+
+    async def va_learning_rollback(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Нет доступа", 401)
+        cid = _va_cid(request)
+        if cid is None:
+            return _err("Неверный канал", 400)
+        from services import channel_admin as _ca
+        from services import va_learning
+        if not await _ca.channel_row(pool, uid, cid):
+            return _err("Канал не найден среди ваших каналов", 404)
+        body = await _va_body(request)
+        decision_id = (body or {}).get("decision_id")
+        if type(decision_id) is not int or decision_id <= 0:
+            return _err("Неверное решение для отмены", 400)
+        try:
+            await va_learning.rollback(pool, uid, cid, decision_id)
+        except va_learning.LearningConflict as exc:
+            return _err(str(exc), 409)
+        return await va_channel_get_for(uid, cid)
+
+    app.router.add_post("/api/miniapp/va/channel/{cid}/learning/rollback", va_learning_rollback)
 
     async def _va_save(uid: int, cid: int, body: dict, *, install: bool) -> web.Response:
         from services import channel_admin as _ca
@@ -14837,7 +14867,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except _ca.ChannelAdminError as e:
             return _err(str(e), 400)
         msg = {
-            "published": "Пост написан и отправлен в канал",
+            "published": "Пост написан и передан в очередь. Доставка будет подтверждена отдельно",
             "draft": "Пост написан — редактор нашёл замечания, он ждёт вашего решения ниже",
             "error": "Не получилось написать пост — причина в журнале, администратор повторит сам",
         }.get(res, "Готово")

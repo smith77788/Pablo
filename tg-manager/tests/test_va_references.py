@@ -115,6 +115,42 @@ async def test_refresh_news_signals_reads_and_saves_recent_competitor_updates(mo
     assert refreshed[0]["status"] == "ready"
     assert refreshed[0]["stats"]["latest_topics"][0]["text"] == "Свежее событие в стране"
     assert "owner_id=$2" in pool.execute.await_args.args[0]
+    assert not any("INSERT INTO va_news_inbox" in call.args[0]
+                   for call in pool.fetchval.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_background_refresh_enqueues_only_unseen_live_events(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    pool = AsyncMock()
+    pool.fetchval.side_effect = [17, 91, None]
+    now = datetime.now(timezone.utc)
+
+    async def _read(*args, **kwargs):
+        return {"recent": [
+            {"id": 502, "text": "Новое подтверждённое решение", "date": now - timedelta(minutes=1)},
+            {"id": 501, "text": "Уже обработанная новость", "date": now - timedelta(minutes=2)},
+        ]}
+
+    monkeypatch.setattr(vr, "_read", _read)
+    ref = _ref() | {"id": 17, "stats": {"latest_topics": [
+        {"message_id": 501, "at": (now - timedelta(minutes=2)).isoformat(),
+         "text": "Уже обработанная новость"},
+    ]}}
+    refreshed = await vr.refresh_news_signals(
+        pool, 44, 55, [ref], force=True, enqueue_events=True,
+    )
+
+    assert refreshed[0]["new_signal_count"] == 1
+    inserts = [call for call in pool.fetchval.await_args_list
+               if "INSERT INTO va_news_inbox" in call.args[0]]
+    assert len(inserts) == 2
+    insert = inserts[0]
+    assert "INSERT INTO va_news_inbox" in insert.args[0]
+    assert insert.args[1:5] == (44, 55, vr.news_signal_hash(
+        "Новое подтверждённое решение", source="rival_news", message_id=502,
+    ), "rival_news")
 
 
 def test_reference_reaches_post_and_plan_prompts_without_texts():
