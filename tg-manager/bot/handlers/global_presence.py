@@ -1334,7 +1334,8 @@ async def cb_gp_geo_custom(callback: CallbackQuery, state: FSMContext) -> None:
         "Или с деталями через запятую:\n"
         "<code>Berlin, Germany, de</code>\n\n"
         "📎 <b>Или загрузите CSV-файл</b> с городами.\n"
-        "Формат: <code>city, country, country_code</code> (первые 3 колонки).",
+        "Формат: <code>город, страна, код, область, язык, часовой пояс</code> "
+        "(последние 3 колонки необязательны).",
         markup=kb.as_markup(),
     )
 
@@ -1358,17 +1359,20 @@ async def _parse_geo_csv_bytes(raw: bytes) -> list[dict] | None:
     sample = text[:2000]
     delimiter = "," if sample.count(",") >= sample.count(";") else ";"
     reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    lines: list[str] = []
+    rows: list[list[str]] = []
     for row in reader:
         if not row:
             continue
         # Skip header rows
         first = row[0].strip().lower()
-        if first in ("city", "город", "name", "название", "#", ""):
+        if first in ("city", "город", "місто", "name", "название", "назва", "#", ""):
             continue
-        # Rebuild as comma-separated for parse_custom_geo_list
-        lines.append(", ".join(c.strip() for c in row[:3] if c.strip()))
-    return parse_custom_geo_list("\n".join(lines)) if lines else None
+        rows.append([c.strip() for c in row[:6]])
+    if not rows:
+        return None
+    normalized = io.StringIO()
+    csv.writer(normalized).writerows(rows)
+    return parse_custom_geo_list(normalized.getvalue())
 
 
 @router.message(GlobalPresenceFSM.entering_custom_geo, F.document)
