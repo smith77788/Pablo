@@ -102,6 +102,8 @@ def test_api_returns_network():
     api = _read("services/mini_app_api.py")
     assert "network_overview(pool, uid)" in api
     assert '"network": network' in api
+    assert 'request.query.get("summary") != "0"' in api
+    assert "if include_summary else []" in api
 
 
 def test_ui_renders_the_network_summary():

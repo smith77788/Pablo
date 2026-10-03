@@ -21,6 +21,7 @@ await page.addInitScript(() => {
     openTelegramLink(){},showAlert(){},showConfirm(){},close(){},setHeaderColor(){},setBackgroundColor(){}
   }};
   window.vaSmokeSaves = [];
+  window.vaSmokeListCalls = [];
   const channel = id => ({ok:true,channel:{id,title:id==='slow'?'Запоздавший ответ':'Канал '+id,
     username:'channel'+id},settings:{installed:true,enabled:true,setup_done:true,
     topic:'Тема',audience:'',tone:'',notes:'',posts_per_day:2,tz_offset:3,window_start:9,
@@ -30,6 +31,7 @@ await page.addInitScript(() => {
     const pathname = new URL(url, location.href).pathname;
     let result = {ok:true};
     if (pathname.endsWith('/api/miniapp/va/channels')) {
+      window.vaSmokeListCalls.push(url.toString());
       const all = Array.from({length:61},(_,i)=>({channel_id:String(i+1),
         title:'Канал '+String(i+1).padStart(2,'0'),username:'name'+(i+1),installed:true,
         enabled:true,setup_done:true,topic:'Тема',pending_drafts:0}));
@@ -63,6 +65,9 @@ try {
   await page.evaluate(() => hidePairingOverlay());
   await page.evaluate(() => openVaAdmin());
   await page.waitForSelector('#vaChannelSearch');
+  await page.waitForFunction(() => window.vaSmokeListCalls.length > 0);
+  if (!new URL(await page.evaluate(() => window.vaSmokeListCalls[0]), 'https://app.invalid').searchParams.has('summary'))
+    throw new Error('Первое открытие не загрузило сводные данные');
   await page.locator('#vaChannelSearch').fill('Канал');
   await page.waitForFunction(() => _vaListTotal === 61 && document.querySelectorAll('#vaChannelResults [data-va-channel]').length === 30);
   if (await page.locator('#vaChannelResults [data-va-channel]').count() !== 30) throw new Error('Ограничение страницы в 30 каналов не сработало');
@@ -85,6 +90,9 @@ try {
   await page.locator('#vaChannelSearch').fill('Канал 01');
   await page.waitForFunction(() => document.querySelectorAll('#vaChannelResults [data-va-channel]').length === 1);
   await page.locator('#vaChannelFilter').selectOption('active');
+  if (await page.evaluate(() => window.vaSmokeListCalls.slice(1)
+    .some(url => new URL(url, 'https://app.invalid').searchParams.get('summary') !== '0')))
+    throw new Error('Поиск и пагинация повторно загрузили сводные данные');
   await page.locator('#vaChannelResults [data-va-channel]').first().evaluate(el => openVaChannel(el.dataset.vaChannel));
   await page.waitForSelector('#vaTab-settings');
   await page.locator('#vaTab-settings').click();

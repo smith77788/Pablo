@@ -27,7 +27,8 @@ def test_channel_list_is_filterable_and_bounded():
     assert "Показать ещё " in js
     assert "concat(data.channels" in js
     assert "_vaChannels = []" in js
-    assert "new URLSearchParams({page:String(_vaListPage),q:_vaListQuery,state:_vaListFilter})" in js
+    assert "summary:includeSummary ? '1' : '0'" in js
+    assert "_vaListUrl(true)" in js and "_vaListUrl(false)" in js
     assert " + _vaListTotal +" in js
 
 

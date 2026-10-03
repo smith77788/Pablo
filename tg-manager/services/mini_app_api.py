@@ -14694,6 +14694,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         from services import channel_admin as _ca
+        include_summary = "page" not in request.query or request.query.get("summary") != "0"
         try:
             if "page" in request.query:
                 try:
@@ -14709,8 +14710,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     return _err(str(exc), 400)
             else:
                 items = {"channels": await _ca.list_channels(pool, uid)}
-            drafts = await _ca.list_drafts(pool, uid)
-            network = await _ca.network_overview(pool, uid)
+            drafts = await _ca.list_drafts(pool, uid) if include_summary else []
+            network = await _ca.network_overview(pool, uid) if include_summary else None
         except Exception:
             log.warning("va_channels failed uid=%s", uid, exc_info=True)
             return _err("Не удалось загрузить каналы", 500)

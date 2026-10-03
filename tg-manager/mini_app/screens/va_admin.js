@@ -166,7 +166,7 @@ async function _vaLoadList() {
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   let d;
   try {
-    d = await api(_vaListUrl());
+    d = await api(_vaListUrl(true));
   } catch (e) {
     if (!_vaWorkspace.current(ticket)) return;
     body.innerHTML = errHtml('Не удалось загрузить каналы: ' + ((e && e.message) || ''), '_vaLoadList()');
@@ -225,8 +225,9 @@ function vaFilterChannels() {
   _vaSearchTimer = setTimeout(function () { _vaLoadChannelsPage(); }, 250);
 }
 
-function _vaListUrl() {
-  const params = new URLSearchParams({page:String(_vaListPage),q:_vaListQuery,state:_vaListFilter});
+function _vaListUrl(includeSummary) {
+  const params = new URLSearchParams({page:String(_vaListPage),q:_vaListQuery,state:_vaListFilter,
+    summary:includeSummary ? '1' : '0'});
   return '/api/miniapp/va/channels?' + params.toString();
 }
 
@@ -234,7 +235,7 @@ async function _vaLoadChannelsPage(append) {
   const ticket = _vaWorkspace.issue('list', 'channels');
   const box = document.getElementById('vaChannelResults');
   try {
-    const data = await api(_vaListUrl());
+    const data = await api(_vaListUrl(false));
     if (!_vaWorkspace.current(ticket)) return;
     _vaChannels = append ? _vaChannels.concat(data.channels || []) : (data.channels || []);
     _vaListTotal = Number(data.total) || 0;
