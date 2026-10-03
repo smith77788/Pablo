@@ -22,8 +22,13 @@ def test_channel_list_is_filterable_and_bounded():
     js = (ROOT / "mini_app" / "screens" / "va_admin.js").read_text(encoding="utf-8")
     assert "function vaFilterChannels()" in js
     assert "function vaChannelPage(delta)" in js
-    assert "const size = 30" in js
-    assert "toLocaleLowerCase('ru')" in js
+    assert "page_size=30" in (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    assert "page_size + 1" in (ROOT / "services" / "channel_admin.py").read_text(encoding="utf-8")
+    assert "Показать ещё " in js
+    assert "concat(data.channels" in js
+    assert "_vaChannels = []" in js
+    assert "new URLSearchParams({page:String(_vaListPage),q:_vaListQuery,state:_vaListFilter})" in js
+    assert " + _vaListTotal +" in js
 
 
 @pytest.mark.skipif(not NODE, reason="Для проверки поведения состояния нужен Node.js")

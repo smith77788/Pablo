@@ -10,6 +10,11 @@ let _vaChannels = [];
 let _vaListPage = 0;
 let _vaListQuery = '';
 let _vaListFilter = 'all';
+let _vaListTotal = 0;
+let _vaListHasMore = false;
+let _vaSearchTimer = null;
+let _vaLoadingMore = false;
+let _vaListError = '';
 
 function _vaFields(root) {
   const values = {};
@@ -157,10 +162,11 @@ async function openVaAdmin() {
 async function _vaLoadList() {
   const body = document.getElementById('s-va-body');
   const ticket = _vaWorkspace.issue('list', 'channels');
+  _vaListError = '';
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   let d;
   try {
-    d = await api('/api/miniapp/va/channels');
+    d = await api(_vaListUrl());
   } catch (e) {
     if (!_vaWorkspace.current(ticket)) return;
     body.innerHTML = errHtml('Не удалось загрузить каналы: ' + ((e && e.message) || ''), '_vaLoadList()');
@@ -169,6 +175,9 @@ async function _vaLoadList() {
   if (!_vaWorkspace.current(ticket)) return;
   const chans = d.channels || [];
   _vaChannels = chans;
+  _vaListTotal = Number(d.total) || 0;
+  _vaListHasMore = !!d.has_more;
+  _vaListPage = Number(d.page) || 0;
   let h = '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.5;color:var(--hint)">' +
     'Выберите канал и поставьте администратора. Он сам разберётся в нише канала, составит контент-план, ' +
     'будет писать и публиковать посты под рост аудитории и заявки, следить за статистикой и присылать ' +
@@ -184,19 +193,14 @@ async function _vaLoadList() {
   }
   h += _vaNetworkHtml(d.network);
   h += _vaDraftsHtml(d.drafts || [], 'list');
-  h += '<div class="sec">Каналы (' + chans.length + ')</div>';
-  if (!chans.length) {
-    h += '<div class="lst" style="padding:14px;color:var(--hint)">Каналов пока нет. Добавьте аккаунт, который ' +
-      'администрирует канал, — канал появится здесь.</div>';
-  } else {
-    h += '<div class="lst" style="padding:12px 14px"><div class="field"><label for="vaChannelSearch">Найти канал</label>' +
+  h += '<div class="sec">Каналы</div>';
+  h += '<div class="lst" style="padding:12px 14px"><div class="field"><label for="vaChannelSearch">Найти канал</label>' +
       '<input type="search" id="vaChannelSearch" maxlength="150" value="' + esc(_vaListQuery) +
       '" placeholder="Название, @имя или тема" oninput="vaFilterChannels()"></div>' +
       '<div class="field"><label for="vaChannelFilter">Показать</label><select id="vaChannelFilter" onchange="vaFilterChannels()">' +
       [['all','Все каналы'],['attention','Требуют внимания'],['active','Работают'],['paused','Остановлены'],['new','Без администратора']].map(function (f) {
         return _vaOpt(f[0], _vaListFilter, f[1]);
       }).join('') + '</select></div></div><div id="vaChannelResults"></div>';
-  }
   h += '<div class="sec">Общие правила редактора</div>' +
     '<div class="lst"><div class="li tap" onclick="openEditorialRules()"><div class="ava ava-purple">✍️</div>' +
     '<div class="li-body"><div class="li-name">Правила для всех каналов</div>' +
@@ -210,33 +214,61 @@ function vaFilterChannels() {
   _vaListQuery = document.getElementById('vaChannelSearch').value;
   _vaListFilter = document.getElementById('vaChannelFilter').value;
   _vaListPage = 0;
+  _vaChannels = [];
+  _vaListTotal = 0;
+  _vaListHasMore = false;
+  _vaLoadingMore = true;
+  _vaListError = '';
+  _vaWorkspace.issue('list', 'channels');
   _vaRenderChannels();
+  if (_vaSearchTimer) clearTimeout(_vaSearchTimer);
+  _vaSearchTimer = setTimeout(function () { _vaLoadChannelsPage(); }, 250);
 }
 
-function vaChannelPage(delta) {
-  _vaListPage += delta;
+function _vaListUrl() {
+  const params = new URLSearchParams({page:String(_vaListPage),q:_vaListQuery,state:_vaListFilter});
+  return '/api/miniapp/va/channels?' + params.toString();
+}
+
+async function _vaLoadChannelsPage(append) {
+  const ticket = _vaWorkspace.issue('list', 'channels');
+  const box = document.getElementById('vaChannelResults');
+  try {
+    const data = await api(_vaListUrl());
+    if (!_vaWorkspace.current(ticket)) return;
+    _vaChannels = append ? _vaChannels.concat(data.channels || []) : (data.channels || []);
+    _vaListTotal = Number(data.total) || 0;
+    _vaListHasMore = !!data.has_more;
+    _vaListPage = Number(data.page) || 0;
+  } catch (e) {
+    if (_vaWorkspace.current(ticket)) {
+      _vaListError = e.message || 'Не удалось загрузить список';
+      if (append) _vaListPage = Math.max(0, _vaListPage - 1);
+    }
+  } finally {
+    _vaLoadingMore = false;
+    if (_vaWorkspace.current(ticket) && box) {
+      _vaRenderChannels();
+      if (append && !_vaListError) document.getElementById('vaChannelLoadMore')?.scrollIntoView({block:'nearest'});
+    }
+  }
+}
+
+async function vaChannelPage(delta) {
+  if (delta < 0 || !_vaListHasMore || _vaLoadingMore) return;
+  _vaLoadingMore = true;
+  _vaListPage += 1;
   _vaRenderChannels();
-  document.getElementById('vaChannelResults')?.scrollIntoView({block:'start'});
+  await _vaLoadChannelsPage(true);
 }
 
 function _vaRenderChannels() {
   const box = document.getElementById('vaChannelResults');
   if (!box) return;
-  const query = _vaListQuery.trim().toLocaleLowerCase('ru');
-  const items = _vaChannels.filter(function (c) {
-    const matches = [c.title, c.username, c.topic, c.channel_id].join(' ').toLocaleLowerCase('ru').includes(query.replace(/^@/, ''));
-    const state = _vaListFilter === 'all' ||
-      (_vaListFilter === 'attention' && (c.last_error || c.pending_drafts)) ||
-      (_vaListFilter === 'active' && c.installed && c.enabled) ||
-      (_vaListFilter === 'paused' && c.installed && !c.enabled) ||
-      (_vaListFilter === 'new' && !c.installed);
-    return matches && state;
-  });
-  const size = 30, pages = Math.max(1, Math.ceil(items.length / size));
-  _vaListPage = Math.max(0, Math.min(_vaListPage, pages - 1));
-  const rows = items.slice(_vaListPage * size, (_vaListPage + 1) * size);
-  let html = '<div class="field-note" role="status" style="padding:8px 14px">Найдено: ' + items.length +
-    (items.length ? ' · страница ' + (_vaListPage + 1) + ' из ' + pages : '. Попробуйте другой запрос или фильтр.') + '</div>';
+  const rows = _vaChannels;
+  let html = '<div class="field-note" role="status" style="padding:8px 14px">Показано ' + rows.length + ' из ' + _vaListTotal +
+    (_vaListTotal ? ' каналов' : (_vaLoadingMore ? ' каналов. Ищем…' :
+      (_vaListQuery || _vaListFilter !== 'all' ? '. Ничего не найдено. Измените поиск или фильтр.' : '. Каналов пока нет. Добавьте аккаунт, который администрирует канал.'))) + '</div>';
   html += '<div class="lst">' + rows.map(function (c) {
     const sub = c.installed && c.enabled && c.setup_done
       ? ('следующий пост: ' + _vaWhen(c.next_post_at) + (c.pending_drafts ? ' · ждёт решения: ' + c.pending_drafts : ''))
@@ -247,9 +279,12 @@ function _vaRenderChannels() {
       '<div class="li-name">' + esc(c.title || c.username || c.channel_id) + '</div>' +
       '<div class="li-sub">' + _vaState(c) + (sub ? ' · ' + sub : '') + '</div></div><span class="chev">›</span></div>';
   }).join('') + '</div>';
-  if (pages > 1) html += '<div style="display:flex;gap:8px;padding:8px 0">' +
-    '<button class="btn btn-s" style="flex:1" onclick="vaChannelPage(-1)"' + (!_vaListPage ? ' disabled' : '') + '>Назад</button>' +
-    '<button class="btn btn-s" style="flex:1" onclick="vaChannelPage(1)"' + (_vaListPage === pages - 1 ? ' disabled' : '') + '>Далее</button></div>';
+  if (_vaListError) html += '<div class="field-err" role="alert" style="display:block">' + esc(_vaListError) + '</div>';
+  if (_vaListHasMore) html += '<div style="padding:8px 0">' +
+    '<button id="vaChannelLoadMore" class="btn btn-s" style="width:100%" onclick="vaChannelPage(1)"' +
+    (_vaLoadingMore ? ' disabled' : '') + '>' + (_vaLoadingMore ? 'Загружаю…' :
+      'Показать ещё ' + Math.min(30, _vaListTotal - rows.length) + ' из ' + (_vaListTotal - rows.length)) +
+    '</button></div>';
   box.innerHTML = html;
 }
 

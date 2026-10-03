@@ -30,9 +30,18 @@ await page.addInitScript(() => {
     const pathname = new URL(url, location.href).pathname;
     let result = {ok:true};
     if (pathname.endsWith('/api/miniapp/va/channels')) {
-      result = {ok:true,channels:Array.from({length:61},(_,i)=>({channel_id:String(i+1),
+      const all = Array.from({length:61},(_,i)=>({channel_id:String(i+1),
         title:'Канал '+String(i+1).padStart(2,'0'),username:'name'+(i+1),installed:true,
-        enabled:true,setup_done:true,topic:'Тема',pending_drafts:0})),drafts:[],network:null};
+        enabled:true,setup_done:true,topic:'Тема',pending_drafts:0}));
+      const params = new URL(url, location.href).searchParams;
+      const page = Number(params.get('page') || 0);
+      const query = (params.get('q') || '').toLocaleLowerCase('ru');
+      const state = params.get('state') || 'all';
+      const filtered = all.filter(item => (!query || [item.title,item.username,item.topic]
+        .some(value => value.toLocaleLowerCase('ru').includes(query))) &&
+        (state !== 'active' || (item.installed && item.enabled && item.setup_done)));
+      result = {ok:true,channels:filtered.slice(page*30,page*30+30),total:filtered.length,
+        has_more:(page+1)*30<filtered.length,page,drafts:[],network:null};
     } else if (pathname.includes('/api/miniapp/va/channel/')) {
       const id = pathname.split('/').filter(Boolean).at(-1);
       if (options.method === 'PUT') {
@@ -55,8 +64,26 @@ try {
   await page.evaluate(() => openVaAdmin());
   await page.waitForSelector('#vaChannelSearch');
   await page.locator('#vaChannelSearch').fill('Канал');
-  if (!(await page.locator('#vaChannelResults').innerText()).includes('61')) throw new Error('Поиск не показал число результатов');
+  await page.waitForFunction(() => _vaListTotal === 61 && document.querySelectorAll('#vaChannelResults [data-va-channel]').length === 30);
   if (await page.locator('#vaChannelResults [data-va-channel]').count() !== 30) throw new Error('Ограничение страницы в 30 каналов не сработало');
+  await page.locator('#vaChannelLoadMore').click();
+  try {
+    await page.waitForFunction(() => document.querySelectorAll('#vaChannelResults [data-va-channel]').length === 60, {timeout:5000});
+  } catch {
+    const state = await page.evaluate(() => ({
+      count:document.querySelectorAll('#vaChannelResults [data-va-channel]').length,
+      page:_vaListPage, total:_vaListTotal, hasMore:_vaListHasMore, loading:_vaLoadingMore,
+      error:_vaListError, button:document.querySelector('#vaChannelLoadMore')?.outerHTML
+    }));
+    throw new Error('Не загрузилась следующая страница: ' + JSON.stringify(state));
+  }
+  await page.locator('#vaChannelLoadMore').click();
+  await page.waitForFunction(() => document.querySelectorAll('#vaChannelResults [data-va-channel]').length === 61);
+  await page.locator('#vaChannelSearch').fill('ничего-нет');
+  await page.waitForFunction(() => document.querySelectorAll('#vaChannelResults [data-va-channel]').length === 0);
+  if (!(await page.locator('#vaChannelSearch').isVisible())) throw new Error('При пустом результате пропало поле поиска');
+  await page.locator('#vaChannelSearch').fill('Канал 01');
+  await page.waitForFunction(() => document.querySelectorAll('#vaChannelResults [data-va-channel]').length === 1);
   await page.locator('#vaChannelFilter').selectOption('active');
   await page.locator('#vaChannelResults [data-va-channel]').first().evaluate(el => openVaChannel(el.dataset.vaChannel));
   await page.waitForSelector('#vaTab-settings');

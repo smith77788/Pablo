@@ -943,6 +943,58 @@ async def list_channels(pool, owner_id: int) -> list[dict]:
     return out
 
 
+async def list_channels_page(pool, owner_id: int, *, page: int = 0, page_size: int = 30,
+                             query: str = "", state: str = "all") -> dict:
+    """Bound the channel-list payload while keeping filters and counts owner-scoped."""
+    states = {"all", "attention", "active", "paused", "new"}
+    if (isinstance(page, bool) or not isinstance(page, int) or not 0 <= page <= 100_000
+            or isinstance(page_size, bool) or not isinstance(page_size, int)
+            or not 1 <= page_size <= 100 or not isinstance(query, str) or len(query) > 150
+            or not isinstance(state, str) or state not in states):
+        raise ChannelAdminError("Не удалось применить поиск каналов")
+    rows = await pool.fetch(
+        "WITH draft_counts AS ("
+        " SELECT owner_id, channel_id, count(*) AS pending_drafts FROM va_admin_drafts "
+        " WHERE owner_id=$1 AND status='pending' GROUP BY owner_id, channel_id), "
+        "channel_rows AS ("
+        " SELECT mc.channel_id, MAX(mc.title) AS title, MAX(mc.username) AS username, "
+        " a.enabled, a.setup_done, a.topic, a.publish_mode, a.next_post_at, a.last_post_at, "
+        " a.last_error, a.members_count, COALESCE(d.pending_drafts,0)::int AS pending_drafts "
+        " FROM managed_channels mc "
+        " LEFT JOIN va_channel_admin a ON a.owner_id=mc.owner_id AND a.channel_id=mc.channel_id "
+        " LEFT JOIN draft_counts d ON d.owner_id=mc.owner_id AND d.channel_id=mc.channel_id "
+        " WHERE mc.owner_id=$1 "
+        " GROUP BY mc.channel_id, a.enabled, a.setup_done, a.topic, a.publish_mode, "
+        " a.next_post_at, a.last_post_at, a.last_error, a.members_count, d.pending_drafts), "
+        "filtered AS (SELECT * FROM channel_rows WHERE "
+        " ($2='' OR strpos(lower(concat_ws(' ', title, username, topic, channel_id::text)), lower($2))>0) "
+        " AND ($3='all' OR ($3='attention' AND (COALESCE(last_error,'')<>'' OR pending_drafts>0)) "
+        " OR ($3='active' AND COALESCE(enabled,false)) "
+        " OR ($3='paused' AND setup_done IS NOT NULL AND NOT COALESCE(enabled,false)) "
+        " OR ($3='new' AND setup_done IS NULL))) "
+        "SELECT *, count(*) OVER() AS _total_count FROM filtered "
+        "ORDER BY enabled DESC NULLS LAST, title NULLS LAST, channel_id "
+        "LIMIT $4 OFFSET $5",
+        int(owner_id), query.strip().removeprefix('@'), state, page_size + 1, page * page_size,
+    )
+    has_more = len(rows or []) > page_size
+    visible = list(rows or [])[:page_size]
+    total = int(visible[0].get("_total_count") or 0) if visible else 0
+    items = []
+    for row in visible:
+        item = dict(row)
+        for key in ("next_post_at", "last_post_at"):
+            if isinstance(item.get(key), datetime):
+                item[key] = item[key].isoformat()
+        item["channel_id"] = str(item["channel_id"])
+        item["enabled"] = bool(item.get("enabled"))
+        item["installed"] = item.get("setup_done") is not None
+        item["pending_drafts"] = int(item.get("pending_drafts") or 0)
+        item.pop("_total_count", None)
+        items.append(item)
+    return {"channels": items, "total": total, "has_more": has_more, "page": page}
+
+
 async def log_event(pool, owner_id: int, channel_id: int, kind: str, text: str) -> None:
     """Запись в журнал администратора. Fail-soft."""
     try:
