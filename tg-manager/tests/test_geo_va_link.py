@@ -2,12 +2,26 @@
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 from services.geo_va_link import (
     MAX_GEO_TARGETS, config_from_plan, install_for_target,
     retry_missing, settings_for_target, validate_config,
 )
+
+
+def _pool_with_transaction():
+    pool = AsyncMock()
+    conn = AsyncMock()
+
+    @asynccontextmanager
+    async def context():
+        yield conn
+
+    pool.acquire = context
+    conn.transaction = context
+    return pool, conn
 
 
 def test_config_defaults_to_review_and_preserves_plan_json():
@@ -43,7 +57,7 @@ def test_target_settings_are_local_and_guard_against_fabricated_news():
 
 
 def test_failed_install_does_not_change_target_from_done():
-    pool = AsyncMock()
+    pool, _ = _pool_with_transaction()
     target = {"id": 4, "plan_id": 9, "city": "Київ"}
     with patch("services.channel_admin.install", new=AsyncMock(side_effect=RuntimeError("temporary"))):
         ok = asyncio.run(install_for_target(pool, 2, 123, target, {"topic": "Новости", "publish_mode": "review", "posts_per_day": 2}))
@@ -54,7 +68,7 @@ def test_failed_install_does_not_change_target_from_done():
 
 
 def test_reconcile_only_missing_admins_and_reports_failures():
-    pool = AsyncMock()
+    pool, conn = _pool_with_transaction()
     pool.fetch.return_value = [
         {"id": 4, "plan_id": 9, "city": "Київ", "result_asset_id": 123},
     ]
@@ -65,3 +79,4 @@ def test_reconcile_only_missing_admins_and_reports_failures():
     assert "va.channel_id IS NULL" in pool.fetch.call_args.args[0]
     assert pool.fetch.call_args.args[1:3] == (2, 9)
     assert install.await_count == 1
+    assert install.await_args.args[0] is conn

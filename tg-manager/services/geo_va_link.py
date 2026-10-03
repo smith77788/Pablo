@@ -72,8 +72,10 @@ async def install_for_target(pool, owner_id, channel_id, target, config):
     from services import channel_admin
 
     try:
-        await channel_admin.install(
-            pool, owner_id, channel_id, settings_for_target(config, target))
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await channel_admin.install(
+                    conn, owner_id, channel_id, settings_for_target(config, target))
     except Exception:
         # Keep target 'done': retrying Telegram channel creation would duplicate it.
         log.exception("Geo VA installation failed for owner=%s channel=%s", owner_id, channel_id)

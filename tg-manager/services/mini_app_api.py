@@ -16072,11 +16072,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "  FROM global_presence_targets WHERE plan_id=$1",
                 plan_id,
             )
+            from services.geo_va_link import config_from_plan
+            admin_coverage = None
+            if config_from_plan(plan["geo_selection"]):
+                admin_coverage = await pool.fetchrow(
+                    "SELECT COUNT(*) AS eligible, "
+                    "COUNT(va.channel_id) AS installed, "
+                    "COUNT(*) FILTER (WHERE va.enabled) AS enabled "
+                    "FROM global_presence_targets t "
+                    "JOIN managed_channels m ON m.owner_id=$1 AND m.channel_id=t.result_asset_id "
+                    "  AND m.type='channel' "
+                    "LEFT JOIN va_channel_admin va ON va.owner_id=$1 AND va.channel_id=t.result_asset_id "
+                    "WHERE t.plan_id=$2 AND t.status='done'",
+                    uid, plan_id,
+                )
             return _json_resp(
                 {
                     "plan": dict(plan),
                     "targets": [dict(t) for t in targets],
                     "dressing": dict(dressing) if dressing else {},
+                    "virtual_admin_coverage": dict(admin_coverage) if admin_coverage else None,
                 }
             )
         except Exception:

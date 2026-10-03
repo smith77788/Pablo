@@ -23583,6 +23583,7 @@ async function openGpDetail(planId, planName) {
     const va = selection.virtual_admin;
     const targets = d.targets||[];
     const dr = d.dressing||{};
+    const vaCoverage = d.virtual_admin_coverage||{};
     const stCls = {done:'b-gr',failed:'b-rd',running:'b-or',pending:'b-gy',skipped:'b-gy'};
     const roles = Array.isArray(p.roles) ? p.roles : (p.roles?JSON.parse(p.roles):null);
     const rolesLine = roles && roles.length ? roles.map(r=>GP_ROLE_LABELS[r]||r).join(', ') : null;
@@ -23599,7 +23600,7 @@ async function openGpDetail(planId, planName) {
         <div class="row"><div class="row-body"><div class="row-name">Паттерн</div><div class="row-val">${esc(p.name_pattern)}</div></div></div>
         ${p.username_pattern?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">${esc(p.username_pattern)}</div></div></div>`:''}
         ${dressLine?`<div class="row"><div class="row-body"><div class="row-name">Оформление</div><div class="row-val">${esc(dressLine)}</div></div></div>`:''}
-        ${va?.enabled?`<div class="row"><div class="row-body"><div class="row-name">Администратор</div><div class="row-val">${esc(va.topic)} · ${va.publish_mode==='auto'?'авто':'проверка'}${va.lead_contact?' · '+esc(va.lead_contact):''}</div></div></div>`:''}
+        ${va?.enabled?`<div class="row"><div class="row-body"><div class="row-name">Администратор</div><div class="row-val">${esc(va.topic)} · ${va.publish_mode==='auto'?'авто':'проверка'}${va.lead_contact?' · '+esc(va.lead_contact):''}</div><div class="row-val">Подключено: ${vaCoverage.installed||0} из ${vaCoverage.eligible||0}, активно: ${vaCoverage.enabled||0}</div></div></div>`:''}
       </div>
       ${dr.applicable ? `
       <div class="sec" style="margin-top:8px">Пакетные операции</div>
@@ -23610,7 +23611,7 @@ async function openGpDetail(planId, planName) {
       </div>
       <div class="hint" style="padding:6px 16px 0">Значения считаются для каждого объекта отдельно — по его городу и тематике.</div>
       ` : ''}
-      ${va?.enabled ? `<div style="padding:8px 16px"><button class="btn" onclick="gpRetryVa(${p.id})">Повторить подключение администратора</button></div>` : ''}
+      ${va?.enabled && vaCoverage.eligible > vaCoverage.installed ? `<div style="padding:8px 16px"><button class="btn" onclick="gpRetryVa(${p.id})">Повторить подключение администратора</button></div>` : ''}
       <div class="sec" style="margin-top:8px">Цели (показаны ${targets.length} из ${selection.count||targets.length})</div>
       <div class="lst" style="margin:0 16px">
     `;
