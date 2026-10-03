@@ -1,11 +1,10 @@
-"""Live newsroom flow consumes fresh Telegram events exactly once."""
+"""Живая редакция обрабатывает свежие события Telegram ровно один раз."""
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from services import channel_admin as ca
 from services import channel_admin_runner as runner
 from services import va_references
@@ -53,7 +52,7 @@ def test_signal_hash_is_stable_for_case_and_spacing():
 
 @pytest.mark.asyncio
 async def test_live_events_create_one_review_draft_and_are_consumed(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     events = [{"id": 11, "source_username": "source", "source_message_id": 91,
                "published_at": now, "source_text": "Срочное решение принято"}]
     pool = _Pool(events)
@@ -78,7 +77,7 @@ async def test_live_events_create_one_review_draft_and_are_consumed(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_live_event_failure_returns_claim_for_bounded_retry(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pool = _Pool([{"id": 12, "source_username": "source", "source_message_id": 92,
                    "published_at": now, "source_text": "Сигнал"}])
     monkeypatch.setattr(ca, "write_post", AsyncMock(side_effect=RuntimeError("temporary")))
@@ -100,7 +99,7 @@ async def test_scheduled_news_slot_waits_for_event_instead_of_writing_filler(mon
     admin = {"owner_id": 7, "channel_id": 8, "publish_mode": "auto", "posts_per_day": 2,
              "window_start": 9, "window_end": 21, "tz_offset": 3, "fail_streak": 0}
 
-    result = await ca.tick_post(pool, None, admin, now=datetime.now(timezone.utc))
+    result = await ca.tick_post(pool, None, admin, now=datetime.now(UTC))
 
     assert result == "news_waiting"
     write.assert_not_awaited()
