@@ -16147,8 +16147,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             geo_source = "countries"
         if not geo_list:
             return _err("Выберите гео-пресет, свои города или страны", 400)
-        # Потолок против гигантских планов.
-        geo_list = geo_list[:200]
+        from services.geo_va_link import MAX_GEO_TARGETS, validate_config
+        if len(geo_list) > MAX_GEO_TARGETS:
+            return _err(f"В одном плане не более {MAX_GEO_TARGETS} городов", 400)
+        va_config, va_error = validate_config(body.get("virtual_admin"), asset_type)
+        if va_error:
+            return _err(va_error, 400)
 
         acc_ids_int = [int(x) for x in account_ids if str(x).isdigit()]
         if acc_ids_int:
@@ -16183,7 +16187,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    RETURNING id""",
                 uid, asset_type, name_pattern, username_pattern,
                 json.dumps({"geo_source": geo_source, "count": len(targets),
-                            "description": description, "short_description": short_desc}),
+                            "description": description, "short_description": short_desc,
+                            "virtual_admin": va_config}),
                 json.dumps({"account_ids": acc_ids_int}),
             )
             from database.db import create_global_presence_targets
@@ -16256,6 +16261,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("global_presence_launch uid=%d plan=%d", uid, plan_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def global_presence_va_retry(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор плана", 400)
+        try:
+            plan = await pool.fetchrow(
+                "SELECT geo_selection FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+                plan_id, uid,
+            )
+            if not plan:
+                return _err("План не найден", 404)
+            from services.geo_va_link import config_from_plan, retry_missing
+            config = config_from_plan(plan["geo_selection"])
+            if not config:
+                return _err("В этом плане администратор не настроен", 400)
+            result = await retry_missing(pool, uid, plan_id, config)
+            return _json_resp({"ok": True, **result})
+        except Exception:
+            log.exception("global_presence_va_retry uid=%d plan=%d", uid, plan_id)
             return _err(_INTERNAL_ERROR, 500)
 
     async def global_presence_bulk_apply(request: web.Request) -> web.Response:
@@ -19124,6 +19154,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/global_presence", global_presence_create)
     app.router.add_get("/api/miniapp/geo_presets", geo_presets)
     app.router.add_post("/api/miniapp/global_presence/{plan_id}/launch", global_presence_launch)
+    app.router.add_post("/api/miniapp/global_presence/{plan_id}/virtual_admin/retry", global_presence_va_retry)
     app.router.add_post(
         "/api/miniapp/global_presence/{plan_id}/bulk_apply", global_presence_bulk_apply
     )

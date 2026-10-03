@@ -2715,6 +2715,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <select id="gpEcosystem" class="inp">
         <option value="">Не привязывать</option>
       </select>
+
+      <details style="margin-top:12px;border:1px solid var(--border-input);border-radius:10px;padding:10px">
+        <summary style="cursor:pointer;font-size:13px">Виртуальный администратор</summary>
+        <label style="display:block;margin:10px 0;font-size:13px"><input type="checkbox" id="gpVaEnabled"> Подключать к каждому созданному каналу</label>
+        <input id="gpVaTopic" class="inp" maxlength="300" placeholder="Тематика, например: новости города">
+        <input id="gpVaContact" class="inp" maxlength="200" placeholder="Куда вести аудиторию: @профиль или ссылка" style="margin-top:8px">
+        <select id="gpVaMode" class="inp" style="margin-top:8px">
+          <option value="review">Проверять публикации перед отправкой</option>
+          <option value="auto">Публиковать автоматически</option>
+        </select>
+        <label style="font-size:12px;color:var(--hint)">Публикаций в день
+          <input id="gpVaPosts" class="inp" type="number" min="1" max="12" value="2" style="margin-top:4px">
+        </label>
+        <div class="hint" style="margin-top:6px">По умолчанию публикации требуют проверки. Для новостей нужны проверенные источники: модуль не должен выдумывать события.</div>
+      </details>
       
       <div id="gpCreateErr" style="color:var(--red);font-size:12px;margin-top:8px"></div>
       
@@ -23506,6 +23521,11 @@ async function submitGpCreate() {
   const customCities = document.getElementById('gpCustomCities').value.trim();
   const accountIds = [...document.querySelectorAll('.gp-acc-cb:checked')].map(cb=>+cb.value);
   const ecosystemId = document.getElementById('gpEcosystem').value;
+  const vaEnabled = document.getElementById('gpVaEnabled').checked;
+  const vaTopic = document.getElementById('gpVaTopic').value.trim();
+  const vaContact = document.getElementById('gpVaContact').value.trim();
+  const vaMode = document.getElementById('gpVaMode').value;
+  const vaPosts = Number(document.getElementById('gpVaPosts').value);
   const errEl = document.getElementById('gpCreateErr');
   errEl.textContent = '';
 
@@ -23513,9 +23533,13 @@ async function submitGpCreate() {
   if (!geoPreset) { errEl.textContent = 'Выберите гео-пресет или свои города'; return; }
   if (geoPreset==='__custom' && !customCities) { errEl.textContent = 'Впишите список городов'; return; }
   if (!accountIds.length) { errEl.textContent = 'Выберите хотя бы один аккаунт'; return; }
+  if (vaEnabled && !['channel','package','full_package'].includes(assetType)) { errEl.textContent = 'Администратор подключается только к каналам'; return; }
+  if (vaEnabled && !vaTopic) { errEl.textContent = 'Укажите тематику администратора'; return; }
+  if (vaEnabled && (!Number.isInteger(vaPosts) || vaPosts < 1 || vaPosts > 12)) { errEl.textContent = 'Укажите от 1 до 12 публикаций в день'; return; }
+  if (geoPreset==='__custom' && customCities.split(/\r?\n/).filter(Boolean).length > 500) { errEl.textContent = 'В одном плане не более 500 городов'; return; }
 
   const geoLbl = geoPreset==='__custom' ? 'свои города' : document.getElementById('gpGeoPreset').selectedOptions[0].textContent;
-  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nНазвание: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nГео: ${geoLbl}\nАккаунтов: ${accountIds.length}`;
+  const preview = `Создать ${GP_TYPES[assetType]||assetType}?\n\nНазвание: ${namePattern}\nUsername: ${usernamePattern || '(авто)'}\nГео: ${geoLbl}\nАккаунтов: ${accountIds.length}${vaEnabled?'\nАдминистратор: '+vaTopic+' ('+(vaMode==='review'?'проверка':'авто')+')':''}`;
   if (!await askConfirm(preview)) return;
 
   const payload = {
@@ -23526,6 +23550,7 @@ async function submitGpCreate() {
     short_description: shortDesc,
     account_ids: accountIds,
     ecosystem_id: ecosystemId ? +ecosystemId : null,
+    virtual_admin: vaEnabled ? {enabled:true, topic:vaTopic, lead_contact:vaContact, publish_mode:vaMode, posts_per_day:vaPosts} : null,
   };
   if (geoPreset==='__custom') payload.custom_cities = customCities;
   else {
@@ -23554,6 +23579,8 @@ async function openGpDetail(planId, planName) {
   try {
     const d = await api(`/api/miniapp/global_presence/${planId}`);
     const p = d.plan;
+    const selection = typeof p.geo_selection === 'string' ? JSON.parse(p.geo_selection||'{}') : (p.geo_selection||{});
+    const va = selection.virtual_admin;
     const targets = d.targets||[];
     const dr = d.dressing||{};
     const stCls = {done:'b-gr',failed:'b-rd',running:'b-or',pending:'b-gy',skipped:'b-gy'};
@@ -23572,6 +23599,7 @@ async function openGpDetail(planId, planName) {
         <div class="row"><div class="row-body"><div class="row-name">Паттерн</div><div class="row-val">${esc(p.name_pattern)}</div></div></div>
         ${p.username_pattern?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">${esc(p.username_pattern)}</div></div></div>`:''}
         ${dressLine?`<div class="row"><div class="row-body"><div class="row-name">Оформление</div><div class="row-val">${esc(dressLine)}</div></div></div>`:''}
+        ${va?.enabled?`<div class="row"><div class="row-body"><div class="row-name">Администратор</div><div class="row-val">${esc(va.topic)} · ${va.publish_mode==='auto'?'авто':'проверка'}${va.lead_contact?' · '+esc(va.lead_contact):''}</div></div></div>`:''}
       </div>
       ${dr.applicable ? `
       <div class="sec" style="margin-top:8px">Пакетные операции</div>
@@ -23582,7 +23610,8 @@ async function openGpDetail(planId, planName) {
       </div>
       <div class="hint" style="padding:6px 16px 0">Значения считаются для каждого объекта отдельно — по его городу и тематике.</div>
       ` : ''}
-      <div class="sec" style="margin-top:8px">Цели (${targets.length})</div>
+      ${va?.enabled ? `<div style="padding:8px 16px"><button class="btn" onclick="gpRetryVa(${p.id})">Повторить подключение администратора</button></div>` : ''}
+      <div class="sec" style="margin-top:8px">Цели (показаны ${targets.length} из ${selection.count||targets.length})</div>
       <div class="lst" style="margin:0 16px">
     `;
     if (!targets.length) {
@@ -23602,11 +23631,19 @@ async function openGpDetail(planId, planName) {
       });
     }
     html += '</div>';
-    if (p.status === 'draft' || p.status === 'failed') {
+    if (p.status === 'pending' || p.status === 'failed') {
       html += `<div style="padding:12px 16px"><button class="btn btn-p" onclick="launchGpPlan(${p.id})" style="width:100%">🚀 Запустить план</button></div>`;
     }
     txt('gpdetail-body', html);
   } catch(e) { txt('gpdetail-body', empty('⚠️','Ошибка',errRu(e))); }
+}
+
+async function gpRetryVa(planId) {
+  try {
+    const r = await api(`/api/miniapp/global_presence/${planId}/virtual_admin/retry`, {method:'POST'});
+    toast(`Администратор подключён: ${r.installed}. Ошибок: ${r.failed}.${r.more?' Повторите для следующих каналов.':''}`);
+    openGpDetail(planId, document.getElementById('gpdetail-name').textContent);
+  } catch(e) { toast(errRu(e,'Не удалось подключить администратора')); }
 }
 
 const GP_ROLE_LABELS = {

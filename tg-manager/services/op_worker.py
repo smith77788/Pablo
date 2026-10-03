@@ -6239,7 +6239,7 @@ async def _exec_global_presence_channel(
 
     plan = await _safe_fetchrow(
             pool,
-        "SELECT asset_type FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        "SELECT asset_type, geo_selection FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
         plan_id,
         owner_id,
     )
@@ -6247,6 +6247,8 @@ async def _exec_global_presence_channel(
         return {"status": "failed", "reason": "План не найден"}
 
     asset_type = plan.get("asset_type", "channel")
+    from services.geo_va_link import config_from_plan
+    va_config = config_from_plan(plan.get("geo_selection"))
     # Тип плана — лишь запасной вариант. Решает тип КАЖДОЙ цели: проект-генератор
     # кладёт в один план каналы (новости, работа, афиша) и группы (чат, барахолка)
     # вперемешку, и общий флаг превратил бы половину структуры не в тот тип актива.
@@ -6728,6 +6730,16 @@ async def _exec_global_presence_channel(
                         "group" if is_group else "channel",
                     )
 
+            va_installed = None
+            if va_config and not is_group:
+                from services.geo_va_link import install_for_target
+                try:
+                    va_installed = await install_for_target(
+                        pool, owner_id, channel_id, target, va_config)
+                except Exception:
+                    va_installed = False
+                    log.exception("gp_channel: VA install failed for channel_id=%s", channel_id)
+
             _infra_mem.record_account_op(
                 acc["id"],
                 "global_presence_channel",
@@ -6806,7 +6818,8 @@ async def _exec_global_presence_channel(
                 created_count + failed_count,
                 f"{target.get('city', '?')} → {title}",
                 f"channel_id={channel_id}"
-                + (f" | username_err={username_error}" if username_error else ""),
+                + (f" | username_err={username_error}" if username_error else "")
+                + (" | va_install_failed" if va_installed is False else ""),
             )
             await _safe_execute(
                     pool,
