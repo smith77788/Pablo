@@ -1,11 +1,13 @@
 """Общая цель сети не стирает каналы и проверяется до публикации."""
 import json
+from copy import deepcopy
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
-
 from services import channel_admin as ca
-from services import va_references, va_strategy as vs
+from services import va_references
+from services import va_strategy as vs
 
 
 def strategy(**kw):
@@ -70,6 +72,98 @@ def test_shared_context_and_voice_reach_both_prompts():
         assert "Укреплять доверие" in prompt
         assert "Самовывоз по записи" in prompt
         assert "Объясню на примере." in prompt
+
+
+@pytest.mark.parametrize("empty", ["", " \t\n", None])
+@pytest.mark.parametrize("encoded", [False, True])
+def test_empty_local_business_inherits_shared_fields_without_mutation(empty, encoded):
+    shared = strategy(business={
+        "facts": "Общие факты", "faq": "Самовывоз по записи",
+        "voice_examples": "Объясню на примере.", "sales_share": 20,
+        "banned_topics": "Тема А", "competitors": "Компания А",
+    })
+    own = dict.fromkeys(shared["business"], empty)
+    own.update(network_role="expert", banned_topics="Тема Б", competitors="Компания Б")
+    original = {"business": json.dumps(own) if encoded else own}
+    before = deepcopy((original, shared))
+
+    result = vs.apply_strategy(original, shared)
+
+    for key in ("facts", "faq", "voice_examples", "sales_share"):
+        assert result["business"][key] == shared["business"][key]
+    assert result["business"]["banned_topics"] == "Тема А\nТема Б"
+    assert result["business"]["competitors"] == "Компания А\nКомпания Б"
+    for _, prompt in (ca.build_post_prompt(result, pillar="Польза"),
+                      ca.build_plan_prompt(result, ["Польза"], [])):
+        for key in ("facts", "faq", "voice_examples"):
+            assert shared["business"][key] in prompt
+    assert (original, shared) == before
+
+
+@pytest.mark.parametrize("shared, local, expected", [
+    (60, 0, 0), (0, "", 0), (0, None, 0), (0, 30, 0.3),
+])
+def test_sales_limit_inherits_empty_but_preserves_explicit_zero(shared, local, expected):
+    profile = vs.apply_strategy({"business": {"sales_share": local}},
+                                strategy(business={"sales_share": shared}))
+    assert ca.sales_cap(profile) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["plan", "plan_without_topics", "post"])
+@pytest.mark.parametrize("shared, own, enabled, selling_allowed", [
+    (0, {}, True, False),
+    (60, {"sales_share": 0}, True, False),
+    (0, {"sales_share": 60}, True, True),
+    (0, {"network_role": "independent"}, True, True),
+    (0, {}, False, True),
+])
+async def test_runtime_pillar_selection_uses_effective_strategy(
+        monkeypatch, operation, shared, own, enabled, selling_allowed):
+    from services import channel_brain as cb
+    from services import content_memory, editorial_review
+
+    pool = AsyncMock()
+    pool.fetchrow.return_value = None
+    pool.fetch.return_value = []
+    admin = {"business": own, "posts_per_day": 1, "window_start": 9,
+             "window_end": 21, "tz_offset": 0, "intro_pending": False}
+    monkeypatch.setattr(ca, "get_admin", AsyncMock(return_value=admin))
+    monkeypatch.setattr(vs, "get_strategy", AsyncMock(return_value={
+        "settings": strategy(enabled=enabled, business={"sales_share": shared}), "revision": 1,
+    }))
+    monkeypatch.setattr(ca, "channel_row", AsyncMock(return_value={"title": "Канал"}))
+    monkeypatch.setattr(va_references, "for_prompt", AsyncMock(return_value=[]))
+    monkeypatch.setattr(content_memory, "recent_texts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(content_memory, "recent_pillars", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ca, "_pillars", AsyncMock(return_value=(
+        ["Продажа", "Польза"], {"Продажа": 5, "Польза": 1}, None)))
+    # Force the initial choice to sell; only the real cap logic can reject it.
+    monkeypatch.setattr(cb, "pick_next_pillar", lambda seq, pillars, **kw: pillars[0])
+    complete = AsyncMock(return_value="Полезный материал о выборе товара.")
+
+    if operation.startswith("plan"):
+        if operation == "plan_without_topics":
+            complete.side_effect = RuntimeError("Генератор тем недоступен")
+        monkeypatch.setattr(ca, "log_event", AsyncMock())
+        count = await ca.ensure_plan(pool, 101, 5, complete=complete,
+                                     now=datetime(2026, 10, 3, 10, tzinfo=UTC))
+        pillars = [call.args[4] for call in pool.execute.call_args_list
+                   if "INSERT INTO va_admin_plan" in call.args[0]]
+        assert count == len(pillars) > 0
+    else:
+        monkeypatch.setattr(ca, "_rules", AsyncMock(return_value=cb.BrandRules()))
+        monkeypatch.setattr(ca, "_best_texts", AsyncMock(return_value=[]))
+        monkeypatch.setattr(ca, "owner_lessons", AsyncMock(return_value=[]))
+        monkeypatch.setattr(editorial_review, "review_draft", AsyncMock(
+            return_value=cb.EditorialVerdict(ok=True, needs_review=False)))
+        draft = await ca.write_post(pool, 101, 5, complete=complete)
+        assert draft.ok
+        pillars = [draft.pillar]
+
+    assert any(ca.is_selling(p) for p in pillars) is selling_allowed
+    complete.assert_awaited_once()
+    assert admin["business"] == own
 
 
 def test_reference_analysis_cannot_escape_data_fence():

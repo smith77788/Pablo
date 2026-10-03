@@ -43,6 +43,7 @@ DELETE /api/miniapp/uch/groups/{group_id}
 DELETE /api/miniapp/uch/intent/rule/{rule_id}
 DELETE /api/miniapp/uch/segments/{seg_id}
 DELETE /api/miniapp/uch/smart-tags/rules/{rule_id}
+DELETE /api/miniapp/va/references/{rid}
 DELETE /api/miniapp/warmup/{plan_id}
 DELETE /api/miniapp/workflow/{wf_id}
 DELETE /api/miniapp/workflows/{wf_id}
@@ -298,6 +299,7 @@ GET /api/miniapp/uch/spotlight
 GET /api/miniapp/uch/stats
 GET /api/miniapp/va/channel/{cid}
 GET /api/miniapp/va/channels
+GET /api/miniapp/va/strategy
 GET /api/miniapp/vault/analytics
 GET /api/miniapp/vault/chat/{chat_id}/messages
 GET /api/miniapp/vault/chats
@@ -569,6 +571,7 @@ HEAD /api/miniapp/uch/spotlight
 HEAD /api/miniapp/uch/stats
 HEAD /api/miniapp/va/channel/{cid}
 HEAD /api/miniapp/va/channels
+HEAD /api/miniapp/va/strategy
 HEAD /api/miniapp/vault/analytics
 HEAD /api/miniapp/vault/chat/{chat_id}/messages
 HEAD /api/miniapp/vault/chats
@@ -888,9 +891,11 @@ POST /api/miniapp/uch/trust/update
 POST /api/miniapp/va/channel/{cid}/install
 POST /api/miniapp/va/channel/{cid}/post_now
 POST /api/miniapp/va/channel/{cid}/reconfigure
+POST /api/miniapp/va/channel/{cid}/references
 POST /api/miniapp/va/drafts/{did}/publish
 POST /api/miniapp/va/drafts/{did}/regenerate
 POST /api/miniapp/va/drafts/{did}/reject
+POST /api/miniapp/va/references/{rid}/refresh
 POST /api/miniapp/vault/chat/{chat_id}/reply
 POST /api/miniapp/vault/settings
 POST /api/miniapp/warmup
@@ -924,3 +929,4 @@ PUT /api/miniapp/stars/experiment/{exp_id}/toggle
 PUT /api/miniapp/uch/groups/{group_id}
 PUT /api/miniapp/uch/smart-tags/rules/{rule_id}/toggle
 PUT /api/miniapp/va/channel/{cid}
+PUT /api/miniapp/va/strategy

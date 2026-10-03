@@ -14727,26 +14727,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     async def _va_payload(uid: int, cid: int) -> dict | None:
         """Экран канала: настройки, рубрики, план, черновики, статистика, журнал."""
-        from services import channel_admin as _ca
-        from services import channel_brain_store as _cbs
-        from services import va_references as _var
-        ch = await _ca.channel_row(pool, uid, cid)
-        if not ch:
-            return None
-        admin = await _ca.get_admin(pool, uid, cid)
-        brain = await _cbs.get_profile(pool, uid, str(cid))
-        return {
-            "ok": True,
-            "channel": {"id": str(cid), "title": ch.get("title") or "",
-                        "username": ch.get("username") or ""},
-            "settings": _ca.settings_public(admin),
-            "pillars": _cbs.to_public(brain)["pillars"],
-            "plan": await _ca.get_plan(pool, uid, cid) if admin else [],
-            "drafts": await _ca.list_drafts(pool, uid, cid) if admin else [],
-            "report": await _ca.channel_report(pool, uid, cid) if admin else None,
-            "events": await _ca.events(pool, uid, cid) if admin else [],
-            "references": await _var.list_refs(pool, uid, cid) if admin else [],
-        }
+        from services import va_workspace
+        return await va_workspace.load_workspace(pool, uid, cid)
 
     async def va_channel_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)

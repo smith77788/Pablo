@@ -100,14 +100,20 @@ def apply_strategy(profile, strategy):
     """Наследование не меняет сохранённые настройки отдельных каналов."""
     result = dict(profile)
     own = _object(profile.get("business"))
-    role = own.get("network_role", "discovery")
+    role = own.get("network_role") or "discovery"
     if not strategy.get("enabled") or role == "independent":
         return result
-    result["business"] = {**strategy.get("business", {}), **own}
+    shared = _object(strategy.get("business"))
+    # Empty UI fields inherit; explicit numeric zero remains a local override.
+    result["business"] = {**shared, **{
+        key: value for key, value in own.items()
+        if value is not None and not (isinstance(value, str) and not value.strip())
+    }}
     # Обязательные запреты сети дополняют местные, а не стираются ими.
     for key in ("banned_topics", "competitors"):
-        result["business"][key] = "\n".join(filter(None, (
-            strategy.get("business", {}).get(key), own.get(key))))
+        result["business"][key] = "\n".join(
+            value.strip() for value in (shared.get(key), own.get(key))
+            if value and value.strip())
     result["project_info"] = "\n".join(filter(None, (
         strategy.get("project_info"), profile.get("project_info"))))
     result["lead_contact"] = strategy["destination"]

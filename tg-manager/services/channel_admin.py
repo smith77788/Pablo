@@ -1236,6 +1236,8 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
         slots.append(cursor)
     if not slots:
         return 0
+    from services import va_strategy
+    profile = await va_strategy.enrich_profile(pool, owner_id, admin)
     names, weights, brain = await _pillars(pool, owner_id, channel_id)
     recent_p = await content_memory.recent_pillars(pool, owner_id, str(channel_id))
     planned = await pool.fetch(
@@ -1243,7 +1245,7 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
         "AND status='planned' ORDER BY slot_at", int(owner_id), int(channel_id))
     history = [p for p in recent_p if p in names] + [r["pillar"] for r in planned or []]
     pillars = plan_pillars(history, names, weights, len(slots),
-                           max_streak=getattr(brain, "max_streak", 2) or 2, cap=sales_cap(admin))
+                           max_streak=getattr(brain, "max_streak", 2) or 2, cap=sales_cap(profile))
     intro = bool(admin.get("intro_pending")) and not last_at and not planned
     if intro and pillars:
         pillars[0] = INTRO_PILLAR
@@ -1252,10 +1254,8 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
         complete = complete or _default_complete()
         recent = await content_memory.recent_texts(pool, owner_id, str(channel_id), limit=8)
         from services import va_references
-        profile = {**admin, "title": (await channel_row(pool, owner_id, channel_id) or {}).get("title"),
+        profile = {**profile, "title": (await channel_row(pool, owner_id, channel_id) or {}).get("title"),
                    "references": await va_references.for_prompt(pool, owner_id, channel_id)}
-        from services import va_strategy
-        profile = await va_strategy.enrich_profile(pool, owner_id, profile)
         system, user = build_plan_prompt(profile, pillars, recent)
         topics = parse_plan_topics(await complete(system, user), len(pillars))
     except Exception as e:
@@ -1347,7 +1347,7 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
     else:
         recent_p = await content_memory.recent_pillars(pool, owner_id, str(channel_id))
         pillar = pick_pillar([p for p in recent_p if p in names], names, weights,
-                             cap=sales_cap(admin)) or names[0]
+                             cap=sales_cap(profile)) or names[0]
         topic = ""
     best = await _best_texts(pool, owner_id, channel_id)
     lessons = await owner_lessons(pool, owner_id, channel_id)

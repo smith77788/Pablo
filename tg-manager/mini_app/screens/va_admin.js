@@ -5,6 +5,86 @@
 
 let _vaCid = null;
 let _vaTab = 'overview';
+const _vaWorkspace = new VaWorkspace();
+let _vaChannels = [];
+let _vaListPage = 0;
+let _vaListQuery = '';
+let _vaListFilter = 'all';
+
+function _vaFields(root) {
+  const values = {};
+  if (root) root.querySelectorAll('input[id],select[id],textarea[id]').forEach(function (el) {
+    values[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  return values;
+}
+
+function _vaCapture(root) {
+  if (root && root.dataset.vaKey) _vaWorkspace.track(root.dataset.vaKey, _vaFields(root));
+}
+
+function _vaDraftNotice(root) {
+  const note = root.querySelector('[data-va-unsaved]');
+  if (note) note.hidden = !_vaWorkspace.dirty(root.dataset.vaKey);
+}
+
+function _vaRenderForm(root, key, html) {
+  _vaCapture(root);
+  const same = root.dataset.vaKey === key;
+  const expanded = same ? Array.from(root.querySelectorAll('details')).map(el => el.open) : [];
+  root.innerHTML = '<div data-va-action role="alert" aria-live="assertive" class="field-err"></div>' +
+    '<div data-va-unsaved role="status" hidden class="field-note" style="padding:10px 14px">' +
+    'Есть несохранённые изменения. Они сохраняются при переходах внутри приложения, но пропадут при его закрытии.</div>' + html;
+  root.dataset.vaKey = key;
+  const values = _vaWorkspace.mount(key, _vaFields(root));
+  root.querySelectorAll('input[id],select[id],textarea[id]').forEach(function (el) {
+    if (el.type === 'checkbox') el.checked = values[el.id];
+    else el.value = values[el.id];
+  });
+  root.querySelectorAll('details').forEach((el, i) => { if (i < expanded.length) el.open = expanded[i]; });
+  root.oninput = root.onchange = function () { _vaCapture(root); _vaDraftNotice(root); };
+  _vaDraftNotice(root);
+}
+
+function _vaLoading(root) {
+  _vaCapture(root);
+  root.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+}
+
+window.addEventListener('beforeunload', function (event) {
+  if (_vaWorkspace.hasDrafts()) { event.preventDefault(); event.returnValue = ''; }
+});
+
+async function _vaMutate(path, options, config) {
+  const cid = _vaCid, key = 'channel:' + cid;
+  if (!_vaWorkspace.lock(key)) { toast('Дождитесь завершения действия с этим каналом'); return; }
+  const ticket = _vaWorkspace.issue('channel', key);
+  const root = document.getElementById('s-va-ch-body');
+  const btn = config.button && document.getElementById(config.button);
+  const label = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Выполняется…'; }
+  try {
+    const data = await api(path, options);
+    _vaCapture(root);
+    _vaWorkspace.acknowledge(key, config.submitted || {});
+    toast(typeof config.success === 'function' ? config.success(data) : config.success);
+    if (_vaWorkspace.current(ticket) && !config.reload) {
+      _vaRenderForm(root, key, _vaChannelHtml(data));
+    } else if (_vaCid === cid) {
+      await _vaLoadChannel();
+    }
+  } catch (e) {
+    if (_vaWorkspace.current(ticket)) {
+      const err = (config.error && document.getElementById(config.error)) || root.querySelector('[data-va-action]');
+      if (err) { err.textContent = e.message || 'Не получилось'; err.style.display = 'block'; }
+      else toast('⚠️ ' + (e.message || 'Не получилось'));
+    } else toast('Не удалось выполнить действие с каналом: ' + (e.message || 'ошибка'));
+  } finally {
+    _vaWorkspace.unlock(key);
+    if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = label; }
+    if (root) _vaDraftNotice(root);
+  }
+}
 
 function vaSelectTab(tab) {
   _vaTab = tab;
@@ -20,13 +100,15 @@ function vaSelectTab(tab) {
 }
 
 function _vaPanel(name) {
-  return '<section data-va-panel="' + name + '"' + (_vaTab === name ? '' : ' hidden') + '>';
+  return '<section role="tabpanel" id="vaPanel-' + name + '" aria-labelledby="vaTab-' + name +
+    '" data-va-panel="' + name + '"' + (_vaTab === name ? '' : ' hidden') + '>';
 }
 
 function _vaTabsHtml() {
   return '<div role="tablist" aria-label="Разделы администратора" style="display:flex;gap:6px;overflow:auto;padding:10px 0">' +
     [['overview','Обзор'],['knowledge','Знания'],['plan','План'],['settings','Настройки']].map(function (t) {
-      return '<button role="tab" aria-selected="' + (_vaTab === t[0]) + '" data-va-tab="' + t[0] +
+      return '<button role="tab" id="vaTab-' + t[0] + '" aria-controls="vaPanel-' + t[0] +
+        '" aria-selected="' + (_vaTab === t[0]) + '" data-va-tab="' + t[0] +
         '" class="btn ' + (_vaTab === t[0] ? 'btn-p' : 'btn-s') +
         '" style="flex:1;min-width:max-content;padding:9px 12px" onclick="vaSelectTab(\'' + t[0] + '\')">' + t[1] + '</button>';
     }).join('') + '</div>';
@@ -74,15 +156,19 @@ async function openVaAdmin() {
 
 async function _vaLoadList() {
   const body = document.getElementById('s-va-body');
+  const ticket = _vaWorkspace.issue('list', 'channels');
   body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   let d;
   try {
     d = await api('/api/miniapp/va/channels');
   } catch (e) {
+    if (!_vaWorkspace.current(ticket)) return;
     body.innerHTML = errHtml('Не удалось загрузить каналы: ' + ((e && e.message) || ''), '_vaLoadList()');
     return;
   }
+  if (!_vaWorkspace.current(ticket)) return;
   const chans = d.channels || [];
+  _vaChannels = chans;
   let h = '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.5;color:var(--hint)">' +
     'Выберите канал и поставьте администратора. Он сам разберётся в нише канала, составит контент-план, ' +
     'будет писать и публиковать посты под рост аудитории и заявки, следить за статистикой и присылать ' +
@@ -103,16 +189,13 @@ async function _vaLoadList() {
     h += '<div class="lst" style="padding:14px;color:var(--hint)">Каналов пока нет. Добавьте аккаунт, который ' +
       'администрирует канал, — канал появится здесь.</div>';
   } else {
-    h += '<div class="lst">' + chans.map(function (c) {
-      const sub = c.installed && c.enabled && c.setup_done
-        ? ('следующий пост: ' + _vaWhen(c.next_post_at) + (c.pending_drafts ? ' · ждёт решения: ' + c.pending_drafts : ''))
-        : (c.topic ? esc(c.topic).slice(0, 80) : (c.username ? '@' + esc(c.username) : ''));
-      return '<div class="li tap" onclick="openVaChannel(\'' + esc(c.channel_id) + '\')">' +
-        '<div class="ava ava-purple">🧠</div><div class="li-body">' +
-        '<div class="li-name">' + esc(c.title || c.username || c.channel_id) + '</div>' +
-        '<div class="li-sub">' + _vaState(c) + (sub ? ' · ' + sub : '') + '</div></div>' +
-        '<span class="chev">›</span></div>';
-    }).join('') + '</div>';
+    h += '<div class="lst" style="padding:12px 14px"><div class="field"><label for="vaChannelSearch">Найти канал</label>' +
+      '<input type="search" id="vaChannelSearch" maxlength="150" value="' + esc(_vaListQuery) +
+      '" placeholder="Название, @имя или тема" oninput="vaFilterChannels()"></div>' +
+      '<div class="field"><label for="vaChannelFilter">Показать</label><select id="vaChannelFilter" onchange="vaFilterChannels()">' +
+      [['all','Все каналы'],['attention','Требуют внимания'],['active','Работают'],['paused','Остановлены'],['new','Без администратора']].map(function (f) {
+        return _vaOpt(f[0], _vaListFilter, f[1]);
+      }).join('') + '</select></div></div><div id="vaChannelResults"></div>';
   }
   h += '<div class="sec">Общие правила редактора</div>' +
     '<div class="lst"><div class="li tap" onclick="openEditorialRules()"><div class="ava ava-purple">✍️</div>' +
@@ -120,6 +203,54 @@ async function _vaLoadList() {
     '<div class="li-sub">Запрещённые слова, лимиты, режим проверки ручных публикаций</div></div>' +
     '<span class="chev">›</span></div></div>';
   body.innerHTML = h;
+  _vaRenderChannels();
+}
+
+function vaFilterChannels() {
+  _vaListQuery = document.getElementById('vaChannelSearch').value;
+  _vaListFilter = document.getElementById('vaChannelFilter').value;
+  _vaListPage = 0;
+  _vaRenderChannels();
+}
+
+function vaChannelPage(delta) {
+  _vaListPage += delta;
+  _vaRenderChannels();
+  document.getElementById('vaChannelResults')?.scrollIntoView({block:'start'});
+}
+
+function _vaRenderChannels() {
+  const box = document.getElementById('vaChannelResults');
+  if (!box) return;
+  const query = _vaListQuery.trim().toLocaleLowerCase('ru');
+  const items = _vaChannels.filter(function (c) {
+    const matches = [c.title, c.username, c.topic, c.channel_id].join(' ').toLocaleLowerCase('ru').includes(query.replace(/^@/, ''));
+    const state = _vaListFilter === 'all' ||
+      (_vaListFilter === 'attention' && (c.last_error || c.pending_drafts)) ||
+      (_vaListFilter === 'active' && c.installed && c.enabled) ||
+      (_vaListFilter === 'paused' && c.installed && !c.enabled) ||
+      (_vaListFilter === 'new' && !c.installed);
+    return matches && state;
+  });
+  const size = 30, pages = Math.max(1, Math.ceil(items.length / size));
+  _vaListPage = Math.max(0, Math.min(_vaListPage, pages - 1));
+  const rows = items.slice(_vaListPage * size, (_vaListPage + 1) * size);
+  let html = '<div class="field-note" role="status" style="padding:8px 14px">Найдено: ' + items.length +
+    (items.length ? ' · страница ' + (_vaListPage + 1) + ' из ' + pages : '. Попробуйте другой запрос или фильтр.') + '</div>';
+  html += '<div class="lst">' + rows.map(function (c) {
+    const sub = c.installed && c.enabled && c.setup_done
+      ? ('следующий пост: ' + _vaWhen(c.next_post_at) + (c.pending_drafts ? ' · ждёт решения: ' + c.pending_drafts : ''))
+      : (c.topic ? esc(c.topic.slice(0, 80)) : (c.username ? '@' + esc(c.username) : ''));
+    return '<div class="li tap" role="button" tabindex="0" data-va-channel="' + esc(c.channel_id) +
+      '" onclick="openVaChannel(this.dataset.vaChannel)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openVaChannel(this.dataset.vaChannel)}">' +
+      '<div class="ava ava-purple">🧠</div><div class="li-body" style="min-width:0;overflow-wrap:anywhere">' +
+      '<div class="li-name">' + esc(c.title || c.username || c.channel_id) + '</div>' +
+      '<div class="li-sub">' + _vaState(c) + (sub ? ' · ' + sub : '') + '</div></div><span class="chev">›</span></div>';
+  }).join('') + '</div>';
+  if (pages > 1) html += '<div style="display:flex;gap:8px;padding:8px 0">' +
+    '<button class="btn btn-s" style="flex:1" onclick="vaChannelPage(-1)"' + (!_vaListPage ? ' disabled' : '') + '>Назад</button>' +
+    '<button class="btn btn-s" style="flex:1" onclick="vaChannelPage(1)"' + (_vaListPage === pages - 1 ? ' disabled' : '') + '>Далее</button></div>';
+  box.innerHTML = html;
 }
 
 // Сводка по всей сети каналов — взгляд руководителя поверх администраторов
@@ -179,7 +310,6 @@ function _vaNetworkHtml(n) {
 let _vaDraftCtx = 'list';
 
 function _vaDraftsHtml(drafts, ctx) {
-  _vaDraftCtx = ctx;
   if (!drafts.length) return '';
   return '<div class="sec">Ждут вашего решения (' + drafts.length + ')</div>' + drafts.map(function (x) {
     const reasons = (x.reasons || []).length
@@ -193,10 +323,10 @@ function _vaDraftsHtml(drafts, ctx) {
       // ряда, не говоря, что он делает. Главное действие во всю ширину,
       // второстепенные — рядом и с подписями.
       '<div style="margin-top:10px">' +
-        '<button class="btn btn-p" style="width:100%" onclick="vaDraftAct(' + x.id + ',\'publish\')">✅ Опубликовать</button>' +
+        '<button class="btn btn-p" style="width:100%" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + x.id + ',\'publish\')">✅ Опубликовать</button>' +
         '<div style="display:flex;gap:8px;margin-top:8px">' +
-          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="vaDraftAct(' + x.id + ',\'regenerate\')">🔄 Другой</button>' +
-          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="vaDraftWhy(' + x.id + ')">✖️ Пропустить</button>' +
+          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + x.id + ',\'regenerate\')">🔄 Другой</button>' +
+          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftWhy(' + x.id + ',\'' + ctx + '\')">✖️ Пропустить</button>' +
         '</div>' +
       '</div><div id="vaWhy' + x.id + '"></div></div>';
   }).join('');
@@ -206,16 +336,18 @@ function _vaDraftsHtml(drafts, ctx) {
 const _VA_WHY = [['offtopic', 'Не по теме'], ['ads', 'Слишком рекламно'], ['invented', 'Выдуманные факты'],
   ['tone', 'Не тот тон'], ['boring', 'Скучно'], ['long', 'Слишком длинно'], ['', 'Просто пропустить']];
 
-function vaDraftWhy(id) {
+function vaDraftWhy(id, ctx) {
   const box = document.getElementById('vaWhy' + id);
   if (!box) return vaDraftAct(id, 'reject');
   box.innerHTML = '<div style="font-size:12px;color:var(--hint);margin:10px 0 6px">Почему пропускаете? Администратор учтёт это в следующих постах.</div>' +
     '<div style="display:flex;flex-wrap:wrap;gap:6px">' + _VA_WHY.map(function (w) {
-      return '<button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="vaDraftAct(' + id + ',\'reject\',\'' + w[0] + '\')">' + w[1] + '</button>';
+      return '<button class="btn btn-s" style="padding:6px 10px;font-size:12px" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + id + ',\'reject\',\'' + w[0] + '\',\'' + ctx + '\')">' + w[1] + '</button>';
     }).join('') + '</div>';
 }
 
-async function vaDraftAct(id, action, reason) {
+async function vaDraftAct(id, action, reason, draftContext) {
+  const ctx = draftContext || _vaDraftCtx, cid = _vaCid, key = 'draft:' + id;
+  if (!_vaWorkspace.lock(key)) return;
   const msgs = { publish: 'Публикую…', regenerate: 'Пишу другой вариант…', reject: 'Пропускаю…' };
   toast(msgs[action] || '…');
   try {
@@ -223,11 +355,15 @@ async function vaDraftAct(id, action, reason) {
     toast(action === 'publish' ? '✅ Отправлено в канал' : (action === 'regenerate' ? '✅ Новый вариант готов' : 'Пропущено'));
   } catch (e) {
     toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
+  } finally {
+    _vaWorkspace.unlock(key);
   }
-  if (_vaDraftCtx === 'ch') await _vaLoadChannel(); else await _vaLoadList();
+  if (ctx === 'ch' && cid === _vaCid) await _vaLoadChannel();
+  else if (ctx === 'list') await _vaLoadList();
 }
 
 async function openVaChannel(cid) {
+  _vaCapture(document.getElementById('s-va-ch-body'));
   if (_vaCid !== String(cid)) _vaTab = 'overview';
   _vaCid = String(cid);
   _vaMkScreen('s-va-ch', '🧠 Администратор канала', 's-va-ch-body');
@@ -237,11 +373,14 @@ async function openVaChannel(cid) {
 
 async function _vaLoadChannel() {
   const body = document.getElementById('s-va-ch-body');
-  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  const cid = _vaCid, key = 'channel:' + cid;
+  const ticket = _vaWorkspace.issue('channel', key);
+  _vaLoading(body);
   try {
-    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid));
-    body.innerHTML = _vaChannelHtml(d);
+    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(cid));
+    if (_vaWorkspace.current(ticket)) _vaRenderForm(body, key, _vaChannelHtml(d));
   } catch (e) {
+    if (!_vaWorkspace.current(ticket)) return;
     body.innerHTML = errHtml('Не удалось загрузить канал: ' + ((e && e.message) || ''), '_vaLoadChannel()');
   }
 }
@@ -461,34 +600,21 @@ function _vaRefsHtml(refs) {
 }
 
 async function vaRefAdd() {
-  const btn = document.getElementById('vaRefBtn'), err = document.getElementById('vaRefErr');
-  err.textContent = '';
-  btn.disabled = true; btn.textContent = '⏳ Читаю канал и разбираю…';
-  try {
-    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/references', {
+  const submitted = {vaRefName:_vaVal('vaRefName'), vaRefKind:_vaVal('vaRefKind'), vaRefFocus:_vaVal('vaRefFocus')};
+  document.getElementById('vaRefErr').textContent = '';
+  await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/references', {
       method: 'POST', timeoutMs: 180000,
-      body: JSON.stringify({ ref: _vaVal('vaRefName') || '', kind: _vaVal('vaRefKind') || 'competitor', focus: _vaVal('vaRefFocus') || '' }),
-    });
-    toast('✅ Образец добавлен');
-    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
-  } catch (e) {
-    err.textContent = (e && e.message) || 'Не получилось';
-    btn.disabled = false; btn.textContent = '➕ Добавить и изучить';
-  }
+      body: JSON.stringify({ref:submitted.vaRefName || '', kind:submitted.vaRefKind || 'competitor', focus:submitted.vaRefFocus || ''}),
+    }, {button:'vaRefBtn', error:'vaRefErr', submitted, success:'Образец добавлен'});
 }
 
 async function vaRefAct(id, action) {
+  const cid = _vaCid;
   if (action === 'delete' && !(await askConfirm('Убрать этот канал из образцов?'))) return;
-  toast(action === 'delete' ? 'Убираю…' : 'Изучаю заново…');
-  try {
-    const d = await api('/api/miniapp/va/references/' + id + (action === 'delete' ? '' : '/refresh'), {
+  if (cid !== _vaCid) return;
+  await _vaMutate('/api/miniapp/va/references/' + id + (action === 'delete' ? '' : '/refresh'), {
       method: action === 'delete' ? 'DELETE' : 'POST', body: '{}', timeoutMs: 180000,
-    });
-    toast('✅ Готово');
-    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
-  } catch (e) {
-    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
-  }
+    }, {success:action === 'delete' ? 'Образец убран' : 'Образец изучен заново'});
 }
 
 function _vaChannelHtml(d) {
@@ -496,7 +622,11 @@ function _vaChannelHtml(d) {
   if (!s.installed) return _vaInstallHtml(ch, s);
   const state = !s.enabled ? '⏸ Остановлен' : (!s.setup_done ? '🔎 Изучает канал и строит план…' :
     (s.last_error ? '⚠️ ' + esc(s.last_error) : '✅ Ведёт канал сам'));
-  let h = '<div class="lst" style="padding:14px;font-size:13px;line-height:1.6">' +
+  let h = (d.warnings || []).map(function (warning) {
+    return '<div role="status" class="lst" style="padding:12px 14px;color:var(--orange,#fb923c)">' + esc(warning) +
+      ' <button class="btn btn-s" onclick="_vaLoadChannel()">Повторить</button></div>';
+  }).join('');
+  h += '<div class="lst" style="padding:14px;font-size:13px;line-height:1.6">' +
     '<b>' + esc(ch.title || ch.username || '') + '</b><br>' + state +
     (s.enabled && s.setup_done ? '<br>Следующий пост: <b>' + _vaWhen(s.next_post_at) + '</b>' : '') +
     (s.last_post_at ? '<br>Последний пост: ' + _vaWhen(s.last_post_at) : '') +
@@ -593,31 +723,20 @@ function _vaShowErr(e) {
 }
 
 async function vaInstall() {
-  const btn = document.getElementById('vaInstallBtn');
-  btn.disabled = true; btn.textContent = '⏳ Ставлю…';
-  try {
-    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/install', {
+  const submitted = _vaFields(document.getElementById('s-va-ch-body'));
+  await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/install', {
       method: 'POST',
       body: JSON.stringify({
         project_info: _vaVal('vaProject') || '',
         lead_contact: _vaVal('vaContact') || '',
         posts_per_day: Number(_vaVal('vaPpd') || 2),
       }),
-    });
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Администратор поставлен — изучает канал');
-    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
-  } catch (e) {
-    _vaShowErr(e);
-    btn.disabled = false; btn.textContent = '🚀 Поставить администратора';
-  }
+    }, {button:'vaInstallBtn', submitted, success:'Администратор поставлен: изучает канал'});
 }
 
 async function vaSave() {
-  const btn = document.getElementById('vaSaveBtn');
-  btn.disabled = true; btn.textContent = '⏳ Сохраняю…';
-  try {
-    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid), {
+  const submitted = _vaFields(document.querySelector('#s-va-ch-body [data-va-panel="settings"]'));
+  await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid), {
       method: 'PUT',
       body: JSON.stringify({
         project_info: _vaVal('vaProject'), lead_contact: _vaVal('vaContact'),
@@ -628,51 +747,30 @@ async function vaSave() {
         window_start: Number(_vaVal('vaWs')), window_end: Number(_vaVal('vaWe')),
         publish_mode: _vaVal('vaMode'), auto_tune: !!document.getElementById('vaTune').checked,
       }),
-    });
-    toast('✅ Сохранено');
-    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
-  } catch (e) {
-    _vaShowErr(e);
-    btn.disabled = false; btn.textContent = '💾 Сохранить';
-  }
+    }, {button:'vaSaveBtn', submitted, success:'Настройки сохранены'});
 }
 
 async function vaToggle(on) {
+  const cid = _vaCid;
   if (!on && !(await askConfirm('Остановить администратора? Посты в канал выходить перестанут.'))) return;
-  try {
-    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid), {
+  if (cid !== _vaCid) return;
+  await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(cid), {
       method: 'PUT', body: JSON.stringify({ enabled: !!on }),
-    });
-    toast(on ? '▶️ Администратор запущен' : '⏸ Администратор остановлен');
-    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
-  } catch (e) {
-    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
-  }
+    }, {success:on ? 'Администратор запущен' : 'Администратор остановлен'});
 }
 
 async function vaReconfigure() {
+  const cid = _vaCid;
   if (!(await askConfirm('Администратор заново изучит канал и пересоберёт тематику, рубрики и контент-план. Продолжить?'))) return;
-  try {
-    const d = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/reconfigure', { method: 'POST', body: '{}' });
-    toast('🔄 Изучает канал заново');
-    document.getElementById('s-va-ch-body').innerHTML = _vaChannelHtml(d);
-  } catch (e) {
-    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
-  }
+  if (cid !== _vaCid) return;
+  await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(cid) + '/reconfigure',
+    {method:'POST', body:'{}'}, {success:'Изучает канал заново'});
 }
 
 async function vaPostNow() {
-  const btn = document.getElementById('vaNowBtn');
-  btn.disabled = true; btn.textContent = '⏳ Пишу пост…';
-  try {
-    const r = await api('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/post_now', {
+  await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/post_now', {
       method: 'POST', body: '{}', timeoutMs: 240000,
-    });
-    toast((r.ok ? '✅ ' : '⚠️ ') + (r.message || 'Готово'));
-  } catch (e) {
-    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
-  }
-  await _vaLoadChannel();
+    }, {button:'vaNowBtn', reload:true, success:function (r) { return r.message || 'Готово'; }});
 }
 
 async function openVaStrategy() {
@@ -683,12 +781,15 @@ async function openVaStrategy() {
 
 async function vaLoadStrategy() {
   const body = document.getElementById('s-va-strategy-body');
-  body.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  const ticket = _vaWorkspace.issue('strategy', 'strategy');
+  _vaLoading(body);
   try {
     const data = await api('/api/miniapp/va/strategy');
+    if (!_vaWorkspace.current(ticket)) return;
     body.dataset.strategy = JSON.stringify(data);
-    body.innerHTML = _vaStrategyHtml(data.settings || {});
+    _vaRenderForm(body, 'strategy', _vaStrategyHtml(data.settings || {}));
   } catch (e) {
+    if (!_vaWorkspace.current(ticket)) return;
     body.innerHTML = errHtml(e.message || 'Не удалось загрузить стратегию', 'vaLoadStrategy()');
   }
 }
@@ -727,6 +828,9 @@ function _vaStrategyHtml(s) {
 
 async function vaSaveStrategy() {
   const body = document.getElementById('s-va-strategy-body');
+  if (!_vaWorkspace.lock('strategy')) return;
+  const ticket = _vaWorkspace.issue('strategy', 'strategy');
+  const submitted = _vaFields(body);
   const btn = document.getElementById('vaNetSave'), err = document.getElementById('vaNetErr');
   btn.disabled = true; err.textContent = '';
   try {
@@ -739,9 +843,14 @@ async function vaSaveStrategy() {
         faq: _vaVal('vaNetFaq'), voice_examples: _vaVal('vaNetVoice'), banned_topics: _vaVal('vaNetBanned')},
     };
     const saved = await api('/api/miniapp/va/strategy', {method:'PUT', body:JSON.stringify({settings:settings, revision:previous.revision})});
-    body.dataset.strategy = JSON.stringify(saved);
+    _vaCapture(body);
+    _vaWorkspace.acknowledge('strategy', submitted);
+    if (_vaWorkspace.current(ticket)) {
+      body.dataset.strategy = JSON.stringify(saved);
+      _vaRenderForm(body, 'strategy', _vaStrategyHtml(saved.settings || {}));
+    } else await vaLoadStrategy();
     toast('Стратегия сохранена');
   } catch (e) {
     err.textContent = e.message || 'Не удалось сохранить'; err.style.display = 'block';
-  } finally { btn.disabled = false; }
+  } finally { _vaWorkspace.unlock('strategy'); btn.disabled = false; _vaDraftNotice(body); }
 }
