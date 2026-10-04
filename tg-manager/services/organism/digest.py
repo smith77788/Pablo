@@ -123,6 +123,7 @@ def compose_digest(snap: dict, suggestions=None, narrative_text: str = "",
             stat("Контактов", "graph", "contacts", "contacts"),
             stat("Горячих лидов", "graph", "hot_leads", "hot_leads"),
             stat("Намерений за 24ч", "graph", "intents_24h", sid="intents_24h"),
+            stat("Осталось из приглашённых", "retention", "retained", "retained"),
         ], "note": ""},
         {"key": "growth", "title": "📈 Рост", "stats": [
             stat("Каналов", "growth", "channels", "channels"),

@@ -16,6 +16,11 @@ from services.organism.digest import compose_digest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+# Часть экранов вынесена в mini_app/screens/*.js — цель перехода может жить там.
+import glob
+ALL_JS = HTML + "\n".join(
+    open(f, encoding="utf-8").read()
+    for f in sorted(glob.glob(os.path.join(ROOT, "mini_app", "screens", "*.js"))))
 
 
 def _snap(**over):
@@ -29,6 +34,7 @@ def _snap(**over):
         "bots": {"total": 3, "active": 3, "community_nodes": 1, "community_empty": 2},
         "seo": {"scored": 4, "weak": 3},
         "vault": {"health": "ok", "stale_days": 0, "waiting_reply": 6},
+        "retention": {"joined": 40, "left": 9, "retained": 31, "retention_pct": 77.5},
     }
     base.update(over)
     return base
@@ -63,7 +69,7 @@ def test_every_number_has_a_screen_behind_it():
 
 def test_targets_really_exist_in_mini_app():
     """Переход не должен вести в несуществующую функцию."""
-    js = HTML
+    js = ALL_JS
     for fid, call in _dig_go().items():
         name = call.split("(")[0]
         assert re.search(r"(async )?function %s\s*\(" % re.escape(name), js), \
@@ -106,8 +112,8 @@ def test_tracked_metrics_are_actually_shown():
     from services.organism.digest import _TREND_METRICS
     shown = {st["id"] for _, st in _all_stats()}
     unseen = set(_TREND_METRICS) - shown
-    assert unseen <= {"retained"}, f"метрики считаются для трендов, но не видны: {unseen}"
-    assert {"seo_weak", "waiting_reply"} <= shown
+    assert not unseen, f"метрики считаются для трендов, но не видны: {unseen}"
+    assert {"seo_weak", "waiting_reply", "retained"} <= shown
 
 
 def test_ops_filter_jump_exists():

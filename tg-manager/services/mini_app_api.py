@@ -6505,6 +6505,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         summary = invite_retention.summarize(joined, left)
         summary["health"] = invite_retention.health(summary["retention_pct"])
         summary["days"] = days
+        # Где именно уходят. Одна общая цифра оттока не говорит, что делать:
+        # приветствие и правила настраиваются по конкретному чату.
+        summary["by_chat"] = [
+            {"chat_id": str(r["chat_id"] or ""), "title": str(r["title"] or ""),
+             "left": int(r["c"] or 0)}
+            for r in await _safe_fetch(
+                pool,
+                "SELECT payload->>'chat_id' AS chat_id, "
+                "       COALESCE(MAX(payload->>'title'), '') AS title, "
+                "       COUNT(*) AS c "
+                "FROM organism_events "
+                "WHERE owner_id=$1 AND kind='left' "
+                "  AND created_at > NOW() - ($2 || ' days')::interval "
+                "GROUP BY payload->>'chat_id' ORDER BY c DESC LIMIT 20",
+                uid, str(days))
+        ]
         return _json_resp(summary)
 
     async def boost_submit(request: web.Request) -> web.Response:

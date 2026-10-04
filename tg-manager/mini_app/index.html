@@ -8598,6 +8598,7 @@ const DIG_GO = {
   ops_running:     {fn:"opsGo('running')",           sub:'что идёт сейчас'},
   seo_weak:        {fn:'openSeo()',                  sub:'поднять находимость'},
   waiting_reply:   {fn:'openVault()',                sub:'ответить ждущим'},
+  retained:        {fn:'openRetention(30)',           sub:'кто остался и откуда уходят'},
 };
 function _digStat(st) {
   const g = DIG_GO[st.id];
@@ -8862,7 +8863,7 @@ function runPulseAction(a) {
   if (k==='bots') return openNetwork();
   if (k==='community') return openCommunity();
   if (k==='seo') return openSeo();
-  if (k==='retention') return openMassInvite();
+  if (k==='retention') return openRetention(30);
   if (k==='health') return openHealth();
   if (k==='vlayer') return openVLayer();
   // Связки модулей (services/op_chain): итог одной операции открывает
@@ -27363,6 +27364,7 @@ function renderAudSegChart(segments) {
 <script src="screens/sales_manager.js"></script>
 <script src="screens/flood_guard.js"></script>
 <script src="screens/eco_overlaps.js"></script>
+<script src="screens/retention.js"></script>
 <script src="screens/editorial.js"></script>
 <script src="screens/va_workspace.js"></script>
 <script src="screens/va_admin.js"></script>

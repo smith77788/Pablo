@@ -281,8 +281,44 @@ async def on_service_message(message: Message, bot: Bot, pool: asyncpg.Pool) -> 
     ct = message.content_type
     if ct in cg.JOIN_TYPES:
         await _on_newcomers(message, bot, pool, settings)
+    if ct in cg.LEAVE_TYPES:
+        await _record_leave(pool, guard, message)
     if cg.should_delete_service(ct, settings):
         await _safe_delete(message)
+
+
+async def _record_leave(pool: asyncpg.Pool, guard: dict, message: Message) -> None:
+    """Записать уход человека из охраняемого чата в журнал организма.
+
+    Без этой записи отток не фиксировался НИГДЕ: продукт считал удержание
+    инвайта как «вступило минус ушло», а «ушло» всегда приходило нулём — и
+    удержание выходило ровно 100% при любом оттоке. Подсказка мозга «отток,
+    welcome не удерживает» не могла сработать ни при каких условиях.
+
+    Событие пишется до удаления системного сообщения: сам факт ухода нужен нам
+    независимо от того, чистит ли владелец уведомления в чате.
+    """
+    try:
+        owner_id = int(guard.get("owner_id") or 0)
+    except (TypeError, ValueError):
+        owner_id = 0
+    if owner_id <= 0:
+        # Чат подхвачен «по факту прав админа», владелец в строке не указан —
+        # приписывать уход некому.
+        return
+    user = getattr(message, "left_chat_member", None)
+    if user is not None and getattr(user, "is_bot", False):
+        return   # ушёл бот, а не человек — к удержанию аудитории не относится
+    try:
+        from services.organism import spine
+
+        await spine.emit(pool, owner_id, "left", {
+            "chat_id": message.chat.id,
+            "title": message.chat.title or "",
+            "user_id": int(getattr(user, "id", 0) or 0),
+        })
+    except Exception:
+        log_exc_swallow(log, "guard: запись ухода из чата", chat_id=message.chat.id)
 
 
 async def _on_newcomers(message: Message, bot: Bot, pool: asyncpg.Pool,
