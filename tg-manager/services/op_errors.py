@@ -30,6 +30,10 @@ _RETRYABLE_ERRORS = {
 }
 _FATAL_ERRORS = {
     "AuthKeyUnregisteredError",
+    # Истёкшая и невалидная авторизация не оживают от повтора: без них операция
+    # уходила в 'retry' и била в мёртвую сессию до конца своих попыток.
+    "SessionExpiredError",
+    "AuthKeyInvalidError",
     "SessionRevokedError",
     "UserDeactivatedBan",
     "UserDeactivatedError",
@@ -74,11 +78,53 @@ _SESSION_CONFLICT_PATTERNS = re.compile(
     r"AUTH_KEY_DUPLICATED|AuthKeyDuplicated|two different IP",
     re.IGNORECASE,
 )
+# Мёртвая сессия: ключ отозван, аккаунт удалён или номер забанен. Такой аккаунт
+# деактивируется (is_active=FALSE) и требует переимпорта — в отличие от конфликта
+# двух IP выше, который лечится кулдауном.
+#
+# Паттерны держим в ДВУХ формах, потому что сюда приходят обе. Код ошибки
+# (AUTH_KEY_UNREGISTERED, SESSION_REVOKED) виден там, где текст собирали мы сами
+# или где передали имя класса. Но на обычном пути исполнители передают
+# `str(exc)`, а это ЧЕЛОВЕЧЕСКОЕ сообщение Telethon, в котором кода нет вообще:
+# проверено на telethon 1.45.0, SESSION_REVOKED выглядит как «The authorization
+# has been invalidated, because of the user terminating all sessions», а
+# USER_DEACTIVATED — как «The user has been deleted/deactivated». Пока здесь были
+# только коды, восемь из девяти смертей сессии детектор не видел: аккаунт с
+# отозванным ключом оставался активным, каждая следующая операция брала его,
+# коннектилась и падала, а владелец видел «ошибка» вместо «переимпортируйте
+# аккаунт».
+#
+# Фразы выбраны узкие намеренно. Раньше здесь стояло «authorization key», и это
+# ловило AuthKeyPermEmptyError («The method is unavailable for temporary
+# authorization key») — сессия там ЖИВА, метод просто недоступен временному
+# ключу, а аккаунт за это деактивировался. Тот же класс вреда, что у конфликта
+# двух IP, который уже чинили.
 _DEAD_SESSION_PATTERNS = re.compile(
-    r"AUTH_KEY|SESSION_REVOKED|authorization key|different data center|"
-    r"AuthKeyUnregistered|AuthKeyDuplicated|SessionRevoked",
+    # Коды и имена классов.
+    r"AUTH_KEY_UNREGISTERED|AUTH_KEY_INVALID|SESSION_REVOKED|SESSION_EXPIRED|"
+    r"USER_DEACTIVATED|PHONE_NUMBER_BANNED|different data center|"
+    r"AuthKeyUnregistered|AuthKeyInvalid|SessionRevoked|SessionExpired|"
+    r"UserDeactivated|PhoneNumberBanned|"
+    # Человеческие сообщения Telethon (1.45.0).
+    r"key is not registered|registered in the system|the key is invalid|"
+    r"deleted/deactivated|authorization has been invalidated|"
+    r"authorization has expired|banned from telegram",
     re.IGNORECASE,
 )
+
+
+def is_dead_session_text(error_text: str | None) -> bool:
+    """Мёртвая ли сессия по тексту ошибки. ЕДИНАЯ ДВЕРЬ этого решения.
+
+    Конфликт двух IP (AUTH_KEY_DUPLICATED) мёртвой сессией НЕ считается: см.
+    _SESSION_CONFLICT_PATTERNS выше и tests/test_auth_key_duplicated_not_dead.py.
+    Без метрики и без побочных эффектов — её считает `_is_dead_session_error`.
+    """
+    if not error_text:
+        return False
+    if _is_session_conflict_error(error_text):
+        return False
+    return bool(_DEAD_SESSION_PATTERNS.search(error_text))
 
 
 def _is_session_conflict_error(error_text: str) -> bool:
@@ -168,6 +214,9 @@ def _is_network_or_proxy_error(error_text: str) -> bool:
 
 
 def _is_dead_session_error(error_text: str) -> bool:
+    # Решение о смерти сессии принимает is_dead_session_text (единая дверь);
+    # здесь к нему добавлены только метрики.
+    #
     # AUTH_KEY_DUPLICATED матчится общим паттерном (AUTH_KEY/AuthKeyDuplicated), но это
     # ВРЕМЕННЫЙ конфликт, а не мёртвая сессия — исключаем, чтобы аккаунт не
     # деактивировался (is_active=FALSE) из-за кратковременного пересечения IP.
@@ -180,7 +229,7 @@ def _is_dead_session_error(error_text: str) -> bool:
         except Exception:
             pass
         return False
-    dead = bool(_DEAD_SESSION_PATTERNS.search(error_text))
+    dead = is_dead_session_text(error_text)
     if dead:
         # Метрика (аудит №6): смерть сессии — самая дорогая потеря продукта,
         # и до сих пор она нигде не считалась.

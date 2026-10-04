@@ -991,6 +991,11 @@ _TG_PUBLIC_RE = re.compile(
 )
 
 
+# Конфликт двух IP мёртвой сессией НЕ считается (tests/test_auth_key_duplicated_
+# not_dead.py): проверяется раньше локальных маркеров, иначе «auth_key…» в тексте
+# конфликта утащил бы аккаунт в деактивацию.
+_CONFLICT_MARKERS = ("auth_key_duplicated", "authkeyduplicated", "two different ip")
+
 _DEAD_SESSION_MARKERS = (
     "auth_key_unregistered",
     "key is not registered",
@@ -1002,11 +1007,28 @@ _DEAD_SESSION_MARKERS = (
 
 
 def is_dead_session_error(error_text: str | None) -> bool:
-    """True if an operation error indicates the account session is dead or the
-    account is banned/deleted — callers should deactivate the account in DB."""
+    """Мертва ли сессия аккаунта (ключ отозван, аккаунт удалён, номер забанен).
+
+    True означает «деактивировать аккаунт и просить переимпорт», поэтому решение
+    принимается в ОДНОМ месте для всего продукта — `op_errors.is_dead_session_text`.
+    Раньше здесь был свой список маркеров, и он расходился с тем, что проверяют
+    исполнители: оба списка были написаны по КОДАМ ошибок, а на обычном пути
+    приходит человеческое сообщение Telethon, где кода нет. Из восьми смертей
+    сессии этот список узнавал одну.
+
+    Локальные маркеры ниже остаются как дополнение: они ловят текст, собранный
+    нами самими, где код как раз присутствует.
+    """
     if not error_text:
         return False
+    from services.op_errors import is_dead_session_text
+
+    if is_dead_session_text(str(error_text)):
+        return True
     low = str(error_text).lower()
+    if any(m in low for m in _CONFLICT_MARKERS):
+        # Конфликт двух IP — не смерть: лечится кулдауном (см. op_errors).
+        return False
     return any(m in low for m in _DEAD_SESSION_MARKERS)
 
 

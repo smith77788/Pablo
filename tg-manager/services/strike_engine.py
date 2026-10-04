@@ -77,7 +77,17 @@ def _acc_result_fleet_danger(r: dict) -> bool:
     if r.get("_peer_flood"):
         return True
     err = (r.get("error") or "").lower()
-    return any(m in err for m in _FLEET_DANGER_MARKERS)
+    if any(m in err for m in _FLEET_DANGER_MARKERS):
+        return True
+    # Единая дверь решения «сессия мертва» (services/op_errors). Список выше
+    # написан по КОДАМ ошибок, а Telethon на обычном пути отдаёт человеческое
+    # сообщение, где кода нет: отозванный ключ приходит как «The authorization
+    # has been invalidated…», удалённый аккаунт — как «deleted/deactivated».
+    # Без этой проверки канарейка таких аккаунтов не считала опасным исходом и
+    # волна жалоб продолжалась уже мёртвым флотом.
+    from services.op_errors import is_dead_session_text
+
+    return is_dead_session_text(err)
 
 
 _BAN_MARKERS = ("banned", "deactivated", "auth_key", "user_deactivated",
@@ -119,6 +129,12 @@ def _acc_outcome(r: dict) -> str:
     if r.get("_peer_flood") or "flood" in err or "too many" in err:
         return "flood"
     if any(m in err for m in _BAN_MARKERS):
+        return "banned"
+    # Та же единая дверь: сообщение о мёртвой сессии — это «banned» для
+    # канарейки, а не безликий «failed», иначе она не наберёт порога остановки.
+    from services.op_errors import is_dead_session_text
+
+    if is_dead_session_text(err):
         return "banned"
     return "failed"
 
