@@ -19,6 +19,7 @@ def test_all_login_routes_registered():
         "/api/miniapp/account/add/phone/start",
         "/api/miniapp/account/add/phone/code",
         "/api/miniapp/account/add/phone/2fa",
+        "/api/miniapp/account/add/phone/resend",
         "/api/miniapp/account/add/qr/start",
         "/api/miniapp/account/add/qr/poll",
         "/api/miniapp/account/add/qr/2fa",
@@ -72,9 +73,44 @@ def test_account_manager_login_primitives_exist():
     from services import account_manager as am
     for fn in ("start_login", "confirm_code", "confirm_2fa",
                "get_client_info_and_session", "start_qr_login",
-               "wait_qr_login", "confirm_qr_2fa"):
+               "wait_qr_login", "confirm_qr_2fa", "resend_code"):
         assert hasattr(am, fn), f"account_manager.{fn} отсутствует"
         assert inspect.iscoroutinefunction(getattr(am, fn)), f"{fn} должна быть async"
+
+
+def test_resend_code_returns_next_timeout():
+    """resend_code отдаёт 3-й элемент — рекомендованную паузу до след. запроса.
+
+    По нему автоповтор кода пейсится, а не бьётся в FloodWait с первого тика.
+    Контракт общий: единственный потребитель в боте распаковывает 3-кортеж.
+    """
+    from services import account_manager as am
+    src = inspect.getsource(am.resend_code)
+    assert "next_timeout" in src, "resend_code должна возвращать рекомендованную паузу"
+    assert "return result.phone_code_hash, hint, next_timeout" in src
+    bot = (pathlib.Path(__file__).resolve().parents[1] / "bot" / "handlers" / "accounts.py").read_text("utf-8")
+    assert "new_hash, hint, _ = await resend_login_code" in bot, \
+        "бот должен распаковывать 3-кортеж resend_code"
+
+
+def test_phone_resend_endpoint_surfaces_flood():
+    """Эндпоинт повтора отдаёт FloodWait структурно (не сырым 500/ошибкой),
+    чтобы фронт показал паузу и остановил автоповтор."""
+    assert "account_add_phone_resend" in API
+    assert "FloodWaitError" in API
+    assert '"flood": True' in API and '"retry_after"' in API
+
+
+def test_ui_has_resend_and_autorepeat():
+    """UI повтора кода: кнопка одиночного повтора и автоповтор, который сам
+    останавливается на флуде."""
+    html = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
+    for fn in ("accPhoneResend", "accPhoneAutoToggle", "accPhoneAutoStop"):
+        assert fn in html, f"нет JS-функции {fn}"
+    assert "accPhoneResendBtn" in html and "accPhoneAutoBtn" in html
+    assert "/api/miniapp/account/add/phone/resend" in html
+    # автоповтор останавливается на флуде/ошибке
+    assert "res.flood||res.error" in html
 
 
 def test_ui_has_all_login_methods():

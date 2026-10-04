@@ -6549,6 +6549,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <label>Код из Telegram</label>
         <input type="text" inputmode="numeric" id="accPhoneCode" placeholder="12345" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accPhoneCodeBtn" onclick="accPhoneCode()" style="width:100%;margin-top:8px">✅ Подтвердить код</button>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-s" id="accPhoneResendBtn" onclick="accPhoneResend()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">🔁 Запросить ещё раз</button>
+          <button class="btn btn-s" id="accPhoneAutoBtn" onclick="accPhoneAutoToggle()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">♾️ Повторять, пока не придёт</button>
+        </div>
+        <div class="field-note" id="accPhoneResendNote">Код не пришёл? Запросите ещё раз или включите автоповтор — он будет запрашивать код сам, пока тот не придёт или Telegram не попросит паузу. Введите код сразу, как получите.</div>
       </div>
       <div class="field" id="accPhoneStep-2fa" style="display:none">
         <label>Пароль 2FA (облачный пароль)</label>
@@ -14474,11 +14479,13 @@ async function openAccImportModal() {
 }
 function closeAccImportModal() {
   accStopQrPoll();
+  if(typeof accPhoneAutoStop==='function') accPhoneAutoStop();
   document.getElementById('accImportMbg').classList.remove('show');
 }
 
 // ── Способы входа в аккаунт (строка / номер / QR) ────────────────────────────
 let _accLoginPhone='', _accLoginHash='', _accQrTimer=null;
+let _accAutoTimer=null, _accAutoRunning=false;  // автоповтор запроса кода
 function _accErr(msg){ const e=document.getElementById('accImportErr'); if(!msg){e.style.display='none';return;} e.textContent=msg; e.style.display='block'; }
 function _accProxy(){ const sel=document.getElementById('accImportProxy'); const opt=sel.options[sel.selectedIndex]; return { id: sel.value||null, url:(opt&&opt.dataset&&opt.dataset.url)||null }; }
 // Создать НОВЫЙ прокси прямо в форме импорта: сохраняем в список пользователя и
@@ -14506,7 +14513,7 @@ async function addAccImportProxy(){
 function accStopQrPoll(){ if(_accQrTimer){ clearInterval(_accQrTimer); _accQrTimer=null; } }
 
 function accSetLoginMethod(m){
-  accStopQrPoll(); _accErr('');
+  accStopQrPoll(); accPhoneAutoStop(); _accErr('');
   document.getElementById('accImportResult').style.display='none';
   ['string','phone','qr','file','tdata'].forEach(k=>{
     const sec=document.getElementById('accMethod-'+k); if(sec) sec.style.display = (k===m)?'block':'none';
@@ -14521,7 +14528,7 @@ function accSetLoginMethod(m){
 }
 
 function _accDone(r){
-  accStopQrPoll();
+  accStopQrPoll(); accPhoneAutoStop();
   const res=document.getElementById('accImportResult');
   res.innerHTML='<div style="color:var(--green)">✅ Аккаунт добавлен'+(r&&r.username?(' @'+esc(r.username)):'')+'</div>';
   res.style.display='block';
@@ -14557,6 +14564,7 @@ async function accPhoneCode(){
   const b=document.getElementById('accPhoneCodeBtn'); b.disabled=true; b.textContent='⏳ Проверяю…';
   try{
     const r=await api('/api/miniapp/account/add/phone/code',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,code,phone_code_hash:_accLoginHash,proxy_id:_accProxy().id})});
+    accPhoneAutoStop();  // код принят — автоповтор больше не нужен
     if(r.needs_2fa){ document.getElementById('accPhoneStep-2fa').style.display='block'; toast('❗ Требуется пароль 2FA'); }
     else _accDone(r);
   }catch(e){ _accErr(String(e&&e.message||e)); }
@@ -14571,6 +14579,63 @@ async function accPhone2fa(){
     _accDone(r);
   }catch(e){ _accErr(String(e&&e.message||e)); }
   finally{ b.disabled=false; b.textContent='🔓 Подтвердить 2FA'; }
+}
+
+// Повторный запрос кода ──────────────────────────────────
+// Telegram не всегда присылает код с первого раза. Одиночный повтор — кнопкой;
+// непрерывный — автоповтором, который сам пейсится по timeout из ответа и
+// останавливается на FloodWait (чтобы не усугублять ограничение).
+function _accResendNote(msg){ const n=document.getElementById('accPhoneResendNote'); if(n&&msg) n.textContent=msg; }
+
+// Один повтор. Возвращает {flood}|{error}|{ok,timeout} — автоповтор по этому
+// решает, крутиться дальше или остановиться.
+async function accPhoneResend(){
+  _accErr('');
+  if(!_accLoginPhone||!_accLoginHash){ _accErr('Сессия входа истекла — отправьте код заново'); return {error:true}; }
+  const b=document.getElementById('accPhoneResendBtn'); const prev=b?b.textContent:'';
+  if(b){ b.disabled=true; b.textContent='⏳ Запрашиваю…'; }
+  try{
+    const r=await api('/api/miniapp/account/add/phone/resend',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,phone_code_hash:_accLoginHash,proxy_id:_accProxy().id})});
+    if(r&&r.ok===false&&r.flood){
+      _accResendNote(r.hint||'Telegram попросил паузу — подождите и попробуйте снова.');
+      toast('⏳ '+(r.hint||'Поймали флуд — подождите'));
+      return {flood:true, retry_after:(r.retry_after||0)};
+    }
+    if(r&&r.phone_code_hash) _accLoginHash=r.phone_code_hash;  // хэш после ResendCode меняется
+    _accResendNote((r&&r.hint)?r.hint:'Код запрошен повторно. Введите его, как получите.');
+    toast((r&&r.hint)?r.hint:'Код запрошен повторно');
+    return {ok:true, timeout:((r&&r.timeout)||0)};
+  }catch(e){
+    _accErr(String(e&&e.message||e));
+    return {error:true};
+  }finally{ if(b){ b.disabled=false; b.textContent=prev||'🔁 Запросить ещё раз'; } }
+}
+
+function accPhoneAutoStop(){
+  _accAutoRunning=false;
+  if(_accAutoTimer){ clearTimeout(_accAutoTimer); _accAutoTimer=null; }
+  const b=document.getElementById('accPhoneAutoBtn');
+  if(b){ b.textContent='♾️ Повторять, пока не придёт'; b.classList.remove('btn-p'); b.classList.add('btn-s'); b.disabled=false; }
+}
+
+async function accPhoneAutoToggle(){
+  if(_accAutoRunning){ accPhoneAutoStop(); toast('⏹ Автоповтор остановлен'); return; }
+  if(!_accLoginPhone||!_accLoginHash){ _accErr('Сессия входа истекла — отправьте код заново'); return; }
+  _accAutoRunning=true;
+  const b=document.getElementById('accPhoneAutoBtn');
+  if(b){ b.textContent='⏹ Остановить автоповтор'; b.classList.remove('btn-s'); b.classList.add('btn-p'); }
+  const tick=async()=>{
+    if(!_accAutoRunning) return;
+    const res=await accPhoneResend();
+    if(!_accAutoRunning) return;                 // остановили во время запроса
+    if(!res||res.flood||res.error){ accPhoneAutoStop(); return; }  // флуд/ошибка — стоп
+    // Пейсимся по рекомендации Telegram (timeout), но не реже раза в 15 с и не
+    // мгновенно — иначе первый же тик упрётся в FloodWait.
+    const wait=Math.max((res.timeout||0),15)*1000;
+    _accResendNote('Автоповтор включён. Следующий запрос примерно через '+Math.round(wait/1000)+' с. Введите код, как только он придёт.');
+    _accAutoTimer=setTimeout(tick, wait);
+  };
+  tick();
 }
 
 // Вход по QR ────────────────────────────────────────────
