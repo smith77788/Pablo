@@ -22069,43 +22069,59 @@ async function openAdIntel() {
     `);
     txt('m-adintel-val',`${d.total_channels||0} каналов · ${d.total_placements||0} размещений`);
     const chs = d.top_channels||[];
-    if (!chs.length) { txt('adIntelChannels', empty('📡','Нет данных','Добавьте канал для анализа')); }
     // Имена полей — РОВНО те, что отдаёт /api/miniapp/ad_intel. Раньше здесь
     // читались channel_username/placements_count/avg_er и advertiser_name/
     // total_placements/avg_spend — ни одного такого ключа в ответе нет, поэтому
     // строка вечно показывала «@undefined · 0 размещений · ER 0.0%». Совпадала
     // одна quality_score из пяти. Заодно показываем то, что бэкенд слал, а UI
     // выбрасывал: заголовок, подписчиков, оценку цены, давность размещения.
-    else txt('adIntelChannels', chs.map(c=>`
-      <div class="row">
+    if (!chs.length) {
+      txt('adIntelChannels', empty('📡','Каналов на разведке нет',
+        'Добавьте чужой канал — система соберёт по нему рекламодателей, цену размещения и вовлечённость',
+        {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
+    } else {
+      txt('adIntelChannels', chs.map(c=>{
+        const nm = c.title || (c.username ? '@'+c.username : 'Канал');
+        return `
+      <div class="row${c.username?' tap':''}" ${c.username?`role="button" tabindex="0" onclick="openTgUser('${esc(String(c.username))}')"`:''}>
         <div class="row-ico" style="background:var(--bg-yellow-16)">📺</div>
         <div class="row-body">
-          <div class="row-name">${esc(c.title || (c.username ? '@'+c.username : 'Канал'))}</div>
-          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1).replace('.',',')}%${c.ad_price_est?' · ~'+num(c.ad_price_est):''}</div>
+          <div class="row-name">${esc(nm)}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${num(c.subscribers||0)} подписчиков · ER ${(Number(c.er_rate)||0).toFixed(1).replace('.',',')}%${c.ad_price_est?' · размещение ~'+num(c.ad_price_est)+' ⭐':''}</div>
         </div>
-        <div class="row-right" style="color:var(--orange);font-size:13px">${(Number(c.quality_score)||0).toFixed(0)}⭐</div>
-      </div>
-    `).join(''));
+        <div class="row-right" style="display:flex;align-items:center;gap:5px"><span style="color:var(--orange);font-size:13px">${(Number(c.quality_score)||0).toFixed(0)}⭐</span>${c.username?'<span class="chev">›</span>':''}</div>
+      </div>`;
+      }).join(''));
+    }
     const advs = d.top_advertisers||[];
-    if (!advs.length) { txt('adIntelAdv', empty('🏢','Нет рекламодателей','')); }
-    else txt('adIntelAdv', advs.map(a=>`
-      <div class="row">
+    if (!advs.length) {
+      txt('adIntelAdv', empty('🏢','Рекламодателей пока нет',
+        chs.length ? 'По добавленным каналам реклама ещё не попадалась — разведка смотрит новые посты и дополнит список сама'
+                   : 'Сначала добавьте канал на разведку — рекламодатели берутся из его постов',
+        chs.length ? null : {label:'➕ Добавить канал', fn:'openAdIntelModal()'}));
+    } else {
+      txt('adIntelAdv', advs.map(a=>`
+      <div class="row${a.username?' tap':''}" ${a.username?`role="button" tabindex="0" onclick="openTgUser('${esc(String(a.username))}')"`:''}>
         <div class="row-ico" style="background:var(--bg-violet-16)">🏢</div>
         <div class="row-body">
           <div class="row-name">${a.username?'@'+esc(a.username):'Рекламодатель'}</div>
           <div class="row-val">${num(a.placements||0)} размещений</div>
         </div>
-        <div class="row-right" style="color:var(--hint);font-size:13px">${a.last_seen?ago(a.last_seen):''}</div>
-      </div>
-    `).join(''));
+        <div class="row-right" style="display:flex;align-items:center;gap:5px"><span style="color:var(--hint);font-size:13px">${a.last_seen?ago(a.last_seen):''}</span>${a.username?'<span class="chev">›</span>':''}</div>
+      </div>`).join(''));
+    }
   } catch(e) {
     txt('adIntelStats','');
-    txt('adIntelChannels', empty('⚠️','Ошибка',errRu(e)));
+    txt('adIntelChannels', errHtml(errRu(e), 'openAdIntel()'));
+    txt('adIntelAdv','');
   }
 }
 
 // ── Network Overview ───────────────────────────────────
-const ROLE_LABELS = {entry:'🚪 Entry',conversion:'💰 Conversion',retention:'🔄 Retention',general:'⚙️ General'};
+// Роли бота в сети. Были подписаны по-английски («Entry», «Conversion»), хотя
+// весь интерфейс русский и рядом, в экране роя, те же роли уже переведены.
+const ROLE_LABELS = {entry:'🚪 Вход', conversion:'💰 Конверсия',
+                     retention:'🔄 Удержание', general:'⚙️ Общий'};
 async function openNetwork() {
   push('s-network');
   txt('networkStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -22113,25 +22129,30 @@ async function openNetwork() {
   try {
     const d = await api('/api/miniapp/network');
     const clusters = d.clusters||[];
+    const swarm = clusters.reduce((n,cl)=>n+(cl.bots||[]).filter(b=>b.swarm).length, 0);
     // Два числа и ничего больше: список ботов — соседняя вкладка.
     txt('networkStats', `
       <div class="kpi-card tap-card" onclick="goTab('bots')" role="button" tabindex="0"><div class="kpi-val">${num(d.total_bots||0)}</div><div class="kpi-lbl">Всего ботов ›</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(clusters.length)}</div><div class="kpi-lbl">Кластеров</div></div>
+      <div class="kpi-card tap-card" onclick="openSwarm()" role="button" tabindex="0"><div class="kpi-val" style="${kpiTone(swarm,'green')}">${num(swarm)}</div><div class="kpi-lbl">В рое ›</div></div>
     `);
     txt('m-net-cnt', (d.total_bots||0)+' ботов · '+clusters.length+' кластеров');
     if (!clusters.length) { txt('networkClusters', empty('🕸','Ботов пока нет',
       'Кластер — это группа ботов; он появится, как только будет кого группировать',
       {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
     txt('networkClusters', clusters.map(cl=>`
-      <div class="sec">${cl.name==='default'?'🌐 По умолчанию':'📦 '+esc(cl.name)}</div>
+      <div class="sec">${cl.name==='default'?'🌐 По умолчанию':'📦 '+esc(cl.name)} <span style="color:var(--hint);font-weight:400">· ${(cl.bots||[]).length} ${plural((cl.bots||[]).length,'бот','бота','ботов')}</span></div>
       <div class="lst">${cl.bots.map(b=>`
-        <div class="row">
+        <div class="row tap" role="button" tabindex="0" onclick="openBot(${Number(b.bot_id)})">
           <div class="row-ico" style="background:var(--bg-blue-16)">🤖</div>
           <div class="row-body">
             <div class="row-name">@${esc(b.name)} ${b.is_active?'🟢':'🔴'}</div>
-            <div class="row-val">${ROLE_LABELS[b.role]||b.role}${b.swarm?' · ⚡ swarm ×'+b.weight.toFixed(1).replace('.',','):''}</div>
+            <div class="row-val">${ROLE_LABELS[b.role]||b.role}${b.swarm?' · ⚡ в рою ×'+Number(b.weight||1).toFixed(1).replace('.',','):''}</div>
           </div>
-          <div class="row-right"><button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openNetRoleModal(${b.bot_id},'${esc(b.name)}','${b.role||'general'}')">✏️ Роль</button></div>
+          <div class="row-right" style="display:flex;gap:5px;align-items:center">
+            <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="event.stopPropagation();openNetRoleModal(${b.bot_id},'${esc(b.name)}','${b.role||'general'}')">✏️ Роль</button>
+            <span class="chev">›</span>
+          </div>
         </div>
       `).join('')}</div>
     `).join(''));
@@ -24661,6 +24682,16 @@ async function openPhysics() {
 }
 
 // ── Graph Hub ───────────────────────────────────────────
+// Открыть внешний объект в Telegram. В разведке рекламы и в графе каналы чужие:
+// своей карточки у них нет, но посмотреть их можно — раньше строка была просто
+// текстом, и даже имя канала приходилось переписывать руками.
+function openTgUser(uname) {
+  const u = String(uname||'').replace(/^@/,'').trim();
+  if (!u) { toast('⚠️ У этого канала нет имени — открыть нечем'); return; }
+  const url = 'https://t.me/' + u;
+  try { if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; } } catch(_) {}
+  try { window.open(url, '_blank'); } catch(_) { copyToClipboard(url, 'Ссылка скопирована'); }
+}
 async function openGraph() {
   push('s-graph');
   txt('graphStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -24670,24 +24701,41 @@ async function openGraph() {
       api('/api/miniapp/graph'),
       api('/api/miniapp/graph/overlaps')
     ]);
+    // Было три строки с числами и сырым словом «Нодов». Теперь понятно, что за
+    // число, и видно, куда идти: узлы графа — это ваши каналы.
     txt('graphStats', `
-      <div class="row"><div class="row-body"><div class="row-name">Нодов</div><div class="row-val">${num(st.nodes||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Рёбер</div><div class="row-val">${num(st.edges||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Сильных пересечений</div><div class="row-val">${num(st.strong_overlaps||0)}</div></div></div>
+      <div class="row tap" role="button" tabindex="0" onclick="goTab('channels')">
+        <div class="row-body"><div class="row-name">Моих каналов в графе</div>
+          <div class="row-val" style="color:var(--hint)">открыть список каналов</div></div>
+        <div class="row-right" style="display:flex;align-items:center;gap:4px">${num(st.nodes||0)}<span class="chev">›</span></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Связей между каналами</div>
+        <div class="row-val" style="color:var(--hint)">сколько раз ваши каналы упоминают друг друга или делят аудиторию</div></div>
+        <div class="row-right">${num(st.edges||0)}</div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Сильных пересечений</div>
+        <div class="row-val" style="color:var(--hint)">пары, где аудитория совпадает больше чем на десятую часть — список ниже</div></div>
+        <div class="row-right" style="color:${(st.strong_overlaps||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(st.strong_overlaps||0)}</div></div>
     `);
-    document.getElementById('m-graph-val').textContent = (st.nodes||0)+' нодов';
+    document.getElementById('m-graph-val').textContent = (st.nodes||0)+' каналов';
     if (!ov.length) { txt('graphOverlaps', empty('🕸','Пересечений не найдено',
       'Граф строится по вашим каналам и их аудиториям; пересечения появятся, когда каналов станет больше одного',
       {label:'📢 К каналам', fn:"goTab('channels')"})); return; }
-    txt('graphOverlaps', ov.map(r => `
+    txt('graphOverlaps', ov.map(r => {
+      const pct = (r.overlap_pct||0)*100;
+      const col = pct>=50?'var(--red)':(pct>=20?'var(--orange,#f59e0b)':'var(--green)');
+      const na = r.title_a || (r.username_a?'@'+r.username_a:'Канал'), nb = r.title_b || (r.username_b?'@'+r.username_b:'Канал');
+      return `
       <div class="row">
         <div class="row-body">
-          <div class="row-name">${esc(r.title_a||r.username_a||'?')} ⟷ ${esc(r.title_b||r.username_b||'?')}</div>
-          <div class="row-val">Пересечение: ${((r.overlap_pct||0)*100).toFixed(1).replace('.',',')}% · Общих: ${r.shared_users||0}</div>
+          <div class="row-name">${esc(na)} ⟷ ${esc(nb)}</div>
+          <div class="row-val" style="color:${col}">Пересечение ${pct.toFixed(1).replace('.',',')}% · общих ${num(r.shared_users||0)}</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
+          <div style="display:flex;gap:6px;margin-top:7px">
+            <button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openTgUser('${esc(String(r.username_a||''))}')">${esc(String(na).substring(0,16))} →</button>
+            <button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openTgUser('${esc(String(r.username_b||''))}')">${esc(String(nb).substring(0,16))} →</button>
+          </div>
         </div>
-      </div>
-    `).join(''));
+      </div>`;
+    }).join(''));
   } catch(e) {
     txt('graphStats', '');
     txt('graphOverlaps', errHtml(errRu(e), 'openGraph()'));
