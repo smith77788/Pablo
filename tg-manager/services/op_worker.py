@@ -4729,7 +4729,8 @@ async def _exec_mass_publish(
         respect_daily_budget=True,  # долговечность: не грузим исчерпавшие лимит аккаунты
     )
     if not accounts_raw:
-        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
+        return {"status": "failed",
+                "summary": "⚠️ Нет активных аккаунтов (или все исчерпали суточный лимит действий)"}
 
     accounts_rows = await _claim_available_accounts(op_id, accounts_raw, owner_id)
     mp_used_acc_ids = [int(a["id"]) for a in accounts_rows]
@@ -5338,7 +5339,7 @@ async def _exec_bulk_join(
     if not accounts:
         return {
             "status": "requeue",
-            "summary": "⏳ Bulk Join: флот занят другими операциями — операция в очереди",
+            "summary": "⏳ Bulk Join: флот занят другими операциями или исчерпал суточный лимит действий — операция в очереди",
         }
 
     try:
@@ -5363,6 +5364,7 @@ async def _exec_bulk_join_inner(
     fail_count = 0
     step = 0
     skipped_by_limit = 0
+    _limit_cut = 0  # целей, не отработанных из-за дневного лимита
     failed_links: list[str] = []
     _JOIN_DAY_LIMITS = {"fast": 20, "normal": 15, "slow": 8, "smart": 12}
     day_limit = _JOIN_DAY_LIMITS.get(delay_mode, 12)
@@ -5397,6 +5399,7 @@ async def _exec_bulk_join_inner(
     # состоит: Telegram считает повторный joinChannel в лимит вступлений и в
     # давление, ведущее к PEER_FLOOD, а дневной счётчик аккаунта выгорал на уже
     # сделанной работе. Повтор после блипа сети сам поднимал риск бана.
+    _budget_left_by_acc = await _budget_remaining(pool, [int(a["id"]) for a in accounts])
     _already_joined = await completed_account_targets(pool, op_id, "join")
     if _already_joined:
         log.info(
@@ -5415,7 +5418,8 @@ async def _exec_bulk_join_inner(
         try:
             joins_today = await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_audit "
-                "WHERE account_id=$1 AND action='join' AND result='success' "
+                # 'ok' пишут накрутки (boost_subscribers) — это те же join.
+                "WHERE account_id=$1 AND action='join' AND result IN ('success', 'ok') "
                 "AND occurred_at > NOW() - INTERVAL '24 hours'",
                 acc["id"],
             )
@@ -5440,6 +5444,11 @@ async def _exec_bulk_join_inner(
             )
             skipped_by_limit += 1
             continue
+        _done_today = int(joins_today or 0)
+        # Общий суточный бюджет риск-действий (account_budget) тоже держим по
+        # ходу: на старте аккаунт с остатком 1 проходит отбор. Бюджет считает
+        # каждую попытку (и неудачную — это тоже запрос к Telegram).
+        _budget_left = _budget_left_by_acc.get(int(acc["id"]))
         for i, link in enumerate(links):
             # Уже вступали этим аккаунтом в эту ссылку на прошлом прогоне —
             # цель закрыта, второй joinChannel только жжёт лимит и риск.
@@ -5456,6 +5465,13 @@ async def _exec_bulk_join_inner(
                     log_ctx=f"[bulk_join_skip_done op={op_id}]",
                 )
                 continue
+            # Дневной лимит держим ВНУТРИ прогона. Раньше joins_today сверялся
+            # только перед первой целью аккаунта, после чего аккаунт отрабатывал
+            # ВЕСЬ список: лимит 12 при 50 целях давал 50 действий.
+            if _done_today >= day_limit or (
+                    _budget_left is not None and _budget_left <= 0):
+                _limit_cut += 1
+                continue
             if await _is_cancelled(pool, op_id):
                 return {
                     "status": "cancelled",
@@ -5466,6 +5482,8 @@ async def _exec_bulk_join_inner(
                     "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}",
                 }
             step += 1
+            if _budget_left is not None:
+                _budget_left -= 1
             t0 = time.monotonic()
             flood_wait = 0
             try:
@@ -5557,6 +5575,7 @@ async def _exec_bulk_join_inner(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
                 )
+                _done_today += 1
                 await _audit(
                     pool,
                     owner_id,
@@ -5677,6 +5696,8 @@ async def _exec_bulk_join_inner(
     parts = [f"Вступлено: {ok_count}", f"ошибок: {fail_count}"]
     if skipped_by_limit:
         parts.append(f"пропущено (лимит): {skipped_by_limit}")
+    if _limit_cut:
+        parts.append(f"не выполнено из-за дневного лимита: {_limit_cut}")
     return {
         "status": "done",
         "ok": ok_count,
@@ -5917,13 +5938,14 @@ async def _exec_bulk_leave(
     if not accounts:
         return {
             "status": "requeue",
-            "summary": "⏳ Bulk Leave: флот занят другими операциями — операция в очереди",
+            "summary": "⏳ Bulk Leave: флот занят другими операциями или исчерпал суточный лимит действий — операция в очереди",
         }
 
     ok_count = 0
     fail_count = 0
     step = 0
     skipped_by_limit = 0
+    _limit_cut = 0  # целей, не отработанных из-за дневного лимита
     failed_channels: list[str] = []
     delay_mode = params.get("delay_mode", "smart")
     proxy_mode = params.get("proxy_mode", "bound")
@@ -5948,6 +5970,7 @@ async def _exec_bulk_leave(
     # Ключ составной: цель отрабатывает КАЖДЫЙ аккаунт операции (цикл
     # accounts × channels), и закрывать канал целиком из-за одного аккаунта
     # значит не вывести из него остальные.
+    _budget_left_by_acc = await _budget_remaining(pool, [int(a["id"]) for a in accounts])
     _already_left = await completed_account_targets(pool, op_id, "leave")
     if _already_left:
         log.info(
@@ -5963,7 +5986,8 @@ async def _exec_bulk_leave(
         try:
             leaves_today = await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_audit "
-                "WHERE account_id=$1 AND action='leave' AND result='success' "
+                # 'ok' пишут накрутки (boost_subscribers) — это те же leave.
+                "WHERE account_id=$1 AND action='leave' AND result IN ('success', 'ok') "
                 "AND occurred_at > NOW() - INTERVAL '24 hours'",
                 acc["id"],
             )
@@ -5986,6 +6010,11 @@ async def _exec_bulk_leave(
             )
             skipped_by_limit += 1
             continue
+        _done_today = int(leaves_today or 0)
+        # Общий суточный бюджет риск-действий (account_budget) тоже держим по
+        # ходу: на старте аккаунт с остатком 1 проходит отбор. Бюджет считает
+        # каждую попытку (и неудачную — это тоже запрос к Telegram).
+        _budget_left = _budget_left_by_acc.get(int(acc["id"]))
         for i, channel in enumerate(channels):
             # Пара уже отработана прошлым прогоном. Считаем её успешной:
             # работа сделана, и отчёт обязан это отражать, иначе владелец
@@ -6000,6 +6029,13 @@ async def _exec_bulk_leave(
                     log_ctx=f"[bulk_leave_skip_done op={op_id}]",
                 )
                 continue
+            # Дневной лимит держим ВНУТРИ прогона. Раньше leaves_today сверялся
+            # только перед первой целью аккаунта, после чего аккаунт отрабатывал
+            # ВЕСЬ список: лимит 12 при 50 целях давал 50 действий.
+            if _done_today >= day_limit or (
+                    _budget_left is not None and _budget_left <= 0):
+                _limit_cut += 1
+                continue
             if await _is_cancelled(pool, op_id):
                 await release_accounts(used_acc_ids)
                 return {
@@ -6011,6 +6047,8 @@ async def _exec_bulk_leave(
                     "summary": f"Отменено. Вышли: {ok_count}, ошибок: {fail_count}",
                 }
             step += 1
+            if _budget_left is not None:
+                _budget_left -= 1
             t0 = time.monotonic()
             flood_wait = 0
             try:
@@ -6044,6 +6082,7 @@ async def _exec_bulk_leave(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
                 )
+                _done_today += 1
                 await _audit(
                     pool,
                     owner_id,
@@ -6154,6 +6193,8 @@ async def _exec_bulk_leave(
     parts = [f"Вышли: {ok_count}", f"ошибок: {fail_count}"]
     if skipped_by_limit:
         parts.append(f"пропущено (лимит): {skipped_by_limit}")
+    if _limit_cut:
+        parts.append(f"не выполнено из-за дневного лимита: {_limit_cut}")
     return {
         "status": "done",
         "ok": ok_count,
@@ -10143,6 +10184,10 @@ async def _exec_bulk_dm_adhoc(
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
+    # Остаток общего суточного бюджета риск-действий по аккаунтам. Раньше
+    # потолок был только на прогон: повторный запуск той же рассылки давал
+    # каждому аккаунту ещё столько же, а суточный бюджет ЛС не видел вовсе.
+    _budget_left = await _budget_remaining(pool, [int(_i) for _i in claimed_ids])
 
     try:
 
@@ -10221,14 +10266,18 @@ async def _exec_bulk_dm_adhoc(
             # Явный вращающийся индекс вместо i % len: при выбывании аккаунта
             # из ротации модуль по счётчику получателей перескакивал через
             # оставшиеся аккаунты и грузил одни сильнее других.
-            acc, acc_idx = _pick_acc(active_accounts, acc_idx, sent_by_acc, per_acc_cap)
+            # Аккаунт, выбравший суточный бюджет, в ротацию не берём.
+            _in_budget = [a for a in active_accounts
+                          if _budget_left.get(int(a["id"])) is None
+                          or _budget_left[int(a["id"])] > 0]
+            acc, acc_idx = _pick_acc(_in_budget, acc_idx, sent_by_acc, per_acc_cap)
             if acc is None:
-                # Все аккаунты выбрали лимит на эту рассылку — это защита, а не
-                # ошибка: честно сообщаем и не дожимаем флот.
+                # Все аккаунты выбрали лимит (на эту рассылку или суточный) —
+                # это защита, а не ошибка: честно сообщаем и не дожимаем флот.
                 _left = total - i
                 skip_count += _left
                 await _log_step(i + 1, username, "skip",
-                                f"лимит {per_acc_cap} на аккаунт исчерпан")
+                                "лимит на аккаунт исчерпан (на рассылку или суточный)")
                 log.info("bulk_dm_adhoc op=%d: лимит на аккаунт исчерпан, не отправлено %d",
                          op_id, _left)
                 break
@@ -10249,6 +10298,13 @@ async def _exec_bulk_dm_adhoc(
 
                 kind = _classify_send_result(result)
                 _err_text = str(result.get("error") or "")
+                # Каждая попытка — запрос к Telegram и идёт в суточный бюджет
+                # аккаунта (иначе бюджет ЛС не видит). Лимит на рассылку ниже
+                # по-прежнему считает только доставленные.
+                if _budget_left.get(int(acc["id"])) is not None:
+                    _budget_left[int(acc["id"])] -= 1
+                await _record_budget_actions(pool, owner_id, int(acc["id"]), "dm",
+                                             result=kind, operation_id=op_id)
 
                 if kind == "sent":
                     ok_count += 1
@@ -11285,7 +11341,8 @@ async def _exec_channel_add(
     )
     accounts = await _claim_available_accounts(op_id, accounts, owner_id)
     if not accounts:
-        return {"status": "failed", "summary": "⚠️ Нет свободных активных аккаунтов"}
+        return {"status": "failed",
+                "summary": "⚠️ Нет свободных активных аккаунтов (или все исчерпали суточный лимит действий)"}
 
     acc = dict(accounts[0])
     try:
@@ -13596,6 +13653,31 @@ async def _filter_quarantined_accounts(
     return accounts, 0
 
 
+async def _budget_remaining(pool: asyncpg.Pool, account_ids: list) -> dict:
+    """Остаток суточного бюджета риск-действий по аккаунтам (None — без лимита).
+
+    Fail-open: сбой учёта → {} (ограничивают только собственные лимиты операции).
+    """
+    try:
+        from services import account_budget as _abudget
+        return await _abudget.remaining_bulk(pool, account_ids)
+    except Exception:
+        log_exc_swallow(log, "budget remaining lookup failed")
+        return {}
+
+
+async def _record_budget_actions(pool: asyncpg.Pool, owner_id: int, account_id: int,
+                                 action: str, n: int = 1, *, result: str = "ok",
+                                 operation_id: int | None = None) -> None:
+    """Учесть риск-действия аккаунта в суточном бюджете. Никогда не бросает."""
+    try:
+        from services import account_budget as _abudget
+        await _abudget.record_actions(pool, owner_id, account_id, action, n,
+                                      result=result, operation_id=operation_id)
+    except Exception:
+        log_exc_swallow(log, f"budget record failed acc={account_id}")
+
+
 async def _filter_over_budget_accounts(
     pool: asyncpg.Pool, op_id: int, accounts: list
 ) -> tuple[list, int]:
@@ -15362,15 +15444,32 @@ async def _exec_mass_invite(
     async def _acc_budget(acc) -> int:
         """Сколько инвайтов аккаунт вправе сделать за прогон (0 = выбыл).
 
-        Берём СТРОЖАЙШИЙ из двух — заданного пользователем и рекомендованного по
-        фактической истории самого аккаунта. Ручное число одно на всю операцию и
-        не знает, что один аккаунт год работает чисто, а другой словил флуд
-        вчера; рекомендация это знает. Уже израсходованное за сегодня
-        вычитается, поэтому повторный запуск не удваивает суточный объём.
+        Берём СТРОЖАЙШИЙ из ограничений: заданного пользователем, лимита режима
+        объёма (рекомендованного по истории / прогрессивного / потолка «одного
+        прохода») и общего суточного бюджета риск-действий аккаунта. Уже
+        израсходованное за сегодня вычитается везде, поэтому повторный запуск
+        не удваивает суточный объём.
         """
+        acc_id = int(acc["id"])
+        _cap = await _acc_mode_cap(acc)
+        # Ручной лимит на аккаунт — потолок в ЛЮБОМ режиме. Раньше «прогрессивно»
+        # его не читал вовсе: «по 5 с аккаунта» превращалось в 25–50.
+        if _per_acc_limit:
+            _cap = min(_cap, _per_acc_limit)
+        # Общий суточный бюджет (account_budget): инвайт — риск-действие, как
+        # вступление и ЛС, и считается вместе с ними.
+        _left = (await _budget_remaining(pool, [acc_id])).get(acc_id)
+        if _left is not None and _left < _cap:
+            log.info("mass_invite op=%d acc=%s: суточный бюджет действий — осталось %d",
+                     op_id, acc_id, _left)
+            _cap = _left
+        return max(0, int(_cap))
+
+    async def _acc_mode_cap(acc) -> int:
+        """Лимит режима объёма с вычетом сделанного сегодня (без ручного лимита)."""
+        _queue_cap = len(all_users) + len(all_phones)
         # Режим «прогрессивно»: лимит на аккаунт по его возрасту/доверию (свежим
-        # мало, отстоявшимся больше). Вычитаем сделанное сегодня — повторный запуск
-        # не удваивает объём. Живые сигналы флуда всё так же тормозят.
+        # мало, отстоявшимся больше). Живые сигналы флуда всё так же тормозят.
         if _volume_mode == "progressive":
             try:
                 from services.flood_engine import progressive_daily_cap
@@ -15380,29 +15479,36 @@ async def _exec_mass_invite(
                 log.debug("mass_invite: progressive cap unavailable acc=%s", acc.get("id"))
                 return 5
         # Режим «один проход»: не клампим к предсказанному суточному лимиту —
-        # берём потолок ёмкости (или явный лимит пользователя, но не выше потолка).
-        # Реальную безопасность держат сигналы флуда + стоп-кран флота, а не гадание.
+        # берём потолок ёмкости. Реальную безопасность держат сигналы флуда +
+        # стоп-кран флота, а не гадание. Но потолок СУТОЧНЫЙ: сделанное сегодня
+        # вычитается, иначе каждый перезапуск давал ещё один полный потолок.
         if _one_pass:
             from services.flood_engine import _INVITE_LIMIT_CEILING as _ceil
-            _cap = _per_acc_limit or _ceil
-            return max(1, min(int(_cap), _ceil))
-        _acc_cap = _per_acc_limit
+            from services.flood_engine import progressive_daily_cap
+            try:
+                _used = int((await progressive_daily_cap(pool, int(acc["id"])))
+                            .get("used_today") or 0)
+            except Exception:
+                _used = 0
+            return max(0, _ceil - _used)
         try:
             from services.flood_engine import recommended_daily_limit
             _rec = await recommended_daily_limit(pool, int(acc["id"]))
-            _remaining = int(_rec.get("remaining") or 0)
-            _acc_cap = _remaining if not _acc_cap else min(_acc_cap, _remaining)
-            if _remaining <= 0:
-                log.info(
-                    "mass_invite op=%d acc=%s: суточный лимит исчерпан (%s/%s, %s)",
-                    op_id, acc.get("id"), _rec.get("used_today"), _rec.get("limit"),
-                    _rec.get("basis"),
-                )
-                return 0
         except Exception:
             log.debug("mass_invite: daily limit unavailable acc=%s", acc.get("id"))
-        # Ни ручного лимита, ни рекомендации — потолком служит сама очередь.
-        return _acc_cap if _acc_cap else (len(all_users) + len(all_phones))
+            _rec = None
+        if _rec is None:
+            # Ни рекомендации — потолком служит сама очередь (ручной лимит,
+            # если задан, наложит _acc_budget).
+            return _queue_cap
+        _remaining = int(_rec.get("remaining") or 0)
+        if _remaining <= 0:
+            log.info(
+                "mass_invite op=%d acc=%s: суточный лимит исчерпан (%s/%s, %s)",
+                op_id, acc.get("id"), _rec.get("used_today"), _rec.get("limit"),
+                _rec.get("basis"),
+            )
+        return _remaining
 
     # Метод «ссылка в ЛС» И финальный фолбэк («никаким другим способом не
     # получилось») используют ОДНУ ссылку — экспортируем один раз (первым

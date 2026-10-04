@@ -44,7 +44,9 @@ def test_budget_bypasses_prediction_but_keeps_ceiling():
     seg = body[body.index("_one_pass"):]
     seg = seg[seg.index("_acc_budget"):]  # тело _acc_budget
     assert "_INVITE_LIMIT_CEILING" in seg, "потолок ёмкости обязан оставаться (защита)"
-    assert "min(int(_cap), _ceil)" in seg, "нельзя выше потолка даже в one_pass"
+    # потолок суточный: сделанное сегодня вычитается, иначе каждый перезапуск
+    # давал бы ещё один полный потолок
+    assert "_ceil - _used" in seg, "нельзя выше потолка даже в one_pass"
     # и это до обычного расчёта recommended_daily_limit
     i_one = seg.index("if _one_pass:")
     i_rec = seg.index("recommended_daily_limit")

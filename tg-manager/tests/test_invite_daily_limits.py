@@ -153,7 +153,7 @@ def test_invite_records_daily_stats():
 def test_invite_applies_strictest_limit():
     src = _exec_src()
     assert "recommended_daily_limit" in src, "рекомендация должна реально применяться"
-    assert "min(_acc_cap" in src, "берём СТРОЖАЙШИЙ из ручного и рекомендованного"
+    assert "min(_cap, _per_acc_limit)" in src, "берём СТРОЖАЙШИЙ из ручного и режимного"
     assert "_remaining <= 0" in src, "исчерпанный суточный лимит обязан пропускать аккаунт"
 
 
