@@ -9396,51 +9396,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Referral Dashboard ────────────────────────────────────────────────────
 
-    # ── Курс гривни ───────────────────────────────────────────────────────────
-    # Комиссия приходит в долларах: платежи идут в TON и USDT, и в базе лежит
-    # commission_usd / amount_usd. Владелец считает заработок в гривне, поэтому
-    # экран показывает гривну — но пересчётом по курсу, который он сам задаёт, а
-    # не подменой значка: доллар, выданный за гривню, завысил бы сумму в десятки
-    # раз. Рядом со гривней всегда видно и исходные доллары, и сам курс.
-    _UAH_RATE_KEY = "uah_per_usd"
-    _UAH_RATE_DEFAULT = 41.0
-
-    async def _uah_rate(uid: int) -> float:
-        """Курс гривни к доллару для этого владельца. Fail-open на значение по
-        умолчанию: без курса экран всё равно должен открыться."""
-        try:
-            from services.organism import spine
-
-            v = await spine.state_get(pool, uid, _UAH_RATE_KEY, None)
-            if isinstance(v, dict):
-                v = v.get("rate")
-            r = float(v)
-            if 1.0 <= r <= 10000.0:
-                return round(r, 4)
-        except Exception:
-            pass
-        return _UAH_RATE_DEFAULT
-
-    async def uah_rate_save(request: web.Request) -> web.Response:
-        """Задать курс гривни: {rate}. Курс свой у каждого владельца."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        try:
-            rate = float(str(body.get("rate")).replace(",", "."))
-        except (TypeError, ValueError):
-            return _err("Курс — это число, например 41.5", 400)
-        if not (1.0 <= rate <= 10000.0):
-            return _err("Курс должен быть от 1 до 10000 гривен за доллар", 400)
-        from services.organism import spine
-
-        await spine.state_set(pool, uid, _UAH_RATE_KEY, {"rate": round(rate, 4)})
-        return _json_resp({"ok": True, "rate": round(rate, 4)})
-
     async def referral_overview_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -9478,8 +9433,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Голый код без ссылки бесполезен: непонятно, куда его вводить.
             # Бот («/referral») давно отдаёт t.me/<бот>?start=<код>, а мини-апп
             # показывал только сам код и писал «Поделитесь кодом!».
-            earned_usd = float(amb_row["total_commission"] or 0) if amb_row else 0.0
-            uah_rate = await _uah_rate(uid)
             code = ref_code_row["code"] if ref_code_row else None
             ref_link = None
             if code:
@@ -9492,12 +9445,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "tier": amb_row["tier_key"] if amb_row else "basic",
                 "tier_name": amb_row["tier_name"] if amb_row else "Базовый",
                 "commission_rate": float(amb_row["commission_rate"] or 0) if amb_row else 0,
-                "total_earned": earned_usd,
-                # Гривня — пересчёт, а не переименование доллара: экран обязан
-                # показать и курс, и исходную сумму.
-                "currency": "UAH",
-                "uah_rate": uah_rate,
-                "total_earned_uah": round(earned_usd * uah_rate, 2),
+                "total_earned": float(amb_row["total_commission"] or 0) if amb_row else 0,
                 "referral_count": int(referral_count or 0),
                 "paid_count": int(paid_count or 0),
                 "referrals": [
@@ -19409,7 +19357,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/phone_check", phone_check_submit)
     # Referral
     app.router.add_get("/api/miniapp/referral/detail", referral_overview_detail)
-    app.router.add_post("/api/miniapp/settings/uah_rate", uah_rate_save)
     # AI Memory
     app.router.add_get("/api/miniapp/ai_memory", ai_memory_list)
     app.router.add_post("/api/miniapp/ai_memory", ai_memory_create)
