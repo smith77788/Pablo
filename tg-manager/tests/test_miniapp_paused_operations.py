@@ -45,30 +45,51 @@ def _index_html() -> str:
 
 class _Pool:
     """Пул с одной операцией: UPDATE ... RETURNING отдаёт строку только если
-    текущий статус попадает в список статусов запроса."""
+    текущий статус попадает в разрешённый набор.
+
+    Набор берётся двумя способами, и оба обязательны. Отмена ушла за единую
+    дверь `operation_bus.cancel`, и там разрешённые статусы передаются
+    ПАРАМЕТРОМ (`b.status = ANY($3::text[])`), а не вписаны в текст запроса, —
+    заглушка, которая умела только текст, считала набор пустым, отказывала в
+    отмене и три теста падали на здоровом коде. Пауза и возобновление
+    по-прежнему ходят своим UPDATE с литералом `AND status='pending'`, поэтому
+    разбор текста остаётся.
+    """
 
     def __init__(self, status: str = "pending", owner: int = 777):
         self.status = status
         self.owner = owner
         self.queries: list[str] = []
 
-    def _allowed(self, query: str) -> list[str]:
+    def _allowed(self, query: str, args: tuple = ()) -> list[str]:
         m = re.search(r"status\s+IN\s*\(([^)]*)\)", query)
         if m:
             return re.findall(r"'([a-z_]+)'", m.group(1))
-        m = re.search(r"status='([a-z_]+)'\s*\n?\s*RETURNING", query)
-        m2 = re.search(r"AND status='([a-z_]+)'", query)
-        return [m2.group(1)] if m2 else ([m.group(1)] if m else [])
+        m = re.search(r"status\s*=\s*'([a-z_]+)'\s*\n?\s*RETURNING", query)
+        m2 = re.search(r"(?:AND|WHERE)\s+(?:\w+\.)?status\s*=\s*'([a-z_]+)'", query)
+        if m2:
+            return [m2.group(1)]
+        if m:
+            return [m.group(1)]
+        # Статусы пришли параметром: ANY($N::text[]) — ищем список строк.
+        for a in args:
+            if isinstance(a, (list, tuple)) and a and all(isinstance(x, str) for x in a):
+                return list(a)
+        return []
 
     async def fetchrow(self, query: str, *args):
         self.queries.append(query)
         if "UPDATE operation_queue" not in query:
             return {"status": self.status}
-        if self.status in self._allowed(query):
-            new = re.search(r"SET status='([a-z_]+)'", query)
+        was = self.status
+        if was in self._allowed(query, args):
+            new = re.search(r"SET\s+status\s*=\s*'([a-z_]+)'", query)
             if new:
                 self.status = new.group(1)
-            return {"id": 1}
+            # was_status/op_type/params читает operation_bus.cancel, когда
+            # дописывает исход отменённой операции.
+            return {"id": 1, "was_status": was, "op_type": "mass_invite",
+                    "params": {}}
         return None
 
     async def fetch(self, query: str, *args):

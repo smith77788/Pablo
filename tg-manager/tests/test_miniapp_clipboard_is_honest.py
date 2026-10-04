@@ -187,4 +187,10 @@ def test_empty_text_is_refused():
     assert res.returncode == 0, res.stderr[:800]
     out = json.loads(res.stdout)
     assert out["ok"] is False
-    assert out["toasts"] == ["Нечего копировать"]
+    # Ровно одно сообщение, и оно про пустой буфер. Сверять строку ЦЕЛИКОМ
+    # нельзя: всплывающие сообщения мини-аппа несут значок состояния
+    # («⚠️ Нечего копировать» после 0bba5ad2), и тест падал на здоровом коде,
+    # хотя проверять он должен другое — что пустой текст не выдаётся за успех.
+    assert len(out["toasts"]) == 1, out["toasts"]
+    assert "Нечего копировать" in out["toasts"][0], out["toasts"]
+    assert "СКОПИРОВАНО" not in out["toasts"][0]

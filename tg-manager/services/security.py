@@ -223,8 +223,12 @@ def rate_limit_response(request: web.Request, uid: Optional[int] = None) -> web.
     """Return a 429 Too Many Requests response."""
     key = _rate_key(request, uid)
     retry_after = _rate_limiter.get_retry_after(key, _RATE_LIMIT_WINDOW)
+    # Текст по-русски: это сообщение видит владелец в мини-аппе, а английского
+    # он не читает. Поле error оставлено тем же (его читает фронтенд), поменялось
+    # только значение.
     return web.json_response(
-        {"error": "Rate limit exceeded", "retry_after": retry_after},
+        {"error": f"Слишком часто — подождите {retry_after} с и повторите",
+         "retry_after": retry_after},
         status=429,
         headers={"Retry-After": str(retry_after)},
     )
