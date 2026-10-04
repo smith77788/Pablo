@@ -117,7 +117,12 @@ def test_no_reader_selects_a_single_reason_column():
                 # и это правильно — пути ожидания и провала разные.
                 if "SELECT" not in line.upper() and "AS error_msg" not in line:
                     continue
-                if "operation_queue" not in src[max(0, src.find(line) - 400):src.find(line) + 400]:
+                # Таблица ищется ВПЕРЁД от строки выборки (FROM идёт после
+                # SELECT): окно в обе стороны цепляло соседнюю функцию, и
+                # last_error чужой таблицы (va_channel_admin) считался причиной
+                # операции.
+                at = src.find(line)
+                if "operation_queue" not in src[at:at + 600]:
                     continue
                 has_msg = "error_msg" in line and "AS error_msg" not in line
                 has_last = "last_error" in line
