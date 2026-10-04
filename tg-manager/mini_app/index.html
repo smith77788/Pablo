@@ -6557,8 +6557,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <!-- Регулировка темпа автоповтора — только для админа (владельца). -->
         <div id="accPhoneResendAdmin" style="display:none;margin-top:8px;padding:8px;border:1px dashed var(--border-strong);border-radius:var(--radius)">
           <label style="display:block;font-weight:600;font-size:12px;margin-bottom:4px">⚙️ Запросов в минуту (автоповтор) · только для админа</label>
-          <input type="number" min="1" max="60" step="1" id="accPhoneRpm" placeholder="например 4" oninput="_accSaveRpm()" style="width:100%;padding:8px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
-          <div style="color:var(--hint);font-size:11px;margin-top:3px">Чем больше — тем чаще автоповтор шлёт запрос кода (1–60). Пусто — осторожный режим: по рекомендации Telegram, но не чаще раза в 15 с. Высокое значение быстрее упрётся во FloodWait.</div>
+          <input type="number" min="1" max="600" step="1" id="accPhoneRpm" placeholder="например 4" oninput="_accSaveRpm()" style="width:100%;padding:8px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+          <div style="color:var(--hint);font-size:11px;margin-top:3px">Сколько укажете — столько и будет: темп исполняется ровно (1–600 запросов/мин), искусственного ограничения нет. Пусто — осторожный режим: по рекомендации Telegram, но не чаще раза в 15 с. Высокое значение быстрее упрётся во FloodWait — тогда автоповтор сам остановится.</div>
         </div>
       </div>
       <div class="field" id="accPhoneStep-2fa" style="display:none">
@@ -14608,19 +14608,21 @@ function _accSaveRpm(){
   const inp=document.getElementById('accPhoneRpm'); if(!inp) return;
   const n=parseInt(inp.value,10);
   try{
-    if(Number.isFinite(n)&&n>=1&&n<=60) localStorage.setItem('acc_resend_rpm',String(n));
+    if(Number.isFinite(n)&&n>=1&&n<=600) localStorage.setItem('acc_resend_rpm',String(n));
     else localStorage.removeItem('acc_resend_rpm');
   }catch(_){}
 }
 function _accResendRpm(){
   try{ const n=parseInt(localStorage.getItem('acc_resend_rpm'),10);
-       return (Number.isFinite(n)&&n>=1&&n<=60)?n:0; }catch(_){ return 0; }
+       return (Number.isFinite(n)&&n>=1&&n<=600)?n:0; }catch(_){ return 0; }
 }
-// Пауза до следующего запроса. Админ задал запросов/мин → 60/rpm (пол 2 с, чтобы
-// не плавить клиент). Иначе — рекомендация Telegram (timeout), но не чаще раза в 15 с.
+// Пауза до следующего запроса. Админ задал запросов/мин → РОВНО 60/rpm, без
+// искусственного пола: сколько указал — столько и исполняем (ограничение темпа
+// дальше держит только реальный FloodWait от Telegram). Пусто → рекомендация
+// Telegram (timeout), но не чаще раза в 15 с.
 function _accResendDelayMs(serverTimeout){
   const rpm=_accResendRpm();
-  if(rpm>0) return Math.max(Math.round(60000/rpm),2000);
+  if(rpm>0) return Math.round(60000/rpm);
   return Math.max((serverTimeout||0),15)*1000;
 }
 
@@ -14663,14 +14665,17 @@ async function accPhoneAutoToggle(){
   if(b){ b.textContent='⏹ Остановить автоповтор'; b.classList.remove('btn-s'); b.classList.add('btn-p'); }
   const tick=async()=>{
     if(!_accAutoRunning) return;
+    const t0=Date.now();
     const res=await accPhoneResend();
     if(!_accAutoRunning) return;                 // остановили во время запроса
     if(!res||res.flood||res.error){ accPhoneAutoStop(); return; }  // флуд/ошибка — стоп
     // Темп: админ-настройка «запросов в минуту» (если задана) или рекомендация
-    // Telegram, но не реже раза в 15 с и не мгновенно — иначе первый же тик
-    // упрётся в FloodWait.
-    const wait=_accResendDelayMs(res.timeout);
-    _accResendNote('Автоповтор включён. Следующий запрос примерно через '+Math.round(wait/1000)+' с. Введите код, как только он придёт.');
+    // Telegram, но не реже раза в 15 с. Из паузы ВЫЧИТАЕМ время самого запроса —
+    // так фактический темп держит заданное значение запросов/мин независимо от
+    // того, сколько отвечал сервер (а не «интервал + время запроса»).
+    const target=_accResendDelayMs(res.timeout);
+    const wait=Math.max(target-(Date.now()-t0),0);
+    _accResendNote('Автоповтор включён. Темп ~'+Math.round(60000/target)+' запросов/мин. Введите код, как только он придёт.');
     _accAutoTimer=setTimeout(tick, wait);
   };
   tick();
