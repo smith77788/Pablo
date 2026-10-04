@@ -618,7 +618,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
     await message.answer("⏳ Отправляю код на " + escape(phone) + "…")
 
     try:
-        phone_code_hash, delivery_hint = await start_login(phone)
+        phone_code_hash, delivery_hint = await start_login(phone, owner_id=message.from_user.id)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -697,7 +697,7 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
             return
         # Code expired — restart login with a fresh SendCodeRequest
         try:
-            new_hash, hint = await start_login(phone)
+            new_hash, hint = await start_login(phone, owner_id=callback.from_user.id)
             await state.update_data(phone_code_hash=new_hash)
             kb = InlineKeyboardBuilder()
             kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
@@ -1813,7 +1813,7 @@ async def _send_relog_code(
         f"⏳ Отправляю код на <code>{escape(phone)}</code>…", parse_mode="HTML"
     )
     try:
-        phone_code_hash, delivery_hint = await start_login(phone)
+        phone_code_hash, delivery_hint = await start_login(phone, owner_id=message.chat.id)
     except Exception as exc:
         err = str(exc)
         kb = InlineKeyboardBuilder()

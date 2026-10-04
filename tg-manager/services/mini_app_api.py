@@ -20525,7 +20525,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             _pid, proxy_url = await _resolve_proxy_url(uid, body.get("proxy_id"))
             from services import account_manager as am
             phone_code_hash, hint = await asyncio.wait_for(
-                am.start_login(phone, proxy_url=proxy_url), timeout=40)
+                am.start_login(phone, proxy_url=proxy_url, owner_id=uid), timeout=40)
             return _json_resp({"ok": True, "phone_code_hash": phone_code_hash, "hint": hint})
         except asyncio.TimeoutError:
             return _err("Telegram не ответил за 40с — проверьте номер/прокси", 400)

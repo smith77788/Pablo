@@ -36,4 +36,4 @@ def test_relog_manual_phone_flow_wired():
     # общий помощник отправки кода существует и переводит в waiting_code
     assert "async def _send_relog_code" in src
     helper = src[src.index("async def _send_relog_code"):src.index("async def relog_phone_entered")]
-    assert "AccountLogin.waiting_code" in helper and "start_login(phone)" in helper
+    assert "AccountLogin.waiting_code" in helper and "start_login(phone" in helper

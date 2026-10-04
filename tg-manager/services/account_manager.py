@@ -567,6 +567,10 @@ def set_account_transport(account_id: int | None, **fields: Any) -> None:
             entry[k] = v
         elif k in _TRANSPORT_META and v is not None:
             entry[k] = int(v)
+        elif k == "phone":
+            # Не транспортное поле в словаре, но от него зависит адрес IPv6
+            # аккаунта (см. _ipv6_key): выборке без phone его подставляет карта.
+            entry["phone"] = _phone_digits(v)
 
 
 def forget_account_transport(account_id: int | None) -> None:
@@ -603,7 +607,7 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
         where = f"WHERE a.owner_id = $1 AND {_has_session}"
         args = [int(owner_id)]
     rows = await pool.fetch(
-        "SELECT a.id, a.owner_id, a.cf_relay_url, a.proxy_id, p.proxy_url "
+        "SELECT a.id, a.owner_id, a.cf_relay_url, a.proxy_id, p.proxy_url, a.phone "
         "FROM tg_accounts a "
         "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         + where, *args)
@@ -618,7 +622,7 @@ async def prime_account_transport(pool: Any, owner_id: int | None = None) -> int
     for r in rows:
         set_account_transport(
             r["id"], owner_id=r["owner_id"], cf_relay_url=r["cf_relay_url"],
-            proxy_id=r["proxy_id"], proxy_url=r["proxy_url"])
+            proxy_id=r["proxy_id"], proxy_url=r["proxy_url"], phone=r.get("phone"))
     return len(_ACC_TRANSPORT)
 
 
@@ -679,6 +683,35 @@ def _fill_transport_fields(device: dict[str, Any]) -> list[str]:
         device["owner_id"] = cached["owner_id"]
         filled.append("owner_id")
     return filled
+
+
+def _phone_digits(phone: Any) -> str | None:
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    return digits or None
+
+
+def _ipv6_key(d: dict[str, Any]) -> int | None:
+    """Ключ, по которому аккаунту выдаётся его IPv6: номер телефона, иначе id.
+
+    Номер известен уже на ЛОГИНЕ, когда id аккаунта ещё нет. По id логин шёл
+    с IP хоста, а первая же операция — со своего IPv6: свежая сессия сразу
+    меняла адрес. По номеру логин, релогин и операции выходят с одного адреса.
+    Выборке без phone номер подставляет карта транспорта; номера нет нигде
+    (импорт сессии без номера) — ключ id, одинаково на всех путях.
+    """
+    digits = _phone_digits(d.get("phone"))
+    acc_id = d.get("id")
+    if not digits and acc_id is not None:
+        try:
+            digits = (_ACC_TRANSPORT.get(int(acc_id)) or {}).get("phone")
+        except (TypeError, ValueError):
+            digits = None
+    if digits:
+        return int(digits)
+    try:
+        return int(acc_id) if acc_id else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _account_ipv6(account_id: int, subnet_cidr: str) -> str | None:
@@ -1544,7 +1577,7 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     # мы отправляли аккаунт напрямую с host-IP именно в том случае, ради
     # которого добор и делается, — а у аккаунта без прокси свой IPv6 это
     # единственный способ иметь стабильный собственный адрес.
-    _acc_id = d.get("id") if device else None
+    _acc_id = _ipv6_key(d) if device else None
 
     # Подсеть: сначала пер-владелец из приложения (device/кэш), иначе глобальный env.
     _owner_id = d.get("owner_id") if device else None
@@ -1560,7 +1593,7 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         # ПРИОРИТЕТ над CF-релеем: IPv6 даёт РЕАЛЬНО уникальный IP на аккаунт
         # (у CF-релея общий edge-IP на пул). Прямое obfuscated-подключение к
         # IPv6-DC Telegram с bind на свой адрес.
-        _v6 = _account_ipv6(int(_acc_id), _subnet)
+        _v6 = _account_ipv6(_acc_id, _subnet)
         if _v6:
             local_addr = _v6
             use_ipv6 = True
@@ -1803,6 +1836,7 @@ async def start_login(
     proxy_url: str | None = None,
     manufacturer: str | None = None,
     app_version: str | None = None,
+    owner_id: int | None = None,
 ) -> tuple[str, str]:
     """Начинает авторизацию по номеру телефона.
 
@@ -1833,10 +1867,29 @@ async def start_login(
     # и будущие ОПЕРАЦИИ этого аккаунта берут ОДИН и тот же pool-прокси (один exit IP),
     # и свежеавторизованная сессия не падает в AUTH_KEY_DUPLICATED на первой операции.
     device["phone"] = phone
+    # IPv6-подсеть владельца: логин выходит с того же адреса, что и будущие
+    # операции этого номера (ключ адреса — номер, см. _ipv6_key). owner_id в
+    # словарь не кладём: он включил бы политику прокси владельца там, где её
+    # раньше не было.
+    if owner_id is not None and _OWNER_IPV6_SUBNET.get(int(owner_id)):
+        device["ipv6_subnet"] = _OWNER_IPV6_SUBNET[int(owner_id)]
     _pending_device[phone] = device
     client = _make_client("", device)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        try:
+            await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        except (OSError, ConnectionError, asyncio.TimeoutError) as e:
+            # Подсеть задана, но с неё не выйти: логин не должен из-за этого
+            # падать — тот же откат на host-IP, что у операций (connect_client).
+            if getattr(client, "_infragram_transport", None) != "ipv6":
+                raise
+            log.warning("start_login: IPv6 недоступен (%s) — логин с host-IP", str(e)[:80])
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            client = _make_client("", device, _force_direct=True)
+            await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await asyncio.wait_for(
             client.send_code_request(phone), timeout=_CONNECT_TIMEOUT
         )

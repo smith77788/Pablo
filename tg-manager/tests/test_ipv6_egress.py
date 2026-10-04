@@ -124,3 +124,54 @@ def test_save_endpoint_probes_before_saving():
     body = body[:body.index("app.router.add_get")]
     assert "probe_subnet" in body
     assert body.index("probe_subnet") < body.index("db.set_ipv6_subnet")
+
+
+# ── Логин и операции одного номера выходят с одного IPv6 ─────────────────────
+# Раньше адрес выдавался по id аккаунта, а на логине id ещё нет: логин шёл с IP
+# хоста, первая операция — со своего IPv6. Свежая сессия сразу меняла адрес.
+
+def test_login_and_ops_get_same_ipv6():
+    from services import account_manager as am
+    sub = "2a01:4f8:abcd::/48"
+    login = {"phone": "+7 999 123-45-67"}           # словарь start_login, id нет
+    ops = {"id": 42, "phone": "79991234567"}        # каноническая выборка
+    a_login = am._account_ipv6(am._ipv6_key(login), sub)
+    assert a_login and a_login == am._account_ipv6(am._ipv6_key(ops), sub)
+
+
+def test_ipv6_key_takes_phone_from_transport_map(monkeypatch):
+    from services import account_manager as am
+    monkeypatch.setattr(am, "_ACC_TRANSPORT", {})
+    am.set_account_transport(77, owner_id=1, phone="+7 (999) 000-11-22")
+    # своя выборка без phone обязана выйти с того же адреса, что и каноническая
+    assert am._ipv6_key({"id": 77}) == am._ipv6_key({"id": 77, "phone": "79990001122"})
+    # номера нет нигде — ключ id, одинаково на всех путях
+    assert am._ipv6_key({"id": 78}) == 78
+    assert am._ipv6_key({"id": 78, "phone": None}) == 78
+    assert am._ipv6_key({}) is None
+
+
+def test_start_login_uses_owner_subnet_and_falls_back():
+    src = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
+    body = src[src.index("async def start_login("):src.index("async def resend_code(")]
+    assert "owner_id: int | None = None" in body
+    assert 'device["ipv6_subnet"] = _OWNER_IPV6_SUBNET' in body
+    assert body.index('device["ipv6_subnet"]') < body.index('_make_client("", device)')
+    # нерабочая подсеть не ломает логин: откат на host-IP
+    assert '_make_client("", device, _force_direct=True)' in body
+
+
+@pytest.mark.parametrize("rel,needle", [
+    ("services/mini_app_api.py", "am.start_login(phone, proxy_url=proxy_url, owner_id=uid)"),
+    ("bot/handlers/accounts.py", "start_login(phone, owner_id=message.from_user.id)"),
+    ("bot/handlers/accounts.py", "start_login(phone, owner_id=callback.from_user.id)"),
+    ("bot/handlers/accounts.py", "start_login(phone, owner_id=message.chat.id)"),
+])
+def test_login_callers_pass_owner(rel, needle):
+    assert needle in open(os.path.join(ROOT, rel), encoding="utf-8").read()
+
+
+def test_autoregistrar_passes_owner_to_every_login():
+    src = open(os.path.join(ROOT, "bot", "handlers", "auto_registrar.py"), encoding="utf-8").read()
+    n = src.count("start_login(\n")
+    assert n >= 2 and src.count("owner_id=owner_id,\n") >= n

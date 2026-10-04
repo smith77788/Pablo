@@ -586,6 +586,7 @@ async def _start_single_register(
                 phone, proxy_url,
                 manufacturer=dev_profile.get("manufacturer"),
                 app_version=dev_profile.get("app_version"),
+                owner_id=owner_id,
             ),
             timeout=20,
         )
@@ -892,6 +893,7 @@ async def _do_batch_register(
                     phone, proxy_url,
                     manufacturer=dev_profile.get("manufacturer"),
                     app_version=dev_profile.get("app_version"),
+                    owner_id=owner_id,
                 ),
                 timeout=20,
             )
