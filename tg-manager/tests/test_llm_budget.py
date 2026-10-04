@@ -177,3 +177,23 @@ def test_ai_wait_postpones_without_failure():
     asyncio.run(ca._wait_ai(pool2, {**admin, "last_error": upd[1][3]}, None, now))
     assert pool2.calls[0][1][2] == now + timedelta(minutes=15)
     assert not any("va_admin_events" in c[0] for c in pool2.calls)
+
+
+def test_news_channel_is_never_written_ahead(monkeypatch):
+    """Новости пишутся по свежим событиям: заранее написанная «новость» — уже не новость."""
+    from unittest.mock import AsyncMock
+
+    pool = AsyncMock()
+    pool.fetch.return_value = [{"id": 1, "pillar": "Главное", "topic": ""}]
+    monkeypatch.setattr(ca, "get_admin", AsyncMock(return_value={"topic": "Оперативные новости"}))
+    monkeypatch.setattr(ca, "channel_row", AsyncMock(return_value={"title": "Свежие новости"}))
+    complete = AsyncMock(return_value='["текст"]')
+    assert asyncio.run(ca.prewrite(pool, 1, 2, complete=complete)) == 0
+    complete.assert_not_awaited()
+    sql, *args = pool.execute.call_args.args
+    assert "write_attempts" in sql and args[1] == ca._PREWRITE_MAX_ATTEMPTS
+
+
+def test_prewrite_horizon_is_one_day():
+    """Писать впрок на трое суток — тратить лимит на тексты, которые устареют."""
+    assert ca._PREWRITE_AHEAD_H <= 24

@@ -162,7 +162,12 @@ async def test_runtime_pillar_selection_uses_effective_strategy(
         pillars = [draft.pillar]
 
     assert any(ca.is_selling(p) for p in pillars) is selling_allowed
-    complete.assert_awaited_once()
+    if operation.startswith("plan"):
+        # План — календарь рубрик без ИИ: лимит бесплатных моделей тратится
+        # только на сами посты (темы выбираются при написании пачки).
+        complete.assert_not_awaited()
+    else:
+        complete.assert_awaited_once()
     assert admin["business"] == own
 
 

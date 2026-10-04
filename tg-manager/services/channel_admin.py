@@ -65,12 +65,12 @@ _MAX_PROJECT, _MAX_CONTACT = 2000, 200
 _PLAN_DAYS = 3              # короткий скользящий план вместо недельной простыни
 _PLAN_MIN_AHEAD_H = 12      # план достраивается, когда вперёд осталось меньше
 _PLAN_MAX_SLOTS = 12        # не накапливаем десятки будущих записей на один канал
-_PLAN_TOPIC_LIMIT = 6       # верхняя граница тем в одном запросе к LLM
-_MISSED_SLOT_H = 6
+_PLAN_TOPIC_LIMIT = 6       # верхняя граница тем в одном запросе build_plan_prompt
+_MISSED_SLOT_H = 6          # слот, просроченный дольше, пропускается (не залп после простоя)
 _STALE_WRITTEN_H = 48       # заранее написанный пост старше этого слота уже не к месту
-_PREWRITE_AHEAD_H = 72      # на сколько вперёд посты пишутся заранее (запас на паузы ИИ)
+_PREWRITE_AHEAD_H = 24      # на сколько вперёд посты пишутся заранее (запас на паузы ИИ)
 _PREWRITE_BATCH = 3         # постов в одном обращении к ИИ
-_PREWRITE_MAX_ATTEMPTS = 2  # пакетных попыток на слот; дальше — поштучно в момент публикации          # слот, просроченный дольше, пропускается (не залп после простоя)
+_PREWRITE_MAX_ATTEMPTS = 2  # пакетных попыток на слот; дальше — поштучно в момент публикации
 _DRAFT_TTL_H = 48           # черновик на одобрении живёт двое суток
 _RECENT_FOR_PROMPT = 6      # сколько недавних постов показать ИИ
 _SALES_WINDOW = 10          # окно, в котором держится доля продающих постов
@@ -1410,7 +1410,8 @@ def _brand_rules_dict(r: cb.BrandRules) -> dict:
 async def ensure_plan(pool, owner_id: int, channel_id: int, *,
                       complete: Optional[Complete] = None, force: bool = False,
                       now: Optional[datetime] = None) -> int:
-    """Достроить короткий план; ограничить и число слотов, и темы на один LLM-вызов."""
+    """Достроить короткий план рубрик. ИИ не зовёт (complete оставлен для
+    совместимости вызовов): темы выбираются при написании постов."""
     now = now or datetime.now(timezone.utc)
     admin = await get_admin(pool, owner_id, channel_id)
     if not admin:
@@ -1452,7 +1453,6 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     profile = await va_strategy.enrich_profile(pool, owner_id, admin)
     channel = await channel_row(pool, owner_id, channel_id) or {}
     profile = {**profile, "title": channel.get("title") or ""}
-    news_mode = is_news_channel(profile)
     names, weights, brain = await _pillars(pool, owner_id, channel_id)
     recent_p = await content_memory.recent_pillars(pool, owner_id, str(channel_id))
     planned = await pool.fetch(
@@ -1464,21 +1464,13 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     intro = bool(admin.get("intro_pending")) and not last_at and not planned
     if intro and pillars:
         pillars[0] = INTRO_PILLAR
-    topics: list[str] = []
-    if not news_mode:
-        try:
-            complete = complete or _default_complete()
-            recent = await content_memory.recent_texts(pool, owner_id, str(channel_id), limit=8)
-            from services import va_references
-            profile["references"] = await va_references.for_prompt(pool, owner_id, channel_id)
-            topic_pillars = pillars[:_PLAN_TOPIC_LIMIT]
-            system, user = build_plan_prompt(profile, topic_pillars, recent)
-            topics = parse_plan_topics(await complete(system, user), len(topic_pillars))
-        except Exception as e:
-            # Без тем план всё равно рабочий: тему поста выберет сам автор в момент написания.
-            log.info("channel_admin.ensure_plan: темы не получены ch=%s: %s", channel_id, e)
-    for i, (slot, pillar) in enumerate(zip(slots, pillars)):
-        topic = topics[i] if i < len(topics) else ""
+    # План — календарь рубрик без обращений к ИИ: конкретную тему каждого
+    # поста выбирает автор при написании пачки (prewrite), уже зная, что вышло
+    # в канале. Отдельный запрос «придумай темы на трое суток» тратил лимит
+    # бесплатных моделей впустую — темы устаревали раньше, чем доходили до
+    # публикации. Новостному каналу темы наперёд не нужны вовсе.
+    for slot, pillar in zip(slots, pillars):
+        topic = ""
         if pillar == INTRO_PILLAR:
             topic = "Знакомство с каналом: о чём он и для кого"
         await pool.execute(
