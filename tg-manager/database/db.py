@@ -6095,11 +6095,21 @@ async def use_workspace_invite(
 
 
 async def delete_workspace_member(pool: asyncpg.Pool, ws_id: int, user_id: int) -> None:
-    await pool.execute(
+    """Убрать участника из рабочего пространства.
+
+    Запись в журнал обязательна и симметрична входу (workspace_member_join):
+    участие в чужом пространстве — это доступ к ботам и каналам его владельца,
+    и разбор «кто тут был и когда перестал» без обеих половин невозможен.
+    """
+    res = await pool.execute(
         "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
         ws_id,
         user_id,
     )
+    if not str(res).endswith(" 0"):
+        await record_manual_action(
+            pool, user_id, "workspace_member_leave",
+            target=f"ws:{ws_id} user:{user_id}")
 
 
 async def get_platform_setting(pool: asyncpg.Pool, key: str, default: str = "") -> str:

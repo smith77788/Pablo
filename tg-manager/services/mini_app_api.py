@@ -5693,6 +5693,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "DELETE FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
             if str(res).endswith(" 0"):
                 return _err("Канал не найден", 404)
+            # Канал — владеемый ресурс, и убрать его может не только хозяин:
+            # доступ даётся и через workspace, и через экосистему. Без записи
+            # на вопрос «куда делся канал» в системе нет ответа.
+            from database.db import record_manual_action
+
+            await record_manual_action(
+                pool, uid, "channel_remove", target=str(ch_id))
             return _json_resp({"ok": True})
         except Exception:
             log.exception("channel_remove uid=%d ch=%d", uid, ch_id)
@@ -13332,13 +13339,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not role:
             return _err("Вы не участник", 404)
         try:
+            from database.db import record_manual_action
+
             if role == "owner":
                 # Delete workspace entirely
                 await pool.execute("DELETE FROM workspaces WHERE id=$1 AND owner_id=$2", ws_id, uid)
+                # Удаление пространства снимает доступ СО ВСЕХ его участников —
+                # событие того же веса, что и вход в чужое пространство,
+                # который уже пишется (workspace_member_join).
+                await record_manual_action(
+                    pool, uid, "workspace_delete", target=f"ws:{ws_id}")
             else:
                 await pool.execute(
                     "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, uid
                 )
+                await record_manual_action(
+                    pool, uid, "workspace_member_leave", target=f"ws:{ws_id} user:{uid}")
             return _json_resp({"ok": True})
         except Exception:
             log.exception("leave_workspace delete uid=%d ws=%d", uid, ws_id)
@@ -15166,6 +15182,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE up.owner_id=$1 AND up.is_alive IS FALSE
                      AND EXISTS (SELECT 1 FROM tg_accounts a
                                  WHERE a.owner_id=$1 AND a.proxy_id=up.id)""", uid) or 0
+            # Прокси — секретоносный ресурс (proxy_url зашифрован), и одиночное
+            # удаление журнал уже пишет. Массовое шло мимо него.
+            if removed:
+                from database.db import record_manual_action
+
+                await record_manual_action(
+                    pool, uid, "proxy_cleanup_dead",
+                    target=",".join(str(r["id"]) for r in removed[:50]))
             return _json_resp({"ok": True, "removed": len(removed),
                                "skipped_assigned": int(skipped)})
         except Exception:
@@ -15912,6 +15936,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await pool.execute(
                 "DELETE FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, uid
             )
+            from database.db import record_manual_action
+
+            await record_manual_action(
+                pool, uid, "presence_pack_delete", target=str(pack_id))
             return _json_resp({"ok": True})
         except Exception:
             log.exception("presence_pack_delete uid=%d", uid)
@@ -16577,6 +16605,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             await pool.execute(
                 "DELETE FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
             )
+            # Экосистема связывает ботов и даёт доступ к ним её участникам:
+            # её удаление — изменение прав, а не правка настройки.
+            from database.db import record_manual_action
+
+            await record_manual_action(
+                pool, uid, "ecosystem_delete", target=str(eco_id))
             return _json_resp({"ok": True})
         except Exception:
             log.exception("ecosystem_delete uid=%d eco=%d", uid, eco_id)

@@ -83,6 +83,25 @@ def _clear_in_memory(account_ids: list[int]) -> None:
                     len(account_ids), exc_info=True)
 
 
+async def _записать_в_журнал(pool, owner_id: int, действие: str, цель: str) -> None:
+    """Отметить снятие риска в operation_audit.
+
+    Снятие риска — не косметика: `risk_cleared_at` выключает предохранитель
+    `is_account_quarantined`, и аккаунт с недавним баном снова берётся в
+    работу. Нажать кнопку может не только хозяин — доступ к аккаунтам даётся
+    и через workspace, и через экосистему. Без записи на вопрос «почему
+    забаненный аккаунт снова пошёл в инвайты» ответа в системе нет.
+
+    Запись никогда не роняет сам сброс: он уже применён.
+    """
+    try:
+        from database.db import record_manual_action
+
+        await record_manual_action(pool, owner_id, действие, target=цель)
+    except Exception:
+        log.debug("account_reset: журнал не записан owner=%s", owner_id, exc_info=True)
+
+
 async def reset_account(pool, acc_id: int, owner_id: int) -> bool:
     """Полный сброс одного аккаунта владельца. True — строка в БД обновлена.
 
@@ -101,9 +120,12 @@ async def reset_account(pool, acc_id: int, owner_id: int) -> bool:
         raise
     _clear_in_memory([acc_id])
     try:
-        return int(str(res).rsplit(" ", 1)[-1]) > 0
+        изменено = int(str(res).rsplit(" ", 1)[-1]) > 0
     except ValueError:
-        return True
+        изменено = True
+    if изменено:
+        await _записать_в_журнал(pool, owner_id, "account_risk_cleared", str(acc_id))
+    return изменено
 
 
 async def cooled_account_ids(pool, owner_id: int) -> list[int]:
@@ -172,6 +194,9 @@ async def reset_all_cooled(pool, owner_id: int) -> int:
                     owner_id, exc_info=True)
         raise
     _clear_in_memory(cooled_ids)
+    await _записать_в_журнал(
+        pool, owner_id, "accounts_risk_cleared_bulk",
+        ",".join(str(i) for i in cooled_ids[:50]))
     try:
         return int(str(res).rsplit(" ", 1)[-1])
     except ValueError:
