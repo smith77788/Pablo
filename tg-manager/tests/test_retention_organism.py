@@ -119,3 +119,6 @@ def test_pulse_action_routes_retention():
     assert "if (k==='retention') return openRetention(30);" in html
     assert "retention:'Удержание приглашённых'" in html
     assert "welcome'" not in html.split("function pulseActionLabel")[1][:900]
+    # Запрет на возврат к прежнему ответу: подсказка про отток не должна снова
+    # вести на масс-инвайт — это «лить ещё людей в ту же дырку».
+    assert "if (k==='retention') return openMassInvite();" not in html
