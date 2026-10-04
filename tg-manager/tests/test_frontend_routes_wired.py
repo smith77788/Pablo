@@ -37,8 +37,22 @@ def _frontend_calls() -> dict[str, set[str]]:
     return calls
 
 
-def _routes() -> set[str]:
+def _api_sources() -> list[str]:
+    """mini_app_api.py и модули, чьи маршруты он подключает
+    (`mini_app_X.setup_routes(app, pool)`): экраны «Хранилище», «Сообщество»,
+    «Рейтинг» вынесены в свои файлы, и чтение одного mini_app_api делало их
+    маршруты невидимыми — храповик кричал о 404, которых нет."""
     api = open(_API, encoding="utf-8").read()
+    out = [api]
+    for mod in sorted(set(re.findall(r"\b(mini_app_\w+)\.setup_routes\(\s*app", api))):
+        path = os.path.join(os.path.dirname(_API), mod + ".py")
+        if os.path.exists(path):
+            out.append(open(path, encoding="utf-8").read())
+    return out
+
+
+def _routes() -> set[str]:
+    api = "\n".join(_api_sources())
     routes = set(re.findall(
         r"""router\.add_(?:get|post|put|delete|patch)\(\s*[`'"](/api/miniapp/[^`'"]+)""", api))
     routes |= set(re.findall(

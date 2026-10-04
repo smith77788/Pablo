@@ -31,11 +31,25 @@ _CALL = re.compile(
 _METHOD = re.compile(r"method\s*:\s*['\"](\w+)['\"]")
 
 
+def _api_sources() -> list[str]:
+    """mini_app_api.py и модули, чьи маршруты он подключает
+    (`mini_app_X.setup_routes(app, pool)`): экраны «Хранилище», «Сообщество»,
+    «Рейтинг» вынесены в свои файлы, и чтение одного mini_app_api делало их
+    маршруты невидимыми — храповик кричал о 404, которых нет."""
+    api = open(_API, encoding="utf-8").read()
+    out = [api]
+    for mod in sorted(set(re.findall(r"\b(mini_app_\w+)\.setup_routes\(\s*app", api))):
+        path = os.path.join(os.path.dirname(_API), mod + ".py")
+        if os.path.exists(path):
+            out.append(open(path, encoding="utf-8").read())
+    return out
+
+
 def _routes() -> dict[str, set[str]]:
-    src = open(_API, encoding="utf-8").read()
     out: dict[str, set[str]] = collections.defaultdict(set)
-    for m in _ROUTE.finditer(src):
-        out[m.group(2)].add(m.group(1).upper())
+    for src in _api_sources():
+        for m in _ROUTE.finditer(src):
+            out[m.group(2)].add(m.group(1).upper())
     return out
 
 
