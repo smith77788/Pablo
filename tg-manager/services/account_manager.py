@@ -685,17 +685,11 @@ def _account_ipv6(account_id: int, subnet_cidr: str) -> str | None:
     """Детерминированно вернуть УНИКАЛЬНЫЙ IPv6 аккаунта из подсети (или None).
 
     account_id → фиксированный адрес: один аккаунт всегда с одного IP (стабильный
-    exit, без AUTH_KEY-рассинхрона), разные аккаунты — с разных. Не выдаёт
-    network/anycast-нулевой адрес."""
-    if not subnet_cidr or not account_id:
-        return None
+    exit, без AUTH_KEY-рассинхрона), разные аккаунты — с разных. В подсети шире
+    /64 каждый аккаунт получает свою /64. Логика — services.ipv6_egress."""
     try:
-        import ipaddress
-        net = ipaddress.ip_network(subnet_cidr, strict=False)
-        if net.version != 6 or net.num_addresses <= 2:
-            return None
-        offset = (int(account_id) % (net.num_addresses - 2)) + 1
-        return str(net[offset])
+        from services.ipv6_egress import account_ipv6
+        return account_ipv6(account_id, subnet_cidr)
     except Exception as e:
         log.warning("_account_ipv6(%s, %s) failed: %s", account_id, subnet_cidr, e)
         return None
@@ -1648,6 +1642,18 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
         _client._infragram_transport = _transport
     except Exception:
         pass
+    # Сессия хранит адрес своего DC. Если семейство адреса не совпадает с
+    # транспортом (IPv4-логин → свой IPv6, или IPv6 → откат на прямой IPv4),
+    # telethon при connect() перекидывает сессию на DC2 со старым ключом, и
+    # аккаунт с DC1/3/4/5 получает AUTH_KEY_UNREGISTERED. Переводим адрес на
+    # тот же DC нужного семейства до подключения.
+    try:
+        from services.ipv6_egress import preserve_session_dc as _keep_dc
+        if _keep_dc(_client.session, use_ipv6):
+            log.debug("acc=%s: адрес DC%s переведён на %s", d.get("id"),
+                      _client.session.dc_id, "IPv6" if use_ipv6 else "IPv4")
+    except Exception as _e:
+        log.warning("acc=%s: не удалось сохранить DC сессии: %s", d.get("id"), _e)
     # RAW-коннекторы (десятки функций _make_client(...).connect() мимо
     # connect_client) получают мьютекс сессии автоматически: одну сессию в момент
     # держит ровно один живой коннект. connect_client управляет мьютексом сам

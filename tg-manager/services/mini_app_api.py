@@ -22971,8 +22971,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось разобрать запрос", 400)
         try:
             from database import db
-            norm = await db.set_ipv6_subnet(pool, uid, data.get("subnet") or "")
-            return _json_resp({"ok": True, "ipv6_subnet": norm})
+            subnet = (data.get("subnet") or "").strip()
+            probe = None
+            if subnet and not data.get("force"):
+                # Без routed-подсети bind падает, и каждый аккаунт молча уходил
+                # бы на прямой host-IP: включённый IPv6 изображал бы изоляцию,
+                # которой нет. Проверяем хост до сохранения; force — сохранить
+                # всё равно (например, подсеть ещё настраивают).
+                import ipaddress
+                try:
+                    ipaddress.ip_network(subnet, strict=False)
+                except ValueError:
+                    return _err("Неверная подсеть. Пример: 2a01:4f8:abcd::/48", 400)
+                from services.ipv6_egress import probe_subnet
+                probe = await asyncio.get_running_loop().run_in_executor(
+                    None, probe_subnet, subnet)
+                if not probe.get("ok"):
+                    msg = "IPv6-подсеть не работает на этом сервере"
+                    if probe.get("hint"):
+                        msg += ": " + probe["hint"]
+                    return _json_resp({"ok": False, "error": msg, "probe": probe},
+                                      status=400)
+            norm = await db.set_ipv6_subnet(pool, uid, subnet)
+            return _json_resp({"ok": True, "ipv6_subnet": norm, "probe": probe})
         except ValueError as ve:
             return _err(str(ve), 400)
         except Exception:
