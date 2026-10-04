@@ -109,6 +109,13 @@ def test_world_snapshot_wires_retention():
 
 
 def test_pulse_action_routes_retention():
+    """Подсказка про отток ведёт на экран удержания, а не на масс-инвайт.
+
+    Раньше она открывала инвайт — то есть предлагала лить ещё людей в ту же
+    дырку, вместо того чтобы показать, откуда они уходят. Экран удержания
+    появился 04.10.2026 (mini_app/screens/retention.js), и подсказка ведёт туда.
+    Подпись кнопки — по-русски: в ней оставалось английское «welcome»."""
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-    assert "if (k==='retention') return openMassInvite();" in html
-    assert "retention:'Настроить welcome'" in html
+    assert "if (k==='retention') return openRetention(30);" in html
+    assert "retention:'Удержание приглашённых'" in html
+    assert "welcome'" not in html.split("function pulseActionLabel")[1][:900]

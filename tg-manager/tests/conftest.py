@@ -402,3 +402,38 @@ def _reset_rate_limiter():
     _clear()
     yield
     _clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_worker_pools():
+    """Пул БД воркера операций и предохранителя — процессное состояние.
+
+    `op_worker.init_op_worker_pool(pool)` прокидывает пул и в
+    `op_circuit_breaker.set_pool(pool)`. Тесты зовут его с пулом-заглушкой, у
+    которой `fetchrow` отвечает одной и той же заготовленной строкой на ЛЮБОЙ
+    запрос. Свой `_db_pool` такие тесты за собой убирают, а пул предохранителя
+    остаётся висеть на весь прогон — и следующий тест, работающий с НАСТОЯЩЕЙ
+    базой, получает от предохранителя чужую строку вместо своей:
+
+        row = {'retry_count': 0, 'max_retries': 3}
+        KeyError: 'failures'   (op_circuit_breaker._cb_from_row)
+
+    Так падал `tests/test_contacts_sync_e2e_postgres.py` — зелёный по
+    отдельности, красный в полном прогоне, то есть ровно то загрязнение, которое
+    видно только на объёме. Предохранитель при этом исправен: чистим ему пул до
+    и после каждого теста, кто его задал — задаст снова.
+    """
+    import sys as _sys
+
+    def _clear():
+        for name, attr in (("services.op_worker", "_db_pool"),
+                           ("services.op_circuit_breaker", "_db_pool")):
+            m = _sys.modules.get(name)
+            if m is not None:
+                try:
+                    setattr(m, attr, None)
+                except Exception:
+                    pass
+    _clear()
+    yield
+    _clear()
