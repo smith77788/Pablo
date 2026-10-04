@@ -391,6 +391,7 @@ def test_posts_are_written_ahead_in_batches_and_publish_without_ai(pool, stubs, 
             "SELECT count(*) FROM va_admin_plan WHERE owner_id=$1 AND status='planned' "
             "AND body IS NOT NULL", OWNER)
         assert stats["n"] >= 3 and written >= 3
+        assert (await ca.network_overview(pool, OWNER))["prewritten"] >= 3
 
         # Публикация: ИИ «упал» совсем, а пост всё равно уходит — он уже написан.
         async def dead(system, user):
@@ -416,5 +417,8 @@ def test_posts_are_written_ahead_in_batches_and_publish_without_ai(pool, stubs, 
         a = await ca.get_admin(pool, OWNER, CID)
         assert a["fail_streak"] == 0 and a["last_error"].startswith("Жду ИИ")
         assert a["next_post_at"] > now + timedelta(hours=5)
+        # Ожидание лимита ИИ — не сбой: на экране сети отдельной строкой, не в «внимании».
+        ov = await ca.network_overview(pool, OWNER)
+        assert ov["ai_waiting"] == 1 and ov["errors"] == 0 and ov["attention"] == []
 
     _run(go())

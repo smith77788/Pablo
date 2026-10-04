@@ -101,6 +101,17 @@ class AiBusy(ChannelAdminError):
         super().__init__(text or "ИИ на паузе по лимиту запросов — продолжу, когда лимит сбросится")
 
 
+# Отметка «жду ИИ» в last_error (см. _wait_ai). Это перенос по лимиту
+# бесплатных моделей, а не сбой канала: в «требуют внимания» не попадает.
+AI_WAIT_PREFIX = "Жду ИИ"
+_REAL_ERROR_SQL = ("(a.fail_streak > 0 OR (a.last_error IS NOT NULL "
+                   "AND a.last_error NOT LIKE 'Жду ИИ%'))")
+
+
+def is_ai_wait(last_error: Optional[str]) -> bool:
+    return bool(last_error) and str(last_error).startswith(AI_WAIT_PREFIX)
+
+
 async def _ask(complete: Complete, system: str, user: str) -> str:
     """Один запрос к ИИ с переводом ошибок в язык администратора."""
     from services import spintax_ai
@@ -2060,14 +2071,14 @@ async def _wait_ai(pool, admin: dict, retry_at: Optional[datetime], now: datetim
     """ИИ на паузе по лимиту: перенести такт, не считая это сбоем канала."""
     at = retry_at or now + timedelta(minutes=15)
     at = min(max(at, now + timedelta(minutes=5)), now + timedelta(hours=1))
-    msg = (f"Жду ИИ: лимит запросов у всех моделей, продолжу в "
+    msg = (f"{AI_WAIT_PREFIX}: лимит запросов у всех моделей, продолжу в "
            f"{at.strftime('%H:%M')} UTC")
     prev = admin.get("last_error") or ""
     await pool.execute(
         "UPDATE va_channel_admin SET next_post_at=$3, last_error=$4, updated_at=now() "
         "WHERE owner_id=$1 AND channel_id=$2",
         int(admin["owner_id"]), int(admin["channel_id"]), at, msg)
-    if not prev.startswith("Жду ИИ"):
+    if not is_ai_wait(prev):
         await log_event(pool, admin["owner_id"], admin["channel_id"], "ai_wait", msg)
 
 
@@ -2365,6 +2376,9 @@ async def network_overview(pool, owner_id: int) -> dict:
         # настроятся, но публикаций не будет; выносим причину на экран, чтобы
         # «тишина» не выглядела загадкой.
         "ai_ready": _ai_ok, "ai_note": _ai_note,
+        # Экономия лимитов ИИ: сколько постов уже написано впрок и сколько
+        # каналов сейчас ждут сброса лимита (это перенос, не сбой).
+        "ai_waiting": 0, "prewritten": 0,
     }
     try:
         row = await pool.fetchrow(
@@ -2372,7 +2386,8 @@ async def network_overview(pool, owner_id: int) -> dict:
             "  count(*) FILTER (WHERE a.channel_id IS NOT NULL) AS installed, "
             "  count(*) FILTER (WHERE a.enabled) AS active, "
             "  count(*) FILTER (WHERE a.enabled AND a.publish_mode='review') AS review, "
-            "  count(*) FILTER (WHERE a.fail_streak > 0 OR a.last_error IS NOT NULL) AS errors, "
+            f"  count(*) FILTER (WHERE {_REAL_ERROR_SQL}) AS errors, "
+            "  count(*) FILTER (WHERE a.enabled AND a.last_error LIKE 'Жду ИИ%') AS ai_waiting, "
             "  coalesce(sum(a.members_count), 0) AS members "
             "FROM va_channel_admin a WHERE a.owner_id=$1",
             int(owner_id))
@@ -2381,6 +2396,7 @@ async def network_overview(pool, owner_id: int) -> dict:
             out["admins_active"] = int(row["active"] or 0)
             out["review_mode"] = int(row["review"] or 0)
             out["errors"] = int(row["errors"] or 0)
+            out["ai_waiting"] = int(row.get("ai_waiting") or 0)
             out["members_total"] = int(row["members"] or 0)
     except Exception:
         log.debug("network_overview: срез администраторов не собран owner=%s", owner_id, exc_info=True)
@@ -2413,6 +2429,13 @@ async def network_overview(pool, owner_id: int) -> dict:
     except Exception:
         log.debug("network_overview: черновики не собраны owner=%s", owner_id, exc_info=True)
 
+    try:
+        out["prewritten"] = int(await pool.fetchval(
+            "SELECT count(*) FROM va_admin_plan WHERE owner_id=$1 AND status='planned' "
+            "AND body IS NOT NULL AND slot_at > now()", int(owner_id)) or 0)
+    except Exception:
+        log.debug("network_overview: посты впрок не посчитаны owner=%s", owner_id, exc_info=True)
+
     # Что заходит по всей сети: рубрика → средний score, топ-5.
     try:
         rows = await pool.fetch(
@@ -2438,7 +2461,7 @@ async def network_overview(pool, owner_id: int) -> dict:
             "SELECT a.channel_id, MAX(mc.title) AS title, a.last_error, a.fail_streak "
             "FROM va_channel_admin a "
             "LEFT JOIN managed_channels mc ON mc.owner_id=a.owner_id AND mc.channel_id=a.channel_id "
-            "WHERE a.owner_id=$1 AND (a.fail_streak > 0 OR a.last_error IS NOT NULL) "
+            f"WHERE a.owner_id=$1 AND {_REAL_ERROR_SQL} "
             "GROUP BY a.channel_id, a.last_error, a.fail_streak "
             "ORDER BY a.fail_streak DESC LIMIT 10",
             int(owner_id))
@@ -2463,7 +2486,8 @@ def format_daily_report(items: list[tuple[str, dict]]) -> str:
     if len(items) > 1:
         posts = sum(int((r.get("posts_7d") or 0)) for _t, r in items)
         members = sum(int((r.get("members") or 0)) for _t, r in items)
-        troubled = sum(1 for _t, r in items if r.get("last_error"))
+        troubled = sum(1 for _t, r in items
+                       if r.get("last_error") and not is_ai_wait(r.get("last_error")))
         head = f"\n<b>По сети:</b> каналов {len(items)} · постов за неделю {posts}"
         if members:
             head += f" · подписчиков {members}"
@@ -2481,7 +2505,9 @@ def format_daily_report(items: list[tuple[str, dict]]) -> str:
                 s += f" ({'+' if d >= 0 else ''}{d} за неделю)"
         if r.get("best_pillar"):
             s += f"\n• лучше всего заходит: {html.escape(r['best_pillar'])}"
-        if r.get("last_error"):
+        if is_ai_wait(r.get("last_error")):
+            s += "\n• ⏳ ждёт сброса лимита ИИ — продолжит сам"
+        elif r.get("last_error"):
             s += f"\n• ⚠️ {html.escape(r['last_error'][:200])}"
         lines.append(s)
     lines.append("\nВмешательство не требуется — администратор продолжает сам.")

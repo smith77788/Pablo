@@ -188,7 +188,8 @@ async def network_actions(pool, owner_id: int) -> list[dict]:
         profile = dict(row)
         profile["title"] = row["title"] or ""
         empty_plan = bool(row["empty_plan"]) and not ca.is_news_channel(profile)
-        reason = ("Ошибка работы: " + str(row["last_error"])[:150] if row["last_error"] else
+        real_error = row["last_error"] and not ca.is_ai_wait(row["last_error"])
+        reason = ("Ошибка работы: " + str(row["last_error"])[:150] if real_error else
                   "Черновики ждут решения" if row["review"] else
                   "Нет будущего плана" if row["enabled"] and empty_plan else "")
         if reason:

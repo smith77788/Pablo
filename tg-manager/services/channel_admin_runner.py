@@ -189,7 +189,7 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
             # настройка повторится, когда отметка устареет (условие выше).
             await _safe("setup ai wait", pool.execute(
                 "UPDATE va_channel_admin SET last_error=$2, updated_at=now() WHERE id=$1",
-                a["id"], f"Жду ИИ: {e}"[:300]))
+                a["id"], f"{ca.AI_WAIT_PREFIX}: {e}"[:300]))
         except Exception as e:
             reason = str(e) if isinstance(e, ca.ChannelAdminError) else f"настройка не удалась: {e}"
             await _safe("setup fail", ca._fail(pool, bot, a, reason[:300],

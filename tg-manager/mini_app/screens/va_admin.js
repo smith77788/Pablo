@@ -145,10 +145,15 @@ function _vaWhen(iso) {
   } catch (e) { return '—'; }
 }
 
+// «Жду ИИ…» — перенос по лимиту бесплатных моделей (services/channel_admin
+// AI_WAIT_PREFIX), а не сбой: показываем спокойно, без красного.
+function _vaAiWait(err) { return !!err && String(err).indexOf('Жду ИИ') === 0; }
+
 function _vaState(c) {
   if (!c.installed) return '<span style="color:var(--hint)">не установлен</span>';
   if (!c.enabled) return '<span style="color:var(--hint)">остановлен</span>';
   if (!c.setup_done) return '<span style="color:var(--orange,#fb923c)">изучает канал…</span>';
+  if (_vaAiWait(c.last_error)) return '<span style="color:var(--hint)">ждёт лимит ИИ</span>';
   if (c.last_error) return '<span style="color:var(--red,#ef4444)">есть проблема</span>';
   return '<span style="color:var(--green)">ведёт канал</span>';
 }
@@ -318,6 +323,14 @@ function _vaNetworkHtml(n) {
     '</div>';
   if (n.pending_drafts) {
     h += '<div style="padding:6px 14px;font-size:13px">📝 Ждут вашего решения: <b>' + _vaNum(n.pending_drafts) + '</b></div>';
+  }
+  if (n.prewritten) {
+    h += '<div style="padding:6px 14px;font-size:13px">✍️ Готово постов впрок: <b>' + _vaNum(n.prewritten) + '</b></div>';
+  }
+  if (n.ai_waiting) {
+    h += '<div style="padding:6px 14px;font-size:13px;color:var(--hint)">⏳ Ждут сброса лимита ИИ: <b>' +
+      _vaNum(n.ai_waiting) + '</b> ' + plural(n.ai_waiting, 'канал', 'канала', 'каналов') +
+      '. Это не сбой: продолжат сами, вмешиваться не нужно.</div>';
   }
   h += '</div>';
 
@@ -722,7 +735,8 @@ function _vaChannelHtml(d) {
   const ch = d.channel || {}, s = d.settings || {};
   if (!s.installed) return _vaInstallHtml(ch, s);
   const state = !s.enabled ? '⏸ Остановлен' : (!s.setup_done ? '🔎 Изучает канал и строит план…' :
-    (s.last_error ? '⚠️ ' + esc(s.last_error) : '✅ Ведёт канал сам'));
+    (_vaAiWait(s.last_error) ? '⏳ ' + esc(s.last_error) :
+      (s.last_error ? '⚠️ ' + esc(s.last_error) : '✅ Ведёт канал сам')));
   let h = (d.warnings || []).map(function (warning) {
     return '<div role="status" class="lst" style="padding:12px 14px;color:var(--orange,#fb923c)">' + esc(warning) +
       ' <button class="btn btn-s" onclick="_vaLoadChannel()">Повторить</button></div>';

@@ -236,3 +236,14 @@ def test_failed_batch_counts_an_attempt(monkeypatch):
     assert asyncio.run(ca.prewrite(pool, 1, 2, complete=broken)) == 0
     sql, ids = pool.execute.call_args.args
     assert "write_attempts=write_attempts+1" in sql and ids == [7]
+
+
+def test_daily_report_does_not_alarm_on_ai_wait():
+    """Канал, ждущий сброса лимита ИИ, — не «требует внимания»: это перенос."""
+    wait = {"posts_7d": 3, "last_error": "Жду ИИ: лимит запросов у всех моделей, продолжу в 12:00 UTC"}
+    ok = {"posts_7d": 5, "last_error": ""}
+    text = ca.format_daily_report([("Мебель", wait), ("Кухни", ok)])
+    assert "требуют внимания" not in text and "⚠️" not in text
+    assert "ждёт сброса лимита ИИ" in text
+    broken = {"posts_7d": 0, "last_error": "Нет доступного аккаунта"}
+    assert "требуют внимания: 1" in ca.format_daily_report([("A", broken), ("B", ok)])

@@ -65,7 +65,7 @@ def test_overview_aggregates_all_slices():
             {"pillar": "Польза", "score": 900, "views": 700, "posts": 5},
             {"pillar": "Новости", "score": 400, "views": 300, "posts": 8},
         ],
-        "a.fail_streak > 0 OR a.last_error IS NOT NULL) ": [
+        "NOT LIKE 'Жду ИИ%')) GROUP BY": [
             {"channel_id": 111, "title": "Мой канал", "last_error": "нет прав", "fail_streak": 3},
         ],
     })
