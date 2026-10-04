@@ -1,8 +1,20 @@
-"""Free Proxy Pool — scrapes, validates, caches SOCKS5 proxies for accounts without personal proxies.
+"""Бесплатный публичный пул SOCKS5-прокси. СТАТУС: НЕ ПОДКЛЮЧЁН.
 
-Background loop: refreshes every 6 hours.
-Validation: HTTPS GET to api.telegram.org through proxy, 10s timeout.
-Selection: random valid proxy from in-memory cache (fallback to DB if cache cold).
+Модуль ни откуда не вызывается и его фоновый цикл никто не запускает. Пул убран
+из продукта осознанно: публичные прокси живут минутами, аккаунт получал один
+выходной IP на логине и другой на операции, а Telegram на это отвечает
+разлогином сессии (AUTH_KEY_DUPLICATED) — то есть «бесплатная изоляция» стоила
+владельцу аккаунтов. Причина и регресс-тесты — в tests/test_no_proxy_direct.py,
+место отключения — main.py (цикла обновления нет) и
+account_manager.set_pool_proxy_cache (задокументированный no-op).
+
+Подключать обратно нельзя, пока источник прокси не даёт СТАБИЛЬНЫЙ IP на всё
+время жизни сессии аккаунта. Удалён не был по одной причине: в чате владельца
+остались старые кнопки free_pool, и экран обязан отдавать правду, а не
+«устаревший запрос».
+
+Что делал раньше: цикл раз в 6 часов тянул списки из открытых источников,
+проверял каждый прокси запросом к api.telegram.org и держал валидные в памяти.
 """
 
 from __future__ import annotations

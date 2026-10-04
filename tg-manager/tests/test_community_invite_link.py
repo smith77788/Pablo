@@ -48,14 +48,30 @@ def _read(rel: str) -> str:
 
 # ── статика: маршрут, обработчик, фронтенд ───────────────────────────────────
 
+def _api_source(marker: str) -> str:
+    """Текст того модуля API мини-аппа, где лежит `marker`.
+
+    Раньше здесь был жёсткий путь services/mini_app_api.py, и после разреза
+    монолита на модули (ноды-сообщества уехали в mini_app_community.py) оба
+    теста падали на «substring not found» — хотя обработчик цел и маршрут
+    зарегистрирован. Ищем по всем модулям API, чтобы следующий разрез ломал
+    продукт, а не пробник.
+    """
+    files = sorted(glob.glob(os.path.join(ROOT, "services", "mini_app*.py")))
+    hits = [f for f in files if marker in _read(os.path.relpath(f, ROOT))]
+    assert hits, f"ни в одном services/mini_app*.py нет «{marker}»"
+    assert len(hits) == 1, f"«{marker}» объявлен в нескольких модулях: {hits}"
+    return _read(os.path.relpath(hits[0], ROOT))
+
+
 def test_route_registered():
-    src = _read("services/mini_app_api.py")
+    src = _api_source("async def community_node_invite_link")
     assert ('app.router.add_get("/api/miniapp/community/node/{node_id}/invite_link", '
             'community_node_invite_link)') in src
 
 
 def test_handler_prefers_admin_members_and_is_owner_scoped():
-    src = _read("services/mini_app_api.py")
+    src = _api_source("async def community_node_invite_link")
     i = src.index("async def community_node_invite_link")
     seg = src[i:src.index("\n    async def ", i + 10)]
     assert "community_node_members" in seg
