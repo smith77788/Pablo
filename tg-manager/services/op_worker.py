@@ -10184,10 +10184,6 @@ async def _exec_bulk_dm_adhoc(
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
-    # Остаток общего суточного бюджета риск-действий по аккаунтам. Раньше
-    # потолок был только на прогон: повторный запуск той же рассылки давал
-    # каждому аккаунту ещё столько же, а суточный бюджет ЛС не видел вовсе.
-    _budget_left = await _budget_remaining(pool, [int(_i) for _i in claimed_ids])
 
     try:
 
@@ -10266,18 +10262,14 @@ async def _exec_bulk_dm_adhoc(
             # Явный вращающийся индекс вместо i % len: при выбывании аккаунта
             # из ротации модуль по счётчику получателей перескакивал через
             # оставшиеся аккаунты и грузил одни сильнее других.
-            # Аккаунт, выбравший суточный бюджет, в ротацию не берём.
-            _in_budget = [a for a in active_accounts
-                          if _budget_left.get(int(a["id"])) is None
-                          or _budget_left[int(a["id"])] > 0]
-            acc, acc_idx = _pick_acc(_in_budget, acc_idx, sent_by_acc, per_acc_cap)
+            acc, acc_idx = _pick_acc(active_accounts, acc_idx, sent_by_acc, per_acc_cap)
             if acc is None:
-                # Все аккаунты выбрали лимит (на эту рассылку или суточный) —
-                # это защита, а не ошибка: честно сообщаем и не дожимаем флот.
+                # Все аккаунты выбрали лимит на эту рассылку — это защита, а не
+                # ошибка: честно сообщаем и не дожимаем флот.
                 _left = total - i
                 skip_count += _left
                 await _log_step(i + 1, username, "skip",
-                                "лимит на аккаунт исчерпан (на рассылку или суточный)")
+                                f"лимит {per_acc_cap} на аккаунт исчерпан")
                 log.info("bulk_dm_adhoc op=%d: лимит на аккаунт исчерпан, не отправлено %d",
                          op_id, _left)
                 break
@@ -10298,11 +10290,8 @@ async def _exec_bulk_dm_adhoc(
 
                 kind = _classify_send_result(result)
                 _err_text = str(result.get("error") or "")
-                # Каждая попытка — запрос к Telegram и идёт в суточный бюджет
-                # аккаунта (иначе бюджет ЛС не видит). Лимит на рассылку ниже
-                # по-прежнему считает только доставленные.
-                if _budget_left.get(int(acc["id"])) is not None:
-                    _budget_left[int(acc["id"])] -= 1
+                # Построчная запись ЛС: по ней дневной лимит ЛС-кампаний видит
+                # и разовые рассылки (иначе аккаунт получал лимит дважды).
                 await _record_budget_actions(pool, owner_id, int(acc["id"]), "dm",
                                              result=kind, operation_id=op_id)
 
@@ -15444,25 +15433,19 @@ async def _exec_mass_invite(
     async def _acc_budget(acc) -> int:
         """Сколько инвайтов аккаунт вправе сделать за прогон (0 = выбыл).
 
-        Берём СТРОЖАЙШИЙ из ограничений: заданного пользователем, лимита режима
+        Берём СТРОЖАЙШИЙ из ограничений: заданного пользователем и лимита режима
         объёма (рекомендованного по истории / прогрессивного / потолка «одного
-        прохода») и общего суточного бюджета риск-действий аккаунта. Уже
+        прохода»). Уже
         израсходованное за сегодня вычитается везде, поэтому повторный запуск
         не удваивает суточный объём.
         """
-        acc_id = int(acc["id"])
         _cap = await _acc_mode_cap(acc)
         # Ручной лимит на аккаунт — потолок в ЛЮБОМ режиме. Раньше «прогрессивно»
         # его не читал вовсе: «по 5 с аккаунта» превращалось в 25–50.
         if _per_acc_limit:
             _cap = min(_cap, _per_acc_limit)
-        # Общий суточный бюджет (account_budget): инвайт — риск-действие, как
-        # вступление и ЛС, и считается вместе с ними.
-        _left = (await _budget_remaining(pool, [acc_id])).get(acc_id)
-        if _left is not None and _left < _cap:
-            log.info("mass_invite op=%d acc=%s: суточный бюджет действий — осталось %d",
-                     op_id, acc_id, _left)
-            _cap = _left
+        # Общий бюджет account_budget инвайт не режет: у инвайта свой умный
+        # суточный лимит выше (см. account_budget._OWN_LIMIT_ACTIONS).
         return max(0, int(_cap))
 
     async def _acc_mode_cap(acc) -> int:

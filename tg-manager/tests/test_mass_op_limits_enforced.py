@@ -6,9 +6,8 @@
     `_LEAVE_DAY_LIMITS`) сверялся ОДИН раз — перед первой ссылкой аккаунта, —
     после чего аккаунт отрабатывал ВЕСЬ список. Лимит 20 при 50 ссылках давал
     50 вступлений одним аккаунтом за прогон.
-  * Общий суточный бюджет риск-действий (`account_budget`) считал только
-    `operation_audit` с action из своего списка, а инвайты туда построчно не
-    пишутся, ЛС — тоже. Самые баноопасные действия в бюджет не попадали.
+  * Дневной лимит ЛС-кампании не видел разовых рассылок: аккаунт, разославший
+    их утром, получал в кампании ещё полный лимит.
   * Исчерпали бюджет ВСЕ аккаунты — `select_all_active` возвращал весь флот
     «с предупреждением в лог», то есть лимит переставал действовать ровно там,
     где он нужнее всего.
@@ -176,13 +175,14 @@ async def test_leave_day_limit_holds_inside_the_run(monkeypatch):
 
 # ── общий суточный бюджет ────────────────────────────────────────────────────
 
-def test_budget_counts_invites_and_dms():
+def test_budget_does_not_cut_invites_and_dms():
+    """Инвайты и ЛС — основной объём продукта, у них свои умные суточные лимиты.
+    Общий бюджет в 50 действий их не режет, иначе день инвайтов закрывал бы
+    аккаунту публикации и вступления."""
     from services import account_budget as ab
 
-    assert "account_daily_stats" in ab._COUNT_SQL, (
-        "инвайты учитываются в account_daily_stats — бюджет обязан их видеть"
-    )
-    assert "dm" in ab._COUNTED_ACTIONS and "invite" in ab._COUNTED_ACTIONS
+    assert "dm" not in ab._COUNTED_ACTIONS and "invite" not in ab._COUNTED_ACTIONS
+    assert "account_daily_stats" not in ab._COUNT_SQL
 
 
 @pytest.mark.asyncio
@@ -196,7 +196,7 @@ async def test_record_actions_writes_one_row_per_action():
     assert "operation_audit" in q and "generate_series" in q
     assert args == (555, 9, 1, "dm", "sent", 3)
 
-    # Неучитываемое действие писать бессмысленно — бюджет его не прочтёт.
+    # Действие вне учёта писать бессмысленно — его никто не прочтёт.
     await ab.record_actions(pool, 555, 1, "health_check", 1)
     assert len(pool.executed) == 1
 

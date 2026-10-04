@@ -1067,15 +1067,6 @@ async def run_campaign(
             acc_cycle = _kept
     except Exception:
         log_exc_swallow(log, "dm_engine: quarantine filter failed")
-    # Общий суточный бюджет риск-действий аккаунта (account_budget): ЛС —
-    # риск-действие наравне с инвайтом и вступлением. Fail-open.
-    try:
-        from services import account_budget as _abudget
-        _budget_left = await _abudget.remaining_bulk(
-            pool, [int(_a["id"]) for _a in acc_cycle])
-    except Exception:
-        log_exc_swallow(log, "dm_engine: budget preload failed")
-        _budget_left = {}
     acc_idx = 0
     sent = 0
     failed = 0
@@ -1157,9 +1148,6 @@ async def run_campaign(
             if _awake:
                 _pool_now = _awake
 
-        _pool_now = [_a for _a in _pool_now
-                     if _budget_left.get(int(_a["id"])) is None
-                     or _budget_left[int(_a["id"])] > 0]
         acc, acc_idx = pick_account_under_cap(_pool_now, acc_idx, _sent_by_acc, _per_acc_cap)
         if acc is None:
             # Все аккаунты исчерпали дневной лимит — пауза до следующего дня
@@ -1183,9 +1171,8 @@ async def run_campaign(
             media_filename=_media_filename, uniquify_media=_media_bytes is not None,
         )
         status = result["status"]
-        # Каждая попытка — запрос к Telegram: в суточный бюджет аккаунта.
-        if _budget_left.get(int(acc["id"])) is not None:
-            _budget_left[int(acc["id"])] -= 1
+        # Построчная запись ЛС — общий счёт «отправлено сегодня» для дневных
+        # лимитов кампаний и разовых рассылок. Общий бюджет её не считает.
         try:
             from services import account_budget as _abudget
             await _abudget.record_actions(pool, owner_id, int(acc["id"]), "dm",

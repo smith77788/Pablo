@@ -24,39 +24,27 @@ DEFAULT_DAILY_BUDGET = 50
 # Действия, которые считаются «риск-действиями» (нагружают аккаунт).
 # Пассивные (health-check, scan) в бюджет не входят.
 _COUNTED_ACTIONS = (
-    "post", "publish", "join", "leave", "dm", "invite", "report",
+    "post", "publish", "join", "leave", "report",
     "boost", "reaction", "view", "create_channel", "create_group",
     "profile", "story",
 )
 
+# Инвайты и ЛС — основной объём продукта, и у них СВОИ умные суточные лимиты:
+# инвайт — recommended_daily_limit/progressive_daily_cap по истории аккаунта,
+# ЛС-кампания — per_account_daily, разовая рассылка — per_account_cap. Общий
+# бюджет в 50 действий их не режет (фактически не резал и раньше: построчных
+# записей у них не было), иначе один день инвайтов закрывал бы аккаунту и
+# публикации, и вступления. Построчно ЛС пишутся только для того, чтобы
+# дневной лимит кампаний видел и разовые рассылки.
+_OWN_LIMIT_ACTIONS = ("dm", "invite")
 
-# Откуда берётся счёт. Раньше бюджет читал ТОЛЬКО operation_audit с action из
-# _COUNTED_ACTIONS, а исполнители пишут туда по строке на действие лишь для
-# вступления/выхода/публикации/реакции/просмотра. Итоговая строка операции
-# несёт action=op_type («mass_invite», «bulk_dm_adhoc»…), которого в списке нет,
-# — поэтому инвайты и ЛС, самые баноопасные действия, в бюджет не попадали
-# вовсе: аккаунт мог разослать сотни ЛС и остаться «в бюджете».
-# Теперь два источника:
-#   * operation_audit — по строке на действие (ЛС пишутся через record_actions);
-#   * account_daily_stats — суточные факты масс-инвайта (bump_daily_stats):
-#     каждая попытка приглашения, успешная или нет, это запрос к Telegram.
-# Инвайт в operation_audit по строкам не пишется, так что двойного счёта нет.
+# Счёт бюджета — построчные записи operation_audit по риск-действиям.
 _COUNT_SQL = """
-    SELECT account_id, SUM(n)::bigint AS n FROM (
-        SELECT account_id, COUNT(*) AS n FROM operation_audit
-         WHERE account_id = ANY($1::bigint[])
-           AND occurred_at > now() - INTERVAL '24 hours'
-           AND action = ANY($2::text[])
-         GROUP BY account_id
-        UNION ALL
-        SELECT account_id,
-               COALESCE(SUM(actions_ok + actions_fail), 0) AS n
-          FROM account_daily_stats
-         WHERE account_id = ANY($1::bigint[])
-           AND stat_date = CURRENT_DATE
-         GROUP BY account_id
-    ) t
-    GROUP BY account_id"""
+    SELECT account_id, COUNT(*) AS n FROM operation_audit
+     WHERE account_id = ANY($1::bigint[])
+       AND occurred_at > now() - INTERVAL '24 hours'
+       AND action = ANY($2::text[])
+     GROUP BY account_id"""
 
 
 async def get_daily_budget(pool: asyncpg.Pool) -> int:
@@ -152,12 +140,13 @@ async def record_actions(
     result: str = "ok",
     operation_id: int | None = None,
 ) -> None:
-    """Записать n риск-действий аккаунта в operation_audit — так их увидит бюджет.
+    """Записать n действий аккаунта в operation_audit построчно.
 
-    Для исполнителей, которые раньше писали только итоговую строку операции
-    (ЛС-рассылки): без построчной записи бюджет их не видел. Никогда не бросает.
+    Для исполнителей, которые раньше писали только итоговую строку операции:
+    без построчной записи суточные лимиты их не видели. Никогда не бросает.
     """
-    if not account_id or n <= 0 or action not in _COUNTED_ACTIONS:
+    if (not account_id or n <= 0
+            or action not in _COUNTED_ACTIONS + _OWN_LIMIT_ACTIONS):
         return
     try:
         await pool.execute(
