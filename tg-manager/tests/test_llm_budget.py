@@ -197,3 +197,42 @@ def test_news_channel_is_never_written_ahead(monkeypatch):
 def test_prewrite_horizon_is_one_day():
     """Писать впрок на трое суток — тратить лимит на тексты, которые устареют."""
     assert ca._PREWRITE_AHEAD_H <= 24
+
+
+def test_gemini_minute_quota_is_not_a_daily_pause():
+    """Gemini шлёт и минутный, и суточный лимит как «Quota exceeded»: минутный,
+    принятый за суточный, выключил бы провайдера до утра."""
+    exc = _Err(429, "RESOURCE_EXHAUSTED: Quota exceeded for quota metric "
+                    "'GenerateRequestsPerMinutePerProjectPerModel-FreeTier'. retryDelay: '37s'")
+    kind, hint = llm_gate.classify_limit(exc)
+    assert kind == "minute" and hint == 37
+    day = _Err(429, "RESOURCE_EXHAUSTED: Quota exceeded for quota metric "
+                    "'GenerateRequestsPerDayPerProjectPerModel-FreeTier'")
+    assert llm_gate.classify_limit(day)[0] == "daily"
+
+
+def test_claude_low_balance_is_a_credit_pause():
+    assert llm_gate.classify_limit(
+        _Err(400, "Your credit balance is too low to access the Anthropic API"))[0] == "credits"
+
+
+def test_failed_batch_counts_an_attempt(monkeypatch):
+    """Ошибка модели на пачке — попытка засчитана: иначе цикл каждую минуту
+    снова тратил бы запрос на тот же сбой."""
+    from unittest.mock import AsyncMock
+
+    from services import channel_brain as cb
+
+    pool = AsyncMock()
+    pool.fetch.return_value = [{"id": 7, "pillar": "Советы", "topic": ""}]
+    monkeypatch.setattr(ca, "get_admin", AsyncMock(return_value={"topic": "мебель"}))
+    monkeypatch.setattr(ca, "channel_row", AsyncMock(return_value={"title": "Мебель"}))
+    monkeypatch.setattr(ca, "_post_context", AsyncMock(return_value={
+        "news_mode": False, "is_intro": False, "rules": cb.BrandRules(), "pillar": "Советы",
+        "profile": {"topic": "мебель"}, "recent": [], "best": [], "lessons": []}))
+
+    async def broken(system, user):
+        raise RuntimeError("500 internal")
+    assert asyncio.run(ca.prewrite(pool, 1, 2, complete=broken)) == 0
+    sql, ids = pool.execute.call_args.args
+    assert "write_attempts=write_attempts+1" in sql and ids == [7]

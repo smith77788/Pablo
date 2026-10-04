@@ -41,9 +41,19 @@ _CACHE_TTL_S = 30.0
 _MIN_PAUSE_S = 20           # минимальная пауза модели после 429
 _MAX_PAUSE_S = 6 * 3600     # потолок нарастающей паузы без подсказки провайдера
 _DAILY_MARKERS = (
-    "per-day", "per day", "perday", "free-models-per-day", "requests per day",
-    "daily", "rpd", "quota exceeded", "exceeded your current quota",
-    "resource_exhausted", "tokens per day", "tpd",
+    "per-day", "per day", "perday", "per_day", "free-models-per-day",
+    "requests per day", "daily", "(rpd)", "tokens per day", "(tpd)",
+)
+# Минутный лимит важнее суточного признака: у Gemini оба лимита приходят как
+# RESOURCE_EXHAUSTED «Quota exceeded…», и различает их только метрика. Принять
+# минутный за суточный — значит выключить провайдера до утра на ровном месте.
+_MINUTE_MARKERS = (
+    "per-minute", "per minute", "perminute", "per_minute", "free-models-per-min",
+    "(rpm)", "(tpm)", "per second",
+)
+_CREDIT_MARKERS = (
+    "insufficient credits", "insufficient_quota", "credit balance",
+    "exceeded your current quota", "billing",
 )
 
 
@@ -147,7 +157,7 @@ def classify_limit(exc: Exception) -> Optional[tuple[str, Optional[float]]]:
     body = getattr(exc, "body", None)
     if body is not None:
         text += " " + str(body).lower()
-    if status == 402 or "insufficient credits" in text or "insufficient_quota" in text:
+    if status == 402 or any(m in text for m in _CREDIT_MARKERS):
         return "credits", 6 * 3600.0
     limited = status == 429 or "rate limit" in text or "rate_limit" in text \
         or "too many requests" in text or "resource_exhausted" in text \
@@ -170,8 +180,11 @@ def classify_limit(exc: Exception) -> Optional[tuple[str, Optional[float]]]:
         m = re.search(r"retry(?:delay)?['\"]?\s*[:=]?\s*['\"]?([\d.]+)\s*s", text)
         if m:
             hint = float(m.group(1))
-    kind = "daily" if any(k in text for k in _DAILY_MARKERS) else "minute"
-    return kind, hint
+    daily = any(k in text for k in _DAILY_MARKERS) and not any(
+        k in text for k in _MINUTE_MARKERS)
+    if daily and hint is not None and 0 < hint <= 600:
+        daily = False  # провайдер сам обещает сброс через минуты — это не сутки
+    return ("daily" if daily else "minute"), hint
 
 
 async def note_limit(provider: str, model: str, exc: Exception) -> Optional[datetime]:

@@ -1750,7 +1750,17 @@ async def prewrite(pool, owner_id: int, channel_id: int, *,
     system, user = build_post_prompt(
         ctx["profile"], pillar=tasks[0][0], recent_texts=ctx["recent"],
         best_texts=ctx["best"], rules=rules, lessons=ctx["lessons"], tasks=tasks)
-    raw = await _ask(complete or _default_complete(), system, user)
+    try:
+        raw = await _ask(complete or _default_complete(), system, user)
+    except AiBusy:
+        raise  # лимит — не попытка: слоты дождутся сброса
+    except ChannelAdminError:
+        # Модель ответила ошибкой — попытка засчитана, иначе каждый такт цикла
+        # снова тратил бы запрос на тот же сбой.
+        await pool.execute(
+            "UPDATE va_admin_plan SET write_attempts=write_attempts+1 WHERE id=ANY($1::bigint[])",
+            [r["id"] for r in rows])
+        return 0
     texts = parse_batch(raw, len(rows))
     written: list[str] = []
     for n, r in enumerate(rows):
