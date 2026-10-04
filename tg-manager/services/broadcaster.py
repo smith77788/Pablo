@@ -699,11 +699,27 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
             return None
 
     src = await _sfrow(
-        "SELECT id, bot_id, message_text, created_by FROM broadcasts WHERE id=$1",
+        "SELECT id, bot_id, message_text, created_by, "
+        "       COALESCE(delivery_log_pruned, FALSE) AS delivery_log_pruned "
+        "  FROM broadcasts WHERE id=$1",
         bc_id,
     )
     if not src or int(src.get("created_by") or 0) != owner_id:
         return {"ok": False, "error": "Рассылка не найдена", "code": 404}
+    # Журнал доставки этой рассылки вычищен уборкой (старше срока хранения).
+    # Недоставленные считаются как «кого нет в журнале», поэтому без журнала
+    # повторная отправка ушла бы ВСЕМ подписчикам заново — то есть живым людям
+    # пришёл бы спам. Отказываем явно, а не отправляем лишнего.
+    if src.get("delivery_log_pruned"):
+        return {
+            "ok": False,
+            "error": (
+                "Журнал доставки этой рассылки уже удалён по сроку хранения, "
+                "поэтому отправить недоставленным нельзя: сообщение ушло бы "
+                "всем подписчикам заново. Создайте новую рассылку."
+            ),
+            "code": 409,
+        }
     bot_id_int = int(src["bot_id"])
     bot_row = await _sfrow(
         "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",

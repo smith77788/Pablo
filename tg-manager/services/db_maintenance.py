@@ -71,6 +71,14 @@ _RETENTION: list[tuple[str, str, str]] = [
     ("resource_activity_log", "performed_at", "30 days"),
 ]
 
+_BROADCAST_LOG_RETENTION = "90 days"
+# Терминальные статусы рассылки: у идущей журнал доставки нужен для
+# возобновления после падения, её не трогаем.
+_BROADCAST_DONE_STATUSES = ("done", "completed", "failed", "cancelled", "partial")
+# Сколько рассылок закрываем за один проход: уборка идёт раз в шесть часов, а
+# пачка держит журнал в узде, не занимая соединение надолго.
+_BROADCAST_BATCH = 200
+
 _OPERATION_QUEUE_RETENTION = "30 days"
 # "partial" — такой же терминальный статус, как done/failed
 # (services/op_status.py). Без него частично выполненные операции НИКОГДА не
@@ -132,6 +140,51 @@ def _record(results: dict[str, int], key: str, deleted: int, err: Exception | No
     else:
         results[key] = deleted
     return deleted
+
+
+async def _prune_broadcast_delivery_log(pool: asyncpg.Pool) -> tuple[int, Exception | None]:
+    """Удалить журнал доставки старых рассылок, ПОМЕТИВ их закрытыми.
+
+    broadcast_delivery_log — строка на каждого получателя каждой рассылки, и он
+    не чистился вообще: бот с десятью тысячами подписчиков оставляет десять
+    тысяч строк на каждую рассылку навсегда.
+
+    Чистить по сроку напрямую нельзя: «отправить недоставленным» считает
+    недоставленными тех, кого НЕТ в журнале, поэтому пустой журнал означает
+    повторную отправку ВСЕМ подписчикам — живым людям придёт спам. Поэтому
+    сначала ставим рассылке отметку delivery_log_pruned, и только потом удаляем
+    её строки. Порядок именно такой: если проход прервётся между отметкой и
+    удалением, повторная отправка будет запрещена по рассылке, журнал которой
+    ещё цел — сторона безопасная. Обратный порядок означал бы спам.
+
+    Берём только завершённые рассылки: у идущей журнал нужен для возобновления
+    после падения (broadcaster читает его на старте, чтобы не отправить дважды).
+    """
+    try:
+        ids = [r["id"] for r in await pool.fetch(
+            f"""SELECT id FROM broadcasts
+                 WHERE delivery_log_pruned = FALSE
+                   AND status = ANY($1::text[])
+                   AND COALESCE(finished_at, created_at)
+                       < NOW() - INTERVAL '{_BROADCAST_LOG_RETENTION}'
+                 ORDER BY id
+                 LIMIT {_BROADCAST_BATCH}""",
+            list(_BROADCAST_DONE_STATUSES),
+        )]
+    except Exception as e:  # noqa: BLE001 — причину отдаём вызывающему
+        return 0, e
+    if not ids:
+        return 0, None
+    try:
+        await pool.execute(
+            "UPDATE broadcasts SET delivery_log_pruned = TRUE WHERE id = ANY($1::bigint[])",
+            ids,
+        )
+    except Exception as e:  # noqa: BLE001
+        return 0, e
+    return await _prune_batched(
+        pool, "broadcast_delivery_log", "broadcast_id = ANY($1::bigint[])", ids,
+    )
 
 
 async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
@@ -214,6 +267,17 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         _record(results, f"{_tbl}(orphan)", deleted, err)
         if deleted:
             log.info("db_maintenance: pruned %d orphaned rows from %s", deleted, _tbl)
+
+    # Журнал доставки рассылок: с отметкой «закрыта», иначе повторная отправка
+    # уйдёт всем подписчикам заново (подробности в _prune_broadcast_delivery_log).
+    deleted, err = await _prune_broadcast_delivery_log(pool)
+    _record(results, "broadcast_delivery_log", deleted, err)
+    if deleted:
+        log.info(
+            "db_maintenance: pruned %d delivery rows from broadcast_delivery_log (>%s)",
+            deleted,
+            _BROADCAST_LOG_RETENTION,
+        )
 
     # Completed operation_queue entries — but only if operation_log entries are
     # also gone (FK safety: operation_log.op_id refs operation_queue.id).
