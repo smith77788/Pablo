@@ -6478,6 +6478,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <button class="btn btn-s" id="accPhoneAutoBtn" onclick="accPhoneAutoToggle()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">♾️ Повторять, пока не придёт</button>
         </div>
         <div class="field-note" id="accPhoneResendNote">Код не пришёл? Запросите ещё раз или включите автоповтор — он будет запрашивать код сам, пока тот не придёт или Telegram не попросит паузу. Введите код сразу, как получите.</div>
+        <!-- Регулировка темпа автоповтора — только для админа (владельца). -->
+        <div id="accPhoneResendAdmin" style="display:none;margin-top:8px;padding:8px;border:1px dashed var(--border-strong);border-radius:var(--radius)">
+          <label style="display:block;font-weight:600;font-size:12px;margin-bottom:4px">⚙️ Запросов в минуту (автоповтор) · только для админа</label>
+          <input type="number" min="1" max="60" step="1" id="accPhoneRpm" placeholder="например 4" oninput="_accSaveRpm()" style="width:100%;padding:8px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+          <div style="color:var(--hint);font-size:11px;margin-top:3px">Чем больше — тем чаще автоповтор шлёт запрос кода (1–60). Пусто — осторожный режим: по рекомендации Telegram, но не чаще раза в 15 с. Высокое значение быстрее упрётся во FloodWait.</div>
+        </div>
       </div>
       <div class="field" id="accPhoneStep-2fa" style="display:none">
         <label>Пароль 2FA (облачный пароль)</label>
@@ -14367,6 +14373,15 @@ function accSetLoginMethod(m){
   // сброс шагов
   ['accPhoneStep-code','accPhoneStep-2fa','accQrStep-2fa'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
   const ps=document.getElementById('accPhoneStep-phone'); if(ps) ps.style.display='block';
+  // Админ-поле темпа автоповтора показываем только админу и только для входа по номеру.
+  const adm=document.getElementById('accPhoneResendAdmin');
+  if(adm){
+    if(m==='phone' && window.IS_ADMIN){
+      adm.style.display='block';
+      const inp=document.getElementById('accPhoneRpm');
+      try{ const v=localStorage.getItem('acc_resend_rpm'); if(inp&&v) inp.value=v; }catch(_){}
+    } else adm.style.display='none';
+  }
   const qb=document.getElementById('accQrBox'); if(qb) qb.innerHTML='<button class="btn btn-p" id="accQrStartBtn" onclick="accQrStart()" style="width:100%">🔲 Показать QR-код</button>';
   const qh=document.getElementById('accQrHint'); if(qh) qh.style.display='none';
   _accLoginPhone=''; _accLoginHash='';
@@ -14432,6 +14447,28 @@ async function accPhone2fa(){
 // останавливается на FloodWait (чтобы не усугублять ограничение).
 function _accResendNote(msg){ const n=document.getElementById('accPhoneResendNote'); if(n&&msg) n.textContent=msg; }
 
+// Админ-регулировка темпа автоповтора: запросов в минуту (1–60). Сохраняем в
+// localStorage. Пусто/невалидно → 0 (осторожный режим по умолчанию).
+function _accSaveRpm(){
+  const inp=document.getElementById('accPhoneRpm'); if(!inp) return;
+  const n=parseInt(inp.value,10);
+  try{
+    if(Number.isFinite(n)&&n>=1&&n<=60) localStorage.setItem('acc_resend_rpm',String(n));
+    else localStorage.removeItem('acc_resend_rpm');
+  }catch(_){}
+}
+function _accResendRpm(){
+  try{ const n=parseInt(localStorage.getItem('acc_resend_rpm'),10);
+       return (Number.isFinite(n)&&n>=1&&n<=60)?n:0; }catch(_){ return 0; }
+}
+// Пауза до следующего запроса. Админ задал запросов/мин → 60/rpm (пол 2 с, чтобы
+// не плавить клиент). Иначе — рекомендация Telegram (timeout), но не чаще раза в 15 с.
+function _accResendDelayMs(serverTimeout){
+  const rpm=_accResendRpm();
+  if(rpm>0) return Math.max(Math.round(60000/rpm),2000);
+  return Math.max((serverTimeout||0),15)*1000;
+}
+
 // Один повтор. Возвращает {flood}|{error}|{ok,timeout} — автоповтор по этому
 // решает, крутиться дальше или остановиться.
 async function accPhoneResend(){
@@ -14474,9 +14511,10 @@ async function accPhoneAutoToggle(){
     const res=await accPhoneResend();
     if(!_accAutoRunning) return;                 // остановили во время запроса
     if(!res||res.flood||res.error){ accPhoneAutoStop(); return; }  // флуд/ошибка — стоп
-    // Пейсимся по рекомендации Telegram (timeout), но не реже раза в 15 с и не
-    // мгновенно — иначе первый же тик упрётся в FloodWait.
-    const wait=Math.max((res.timeout||0),15)*1000;
+    // Темп: админ-настройка «запросов в минуту» (если задана) или рекомендация
+    // Telegram, но не реже раза в 15 с и не мгновенно — иначе первый же тик
+    // упрётся в FloodWait.
+    const wait=_accResendDelayMs(res.timeout);
     _accResendNote('Автоповтор включён. Следующий запрос примерно через '+Math.round(wait/1000)+' с. Введите код, как только он придёт.');
     _accAutoTimer=setTimeout(tick, wait);
   };
@@ -26400,6 +26438,7 @@ function initPayment(planKey, label, price) {
 async function loadAdminSection() {
   try {
     const stats = await api('/api/miniapp/admin/stats');
+    window.IS_ADMIN = true;  // раздел админки доступен → показываем админ-поля (темп автоповтора кода)
     document.getElementById('adminSection').style.display = 'block';
     // Без запаса здесь выводилось «undefined юзеров»: бэкенд может не прислать
     // поле, и пользователь видел служебное слово вместо числа.

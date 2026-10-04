@@ -113,6 +113,17 @@ def test_ui_has_resend_and_autorepeat():
     assert "res.flood||res.error" in html
 
 
+def test_admin_only_resend_rate_field():
+    """Поле «запросов в минуту» для автоповтора — только для админа и управляет
+    темпом (интервалом) автоповтора."""
+    html = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
+    assert "accPhoneRpm" in html and "accPhoneResendAdmin" in html
+    assert "_accSaveRpm" in html and "_accResendDelayMs" in html
+    # гейт по админу и пробрасывание темпа в цикл автоповтора
+    assert "window.IS_ADMIN" in html
+    assert "_accResendDelayMs(res.timeout)" in html
+
+
 def test_ui_has_all_login_methods():
     """Мини-апп UI предлагает все способы, а не только строку сессии."""
     html = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
