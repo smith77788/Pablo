@@ -23328,7 +23328,7 @@ async function swarmToggle(botId, on) {
               {method:'POST', body:JSON.stringify({enabled: !on})});
     toast(on ? '⚫ Бот выведен из роя' : '🟢 Бот в рою');
     openSwarm();
-  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+  } catch(e) { toast('⚠️ '+errRu(e, 'Не удалось изменить участие бота в рою')); }
 }
 
 async function swarmRole(botId, cluster) {
@@ -23344,7 +23344,7 @@ async function swarmRole(botId, cluster) {
               {method:'PUT', body:JSON.stringify({role, cluster: cluster || 'default'})});
     toast('✅ Роль сохранена');
     openSwarm();
-  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+  } catch(e) { toast('⚠️ '+errRu(e, 'Не удалось сохранить роль бота')); }
 }
 async function openSwarm() {
   push('s-swarm');
