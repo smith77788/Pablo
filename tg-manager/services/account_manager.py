@@ -1944,9 +1944,13 @@ async def start_login(
     return result.phone_code_hash, delivery_hint
 
 
-async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str]:
+async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str, int]:
     """Resend code via next available method (usually SMS if app was first).
-    Returns (new_phone_code_hash, delivery_hint).
+
+    Returns (new_phone_code_hash, delivery_hint, next_timeout). next_timeout —
+    сколько секунд Telegram рекомендует подождать до следующего запроса кода
+    (поле timeout в ответе). 0, если Telegram его не прислал. По нему UI пейсит
+    автоповтор, чтобы не упереться в FloodWait с первого же тика.
     """
     from telethon.tl.functions.auth import ResendCodeRequest
     from telethon.errors import FloodWaitError
@@ -1972,7 +1976,8 @@ async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str]:
         hint = "📱 Код отправлен в приложение Telegram"
     else:
         hint = "💬 Код выслан повторно (SMS или звонок)"
-    return result.phone_code_hash, hint
+    next_timeout = int(getattr(result, "timeout", 0) or 0)
+    return result.phone_code_hash, hint, next_timeout
 
 
 async def confirm_code(phone: str, code: str, phone_code_hash: str):

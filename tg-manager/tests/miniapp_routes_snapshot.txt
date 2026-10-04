@@ -607,6 +607,7 @@ PATCH /api/miniapp/workflows/{wf_id}
 POST /api/miniapp/ab/followup
 POST /api/miniapp/account/add/phone/2fa
 POST /api/miniapp/account/add/phone/code
+POST /api/miniapp/account/add/phone/resend
 POST /api/miniapp/account/add/phone/start
 POST /api/miniapp/account/add/qr/2fa
 POST /api/miniapp/account/add/qr/poll

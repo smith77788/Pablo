@@ -20801,6 +20801,51 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("account_add_phone_2fa uid=%s", uid)
             return _err("Не удалось подтвердить 2FA", 400)
 
+    async def account_add_phone_resend(request: web.Request) -> web.Response:
+        """Повторный запрос кода авторизации (кнопка «Повторить»).
+
+        Telegram не всегда присылает код с первого раза, поэтому владельцу нужна
+        возможность запрашивать его повторно — в т.ч. автоповтором на фронте,
+        пока код не придёт. ResendCode просит Telegram прислать код следующим
+        способом (обычно SMS, если первым был пуш в приложение).
+
+        FloodWait отдаём СТРУКТУРНО (ok=false, flood=true, retry_after) со
+        статусом 200, а не ошибкой: фронт по этому полю показывает, сколько
+        ждать, и сам останавливает автоповтор, а не уходит в общий тост ошибки.
+        timeout — рекомендованная Telegram пауза до следующего запроса; фронт
+        пейсит по ней автоповтор.
+        """
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            # Тот же нормализатор, что и в start/code — Telethon сверяет номер
+            # байт-в-байт с тем, что ушёл в send_code_request.
+            phone = normalize_phone(body.get("phone") or "") or (body.get("phone") or "").strip()
+            pch = (body.get("phone_code_hash") or "").strip()
+            if not phone or not pch:
+                return _err("Нужны phone и phone_code_hash", 400)
+            from services import account_manager as am
+            from telethon.errors import FloodWaitError
+            try:
+                new_hash, hint, timeout = await asyncio.wait_for(
+                    am.resend_code(phone, pch), timeout=40)
+            except FloodWaitError as fw:
+                secs = int(getattr(fw, "seconds", 0) or 0)
+                return _json_resp({
+                    "ok": False, "flood": True, "retry_after": secs,
+                    "hint": f"⏳ Telegram просит подождать {secs} сек перед новым запросом кода",
+                })
+            return _json_resp({"ok": True, "phone_code_hash": new_hash,
+                               "hint": hint, "timeout": timeout})
+        except asyncio.TimeoutError:
+            return _err("Telegram не ответил за 40с", 400)
+        except ValueError as ve:
+            return _err(str(ve), 400)
+        except Exception:
+            log.exception("account_add_phone_resend uid=%s", uid)
+            return _err("Не удалось повторно отправить код", 400)
+
     async def account_add_qr_start(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -20937,6 +20982,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/add/phone/start", account_add_phone_start)
     app.router.add_post("/api/miniapp/account/add/phone/code", account_add_phone_code)
     app.router.add_post("/api/miniapp/account/add/phone/2fa", account_add_phone_2fa)
+    app.router.add_post("/api/miniapp/account/add/phone/resend", account_add_phone_resend)
     app.router.add_post("/api/miniapp/account/add/qr/start", account_add_qr_start)
     app.router.add_post("/api/miniapp/account/add/qr/poll", account_add_qr_poll)
     app.router.add_post("/api/miniapp/account/add/qr/2fa", account_add_qr_2fa)

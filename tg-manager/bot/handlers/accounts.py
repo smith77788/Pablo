@@ -680,8 +680,17 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
 
+    # Кнопка повтора остаётся на КАЖДОМ шаге: Telegram не всегда присылает код с
+    # первого раза, и владелец должен иметь возможность жать «Повторить» подряд,
+    # пока код не придёт или не поймается FloodWait. Поэтому ниже после любого
+    # исхода (кроме флуда) снова прикрепляем «Запросить код ещё раз».
+    _retry_kb = InlineKeyboardBuilder()
+    _retry_kb.button(text="🔁 Запросить код ещё раз", callback_data=AccCb(action="resend_sms"))
+    _retry_kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+    _retry_kb.adjust(1)
+
     try:
-        new_hash, hint = await resend_login_code(phone, phone_code_hash)
+        new_hash, hint, _ = await resend_login_code(phone, phone_code_hash)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -689,23 +698,25 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
 
             m = _re.search(r"(\d+)", err)
             wait = m.group(1) if m else "?"
-            await state.clear()
+            # Состояние НЕ сбрасываем: код, запрошенный ранее, может всё ещё
+            # прийти — владелец введёт его, когда получит. Кнопку повтора
+            # оставляем, чтобы после паузы можно было запросить снова.
             await callback.message.answer(
-                f"⏳ Слишком много запросов. Подождите <b>{wait} сек</b> и попробуйте снова.",
+                f"⏳ Поймали ограничение Telegram (FloodWait). Подождите "
+                f"<b>{wait} сек</b> — и либо введите код, если он придёт, "
+                f"либо запросите ещё раз.",
                 parse_mode="HTML",
+                reply_markup=_retry_kb.as_markup(),
             )
             return
         # Code expired — restart login with a fresh SendCodeRequest
         try:
             new_hash, hint = await start_login(phone, owner_id=callback.from_user.id)
             await state.update_data(phone_code_hash=new_hash)
-            kb = InlineKeyboardBuilder()
-            kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
-            kb.adjust(1)
             await callback.message.answer(
                 f"📱 Код запрошен заново.\n{hint} на <code>{escape(phone)}</code>.\n\nВведите код (только цифры):",
                 parse_mode="HTML",
-                reply_markup=kb.as_markup(),
+                reply_markup=_retry_kb.as_markup(),
             )
             return
         except Exception as exc2:
@@ -719,13 +730,12 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.update_data(phone_code_hash=new_hash)
 
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
-    kb.adjust(1)
     await callback.message.answer(
-        f"{hint} на <code>{escape(phone)}</code>.\n\nВведите код (только цифры):",
+        f"{hint} на <code>{escape(phone)}</code>.\n\n"
+        f"Не пришёл? Жмите <b>«Запросить код ещё раз»</b> — можно подряд, "
+        f"пока не придёт.\n\nВведите код (только цифры):",
         parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        reply_markup=_retry_kb.as_markup(),
     )
 
 
