@@ -657,6 +657,7 @@ POST /api/miniapp/bot/{bot_id}/funnel
 POST /api/miniapp/bot/{bot_id}/multigeo
 POST /api/miniapp/bot/{bot_id}/profile
 POST /api/miniapp/bot/{bot_id}/schedule
+POST /api/miniapp/bot/{bot_id}/swarm
 POST /api/miniapp/bot_factory/create
 POST /api/miniapp/bot_factory/create_new
 POST /api/miniapp/bots/bulk_edit

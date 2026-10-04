@@ -1165,6 +1165,27 @@ async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
         return 0
 
 
+async def _ecosystem_is_mine(pool, ecosystem_id, uid: int) -> bool:
+    """Принадлежит ли экосистема этому пользователю.
+
+    Экосистема — структура доступа: что в ней лежит, видно её владельцу
+    (см. _BOTS_VISIBLE_SQL и _CHANNELS_VISIBLE_SQL). Номер экосистемы в
+    привязках приходит из тела запроса, то есть целиком со стороны клиента,
+    поэтому писать в неё без этой проверки нельзя: посторонний дописывал
+    объект в ЧУЖУЮ экосистему, и тот появлялся в списках её владельца.
+
+    Fail-closed: ошибка базы или нечисловой номер — «не моя». Для гейта прав
+    это единственный безопасный исход (так же ведёт себя _user_can_use_bot).
+    """
+    try:
+        eco_id = int(ecosystem_id)
+    except (TypeError, ValueError):
+        return False
+    return bool(await _safe_count(
+        pool, "SELECT COUNT(*) FROM ecosystems WHERE id=$1 AND owner_id=$2",
+        eco_id, uid))
+
+
 # Проверка прав аккаунта в чате идёт через реальное подключение к Telegram:
 # секунды в норме и до таймаута на мёртвой сессии. Последовательный обход
 # восьми аккаунтов складывал эти секунды в одну HTTP-паузу, и в худшем случае
@@ -7228,9 +7249,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     applied.append("short_description")
                 except Exception as e:
                     log.warning("bot_factory_create setMyShortDescription: %s", e)
-            # Привязка к экосистеме
+            # Привязка к экосистеме. Номер приходит из тела запроса, то есть
+            # целиком со стороны клиента, а экосистема — структура доступа:
+            # всё, что в ней лежит, видно её владельцу (_BOTS_VISIBLE_SQL).
+            # Без проверки владения посторонний дописывал бота в ЧУЖУЮ
+            # экосистему, и тот появлялся в списке ботов её владельца. Это тот
+            # же гейт, что в ecosystem_brain.add_member, только для другой
+            # таблицы — там он есть, здесь его не было.
             if ecosystem_id:
                 try:
+                    if not await _ecosystem_is_mine(pool, ecosystem_id, uid):
+                        from database.db import record_manual_action
+
+                        await record_manual_action(
+                            pool, uid, "ecosystem_foreign_link_refused",
+                            target=f"eco:{ecosystem_id} bot:{bot_id}",
+                            result="refused")
+                        return _err("Экосистема не найдена", 404)
                     await pool.execute(
                         "INSERT INTO ecosystem_bots (ecosystem_id, bot_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                         int(ecosystem_id), bot_id,
@@ -16299,9 +16334,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             from database.db import create_global_presence_targets
             await create_global_presence_targets(pool, plan_id, targets)
-            # Привязка к экосистеме
+            # Привязка к экосистеме — с той же проверкой владения, что и в
+            # фабрике ботов: номер экосистемы приходит от клиента, а запись в
+            # чужую экосистему означает запись в чужую структуру доступа.
             if ecosystem_id:
                 try:
+                    if not await _ecosystem_is_mine(pool, ecosystem_id, uid):
+                        from database.db import record_manual_action
+
+                        await record_manual_action(
+                            pool, uid, "ecosystem_foreign_link_refused",
+                            target=f"eco:{ecosystem_id} plan:{plan_id}",
+                            result="refused")
+                        return _err("Экосистема не найдена", 404)
                     await pool.execute(
                         "INSERT INTO ecosystem_global_presence (ecosystem_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                         int(ecosystem_id), plan_id,
