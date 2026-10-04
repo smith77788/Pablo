@@ -15914,12 +15914,15 @@ async function openTopology() {
   txt('topoBody','');
   try {
     const d = await api('/api/miniapp/topology');
+    // Пять чисел подряд, и ни одно не открывало свой список.
+    // «Связей» и «Подписчиков» сводного списка не имеют — они остаются числами,
+    // а не притворяются кнопками.
     txt('topoStats',`
-      <div class="kpi-card"><div class="kpi-val">${d.accounts||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.channels||0}</div><div class="kpi-lbl">Каналов</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.bots||0}</div><div class="kpi-lbl">Ботов</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.channel_links||0}</div><div class="kpi-lbl">Связей (вступ)</div></div>
-      <div class="kpi-card"><div class="kpi-val">${d.bot_users_total||0}</div><div class="kpi-lbl">Подп. ботов</div></div>
+      <div class="kpi-card tap-card" onclick="healthGoAccounts('all','')" role="button" tabindex="0"><div class="kpi-val">${num(d.accounts||0)}</div><div class="kpi-lbl">Аккаунтов ›</div></div>
+      <div class="kpi-card tap-card" onclick="goTab('channels')" role="button" tabindex="0"><div class="kpi-val">${num(d.channels||0)}</div><div class="kpi-lbl">Каналов ›</div></div>
+      <div class="kpi-card tap-card" onclick="goTab('bots')" role="button" tabindex="0"><div class="kpi-val">${num(d.bots||0)}</div><div class="kpi-lbl">Ботов ›</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(d.channel_links||0)}</div><div class="kpi-lbl">Связей (вступ)</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(d.bot_users_total||0)}</div><div class="kpi-lbl">Подп. ботов</div></div>
     `);
     txt('topoBody',`
       <div class="lst">
@@ -15933,7 +15936,9 @@ async function openTopology() {
     const accs = (links.accounts||[]).filter(a => a.channels && a.channels.length);
     const bots = links.bots||[];
     if (!accs.length && !bots.length) {
-      txt('topoLinks', empty('🗺','Связей пока нет',''));
+      txt('topoLinks', empty('🗺','Связей пока нет',
+        'Связь появляется, когда аккаунт вступает в канал или пользователь приходит в бота',
+        {label:'📢 К каналам', fn:"goTab('channels')"}));
       return;
     }
     txt('topoLinks', `
@@ -21462,14 +21467,18 @@ async function openRehab() {
   txt('rehabList','');
   try {
     const d = await api('/api/miniapp/rehab');
+    // «Возвращены» и «Нужен разбор» — это срезы списка аккаунтов, а не просто
+    // цифры. «Восстанавливаются» никуда не ведёт нарочно: их список прямо ниже.
     txt('rehabStats',`
-      <div class="kpi-card"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${d.in_progress||0}</div><div class="kpi-lbl">Восстанавливаются</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.freed,'green')}">${d.freed||0}</div><div class="kpi-lbl">Возвращены</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${d.stuck||0}</div><div class="kpi-lbl">Нужен разбор</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:var(--blue,#3b82f6)">${num(d.in_progress||0)}</div><div class="kpi-lbl">Восстанавливаются</div></div>
+      <div class="kpi-card tap-card" onclick="healthGoAccounts('active','')" role="button" tabindex="0"><div class="kpi-val" style="${kpiTone(d.freed,'green')}">${num(d.freed||0)}</div><div class="kpi-lbl">Возвращены ›</div></div>
+      <div class="kpi-card tap-card" onclick="healthGoAccounts('spamblock','')" role="button" tabindex="0"><div class="kpi-val" style="color:${(d.stuck||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(d.stuck||0)}</div><div class="kpi-lbl">Нужен разбор ›</div></div>
     `);
     txt('m-rehab-val', (d.in_progress||0) ? `${d.in_progress} в работе${(d.stuck||0)?' · '+d.stuck+' ⚠️':''}` : ((d.stuck||0)?`${d.stuck} ждут разбора`:'нет ограниченных'));
     const accs = d.accounts||[];
-    if (!accs.length) { txt('rehabList', empty('🩹','Восстанавливать некого','Ни один аккаунт не под спам-блоком — это хорошая новость')); return; }
+    if (!accs.length) { txt('rehabList', empty('🩹','Восстанавливать некого',
+      'Ни один аккаунт не под спам-блоком — это хорошая новость',
+      {label:'📱 К аккаунтам', fn:"healthGoAccounts('all','')"})); return; }
     txt('rehabList', accs.map(a=>{
       const s = a.state||{};
       const col = REHAB_COLOR[s.phase] || 'var(--hint)';
@@ -21478,8 +21487,8 @@ async function openRehab() {
       return `
       <div class="row" style="border-left:3px solid ${col}">
         <div class="row-ico" style="background:var(--bg2)">${s.attention?'🛠':'🩹'}</div>
-        <div class="row-body">
-          <div class="row-name">${esc(a.first_name||a.phone||('#'+a.acc_id))}</div>
+        <div class="row-body" onclick="openAccount(${Number(a.acc_id)})" role="button" tabindex="0" style="cursor:pointer">
+          <div class="row-name">${esc(a.first_name||a.phone||('#'+a.acc_id))} ›</div>
           <div class="row-val">${esc(s.label||'')}${s.attempts?` · попытка ${s.attempts}/${s.max_attempts}`:''}</div>
           ${wait?`<div style="font-size:11px;color:var(--hint);margin-top:2px">${esc(wait)}</div>`:''}
           ${s.hint?`<div style="font-size:11px;color:var(--hint);margin-top:3px;line-height:1.35">${esc(s.hint)}</div>`:''}
@@ -21493,7 +21502,7 @@ async function openRehab() {
     }).join(''));
   } catch(e) {
     txt('rehabStats','');
-    txt('rehabList', empty('⚠️','Ошибка',errRu(e)));
+    txt('rehabList', errHtml(errRu(e), 'openRehab()'));
   }
 }
 async function rehabAct(accId, action) {
