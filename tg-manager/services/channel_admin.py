@@ -66,7 +66,11 @@ _PLAN_DAYS = 3              # короткий скользящий план в�
 _PLAN_MIN_AHEAD_H = 12      # план достраивается, когда вперёд осталось меньше
 _PLAN_MAX_SLOTS = 12        # не накапливаем десятки будущих записей на один канал
 _PLAN_TOPIC_LIMIT = 6       # верхняя граница тем в одном запросе к LLM
-_MISSED_SLOT_H = 6          # слот, просроченный дольше, пропускается (не залп после простоя)
+_MISSED_SLOT_H = 6
+_STALE_WRITTEN_H = 48       # заранее написанный пост старше этого слота уже не к месту
+_PREWRITE_AHEAD_H = 72      # на сколько вперёд посты пишутся заранее (запас на паузы ИИ)
+_PREWRITE_BATCH = 3         # постов в одном обращении к ИИ
+_PREWRITE_MAX_ATTEMPTS = 2  # пакетных попыток на слот; дальше — поштучно в момент публикации          # слот, просроченный дольше, пропускается (не залп после простоя)
 _DRAFT_TTL_H = 48           # черновик на одобрении живёт двое суток
 _RECENT_FOR_PROMPT = 6      # сколько недавних постов показать ИИ
 _SALES_WINDOW = 10          # окно, в котором держится доля продающих постов
@@ -86,6 +90,28 @@ _NEWS_MARKERS = ("новост", "новин", "news", "сводк", "проис
 
 class ChannelAdminError(Exception):
     """Ошибка, понятная владельцу (текст по-русски)."""
+
+
+class AiBusy(ChannelAdminError):
+    """Все модели ИИ на паузе по лимиту запросов. Это не сбой канала: работа
+    переносится на retry_at, владельца не тревожим и fail_streak не растёт."""
+
+    def __init__(self, retry_at: Optional[datetime], text: str = ""):
+        self.retry_at = retry_at
+        super().__init__(text or "ИИ на паузе по лимиту запросов — продолжу, когда лимит сбросится")
+
+
+async def _ask(complete: Complete, system: str, user: str) -> str:
+    """Один запрос к ИИ с переводом ошибок в язык администратора."""
+    from services import spintax_ai
+    try:
+        return await complete(system, user)
+    except spintax_ai.AiPaused as e:
+        raise AiBusy(e.retry_at) from e
+    except ChannelAdminError:
+        raise
+    except Exception as e:
+        raise ChannelAdminError(f"ИИ не ответил: {str(e)[:200]}") from e
 
 
 # ── Чистые функции ───────────────────────────────────────────────────────────
@@ -603,8 +629,14 @@ def build_post_prompt(
     rules: Optional[cb.BrandRules] = None,
     feedback: list[str] = (),
     lessons: list[str] = (),
+    tasks: Optional[list[tuple[str, str]]] = None,
 ) -> tuple[str, str]:
-    """Промпт на пост → (system, user)."""
+    """Промпт на пост → (system, user).
+
+    tasks — пакет [(рубрика, тема)]: один запрос пишет сразу несколько постов
+    (prewrite). Профиль, правила и история канала в пакете общие, поэтому пакет
+    из трёх постов стоит одного обращения к ИИ вместо трёх.
+    """
     rules = rules or cb.BrandRules()
     lo = max(rules.min_chars, 250)
     hi = min(rules.max_chars, 1400)
@@ -646,31 +678,56 @@ def build_post_prompt(
         lines.append("Недавние материалы сети — выбери другой угол и не копируй:")
         lines.append(_fence(profile["network_recent"][:6], cap=250))
     lines.append("")
-    if is_intro:
+    if tasks:
         lines.append(
-            "ЗАДАЧА: это ПЕРВЫЙ пост канала — знакомство. Расскажи, о чём канал, "
-            "для кого он, что здесь будет выходить и почему стоит остаться. "
-            "Коротко, тепло, без пафоса.")
+            f"ЗАДАЧА: напиши {len(tasks)} РАЗНЫХ поста для этого канала — по одному на пункт. "
+            "Посты не должны повторять друг друга ни темой, ни вступлением, ни формулировками.")
+        contact = (profile.get("lead_contact") or "").strip()
+        cta_allowed = va_strategy.allow_cta(profile, recent_texts)
+        for n, (t_pillar, t_topic) in enumerate(tasks, 1):
+            goal = pillar_goal(t_pillar)
+            item = f"{n}. Рубрика «{t_pillar}»"
+            item += f"; тема: {t_topic}" if t_topic else "; тему выбери сам — конкретную и полезную аудитории"
+            if goal:
+                item += f"; задача рубрики: {goal}"
+            if contact and cta_allowed is not False and goal == _GOALS["sell"]:
+                item += f"; в конце укажи, куда обращаться: {contact}"
+            lines.append(item)
+        if cta_allowed is False:
+            lines.append("Ни в одном посте не указывай целевой ресурс и не зови перейти: "
+                         "лимит призывов достигнут.")
+        elif contact:
+            lines.append(f"Контакт для заявок: {contact}. В непродающих постах упоминай его, "
+                         "только если это естественно.")
+        lines.append('Ответ — ТОЛЬКО JSON-массив строк в том же порядке: '
+                     '["текст поста 1", "текст поста 2", ...]. Без пояснений вокруг. '
+                     'Длина и правила ниже относятся к КАЖДОМУ посту.')
     else:
-        lines.append(f"ЗАДАЧА: пост в рубрике «{pillar}».")
-        if topic_hint:
-            lines.append(f"Тема поста по контент-плану: {topic_hint}")
+        if is_intro:
+            lines.append(
+                "ЗАДАЧА: это ПЕРВЫЙ пост канала — знакомство. Расскажи, о чём канал, "
+                "для кого он, что здесь будет выходить и почему стоит остаться. "
+                "Коротко, тепло, без пафоса.")
         else:
-            lines.append("Тему выбери сам — конкретную и полезную аудитории канала.")
-    goal = pillar_goal(pillar)
-    if goal and not is_intro:
-        lines.append(f"Задача рубрики: {goal}")
-    contact = (profile.get("lead_contact") or "").strip()
-    cta_allowed = va_strategy.allow_cta(profile, recent_texts)
-    if cta_allowed is False:
-        lines.append("В этом посте не указывай целевой ресурс и не зови перейти: "
-                     "лимит призывов достигнут. Дай самостоятельную пользу.")
-    elif contact:
-        if is_intro or goal == _GOALS["sell"]:
-            lines.append(f"Куда вести клиента: {contact} — укажи это в конце поста.")
-        else:
-            lines.append(f"Контакт для заявок: {contact}. Упоминай его, только если это "
-                         "естественно для поста; полезный пост не превращай в рекламу.")
+            lines.append(f"ЗАДАЧА: пост в рубрике «{pillar}».")
+            if topic_hint:
+                lines.append(f"Тема поста по контент-плану: {topic_hint}")
+            else:
+                lines.append("Тему выбери сам — конкретную и полезную аудитории канала.")
+        goal = pillar_goal(pillar)
+        if goal and not is_intro:
+            lines.append(f"Задача рубрики: {goal}")
+        contact = (profile.get("lead_contact") or "").strip()
+        cta_allowed = va_strategy.allow_cta(profile, recent_texts)
+        if cta_allowed is False:
+            lines.append("В этом посте не указывай целевой ресурс и не зови перейти: "
+                         "лимит призывов достигнут. Дай самостоятельную пользу.")
+        elif contact:
+            if is_intro or goal == _GOALS["sell"]:
+                lines.append(f"Куда вести клиента: {contact} — укажи это в конце поста.")
+            else:
+                lines.append(f"Контакт для заявок: {contact}. Упоминай его, только если это "
+                             "естественно для поста; полезный пост не превращай в рекламу.")
     lines.append(f"Длина: примерно {lo}–{hi} символов.")
     if rules.max_emoji is not None:
         lines.append(f"Эмодзи — не больше {rules.max_emoji}.")
@@ -1275,7 +1332,11 @@ async def setup_channel(pool, owner_id: int, channel_id: int, *,
         hint = " ".join(x for x in (admin.get("topic"), admin.get("project_info"),
                                      admin.get("audience")) if x)
         system, user = build_profile_prompt(snap, owner_hint=hint)
-        profile = parse_profile(await complete(system, user))
+        profile = parse_profile(await _ask(complete, system, user))
+    except AiBusy:
+        # Лимит ИИ исчерпан: профиль соберём, когда он сбросится, а не урезанным
+        # «по названию» — слабый профиль остался бы у канала навсегда.
+        raise
     except Exception as e:
         log.info("channel_admin.setup: ИИ не собрал профиль ch=%s: %s", channel_id, e)
     source = "ИИ по каналу"
@@ -1468,18 +1529,14 @@ async def _best_texts(pool, owner_id: int, channel_id: int) -> list[str]:
         return []
 
 
-async def write_post(pool, owner_id: int, channel_id: int, *,
-                     complete: Optional[Complete] = None,
-                     plan_item: Optional[dict] = None,
-                     news_events: Optional[list[dict]] = None) -> Draft:
-    """Написать пост для канала и прогнать через редактора канала.
+async def _post_context(pool, owner_id: int, channel_id: int, *,
+                        plan_item: Optional[dict] = None,
+                        news_events: Optional[list[dict]] = None) -> dict:
+    """Всё, что нужно автору поста о канале: профиль, история, рубрики, правила.
 
-    До _MAX_ATTEMPTS попыток: замечания редактора возвращаются автору как
-    правка. Draft.ok — пост чистый (можно публиковать без человека).
+    Общее для поштучного написания (write_post) и пакетного (prewrite) — чтобы
+    пост, написанный заранее, проверялся ровно теми же правилами.
     """
-    from services import editorial_review
-
-    complete = complete or _default_complete()
     admin = await get_admin(pool, owner_id, channel_id)
     if not admin:
         raise ChannelAdminError("Администратор на этом канале не установлен")
@@ -1565,40 +1622,75 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
         topic = ""
     best = await _best_texts(pool, owner_id, channel_id)
     lessons = await owner_lessons(pool, owner_id, channel_id)
+    return {
+        "profile": profile, "recent": recent, "is_intro": is_intro, "news_mode": news_mode,
+        "names": names, "weights": weights, "brain": brain, "rules": rules,
+        "pillar": pillar, "topic": topic, "plan_item": plan_item,
+        "rival_names": rival_names, "best": best, "lessons": lessons,
+    }
+
+
+async def review_text(pool, owner_id: int, channel_id: int, ctx: dict, text: str) -> list[str]:
+    """Замечания к готовому тексту (пусто — можно публиковать без человека).
+
+    Без ИИ: редактор канала, стратегия сети, упоминание конкурентов, обрыв.
+    """
+    from services import editorial_review, va_strategy
+
+    if not text:
+        return ["пустой текст"]
+    if looks_unfinished(text):
+        return [_UNFINISHED]
+    verdict = await editorial_review.review_draft(pool, owner_id, text,
+                                                  channel_key=str(channel_id))
+    reasons = list(verdict.reasons)
+    reasons.extend(va_strategy.review_reasons(ctx["profile"], text, ctx["recent"]))
+    rivals = mentioned_competitors(text, ctx["rival_names"])
+    if rivals:
+        reasons.append("упомянут конкурент: " + ", ".join(rivals[:3]))
+    return reasons
+
+
+async def write_post(pool, owner_id: int, channel_id: int, *,
+                     complete: Optional[Complete] = None,
+                     plan_item: Optional[dict] = None,
+                     news_events: Optional[list[dict]] = None) -> Draft:
+    """Написать пост для канала и прогнать через редактора канала.
+
+    До _MAX_ATTEMPTS попыток: замечания редактора возвращаются автору как
+    правка. Draft.ok — пост чистый (можно публиковать без человека).
+    Все модели на паузе по лимиту → AiBusy (перенести, а не считать сбоем).
+    """
+    complete = complete or _default_complete()
+    ctx = await _post_context(pool, owner_id, channel_id, plan_item=plan_item,
+                              news_events=news_events)
+    profile, recent, is_intro = ctx["profile"], ctx["recent"], ctx["is_intro"]
+    news_mode, rules, pillar, topic = ctx["news_mode"], ctx["rules"], ctx["pillar"], ctx["topic"]
+    best, lessons, plan_item = ctx["best"], ctx["lessons"], ctx["plan_item"]
     feedback: list[str] = []
     text, reasons = "", []
     for _ in range(_MAX_ATTEMPTS):
         system, user = build_post_prompt(
             profile, pillar=pillar, topic_hint=topic, recent_texts=recent,
             best_texts=best, is_intro=is_intro, rules=rules, feedback=feedback, lessons=lessons)
-        try:
-            raw = await complete(system, user)
-        except Exception as e:
-            raise ChannelAdminError(f"ИИ не ответил: {str(e)[:200]}") from e
+        raw = await _ask(complete, system, user)
         text = clean_generated(raw, rules.max_chars)
         if not text:
             feedback = ["ответ пустой — нужен текст поста"]
             continue
-        if looks_unfinished(text):
+        reasons = await review_text(pool, owner_id, channel_id, ctx, text)
+        if reasons == [_UNFINISHED]:
             # Оборванный пост в канал не уходит: просим дописать, а не публикуем кусок.
-            reasons = [_UNFINISHED]
             feedback = ["прошлый текст оборвался на полуслове — напиши пост целиком, "
                         "короче, и закончи последнюю мысль"]
             continue
-        verdict = await editorial_review.review_draft(pool, owner_id, text,
-                                                      channel_key=str(channel_id))
-        reasons = list(verdict.reasons)
-        reasons.extend(va_strategy.review_reasons(profile, text, recent))
-        rivals = mentioned_competitors(text, rival_names)
-        if rivals:
-            reasons.append("упомянут конкурент: " + ", ".join(rivals[:3]))
         if news_mode:
             # A newsroom publishes from live signals, never from scheduled filler.
             # One LLM pass creates a review draft; a human checks source and facts.
             reasons.append(_NEWS_REVIEW_REASON)
             return Draft(pillar, text, reasons, is_intro, False,
                          plan_item.get("id") if plan_item else None)
-        if not verdict.needs_review and not reasons:
+        if not reasons:
             return Draft(pillar, text, [], is_intro, True,
                          plan_item.get("id") if plan_item else None)
         feedback = reasons
@@ -1608,6 +1700,88 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
         reasons.append(_NEWS_REVIEW_REASON)
     return Draft(pillar, text, reasons, is_intro, False,
                  plan_item.get("id") if plan_item else None)
+
+
+def parse_batch(raw: str, n: int) -> list[str]:
+    """Ответ модели на пакет → тексты постов по порядку (недостающие — пустые)."""
+    d = _extract_json(raw)
+    if isinstance(d, dict):
+        d = d.get("posts") or d.get("items") or []
+    if not isinstance(d, list):
+        return []
+    out = []
+    for it in d[:n]:
+        if isinstance(it, dict):
+            it = it.get("text") or it.get("post") or ""
+        out.append(str(it or ""))
+    return out
+
+
+async def prewrite(pool, owner_id: int, channel_id: int, *,
+                   complete: Optional[Complete] = None, now: Optional[datetime] = None,
+                   batch: int = _PREWRITE_BATCH) -> int:
+    """Написать заранее несколько ближайших постов плана ОДНИМ обращением к ИИ.
+
+    Это главный рычаг против лимитов бесплатных моделей: пост пишется не в
+    минуту публикации, а за часы-сутки до неё, пачкой по нескольку штук. В
+    момент публикации ИИ не нужен вовсе, а пауза провайдера (минутный или
+    суточный лимит) лишь сдвигает написание внутри запаса _PREWRITE_AHEAD_H.
+
+    Каждый текст проверяется теми же правилами, что и поштучный (review_text),
+    плюс на повтор внутри пачки. Не прошедший остаётся без текста и попадёт в
+    следующую пачку. Возвращает число записанных постов; AiBusy — лимит.
+    """
+    now = now or datetime.now(timezone.utc)
+    rows = await pool.fetch(
+        "SELECT id, pillar, topic FROM va_admin_plan WHERE owner_id=$1 AND channel_id=$2 "
+        "AND status='planned' AND body IS NULL AND pillar <> $3 AND write_attempts < $4 "
+        "AND slot_at > $5 AND slot_at <= $6 ORDER BY slot_at LIMIT $7",
+        int(owner_id), int(channel_id), INTRO_PILLAR, _PREWRITE_MAX_ATTEMPTS,
+        now - timedelta(hours=_MISSED_SLOT_H), now + timedelta(hours=_PREWRITE_AHEAD_H),
+        max(1, int(batch)))
+    if not rows:
+        return 0
+    rows = [dict(r) for r in rows]
+    admin = await get_admin(pool, owner_id, channel_id) or {}
+    ch = await channel_row(pool, owner_id, channel_id) or {}
+    if is_news_channel({**admin, "title": ch.get("title") or ""}):
+        # Новостной канал пишет по свежим событиям, а не по календарю.
+        await pool.execute(
+            "UPDATE va_admin_plan SET write_attempts=$2 WHERE id=ANY($1::bigint[])",
+            [r["id"] for r in rows], _PREWRITE_MAX_ATTEMPTS)
+        return 0
+    ctx = await _post_context(pool, owner_id, channel_id, plan_item=rows[0])
+    if ctx["is_intro"]:
+        return 0  # сначала знакомство — его пишем отдельно в момент публикации
+    rules = ctx["rules"]
+    tasks = [(r["pillar"] or ctx["pillar"], r["topic"] or "") for r in rows]
+    system, user = build_post_prompt(
+        ctx["profile"], pillar=tasks[0][0], recent_texts=ctx["recent"],
+        best_texts=ctx["best"], rules=rules, lessons=ctx["lessons"], tasks=tasks)
+    raw = await _ask(complete or _default_complete(), system, user)
+    texts = parse_batch(raw, len(rows))
+    written: list[str] = []
+    for n, r in enumerate(rows):
+        text = clean_generated(texts[n] if n < len(texts) else "", rules.max_chars)
+        reasons = await review_text(pool, owner_id, channel_id,
+                                    {**ctx, "recent": list(ctx["recent"]) + written}, text)
+        if text and not reasons and written:
+            rep = cb.repetition_check(text, written)
+            if rep["is_duplicate"] or rep["opening_repeat"]:
+                reasons = ["повторяет соседний пост пачки"]
+        if reasons:
+            await pool.execute(
+                "UPDATE va_admin_plan SET write_attempts=write_attempts+1 WHERE id=$1", r["id"])
+            continue
+        await pool.execute(
+            "UPDATE va_admin_plan SET body=$2, written_at=now() WHERE id=$1 AND body IS NULL",
+            r["id"], text)
+        written.append(text)
+    if written:
+        await log_event(pool, owner_id, channel_id, "prewrite",
+                        f"Заранее написано постов: {len(written)} из {len(rows)} "
+                        "одним обращением к ИИ")
+    return len(written)
 
 
 # ── Публикация и черновики ──────────────────────────────────────────────────
@@ -1859,6 +2033,42 @@ async def notify_draft(pool, bot, owner_id: int, channel_id: int, draft_id: int,
         log.debug("channel_admin: черновик владельцу не ушёл", exc_info=True)
 
 
+async def _prewritten_draft(pool, owner_id: int, channel_id: int,
+                            item: Optional[dict]) -> Optional[Draft]:
+    """Пост, написанный заранее (prewrite), — если он всё ещё годен.
+
+    Перепроверяется на момент публикации: за часы с написания в канал могли
+    выйти другие посты, и повтор ловится уже по свежей истории. Не годен —
+    None, и пост пишется заново обычным путём.
+    """
+    body = (item or {}).get("body")
+    if not body:
+        return None
+    plan_item = {k: v for k, v in item.items() if k != "body"}
+    ctx = await _post_context(pool, owner_id, channel_id, plan_item=plan_item)
+    if ctx["is_intro"] or ctx["news_mode"]:
+        return None
+    if await review_text(pool, owner_id, channel_id, ctx, body):
+        await pool.execute("UPDATE va_admin_plan SET body=NULL WHERE id=$1", item["id"])
+        return None
+    return Draft(ctx["pillar"], body, [], False, True, item["id"])
+
+
+async def _wait_ai(pool, admin: dict, retry_at: Optional[datetime], now: datetime) -> None:
+    """ИИ на паузе по лимиту: перенести такт, не считая это сбоем канала."""
+    at = retry_at or now + timedelta(minutes=15)
+    at = min(max(at, now + timedelta(minutes=5)), now + timedelta(hours=1))
+    msg = (f"Жду ИИ: лимит запросов у всех моделей, продолжу в "
+           f"{at.strftime('%H:%M')} UTC")
+    prev = admin.get("last_error") or ""
+    await pool.execute(
+        "UPDATE va_channel_admin SET next_post_at=$3, last_error=$4, updated_at=now() "
+        "WHERE owner_id=$1 AND channel_id=$2",
+        int(admin["owner_id"]), int(admin["channel_id"]), at, msg)
+    if not prev.startswith("Жду ИИ"):
+        await log_event(pool, admin["owner_id"], admin["channel_id"], "ai_wait", msg)
+
+
 async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = None,
                     now: Optional[datetime] = None, manual: bool = False) -> str:
     """Один такт публикации для канала. Возвращает, что сделано (для журнала/тестов).
@@ -1870,10 +2080,13 @@ async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = No
     now = now or datetime.now(timezone.utc)
     owner_id, channel_id = int(admin["owner_id"]), int(admin["channel_id"])
     # Просроченные слоты (простой процесса) пропускаем, а не публикуем залпом.
+    # Уже написанный заранее пост живёт дольше: он лишь сдвинулся (пауза ИИ
+    # здесь ни при чём — ИИ ему не нужен), и выкидывать готовый текст жалко.
     await pool.execute(
         "UPDATE va_admin_plan SET status='skipped' WHERE owner_id=$1 AND channel_id=$2 "
-        "AND status='planned' AND slot_at < $3", owner_id, channel_id,
-        now - timedelta(hours=_MISSED_SLOT_H))
+        "AND status='planned' AND ((body IS NULL AND slot_at < $3) OR slot_at < $4)",
+        owner_id, channel_id, now - timedelta(hours=_MISSED_SLOT_H),
+        now - timedelta(hours=_STALE_WRITTEN_H))
     if not manual:
         pending = await pool.fetchval(
             "SELECT count(*) FROM va_admin_drafts WHERE owner_id=$1 AND channel_id=$2 "
@@ -1899,12 +2112,19 @@ async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = No
             await _ok(pool, admin, await _next_at(pool, admin, now))
             return "news_waiting"
     item_row = await pool.fetchrow(
-        "SELECT id, pillar, topic FROM va_admin_plan WHERE owner_id=$1 AND channel_id=$2 "
+        "SELECT id, pillar, topic, body FROM va_admin_plan WHERE owner_id=$1 AND channel_id=$2 "
         "AND status='planned' AND slot_at <= $3 ORDER BY slot_at LIMIT 1",
         owner_id, channel_id, now + timedelta(minutes=30))
     item = dict(item_row) if item_row else None
     try:
-        d = await write_post(pool, owner_id, channel_id, complete=complete, plan_item=item)
+        d = await _prewritten_draft(pool, owner_id, channel_id, item)
+        if d is None:
+            d = await write_post(pool, owner_id, channel_id, complete=complete,
+                                 plan_item={k: v for k, v in item.items() if k != "body"}
+                                 if item else None)
+    except AiBusy as e:
+        await _wait_ai(pool, admin, e.retry_at, now)
+        return "ai_wait"
     except ChannelAdminError as e:
         await _fail(pool, bot, admin, str(e), retry_in=timedelta(minutes=30))
         return "error"

@@ -160,7 +160,9 @@ def test_empty_channel_is_administered_end_to_end(pool, stubs):
         brain = await store.get_profile(pool, OWNER, str(CID))
         assert "Полезные советы" in brain.pillars
         plan = await ca.get_plan(pool, OWNER, CID)
-        assert len(plan) >= 7 and plan[0]["pillar"] == ca.INTRO_PILLAR
+        # Горизонт плана — ca._PLAN_DAYS суток; сколько слотов влезет в первые
+        # сутки, зависит от часа запуска, поэтому точное число не проверяем.
+        assert len(plan) >= 5 and plan[0]["pillar"] == ca.INTRO_PILLAR
         assert a["next_post_at"] is not None
 
         # 2. Такт по расписанию: пишет знакомство и ставит публикацию на один канал.
@@ -340,5 +342,79 @@ def test_miniapp_routes_over_real_db(pool, stubs, monkeypatch):
         assert st == 404
         st, _ = await call("GET", "/api/miniapp/editorial/policy?channel=5555")
         assert st == 404
+
+    _run(go())
+
+
+def test_posts_are_written_ahead_in_batches_and_publish_without_ai(pool, stubs, monkeypatch):
+    """Против лимитов бесплатного ИИ: посты пишутся заранее, пачкой за одно
+    обращение, а в минуту публикации ИИ не нужен вовсе. Лимит — перенос, не сбой."""
+    from services import channel_admin as ca
+    from services import channel_admin_runner as runner
+
+    class _BatchAI(_AI):
+        async def __call__(self, system, user):
+            if "JSON-массив строк" in user:
+                self.prompts.append((system, user))
+                n = len(re.findall(r"^\d+\. Рубрика", user, re.M))
+                topics = ["шкаф", "диван", "кухню", "стол", "кровать"]
+                return json.dumps([
+                    f"Пост {i}: как перевезти {topics[i % 5]} без царапин. Упаковываем в "
+                    f"три слоя плёнки, снимаем фасады, крепим ремнями. Код {i * 7919 + 13}."
+                    for i in range(n)], ensure_ascii=False)
+            return await super().__call__(system, user)
+
+    ai, bot = _BatchAI(), _Bot()
+    monkeypatch.setattr(ca, "_default_complete", lambda: ai)
+
+    async def go():
+        for t in ("va_admin_plan", "va_admin_drafts", "va_channel_posts", "va_admin_events"):
+            await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWNER)
+        await pool.execute("DELETE FROM va_channel_admin WHERE owner_id=$1", OWNER)
+        await ca.install(pool, OWNER, CID, {"lead_contact": "@mebel_manager"})
+        await ca.setup_channel(pool, OWNER, CID, complete=ai)
+        # Канал с историей: знакомство не нужно, план — обычные рубрики.
+        await pool.execute("UPDATE va_channel_admin SET intro_pending=FALSE, publish_mode='auto' "
+                           "WHERE owner_id=$1", OWNER)
+        await pool.execute("DELETE FROM va_admin_plan WHERE owner_id=$1 AND pillar=$2",
+                           OWNER, ca.INTRO_PILLAR)
+        now = datetime.now(timezone.utc)
+        for h, p in ((1, "Полезные советы"), (5, "Как мы работаем"), (9, "Вопрос подписчикам")):
+            await pool.execute(
+                "INSERT INTO va_admin_plan(owner_id, channel_id, slot_at, pillar, topic) "
+                "VALUES($1,$2,$3,$4,'')", OWNER, CID, now + timedelta(hours=h), p)
+
+        calls0 = len(ai.prompts)
+        stats = {"n": await runner._prewrite_pass(pool, now)}
+        assert len(ai.prompts) - calls0 == 1, "пачка должна писаться одним обращением"
+        written = await pool.fetchval(
+            "SELECT count(*) FROM va_admin_plan WHERE owner_id=$1 AND status='planned' "
+            "AND body IS NOT NULL", OWNER)
+        assert stats["n"] >= 3 and written >= 3
+
+        # Публикация: ИИ «упал» совсем, а пост всё равно уходит — он уже написан.
+        async def dead(system, user):
+            raise AssertionError("в минуту публикации ИИ не должен вызываться")
+        a = await ca.get_admin(pool, OWNER, CID)
+        res = await ca.tick_post(pool, bot, a, complete=dead, now=now + timedelta(minutes=50))
+        assert res == "published"
+        first = await pool.fetchrow(
+            "SELECT status FROM va_admin_plan WHERE owner_id=$1 ORDER BY slot_at LIMIT 1", OWNER)
+        assert first["status"] == "done"
+
+        # Ненаписанный слот и лимит у всех моделей: перенос без счётчика сбоев.
+        await pool.execute("UPDATE va_admin_plan SET body=NULL WHERE owner_id=$1", OWNER)
+        await pool.execute("DELETE FROM va_channel_posts WHERE owner_id=$1", OWNER)
+        await pool.execute("UPDATE va_channel_admin SET last_op_id=NULL WHERE owner_id=$1", OWNER)
+        from services import spintax_ai
+
+        async def limited(system, user):
+            raise spintax_ai.AiPaused(now + timedelta(minutes=20))
+        a = await ca.get_admin(pool, OWNER, CID)
+        res = await ca.tick_post(pool, bot, a, complete=limited, now=now + timedelta(hours=5))
+        assert res == "ai_wait"
+        a = await ca.get_admin(pool, OWNER, CID)
+        assert a["fail_streak"] == 0 and a["last_error"].startswith("Жду ИИ")
+        assert a["next_post_at"] > now + timedelta(hours=5)
 
     _run(go())

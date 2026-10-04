@@ -18,10 +18,10 @@ async def capture_sample(pool, owner_id: int, channel_id: int, post_id: int,
     # Never backfill an old post with today's cumulative counters.
     await pool.execute(
         "UPDATE va_channel_posts SET learning_views=$4, learning_reactions=$5, "
-        "learning_forwards=$6, learning_sampled_at=$7 "
+        "learning_forwards=$6, learning_sampled_at=$7::timestamptz "
         "WHERE id=$1 AND owner_id=$2 AND channel_key=$3 "
-        "AND learning_sampled_at IS NULL AND published_at <= $7 - interval '24 hours' "
-        "AND published_at >= $7 - interval '30 hours'",
+        "AND learning_sampled_at IS NULL AND published_at <= $7::timestamptz - interval '24 hours' "
+        "AND published_at >= $7::timestamptz - interval '30 hours'",
         int(post_id), int(owner_id), str(channel_id), *counters, observed_at,
     )
 

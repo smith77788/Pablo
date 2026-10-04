@@ -355,3 +355,17 @@ def _clear_invite_entity_cache():
     _clear()
     yield
     _clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_llm_gate():
+    """Паузы моделей ИИ (services/llm_gate) — процессное состояние: тест, где
+    модель «упёрлась в лимит», иначе оставил бы её на паузе для всех следующих."""
+    try:
+        from services import llm_gate as _lg
+    except Exception:
+        yield
+        return
+    _lg._STATE.update(pool=None, cool={}, loaded_at=0.0)
+    yield
+    _lg._STATE.update(pool=None, cool={}, loaded_at=0.0)

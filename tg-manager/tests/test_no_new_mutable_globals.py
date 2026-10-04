@@ -216,6 +216,7 @@ DB_BACKED: dict[str, str] = {
     "services/infra_memory.py:_dirty_account_keys": "очередь флаша",
     "services/infra_memory.py:_dirty_proxy_keys": "очередь флаша",
     "services/op_circuit_breaker.py:_circuit_breaker_state": "op_circuit_breaker, решение под блокировкой строки",
+    "services/llm_gate.py:_STATE": "llm_cooldowns, кэш пауз перечитывается раз в 30 с",
 }
 
 # Расхождение реально стоит качества, но пока принято. СПИСОК НЕ ДОЛЖЕН РАСТИ.

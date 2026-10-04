@@ -1663,6 +1663,10 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
 
 
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
+    # Паузы моделей ИИ по лимитам — общие с фоновым циклом (services/llm_gate).
+    from services import llm_gate
+    llm_gate.attach(pool)
+
     @web.middleware
     async def plan_gate_middleware(request, handler):
         """Единая страховка ответов API: отказ по тарифу → 403, любое иное

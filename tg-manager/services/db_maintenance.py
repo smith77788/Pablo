@@ -60,6 +60,9 @@ _RETENTION: list[tuple[str, str, str]] = [
     ("va_admin_events", "created_at", "60 days"),
     ("va_admin_plan", "created_at", "60 days"),
     ("va_admin_drafts", "created_at", "90 days"),
+    # Учёт запросов к ИИ по дням и истёкшие паузы моделей (schema_v239).
+    ("llm_usage", "day", "90 days"),
+    ("llm_cooldowns", "until", "7 days"),
     # Журналы прогрева: строка на каждое действие каждого аккаунта, пишутся
     # непрерывно фоном. Экраны показывают последние 20-60 записей и сводку за
     # неделю, поэтому месяца истории хватает с запасом. Индексы — schema_v227.

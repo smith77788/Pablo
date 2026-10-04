@@ -28,6 +28,10 @@ _POLL_INTERVAL_S = 60.0
 _BATCH = 20  # каналов на шаг за такт: ИИ и Telegram медленные, не держим цикл
 _NEWS_SCAN_BATCH = 12
 _NEWS_SCAN_CONCURRENCY = 4
+# Каналов, которым за такт пишутся посты впрок (каждому — одно обращение к ИИ
+# на пачку из ca._PREWRITE_BATCH постов). Очередь — по срочности: первым идёт
+# канал, чей ближайший ненаписанный слот раньше всех.
+_PREWRITE_CHANNELS = 8
 
 
 async def _rows(pool, where: str, *args) -> list[dict]:
@@ -180,6 +184,12 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
         try:
             await ca.setup_channel(pool, a["owner_id"], a["channel_id"])
             stats["setup"] += 1
+        except ca.AiBusy as e:
+            # Лимит ИИ — не сбой канала: без счётчика неудач и тревоги владельцу,
+            # настройка повторится, когда отметка устареет (условие выше).
+            await _safe("setup ai wait", pool.execute(
+                "UPDATE va_channel_admin SET last_error=$2, updated_at=now() WHERE id=$1",
+                a["id"], f"Жду ИИ: {e}"[:300]))
         except Exception as e:
             reason = str(e) if isinstance(e, ca.ChannelAdminError) else f"настройка не удалась: {e}"
             await _safe("setup fail", ca._fail(pool, bot, a, reason[:300],
@@ -223,6 +233,8 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
         except Exception:
             log.exception("channel_admin_runner: план канала %s", a["channel_id"])
 
+    stats["prewritten"] = await _prewrite_pass(pool, now)
+
     for a in await _rows(pool, "setup_done AND (last_stats_at IS NULL OR "
                                "last_stats_at < now() - interval '6 hours')"):
         # Отметка ДО сбора: канал, который не читается, не долбим каждую минуту.
@@ -243,6 +255,35 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
 
     stats["reports"] = await _daily_reports(pool, bot)
     return stats
+
+
+async def _prewrite_pass(pool, now: datetime) -> int:
+    """Написать посты впрок для самых срочных каналов (см. ca.prewrite).
+
+    Так публикация не зависит от лимита ИИ в свою минуту, а квота бесплатных
+    моделей делится между каналами по срочности, а не «кто первый в цикле».
+    Все модели на паузе — проход останавливается до следующего такта.
+    """
+    from datetime import timedelta
+    rows = await pool.fetch(
+        "SELECT p.owner_id, p.channel_id, MIN(p.slot_at) AS first_slot "
+        "FROM va_admin_plan p JOIN va_channel_admin a "
+        "ON a.owner_id=p.owner_id AND a.channel_id=p.channel_id "
+        "WHERE a.enabled AND a.setup_done AND NOT a.intro_pending "
+        "AND p.status='planned' AND p.body IS NULL "
+        "AND p.pillar <> $1 AND p.write_attempts < $2 AND p.slot_at > $3 AND p.slot_at <= $4 "
+        "GROUP BY p.owner_id, p.channel_id ORDER BY first_slot LIMIT $5",
+        ca.INTRO_PILLAR, ca._PREWRITE_MAX_ATTEMPTS, now - timedelta(hours=ca._MISSED_SLOT_H),
+        now + timedelta(hours=ca._PREWRITE_AHEAD_H), _PREWRITE_CHANNELS)
+    written = 0
+    for r in rows or []:
+        try:
+            written += await ca.prewrite(pool, int(r["owner_id"]), int(r["channel_id"]), now=now)
+        except ca.AiBusy:
+            break
+        except Exception:
+            log.exception("channel_admin_runner: посты впрок для канала %s", r["channel_id"])
+    return written
 
 
 def _td(**kw):
@@ -310,6 +351,8 @@ async def _stamp_report(pool, owner_id: int, *, retry: bool) -> None:
 
 
 async def run(pool, bot) -> None:
+    from services import llm_gate
+    llm_gate.attach(pool)
     log.info("channel_admin_runner: виртуальный администратор каналов запущен")
     while True:
         try:

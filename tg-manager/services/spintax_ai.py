@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 
+from services import llm_gate
 from services.ai_providers import configured_providers
 from services.logger import log_exc_swallow
 from services.spintax_service import SpintaxServiceError
@@ -32,6 +33,18 @@ _SPIN_PREFERRED_MODELS: dict[str, str] = {
 }
 
 
+class AiPaused(SpintaxServiceError):
+    """Все подходящие модели на паузе по лимиту запросов — к ним не обращались.
+
+    retry_at — когда освободится ближайшая. Вызывающий переносит работу на это
+    время, а не считает её сбоем (см. services/llm_gate)."""
+
+    def __init__(self, retry_at, detail: str = ""):
+        self.retry_at = retry_at
+        when = retry_at.strftime("%H:%M UTC") if retry_at else "позже"
+        super().__init__(detail or f"ИИ на паузе по лимиту запросов до {when}")
+
+
 def models_for(provider) -> list[str]:
     """Список моделей для /spin: сильные впереди, дефолтные провайдера — запас."""
     if provider.name == "openrouter":
@@ -49,17 +62,33 @@ async def complete(system: str, user: str) -> str:
     # 1) Claude Opus 4.8 (adaptive thinking, effort=xhigh) — предпочтительный путь.
     from services import ai_claude
 
+    # Модели на паузе по лимиту (services/llm_gate) пропускаются без запроса:
+    # повторный удар в исчерпанный лимит только сжигает остаток квоты.
+    paused: list = []
     if ai_claude.enabled():
-        try:
-            text = await ai_claude.complete(system, user)
-            if text.strip():
-                return text
-        except Exception:  # noqa: BLE001 - failover на OpenAI-совместимые провайдеры
-            log_exc_swallow(log, "spin: Claude недоступен, failover на OpenAI-провайдеры")
+        until = await llm_gate.blocked_until("anthropic", ai_claude.MODEL)
+        if until:
+            paused.append(until)
+        else:
+            try:
+                text = await ai_claude.complete(system, user)
+                if text.strip():
+                    await llm_gate.note_ok("anthropic", ai_claude.MODEL)
+                    return text
+                await llm_gate.note_call("anthropic", ok=False)
+            except Exception as exc:  # noqa: BLE001 - failover на OpenAI-совместимые провайдеры
+                lim = await llm_gate.note_limit("anthropic", ai_claude.MODEL, exc)
+                if lim:
+                    paused.append(lim)
+                else:
+                    await llm_gate.note_call("anthropic", ok=False)
+                log_exc_swallow(log, "spin: Claude недоступен, failover на OpenAI-провайдеры")
 
     # 2) OpenAI-совместимый failover (OpenRouter/Groq/Gemini/Ollama).
     providers = configured_providers()
     if not providers:
+        if paused:
+            raise AiPaused(min(paused))
         if ai_claude.enabled():
             raise SpintaxServiceError("Claude не ответил, других AI-провайдеров нет")
         raise SpintaxServiceError(
@@ -84,11 +113,15 @@ async def complete(system: str, user: str) -> str:
         while models:
             model = models.pop(0)
             tried.append(model)
+            until = await llm_gate.blocked_until(provider.name, model)
+            if until:
+                paused.append(until)
+                continue
             try:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    max_tokens=2500,
+                    max_tokens=4000,
                     temperature=_SPIN_TEMPERATURE,
                 )
                 choice = response.choices[0]
@@ -99,10 +132,17 @@ async def complete(system: str, user: str) -> str:
                     failures.append((f"{provider.name}/{model}", _CUT))
                     log.warning("ИИ: %s/%s — %s", provider.name, model, _CUT)
                 elif text.strip():
+                    await llm_gate.note_ok(provider.name, model)
                     return text
                 else:
                     failures.append((f"{provider.name}/{model}", "пустой ответ"))
+                await llm_gate.note_call(provider.name, ok=False)
             except Exception as exc:  # noqa: BLE001 - failover по провайдерам
+                lim = await llm_gate.note_limit(provider.name, model, exc)
+                if lim:
+                    paused.append(lim)
+                else:
+                    await llm_gate.note_call(provider.name, ok=False)
                 reason = explain_error(exc)
                 failures.append((f"{provider.name}/{model}", reason))
                 log.warning("ИИ: %s/%s не ответил — %s", provider.name, model, reason)
@@ -114,6 +154,11 @@ async def complete(system: str, user: str) -> str:
                     and any(r == _GONE for _, r in failures)):
                 discovered = True
                 models = [m for m in await _live_free_models(client) if m not in tried]
+    if paused and all(r in ("превышен лимит запросов", "на счёте нет средств")
+                      for _, r in failures):
+        # Ни одна модель не отказала по иной причине: всё упёрлось в лимиты —
+        # это пауза до сброса, а не поломка.
+        raise AiPaused(min(paused))
     raise SpintaxServiceError(summarize_failures(failures))
 
 
