@@ -8864,6 +8864,16 @@ function runPulseAction(a) {
   if (k==='retention') return openMassInvite();
   if (k==='health') return openHealth();
   if (k==='vlayer') return openVLayer();
+  // Связки модулей (services/op_chain): итог одной операции открывает
+  // следующий модуль уже заполненным — та же запись «kind:param» приходит и из
+  // кнопки уведомления бота, и из плашки итога в приложении.
+  const _n = (prm !== null && /^-?\d+$/.test(String(prm))) ? Number(prm) : null;
+  if (k==='invite_run' && _n) return startInviteFromParse(_n);
+  if (k==='campaign_run' && _n) return startCampaignFromParse(_n);
+  if (k==='invite_channel' && _n) return openMassInviteForChannel(_n);
+  if (k==='va_channel' && _n) return openVaChannel(_n);
+  if (k==='va') return openVaAdmin();
+  if (k==='channels') return openChannels();
   // «Открываю…» было обещанием, за которым ничего не следовало: человек нажимал
   // «Открыть», читал, что раздел открывается, и оставался на месте. Неизвестный
   // раздел — это поломка ссылки, и сказать надо именно это.
@@ -8895,6 +8905,29 @@ function copilotOpen(nav, fn) {
     else if (fn && typeof window[fn] === 'function') { window[fn](); }
     else { toast('⚠️ Раздел недоступен'); }
   } catch(e) { try { toast('⚠️ Не удалось открыть раздел'); } catch(_){} }
+}
+
+// Связка «итог операции → следующий модуль», открытие экрана. arg — «kind:param»
+// из services/op_chain; маршрут один на обе двери — runPulseAction.
+function openChainStep(screen) {
+  const s = String(screen || '');
+  const i = s.indexOf(':');
+  return runPulseAction({kind: i > 0 ? s.slice(0, i) : s, param: i > 0 ? s.slice(i + 1) : null});
+}
+// Связка, запускаемая одним нажатием: следующая операция по тому, что
+// произвела предыдущая. Клиент шлёт только «op_id:шаг» — цели сервер берёт из
+// сохранённого итога операции сам (подменить их отсюда нельзя).
+async function launchChainStep(arg) {
+  const s = String(arg || '');
+  const i = s.indexOf(':');
+  const opId = parseInt(s.slice(0, i), 10), step = s.slice(i + 1);
+  if (!(opId > 0) || !step) { toast('⚠️ Шаг устарел — откройте операцию заново'); return; }
+  if (!await askConfirm('Запустить следующий шаг по итогу операции #' + opId + '?')) return;
+  try {
+    const r = await api('/api/miniapp/op_chain/launch', {method:'POST', body:JSON.stringify({op_id: opId, step})});
+    toast((r.message || '✅ Запущено') + ((r.op_ids && r.op_ids.length === 1) ? ' · операция #' + r.op_ids[0] : ''));
+    if (r.op_ids && r.op_ids.length === 1) pollOpResult(r.op_ids[0], r.message || 'Следующий шаг');
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Шаг не запустился').substring(0, 140)); }
 }
 
 // «Отложить» — клиентское, на сутки, по id подсказки (без роста схемы БД).

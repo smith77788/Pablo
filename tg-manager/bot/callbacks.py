@@ -801,3 +801,11 @@ class AboutCb(CallbackData, prefix="about"):
 
     action: str          # menu | sec | share
     key: str = ""        # ключ раздела каталога
+
+
+class ChainCb(CallbackData, prefix="chn"):
+    """Связка модулей: следующий шаг по итогу операции (services/op_chain)."""
+
+    action: str      # go — запустить шаг
+    op_id: int = 0   # исходная операция
+    s: str = ""      # id шага op_chain

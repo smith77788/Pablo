@@ -2882,6 +2882,28 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     return {str(r["target"]) for r in (rows or []) if r["target"]}
 
 
+async def _created_channel_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
+    """Telegram id каналов, созданных операцией (включая прогоны до повтора).
+
+    Источник — журнал шагов: успешный шаг создания пишет «channel_id=<id>».
+    Никогда не бросает.
+    """
+    rows = await _safe_fetch(
+        pool,
+        "SELECT message FROM operation_log "
+        " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND step_num IS NOT NULL"
+        " ORDER BY step_num",
+        await journal_op_ids(pool, op_id),
+        log_ctx=f"[created_channel_ids op={op_id}]",
+    )
+    out: list[int] = []
+    for r in rows or []:
+        m = re.search(r"channel_id=(-?\d+)", str(r["message"] or ""))
+        if m and int(m.group(1)) not in out:
+            out.append(int(m.group(1)))
+    return out
+
+
 async def completed_steps(pool: asyncpg.Pool, op_id: int) -> set[int]:
     """Номера шагов операции, уже отработанных УСПЕШНО (operation_log.step_num).
 
@@ -4161,6 +4183,18 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                           + (f" (осталось {_left_items})" if _left_items else "")),
                     callback_data=MassOpCb(action="retry_op", op_id=op_id),
                 )
+            # Связка модулей: следующий шаг по тому, что операция произвела
+            # (база → инвайт, новые аккаунты → прогрев, каналы → папка/админ).
+            # Тот же источник шагов, что у плашки итога в мини-аппе.
+            try:
+                from services import op_chain as _op_chain
+                from bot.handlers.op_chain import add_chain_buttons
+
+                add_chain_buttons(kb, op_id, _op_chain.steps_for(
+                    op_type, _final_status, params,
+                    result if isinstance(result, dict) else {}))
+            except Exception:
+                log_exc_swallow(log, f"op_chain: шаги для op {op_id} не собраны")
             kb.button(
                 text="📋 Детали операции",
                 callback_data=BmCb(action="op_detail", op_id=op_id),
@@ -8350,6 +8384,13 @@ async def _exec_bulk_create_channels(
             "created": created_count,
             "failed": failed_count,
             "summary": f"Создано {_unit}: {created_count}, ошибок: {failed_count}",
+            # Связка модулей: новые ресурсы — в папку, к администратору, в инвайт
+            # (services/op_chain). По журналу, а не по счётчику этого прогона:
+            # каналы, созданные до повтора, тоже свои.
+            "handoff": {
+                "channel_ids": await _created_channel_ids(pool, op_id),
+                "chan_kind": "group" if is_group else "channel",
+            },
         }
     finally:
         await release_accounts([_claimed_acc])
@@ -17409,6 +17450,9 @@ async def _exec_parse_audience(
             "total_found": total_found,
             "total_saved": total_saved,
             "summary": f"👥 Парсинг {source_ref}: найдено {total_found}, сохранено {total_saved}",
+            # Связка модулей: база уходит в инвайт/рассылку без повторного
+            # выбора из списка (services/op_chain).
+            "handoff": {"parse_run_id": result.get("run_id")},
         }
     except Exception as exc:
         log.exception("_exec_parse_audience op=%d source=%s", op_id, source_ref)
@@ -18043,6 +18087,8 @@ async def _exec_auto_register(
         "ok": ok_n,
         "failed": fail_n,
         "summary": f"📱 Авторег {country}: ✅ {ok_n}/{cnt}" + (f" ⚠️ {fail_n}" if fail_n else ""),
+        # Связка модулей: новые аккаунты сразу в прогрев/проверку (services/op_chain).
+        "handoff": {"account_ids": list(res.get("account_ids") or [])},
     }
 
 

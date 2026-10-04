@@ -139,3 +139,40 @@ def summarize(record: dict, invite_link: str | None = None,
     if join_count:
         return head + f" · добавили {join_count}"
     return head + " · ссылка готова, добавлений пока нет"
+
+
+async def submit_folder(pool, owner_id: int, chat_ids: list, title: str,
+                        acc_id: int | None = None,
+                        instance_id: int | None = None) -> dict:
+    """Собрать папку из СВОИХ чатов владельца и поставить экспорт ссылки.
+
+    Единая дорога для мини-аппа (экран папок) и связок модулей
+    (`services/op_chain`: «создал каналы → собрал папку»). Чаты сверяются с
+    managed_channels владельца — чужие и неизвестные отсеиваются.
+    Возвращает {"ok", "folder_id", "op_id", "chat_count"} или {"ok": False,
+    "reason", "status"}; отказ по тарифу пробрасывается PermissionError.
+    """
+    from database import db as _db
+    from services import operation_bus as _obus
+
+    assets = [{"chat_id": c} for c in (chat_ids or [])]
+    ok, why, eligible = validate_selection(assets)
+    if not ok:
+        return {"ok": False, "reason": why, "status": 400}
+    rows = await pool.fetch(
+        "SELECT channel_id FROM managed_channels WHERE owner_id=$1", int(owner_id))
+    owned_ids = {int(r["channel_id"]) for r in (rows or [])}
+    eligible = [a for a in eligible if int(a["chat_id"]) in owned_ids]
+    if not eligible:
+        return {"ok": False, "status": 400,
+                "reason": "В подборку попали только чужие или неизвестные чаты — "
+                          "выбирайте из своих каналов."}
+    record = build_folder_record(owner_id, title or "Подборка", eligible, instance_id)
+    folder_id = await _db.save_chatlist_folder(
+        pool, owner_id, record, acc_id=int(acc_id) if acc_id else None)
+    op_id = await _obus.submit(pool, owner_id, "create_chatlist_folder", {
+        "folder_id": folder_id, "title": record["title"],
+        "chat_ids": record["chat_ids"], "acc_id": acc_id,
+    }, total_items=1, label=f"Общая папка «{record['title']}»")
+    return {"ok": True, "folder_id": folder_id, "op_id": op_id,
+            "chat_count": record["chat_count"]}

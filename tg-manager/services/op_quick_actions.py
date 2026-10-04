@@ -58,7 +58,7 @@ _AFTER_DONE = {
 
 
 def suggest(op_type: str, status: str, result: dict | None,
-            op_id: int | None = None) -> list[dict]:
+            op_id: int | None = None, params: dict | None = None) -> list[dict]:
     """Быстрые действия по итогу операции. Порядок = приоритет показа.
 
     Сначала то, что чинит НАЙДЕННУЮ проблему (прокси, права, остаток целей), и
@@ -108,9 +108,25 @@ def suggest(op_type: str, status: str, result: dict | None,
              "ни один аккаунт не подключился — нужны живые сессии",
              arg="accounts")
 
-    # 5. Обычный следующий шаг по типу операции.
+    # 5. Связка с другим модулем по ТОМУ, что операция произвела (база парсера,
+    #    новые аккаунты, новые каналы) — services/op_chain. Это конкретнее
+    #    общего «открыть раздел», поэтому, когда связка есть, общий шаг не нужен.
+    chained = False
+    from services import op_chain as _chain
+    for stp in _chain.steps_for(op_type or "", st, params, res):
+        if stp["kind"] == "launch":
+            if not op_id:
+                continue
+            _add(f"chain_{stp['id']}", stp["label"], "launchChainStep",
+                 stp["reason"], arg=f"{int(op_id)}:{stp['id']}")
+        else:
+            _add(f"chain_{stp['id']}", stp["label"], "openChainStep",
+                 stp["reason"], arg=stp["screen"])
+        chained = True
+
+    # 6. Обычный следующий шаг по типу операции.
     nxt = _AFTER_DONE.get(op_type or "")
-    if nxt and st != "failed":
+    if nxt and st != "failed" and not chained:
         _add(f"next_{op_type}", nxt[0], nxt[1], "следующий шаг",
              arg=(nxt[2] if len(nxt) > 2 else None))
 

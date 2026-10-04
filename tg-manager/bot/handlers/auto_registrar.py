@@ -854,6 +854,7 @@ async def _do_batch_register(
     )
 
     ok_accs: list[str] = []
+    ok_ids: list[int] = []   # tg_accounts.id созданных — вход следующего шага (op_chain)
     failed: list[str] = []
     dev_profile = await db.get_autoreg_device_profile(pool, owner_id) or {}
 
@@ -919,6 +920,8 @@ async def _do_batch_register(
             await cleanup_pending(phone)
             acc_id = await _save_account(pool, owner_id, phone, session_str, info, proxy_id=proxy_id)
             ok_accs.append(f"{phone} → id{acc_id}")
+            if acc_id:
+                ok_ids.append(int(acc_id))
 
         except Exception as exc:
             log.warning("autoreg batch i=%d phone=%s: %s", i, phone, exc)
@@ -959,7 +962,7 @@ async def _do_batch_register(
             )
         except Exception:
             log_exc_swallow(log, "_do_batch_register: report edit failed")
-    return {"ok": ok_accs, "failed": failed}
+    return {"ok": ok_accs, "failed": failed, "account_ids": ok_ids}
 
 
 # ── Пакетная регистрация с расписанием ──────────────────────────────────────

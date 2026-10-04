@@ -211,11 +211,46 @@ async def msg_inviter_preflight(
 
 @router.callback_query(InviterCb.filter(F.action == "start"))
 async def cb_inviter_start(callback: CallbackQuery, state: FSMContext) -> None:
+    # Обычный вход — без базы, предвыбранной из итога парсинга.
+    await state.update_data(prefill_run=None)
     await state.set_state(InviterFSM.group)
     await _edit(
         callback,
         "👥 <b>Инвайтер — шаг 1/3</b>\n\n"
         "Введите @username или ссылку группы, <b>куда</b> добавляем пользователей:\n\n"
+        "<i>Аккаунты должны уже быть участниками этой группы.</i>",
+        _cancel_kb(),
+    )
+
+
+@router.callback_query(InviterCb.filter(F.action == "from_run"))
+async def cb_inviter_from_run(
+    callback: CallbackQuery, callback_data: InviterCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Вход из итога парсинга (связка op_chain): база уже выбрана, спросить группу.
+
+    Раньше после «👥 Парсинг: сохранено N» человек шёл в инвайтер и выбирал ту
+    же базу из списка заново.
+    """
+    try:
+        run_id = int(callback_data.item)
+    except (TypeError, ValueError):
+        await callback.answer("⚠️ База не найдена", show_alert=True)
+        return
+    count = await pool.fetchval(
+        "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences "
+        "WHERE owner_id=$1 AND parse_run_id=$2", callback.from_user.id, run_id) or 0
+    if not count:
+        await callback.answer("⚠️ В этой базе никого нет — запустите парсинг заново",
+                              show_alert=True)
+        return
+    await state.clear()
+    await state.update_data(prefill_run=run_id, prefill_count=int(count))
+    await state.set_state(InviterFSM.group)
+    await _edit(
+        callback,
+        f"👥 <b>Инвайт базы #{run_id}</b> ({int(count):,} чел.)\n\n"
+        "Введите @username или ссылку группы, <b>куда</b> добавляем:\n\n"
         "<i>Аккаунты должны уже быть участниками этой группы.</i>",
         _cancel_kb(),
     )
@@ -235,6 +270,21 @@ async def msg_inviter_group(message: Message, state: FSMContext) -> None:
     group = parse_group_ref(message.text or "")
     await state.update_data(group=group)
     await state.set_state(InviterFSM.source)
+    _pre = (await state.get_data()).get("prefill_run")
+    if _pre:
+        # База пришла из итога парсинга — источник не спрашиваем, ведём на
+        # тот же шаг, что и ручной выбор базы из списка.
+        await state.update_data(source_type="parser")
+        kb = InlineKeyboardBuilder()
+        kb.button(text=f"▶️ Продолжить с базой #{int(_pre)}",
+                  callback_data=InviterCb(action="pick_run", item=str(int(_pre))))
+        kb.button(text="🔄 Выбрать другой источник", callback_data=InviterCb(action="src_parser"))
+        kb.button(text="❌ Отмена", callback_data=InviterCb(action="menu"))
+        kb.adjust(1)
+        await message.answer(
+            f"✅ Группа: <code>{html.escape(group)}</code>",
+            parse_mode="HTML", reply_markup=kb.as_markup())
+        return
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Из базы парсера", callback_data=InviterCb(action="src_parser"))
     kb.button(text="📇 Из хранилища контактов (CRM)", callback_data=InviterCb(action="src_crm"))

@@ -3697,7 +3697,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             f"{op_status.sql_error_reason()} AS error_msg, "
             "created_at, finished_at, scheduled_for, "
             "COALESCE(result->>'summary', result->>'reason') AS summary, "
-            "result AS _result "
+            "result AS _result, params AS _params "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2", op_id, uid)
         if not row:
             return _err("Операция не найдена", 404)
@@ -3706,14 +3706,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # («назначьте прокси», «проверьте права», «повторите позже»), а кнопки
         # рядом не было — совет уходил в пустоту.
         _res_raw = d.pop("_result", None)
+        _prm_raw = d.pop("_params", None)
         try:
             import json as _json_qa
             from services import op_quick_actions as _qa
 
             _res = (_res_raw if isinstance(_res_raw, dict)
                     else _json_qa.loads(_res_raw or "{}"))
+            _prm = (_prm_raw if isinstance(_prm_raw, dict)
+                    else _json_qa.loads(_prm_raw or "{}"))
             d["quick_actions"] = _qa.suggest(
-                d.get("op_type"), d.get("status"), _res, op_id=op_id)
+                d.get("op_type"), d.get("status"), _res, op_id=op_id, params=_prm)
         except Exception:
             log.debug("operation_status: быстрые действия недоступны op=%s", op_id)
             d["quick_actions"] = []
@@ -11637,34 +11640,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not chat_ids:
                 return _err("В связке нет ваших каналов, пригодных для папки.", 400)
 
-        assets = [{"chat_id": c} for c in chat_ids]
-        ok, why, eligible = cf.validate_selection(assets)
-        if not ok:
-            return _err(why, 400)
-        # Все чаты должны быть СВОИми — сверяем с managed_channels владельца.
-        eligible = [a for a in eligible if int(a["chat_id"]) in owned_ids]
-        if not eligible:
-            return _err("В подборку попали только чужие или неизвестные чаты — "
-                        "выбирайте из своих каналов.", 400)
-        record = cf.build_folder_record(
-            uid, body.get("title") or auto_title or "Подборка",
-            eligible, instance_id)
-        acc_id = body.get("acc_id")
-        from database import db as _db
-
-        folder_id = await _db.save_chatlist_folder(pool, uid, record,
-                                                   acc_id=int(acc_id) if acc_id else None)
+        # Отбор своих чатов, запись папки и постановка экспорта — одна дорога
+        # со связками модулей (op_chain «создал каналы → собрал папку»).
         try:
-            op_id = await _obus.submit(pool, uid, "create_chatlist_folder", {
-                "folder_id": folder_id, "title": record["title"],
-                "chat_ids": record["chat_ids"], "acc_id": acc_id,
-            }, total_items=1, label=f"Общая папка «{record['title']}»")
+            r = await cf.submit_folder(pool, uid, chat_ids,
+                                       body.get("title") or auto_title or "Подборка",
+                                       acc_id=body.get("acc_id"), instance_id=instance_id)
         except PermissionError as exc:
             # Отказ по тарифу — не сбой: честный 403 с причиной, чтобы платная
             # функция не выглядела сломанной.
             return _err(str(exc) or "Требуется подписка", 403)
-        return _json_resp({"ok": True, "folder_id": folder_id, "op_id": op_id,
-                           "chat_count": record["chat_count"]})
+        if not r.get("ok"):
+            return _err(r.get("reason") or "Папку собрать не удалось", r.get("status") or 400)
+        return _json_resp({"ok": True, "folder_id": r["folder_id"], "op_id": r["op_id"],
+                           "chat_count": r["chat_count"]})
 
     async def chatlist_folder_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -18046,6 +18035,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 return []
 
+        async def completed_quick_actions(op: dict) -> list:
+            """Быстрые действия по итогу — только для НОВОГО итога, не каждый такт."""
+            try:
+                from services import op_chain as _oc, op_quick_actions as _qa
+
+                row = await pool.fetchrow(
+                    "SELECT params, result FROM operation_queue WHERE id=$1 AND owner_id=$2",
+                    op["id"], uid)
+                if not row:
+                    return []
+                return _qa.suggest(op["op_type"], op["status"], _oc.as_dict(row["result"]),
+                                   op_id=op["id"], params=_oc.as_dict(row["params"]))
+            except Exception:
+                log.debug("miniapp/events: быстрые действия op=%s недоступны", op.get("id"))
+                return []
+
         # Живой поток статистики совпадает по скоупу с дашбордом/экраном
         # «Аккаунты»: owner-scoped по умолчанию, платформа — только ?scope=platform.
         _adm = _wants_platform_scope(request, uid)
@@ -18103,6 +18108,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                             # Без него мини-апп мог сказать только «завершилась»,
                             # но не «что получилось».
                             "summary": op.get("summary"),
+                            # Следующий шаг прямо на плашке итога — в т.ч.
+                            # связка с другим модулем (services/op_chain).
+                            "quick_actions": await completed_quick_actions(op),
                         })
                 while len(_seen_order) > 500:
                     _seen_completed.discard(_seen_order.popleft())
@@ -19525,6 +19533,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("next_actions_apply id=%s uid=%s", action_id, uid)
             return _err("Не удалось применить действие", 500)
 
+    async def op_chain_launch(request: web.Request) -> web.Response:
+        """Запустить связку «итог операции → следующий модуль» в одно нажатие.
+
+        Клиент присылает только номер исходной операции и id шага; цели шаг
+        берёт из сохранённого итога этой операции владельца (services/op_chain),
+        та же функция стоит за кнопкой в уведомлении бота.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            op_id = int(body.get("op_id") or 0)
+        except (TypeError, ValueError):
+            op_id = 0
+        step = str(body.get("step") or "").strip()[:32]
+        if op_id <= 0 or not step:
+            return _err("Не указаны операция и шаг", 400)
+        from services import op_chain as _oc
+
+        r = await _oc.launch(pool, uid, op_id, step)
+        if not r.get("ok"):
+            return _err(r.get("reason") or "Шаг не запустился", 409)
+        return _json_resp(r)
+
     async def dashboard_realtime(request: web.Request) -> web.Response:
         """Analytics Dashboard — операторская сводка на РЕАЛЬНЫХ данных, которые
         система собирает: аккаунты, каналы, аудитория ботов, операции + дневные
@@ -20423,6 +20459,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/dashboard/attention", dashboard_attention)
     app.router.add_get("/api/miniapp/next_actions", next_actions)
     app.router.add_post("/api/miniapp/next_actions/apply", next_actions_apply)
+    app.router.add_post("/api/miniapp/op_chain/launch", op_chain_launch)
     app.router.add_get("/api/miniapp/accounts/health", accounts_health)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
     app.router.add_get("/api/miniapp/networks", networks_list)

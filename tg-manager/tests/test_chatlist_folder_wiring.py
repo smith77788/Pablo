@@ -86,7 +86,12 @@ def test_export_error_classifier_is_present():
 # ── API: отказ негодного набора и владельческий скоуп ──────────────────────
 
 def test_create_endpoint_validates_before_enqueuing():
-    src = _func_src(_API, "chatlist_folder_create")
+    # Отбор и постановка — одна общая дорога с op_chain («создал каналы →
+    # собрал папку»): эндпойнт обязан идти через неё, а не копию проверок.
+    assert "cf.submit_folder(" in _func_src(_API, "chatlist_folder_create")
+    src = _func_src(
+        (_ROOT / "services" / "chatlist_folders.py").read_text(encoding="utf-8"),
+        "submit_folder")
     assert "validate_selection" in src
     # Чужие чаты отсекаются по managed_channels владельца.
     assert "managed_channels" in src and "owner_id=$1" in src
