@@ -108,8 +108,13 @@ async def _get_chat_messages(
     chat_id: int,
     limit: int = 20,
     _acc: dict | None = None,
+    pool: "asyncpg.Pool | None" = None,
 ) -> list[dict]:
-    """Получить последние сообщения из чата (включая ЛС с ботом)."""
+    """Получить последние сообщения из чата (включая ЛС с ботом).
+
+    `pool` нужен, чтобы назначенную Telegram паузу записать в flood_engine:
+    без неё FloodWait оставался только в логе, а аккаунт выглядел отдохнувшим
+    для следующей операции — и шёл за новым штрафом."""
     from telethon.errors import (
         ChannelPrivateError,
         FloodWaitError,
@@ -128,6 +133,14 @@ async def _get_chat_messages(
             return []
         except FloodWaitError as e:
             log.warning("_get_chat_messages: FloodWait %ds chat_id=%s", e.seconds, chat_id)
+            if pool is not None and (_acc or {}).get("id"):
+                try:
+                    from services.flood_engine import record_flood
+                    await record_flood(pool, int(_acc["id"]),
+                                       int(getattr(e, "seconds", 0) or 0),
+                                       "read_messages")
+                except Exception:
+                    log_exc_swallow(log, "rest_api: запись флуд-паузы не сработала")
             await client.disconnect()
             return []
         except ChatWriteForbiddenError:
@@ -302,7 +315,8 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
             if not acc:
                 return web.json_response({"error": "account not found"}, status=404)
             messages = await _get_chat_messages(
-                acc["session_str"], chat_id, limit=limit, _acc=dict(acc)
+                acc["session_str"], chat_id, limit=limit, _acc=dict(acc),
+                pool=pool,
             )
             return web.json_response({"messages": messages, "count": len(messages)})
         except Exception:

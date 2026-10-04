@@ -2678,7 +2678,8 @@ async def create_shared_folder_link(
 ) -> dict:
     """Создать общую папку из указанных чатов и экспортировать chatlist-ссылку.
 
-    Возвращает {ok, invite_link, slug, filter_id, error, error_kind}. error_kind:
+    Возвращает {ok, invite_link, slug, filter_id, error, error_kind} и, при
+    FloodWait, ещё flood_wait с длительностью паузы в секундах. error_kind:
     'premium' — нужна Telegram Premium на аккаунте (Telegram требует Premium для
     ШАРИНГА папок), 'auth' — сессия мертва, 'flood' — FloodWait, 'peer' — чат
     недоступен аккаунту, 'other' — прочее.
@@ -2775,8 +2776,12 @@ async def create_shared_folder_link(
 
         return await asyncio.wait_for(_work(), timeout=_OP_TIMEOUT)
     except FloodWaitError as e:
+        # flood_wait числом, а не только внутри текста: без него вызывающий
+        # исполнитель не мог записать назначенную паузу в flood_engine, и
+        # аккаунт выглядел отдохнувшим для следующей операции.
         return {"ok": False, "error": f"FloodWait {getattr(e,'seconds','?')}с",
-                "error_kind": "flood", "filter_id": _created["filter_id"]}
+                "error_kind": "flood", "filter_id": _created["filter_id"],
+                "flood_wait": int(getattr(e, "seconds", 0) or 0)}
     except Exception as e:
         low = str(e).lower()
         if "premium" in low or "chatlists.chatlist_invites" in low or "user_premium" in low:

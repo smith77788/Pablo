@@ -6488,6 +6488,10 @@ async def _exec_global_presence_channel(
 
             if result.get("error") and result.get("flood_wait"):
                 raw_flood = int(result["flood_wait"])
+                # Та же запись, что и в bulk_channels: пауза принадлежит
+                # аккаунту и переживает этот прогон.
+                await _note_flood_penalty(
+                    pool, int(acc["id"]), raw_flood, "create_channel", op_id)
                 if raw_flood > 600:
                     # Flood wait too long to block the batch — skip this target and continue
                     log.warning(
@@ -6616,6 +6620,10 @@ async def _exec_global_presence_channel(
 
                         m = _re.search(r"(\d+)", err)
                         flood_wait = int(m.group(1)) + 5 if m else 60
+                        # Пауза за имя принадлежит аккаунту и живёт дольше
+                        # этого прогона — записываем до любых решений о сне.
+                        await _note_flood_penalty(
+                            pool, int(acc["id"]), flood_wait, "username", op_id)
                         if flood_wait > _FLOOD_INLINE_MAX_S:
                             # Пауза без предела здесь держала слот и аккаунты
                             # часами ради ОДНОГО имени: канал к этому моменту
@@ -7464,6 +7472,12 @@ async def _exec_global_presence_bot(
             # BotFather flood_wait — ждём указанное время и пробуем другим аккаунтом
             if result.get("error") and result.get("flood_wait"):
                 wait_s = int(result["flood_wait"]) + random.randint(30, 60)
+                # Лимит BotFather считается НА АККАУНТ, поэтому пауза остаётся
+                # на том аккаунте, который её получил, даже когда ретрай идёт
+                # с другого. Без записи следующая операция возьмёт его первым.
+                await _note_flood_penalty(
+                    pool, int(acc["id"]),
+                    result.get("flood_wait") or 0, "create_bot", op_id)
                 log.info(
                     "op_worker gp_bot: BotFather flood_wait %ds, switching account and retrying",
                     wait_s,
@@ -7816,6 +7830,12 @@ async def _exec_bulk_create_channels_multi(
             )
 
             flood_wait = result.get("flood_wait", 0) if isinstance(result, dict) else 0
+            # Пауза в flood_engine, а не только в сне этого прогона: иначе
+            # аккаунт выглядит отдохнувшим для следующей операции и для
+            # подборщиков флота (resource_selector, fleet_pulse).
+            if flood_wait:
+                await _note_flood_penalty(
+                    pool, int(acc["id"]), flood_wait, "create_channel", op_id)
             if result.get("banned") or account_manager.is_dead_session_error(
                 result.get("error") if isinstance(result, dict) else str(result)
             ):
@@ -8170,6 +8190,12 @@ async def _exec_bulk_create_channels(
             # Handle flood wait
             if result.get("error") and result.get("flood_wait"):
                 raw_flood = int(result["flood_wait"])
+                # Пауза уходит в flood_engine ДО решения «ждать или пропустить»:
+                # Telegram назначил её аккаунту, и она остаётся в силе, даже
+                # если этот прогон решил цель пропустить. Без записи следующая
+                # операция брала аккаунт как отдохнувший и шла за новым штрафом.
+                await _note_flood_penalty(
+                    pool, int(acc["id"]), raw_flood, "create_channel", op_id)
                 if raw_flood > 600:
                     # Flood wait too long to block the batch — skip this channel
                     log.warning(
@@ -8445,6 +8471,22 @@ async def _exec_bot_factory_multi(
                     active_accounts = [a for a in active_accounts if a["id"] != candidate["id"]]
                     continue
                 if result.get("peer_flood") or result.get("flood_wait"):
+                    # Аккаунт пропускаем, но пауза остаётся на НЁМ: без записи
+                    # следующая операция возьмёт его первым как свободного.
+                    # PeerFlood у BotFather — тот же сигнал флага аккаунта,
+                    # что и при инвайте, поэтому и срок берём оттуда.
+                    if result.get("peer_flood"):
+                        try:
+                            from services.flood_engine import record_peer_flood
+                            await record_peer_flood(
+                                pool, int(candidate["id"]), "create_bot", op_id)
+                        except Exception:
+                            log_exc_swallow(
+                                log, "bot_factory: запись PeerFlood не сработала")
+                    else:
+                        await _note_flood_penalty(
+                            pool, int(candidate["id"]),
+                            result.get("flood_wait") or 0, "create_bot", op_id)
                     continue
                 break
             if result is None:
@@ -8725,6 +8767,9 @@ async def _exec_bot_factory(
                 flood_wait = result.get("flood_wait")
                 if flood_wait:
                     wait_secs = int(flood_wait)
+                    # Та же причина, что выше: пауза переживает прогон.
+                    await _note_flood_penalty(
+                        pool, int(acc["id"]), wait_secs, "create_bot", op_id)
                     if wait_secs <= 600:
                         log.info(
                             "_exec_bot_factory: FloodWait %ds, sleeping...", wait_secs + 15
@@ -10764,6 +10809,13 @@ async def _exec_bulk_update_profile(
                         err_list.append(f"❌ {label}: забанен")
                     elif isinstance(result, dict) and result.get("flood_wait"):
                         err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                        # Пауза Telegram за смену имени — самая длинная из
+                        # бытовых (часы, иногда сутки). Без записи аккаунт
+                        # выглядел отдохнувшим: следующая операция брала его
+                        # сразу и шла за новым штрафом.
+                        await _note_flood_penalty(
+                            pool, int(acc["id"]),
+                            result.get("flood_wait") or 0, "username", op_id)
                     elif result and not isinstance(result, dict):
                         err_list.append(f"❌ {label}: {_html.escape(str(result)[:50])}")
                     else:
@@ -10777,6 +10829,11 @@ async def _exec_bulk_update_profile(
                         err_list.append(f"❌ {label}: забанен")
                     elif isinstance(result, dict) and result.get("flood_wait"):
                         err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                        # То же, что и у username: пауза назначена АККАУНТУ,
+                        # а не полю, и о ней должен знать весь флот.
+                        await _note_flood_penalty(
+                            pool, int(acc["id"]),
+                            result.get("flood_wait") or 0, "profile", op_id)
                     elif result:
                         ok_list.append(f"✅ {label}")
                     else:
@@ -14410,6 +14467,11 @@ async def _exec_create_chatlist_folder(
         elif kind == "peer":
             msg = "⚠️ Аккаунт не админ ни в одном из выбранных чатов — папку не собрать."
         elif kind == "flood":
+            # Пауза принадлежит аккаунту и переживает эту операцию: без записи
+            # следующая взяла бы его первым как свободного.
+            await _note_flood_penalty(
+                pool, int(acc["id"]), res.get("flood_wait") or 0,
+                "shared_folder", op_id)
             msg = f"⚠️ Telegram просит подождать: {res.get('error')}"
         elif kind == "auth":
             msg = "⚠️ Сессия аккаунта недействительна — переимпортируйте его."
