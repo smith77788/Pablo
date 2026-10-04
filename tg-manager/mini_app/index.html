@@ -2849,6 +2849,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openEcosystemModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
+    <div id="ecoRecs"></div>
     <div class="sec">Мои экосистемы</div>
     <div class="lst" id="ecoList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
@@ -24201,9 +24202,40 @@ async function openMassOps(focusId) {
 // ── Ecosystems ─────────────────────────────────────────
 const ECO_TYPES = {network:'🕸 Сеть',media:'📱 Медиа',commerce:'🛒 Торговля',community:'🏘 Сообщество',custom:'🌐 Кастом'};
 const RISK_LABEL = {low:'🟢 Низкий',medium:'🟡 Средний',high:'🟠 Высокий',critical:'🔴 Критический'};
+// Куда ведёт каждый совет по экосистемам. Ключи приходят с сервера
+// (services/ecosystem_brain.get_ecosystem_recommendations) — совет перестал быть
+// текстом, по которому нельзя нажать.
+const ECO_REC_GO = {
+  eco_create:        {fn:'openEcosystemModal()',          label:'➕ Создать'},
+  accounts:          {fn:"goTab('accounts')",             label:'📱 К аккаунтам'},
+  accounts_cooldown: {fn:"healthGoAccounts('cooldown')",  label:'⏳ На кулдауне'},
+  op_create:         {fn:'openOpCreate()',                label:'▶ Запустить операцию'},
+  ops_failed:        {fn:"opsGo('failed')",               label:'❌ Разобрать ошибки'},
+  channels:          {fn:"goTab('channels')",             label:'📡 К каналам'},
+};
+async function ecoLoadRecs() {
+  const box = document.getElementById('ecoRecs');
+  if (!box) return;
+  try {
+    const d = await api('/api/miniapp/ecosystem_recommendations');
+    const recs = d.recommendations || [];
+    if (!recs.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="sec">Что стоит сделать</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;padding:0 16px">' +
+      recs.map(r=>{
+        const t = typeof r === 'string' ? r : (r.text||'');
+        const g = (typeof r === 'object' && r.go) ? ECO_REC_GO[r.go] : null;
+        return `<div style="background:var(--bg2);border-left:3px solid var(--accent,#7c3aed);border-radius:0 10px 10px 0;padding:9px 12px">
+          <div style="font-size:12px;line-height:1.45">${esc(t)}</div>
+          ${g?`<button class="btn btn-s" style="margin-top:7px;font-size:12px;padding:6px 12px" onclick="${g.fn}">${esc(g.label)}</button>`:''}
+        </div>`;
+      }).join('') + '</div>';
+  } catch(e) { box.innerHTML = ''; }
+}
 async function openEcosystems() {
   push('s-ecosystems');
   txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
+  ecoLoadRecs();
   try {
     const rows = await api('/api/miniapp/ecosystems');
     if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
@@ -24226,13 +24258,45 @@ async function openEcosystems() {
   } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e))); }
 }
 let CUR_ECO_ID = null;
+// Состав экосистемы приходил типами и номерами строк («account #17»),
+// ролями и типами событий по-английски. Владелец читает интерфейс по-русски, и
+// по номеру строки в базе он не узнает ни аккаунт, ни канал.
+const ECO_OBJ_RU = {account:'Аккаунт', bot:'Бот', channel:'Канал', group:'Группа'};
+const ECO_OBJ_ICO = {account:'📱', bot:'🤖', channel:'📡', group:'👥'};
+const ECO_ROLE_RU = {member:'участник', core:'ядро', hub:'узел связи',
+                     satellite:'спутник', primary:'главный', support:'поддержка'};
+const ECO_EV_RU = {dna_applied:'применён профиль поведения', cloned:'склонирована',
+                   scores_synced:'метрики пересчитаны', sync:'синхронизация',
+                   created:'создана', member_added:'добавлен участник',
+                   member_removed:'убран участник'};
+function ecoObjRu(t) { return ECO_OBJ_RU[String(t||'').toLowerCase()] || (t||'объект'); }
+function ecoRoleRu(r) { return ECO_ROLE_RU[String(r||'').toLowerCase()] || (r||'участник'); }
+function ecoEvRu(e) { return ECO_EV_RU[String(e||'').toLowerCase()] || (e||'событие'); }
+// Переход к самому объекту: из состава экосистемы видно аккаунт, канал и бота.
+function ecoOpenMember(type, id) {
+  const t = String(type||'').toLowerCase();
+  if (t === 'account') return openAccount(id);
+  if (t === 'bot') return openBot(id);
+  if (t === 'channel' || t === 'group') return openChannel(id);
+  toast('⚠️ Для этого типа объекта нет отдельного экрана');
+}
+async function ecoDropMember(type, id, name) {
+  if (!CUR_ECO_ID) return;
+  if (!await askConfirm(`Убрать ${ecoObjRu(type).toLowerCase()} «${name||id}» из экосистемы?\n\nСам объект останется — уйдёт только привязка.`)) return;
+  try {
+    await api(`/api/miniapp/ecosystem/${CUR_ECO_ID}/member/drop`, {method:'POST',
+      body: JSON.stringify({object_type:type, object_id:id})});
+    toast('✅ Убран из экосистемы');
+    openEcoDetail(CUR_ECO_ID, document.getElementById('ecodetail-name').textContent);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
 async function ecoAutoDiscover() {
   if (!CUR_ECO_ID) return;
   if (!await askConfirm('Авто-наполнить экосистему подходящими аккаунтами/каналами/ботами?')) return;
   toast('🔎 Подбираю объекты…');
   try {
     const r = await api(`/api/miniapp/ecosystem/${CUR_ECO_ID}/auto_discover`, {method:'POST'});
-    const parts = Object.entries(r.added||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}: ${v}`);
+    const parts = Object.entries(r.added||{}).filter(([k,v])=>v>0).map(([k,v])=>`${ECO_OBJ_RU[k]||k}: ${v}`);
     toast(r.total>0 ? `✅ Добавлено ${r.total} (${parts.join(', ')})` : 'Новых подходящих объектов не найдено');
     openEcoDetail(CUR_ECO_ID, document.getElementById('ecodetail-name').textContent);
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
@@ -24246,38 +24310,65 @@ async function openEcoDetail(ecoId, ecoName) {
     const d = await api(`/api/miniapp/ecosystem/${ecoId}`);
     const e = d.eco;
     const members = d.members||[];
+    const total = d.members_total != null ? d.members_total : members.length;
     const events = d.events||[];
     const sevCls = {info:'b-bl',warning:'b-or',error:'b-rd',critical:'b-rd'};
+    const health = Math.round((e.health_score==null?1:e.health_score)*100);
     let html = `
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${ECO_TYPES[e.ecosystem_type]||e.ecosystem_type}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${stb(e.status)[1]}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Риск</div><div class="row-val">${RISK_LABEL[e.risk_level]||e.risk_level}</div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Здоровье</div><div class="row-val">${((e.health_score||1)*100).toFixed(0)}%</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Здоровье</div>
+          <div class="row-val" style="color:${health>=80?'var(--green)':(health>=50?'var(--orange,#f59e0b)':'var(--red)')}">${health}%</div></div></div>
         ${e.description?`<div class="row"><div class="row-body"><div class="row-name">Описание</div><div class="row-val">${esc(e.description)}</div></div></div>`:''}
       </div>
       <div style="margin:12px 16px 0"><button class="btn btn-p" style="width:100%" onclick="ecoAutoDiscover()">🔎 Авто-наполнить участников</button></div>
-      <div class="sec" style="margin-top:8px">Участники (${members.length})</div>
-      <div class="lst" style="margin:0 16px">
-        ${members.length?members.map(m=>`
-          <div class="row"><div class="row-body">
-            <div class="row-name">${esc(m.object_type)} #${m.object_id}</div>
-            <div class="row-val">Роль: ${m.role} · ${ago(m.added_at)}</div>
-          </div></div>
-        `).join(''):empty('👥','Нет участников','')}
-      </div>
-      <div class="sec" style="margin-top:8px">События (${events.length})</div>
-      <div class="lst" style="margin:0 16px">
-        ${events.length?events.map(ev=>`
+      <div class="sec" style="margin-top:8px">Участники${total?' ('+num(total)+')':''}</div>
+      <div class="lst" style="margin:0 16px">`;
+    if (!members.length) {
+      html += empty('👥','Пока никого','Нажмите «Авто-наполнить» — система подберёт аккаунты, каналы и ботов сама',
+                    {label:'🔎 Авто-наполнить', fn:'ecoAutoDiscover()'});
+    } else {
+      html += members.map(m=>{
+        const t = String(m.object_type||'').toLowerCase();
+        const nm = m.name ? m.name : (ecoObjRu(t)+' #'+m.object_id);
+        return `<div class="row tap" onclick="ecoOpenMember('${esc(t)}',${Number(m.object_id)})">
+          <div class="row-ico" style="background:var(--bg-blue-16)">${ECO_OBJ_ICO[t]||'🌐'}</div>
+          <div class="row-body">
+            <div class="row-name">${esc(nm)}</div>
+            <div class="row-val">${esc(ecoObjRu(t))} · ${esc(ecoRoleRu(m.role))} · ${ago(m.added_at)}</div>
+          </div>
+          <div class="row-right" style="display:flex;gap:6px;align-items:center">
+            <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:var(--red)"
+              onclick="event.stopPropagation();ecoDropMember('${esc(t)}',${Number(m.object_id)},'${esc(String(nm).replace(/'/g,''))}')"
+              aria-label="Убрать из экосистемы">✕</button>
+            <span class="chev">›</span>
+          </div></div>`;
+      }).join('');
+      if (total > members.length) {
+        html += `<div style="padding:8px 12px;font-size:11px;color:var(--hint)">Показано ${num(members.length)} из ${num(total)} — последние добавленные.</div>`;
+      }
+    }
+    html += `</div>
+      <div class="sec" style="margin-top:8px">События${events.length?' ('+events.length+')':''}</div>
+      <div class="lst" style="margin:0 16px">`;
+    if (!events.length) {
+      html += empty('📋','Событий пока нет','Здесь будет видно, что система делала с экосистемой: наполнение, пересчёт метрик, клонирование');
+    } else {
+      html += events.map(ev=>`
           <div class="row"><div class="row-body">
             <div class="row-name"><span class="badge ${sevCls[ev.severity]||'b-gy'}">${esc(sevRu(ev.severity))}</span> ${esc(ev.title)}</div>
-            <div class="row-val">${esc(ev.event_type)} · ${ago(ev.occurred_at)}</div>
-          </div></div>
-        `).join(''):empty('📋','Нет событий','')}
-      </div>
-    `;
+            <div class="row-val">${esc(ecoEvRu(ev.event_type))} · ${ago(ev.occurred_at)}</div>
+          </div></div>`).join('');
+    }
+    html += `</div>
+      <div style="display:flex;gap:8px;padding:12px 16px 20px">
+        <button class="btn btn-s" style="flex:1;font-size:12px;padding:10px 6px" onclick="openEcoOverlaps(${ecoId})">🔀 Пересечения</button>
+        <button class="btn btn-s" style="flex:1;font-size:12px;padding:10px 6px" onclick="goTab('accounts')">📱 Все аккаунты</button>
+      </div>`;
     txt('ecodetail-body', html);
-  } catch(e) { txt('ecodetail-body', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('ecodetail-body', errHtml(errRu(e), `openEcoDetail(${ecoId})`)); }
 }
 
 // ── Channel Factory ─────────────────────────────────────
@@ -27271,6 +27362,7 @@ function renderAudSegChart(segments) {
 <script src="screens/contact_invite_link.js"></script>
 <script src="screens/sales_manager.js"></script>
 <script src="screens/flood_guard.js"></script>
+<script src="screens/eco_overlaps.js"></script>
 <script src="screens/editorial.js"></script>
 <script src="screens/va_workspace.js"></script>
 <script src="screens/va_admin.js"></script>

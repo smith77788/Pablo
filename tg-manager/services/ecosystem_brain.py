@@ -2063,15 +2063,25 @@ async def analyze_audience_overlap(pool: asyncpg.Pool, channel_ids: list[int]) -
 # ── Ecosystem Recommendations (global) ───────────────────────────────────────
 
 
-async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> list[str]:
-    recs: list[str] = []
+async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
+    """Что сделать с экосистемами: текст + куда за этим идти.
+
+    Раньше возвращались просто строки, и совет «проверьте аккаунты и прокси»
+    оставался текстом, по которому нельзя нажать. Теперь каждый совет несёт
+    стабильный ключ экрана (`go`), а мини-апп знает, куда он ведёт
+    (ECO_REC_GO в index.html). Ключ пустой — вести некуда, это просто итог.
+    """
+    recs: list[dict] = []
+
+    def add(text: str, go: str = "") -> None:
+        recs.append({"text": text, "go": go})
 
     eco_count = await pool.fetchval(
         "SELECT COUNT(*) FROM ecosystems WHERE owner_id=$1 AND status='active'",
         owner_id,
     ) or 0
     if eco_count == 0:
-        recs.append("Создайте первую экосистему для управления ресурсами")
+        add("Создайте первую экосистему для управления ресурсами", "eco_create")
         return recs
 
     acc_count = await pool.fetchval(
@@ -2079,14 +2089,15 @@ async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> li
         owner_id,
     ) or 0
     if acc_count == 0:
-        recs.append("Добавьте активные аккаунты — без них экосистема не работает")
+        add("Добавьте активные аккаунты — без них экосистема не работает", "accounts")
 
     ch_count = await pool.fetchval(
         "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
         owner_id,
     ) or 0
     if ch_count > 0 and acc_count < 3:
-        recs.append(f"У вас {ch_count} каналов, но только {acc_count} аккаунтов — добавьте больше")
+        add(f"У вас {ch_count} каналов, но только {acc_count} аккаунтов — добавьте больше",
+            "accounts")
 
     ops_7d = await pool.fetchval(
         """SELECT COUNT(*) FROM operation_queue
@@ -2094,7 +2105,7 @@ async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> li
         owner_id,
     ) or 0
     if ops_7d == 0 and acc_count > 0:
-        recs.append("Нет операций за неделю — запустите публикации или рассылки")
+        add("Нет операций за неделю — запустите публикации или рассылки", "op_create")
 
     failed_7d = await pool.fetchval(
         """SELECT COUNT(*) FROM operation_queue
@@ -2103,7 +2114,7 @@ async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> li
         owner_id,
     ) or 0
     if failed_7d > 3:
-        recs.append(f"{failed_7d} ошибок за неделю — проверьте аккаунты и прокси")
+        add(f"{failed_7d} ошибок за неделю — проверьте аккаунты и прокси", "ops_failed")
 
     frozen_accs = await pool.fetchval(
         """SELECT COUNT(*) FROM tg_accounts
@@ -2112,7 +2123,8 @@ async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> li
         owner_id,
     ) or 0
     if frozen_accs > 0:
-        recs.append(f"{frozen_accs} аккаунтов на длительном кулдауне — рассмотрите замену")
+        add(f"{frozen_accs} аккаунтов на длительном кулдауне — рассмотрите замену",
+            "accounts_cooldown")
 
     channels_no_subs = await pool.fetchval(
         """SELECT COUNT(*) FROM managed_channels mc
@@ -2124,10 +2136,10 @@ async def get_ecosystem_recommendations(pool: asyncpg.Pool, owner_id: int) -> li
         owner_id,
     ) or 0
     if channels_no_subs > 0:
-        recs.append(f"{channels_no_subs} каналов без подписчиков — продвигайте или удалите")
+        add(f"{channels_no_subs} каналов без подписчиков — продвигайте или удалите", "channels")
 
     if not recs:
-        recs.append("Экосистема в хорошем состоянии — продолжайте в том же духе")
+        add("Экосистема в хорошем состоянии — продолжайте в том же духе")
 
     return recs
 

@@ -16543,6 +16543,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("ecosystems_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    # Где искать имя объекта каждого рода. Экосистема хранит только тип и id, и
+    # экран показывал «account #17» — номер строки в базе, по которому владелец
+    # не узнает ни аккаунт, ни канал.
+    _ECO_NAME_SQL = {
+        "account": "SELECT id AS k, COALESCE(NULLIF(first_name,''), phone, '') AS n "
+                   "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        "bot": "SELECT bot_id AS k, COALESCE(NULLIF(username,''), NULLIF(first_name,''), '') AS n "
+               "FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+        "channel": "SELECT channel_id AS k, COALESCE(NULLIF(title,''), NULLIF(username,''), '') AS n "
+                   "FROM managed_channels WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+    }
+    _ECO_NAME_SQL["group"] = _ECO_NAME_SQL["channel"]
+
+    async def _eco_member_names(uid: int, members: list) -> None:
+        """Дописать каждому участнику человеческое имя (поле name).
+
+        Выборки — по владельцу: чужой объект имени не получит. Fail-open: без
+        имени строка остаётся с типом и номером, экран не падает."""
+        by_type: dict[str, list[int]] = {}
+        for m in members:
+            t = str(m.get("object_type") or "").strip().lower()
+            try:
+                by_type.setdefault(t, []).append(int(m.get("object_id") or 0))
+            except (TypeError, ValueError):
+                continue
+        found: dict[tuple[str, int], str] = {}
+        for t, ids in by_type.items():
+            sql = _ECO_NAME_SQL.get(t)
+            if not sql or not ids:
+                continue
+            for r in await _safe_fetch(pool, sql, uid, ids):
+                found[(t, int(r["k"]))] = str(r["n"] or "")
+        for m in members:
+            t = str(m.get("object_type") or "").strip().lower()
+            try:
+                oid = int(m.get("object_id") or 0)
+            except (TypeError, ValueError):
+                oid = 0
+            m["name"] = found.get((t, oid), "")
+
     async def ecosystem_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -16557,11 +16597,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             if not eco:
                 return _err("Не найдено", 404)
-            members = await pool.fetch(
+            rows = await pool.fetch(
                 "SELECT object_type, object_id, role, added_at "
                 "FROM ecosystem_members WHERE ecosystem_id=$1 ORDER BY added_at DESC LIMIT 50",
                 eco_id,
             )
+            members = [dict(m) for m in rows]
+            await _eco_member_names(uid, members)
+            members_total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM ecosystem_members WHERE ecosystem_id=$1", eco_id)
             try:
                 events = await pool.fetch(
                     "SELECT event_type, severity, title, occurred_at "
@@ -16572,12 +16616,45 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 events = []
             return _json_resp({
                 "eco": dict(eco),
-                "members": [dict(m) for m in members],
+                "members": members,
+                "members_total": int(members_total or len(members)),
                 "events": [dict(ev) for ev in events],
             })
         except Exception:
             log.exception("ecosystem_detail uid=%d eco=%d", uid, eco_id)
             return _err(_INTERNAL_ERROR, 500)
+
+    async def ecosystem_member_drop(request: web.Request) -> web.Response:
+        """Убрать объект из экосистемы: {object_type, object_id}.
+
+        Экран показывал состав только на чтение: добавить можно было
+        авто-наполнением, а убрать лишнее — ничем."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eco_id = int(request.match_info["eco_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор экосистемы", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        otype = validate_string(body.get("object_type"), max_len=32) or ""
+        otype = otype.strip().lower()
+        if otype not in ("account", "bot", "channel", "group"):
+            return _err("Неизвестный тип объекта", 400)
+        try:
+            oid = validate_integer(body.get("object_id"), min_val=1, max_val=2 ** 63 - 1)
+        except (TypeError, ValueError):
+            return _err("Неверный идентификатор объекта", 400)
+        own = await _safe_fetchrow(
+            pool, "SELECT id FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid)
+        if not own:
+            return _err("Не найдено", 404)
+        from services import ecosystem_brain
+        await ecosystem_brain.remove_member(pool, eco_id, uid, otype, int(oid))
+        return _json_resp({"ok": True})
 
     async def ecosystem_auto_discover(request: web.Request) -> web.Response:
         """Авто-наполнение экосистемы объектами (аккаунты/каналы/боты по region/пулам).
@@ -19330,6 +19407,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/ecosystems", ecosystems_list)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}", ecosystem_detail)
     app.router.add_post("/api/miniapp/ecosystem/{eco_id}/auto_discover", ecosystem_auto_discover)
+    app.router.add_post("/api/miniapp/ecosystem/{eco_id}/member/drop", ecosystem_member_drop)
     app.router.add_post("/api/miniapp/ecosystem", ecosystem_create)
     app.router.add_delete("/api/miniapp/ecosystem/{eco_id}", ecosystem_delete)
     # Channel Factory
@@ -19484,8 +19562,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 ch_ids = [r["channel_id"] for r in ch_rows]
                 if ch_ids:
                     overlaps = await _eb.analyze_audience_overlap(pool, ch_ids)
+                    # Пары приходят номерами каналов. Номер владельцу ничего не
+                    # говорит — подставляем названия (выборка по владельцу,
+                    # чужой канал имени не получит).
+                    names = {}
+                    for r in await _safe_fetch(
+                            pool,
+                            "SELECT channel_id, COALESCE(NULLIF(title,''), "
+                            "       NULLIF('@' || username,'@'), '') AS n "
+                            "FROM managed_channels "
+                            "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+                            uid, ch_ids):
+                        names[int(r["channel_id"])] = str(r["n"] or "")
+                    for pr in overlaps.get("pairs") or []:
+                        a, b = int(pr["channel_a"]), int(pr["channel_b"])
+                        pr["name_a"] = names.get(a) or f"Канал #{a}"
+                        pr["name_b"] = names.get(b) or f"Канал #{b}"
+                    overlaps["channels"] = len(ch_ids)
                     return _json_resp(overlaps)
-            return _json_resp({"overlaps": {}})
+                # Каналов в экосистеме нет — считать пересечения не на чем.
+                return _json_resp({"pairs": [], "channels": len(ch_ids),
+                                   "total_subscribers": 0, "unique_subscribers": 0})
+            return _json_resp({"pairs": [], "channels": 0,
+                               "total_subscribers": 0, "unique_subscribers": 0})
         except Exception:
             log.exception("ecosystem_overlaps")
             return _err(_INTERNAL_ERROR, 500)

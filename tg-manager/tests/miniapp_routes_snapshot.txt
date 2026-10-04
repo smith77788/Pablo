@@ -723,6 +723,7 @@ POST /api/miniapp/dm_campaign/{campaign_id}/pause
 POST /api/miniapp/dm_campaigns
 POST /api/miniapp/ecosystem
 POST /api/miniapp/ecosystem/{eco_id}/auto_discover
+POST /api/miniapp/ecosystem/{eco_id}/member/drop
 POST /api/miniapp/editorial/review
 POST /api/miniapp/error_report
 POST /api/miniapp/experiment
