@@ -12354,6 +12354,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total_bots": len(bots),
         })
 
+    async def set_bot_swarm_api(request: web.Request) -> web.Response:
+        """Включить или выключить бота в «Рое».
+
+        Экран «Рой» показывал «🟢 В рою / ⚫ Выключен» и прямо отсылал владельца
+        наружу: «Рой включается на карточке бота в Telegram-боте». Переключателя
+        у мини-аппа не было — только у бота (`bot/handlers/swarm.py`).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        bot_id = validate_integer(request.match_info.get("bot_id"),
+                                  min_val=1, max_val=2**63 - 1)
+        if bot_id is None:
+            return _err("Неверный идентификатор бота")
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        if "enabled" not in body:
+            return _err("Не указано, включать или выключать")
+        enabled = bool(body["enabled"])
+        res = await pool.execute(
+            "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1 AND added_by=$3",
+            bot_id, enabled, uid,
+        )
+        if res == "UPDATE 0":
+            return _err("Бот не найден", 404)
+        return _json_resp({"ok": True, "enabled": enabled})
+
     async def set_bot_role_api(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -18232,6 +18261,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Network / Cluster
     app.router.add_get("/api/miniapp/network", network_overview)
     app.router.add_put("/api/miniapp/bot/{bot_id}/role", set_bot_role_api)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/swarm", set_bot_swarm_api)
     # Relay (Inbox)
     app.router.add_get("/api/miniapp/bot/{bot_id}/relay/sessions", relay_sessions_list)
     app.router.add_get("/api/miniapp/relay/session/{session_id}/messages", relay_session_messages)

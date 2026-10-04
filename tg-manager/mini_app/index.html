@@ -16569,7 +16569,9 @@ async function openAbResults() {
   try {
     const d = await api('/api/miniapp/ab/results');
     if (!d.batch || !(d.variants||[]).length) {
-      txt('abResults', empty('🧪','Нет A/B-тестов','Запустите рассылку сегменту с включённым A/B — результаты появятся здесь'));
+      txt('abResults', empty('🧪','Тестов ещё не было',
+        'A/B включается при запуске рассылки: половина получит одну копию, половина другую, и здесь будет видно, какая сработала',
+        {label:'📨 К рассылкам', fn:"goTab('broadcasts')"}));
       return;
     }
     const maxRate = Math.max(1, ...d.variants.map(v=>v.rate||0));
@@ -16595,7 +16597,9 @@ async function openAbResults() {
     }
     txt('abResults', h);
   } catch(e) {
-    txt('abResults', empty('⚠️','Ошибка',errRu(e)||'Не удалось загрузить'));
+    // Соседний тред перевёл текст ошибки на русский (errRu), здесь добавилась
+    // кнопка «Повторить» — нужно и то и другое.
+    txt('abResults', errHtml(errRu(e, 'Не удалось загрузить'), 'openAbResults()'));
   }
 }
 async function runAbFollowup(batch){
@@ -23187,33 +23191,68 @@ async function openInfraHealth() {
 
 // ── Swarm ───────────────────────────────────────────────
 const SWARM_ROLES={entry:'🚪 Вход',conversion:'💰 Конверсия',retention:'🔄 Удержание',general:'🤖 Общий'};
+// Экран показывал «🟢 В рою / ⚫ Выключен» и отсылал владельца наружу: «Рой
+// включается на карточке бота в Telegram-боте». Переключателя у мини-аппа не
+// было вовсе — только у бота. Роль меняется через давно существующий
+// PUT /bot/{id}/role, которым здесь тоже никто не пользовался.
+async function swarmToggle(botId, on) {
+  try {
+    await api('/api/miniapp/bot/'+Number(botId)+'/swarm',
+              {method:'POST', body:JSON.stringify({enabled: !on})});
+    toast(on ? '⚫ Бот выведен из роя' : '🟢 Бот в рою');
+    openSwarm();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
+
+async function swarmRole(botId, cluster) {
+  const role = await askChoice('Какая роль у бота в рою?', [
+    {value:'entry',      label:'🚪 Вход',      sub:'принимает новых — им рой кормит трафик'},
+    {value:'conversion', label:'💰 Конверсия', sub:'доводит до покупки'},
+    {value:'retention',  label:'🔄 Удержание', sub:'возвращает тех, кто ушёл'},
+    {value:'general',    label:'🤖 Общий',     sub:'без специализации'},
+  ]);
+  if (role === null) return;
+  try {
+    await api('/api/miniapp/bot/'+Number(botId)+'/role',
+              {method:'PUT', body:JSON.stringify({role, cluster: cluster || 'default'})});
+    toast('✅ Роль сохранена');
+    openSwarm();
+  } catch(e) { toast('⚠️ '+(e.message||'Ошибка')); }
+}
 async function openSwarm() {
   push('s-swarm');
   txt('swarmList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/swarm');
-    if (!rows.length) { txt('swarmList', empty('🐝','Нет данных','Рой включается на карточке бота в Telegram-боте — оттуда же пойдут метрики')); return; }
+    if (!rows.length) { txt('swarmList', empty('🐝','Ботов для роя нет',
+      'Рой распределяет трафик между ботами по их ролям и результатам — для этого нужен хотя бы один подключённый бот',
+      {label:'🤖 К ботам', fn:"goTab('bots')"})); return; }
     txt('swarmList', rows.map(r=>{
       const score = r.score?r.score.toFixed(2).replace('.',','):'—';
       const ctr = r.ctr?(r.ctr*100).toFixed(1).replace('.',',')+'%':'—';
       const cvr = r.conversion_rate?(r.conversion_rate*100).toFixed(1).replace('.',',')+'%':'—';
       const d1 = r.retention_d1?(r.retention_d1*100).toFixed(0)+'%':'—';
       const d7 = r.retention_d7?(r.retention_d7*100).toFixed(0)+'%':'—';
+      const cluster = (r.cluster||'default').replace(/'/g, '');
       return `
         <div class="row">
           <div class="row-ico" style="background:var(--bg-yellow-16)">🤖</div>
           <div class="row-body">
             <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
-            <div class="row-val">${SWARM_ROLES[r.bot_role]||r.bot_role} · ${r.swarm_enabled?'🟢 В рою':'⚫ Выключен'} · Оценка: ${score}</div>
+            <div class="row-val">${SWARM_ROLES[r.bot_role]||esc(r.bot_role||'—')} · ${r.swarm_enabled?'🟢 В рою':'⚫ Выключен'} · Оценка: ${score}</div>
             <div class="row-val">Клики: ${ctr} · Конверсия: ${cvr} · Возврат: за день ${d1} · за неделю ${d7}</div>
             ${r.cluster&&r.cluster!=='default'?`<div class="row-val" style="color:var(--hint)">Кластер: ${esc(r.cluster)}</div>`:''}
+          </div>
+          <div class="row-right" style="flex-direction:column;gap:4px">
+            <button class="btn ${r.swarm_enabled?'btn-o':'btn-g'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="swarmToggle(${Number(r.bot_id)},${r.swarm_enabled?'true':'false'})">${r.swarm_enabled?'Вывести':'В рой'}</button>
+            <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="swarmRole(${Number(r.bot_id)},'${esc(cluster)}')">Роль</button>
           </div>
         </div>
       `;
     }).join(''));
     const enabled = rows.filter(r=>r.swarm_enabled).length;
     document.getElementById('m-swarm-val').textContent = `${enabled} в рое / ${rows.length} всего`;
-  } catch(e) { txt('swarmList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('swarmList', errHtml(errRu(e), 'openSwarm()')); }
 }
 
 // ── Presence Packs ──────────────────────────────────────
