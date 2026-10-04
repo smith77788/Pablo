@@ -29,7 +29,7 @@ def _snap(**over):
 def test_compose_has_all_sections_and_headline():
     d = compose_digest(_snap(), suggestions=[], narrative_text="обзор")
     keys = {s["key"] for s in d["sections"]}
-    assert keys == {"fleet", "audience", "growth", "network", "risks"}
+    assert keys == {"fleet", "audience", "growth", "network", "risks", "discovery"}
     assert d["narrative"] == "обзор"
     assert d["headline"].startswith("🟢")   # всё здорово
     assert d["has_prev"] is False

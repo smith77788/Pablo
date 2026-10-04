@@ -8576,6 +8576,41 @@ function _digTrend(t) {
   const sign = t.delta>0 ? '+' : '';
   return ` <span style="color:${col};font-size:11px;font-weight:700">${arrow}${sign}${t.delta}</span>`;
 }
+// Куда ведёт каждое число отчёта. Отчёт был сводкой цифр, по которой нельзя
+// нажать: человек видел «Мёртвых 4» и шёл искать их по экранам сам. Ключ — id
+// метрики с сервера (services/organism/digest.py), значение — экран, где с этим
+// числом действительно можно что-то сделать.
+const DIG_GO = {
+  fleet_active:    {fn:"healthGoAccounts('active')", sub:'живые аккаунты'},
+  fleet_dead:      {fn:"healthGoAccounts('dead')",   sub:'разобрать мёртвые'},
+  fleet_pressure:  {fn:'openFleetDoctor()',          sub:'почему флот сдерживается'},
+  contacts:        {fn:'openContacts()',             sub:'все контакты'},
+  hot_leads:       {fn:'openContactsHot()',          sub:'дожать горячих'},
+  intents_24h:     {fn:'openIntentSensor()',         sub:'сенсор намерений'},
+  channels:        {fn:"goTab('channels')",          sub:'мои каналы'},
+  growth_ops_7d:   {fn:'openOps()',                  sub:'история операций'},
+  bots:            {fn:"goTab('bots')",              sub:'мои боты'},
+  community_nodes: {fn:'openCommunity()',            sub:'комьюнити-ноды'},
+  community_empty: {fn:'openCommunity()',            sub:'наполнить пустые'},
+  failed_24h:      {fn:"opsGo('failed')",            sub:'разобрать ошибки'},
+  ops_pending:     {fn:"opsGo('pending')",           sub:'очередь ожидания'},
+  ops_running:     {fn:"opsGo('running')",           sub:'что идёт сейчас'},
+  seo_weak:        {fn:'openSeo()',                  sub:'поднять находимость'},
+  waiting_reply:   {fn:'openVault()',                sub:'ответить ждущим'},
+};
+function _digStat(st) {
+  const g = DIG_GO[st.id];
+  const val = `<span style="font-size:14px;font-weight:600">${st.value}${esc(st.suffix||'')}${_digTrend(st.trend)}</span>`;
+  if (!g) {
+    return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--sep)">
+      <span style="font-size:13px;color:var(--hint)">${esc(st.label)}</span>${val}</div>`;
+  }
+  return `<div class="tap" role="button" tabindex="0" onclick="${g.fn}"
+      style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--sep);cursor:pointer;min-height:38px">
+    <span style="font-size:13px;min-width:0">${esc(st.label)}
+      <span style="display:block;font-size:10px;color:var(--hint)">${esc(g.sub)}</span></span>
+    <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">${val}<span class="chev">›</span></span></div>`;
+}
 async function openDigest() {
   push('s-digest');
   const el = document.getElementById('digestBody');
@@ -8588,15 +8623,18 @@ async function openDigest() {
     if (!d.has_prev) h += `<div style="font-size:11px;color:var(--hint);margin-top:8px;opacity:.7">Тренды появятся со следующего отчёта.</div>`;
     h += '</div>';
     (d.sections||[]).forEach(sec=>{
-      const stats = (sec.stats||[]).map(s=>`
-        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--sep)">
-          <span style="font-size:13px;color:var(--hint)">${esc(s.label)}</span>
-          <span style="font-size:14px;font-weight:600">${s.value}${esc(s.suffix||'')}${_digTrend(s.trend)}</span>
-        </div>`).join('');
+      const stats = (sec.stats||[]).map(_digStat).join('');
+      // Последний сбой приходит структурой: тип операции переводим здесь —
+      // раньше в отчёт уходило сырое «mass_invite».
+      const f = sec.fail;
+      const fail = f ? `<div class="tap" role="button" tabindex="0" onclick="opsGo('failed')"
+          style="font-size:11px;color:var(--hint);margin-top:6px;line-height:1.4;cursor:pointer">
+          Последний сбой: ${esc(opRu(f.op_type))} — ${esc(f.reason||'без причины')} <span class="chev">›</span></div>` : '';
       h += `<div style="background:var(--bg);border:1px solid var(--sep);border-radius:12px;padding:10px 14px;margin-bottom:10px">
         <div style="font-size:13px;font-weight:700;margin-bottom:4px">${esc(sec.title)}</div>
         ${stats}
         ${sec.note?`<div style="font-size:11px;color:var(--hint);margin-top:6px;line-height:1.4">${esc(sec.note)}</div>`:''}
+        ${fail}
       </div>`;
     });
     const recs = d.recommendations||[];
@@ -8612,6 +8650,14 @@ async function openDigest() {
         </div>`;
       }).join('');
       h += '</div>';
+    } else {
+      // Без рекомендаций экран заканчивался цифрами и тупиком. Пусть ведёт
+      // дальше: в пульс организма и в очередь операций.
+      h += `<div class="sec" style="margin-top:6px">Что дальше</div>
+        <div style="display:flex;gap:8px;padding:0 0 8px">
+          <button class="btn btn-s" style="flex:1;font-size:12px;padding:9px 6px" onclick="openFleetDoctor()">🩺 Диагностика флота</button>
+          <button class="btn btn-s" style="flex:1;font-size:12px;padding:9px 6px" onclick="openOps()">📋 Очередь операций</button>
+        </div>`;
     }
     el.innerHTML = h;
   } catch(e) { el.innerHTML = errHtml(errRu(e),'openDigest()'); }
@@ -12299,6 +12345,22 @@ function onOpsSearch(v) {
     txt('opsList', '<div class="spin-wrap"><div class="spin"></div></div>');
     loadOps();
   }, 350);
+}
+// Открыть очередь операций сразу на нужном срезе. Нужно, чтобы число в
+// Пульс-отчёте («Ошибок за 24ч: 7») вело ровно к тем строкам, которые его дали,
+// а не на общий список, где этот срез надо искать руками.
+function opsGo(status) {
+  OPS_SEARCH = ''; OPS_FILTER = status || null;
+  const i = document.getElementById('opsSearch'); if (i) i.value = '';
+  const want = status ? ("filterOps('" + status + "'") : 'filterOps(null';
+  document.querySelectorAll('#ops-seg .seg-opt').forEach(o => {
+    o.classList.toggle('on', (o.getAttribute('onclick') || '').indexOf(want) === 0);
+  });
+  OPS_ROWS = []; OPS_OFFSET = 0; OPS_TOTAL = 0;
+  const box = document.getElementById('opsLoadMore'); if (box) box.innerHTML = '';
+  push('s-ops');
+  txt('opsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  loadOps();
 }
 function resetOpsFilters() {
   OPS_SEARCH = ''; OPS_FILTER = null;

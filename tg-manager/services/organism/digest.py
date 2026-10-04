@@ -36,6 +36,10 @@ _LOWER_IS_BETTER = {"fleet_dead", "failed_24h", "seo_weak", "waiting_reply"}
 
 _DIGEST_STATE_KEY = "digest_metrics"
 
+# Уровень губернатора по-русски: в отчёт уходило сырое green/orange/red, а
+# владелец читает интерфейс на русском.
+_GOV_RU = {"green": "спокойно", "orange": "умеренно", "red": "под давлением"}
+
 
 def _dig(snap: dict, block: str, key: str, default=0):
     b = snap.get(block) or {}
@@ -92,9 +96,13 @@ def compose_digest(snap: dict, suggestions=None, narrative_text: str = "",
     now = now or datetime.now(timezone.utc)
     suggestions = list(suggestions or [])
 
-    def stat(label, block, key, metric_name=None, suffix=""):
+    def stat(label, block, key, metric_name=None, suffix="", sid=None):
+        """Одна строка отчёта. `id` — стабильный ключ метрики: по нему мини-апп
+        знает, на какой экран ведёт это число. Без id строка остаётся просто
+        цифрой, и человеку некуда нажать."""
         val = int(_dig(snap, block, key, 0) or 0)
-        s = {"label": label, "value": val, "suffix": suffix}
+        s = {"label": label, "value": val, "suffix": suffix,
+             "id": sid or metric_name or ""}
         if metric_name:
             t = _trend(metric_name, val, prev_metrics)
             if t:
@@ -102,33 +110,40 @@ def compose_digest(snap: dict, suggestions=None, narrative_text: str = "",
         return s
 
     fleet = snap.get("fleet") or {}
+    gov = str(fleet.get("governor_level", "green") or "green")
     sections = [
         {"key": "fleet", "title": "🛰 Флот", "stats": [
             stat("Активных аккаунтов", "fleet", "active", "fleet_active"),
             stat("Мёртвых", "fleet", "dead", "fleet_dead"),
             {"label": "Давление флота", "value": int(fleet.get("pressure", 0) or 0),
-             "suffix": f"/100 · ×{fleet.get('governor_mult', 1.0)}"},
-        ], "note": f"Губернатор: {fleet.get('governor_level', 'green')}, банов за 24ч: {int(fleet.get('bans_24h', 0) or 0)}"},
+             "suffix": f"/100 · ×{fleet.get('governor_mult', 1.0)}",
+             "id": "fleet_pressure"},
+        ], "note": f"Губернатор: {_GOV_RU.get(gov, gov)}, банов за 24ч: {int(fleet.get('bans_24h', 0) or 0)}"},
         {"key": "audience", "title": "👥 Аудитория", "stats": [
             stat("Контактов", "graph", "contacts", "contacts"),
             stat("Горячих лидов", "graph", "hot_leads", "hot_leads"),
-            stat("Намерений за 24ч", "graph", "intents_24h"),
+            stat("Намерений за 24ч", "graph", "intents_24h", sid="intents_24h"),
         ], "note": ""},
         {"key": "growth", "title": "📈 Рост", "stats": [
             stat("Каналов", "growth", "channels", "channels"),
-            stat("Операций роста (7д)", "growth", "growth_ops_7d"),
+            stat("Операций роста (7д)", "growth", "growth_ops_7d", sid="growth_ops_7d"),
         ], "note": ""},
         {"key": "network", "title": "🕸 Сеть", "stats": [
             stat("Ботов", "bots", "total", "bots"),
             stat("Комьюнити-нод", "bots", "community_nodes", "community_nodes"),
-            stat("Пустых нод", "bots", "community_empty"),
+            stat("Пустых нод", "bots", "community_empty", sid="community_empty"),
         ], "note": ""},
         {"key": "risks", "title": "⚠️ Операции и риски", "stats": [
             stat("Ошибок за 24ч", "ops", "failed_24h", "failed_24h"),
-            stat("В очереди", "ops", "pending"),
-            stat("Выполняется", "ops", "running"),
-        ], "note": (lambda lf: f"Последний сбой: {lf['op_type']} — {lf['reason']}" if lf else "")(
-            (snap.get("ops") or {}).get("last_failed"))},
+            stat("В очереди", "ops", "pending", sid="ops_pending"),
+            stat("Выполняется", "ops", "running", sid="ops_running"),
+        ], "note": "", "fail": (snap.get("ops") or {}).get("last_failed") or None},
+        # Эти две метрики отчёт уже считал для трендов, но не показывал: база
+        # для сравнения копилась по числам, которых человек не видел.
+        {"key": "discovery", "title": "🔍 Находимость и диалоги", "stats": [
+            stat("Слабых по SEO", "seo", "weak", "seo_weak"),
+            stat("Ждут ответа", "vault", "waiting_reply", "waiting_reply"),
+        ], "note": ""},
     ]
 
     # Рекомендации — из мозга (топ по severity), максимум 5. Порядок важности
