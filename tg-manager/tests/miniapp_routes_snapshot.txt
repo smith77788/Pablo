@@ -843,6 +843,7 @@ POST /api/miniapp/seo/apply
 POST /api/miniapp/seo/apply_all
 POST /api/miniapp/seo/apply_bot
 POST /api/miniapp/settings
+POST /api/miniapp/settings/uah_rate
 POST /api/miniapp/shield/config
 POST /api/miniapp/spintax/expand
 POST /api/miniapp/spintax/generate

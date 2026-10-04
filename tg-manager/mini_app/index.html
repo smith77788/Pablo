@@ -4941,6 +4941,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div id="referralStats" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:8px 16px 12px"></div>
     <div id="referralCode" style="padding:8px 16px 12px"></div>
+    <div id="referralRate" style="padding:0 16px 12px"></div>
     <div class="sec">Рефералы</div>
     <div class="lst" id="referralList"></div>
   </div>
@@ -19745,6 +19746,24 @@ function refShare() {
   try { tg.openTelegramLink(url); } catch(_) { copyToClipboard(REF_LINK, 'Ссылка скопирована'); }
 }
 
+let REF_RATE = 41;
+// Денежная сумма по-русски: запятая как разделитель копеек, пробел в тысячах.
+function _money(v) {
+  const n = Number(v) || 0;
+  return n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+async function refEditRate() {
+  const v = await askPrompt('Сколько гривен в одном долларе?', {value: String(REF_RATE).replace('.', ','),
+    placeholder: 'например 41,5'});
+  if (v === null) return;
+  const rate = Number(String(v).replace(',', '.'));
+  if (!(rate >= 1 && rate <= 10000)) { toast('❗ Курс — число от 1 до 10000'); return; }
+  try {
+    await api('/api/miniapp/settings/uah_rate', {method:'POST', body: JSON.stringify({rate})});
+    toast('✅ Курс сохранён');
+    openReferral();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
 async function openReferral() {
   push('s-referral');
   txt('referralStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -19756,9 +19775,24 @@ async function openReferral() {
       <div class="kpi-card"><div class="kpi-val">${REFERRAL_TIER[d.tier]||d.tier||'—'}</div><div class="kpi-lbl">Уровень</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.referral_count||0}</div><div class="kpi-lbl">Рефералов</div></div>
       <div class="kpi-card"><div class="kpi-val">${d.paid_count||0}</div><div class="kpi-lbl">Оплативших</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.total_earned,'green')}">$${Number(d.total_earned||0).toFixed(2).replace('.',',')}</div><div class="kpi-lbl">Заработано</div></div>
+      <div class="kpi-card tap-card" role="button" tabindex="0" onclick="refEditRate()"><div class="kpi-val" style="${kpiTone(d.total_earned_uah,'green')}">${_money(d.total_earned_uah||0)} ₴</div><div class="kpi-lbl">Заработано ›</div></div>
     `);
     txt('m-ref-val',`${d.referral_count||0} рефералов · ${d.commission_rate||0}% комиссия`);
+    // Комиссия приходит в долларах (платежи в TON/USDT, в базе commission_usd).
+    // Гривня на экране — пересчёт по курсу владельца, поэтому курс и исходная
+    // сумма показаны рядом: подменить значок у доллара значило бы завысить
+    // заработок в десятки раз.
+    REF_RATE = Number(d.uah_rate) || 41;
+    txt('referralRate', `
+      <div class="lst">
+        <div class="row tap" role="button" tabindex="0" onclick="refEditRate()">
+          <div class="row-body"><div class="row-name">Курс пересчёта</div>
+            <div class="row-val" style="color:var(--hint)">комиссия приходит в долларах — в гривню считаем по этому курсу</div></div>
+          <div class="row-right" style="display:flex;align-items:center;gap:4px">${_money(REF_RATE)} ₴/$<span class="chev">›</span></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">В долларах</div>
+          <div class="row-val" style="color:var(--hint)">столько реально начислено</div></div>
+          <div class="row-right">$${_money(d.total_earned||0)}</div></div>
+      </div>`);
     // Экран показывал голый код и писал «Поделитесь кодом!» — поделиться было
     // нечем: ни копирования, ни ссылки. Бот отдаёт t.me/<бот>?start=<код>
     // с кнопкой «Поделиться» с самого начала.
