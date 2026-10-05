@@ -26340,18 +26340,53 @@ async function openSemFacts(botId, botName, keep) {
     const d = await api(`/api/miniapp/semantic_memory/${botId}?limit=${SEMF_LIMIT}`);
     const rows = listOf(d,'items');
     const semTotal = totalOf(d, rows);
-    if (!rows.length) { txt('semfactsList', empty('🧬','Фактов нет','')); return; }
-    const byUser = {};
-    rows.forEach(r => { if (!byUser[r.user_id]) byUser[r.user_id]=[]; byUser[r.user_id].push(r); });
-    txt('semfactsList', Object.entries(byUser).map(([uid2, facts]) => `
-      <div class="row">
-        <div class="row-body">
-          <div class="row-name">👤 User ${uid2}</div>
-          ${facts.map(f=>`<div class="row-val">${esc(f.fact_key)}: ${esc(String(f.fact_value))} <span style="color:var(--hint)">(${Math.round((f.confidence||1)*100)}%)</span></div>`).join('')}
+    if (!rows.length) { txt('semfactsList', empty('🧬','Бот ещё ничего не запомнил',
+      'Факты о собеседнике извлекаются из переписки: имя, город, интересы, что человек хотел купить. Они появятся, когда с ботом начнут разговаривать.')); return; }
+    // Map, а не объект: у объекта ключи-числа браузер сортирует по возрастанию,
+    // и порядок «свежие факты сверху», который задаёт запрос, терялся —
+    // собеседники выстраивались по номеру.
+    const byUser = new Map();
+    rows.forEach(r => {
+      if (!byUser.has(r.user_id)) byUser.set(r.user_id, []);
+      byUser.get(r.user_id).push(r);
+    });
+    txt('semfactsList', [...byUser.entries()].map(([uid2, facts]) => {
+      const f0 = facts[0]||{};
+      const who = f0.name || (f0.username ? '@'+f0.username : '');
+      return `<div class="li">
+        <div class="row-ico" style="background:var(--bg-purple-16)">👤</div>
+        <div class="li-body">
+          <div class="li-name">${who ? esc(who) : 'Собеседник без имени'}${f0.name && f0.username ? ' · @'+esc(f0.username) : ''}</div>
+          ${facts.map(f=>`<div class="li-sub wrap"><span style="color:var(--hint)">${esc(semFactRu(f.fact_key))}:</span> ${esc(String(f.fact_value))}</div>`).join('')}
         </div>
-      </div>
-    `).join('') + moreBtn(rows.length, semTotal, 'openSemFactsMore()'));
+        <button class="btn btn-s" style="padding:5px 10px;min-width:0;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="forgetSemUser(${Number(uid2)},${facts.length},this)">Забыть</button>
+      </div>`;
+    }).join('') + moreBtn(rows.length, semTotal, 'openSemFactsMore()'));
   } catch(e) { txt('semfactsList', errHtml(errRu(e), 'retrySemFacts()')); }
+}
+
+// Ключи фактов задаёт промпт извлечения в services/semantic_memory.py — их
+// ровно семь, и все английские. Владельцу они уезжали как есть: строка
+// читалась «pain_points: не успевает отвечать клиентам».
+const SEM_FACT_RU = {
+  name:'Имя', interests:'Интересы', purchases:'Покупки',
+  pain_points:'Что болит', location:'Откуда', language:'Язык',
+  goals:'Чего хочет',
+};
+function semFactRu(k) { return SEM_FACT_RU[String(k||'').toLowerCase()] || (k || '—'); }
+
+// Бот хранит имя, город, боли и цели живого человека. Стереть это умел только
+// Telegram-бот (semantic_memory_hub) — в приложении кнопки не было.
+async function forgetSemUser(userId, factCount, el) {
+  if (!_SEMF_ARGS) return;
+  const botId = _SEMF_ARGS[0];
+  if (!await confirmDelete('Забыть собеседника', el,
+      `Сотрутся ${factCount} ${plural(factCount,'факт','факта','фактов')} и вся переписка, которую бот о нём помнит. Вернуть нельзя.`)) return;
+  try {
+    const r = await api(`/api/miniapp/semantic_memory/${botId}/user/${userId}`, {method:'DELETE'});
+    toast(`🗑 Забыто: ${num(r.facts||0)} ${plural(r.facts||0,'факт','факта','фактов')}`);
+    openSemFacts(_SEMF_ARGS[0], _SEMF_ARGS[1], true);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 // ── Audience DNA ───────────────────────────────────────

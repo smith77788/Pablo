@@ -18453,17 +18453,63 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             owner = await pool.fetchval("SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
             if owner != uid:
                 return _err("Это не ваш ресурс", 403)
+            # Имя собеседника, а не его номер. Экран показывал «User 783215441»:
+            # смысл семантической памяти в том, что это факты О ЧЕЛОВЕКЕ, а по
+            # номеру человека не узнать ни владельцу, ни кому-либо ещё.
             facts = await pool.fetch(
-                "SELECT user_id, fact_key, fact_value, confidence, updated_at "
-                "FROM bot_user_facts WHERE bot_id=$1 ORDER BY updated_at DESC LIMIT $2",
+                "SELECT f.user_id, f.fact_key, f.fact_value, f.confidence, f.updated_at, "
+                "       bu.first_name, bu.last_name, bu.username "
+                "FROM bot_user_facts f "
+                "LEFT JOIN bot_users bu ON bu.bot_id = f.bot_id AND bu.user_id = f.user_id "
+                "WHERE f.bot_id=$1 ORDER BY f.updated_at DESC LIMIT $2",
                 bot_id, _list_limit(request, 100, 2000),
             )
             total = await _safe_count(pool,
                 "SELECT COUNT(*) FROM bot_user_facts WHERE bot_id=$1", bot_id)
             # Было — голый массив; сотня фактов выдавалась за всю память бота.
-            return _json_resp({"items": [dict(r) for r in facts], "total": total})
+            return _json_resp({"items": [
+                {
+                    "user_id": r["user_id"],
+                    "fact_key": r["fact_key"],
+                    "fact_value": r["fact_value"],
+                    "confidence": r["confidence"],
+                    "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+                    "name": " ".join(x for x in (r["first_name"], r["last_name"]) if x).strip(),
+                    "username": r["username"] or "",
+                }
+                for r in facts
+            ], "total": total})
+
         except Exception:
             log.exception("semantic_memory_bot uid=%d bot=%d", uid, bot_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def semantic_memory_forget(request: web.Request) -> web.Response:
+        """Забыть всё, что бот запомнил об одном собеседнике.
+
+        В продукте это умеет только Telegram-бот (semantic_memory_hub). А это
+        не удобство, а обязанность: бот хранит имя, город, боли и цели живого
+        человека, и владелец должен уметь это стереть, не уходя из приложения.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            user_id = int(request.match_info["user_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        try:
+            owner = await pool.fetchval(
+                "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
+            if owner != uid:
+                return _err("Это не ваш ресурс", 403)
+            from services import semantic_memory as _sm
+            msgs, facts = await _sm.clear_user_memory(pool, bot_id, user_id)
+            return _json_resp({"ok": True, "messages": msgs, "facts": facts})
+        except Exception:
+            log.exception("semantic_memory_forget uid=%d bot=%d user=%d",
+                          uid, bot_id, user_id)
             return _err(_INTERNAL_ERROR, 500)
 
     # ── Audience DNA ─────────────────────────────────────────────────────────
@@ -20403,6 +20449,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Semantic Memory
     app.router.add_get("/api/miniapp/semantic_memory", semantic_memory_overview)
     app.router.add_get("/api/miniapp/semantic_memory/{bot_id}", semantic_memory_bot)
+    app.router.add_delete("/api/miniapp/semantic_memory/{bot_id}/user/{user_id}",
+                          semantic_memory_forget)
     # Audience DNA
     app.router.add_get("/api/miniapp/audience_dna", audience_dna_list)
     app.router.add_get("/api/miniapp/audience_dna/{bot_id}/profile", audience_dna_profile)
