@@ -14983,11 +14983,59 @@ async def _exec_mass_invite(
                  op_id, reason[:120])
         return True
 
+    # Аккаунты, получившие флуд в этом прогоне: им нельзя поручать ни промоут-
+    # трюк, ни рассылку ссылки в конце — они под действующим ограничением.
+    _flooded_ids: set[int] = set()
+    _promoter_rest_until = [0.0]   # монотонные часы: до каких пор не звать промоутера
+
+    def _promoter_resting() -> bool:
+        """Промоутер получил флуд в этом прогоне или сейчас на паузе Telegram."""
+        if _promoter is None:
+            return False
+        _pid = int(_promoter["id"])
+        if _pid in _flooded_ids or time.monotonic() < _promoter_rest_until[0]:
+            return True
+        if _include_risky:
+            # Владелец осознанно взял аккаунты под кулдауном — старый кулдаун
+            # промоутера не повод молча выключать выдачу прав на весь прогон.
+            return False
+        try:
+            from services.flood_engine import is_account_cooling
+            return bool(is_account_cooling(_pid))
+        except Exception:
+            return False
+
+    def _promoter_flooded() -> None:
+        """Промоутер получил паузу на выдаче прав — не трогать его, пока она идёт."""
+        if _promoter is None:
+            return
+        try:
+            from services.flood_engine import seconds_until_ready
+            _wait = float(seconds_until_ready(int(_promoter["id"])))
+        except Exception:
+            _wait = 0.0
+        _promoter_rest_until[0] = time.monotonic() + max(60.0, _wait)
+
+    async def _note_short_floods(acc_id: int, secs_list) -> None:
+        """Записать в пульс короткие паузы, которые движок пережил на месте."""
+        if not secs_list:
+            return
+        try:
+            from services.flood_engine import record_flood
+            for _s in secs_list:
+                if int(_s or 0) > 0:
+                    await record_flood(pool, int(acc_id), wait_seconds=int(_s),
+                                       action_type="invite", operation_id=op_id)
+        except Exception:
+            log_exc_swallow(log, "mass_invite: short flood record failed")
+
     async def _rest_invite_account(acc_id: int, res: dict) -> None:
         """Дать флагнутому/зафлуженному инвайт-аккаунту cooldown через ЕДИНЫЙ
         flood-сигнал. Без этого переключение внутри операции недостаточно: флаг
         живёт на аккаунте, и следующая операция сразу его добьёт (anti-detection).
         PeerFlood → 48ч; длинный FloodWait → ровно на длительность флуда."""
+        if res.get("peer_flood") or res.get("flood_wait"):
+            _flooded_ids.add(int(acc_id))
         try:
             from services.flood_engine import record_peer_flood, record_flood
             if res.get("peer_flood"):
@@ -15247,7 +15295,7 @@ async def _exec_mass_invite(
                             # Анонимный админ не подписывается своим именем — всплеск
                             # свежепромоутнутых видимых инвайтеров сам по себе заметный
                             # сигнал для участников/детекта чата.
-                            anonymous=True),
+                            anonymous=True, pool=pool),
                         timeout=45)
                     if okp:
                         _promoted_n += 1
@@ -15257,6 +15305,12 @@ async def _exec_mass_invite(
                         _promote_failed += 1
                         if _pr_reason == "admins_too_much":
                             _admin_cap_hit = True
+                        elif _pr_reason == "flood":
+                            # Промоутер на паузе Telegram: дальше раздавать права
+                            # подряд — эскалация. Остальные получат их «на лету»,
+                            # когда пауза пройдёт.
+                            _promoter_flooded()
+                            break
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                 except Exception as _pe:
                     _promote_failed += 1
@@ -15868,7 +15922,13 @@ async def _exec_mass_invite(
                                 _am.resolve_self_user_id(acc["session_str"], dict(acc)), timeout=30)
                             if _u:
                                 _acc_uid[acc_id] = int(_u)
-                        if _u:
+                        if _promoter_resting():
+                            # Промоутер под паузой Telegram (флуд в этом прогоне
+                            # или пауза на выдаче прав). Стучаться к нему снова —
+                            # эскалация на самом ценном аккаунте инвайта. Отказ
+                            # временный: попытка засчитана, аккаунт ждёт в круге.
+                            _reason = "flood"
+                        elif _u:
                             # Инвайтер должен быть участником, затем выдаём права.
                             # Сбой вступления НЕ глушим молча: именно он приводит к
                             # not_participant на следующем шаге, и знать об этом надо.
@@ -15890,8 +15950,10 @@ async def _exec_mass_invite(
                                     _promoter["session_str"], group, int(_u),
                                     _acc=dict(_promoter), invite_users=True, post_messages=False,
                                     add_admins=(_invite_method == "admin"),
-                                    anonymous=True),
+                                    anonymous=True, pool=pool),
                                 timeout=45)
+                            if _reason == "flood":
+                                _promoter_flooded()
                             if _okp:
                                 _promoted_n += 1
                                 _admin_seats.add(acc_id)
@@ -15947,8 +16009,24 @@ async def _exec_mass_invite(
             ok_n = int(res.get("ok") or 0)
             fail_n = int(res.get("failed") or 0)
             # Движок обрывает батч на флуде/закрытой группе — хвост НЕ пробовали.
-            attempted = max(0, min(len(batch), ok_n + fail_n))
-            leftover = batch[attempted:]
+            # Кого именно не пробовали, движок говорит поимённо (untried): цель,
+            # на которой пришёл флуд, Telegram не добавлял и не отклонял. Раньше
+            # её считали «попробованной» по срезу ok+failed — она уходила в дедуп
+            # как обработанная и больше не приглашалась никогда, а пакетный флуд
+            # так терял весь батч.
+            _untried = res.get("untried")
+            if _untried is not None:
+                _ut_keys = {str(x) for x in _untried}
+                tried = [b for b in batch if str(b) not in _ut_keys]
+                leftover = [b for b in batch if str(b) in _ut_keys]
+            else:
+                _att = max(0, min(len(batch), ok_n + fail_n))
+                tried, leftover = batch[:_att], batch[_att:]
+            attempted = len(tried)
+            # Короткие паузы Telegram движок пережил на месте — но пульс аккаунта
+            # должен о них знать, иначе адаптивный темп на них не учится, а
+            # соседние операции берут аккаунт как спокойный.
+            await _note_short_floods(acc_id, res.get("short_floods"))
             if attempted:
                 if by_phone:
                     # Дедупим только УСПЕШНО приглашённые номера; «не в Telegram»
@@ -15956,9 +16034,18 @@ async def _exec_mass_invite(
                     await _remember_invited(res.get("invited_phones") or [])
                     _phones_not_found += len(res.get("not_found_phones") or [])
                 else:
-                    await _remember_invited(batch[:attempted])
+                    await _remember_invited(tried)
             total_ok += ok_n
             total_fail += fail_n
+            if _invite_method == "link" and not by_phone and ok_n:
+                # Метод «ссылка в ЛС» — это личные сообщения: учитываем их
+                # построчно, как рассылка, иначе дневной лимит ЛС их не видит.
+                try:
+                    from services import account_budget as _ab_link
+                    await _ab_link.record_actions(pool, owner_id, acc_id, "dm", ok_n,
+                                                  result="sent", operation_id=op_id)
+                except Exception:
+                    log_exc_swallow(log, "mass_invite: dm record failed")
 
             # Безопасный режим: копим состояние по чату и держим темп.
             if _safe_mode:
@@ -16006,7 +16093,9 @@ async def _exec_mass_invite(
                 for _k, _n in _kinds.items():
                     _fail_reasons[_k] = _fail_reasons.get(_k, 0) + int(_n)
             for _e in (res.get("errors") or []):
-                if not _kinds:
+                # «account error: …» — отказ аккаунту (флуд/права), а не цели:
+                # цель вернулась в очередь, в отказы по целям его не считаем.
+                if not _kinds and not str(_e).startswith("account error"):
                     _es = str(_e).lower()
                     if "privacy" in _es:
                         _k = "privacy"
@@ -16043,7 +16132,7 @@ async def _exec_mass_invite(
                         _raw = str(_e)
                         if ": " in _raw and not _raw.startswith("group error"):
                             _failed_set.add(_raw.split(": ", 1)[0])
-                    _succ = [str(r) for r in batch[:attempted] if str(r) not in _failed_set]
+                    _succ = [str(r) for r in tried if str(r) not in _failed_set]
                 # без дублей в отчёте (одну цель могли пробовать в двух батчах)
                 _succ = [s for s in _succ if s not in _ok_seen]
                 _ok_seen.update(_succ)
@@ -16174,7 +16263,16 @@ async def _exec_mass_invite(
     # Кого не взял НИ ОДИН способ — кандидат на финальный фолбэк (ссылка в ЛС)
     # ниже. По умолчанию — все (трюк мог не запуститься вовсе); сужаем по факту.
     _still_blocked: list = list(_all_blocked_uniq)
-    if _promoter is not None and _promote_trick and _all_blocked_uniq and not group_broken \
+    _trick_skipped_flood = False
+    if _promoter is not None and _promote_trick and _all_blocked_uniq and _promoter_resting():
+        # Промоутер в этом прогоне уже словил флуд (или сейчас на паузе). Раньше
+        # трюк всё равно запускался им — до 400 EditAdmin подряд аккаунтом под
+        # действующим ограничением, то есть прямая дорога к бану именно того
+        # аккаунта, на котором держится выдача прав всему флоту.
+        _trick_skipped_flood = True
+        log.warning("mass_invite op=%d: промоут-трюк пропущен — промоутер #%s на паузе "
+                    "Telegram", op_id, _promoter["id"])
+    elif _promoter is not None and _promote_trick and _all_blocked_uniq and not group_broken \
             and not flood_storm and not await _is_cancelled(pool, op_id):
         from services import mass_inviter_engine as _inv
         _cap = 200 if not _max_invites else max(0, _max_invites - (total_ok + total_fail))
@@ -16183,36 +16281,66 @@ async def _exec_mass_invite(
         if _uniq_blocked:
             log.info("mass_invite op=%d: промоут-трюк для %d заблокированных целей",
                      op_id, len(_uniq_blocked))
+            # Пачками, а не одним вызовом на все 200: между пачками видна отмена
+            # операции, и флуд промоутера останавливает трюк сразу, а не после
+            # того, как движок сам дойдёт до конца списка.
+            _TRICK_CHUNK = 20
+            _tried_blocked: list = []
+            _trick_added: list = []
+            _trick_tried = 0
             try:
-                _tr = await _inv.add_via_promote(
-                    _promoter["session_str"], dict(_promoter), group, _uniq_blocked)
-                _trick_ok = int(_tr.get("ok") or 0)
+                for _ci in range(0, len(_uniq_blocked), _TRICK_CHUNK):
+                    _part = _uniq_blocked[_ci:_ci + _TRICK_CHUNK]
+                    if _ci and await _is_cancelled(pool, op_id):
+                        _tried_blocked.extend(_uniq_blocked[_ci:])
+                        break
+                    _tr = await _inv.add_via_promote(
+                        _promoter["session_str"], dict(_promoter), group, _part)
+                    _part_ok = int(_tr.get("ok") or 0)
+                    _trick_ok += _part_ok
+                    _trick_tried += len(_part) - len(_tr.get("untried") or [])
+                    # still_blocked — РЕАЛЬНО не добавленные (не все при частичном
+                    # успехе: раньше при trick_ok>0 в invited_this_run уходил ВЕСЬ
+                    # пакет, и реально не добавленные никогда не получали
+                    # повторной попытки/фолбэка — тихая потеря цели).
+                    _part_blocked = list(_tr.get("still_blocked") or [])
+                    _tried_blocked.extend(_part_blocked)
+                    await _note_short_floods(int(_promoter["id"]), _tr.get("short_floods"))
+                    if _part_ok:
+                        _pb_keys = {str(v) for v in _part_blocked}
+                        _part_added = [x for x in _part if str(x) not in _pb_keys]
+                        _trick_added.extend(_part_added)
+                        await _remember_invited(_part_added)
+                        await bump_daily_stats(pool, int(_promoter["id"]),
+                                               ok=_part_ok, invites=_part_ok)
+                        await _safe_execute(
+                            pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                            op_id, _part_ok)
+                    if _tr.get("peer_flood") or _tr.get("flood_wait"):
+                        # Пауза промоутеру — та же запись в пульс, что у инвайтеров.
+                        await _rest_invite_account(int(_promoter["id"]), _tr)
+                        _tried_blocked.extend(_uniq_blocked[_ci + len(_part):])
+                        log.warning("mass_invite op=%d: промоут-трюк остановлен — "
+                                    "флуд промоутера", op_id)
+                        break
+                    if _tr.get("no_rights"):
+                        _tried_blocked.extend(_uniq_blocked[_ci + len(_part):])
+                        break
                 total_ok += _trick_ok
-                # still_blocked — РЕАЛЬНО не добавленные (не все _uniq_blocked при
-                # частичном успехе: раньше при trick_ok>0 в invited_this_run уходил
-                # ВЕСЬ пакет, и реально не добавленные никогда не получали повторной
-                # попытки/фолбэка — тихая потеря цели).
-                _tried_blocked = _tr.get("still_blocked") or []
-                _still_blocked = list(_tried_blocked) + _never_tried
-                if _trick_ok:
-                    _still_blocked_keys = {str(v) for v in _tried_blocked}
-                    _added_by_trick = [x for x in _uniq_blocked
-                                       if str(x) not in _still_blocked_keys]
-                    await bump_daily_stats(pool, int(_promoter["id"]),
-                                           ok=_trick_ok, invites=_trick_ok)
-                    await _remember_invited(_added_by_trick)
-                    await _safe_execute(
-                        pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
-                        op_id, _trick_ok)
+                _still_blocked = _tried_blocked + _never_tried
                 await _safe_execute(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,0,'promote_trick',$2,$3)", op_id,
                     "ok" if _trick_ok else "fail",
-                    f"добавлено промоут-трюком: {_trick_ok}/{len(_uniq_blocked)}")
+                    f"добавлено промоут-трюком: {_trick_ok}/{max(_trick_tried, _trick_ok)}")
             except Exception as _te:
                 log.warning("mass_invite op=%d: промоут-трюк сбой: %s", op_id, _te)
-                # Сбой ДО результата — весь _uniq_blocked остаётся заблокированным
-                # (плюс некапнутый остаток); _still_blocked уже на дефолте это отражает.
+                total_ok += _trick_ok
+                # Сбой посреди пачек: всё, что не подтверждено как добавленное,
+                # остаётся кандидатом на фолбэк (ссылка в ЛС).
+                _added_keys = {str(v) for v in _trick_added}
+                _still_blocked = [x for x in _uniq_blocked
+                                  if str(x) not in _added_keys] + _never_tried
 
     # ── Финальный фолбэк: кого не взял НИ ОДИН способ — ссылка в ЛС ───────────
     # Явный запрос владельца: "тех кого не удаётся заинвайтить никаким способом
@@ -16220,6 +16348,7 @@ async def _exec_mass_invite(
     # из всех (человек вступает сам) — подходящий именно для целей, на которых
     # уже отработали прямой инвайт И промоут-трюк и оба отказали.
     _link_fallback_ok = 0
+    _link_fallback_left = 0
     if _link_fallback and _invite_link and _still_blocked and not group_broken \
             and not flood_storm and not await _is_cancelled(pool, op_id):
         from services import mass_inviter_engine as _inv2
@@ -16228,37 +16357,98 @@ async def _exec_mass_invite(
                           if not (str(x) in _seen_lf or _seen_lf.add(str(x)))]
         _lf_cap = 200 if not _max_invites else max(0, _max_invites - (total_ok + total_fail))
         _uniq_fallback = _uniq_fallback[:_lf_cap]
-        # Отправитель ЛС не обязан быть ИМЕННО промоутером (право слать личные
-        # сообщения не связано с правом назначать админов в чате) — промоутер
-        # может отсутствовать вовсе, если основной метод «direct» и весь флот
-        # уже имел invite_users нативно. Первый живой аккаунт флота подходит
-        # ровно так же, лишь бы у него была сессия.
-        _dm_sender = _promoter or next((a for a in accounts if a.get("session_str")), None)
-        if _uniq_fallback and _dm_sender is not None:
-            log.info("mass_invite op=%d: ссылка в ЛС для %d недостижимых целей",
-                     op_id, len(_uniq_fallback))
+        # Отправители — живые аккаунты флота, по небольшой порции на каждого.
+        #
+        # Раньше ВСЕ ссылки слал один аккаунт (промоутер, если был) одним
+        # вызовом с потолком 180 секунд. На 200 целей при паузе 2,5–5с между
+        # сообщениями это физически не помещалось: вызов обрывался по таймауту
+        # примерно на сороковом сообщении, в отчёт уходило «доставлено 0», а
+        # разосланные ссылки не учитывались нигде. Плюс 200 ЛС незнакомым людям
+        # подряд с одного аккаунта — ровно то, за что Telegram даёт PeerFlood, и
+        # получал его самый ценный аккаунт инвайта. Флуд при этом не записывался.
+        #
+        # Теперь: аккаунты, словившие флуд в этом прогоне, не шлют; промоутер —
+        # последним; флуд отправителя записывается в пульс, а его остаток
+        # переходит следующему.
+        _pid = int(_promoter["id"]) if _promoter is not None else None
+        _senders = [a for a in accounts
+                    if a.get("session_str") and int(a["id"]) not in _flooded_ids
+                    and int(a["id"]) != _pid]
+        if _promoter is not None and _promoter.get("session_str") and not _promoter_resting():
+            _senders.append(_promoter)
+        _LF_PER_SENDER = 20
+        _lf_queue: deque = deque(_uniq_fallback)
+        _lf_tried = 0
+        if _uniq_fallback and _senders:
+            log.info("mass_invite op=%d: ссылка в ЛС для %d недостижимых целей "
+                     "(отправителей: %d)", op_id, len(_uniq_fallback), len(_senders))
+        from services import account_budget as _lf_budget
+
+        async def _lf_send(_snd) -> bool:
+            """Одна порция ссылок одним отправителем. False — отправитель выбывает."""
+            nonlocal _link_fallback_ok, _lf_tried
+            _sid = int(_snd["id"])
+            _part = _take(_lf_queue, _LF_PER_SENDER)
             try:
+                # Потолок с запасом на КАЖДОЕ сообщение (45с на отправку, пауза,
+                # одна короткая пауза Telegram с повтором): обрыв посреди порции
+                # оставил бы разосланное неучтённым.
                 _lf = await asyncio.wait_for(
                     _inv2.invite_via_link_batch(
-                        _dm_sender["session_str"], dict(_dm_sender), _invite_link,
-                        _uniq_fallback, _link_msg, _pace_mult),
-                    timeout=180)
-                _link_fallback_ok = int(_lf.get("ok") or 0)
-                total_ok += _link_fallback_ok
-                if _link_fallback_ok:
-                    await bump_daily_stats(pool, int(_dm_sender["id"]),
-                                           ok=_link_fallback_ok, invites=_link_fallback_ok)
-                    await _remember_invited(_uniq_fallback)
-                    await _safe_execute(
-                        pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
-                        op_id, _link_fallback_ok)
-                await _safe_execute(
-                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,0,'link_fallback',$2,$3)", op_id,
-                    "ok" if _link_fallback_ok else "fail",
-                    f"ссылка в ЛС недостижимым целям: доставлено {_link_fallback_ok}/{len(_uniq_fallback)}")
+                        _snd["session_str"], dict(_snd), _invite_link,
+                        _part, _link_msg, _pace_mult),
+                    timeout=120 + 120 * len(_part))
             except Exception as _lfe:
-                log.warning("mass_invite op=%d: фолбэк-ссылка в ЛС сбой: %s", op_id, _lfe)
+                # Порцию назад НЕ возвращаем: часть ссылок могла уйти, и второй
+                # отправитель написал бы тем же людям повторно.
+                log.warning("mass_invite op=%d: фолбэк-ссылка в ЛС сбой у #%s: %s",
+                            op_id, _sid, _lfe)
+                return False
+            _ok_lf = int(_lf.get("ok") or 0)
+            _untried_lf = list(_lf.get("untried") or [])
+            _lf_tried += len(_part) - len(_untried_lf)
+            await _note_short_floods(_sid, _lf.get("short_floods"))
+            if _ok_lf:
+                _link_fallback_ok += _ok_lf
+                await bump_daily_stats(pool, _sid, ok=_ok_lf, invites=_ok_lf)
+                # ЛС учитываются построчно — так их видит дневной лимит рассылок,
+                # и кампания в тот же день не перебирает аккаунт сверх лимита.
+                await _lf_budget.record_actions(pool, owner_id, _sid, "dm", _ok_lf,
+                                                result="sent", operation_id=op_id)
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                    op_id, _ok_lf)
+            if _untried_lf:
+                _give_back(_lf_queue, _untried_lf)
+            if _lf.get("peer_flood") or _lf.get("flood_wait"):
+                await _rest_invite_account(_sid, _lf)
+                return False
+            return True
+
+        # Круги по живым отправителям, по порции на каждого за круг: нагрузка
+        # ложится на флот ровно, а не «выжать один аккаунт, потом следующий».
+        # Отправитель со флудом или сбоем из кругов выбывает.
+        _lf_live = list(_senders)
+        _lf_stop = False
+        while _lf_queue and _lf_live and not _lf_stop:
+            for _snd in list(_lf_live):
+                if not _lf_queue:
+                    break
+                if await _is_cancelled(pool, op_id):
+                    _lf_stop = True
+                    break
+                if not await _lf_send(_snd):
+                    _lf_live.remove(_snd)
+        _link_fallback_left = len(_lf_queue)
+        total_ok += _link_fallback_ok
+        if _uniq_fallback:
+            await _safe_execute(
+                pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,0,'link_fallback',$2,$3)", op_id,
+                "ok" if _link_fallback_ok else "fail",
+                f"ссылка в ЛС недостижимым целям: доставлено {_link_fallback_ok}/"
+                f"{max(_lf_tried, _link_fallback_ok)}"
+                + (f", не успели отправить: {_link_fallback_left}" if _link_fallback_left else ""))
 
     # Запомнить обработанные цели, чтобы следующий прогон их не тыкал повторно.
     # Страховка: цели пишутся в дедуп по ходу прогона (_remember_invited), и к
@@ -16419,6 +16609,10 @@ async def _exec_mass_invite(
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n🔗 Недостижимым отправлена ссылка в ЛС: {_link_fallback_ok}"
            if _link_fallback_ok else "")
+        + (f"\n🔗 Ссылку не успели отправить: {_link_fallback_left} — отправители "
+           "выбыли (пауза Telegram или сбой связи)." if _link_fallback_left else "")
+        + ("\n⏸ Промоут-трюк пропущен: аккаунт, выдающий права, словил паузу Telegram "
+           "в этом прогоне — его берегли от бана." if _trick_skipped_flood else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
         + (f"\n📦 Источник больше {_INVITE_AUDIENCE_CAP} целей — взята первая порция; "
            "остальные подтянутся следующими прогонами." if not _source_exhausted else "")

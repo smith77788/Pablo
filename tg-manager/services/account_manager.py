@@ -5693,8 +5693,15 @@ async def promote_to_admin_ex(
     manage_call: bool = False,
     add_admins: bool = False,
     anonymous: bool = False,
+    pool=None,
 ) -> tuple[bool, str]:
     """Выдать пользователю права админа в канале/группе.
+
+    pool — если передан, пауза Telegram промоутеру пишется в общий пульс
+    (flood_engine.note_flood) и видна соседним процессам; без него — только
+    процессный кулдаун. Записывается в любом случае: раньше «flood» возвращался
+    вызывающему и терялся, и промоутер — самый ценный аккаунт инвайта — снова
+    получал EditAdmin под уже действующей паузой.
 
     anonymous=True прячет личность админа: его действия (в т.ч. системные
     вступления новых участников через промоут-трюк) в списке участников/логе
@@ -5802,7 +5809,14 @@ async def promote_to_admin_ex(
         # к разночтениям версий, чем импорт конкретного символа.
         if "AdminsTooMuch" in _name:
             return False, "admins_too_much"
-        return False, ("flood" if "Flood" in _name or "Wait" in _name else "error")
+        if "Flood" in _name or "Wait" in _name:
+            try:
+                from services import flood_engine as _fe
+                await _fe.note_flood(pool, (_acc or {}).get("id"), e, "promote")
+            except Exception:
+                log_exc_swallow(log, "promote_to_admin: flood record failed")
+            return False, "flood"
+        return False, "error"
     finally:
         try:
             await client.disconnect()

@@ -400,7 +400,14 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
     if not resolved:
         return {"ok": 0, "failed": failed, "errors": errors,
                 "privacy_failed": privacy_failed, "peer_flood": False,
-                "flood_wait": 0, "no_rights": False}
+                "flood_wait": 0, "no_rights": False, "untried": [],
+                "short_floods": []}
+
+    short_floods: list[int] = []
+    # Флуд, нет прав, закрытый чат — отказ аккаунту или чату, а не целям: весь
+    # пакет не тронут. Раньше его целиком писали в ошибки, исполнитель записывал
+    # всех в дедуп и не возвращал в очередь — один флуд пакетом стоил пятерых.
+    _untried = [r for r, _ in resolved]
 
     async def _send():
         return await asyncio.wait_for(
@@ -418,6 +425,7 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
             # вывел из круга — режим «быстрее» превращался бы в «теряем аккаунты».
             if (type(first).__name__ == "FloodWaitError"
                     and int(getattr(first, "seconds", 0) or 0) <= _MAX_FLOOD_INLINE):
+                short_floods.append(int(getattr(first, "seconds", 0) or 0))
                 await asyncio.sleep(min(int(getattr(first, "seconds", 0) or 0), 60))
                 res = await _send()
             else:
@@ -429,28 +437,29 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
             log.info("bulk invite: %s — откат на поштучный путь", name)
             return None
         if name == "PeerFloodError":
-            note(FAIL_FLOOD)
-            return {"ok": 0, "failed": failed + len(resolved), "errors":
-                    errors + ["batch: peer flood — аккаунт ограничен"],
+            return {"ok": 0, "failed": failed, "errors":
+                    errors + ["account error: peer flood — аккаунт ограничен"],
                     "privacy_failed": privacy_failed, "peer_flood": True,
-                    "flood_wait": 0, "no_rights": False}
+                    "flood_wait": 0, "no_rights": False, "untried": _untried,
+                    "short_floods": short_floods}
         if name == "FloodWaitError":
-            note(FAIL_FLOOD)
             _fw = int(getattr(e, "seconds", 60) or 60)
-            return {"ok": 0, "failed": failed + len(resolved),
-                    "errors": errors + [f"batch: flood wait {_fw}s"],
+            return {"ok": 0, "failed": failed,
+                    "errors": errors + [f"account error: flood wait {_fw}s"],
                     "privacy_failed": privacy_failed, "peer_flood": False,
-                    "flood_wait": _fw, "no_rights": False}
+                    "flood_wait": _fw, "no_rights": False, "untried": _untried,
+                    "short_floods": short_floods}
         if name == "ChatAdminRequiredError":
             return {"ok": 0, "failed": failed, "errors": errors + [
                 "account error: у аккаунта нет прав добавлять участников"],
                 "privacy_failed": privacy_failed, "peer_flood": False,
-                "flood_wait": 0, "no_rights": True}
-        note(FAIL_PERM)
-        return {"ok": 0, "failed": failed + len(resolved),
+                "flood_wait": 0, "no_rights": True, "untried": _untried,
+                "short_floods": short_floods}
+        return {"ok": 0, "failed": failed,
                 "errors": errors + [f"group error: {name}"],
                 "privacy_failed": privacy_failed, "peer_flood": False,
-                "flood_wait": 0, "no_rights": False}
+                "flood_wait": 0, "no_rights": False, "untried": _untried,
+                "short_floods": short_floods}
 
     # Кого Telegram не добавил — говорит поимённо. Это ТОЧНЕЕ поштучного обхода:
     # там «не добавлен» приходилось выводить из отсутствия исключения.
@@ -483,7 +492,8 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
             ok += 1
     return {"ok": ok, "failed": failed, "errors": errors,
             "privacy_failed": privacy_failed, "peer_flood": False,
-            "flood_wait": 0, "no_rights": False}
+            "flood_wait": 0, "no_rights": False, "untried": [],
+            "short_floods": short_floods}
 
 
 async def invite_batch(
@@ -541,6 +551,14 @@ async def invite_batch(
     # Цели, которые отклонены приватностью/не-взаимностью — их прямой инвайт не
     # берёт, но может взять «добавление через выдачу админки» (промоут-трюк).
     privacy_failed: list = []
+    # Цели, до которых дело не дошло (флуд аккаунта, закрытый чат, нет прав,
+    # обрыв связи): их Telegram не добавлял и не отклонял. Исполнитель вернёт их
+    # в очередь и НЕ запишет в дедуп. Срез с этого индекса.
+    untried_from = len(user_refs)
+    _cur = 0
+    # Короткие паузы Telegram, пережитые на месте: исполнитель записывает их в
+    # пульс аккаунта (flood_engine), иначе темп аккаунта не учится на них.
+    short_floods: list[int] = []
 
     try:
         client = await connect_client(session_string, _acc, "invite")
@@ -559,11 +577,17 @@ async def invite_batch(
                         "flood_wait": _bulk["flood_wait"], "errors": errors,
                         "privacy_failed": privacy_failed,
                         "no_rights": _bulk["no_rights"], "fail_kinds": fail_kinds,
+                        "untried": list(_bulk.get("untried") or []),
+                        "short_floods": list(_bulk.get("short_floods") or []),
                         "bulk": True}
             # None — пакет не подошёл (ошибка про одну цель): идём поштучно ниже,
             # НЕ теряя целей. Счётчики пакета при этом не применялись.
 
-        for ref in user_refs:
+        _i = 0
+        _flood_retried = False
+        while _i < len(user_refs):
+            ref = user_refs[_i]
+            _cur = _i
             try:
                 user = await asyncio.wait_for(
                     client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
@@ -598,21 +622,33 @@ async def invite_batch(
                 privacy_failed.append(ref)
                 errors.append(f"{ref}: not mutual contact")
             except PeerFloodError:
+                # Флуд — отказ АККАУНТУ, а не цели: Telegram её не добавлял и не
+                # отклонял. Раньше цель шла в «ошибки», попадала в дедуп как
+                # обработанная и не возвращалась в очередь — каждый флуд молча
+                # стоил одного человека из аудитории. Теперь она в untried.
                 peer_flood = True
-                failed += 1
-                _note(FAIL_FLOOD)
-                errors.append(f"{ref}: peer flood — аккаунт ограничен")
+                untried_from = _cur
+                errors.append("account error: peer flood — аккаунт ограничен")
                 break  # аккаунт перегрет, дальше не пробуем
             except FloodWaitError as e:
                 _fw = int(getattr(e, "seconds", 60) or 60)
-                failed += 1
-                _note(FAIL_FLOOD)
-                errors.append(f"{ref}: flood wait {_fw}s")
                 if _fw > _MAX_FLOOD_INLINE:
                     # Длинный флуд: НЕ инвайтим во время активного флуда (эскалация).
                     flood_wait = _fw
+                    untried_from = _cur
+                    errors.append(f"account error: flood wait {_fw}s")
                     break
+                # Короткую паузу пережидаем и повторяем ЭТУ ЖЕ цель (один раз):
+                # раньше цикл шёл дальше, и цель, на которой пришла пауза,
+                # списывалась в ошибки, хотя её никто не отклонял.
+                short_floods.append(_fw)
                 await asyncio.sleep(min(_fw, 60))
+                if not _flood_retried:
+                    _flood_retried = True
+                    continue
+                failed += 1
+                _note(FAIL_FLOOD)
+                errors.append(f"{ref}: flood wait {_fw}s")
             except ChatAdminRequiredError:
                 # Не про пользователя и НЕ про группу — про ПРАВА ЭТОГО аккаунта.
                 # Для канала добавлять участников может только админ с правом
@@ -621,17 +657,18 @@ async def invite_batch(
                 # есть. Теперь помечаем no_rights → вызывающий выводит ЭТОТ аккаунт
                 # из круга и продолжает аккаунтами с правами, а не рушит прогон.
                 no_rights = True
+                untried_from = _cur
                 errors.append("account error: у аккаунта нет прав добавлять участников "
                               "(не админ / права ещё не применились)")
                 break
             except UsersTooMuchError:
-                failed += 1
-                _note(FAIL_PERM)
+                # Беда чата, а не цели: она возвращается в очередь (её возьмёт
+                # следующая дочерняя группа, если включена ротация).
+                untried_from = _cur
                 errors.append("group error: в чате достигнут лимит участников Telegram")
                 break
             except (ChatWriteForbiddenError, ChannelPrivateError) as e:
-                failed += 1
-                _note(FAIL_PERM)
+                untried_from = _cur
                 errors.append(f"group error: нет доступа к чату ({type(e).__name__})")
                 break  # нет прав/группа закрыта
             except Exception as e:
@@ -647,8 +684,11 @@ async def invite_batch(
                 errors.append(f"{ref}: {FAIL_LABELS.get(_kind, str(e)[:80])}")
                 if _kind == FAIL_OTHER:
                     log.warning("invite failed: %s", e)
+            _i += 1
+            _flood_retried = False
 
     except Exception as exc:
+        untried_from = min(untried_from, _cur)
         # Флуд во время резолва группы (приват-ссылка → CheckChatInviteRequest,
         # числовой id → get_entity) раньше уходил сюда как «connect»-ошибка с
         # flood_wait=0. Исполнитель не видел флуд-сигнала, ретайрил аккаунт как
@@ -677,7 +717,9 @@ async def invite_batch(
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors,
             "privacy_failed": privacy_failed, "no_rights": no_rights,
-            "fail_kinds": fail_kinds}
+            "fail_kinds": fail_kinds,
+            "untried": list(user_refs[untried_from:]),
+            "short_floods": short_floods}
 
 
 # ── Автовыдача прав админа инвайтерам + «промоут-трюк» ───────────────────────
@@ -831,10 +873,19 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     # частичном успехе помечал ВСЕХ целей пакета как обработанных (дубль-баг:
     # реально не добавленные никогда не получали повторной попытки).
     succeeded: list = []
+    # Как в invite_batch: цели, до которых не дошло (флуд/нет прав/обрыв), и
+    # короткие паузы, пережитые на месте, — исполнителю для очереди и пульса.
+    untried_from = len(user_refs)
+    _cur = 0
+    _flood_retried = False
+    short_floods: list[int] = []
     try:
         client = await connect_client(session_string, _acc, "invite")
         group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
-        for ref in user_refs:
+        _i = 0
+        while _i < len(user_refs):
+            ref = user_refs[_i]
+            _cur = _i
             try:
                 user = await asyncio.wait_for(
                     client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
@@ -860,20 +911,28 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                 # no_rights → вызывающий выдаёт ему add_admins и продолжает, а не
                 # рушит операцию (как в invite_batch).
                 no_rights = True
+                untried_from = _cur
                 errors.append("account error: нет прав add_admins для промоут-трюка")
                 break
             except PeerFloodError:
                 peer_flood = True
-                failed += 1
-                errors.append(f"{ref}: peer flood")
+                untried_from = _cur
+                errors.append("account error: peer flood")
                 break
             except FloodWaitError as e:
                 _fw = int(getattr(e, "seconds", 60) or 60)
-                failed += 1
                 if _fw > _MAX_FLOOD_INLINE:
                     flood_wait = _fw
+                    untried_from = _cur
+                    errors.append(f"account error: flood wait {_fw}s")
                     break
+                short_floods.append(_fw)
                 await asyncio.sleep(min(_fw, 60))
+                if not _flood_retried:
+                    _flood_retried = True
+                    continue
+                failed += 1
+                errors.append(f"{ref}: flood wait {_fw}s")
             except UserPrivacyRestrictedError:
                 # Даже трюк не всегда обходит приватность — честно считаем провалом.
                 failed += 1
@@ -882,7 +941,10 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                 log.warning("add_via_promote failed: %s", e)
                 failed += 1
                 errors.append(f"{ref}: {str(e)[:80]}")
+            _i += 1
+            _flood_retried = False
     except Exception as exc:
+        untried_from = min(untried_from, _cur)
         # Как в invite_batch: флуд во время резолва группы не должен маскироваться
         # под «connect» с flood_wait=0 — иначе вызывающий не поставит cooldown.
         _en = type(exc).__name__
@@ -906,7 +968,9 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     still_blocked = [r for r in user_refs if str(r) not in _done]
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights,
-            "still_blocked": still_blocked}
+            "still_blocked": still_blocked,
+            "untried": list(user_refs[untried_from:]),
+            "short_floods": short_floods}
 
 
 async def export_group_invite_link(session_string: str, _acc: dict | None,
@@ -991,7 +1055,14 @@ async def invite_via_link_batch(session_string: str, _acc: dict | None,
     _LINK_SLOT = "\x00LINKSLOT\x00"
     _tpl_masked = tpl.replace("{link}", _LINK_SLOT)
 
-    for ref in user_refs:
+    # Как в invite_batch: кому ссылку так и не отправили из-за флуда аккаунта,
+    # возвращаются исполнителю — их возьмёт другой отправитель.
+    untried_from = len(user_refs)
+    short_floods: list[int] = []
+    _flood_retried = False
+    _i = 0
+    while _i < len(user_refs):
+        ref = user_refs[_i]
         text = expand_spintax(_tpl_masked).replace(_LINK_SLOT, invite_link)
         try:
             res = await asyncio.wait_for(
@@ -1005,28 +1076,44 @@ async def invite_via_link_batch(session_string: str, _acc: dict | None,
             # прогоняла цикл без единой задержки — ровно тот всплеск частоты,
             # из-за которого прилетает PeerFlood.
             await asyncio.sleep(random.uniform(2.5, 5.0) * _pm)
+            _i += 1
+            _flood_retried = False
             continue
         if res.get("ok"):
             ok += 1
             await asyncio.sleep(random.uniform(2.5, 5.0) * _pm)
+            _i += 1
+            _flood_retried = False
             continue
         # Ошибки send_dm: privacy / peer_flood / flood_wait / прочее.
-        failed += 1
         if res.get("peer_flood"):
+            # Флуд — отказ отправителю, а не человеку: ссылку он не получил и
+            # не отклонял. Возвращаем его исполнителю (untried).
             peer_flood = True
-            _note(FAIL_FLOOD)
-            errors.append(f"{ref}: peer flood")
+            untried_from = _i
+            errors.append("account error: peer flood")
             break
         _fw = int(res.get("flood_wait") or 0)
         if _fw:
-            _note(FAIL_FLOOD)
             if _fw > _MAX_FLOOD_INLINE:
                 flood_wait = _fw
-                errors.append(f"{ref}: flood wait {_fw}s")
+                untried_from = _i
+                errors.append(f"account error: flood wait {_fw}s")
                 break
+            # Короткую паузу пережидаем и шлём ЭТОМУ ЖЕ человеку ещё раз.
+            # Раньше цикл шёл дальше — ссылку он так и не получал.
+            short_floods.append(_fw)
             await asyncio.sleep(min(_fw, 60))
-            errors.append(f"{ref}: flood wait {_fw}s (переждали)")
+            if not _flood_retried:
+                _flood_retried = True
+                continue
+            failed += 1
+            _note(FAIL_FLOOD)
+            errors.append(f"{ref}: flood wait {_fw}s")
+            _i += 1
+            _flood_retried = False
             continue
+        failed += 1
         # Причина отказа — той же классификацией, что у прямого инвайта: иначе
         # отчёт по «ссылке в ЛС» остаётся в корзине «прочее», хотя в нём ровно
         # те же случаи (приватность ЛС, мёртвая цель, блокировка).
@@ -1039,11 +1126,15 @@ async def invite_via_link_batch(session_string: str, _acc: dict | None,
             privacy_failed.append(ref)
         errors.append(f"{ref}: {FAIL_LABELS.get(_kind) if _kind != FAIL_OTHER else _err[:80]}")
         await asyncio.sleep(random.uniform(2.5, 5.0) * _pm)
+        _i += 1
+        _flood_retried = False
 
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors,
             "privacy_failed": privacy_failed, "no_rights": False,
-            "fail_kinds": fail_kinds}
+            "fail_kinds": fail_kinds,
+            "untried": list(user_refs[untried_from:]),
+            "short_floods": short_floods}
 
 
 # ── Добавление по номерам телефонов ──────────────────────────────────────────
@@ -1081,6 +1172,9 @@ async def invite_by_phones(
     invited_phones: list[str] = []   # номера, реально добавленные (для дедупа впредь)
     _uid_to_phone: dict = {}          # user_id → исходный номер (по client_id)
     _resolved_phones: set = set()     # номера, которые Telegram сопоставил юзеру
+    untried_phones: list[str] = []    # не дошли из-за флуда/прав — вернуть в очередь
+    short_floods: list[int] = []      # короткие паузы, пережитые на месте
+    _connected_ok = False             # дошли ли до приглашения вообще
 
     try:
         client = await connect_client(session_string, _acc, "invite")
@@ -1104,9 +1198,15 @@ async def invite_by_phones(
                 _uid_to_phone[getattr(_imp, "user_id", None)] = phones[int(_ci)]
                 _resolved_phones.add(phones[int(_ci)])
         log.info("invite_by_phones: imported %d/%d users", len(imported_users), len(phones))
+        _connected_ok = True
 
-        for user in imported_users:
+        for _ui, user in enumerate(imported_users):
             if peer_flood or flood_wait or group_broken or no_rights:
+                # Номера, до которых не дошло: флуд/права — беда аккаунта, а не
+                # человека. Исполнитель вернёт их в очередь другому аккаунту.
+                untried_phones.extend(
+                    _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
+                                  for _u in imported_users[_ui:]) if _p)
                 break
             _ph = _uid_to_phone.get(getattr(user, "id", None))
             try:
@@ -1127,6 +1227,9 @@ async def invite_by_phones(
                 # выводит аккаунт из круга и продолжает аккаунтами с правами (как в
                 # invite_batch), а не рушит всю операцию.
                 no_rights = True
+                untried_phones.extend(
+                    _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
+                                  for _u in imported_users[_ui:]) if _p)
                 errors.append("account error: у аккаунта нет прав добавлять участников "
                               "(не админ / права ещё не применились)")
                 break
@@ -1134,15 +1237,22 @@ async def invite_by_phones(
                 failed += 1
             except PeerFloodError:
                 peer_flood = True
-                failed += 1
-                errors.append("peer flood — аккаунт ограничен")
+                untried_phones.extend(
+                    _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
+                                  for _u in imported_users[_ui:]) if _p)
+                errors.append("account error: peer flood — аккаунт ограничен")
+                break
             except FloodWaitError as e:
                 _fw = int(getattr(e, "seconds", 60) or 60)
-                failed += 1
                 if _fw > _MAX_FLOOD_INLINE:
                     flood_wait = _fw  # длинный флуд → стоп, не инвайтим во время флуда
-                    errors.append(f"flood wait {_fw}s")
+                    untried_phones.extend(
+                        _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
+                                      for _u in imported_users[_ui:]) if _p)
+                    errors.append(f"account error: flood wait {_fw}s")
                     break
+                failed += 1
+                short_floods.append(_fw)
                 await asyncio.sleep(min(_fw, 60))
             except Exception as e:
                 log.warning('invite failed: %s', e)
@@ -1178,6 +1288,9 @@ async def invite_by_phones(
         log.warning("invite_by_phones error: %s", exc)
         errors.append(str(exc)[:100])
         not_found_phones = []
+        if not _connected_ok:
+            # Не подключились / флуд на импорте контактов — ни один номер не тронут.
+            untried_phones = list(phones)
     finally:
         # client остаётся None, если упал сам connect_client —
         # тогда disconnect звать не на чем, и попытка добавляла лишний
@@ -1192,7 +1305,9 @@ async def invite_by_phones(
             "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights,
             # Для дедупа впредь и честного пер-номер отчёта:
             "invited_phones": list(dict.fromkeys(invited_phones)),
-            "not_found_phones": not_found_phones}
+            "not_found_phones": not_found_phones,
+            "untried": list(dict.fromkeys(untried_phones)),
+            "short_floods": short_floods}
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────

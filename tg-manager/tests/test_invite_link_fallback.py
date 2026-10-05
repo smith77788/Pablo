@@ -106,15 +106,15 @@ def test_still_blocked_excludes_only_actually_added_targets():
     invited_this_run уходил ВЕСЬ пакет — реально не добавленные цели тихо
     терялись (не получали ни повтора, ни фолбэка)."""
     body = _exec_mass_invite_body()
-    i = body.index('_tried_blocked = _tr.get("still_blocked") or []')
-    j = body.index("await _safe_execute(\n                    pool, \"INSERT INTO operation_log", i)
+    i = body.index('_part_blocked = list(_tr.get("still_blocked") or [])')
+    j = body.index("INSERT INTO operation_log", i)
     block = body[i:j]
-    assert "_still_blocked_keys = {str(v) for v in _tried_blocked}" in block
-    assert "_added_by_trick = [x for x in _uniq_blocked" in block
+    assert "_pb_keys = {str(v) for v in _part_blocked}" in block
+    assert "_part_added = [x for x in _part if str(x) not in _pb_keys]" in block
     # Дедуп пополняется через _remember_invited (он же сразу пишет в
     # invite_target_log), но смысл проверки тот же: передаётся список РЕАЛЬНО
     # добавленных целей, а не весь пакет.
-    assert "await _remember_invited(_added_by_trick)" in block, (
+    assert "await _remember_invited(_part_added)" in block, (
         "в дедуп обязаны попадать только РЕАЛЬНО добавленные трюком цели, "
         "не весь пакет разом"
     )
@@ -126,7 +126,7 @@ def test_still_blocked_excludes_only_actually_added_targets():
 def test_never_tried_targets_over_cap_stay_blocked_for_fallback():
     body = _exec_mass_invite_body()
     i = body.index("_never_tried = _all_blocked_uniq[_cap:]")
-    j = body.index("_still_blocked = list(_tried_blocked) + _never_tried")
+    j = body.index("_still_blocked = _tried_blocked + _never_tried")
     assert j > i, "цели сверх лимита прогона (не пробовали трюком вовсе) обязаны попасть в фолбэк"
 
 
@@ -149,9 +149,11 @@ def test_link_fallback_sender_falls_back_to_any_fleet_account():
     связано с правом назначать админов) — иначе фолбэк молча не работал бы
     для метода "direct" без auto_promote, где промоутера просто нет."""
     body = _exec_mass_invite_body()
-    i = body.index("_dm_sender = _promoter or next(")
-    line = body[i:i + 200]
-    assert 'a.get("session_str")' in line
+    i = body.index("_senders = [a for a in accounts")
+    seg = body[i:i + 400]
+    assert 'a.get("session_str")' in seg
+    # промоутер — не обязательный, а последний в очереди отправителей
+    assert "_senders.append(_promoter)" in seg
 
 
 def test_link_fallback_reported_in_summary():
