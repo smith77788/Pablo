@@ -10591,6 +10591,8 @@ function phoneFlag(phone) {
 let ACC_FILTER = 'all';
 let ACC_STAGE_FILTER = '';   // '' = все статусы
 let ACC_POOL_FILTER = '';    // '' = все пулы (срез приходит с «Инфраструктуры»)
+let ACC_GEO_FILTER = '';     // '' = все страны (срез приходит с «Карты присутствия»)
+let ACC_GEO_TITLE = '';      // как показать страну в баннере
 let ACC_SEARCH = '';
 let ACC_OFFSET = 0;
 let ACC_HAS_MORE = false;
@@ -10603,6 +10605,7 @@ function _accQuery(offset) {
   if (ACC_FILTER && ACC_FILTER!=='all') p.set('filter', ACC_FILTER);
   if (ACC_STAGE_FILTER) p.set('stage', ACC_STAGE_FILTER);
   if (ACC_POOL_FILTER) p.set('pool', ACC_POOL_FILTER);
+  if (ACC_GEO_FILTER) p.set('geo', ACC_GEO_FILTER);
   if (ACC_SEARCH) p.set('q', ACC_SEARCH);
   p.set('offset', offset); p.set('limit', 100);
   return '/api/miniapp/accounts?'+p.toString();
@@ -10737,7 +10740,7 @@ function _fixBtn(f) {
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) {
-    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
+    const filtered = ACC_SEARCH || ACC_STAGE_FILTER || ACC_POOL_FILTER || ACC_GEO_FILTER || (ACC_FILTER && ACC_FILTER!=='all');
     if (filtered) el.innerHTML=empty('🔍','Ничего не найдено','Измените фильтр, статус или строку поиска');
     else el.innerHTML=empty('📱','Нет аккаунтов','Импортируйте сессии прямо здесь или загрузите файл сессии в боте',{label:'➕ Добавить аккаунт',fn:'openAccImportModal()'});
     return;
@@ -10844,7 +10847,7 @@ function updateAccSelBar() {
 function _massSel() {
   if (ACC_SEL_ALL_FILTERED) {
     return {select_all_filtered: true, filter: ACC_FILTER, stage: ACC_STAGE_FILTER,
-            q: ACC_SEARCH, pool: ACC_POOL_FILTER};
+            q: ACC_SEARCH, pool: ACC_POOL_FILTER, geo: ACC_GEO_FILTER};
   }
   return {account_ids: [...ACC_SEL]};
 }
@@ -21918,6 +21921,8 @@ function healthGoAccounts(filter, stage, accPool) {
   ACC_FILTER = filter || 'all';
   ACC_STAGE_FILTER = stage || '';
   ACC_POOL_FILTER = accPool || '';
+  // Другой срез — прежняя страна с ним не едет, иначе список молча пуст.
+  ACC_GEO_FILTER = ''; ACC_GEO_TITLE = '';
   goTab('accounts');
   accPoolBanner();
   // Подсветить плитку выбранного среза, чтобы было видно, куда попали.
@@ -21937,18 +21942,30 @@ function accPoolBanner() {
   const host = document.getElementById('accList');
   const old = document.getElementById('accPoolBanner');
   if (old) old.remove();
-  if (!ACC_POOL_FILTER || !host || !host.parentNode) return;
+  if ((!ACC_POOL_FILTER && !ACC_GEO_FILTER) || !host || !host.parentNode) return;
   const el = document.createElement('div');
   el.id = 'accPoolBanner';
-  el.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0 16px 8px;padding:8px 12px;'
+  el.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin:0 16px 8px;padding:8px 12px;'
     + 'border-radius:10px;background:var(--bg-blue-16);font-size:13px';
-  el.innerHTML = '<span style="flex:1">Пул: <b>' + esc(ACC_POOL_FILTER) + '</b></span>'
-    + '<span class="icon-tap" onclick="accPoolClear()" role="button" tabindex="0">Снять \u2715</span>';
+  let rows = '';
+  if (ACC_POOL_FILTER) rows += '<div style="display:flex;align-items:center;gap:8px">'
+    + '<span style="flex:1">Пул: <b>' + esc(ACC_POOL_FILTER) + '</b></span>'
+    + '<span class="icon-tap" onclick="accPoolClear()" role="button" tabindex="0">Снять \u2715</span></div>';
+  if (ACC_GEO_FILTER) rows += '<div style="display:flex;align-items:center;gap:8px">'
+    + '<span style="flex:1">Страна: <b>' + esc(ACC_GEO_TITLE || ACC_GEO_FILTER) + '</b></span>'
+    + '<span class="icon-tap" onclick="accGeoClear()" role="button" tabindex="0">Снять \u2715</span></div>';
+  el.innerHTML = rows;
   host.parentNode.insertBefore(el, host);
 }
 
 function accPoolClear() {
   ACC_POOL_FILTER = '';
+  accPoolBanner();
+  reloadAccounts();
+}
+
+function accGeoClear() {
+  ACC_GEO_FILTER = ''; ACC_GEO_TITLE = '';
   accPoolBanner();
   reloadAccounts();
 }
@@ -23612,19 +23629,27 @@ async function openPresenceMap() {
     const d = await api('/api/miniapp/presence/map');
     const a = d.assets||{}; const cov = d.coverage||{};
     const cl = _PM_COV[cov.level]||['—','var(--hint)'];
+    // Плитки были просто числами. Теперь каждая ведёт туда, где с этим числом
+    // можно что-то сделать: к аккаунтам, каналам, ботам, планам присутствия.
     txt('pmTotals', `
-      <div class="kpi-chip"><div class="kpi-chip-val" style="color:${cl[1]}">${cl[0]}</div><div class="kpi-chip-lbl">охват гео</div></div>
-      <div class="kpi-chip"><div class="kpi-chip-val">${num(cov.distinct_geo||0)}</div><div class="kpi-chip-lbl">стран флота</div></div>
-      <div class="kpi-chip"><div class="kpi-chip-val">${num(a.channels||0)}</div><div class="kpi-chip-lbl">каналов</div></div>
-      <div class="kpi-chip"><div class="kpi-chip-val">${num(a.bots||0)}</div><div class="kpi-chip-lbl">ботов</div></div>`);
-    const by = (d.geo&&d.geo.by_country)||{};
-    const entries = Object.entries(by).sort((x,y)=>y[1]-x[1]);
-    const mx = Math.max(1, ...entries.map(e=>e[1]));
-    txt('pmGeo', entries.length ? entries.map(([cc,n])=>{
-      const w = Math.round((n/mx)*100);
-      const label = cc==='UNKNOWN' ? '🌐 Без гео-прокси' : cc;
-      return `<div style="padding:8px 0">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>${esc(label)}</b><span>${num(n)} акк.</span></div>
+      <div class="kpi-chip" onclick="pmCoverageHelp('${esc(String(cov.level||''))}')" role="button" tabindex="0"><div class="kpi-chip-val" style="color:${cl[1]}">${cl[0]}</div><div class="kpi-chip-lbl">охват гео</div></div>
+      <div class="kpi-chip" onclick="goTab('accounts')" role="button" tabindex="0"><div class="kpi-chip-val">${num(cov.distinct_geo||0)}</div><div class="kpi-chip-lbl">стран флота</div></div>
+      <div class="kpi-chip" onclick="goTab('channels')" role="button" tabindex="0"><div class="kpi-chip-val">${num(a.channels||0)}</div><div class="kpi-chip-lbl">каналов</div></div>
+      <div class="kpi-chip" onclick="goTab('bots')" role="button" tabindex="0"><div class="kpi-chip-val">${num(a.bots||0)}</div><div class="kpi-chip-lbl">ботов</div></div>`);
+    // Сервер отдаёт страны с русским названием и раздельным счётом; старый
+    // by_country (код → число активных) остаётся запасным вариантом.
+    let list = (d.geo&&d.geo.countries)||[];
+    if (!list.length) {
+      const by = (d.geo&&d.geo.by_country)||{};
+      list = Object.entries(by).sort((x,y)=>y[1]-x[1]).map(([cc,n])=>({
+        code:cc, title:(cc==='UNKNOWN'?'🌐 Без гео-прокси':cc), accounts:n, active:n}));
+    }
+    const mx = Math.max(1, ...list.map(c=>c.accounts||0));
+    txt('pmGeo', list.length ? list.map(c=>{
+      const w = Math.round(((c.accounts||0)/mx)*100);
+      const dead = (c.accounts||0) - (c.active||0);
+      return `<div class="li tap" style="flex-direction:column;align-items:stretch" onclick="pmOpenCountry('${esc(String(c.code||''))}','${esc(String(c.title||c.name||c.code||''))}')" role="button" tabindex="0">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;gap:8px"><b>${esc(c.title||c.code||'')}</b><span style="color:var(--hint);white-space:nowrap">${num(c.accounts||0)} ${plural(c.accounts||0,'аккаунт','аккаунта','аккаунтов')}${dead>0?' · '+num(dead)+' не в строю':''} ›</span></div>
         <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${w}%;background:var(--accent)"></div></div>
       </div>`;
     }).join('') : empty('🌐','География неизвестна',
@@ -23633,13 +23658,47 @@ async function openPresenceMap() {
     const gaps = (d.presence&&d.presence.gaps)||[];
     txt('pmGaps', gaps.length ? gaps.map(cc=>{
       const c = (d.presence.countries||{})[cc]||{};
-      return `<div class="row"><div class="row-ico" style="background:var(--bg-yellow-16)">📍</div>
-        <div class="row-body"><div class="row-name">${esc(c.name||cc)}</div><div class="row-val">развёрнуто ${num(c.done||0)}/${num(c.planned||0)} — ${num(c.pending||0)} в очереди</div></div></div>`;
-    }).join('') : empty('✅','Пробелов нет','Запланированное присутствие развёрнуто'));
+      // Пробел растёт из плана присутствия — строка открывает сам план.
+      const pl = (c.plans||[])[0];
+      const go = pl ? ` onclick="openGpDetail(${Number(pl.id)},'${esc(String(pl.name||''))}')" role="button" tabindex="0"` : '';
+      return `<div class="row${pl?' tap':''}"${go}><div class="row-ico" style="background:var(--bg-yellow-16)">📍</div>
+        <div class="row-body"><div class="row-name">${esc(c.title||c.name_ru||c.name||cc)}</div><div class="row-val">развёрнуто ${num(c.done||0)} из ${num(c.planned||0)} — ${num(c.pending||0)} в очереди${pl?' · '+esc(String(pl.name||'план')):''}</div></div>${pl?'<span class="chev">›</span>':''}</div>`;
+    }).join('') : empty('✅','Пробелов нет','Всё запланированное присутствие развёрнуто. Новые страны добавляются планом гео-сети.',
+      {label:'🌍 К планам гео-сети', fn:'openGlobalPresence()'}));
   } catch(e) {
+    // Экран из трёх блоков: раньше ошибка падала только в средний, а плитки и
+    // пробелы оставались пустыми — выглядело как «данных нет».
+    txt('pmTotals','');
     txt('pmGeo', errHtml(errRu(e, 'Не удалось загрузить'), 'openPresenceMap()'));
+    txt('pmGaps','');
   }
 }
+
+// Срез флота по стране: та же вкладка аккаунтов, но показаны аккаунты одной
+// страны, и баннер говорит, какой именно.
+function pmOpenCountry(cc, title) {
+  if (!cc) return;
+  ACC_GEO_FILTER = cc;
+  ACC_GEO_TITLE = title || (cc === 'UNKNOWN' ? '🌐 Без гео-прокси' : cc);
+  ACC_POOL_FILTER = '';
+  ACC_FILTER = 'all'; ACC_STAGE_FILTER = '';
+  goTab('accounts');
+  accPoolBanner();
+  document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x => {
+    x.classList.toggle('on', x.getAttribute('data-filter') === ACC_FILTER);
+  });
+  reloadAccounts();
+}
+
+function pmCoverageHelp(level) {
+  const t = level === 'wide'
+    ? 'Широко: флот больше чем в трёх странах — гео-блокировки и разом упавший провайдер не остановят работу.'
+    : level === 'moderate'
+    ? 'Умеренно: флот в двух-трёх странах. Запас есть, но одна страна всё ещё тянет много.'
+    : 'Узко: весь флот в одной стране. Блокировка провайдера или гео-ограничение остановят всё сразу — стоит развести прокси по странам.';
+  toast(t);
+}
+
 async function openGlobalPresence() {
   push('s-globalpresence');
   txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');

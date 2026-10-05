@@ -1144,6 +1144,14 @@ def _csv_resp(filename: str, header: list[str], rows: list[list]) -> web.Respons
     )
 
 
+def _geo_code(raw) -> str:
+    """Код страны из запроса: две латинские буквы или UNKNOWN, иначе пусто."""
+    cc = str(raw or "").strip().upper()[:7]
+    if cc == "UNKNOWN":
+        return cc
+    return cc if len(cc) == 2 and cc.isalpha() and cc.isascii() else ""
+
+
 def _list_limit(request: web.Request, default: int, maximum: int) -> int:
     """Потолок списка: по умолчанию короткий, по просьбе экрана — больший.
 
@@ -2921,7 +2929,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # ── Accounts ─────────────────────────────────────────────────────────────
 
     def _accounts_where(uid: int, flt: str, stage: str, q: str, admin: bool = False,
-                        acc_pool: str = "") -> tuple[str, list]:
+                        acc_pool: str = "", geo: str = "") -> tuple[str, list]:
         """Собрать WHERE + args для списка аккаунтов из фильтра здоровья, CRM-статуса
         и поиска. Возвращает (sql_where, args). Серверная фильтрация снимает
         100-лимит клиента: срез считается по ВСЕЙ таблице, не по загруженной странице.
@@ -2971,6 +2979,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if acc_pool:
             args.append(acc_pool)
             clauses.append(f"pool = ${len(args)}")
+        # Страна аккаунта = страна его прокси (так же считает geo_router). На
+        # карте присутствия страна была видна столбиком и числом, и ничем
+        # больше: открыть «эти 42 аккаунта в Германии» было нечем.
+        if geo:
+            args.append(geo)
+            clauses.append(
+                "COALESCE((SELECT UPPER(p.geo_country) FROM user_proxies p "
+                "WHERE p.id = tg_accounts.proxy_id), 'UNKNOWN') = ${}".format(len(args)))
         return " AND ".join(clauses), args
 
     async def accounts(request: web.Request) -> web.Response:
@@ -2991,6 +3007,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             stage = ""
         q = (qs.get("q") or "").strip()[:64]
         acc_pool = (qs.get("pool") or "").strip()[:64]
+        acc_geo = _geo_code(qs.get("geo"))
         try:
             offset = max(0, int(qs.get("offset", 0)))
         except (TypeError, ValueError):
@@ -3001,7 +3018,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             limit = 100
 
         # admin=True — межтенантный просмотр всех аккаунтов платформы (без owner-скоупа).
-        where, args = _accounts_where(uid, flt, stage, q, admin=admin, acc_pool=acc_pool)
+        where, args = _accounts_where(uid, flt, stage, q, admin=admin,
+                                      acc_pool=acc_pool, geo=acc_geo)
         page_args = args + [limit, offset]
         rows = await _safe_fetch(pool,
             f"""SELECT id, phone, first_name, username, is_active, last_used, added_at,
@@ -5127,7 +5145,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # срезу» взяло бы аккаунты вне показанного пула — операция ушла бы
             # шире, чем видел владелец.
             bpool = (body.get("pool") or "").strip()[:64]
-            where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin, acc_pool=bpool)
+            # То же и про срез по стране: иначе «применить ко всему срезу»
+            # ушло бы по всему флоту, а владелец видел одну страну.
+            bgeo = _geo_code(body.get("geo"))
+            where, wargs = _accounts_where(uid, flt, stage, qterm, admin=admin,
+                                           acc_pool=bpool, geo=bgeo)
             owned = await _safe_fetch(pool,
                 f"SELECT id FROM tg_accounts WHERE {where} ORDER BY id LIMIT 5000", *wargs)
             ids = [int(r["id"]) for r in (owned or [])]
@@ -15886,6 +15908,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             geo["by_country"] = dist
         except Exception:
             log.debug("presence_map: geo failed uid=%s", uid)
+        # Страны флота с русскими названиями и раздельным счётом «всего/активных»:
+        # столбик на карте показывал только активных, а открыть страну списком
+        # было нечем — теперь строка ведёт в аккаунты с тем же срезом.
+        countries_fleet = []
+        try:
+            crows = await _safe_fetch(pool,
+                """SELECT COALESCE(UPPER(p.geo_country), 'UNKNOWN') AS cc,
+                          COUNT(*) AS total,
+                          COUNT(*) FILTER (WHERE a.is_active) AS active
+                     FROM tg_accounts a
+                     LEFT JOIN user_proxies p ON p.id = a.proxy_id
+                    WHERE a.owner_id = $1
+                 GROUP BY cc ORDER BY total DESC""", uid)
+            for r in (crows or []):
+                ru = presence_map.country_ru(r["cc"])
+                countries_fleet.append({**ru, "accounts": int(r["total"] or 0),
+                                        "active": int(r["active"] or 0)})
+        except Exception:
+            log.debug("presence_map: fleet countries failed uid=%s", uid)
         # Активы.
         channels = await _safe_count(pool,
             "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
@@ -15895,7 +15936,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         targets = {"countries": {}, "gaps": []}
         try:
             trows = await _safe_fetch(pool,
-                """SELECT t.country, t.country_code, t.status
+                """SELECT t.country, t.country_code, t.status,
+                          p.id AS plan_id, p.name_pattern AS plan_name
                    FROM global_presence_targets t
                    JOIN global_presence_plans p ON p.id = t.plan_id
                    WHERE p.owner_id=$1""", uid)
@@ -15904,6 +15946,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.debug("presence_map: targets failed uid=%s", uid)
         cov = presence_map.coverage_score(int(geo.get("distinct", 0) or 0),
                                           len(targets.get("gaps", [])))
+        geo["countries"] = countries_fleet
         return _json_resp({"geo": geo, "assets": {"channels": channels, "bots": bots},
                            "presence": targets, "coverage": cov})
 
