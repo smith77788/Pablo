@@ -3365,7 +3365,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <select id="ceOp" onchange="ceToggle()" class="sel">
         <option value="title">Название</option>
         <option value="about">Описание</option>
-        <option value="username">Username</option>
+        <option value="username">Имя в Telegram (@…)</option>
       </select>
     </div>
     <div class="field"><label id="ceLbl">Новое описание *</label><textarea id="ceValue" rows="3" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;resize:vertical"></textarea></div>
@@ -6328,10 +6328,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Роль в сети</label>
       <select id="netRoleSel" class="sel">
-        <option value="general">⚙️ General — общий бот</option>
-        <option value="entry">🚪 Entry — входной трафик</option>
-        <option value="conversion">💰 Conversion — конверсия</option>
-        <option value="retention">🔄 Retention — удержание</option>
+        <option value="general">⚙️ Общий — без особой задачи</option>
+        <option value="entry">🚪 Вход — принимает новых людей</option>
+        <option value="conversion">💰 Конверсия — доводит до покупки</option>
+        <option value="retention">🔄 Удержание — возвращает ушедших</option>
       </select>
     </div>
     <div class="field-err" id="netRoleErr"></div>
@@ -6592,9 +6592,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Режим прогрева</label>
       <select id="warmupPlan">
-        <option value="gentle">🌱 Gentle (21 день, 5 действий/день)</option>
-        <option value="standard" selected>🌿 Standard (14 дней, 10 действий/день)</option>
-        <option value="aggressive">🔥 Intensive (10 дней, 12 действий/день)</option>
+        <option value="gentle">🌱 Мягкий (21 день, 5 действий в день)</option>
+        <option value="standard" selected>🌿 Обычный (14 дней, 10 действий в день)</option>
+        <option value="aggressive">🔥 Интенсивный (10 дней, 12 действий в день)</option>
       </select>
     </div>
     <div class="field">
@@ -17478,7 +17478,7 @@ async function openContactDetail(id) {
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
       <div class="row"><div class="row-body"><div class="row-name">Имя</div><div class="row-val">${esc(name)}</div></div></div>
-      ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
+      ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
       ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
       ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(String(c.registered_estimate))}</div></div></div>`:''}
@@ -17486,7 +17486,7 @@ async function openContactDetail(id) {
       ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Подтверждён</div></div></div>`:''}
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${enr.activity&&enr.activity.level!=='unknown'?`<div class="row"><div class="row-body"><div class="row-name">Активность</div><div class="row-val">${enr.activity.level==='hot'?'🔥':enr.activity.level==='warm'?'🌤':'❄️'} ${esc(enr.activity.label)}</div></div></div>`:''}
-      ${enr.language&&enr.language.code?`<div class="row"><div class="row-body"><div class="row-name">Язык (оценка)</div><div class="row-val">${esc(({ru:'🇷🇺 Русский',en:'🌐 Латиница',cjk:'🀄 CJK',ar:'☪ Арабский'})[enr.language.code]||enr.language.code)} · ${Math.round((enr.language.confidence||0)*100)}%</div></div></div>`:''}
+      ${enr.language&&enr.language.code?`<div class="row"><div class="row-body"><div class="row-name">Язык (оценка)</div><div class="row-val">${esc(({ru:'🇷🇺 Русский',en:'🌐 Латиница',cjk:'🀄 Иероглифы',ar:'☪ Арабский'})[enr.language.code]||enr.language.code)} · ${Math.round((enr.language.confidence||0)*100)}%</div></div></div>`:''}
       ${Array.isArray(c.phones)&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
       ${Array.isArray(c.emails)&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
@@ -17936,7 +17936,7 @@ async function loadEditForm(id) {
     let html = `<div style="padding:12px 16px">
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Имя</label><input id="ef-first" value="${esc(c.first_name||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Фамилия</label><input id="ef-last" value="${esc(c.last_name||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Username</label><input id="ef-username" value="${esc(c.username||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Имя в Telegram</label><input id="ef-username" value="${esc(c.username||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Компания</label><input id="ef-company" value="${esc(c.company||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Должность</label><input id="ef-position" value="${esc(c.position||'')}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Телефоны (через запятую)</label><input id="ef-phones" value="${esc((Array.isArray(c.phones)?c.phones:[]).join(', '))}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
@@ -19567,7 +19567,7 @@ async function submitBotFactory() {
 }
 
 // ── Persona Hub ─────────────────────────────────────────
-const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Casual',expert:'🔬 Эксперт',friendly:'🤗 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
+const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Непринуждённый',expert:'🔬 Эксперт',friendly:'🤗 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
 async function openPersonas() {
   push('s-personas');
   txt('personaStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -20774,7 +20774,7 @@ function humanDur(sec) {
 // дошло, почему и какой аккаунт сыпет ошибками.
 const DM_LOG_STATUS = {
   sent:'✅ доставлено', blocked:'🚫 заблокирован', skip:'🔒 недоступен',
-  auth:'🔑 сессия мертва', peer_flood:'⛔ PeerFlood', retry:'⚠️ сбой', failed:'⚠️ сбой',
+  auth:'🔑 сессия мертва', peer_flood:'⛔ слишком много сообщений незнакомым', retry:'⚠️ сбой', failed:'⚠️ сбой',
 };
 async function openDmReport(id) {
   push('s-dmreport');
@@ -20975,7 +20975,8 @@ async function submitWarmup() {
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить прогрев'; }
 }
-const WARMUP_PLAN = {gentle:'🌱 Gentle',standard:'🌿 Standard',aggressive:'🔥 Intensive'};
+// Режимы прогрева читал владелец, а назывались они по-английски.
+const WARMUP_PLAN = {gentle:'🌱 Мягкий',standard:'🌿 Обычный',aggressive:'🔥 Интенсивный'};
 const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён',failed:'❌ Ошибка',cancelled:'🚫 Отменён'};
 // Цвет рамки по честному состоянию плана: «стоит на месте» и «остановлен
 // движком» больше не выглядят как обычная работа.
@@ -23764,7 +23765,7 @@ async function openGpDetail(planId, planName) {
         ${rolesLine?`<div class="row"><div class="row-body"><div class="row-name">Тематики</div><div class="row-val">${esc(rolesLine)}</div></div></div>`:''}
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${stb(p.status)[1]}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Паттерн</div><div class="row-val">${esc(p.name_pattern)}</div></div></div>
-        ${p.username_pattern?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">${esc(p.username_pattern)}</div></div></div>`:''}
+        ${p.username_pattern?`<div class="row"><div class="row-body"><div class="row-name">Шаблон имени</div><div class="row-val">${esc(p.username_pattern)}</div></div></div>`:''}
         ${dressLine?`<div class="row"><div class="row-body"><div class="row-name">Оформление</div><div class="row-val">${esc(dressLine)}</div></div></div>`:''}
         ${va?.enabled?`<div class="row"><div class="row-body"><div class="row-name">Администратор</div><div class="row-val">${esc(va.topic)} · ${va.publish_mode==='auto'?'авто':'проверка'}${va.lead_contact?' · '+esc(va.lead_contact):''}</div><div class="row-val">Подключено: ${vaCoverage.installed||0} из ${vaCoverage.eligible||0}, активно: ${vaCoverage.enabled||0}</div></div></div>`:''}
       </div>
