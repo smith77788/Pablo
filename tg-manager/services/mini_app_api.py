@@ -12061,7 +12061,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             exp = await pool.fetchrow(
                 """SELECT e.id, e.name, e.experiment_type, e.status, e.created_at,
-                          e.winner_variant_id, e.min_sample_size, b.username AS bot_username
+                          e.winner_variant_id, e.min_sample_size, e.bot_id,
+                          b.username AS bot_username
                    FROM experiments e
                    JOIN managed_bots b ON b.bot_id=e.bot_id
                    WHERE e.id=$1 AND b.added_by=$2""",
@@ -12073,10 +12074,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT id, name, content, weight, impressions, conversions FROM experiment_variants WHERE experiment_id=$1 ORDER BY id",
                 exp_id,
             )
+            # Экран показывал «CR: 12,3%» и молчал о том, можно ли этому
+            # верить. Тот же z-тест, что и у A/B рассылок, — чтобы владелец не
+            # остановил эксперимент на случайном отрыве.
+            from services import ab_engine
+            min_sample = int(exp["min_sample_size"] or 0) or 30
+            verdict = ab_engine.pick_winner(
+                [{"variant": v["id"], "sent": int(v["impressions"] or 0),
+                  "converted": int(v["conversions"] or 0)} for v in variants],
+                min_sample)
             return _json_resp({
                 **dict(exp),
                 "created_at": exp["created_at"].isoformat() if exp["created_at"] else None,
                 "variants": [dict(v) for v in variants],
+                "verdict": verdict,
+                "min_sample": min_sample,
             })
         except Exception:
             log.exception("experiment_detail uid=%d exp=%d", uid, exp_id)
@@ -12098,6 +12110,95 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True})
         except Exception:
             log.exception("experiment_delete uid=%d exp=%d", uid, exp_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    _EXP_STATUSES = ("draft", "active", "paused", "completed")
+
+    async def _own_experiment(uid: int, exp_id: int):
+        """Эксперимент владельца или None. Скоуп — через владельца бота."""
+        return await _safe_fetchrow(pool,
+            """SELECT e.id, e.bot_id, e.status, e.experiment_type, e.name
+                 FROM experiments e
+                 JOIN managed_bots b ON b.bot_id = e.bot_id
+                WHERE e.id=$1 AND b.added_by=$2""", exp_id, uid)
+
+    async def experiment_set_status(request: web.Request) -> web.Response:
+        """Запустить / поставить на паузу / завершить эксперимент.
+
+        В боте это было, в мини-аппе — нет: статус показывался подписью, и
+        изменить его из интерфейса было нечем.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор эксперимента", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        status = str(body.get("status") or "").strip().lower()
+        if status not in _EXP_STATUSES:
+            return _err("Неизвестный статус эксперимента", 400)
+        exp = await _own_experiment(uid, exp_id)
+        if not exp:
+            return _err("Эксперимент не найден", 404)
+        try:
+            if status == "active":
+                # Бот берёт ОДИН активный эксперимент на тип (get_active_experiment
+                # с LIMIT 1): второй активный того же типа молча не исполнялся бы.
+                busy = await _safe_fetchrow(pool,
+                    """SELECT id, name FROM experiments
+                        WHERE bot_id=$1 AND experiment_type=$2
+                          AND status='active' AND id<>$3 LIMIT 1""",
+                    exp["bot_id"], exp["experiment_type"], exp_id)
+                if busy:
+                    return _err(
+                        "На этом боте уже идёт эксперимент «%s» того же типа. "
+                        "Сначала поставьте его на паузу или завершите."
+                        % (busy["name"] or busy["id"]), 409)
+            from database import db as _db
+            await _db.set_experiment_status(pool, exp_id, status, exp["bot_id"])
+            return _json_resp({"ok": True, "status": status})
+        except Exception:
+            log.exception("experiment_set_status uid=%d exp=%d", uid, exp_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def experiment_set_winner(request: web.Request) -> web.Response:
+        """Назначить победителя вручную — эксперимент при этом завершается."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор эксперимента", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        variant_id = validate_integer(body.get("variant_id"), min_val=1)
+        if not variant_id:
+            return _err("Не выбран вариант", 400)
+        exp = await _own_experiment(uid, exp_id)
+        if not exp:
+            return _err("Эксперимент не найден", 404)
+        try:
+            # Вариант обязан принадлежать ИМЕННО этому эксперименту, иначе
+            # победителем можно было бы назначить чужую строку.
+            own = await _safe_fetchrow(pool,
+                "SELECT id FROM experiment_variants WHERE id=$1 AND experiment_id=$2",
+                variant_id, exp_id)
+            if not own:
+                return _err("Вариант не из этого эксперимента", 400)
+            await pool.execute(
+                "UPDATE experiments SET status='completed', winner_variant_id=$2, "
+                "ended_at=NOW() WHERE id=$1", exp_id, variant_id)
+            return _json_resp({"ok": True, "winner_variant_id": variant_id})
+        except Exception:
+            log.exception("experiment_set_winner uid=%d exp=%d", uid, exp_id)
             return _err(_INTERNAL_ERROR, 500)
 
     async def experiment_create(request: web.Request) -> web.Response:
@@ -18572,6 +18673,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/experiment", experiment_create)
     app.router.add_get("/api/miniapp/experiment/{exp_id}", experiment_detail)
     app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
+    app.router.add_post("/api/miniapp/experiment/{exp_id}/status", experiment_set_status)
+    app.router.add_post("/api/miniapp/experiment/{exp_id}/winner", experiment_set_winner)
     # Health Dashboard
     app.router.add_get("/api/miniapp/health", health_overview)
     # Topology Map

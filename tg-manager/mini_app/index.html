@@ -21813,7 +21813,9 @@ async function openExperiments() {
     const d = await api('/api/miniapp/experiments');
     const exps = d.experiments||[];
     txt('m-exp-cnt', exps.length+' экспериментов');
-    if (!exps.length) { txt('experimentsList', empty('🧪','Нет экспериментов','Нажмите + Создать')); return; }
+    if (!exps.length) { txt('experimentsList', empty('🧪','Экспериментов ещё нет',
+      'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
+      {label:'+ Создать эксперимент', fn:'openExpModal()'})); return; }
     txt('experimentsList', exps.map(e=>`
       <div class="row tap" onclick="openExpDetail(${e.id},'${esc(e.name)}')">
         <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
@@ -21825,42 +21827,122 @@ async function openExperiments() {
       </div>
     `).join(''));
   } catch(e) {
-    txt('experimentsList', empty('⚠️','Ошибка',errRu(e)));
+    txt('experimentsList', errHtml(errRu(e), 'openExperiments()'));
   }
 }
 async function openExpDetail(id, name) {
   push('s-expdetail');
   txt('expdetail-title','🧪 '+esc(name));
   txt('expdetailBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  _EXP_CUR = id;
   try {
     const d = await api(`/api/miniapp/experiment/${id}`);
     const vars = d.variants||[];
     const total_impr = vars.reduce((s,v)=>s+(v.impressions||0),0);
-    txt('expdetailBody',`
-      <div style="display:flex;gap:10px;padding:8px 0 12px">
-        <div class="kpi-card"><div class="kpi-val">${EXP_STATUS[d.status]||d.status}</div><div class="kpi-lbl">Статус</div></div>
-        <div class="kpi-card"><div class="kpi-val">${vars.length}</div><div class="kpi-lbl">Вариантов</div></div>
-        <div class="kpi-card"><div class="kpi-val">${total_impr}</div><div class="kpi-lbl">Показов</div></div>
-      </div>
-      <div class="sec">Варианты</div>
-      <div class="lst">${vars.map(v=>{
-        const cr = v.impressions>0?((v.conversions/v.impressions)*100).toFixed(1).replace('.',',')+'%':'—';
-        const winner = d.winner_variant_id===v.id?' 🏆':'';
-        return `<div class="row">
-          <div class="row-body">
-            <div class="row-name">${esc(v.name)}${winner}</div>
-            <div class="row-val">Показов: ${v.impressions} · CR: ${cr} · Вес: ${v.weight}%</div>
-          </div>
+    const total_conv = vars.reduce((s,v)=>s+(v.conversions||0),0);
+    const vd = d.verdict||{};
+    const minS = d.min_sample||30;
+    // Экран был витриной: три числа и список вариантов, из действий — только
+    // «Удалить». Запуск, пауза и выбор победителя жили только в боте.
+    let h = `<div style="display:flex;gap:10px;padding:8px 0 12px;flex-wrap:wrap">
+        <div class="kpi-card"><div class="kpi-val" style="font-size:15px">${EXP_STATUS[d.status]||d.status}</div><div class="kpi-lbl">Статус</div></div>
+        <div class="kpi-card"><div class="kpi-val">${num(total_impr)}</div><div class="kpi-lbl">Показов</div></div>
+        <div class="kpi-card"><div class="kpi-val">${num(total_conv)}</div><div class="kpi-lbl">Конверсий</div></div>
+      </div>`;
+    if (d.bot_username) h += `<div class="li tap" onclick="openBot(${Number(d.bot_id||0)})" role="button" tabindex="0"><div class="li-body"><div class="li-name">@${esc(d.bot_username)}</div><div class="li-sub">${EXP_TYPE[d.experiment_type]||esc(d.experiment_type||'')} · бот эксперимента</div></div><span class="chev">›</span></div>`;
+    h += _expVerdict(vd, vars, minS, d.winner_variant_id);
+    h += '<div class="sec">Варианты — нажмите, чтобы объявить победителя или скопировать текст</div><div class="lst">';
+    const best = vd.leader;
+    h += vars.map(v=>{
+      const cr = v.impressions>0?((v.conversions/v.impressions)*100).toFixed(1).replace('.',',')+'%':'—';
+      const mark = d.winner_variant_id===v.id ? ' 🏆' : (best===v.id && (v.impressions||0)>0 ? ' ⭐' : '');
+      const need = Math.max(0, minS - (v.impressions||0));
+      return `<div class="li tap" onclick="openExpVariant(${id},${v.id})" role="button" tabindex="0">
+          <div class="li-body">
+            <div class="li-name">${esc(v.name)}${mark}</div>
+            <div class="li-sub wrap">${esc((v.content||'(текст пуст)').slice(0,110))}${(v.content||'').length>110?'…':''}</div>
+            <div class="li-sub wrap" style="margin-top:2px">Показов ${num(v.impressions||0)} · конверсия ${cr} · доля показа ${v.weight}%${need>0?' · до оценки не хватает '+num(need):''}</div>
+          </div><span class="chev">›</span>
         </div>`;
-      }).join('')}</div>
-      <div style="padding:12px 0">
-        <button class="btn btn-d" onclick="deleteExp(${id}, this)" style="width:100%">🗑 Удалить эксперимент</button>
-      </div>
-    `);
+    }).join('');
+    h += '</div>';
+    h += `<div class="sec" style="margin-top:12px">Управление</div><div style="display:flex;flex-direction:column;gap:8px;padding:0 0 12px">`;
+    if (d.status !== 'active') h += `<button class="btn btn-p" onclick="expSetStatus(${id},'active')" style="width:100%">▶️ Запустить</button>`;
+    if (d.status === 'active') h += `<button class="btn btn-s" onclick="expSetStatus(${id},'paused')" style="width:100%">⏸ Поставить на паузу</button>`;
+    if (d.status !== 'completed') h += `<button class="btn btn-s" onclick="expPickWinner(${id})" style="width:100%">🏆 Выбрать победителя и завершить</button>`;
+    h += `<button class="btn btn-d" onclick="deleteExp(${id}, this)" style="width:100%">🗑 Удалить эксперимент</button></div>`;
+    txt('expdetailBody', h);
   } catch(e) {
-    txt('expdetailBody', empty('⚠️','Ошибка',errRu(e)));
+    txt('expdetailBody', errHtml(errRu(e), `openExpDetail(${Number(id)},'${esc(String(name||''))}')`));
   }
 }
+let _EXP_CUR = 0;
+
+// Можно ли верить отрыву. Раньше экран показывал «CR: 12,3%» и молчал о том,
+// что при тридцати показах это шум, — и эксперимент останавливали рано.
+function _expVerdict(vd, vars, minS, winnerId) {
+  const byId = {}; (vars||[]).forEach(v=>byId[v.id]=v);
+  if (winnerId && byId[winnerId]) {
+    return `<div class="li" style="background:var(--bg-green-16);border-radius:10px;margin-bottom:8px"><div class="li-body"><div class="li-name">🏆 Победитель: ${esc(byId[winnerId].name)}</div><div class="li-sub wrap">Эксперимент завершён, этот текст можно ставить основным</div></div></div>`;
+  }
+  if (vd.confident && byId[vd.winner]) {
+    return `<div class="li tap" style="background:var(--bg-green-16);border-radius:10px;margin-bottom:8px" onclick="expSetWinner(${Number(_EXP_CUR)},${Number(vd.winner)})" role="button" tabindex="0"><div class="li-body"><div class="li-name">📈 Отрыв статистически значим: ${esc(byId[vd.winner].name)}</div><div class="li-sub wrap">Нажмите, чтобы объявить победителем и завершить</div></div><span class="chev">›</span></div>`;
+  }
+  if (byId[vd.leader]) {
+    return `<div class="li" style="background:var(--bg2);border-radius:10px;margin-bottom:8px"><div class="li-body"><div class="li-name">📊 Пока впереди: ${esc(byId[vd.leader].name)}</div><div class="li-sub wrap">Выборки мало для уверенного вывода — нужно от ${num(minS)} показов на вариант</div></div></div>`;
+  }
+  return `<div class="li" style="background:var(--bg2);border-radius:10px;margin-bottom:8px"><div class="li-body"><div class="li-name">⏳ Данных пока нет</div><div class="li-sub wrap">Показы появятся, когда эксперимент запущен и бот начнёт отвечать</div></div></div>`;
+}
+
+async function openExpVariant(expId, variantId) {
+  try {
+    const d = await api(`/api/miniapp/experiment/${expId}`);
+    const v = (d.variants||[]).find(x=>x.id===variantId);
+    if (!v) { toast('⚠️ Вариант не найден'); return; }
+    const cr = v.impressions>0?((v.conversions/v.impressions)*100).toFixed(1).replace('.',',')+'%':'—';
+    const act = await askChoice(`${v.name} · конверсия ${cr}`, [
+      {value:'copy', label:'📋 Скопировать текст варианта'},
+      {value:'win', label:'🏆 Назначить победителем', sub:'эксперимент будет завершён'},
+    ]);
+    if (act === 'copy') { await copyToClipboard(v.content||'', '📋 Текст варианта скопирован'); return; }
+    if (act === 'win') await expSetWinner(expId, variantId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function expSetStatus(id, status) {
+  const what = status==='active' ? 'Запустить эксперимент?'
+    : status==='paused' ? 'Поставить эксперимент на паузу?'
+    : 'Завершить эксперимент?';
+  if (!await askConfirm(what)) return;
+  try {
+    await api(`/api/miniapp/experiment/${id}/status`, {method:'POST', body:JSON.stringify({status})});
+    toast(status==='active'?'▶️ Запущен':status==='paused'?'⏸ На паузе':'✅ Завершён');
+    openExpDetail(id, document.getElementById('expdetail-title').textContent.replace(/^🧪\s*/,''));
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function expPickWinner(id) {
+  try {
+    const d = await api(`/api/miniapp/experiment/${id}`);
+    const vars = d.variants||[];
+    if (!vars.length) { toast('⚠️ У эксперимента нет вариантов'); return; }
+    const pick = await askChoice('Кого объявить победителем?', vars.map(v=>({
+      value: v.id, label: v.name,
+      sub: `показов ${v.impressions||0} · конверсия ${v.impressions>0?((v.conversions/v.impressions)*100).toFixed(1).replace('.',',')+'%':'—'}`,
+    })));
+    if (pick) await expSetWinner(id, pick);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function expSetWinner(expId, variantId) {
+  if (!await askConfirm('Назначить победителем и завершить эксперимент?')) return;
+  try {
+    await api(`/api/miniapp/experiment/${expId}/winner`, {method:'POST', body:JSON.stringify({variant_id:variantId})});
+    toast('🏆 Победитель назначен, эксперимент завершён');
+    openExpDetail(expId, document.getElementById('expdetail-title').textContent.replace(/^🧪\s*/,''));
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
 async function deleteExp(id, _el) {
   if (!await confirmDelete('Удалить эксперимент', _el)) return;
   try {

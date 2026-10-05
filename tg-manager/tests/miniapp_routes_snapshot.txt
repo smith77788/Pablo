@@ -729,6 +729,8 @@ POST /api/miniapp/ecosystem/{eco_id}/member/drop
 POST /api/miniapp/editorial/review
 POST /api/miniapp/error_report
 POST /api/miniapp/experiment
+POST /api/miniapp/experiment/{exp_id}/status
+POST /api/miniapp/experiment/{exp_id}/winner
 POST /api/miniapp/factory/name_preview
 POST /api/miniapp/find_contact
 POST /api/miniapp/flood/{bot_id}/flag-recent
