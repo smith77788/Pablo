@@ -15040,6 +15040,13 @@ async def _exec_mass_invite(
     # друг другом.
     _main_chan_id: int | None = None
     _chan_ok = 0                  # приглашено в ТЕКУЩИЙ канал этим прогоном
+    # Реальное число участников текущего канала (из Telegram), а НЕ число
+    # отправленных инвайтов. Ротация резерва идёт по нему: если часть
+    # приглашённых вышла, дозабиваем канал до реального лимита, а не ротируем
+    # рано. -1 = ещё не читали. _chan_members_at_ok — при каком _chan_ok читали
+    # последний раз (чтобы не дёргать Telegram на каждом инвайте).
+    _chan_members = -1
+    _chan_members_at_ok = -1
     _chan_switches = 0
     _chan_trail: list = []        # для итога: [{"ref","ok","why"}]
     _main_needs_switch = False    # главный уже заполнен прошлым прогоном
@@ -15353,6 +15360,9 @@ async def _exec_mass_invite(
                 _admin_probe_ok = True
                 if st.get("channel_id") and group == _main_ref and not _main_chan_id:
                     _main_chan_id = int(st["channel_id"])
+                if _chan_members < 0 and int(st.get("participants", -1)) >= 0:
+                    _chan_members = int(st["participants"])
+                    _chan_members_at_ok = _chan_ok
                 if st.get("can_promote"):
                     _promoter = a
                     break
@@ -15539,12 +15549,14 @@ async def _exec_mass_invite(
         выключено, резерв кончился или исчерпан потолок переходов.
         """
         nonlocal group, _promoter, _invite_link, _cur_chan_id, _chan_ok
-        nonlocal _chan_switches
+        nonlocal _chan_switches, _chan_members, _chan_members_at_ok
         if not _use_overflow or _chan_switches >= _ovf.MAX_SWITCHES_PER_RUN:
             return False
         await _ovf.mark(pool, owner_id, _chain_key, group, _cur_chan_id, status,
                         ok_delta=_chan_ok, reason=reason, op_id=op_id)
         _chan_ok = 0
+        _chan_members = -1          # новый канал — реальное число ещё не знаем
+        _chan_members_at_ok = -1
         _chan_trail[-1]["why"] = reason
         if _admin_seats:
             await _release_admin_seats_batch(list(_admin_seats))
@@ -15605,6 +15617,9 @@ async def _exec_mass_invite(
                     timeout=45)
                 if _st.get("can_promote"):
                     _promoter = _adm
+                if int(_st.get("participants", -1)) >= 0:
+                    _chan_members = int(_st["participants"])
+                    _chan_members_at_ok = _chan_ok
             except Exception:
                 log_exc_swallow(log, f"mass_invite op={op_id}: overflow admin probe")
             # Аккаунт, взятый в операцию ради нового канала, промоутить некого
@@ -15638,6 +15653,31 @@ async def _exec_mass_invite(
                 f"канал исчерпан ({reason[:120]}) → следующий канал резерва: {group[:120]}")
             return True
         return False
+
+    _MEMBERS_RECHECK = 15   # перечитывать реальное число участников каждые N инвайтов
+
+    async def _refresh_chan_members() -> None:
+        """Перечитать РЕАЛЬНОЕ число участников текущего канала из Telegram.
+
+        Нужно для честной ротации резерва: часть приглашённых могла выйти, и
+        канал не «полон на 200 отправленных», а реально держит меньше — тогда
+        дозабиваем. Читаем промоутером (он админ), иначе любым инвайтером с
+        сессией. Не чаще чем раз в _MEMBERS_RECHECK инвайтов (см. вызывающий
+        код), чтобы не дёргать Telegram на каждом шаге. Сбой — не блокирует.
+        """
+        nonlocal _chan_members, _chan_members_at_ok
+        _probe = _promoter or next((a for a in accounts if a.get("session_str")), None)
+        if not _probe or not _probe.get("session_str"):
+            return
+        try:
+            _st = await asyncio.wait_for(
+                inv.channel_admin_status(_probe["session_str"], dict(_probe), group),
+                timeout=45)
+            if _st.get("ok") and int(_st.get("participants", -1)) >= 0:
+                _chan_members = int(_st["participants"])
+                _chan_members_at_ok = _chan_ok
+        except Exception:
+            log_exc_swallow(log, f"mass_invite op={op_id}: refresh members")
 
     async def _leave_after_seat_release(acc_id: int) -> None:
         """Аккаунт, чья роль админа закончилась, выходит из чата САМ.
@@ -16135,10 +16175,13 @@ async def _exec_mass_invite(
                 if _max_invites:
                     take_n = min(take_n, _max_invites - step - _chunk_planned)
                 if _per_channel_limit:
-                    # Лимит приглашённых на канал: не набирать сверх остатка
-                    # текущего канала — переход в следующий канал резерва
-                    # случится после подсчёта этого чанка.
-                    take_n = min(take_n, _per_channel_limit - _chan_ok - _chunk_planned)
+                    # Лимит участников на канал: не набирать сверх остатка ДО
+                    # реального числа подписчиков (а не до числа отправленных
+                    # инвайтов — вышедшие освобождают места, их дозабиваем).
+                    # Пока реальное число не прочитано (_chan_members < 0) —
+                    # оцениваем по отправленным, как раньше.
+                    _fill_now = _chan_members if _chan_members >= 0 else _chan_ok
+                    take_n = min(take_n, _per_channel_limit - _fill_now - _chunk_planned)
                 if take_n <= 0:
                     break
 
@@ -16664,14 +16707,26 @@ async def _exec_mass_invite(
         # Лимит приглашённых на канал достигнут — следующий канал резерва.
         # Резерва нет — канал полон по решению оператора, останавливаемся:
         # продолжение в тот же полный канал не планируется (group_broken).
-        if (_per_channel_limit and _chan_ok >= _per_channel_limit
-                and (q_users or q_phones) and not group_broken and not flood_storm):
-            _lim_why = f"лимит {_per_channel_limit} приглашённых на канал"
-            if not await _switch_channel(_lim_why, _ovf.ST_FULL):
-                group_broken = True
-                _group_reason = _lim_why + (" — резерв каналов закончился"
-                                            if _use_overflow else "")
-            continue
+        # Канал заполнен — следующий канал резерва. Решение по РЕАЛЬНОМУ числу
+        # участников (а не по числу отправленных инвайтов): если часть
+        # приглашённых вышла, канал реально держит меньше лимита — дозабиваем, а
+        # не ротируем рано. Реальное число перечитываем не чаще _MEMBERS_RECHECK
+        # инвайтов, и обязательно когда по отправленным уже дотянули до лимита.
+        if (_per_channel_limit and (q_users or q_phones)
+                and not group_broken and not flood_storm):
+            if _chan_ok >= _per_channel_limit and (
+                    _chan_members < 0 or (_chan_ok - _chan_members_at_ok) >= _MEMBERS_RECHECK):
+                await _refresh_chan_members()
+            _fill = _chan_members if _chan_members >= 0 else _chan_ok
+            if _fill >= _per_channel_limit:
+                _lim_why = (f"канал заполнен: {_fill} подписчиков (лимит {_per_channel_limit})"
+                            if _chan_members >= 0
+                            else f"лимит {_per_channel_limit} приглашённых на канал")
+                if not await _switch_channel(_lim_why, _ovf.ST_FULL):
+                    group_broken = True
+                    _group_reason = _lim_why + (" — резерв каналов закончился"
+                                                if _use_overflow else "")
+                continue
 
         if not progressed:
             break
@@ -17156,6 +17211,18 @@ async def _exec_mass_invite(
            if _left and not _next_op and not group_broken and not flood_storm
            and not _all_failed_connect else "")
     )
+    # Отработавший флот покидает текущий канал: снять выданную инвайтерам админку
+    # и вывести их из канала. Иначе админ-места (лимит Telegram ~50) остаются
+    # забиты инвайтерами — в канал нельзя ни назначить свежий флот, ни добавить
+    # людей (жалоба владельца: «32 администратора»). При ротации места уже
+    # освобождались в _switch_channel; здесь — для последнего/единственного канала
+    # в конце прогона. Промоутер (создатель канала) НЕ в _admin_seats — остаётся.
+    if _admin_seats:
+        try:
+            await _release_admin_seats_batch(list(_admin_seats))
+        except Exception as _fe:
+            log.debug("mass_invite op=%d: финальное освобождение админ-мест: %s", op_id, _fe)
+
     # Шов «Инвайт → Welcome»: приветствие реально добавленным (если настроено).
     await _chain_welcome(pool, owner_id, op_id, params)
     # no_proxy / no_rights_retired отдаём СТРУКТУРНО, а не только текстом сводки:

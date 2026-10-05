@@ -117,6 +117,59 @@ def test_per_channel_limit_spreads_audience_over_the_chain(chain):
     assert res["ok"] == 12
 
 
+def test_rotation_by_real_participants_not_invited_count(chain, monkeypatch):
+    """Корень жалобы: часть приглашённых вышла — канал дозабивается до РЕАЛЬНЫХ
+    подписчиков, а не ротируется по числу отправленных инвайтов.
+
+    Эмуляция: в @main 10 из приглашённых «выходят» (participants = отправлено
+    − 10). При лимите 20 по-старому ротация была бы на 20 отправленных; по факту
+    реальных тогда лишь 10 — надо слать дальше, пока реальных не станет 20
+    (то есть ~30 отправленных)."""
+    sent = {"@main": 0}
+
+    def responder(group, refs):
+        if group == "@main":
+            sent["@main"] += len(refs)
+        return _all_ok(group, refs)
+
+    s = chain(responder)
+
+    async def _status(sess, acc, group):
+        if group == "@main":
+            # 10 приглашённых вышли → реальных меньше отправленных.
+            return {"ok": True, "can_promote": True, "channel_id": 100,
+                    "participants": max(0, sent["@main"] - 10)}
+        return {"ok": True, "can_promote": True, "channel_id": 200, "participants": 0}
+
+    monkeypatch.setattr(mie, "channel_admin_status", _status)
+
+    targets = [f"u{i}" for i in range(1, 61)]
+    _run(_Pool(), targets, group="@main", account_ids=[1, 2], batch_size=5,
+         reserve_channels=[501], per_channel_limit=20)
+
+    main_sent = sum(len(refs) for g, refs in s.groups if g == "@main")
+    # По-старому было бы ровно 20 (ротация по отправленным). С учётом реальных
+    # подписчиков канал дозабивается заметно сверх 20 (вышедшие освобождают места).
+    assert main_sent > 20, f"канал должен дозабиваться по реальным подписчикам, ушло {main_sent}"
+
+
+def test_final_flota_leaves_channel_releases_admin_seats():
+    """Отработавший флот покидает канал в конце прогона (освобождает админ-места,
+    чтобы не копилось «32 администратора»). Проверяем по исходнику: перед
+    завершением _exec_mass_invite освобождает оставшиеся _admin_seats."""
+    import inspect
+    src = inspect.getsource(op_worker._exec_mass_invite)
+    i_welcome = src.index("_chain_welcome(pool, owner_id, op_id, params)")
+    # Финальный блок стоит НЕПОСРЕДСТВЕННО перед _chain_welcome (а не только в
+    # _switch_channel при ротации) — ищем его по уникальному маркеру жалобы.
+    tail = src[max(0, i_welcome - 900):i_welcome]
+    assert "Отработавший флот покидает" in tail
+    assert "_release_admin_seats_batch(list(_admin_seats))" in tail, (
+        "в конце прогона оставшиеся админ-места инвайтеров обязаны освобождаться "
+        "(demote + выход из канала), иначе места забиваются («32 администратора»)"
+    )
+
+
 def test_per_channel_limit_without_reserve_stops_instead_of_overfilling(chain):
     s = chain(_all_ok)
     res = _run(_Pool(), TARGETS, group="@main", account_ids=[1, 2], batch_size=5,

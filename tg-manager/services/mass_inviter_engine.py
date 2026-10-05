@@ -758,21 +758,37 @@ async def channel_admin_status(session_string: str, _acc: dict | None,
         group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
         me = await asyncio.wait_for(client.get_me(), timeout=_ACTION_TIMEOUT)
         _chan_id = _group_channel_id(group)  # id чата — чтобы вызвать promote_all_admins
+        # Реальное число участников канала. Нужно для ротации резерва ПО ФАКТУ
+        # (а не по числу отправленных инвайтов): если часть приглашённых вышла,
+        # дозабиваем канал, а не ротируем рано. Читаем из резолвнутого entity,
+        # иначе одним GetFullChannel. Сбой чтения → -1 (неизвестно), не блокирует.
+        _members = getattr(group, "participants_count", None)
+        if _members is None:
+            try:
+                from telethon.tl.functions.channels import GetFullChannelRequest
+                _full = await asyncio.wait_for(
+                    client(GetFullChannelRequest(group)), timeout=_ACTION_TIMEOUT)
+                _members = getattr(_full.full_chat, "participants_count", None)
+            except Exception:
+                _members = None
+        _members = int(_members) if _members is not None else -1
         part = await asyncio.wait_for(
             client(GetParticipantRequest(channel=group, participant="me")),
             timeout=_ACTION_TIMEOUT)
         p = part.participant
         if isinstance(p, ChannelParticipantCreator):
             return {"ok": True, "user_id": me.id, "creator": True,
-                    "can_promote": True, "can_invite": True, "channel_id": _chan_id}
+                    "can_promote": True, "can_invite": True, "channel_id": _chan_id,
+                    "participants": _members}
         if isinstance(p, ChannelParticipantAdmin):
             r = getattr(p, "admin_rights", None)
             return {"ok": True, "user_id": me.id, "creator": False,
                     "can_promote": bool(getattr(r, "add_admins", False)),
                     "can_invite": bool(getattr(r, "invite_users", False)),
-                    "channel_id": _chan_id}
+                    "channel_id": _chan_id, "participants": _members}
         return {"ok": True, "user_id": me.id, "creator": False,
-                "can_promote": False, "can_invite": False, "channel_id": _chan_id}
+                "can_promote": False, "can_invite": False, "channel_id": _chan_id,
+                "participants": _members}
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:120]}
     finally:
