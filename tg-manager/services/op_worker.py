@@ -14953,6 +14953,11 @@ async def _exec_mass_invite(
     _chain_key = _group_key
     _reserve: list = []           # каналы резерва, ещё не взятые (по порядку оператора)
     _cur_chan_id: int | None = None
+    # id главного канала — узнаётся по ходу прогона (проверка прав, оценка
+    # чата). Нужен дедупу: приватный канал массовый инвайт знает по ссылке,
+    # а инвайт из бота — по id, и без общего ключа они не видели приглашённых
+    # друг другом.
+    _main_chan_id: int | None = None
     _chan_ok = 0                  # приглашено в ТЕКУЩИЙ канал этим прогоном
     _chan_switches = 0
     _chan_trail: list = []        # для итога: [{"ref","ok","why"}]
@@ -15265,6 +15270,8 @@ async def _exec_mass_invite(
                 continue
             if st.get("ok"):
                 _admin_probe_ok = True
+                if st.get("channel_id") and group == _main_ref and not _main_chan_id:
+                    _main_chan_id = int(st["channel_id"])
                 if st.get("can_promote"):
                     _promoter = a
                     break
@@ -15685,6 +15692,8 @@ async def _exec_mass_invite(
             try:
                 _lv_entity = await inv._resolve_group_entity(
                     _lv_client, group, acc_id=_lv_acc.get("id"))
+                if group == _main_ref and inv._group_channel_id(_lv_entity):
+                    _main_chan_id = int(inv._group_channel_id(_lv_entity))
                 _lv_score = await _si.assess_and_store_liveness(
                     pool, owner_id, _group_key, _lv_client, _lv_entity)
                 log.info("mass_invite op=%d: safe-режим liveness чата = %s", op_id, _lv_score)
@@ -15739,9 +15748,9 @@ async def _exec_mass_invite(
         # под ключом самой кампании (его видят все её каналы и продолжения), и
         # под ключом канала, куда реально пригласили, — чтобы и отдельная
         # кампания прямо в этот канал его не позвала второй раз.
-        if group != _main_ref:
+        _extra = _alias_keys()
+        if _extra:
             from services import invite_dedup as _idd
-            _extra = [k for k in _idd.dedup_keys(group, _cur_chan_id) if k != _group_key]
             await _idd.remember(pool, owner_id, _extra, _new, op_id=op_id)
         if await _record_invited_targets(
                 pool, owner_id, _group_key, op_id, _dedup_unconfirmed):
@@ -15804,6 +15813,12 @@ async def _exec_mass_invite(
 
     _dedup_live = 0   # отсеяно прямо перед отправкой: их успела пригласить другая операция
 
+    def _alias_keys() -> list:
+        """Другие ключи канала, куда сейчас приглашаем (id, ссылка канала резерва)."""
+        from services import invite_dedup as _idd
+        _cid = _main_chan_id if group == _main_ref else _cur_chan_id
+        return [k for k in _idd.dedup_keys(group, _cid) if k != _group_key]
+
     async def _drop_invited_meanwhile(batch: list) -> list:
         """Отсеять из батча тех, кого пригласили ПОСЛЕ старта этого прогона.
 
@@ -15818,10 +15833,12 @@ async def _exec_mass_invite(
             return batch
         _vals = sorted({str(b) for b in batch} | {_coo.compare_key(b) for b in batch})
         try:
+            # Под всеми ключами канала: приглашённого из бота (тот пишет по id)
+            # или прямо в канал резерва видно и здесь.
             rows = await pool.fetch(
                 "SELECT target FROM invite_target_log "
-                "WHERE owner_id=$1 AND group_key=$2 AND target = ANY($3::text[])",
-                owner_id, _group_key, _vals)
+                "WHERE owner_id=$1 AND group_key = ANY($2::text[]) AND target = ANY($3::text[])",
+                owner_id, [_group_key] + _alias_keys(), _vals)
         except Exception:
             return batch
         _taken = {_coo.compare_key(r["target"]) for r in (rows or [])}

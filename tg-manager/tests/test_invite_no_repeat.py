@@ -188,3 +188,41 @@ def test_bot_doors_go_through_the_same_journal():
     assert src.count("_idd.settle(") >= calls, "дверь бота не пишет приглашённых"
     am = (ROOT / "services" / "account_manager.py").read_text(encoding="utf-8")
     assert '"invited_list": invited_list' in am, "бот не узнал бы, кого именно пригласили"
+
+
+class _KeyedJournalPool(_Pool):
+    """Журнал с ключами канала: {(group_key, target)}."""
+
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = set(rows)
+
+    async def fetch(self, q, *a):
+        if "FROM invite_target_log" in q and "ANY($3" in q:
+            keys = a[1] if isinstance(a[1], list) else [a[1]]
+            return [{"target": t} for t in a[2] if any((k, t) in self.rows for k in keys)]
+        return []
+
+
+def test_private_channel_sees_bot_invites_by_channel_id(stand, monkeypatch):
+    """Приватный канал: массовый инвайт знает его по ссылке, бот — по id.
+
+    Раньше журнал вёлся под ключом ссылки, а бот писал под id — приглашённый
+    из бота получал второе приглашение из мини-аппа, и наоборот.
+    """
+    recorded: dict = {}
+
+    async def _rec(pool, owner_id, key, op_id, targets):
+        recorded.setdefault(key, set()).update(str(t) for t in targets)
+        return True
+    monkeypatch.setattr(op_worker, "_record_invited_targets", _rec)
+
+    async def _status(*a, **k):
+        return {"ok": True, "can_promote": False, "channel_id": 777}
+
+    s = stand(_ok)
+    monkeypatch.setattr(mie, "channel_admin_status", _status)
+    _run(_KeyedJournalPool({("777", "u3")}), ["u1", "u2", "u3"],
+         group="https://t.me/+PrivHash")
+    assert "u3" not in _sent(s), "приглашённого из бота (по id) звать нельзя"
+    assert recorded.get("777", set()) >= {"u1", "u2"}, "бот должен видеть приглашённых здесь"
