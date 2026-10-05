@@ -4528,8 +4528,19 @@ async def join_channel(
             result = await asyncio.wait_for(
                 client(JoinChannelRequest(channel=entity)), timeout=_OP_TIMEOUT)
         chats = getattr(result, "chats", None) or []
+        if not chats and ref_kind != "invite":
+            # Telegram отвечает пустым Updates, когда аккаунт УЖЕ в чате (или
+            # ответ свернулся в UpdatesTooLong). Раньше это шло в ошибки
+            # «Telegram did not return joined chat» — по-английски, и аккаунт,
+            # готовый к работе, выпадал из вступления, а за ним и из выдачи
+            # прав и инвайта. Сверяемся с самим чатом: left=False — участник.
+            _fresh = await asyncio.wait_for(
+                client.get_entity(ref_value), timeout=_OP_TIMEOUT)
+            if getattr(_fresh, "left", True) is False:
+                chats = [_fresh]
         if not chats:
-            return {"error": "Telegram did not return joined chat"}
+            return {"error": "Telegram не подтвердил вступление: аккаунт не появился "
+                             "в чате. Попробуйте позже или проверьте чат вручную."}
         ch = chats[0]
         return {
             "channel_id": ch.id,

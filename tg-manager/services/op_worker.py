@@ -5441,9 +5441,29 @@ async def _exec_bulk_join_inner(
             "(аккаунт, ссылка)", op_id, len(_already_joined),
         )
 
-    for acc_idx, acc in enumerate(accounts):
+    # Аккаунты вступают параллельно, по BULK_JOIN_PARALLEL одновременно (как
+    # INVITE_PARALLEL у инвайта). Раньше — строго по одному с паузой между ними:
+    # 50 аккаунтов в один канал шли около двух часов, и владелец видел, что
+    # «начала работу лишь часть флота». Темп КАЖДОГО аккаунта (паузы между его
+    # ссылками, суточный лимит, бюджет) прежний: Telegram считает его на
+    # аккаунт, у каждого своя сессия и свой прокси.
+    import os as _os_bj
+    try:
+        _parallel = max(1, int(_os_bj.getenv("BULK_JOIN_PARALLEL", "4")))
+    except (TypeError, ValueError):
+        _parallel = 4
+    _slots = asyncio.Semaphore(_parallel)
+    _cancelled: list = []
+
+    async def _join_account(acc_idx: int, acc) -> None:
+        async with _slots:
+            if not _cancelled:
+                await _join_account_body(acc_idx, acc)
+
+    async def _join_account_body(acc_idx: int, acc) -> None:
+        nonlocal ok_count, fail_count, step, skipped_by_limit, _limit_cut
         if acc["id"] in isolated_accounts:
-            continue
+            return
         if proxy_mode == "relay":
             # Strip bound proxy — Telethon will use CF relay instead
             acc_dict = {**dict(acc), "proxy_url": None, "enforce_proxy": False}
@@ -5467,7 +5487,7 @@ async def _exec_bulk_join_inner(
                 day_limit,
             )
             skipped_by_limit += 1
-            continue
+            return
         # Риск-пульс (Волна S/1B, fail-open): аккаунт с недавним СЕРЬЁЗНЫМ
         # ограничением не трогаем в массовой операции — уводим от риска повторного
         # бана. Нет сигнала/ошибка → работаем как раньше (не блокируем ядро).
@@ -5477,7 +5497,7 @@ async def _exec_bulk_join_inner(
                 acc_dict.get("phone"),
             )
             skipped_by_limit += 1
-            continue
+            return
         _done_today = int(joins_today or 0)
         # Общий суточный бюджет риск-действий (account_budget) тоже держим по
         # ходу: на старте аккаунт с остатком 1 проходит отбор. Бюджет считает
@@ -5507,14 +5527,8 @@ async def _exec_bulk_join_inner(
                 _limit_cut += 1
                 continue
             if await _is_cancelled(pool, op_id):
-                return {
-                    "status": "cancelled",
-                    "ok": ok_count,
-                    "failed": fail_count,
-                    "skipped_accounts": skipped_by_limit,
-                    "failed_links": failed_links[:50],
-                    "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}",
-                }
+                _cancelled.append(True)
+                return
             step += 1
             if _budget_left is not None:
                 _budget_left -= 1
@@ -5594,7 +5608,9 @@ async def _exec_bulk_join_inner(
                         op_id,
                     )
                     break  # stop all remaining links for this account
-                if res.get("error"):
+                # «Уже состоит в чате» — цель достигнута, а не ошибка: аккаунт
+                # готов к выдаче прав и инвайту.
+                if res.get("error") and not res.get("already_member"):
                     raise Exception(str(res["error"]))
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
@@ -5693,6 +5709,12 @@ async def _exec_bulk_join_inner(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                     op_id,
                 )
+            # После последней ссылки аккаунта пауза никого не бережёт: его
+            # следующего действия в этой операции нет. Раньше она шла и после
+            # единственной ссылки — флот из 50 аккаунтов вступал в один канал
+            # около двух часов, и казалось, что работает лишь часть флота.
+            if i == len(links) - 1:
+                continue
             # Apply pacing based on delay_mode from params
             chaos = session_simulator.chaos_factor()
             # Ночной режим — по ЛОКАЛЬНОМУ времени аккаунта (гео прокси), а не сервера.
@@ -5726,6 +5748,21 @@ async def _exec_bulk_join_inner(
         # Пауза при смене аккаунта — защита от account-hopping detection
         if acc_idx < len(accounts) - 1:
             await session_simulator.between_accounts_pause(acc_idx)
+
+    _results = await asyncio.gather(
+        *[_join_account(i, a) for i, a in enumerate(accounts)], return_exceptions=True)
+    for _r in _results:
+        if isinstance(_r, BaseException):
+            raise _r
+    if _cancelled:
+        return {
+            "status": "cancelled",
+            "ok": ok_count,
+            "failed": fail_count,
+            "skipped_accounts": skipped_by_limit,
+            "failed_links": failed_links[:50],
+            "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}",
+        }
 
     parts = [f"Вступлено: {ok_count}", f"ошибок: {fail_count}"]
     if skipped_by_limit:
@@ -13304,8 +13341,28 @@ async def _exec_promote_all_admins(
 
         ok_count = 0
         fail_count = 0
+        # Причина каждого отказа — в журнал операции и в итог. Раньше отказ был
+        # голым False: «Ошибок: 42» без единого слова, почему, и владелец не мог
+        # отличить «аккаунт не вступил в канал» от «у канала кончились места
+        # админа» (Telegram держит их около 50).
+        _why_ru = {
+            "not_participant": "аккаунт не состоит в канале — сначала вступление",
+            "no_add_admins": "у аккаунта-владельца нет права «Назначать админов»",
+            "admins_too_much": "у канала закончились места админа (лимит Telegram)",
+            "flood": "Telegram попросил паузу",
+        }
+        _reasons: dict = {}
+        _stop_reason = ""
+        _not_reached = 0
+        # Повтор (перезапуск на деплое, сброс зависшей) не промоутит заново
+        # тех, кому права уже выданы: каждый лишний EditAdmin — запрос
+        # промоутера, самого ценного аккаунта, к паузе Telegram.
+        _done_before = await completed_targets(pool, op_id)
 
         for idx, acc in enumerate(accounts):
+            if _stop_reason:
+                _not_reached += 1
+                continue
             if await _is_cancelled(pool, op_id):
                 return {
                     "status": "cancelled",
@@ -13313,23 +13370,42 @@ async def _exec_promote_all_admins(
                     "fail": fail_count,
                     "summary": f"Отменено. Назначено: {ok_count}/{n}",
                 }
+            _target = acc.get("phone") or f"акк #{acc['id']}"
+            if _target in _done_before:
+                ok_count += 1
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
             try:
-                ok = await account_manager.promote_to_admin(
-                    owner_acc["session_str"], channel_id, acc["tg_user_id"], _acc=dict(owner_acc)
+                ok, _why = await account_manager.promote_to_admin_ex(
+                    owner_acc["session_str"], channel_id, acc["tg_user_id"],
+                    _acc=dict(owner_acc), pool=pool,
                 )
-                if ok:
-                    ok_count += 1
-                else:
-                    fail_count += 1
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 log.warning("_exec_promote_all_admins op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+                ok, _why = False, "error"
+            if ok:
+                ok_count += 1
+                await _safe_execute(
+                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx + 1, _target, "права выданы")
+            else:
                 fail_count += 1
+                _txt = _why_ru.get(_why, "не удалось выдать права")
+                _reasons[_txt] = _reasons.get(_txt, 0) + 1
+                await _safe_execute(
+                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)", op_id, idx + 1, _target, _txt)
+                # Дальше этот отказ повторится у всех остальных — не жжём
+                # запросы промоутера, а честно говорим, сколько не дошло.
+                if _why in ("no_add_admins", "admins_too_much", "flood"):
+                    _stop_reason = _txt
 
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            if idx < n - 1:
+            if idx < n - 1 and not _stop_reason:
                 # межаккаунтный темп под губернатором (давление флота тормозит)
                 await asyncio.sleep(await _governed_delay(pool, owner_id, 2.0))
 
@@ -13337,7 +13413,13 @@ async def _exec_promote_all_admins(
             f"👑 Назначение администраторов канала\n"
             f"✅ Успешно: {ok_count}/{n}"
             + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+            + "".join(f"\n  • {t}: {c}" for t, c in _reasons.items())
+            + (f"\n⏸ Не дошла очередь: {_not_reached} — остановлено: {_stop_reason}"
+               if _not_reached else "")
         )
+        if _not_reached:
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id)
         return {"status": "done", "ok": ok_count, "fail": fail_count, "total": n, "summary": summary}
     finally:
         await release_accounts([_claimed_acc])
