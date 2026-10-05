@@ -69,6 +69,17 @@ def test_ui_invite_filters_wired():
     for cid in ("invFltUsername", "invFltNotBot", "invFltPremium", "invFltActive"):
         assert f'id="{cid}"' in html, f"нет чекбокса фильтра {cid}"
     m = re.search(r"async function submitMassInvite\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
-    assert m and "aud_filters" in m.group(1) and "with_username" in m.group(1), (
-        "submitMassInvite должен собирать aud_filters из чекбоксов"
-    )
+    assert m, "submitMassInvite не найдена"
+    body = m.group(1)
+    assert "aud_filters" in body, "submitMassInvite не кладёт aud_filters в запрос"
+    # Сбор фильтров вынесен в _invAudFilters() — им пользуются и запуск инвайта,
+    # и предпросмотр аудитории, поэтому проверяем вызов и сам сборщик, а не
+    # ключи внутри submitMassInvite. Иначе тест краснеет на выносе в функцию,
+    # хотя фильтры по-прежнему собираются и уходят.
+    assert "_invAudFilters()" in body, "фильтры не собираются перед отправкой"
+    h = re.search(r"function _invAudFilters\(\)\s*\{(.*?)\n\}", html, re.DOTALL)
+    assert h, "сборщик фильтров _invAudFilters не найден"
+    hb = h.group(1)
+    for cid, key in (("invFltUsername", "with_username"), ("invFltNotBot", "not_bot"),
+                     ("invFltPremium", "premium"), ("invFltActive", "active")):
+        assert cid in hb and key in hb, f"фильтр {cid} не превращается в {key}"

@@ -21264,8 +21264,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             segments = []
             try:
                 from services.audience_analytics import segment_audience
+                from services.audience_analytics import SEGMENT_NAMES
+                # Ключ сегмента нужен экрану, чтобы спросить «кто в нём»:
+                # по русскому имени маршрут искать нельзя.
+                _key_by_name = {v: k for k, v in SEGMENT_NAMES.items()}
                 for sg in await segment_audience(pool, uid):
                     segments.append({
+                        "key": _key_by_name.get(sg.name),
                         "name": sg.name, "count": sg.user_count,
                         "percentage": sg.percentage, "growth_pct": None,
                         "avg_activity": (f"{sg.avg_engagement:.0f} сообщ."
@@ -21284,14 +21289,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             heatmap = [{"hour": int(r["h"]), "value": int(r["c"])} for r in (hm_rows or [])]
             insights = []
             if total:
-                insights.append({"title": "Аудитория", "text":
-                    f"Всего {total}, активных за 7д — {active} ({avg_eng}%)."})
+                # Ключ `description`, а не `text`: экран читает именно его,
+                # и из-за расхождения каждый инсайт показывался одним
+                # заголовком с пустой строкой под ним.
+                insights.append({"type": "activity", "impact": "neutral",
+                    "title": "Аудитория", "description":
+                    f"Всего {total}, активных за 7 дней — {active} "
+                    f"({str(avg_eng).replace('.', ',')}%)."})
                 if dormant:
-                    insights.append({"title": "Реактивация", "text":
-                        f"{dormant} спящих — кандидаты на прогрев/рассылку."})
+                    insights.append({"type": "churn", "impact": "negative",
+                        "title": "Реактивация", "description":
+                        f"{dormant} спящих — кандидаты на прогрев или рассылку."})
             if segments:
                 _in_seg = sum(sg["count"] for sg in segments)
-                insights.append({"title": "Как считаются сегменты", "text":
+                insights.append({"type": "segment", "impact": "neutral",
+                    "title": "Как считаются сегменты", "description":
                     f"По {_in_seg} подписчикам, у которых есть записанная "
                     f"активность. Доли внутри сегментов считаются от них, а не "
                     f"от общего числа."})
@@ -21303,6 +21315,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("audience_analytics uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
+
+    async def audience_segment_members(request: web.Request) -> web.Response:
+        """Кто именно в сегменте аудитории.
+
+        Экран показывал «Спящие · 1 240» и на этом заканчивался: ни увидеть
+        этих людей, ни забрать их номера для рассылки было нечем.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import audience_analytics as _aa
+        key = validate_string(request.query.get("key"), 32, required=False) or ""
+        if key not in _aa.SEGMENT_PREDICATES:
+            return _err("Неизвестный сегмент", 400)
+        limit = _list_limit(request, 100, 500)
+        rows = await _aa.segment_members(pool, uid, key, limit)
+        ids = [int(r["user_id"]) for r in rows if r.get("user_id") is not None]
+        names: dict[int, dict] = {}
+        if ids:
+            # Имя подписчика лежит в bot_users; скоуп по ботам владельца,
+            # иначе подтянулось бы имя из чужого бота.
+            nr = await _safe_fetch(
+                pool,
+                """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.first_name, bu.username
+                     FROM bot_users bu
+                     JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+                    WHERE mb.added_by=$1 AND bu.user_id = ANY($2::bigint[])
+                 ORDER BY bu.user_id, bu.last_seen DESC NULLS LAST""",
+                uid, ids)
+            names = {int(r["user_id"]): dict(r) for r in (nr or [])}
+        items = []
+        for r in rows:
+            uid_ = int(r["user_id"]) if r.get("user_id") is not None else None
+            n = names.get(uid_, {})
+            items.append({
+                "user_id": uid_,
+                "name": n.get("first_name"),
+                "username": n.get("username"),
+                "msgs": int(r.get("msgs") or 0),
+                "last_seen": r["last_seen"].isoformat() if r.get("last_seen") else None,
+            })
+        return _json_resp({"key": key, "name": _aa.SEGMENT_NAMES.get(key, key),
+                           "items": items, "shown": len(items)})
 
     async def networks_list(request: web.Request) -> web.Response:
         """Network Builder — список сеток владельца (форма экрана s-network-builder)."""
@@ -21722,6 +21777,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/op_chain/launch", op_chain_launch)
     app.router.add_get("/api/miniapp/accounts/health", accounts_health)
     app.router.add_get("/api/miniapp/audience_analytics", audience_analytics)
+    app.router.add_get("/api/miniapp/audience_analytics/segment", audience_segment_members)
     app.router.add_get("/api/miniapp/networks", networks_list)
     app.router.add_post("/api/miniapp/networks", network_create_plural)
     app.router.add_delete("/api/miniapp/networks/nodes/{node_id}", network_delete_node)

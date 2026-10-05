@@ -144,7 +144,28 @@ _REGULAR_DAYS, _REGULAR_MSGS = 7, 20
 _AT_RISK_DAYS = 14
 _NEW_DAYS = 7
 
-_SEGMENTS_SQL = """
+# Условия сегментов — ОДИН источник: из них строится и запрос со счётчиками,
+# и выборка людей сегмента. Пока они жили только внутри _SEGMENTS_SQL, список
+# «кто в сегменте» нельзя было показать, не переписав условия второй раз — а
+# разъехавшиеся копии порогов этот модуль уже однажды сломали.
+SEGMENT_PREDICATES: dict[str, str] = {
+    "leaders": "last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4",
+    "regulars": ("last_seen >= NOW() - make_interval(days => $5) AND msgs >= $6"
+                 " AND NOT (last_seen >= NOW() - make_interval(days => $3)"
+                 " AND msgs >= $4)"),
+    "at_risk": ("last_seen < NOW() - make_interval(days => $5)"
+                " AND last_seen >= NOW() - make_interval(days => $7)"),
+    "dormant": "last_seen IS NULL OR last_seen < NOW() - make_interval(days => $7)",
+    "newcomers": "first_seen >= NOW() - make_interval(days => $8)",
+}
+# Русские имена сегментов — их видит владелец; ключ → имя нужен и экрану.
+SEGMENT_NAMES: dict[str, str] = {
+    "leaders": "Лидеры", "regulars": "Постоянные", "at_risk": "Под риском",
+    "dormant": "Спящие", "newcomers": "Новые",
+}
+_SEG_AVG = ("leaders", "regulars", "at_risk", "newcomers")
+
+_SEGMENTS_BASE = """
 WITH u AS (
     SELECT ua.user_id, ua.last_seen, ua.first_seen,
            COALESCE(ua.message_count, 0) AS msgs
@@ -153,41 +174,58 @@ WITH u AS (
     WHERE mb.added_by = $1
       AND ($2::bigint IS NULL OR ua.bot_id = $2)
 )
-SELECT
-    COUNT(*) AS total,
-    COUNT(*) FILTER (
-        WHERE last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4
-    ) AS leaders,
-    AVG(msgs) FILTER (
-        WHERE last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4
-    ) AS leaders_msgs,
-    COUNT(*) FILTER (
-        WHERE last_seen >= NOW() - make_interval(days => $5) AND msgs >= $6
-          AND NOT (last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4)
-    ) AS regulars,
-    AVG(msgs) FILTER (
-        WHERE last_seen >= NOW() - make_interval(days => $5) AND msgs >= $6
-          AND NOT (last_seen >= NOW() - make_interval(days => $3) AND msgs >= $4)
-    ) AS regulars_msgs,
-    COUNT(*) FILTER (
-        WHERE last_seen < NOW() - make_interval(days => $5)
-          AND last_seen >= NOW() - make_interval(days => $7)
-    ) AS at_risk,
-    AVG(msgs) FILTER (
-        WHERE last_seen < NOW() - make_interval(days => $5)
-          AND last_seen >= NOW() - make_interval(days => $7)
-    ) AS at_risk_msgs,
-    COUNT(*) FILTER (
-        WHERE last_seen IS NULL OR last_seen < NOW() - make_interval(days => $7)
-    ) AS dormant,
-    COUNT(*) FILTER (
-        WHERE first_seen >= NOW() - make_interval(days => $8)
-    ) AS newcomers,
-    AVG(msgs) FILTER (
-        WHERE first_seen >= NOW() - make_interval(days => $8)
-    ) AS newcomers_msgs
-FROM u
 """
+
+
+def _segments_sql() -> str:
+    parts = ["    COUNT(*) AS total"]
+    for key, cond in SEGMENT_PREDICATES.items():
+        parts.append(f"    COUNT(*) FILTER (WHERE {cond}) AS {key}")
+        if key in _SEG_AVG:
+            parts.append(f"    AVG(msgs) FILTER (WHERE {cond}) AS {key}_msgs")
+    return _SEGMENTS_BASE + "SELECT\n" + ",\n".join(parts) + "\nFROM u\n"
+
+
+_SEGMENTS_SQL = _segments_sql()
+
+
+# Пороги в выборке людей подставляются числами, а не параметрами: условие
+# одного сегмента ссылается не на все $3..$8, а подставить в запрос лишний
+# параметр нельзя — Postgres откажется. Числа здесь — константы модуля, не
+# пользовательский ввод.
+_SEG_PARAM_VALUES = {"$3": _LEADER_DAYS, "$4": _LEADER_MSGS,
+                     "$5": _REGULAR_DAYS, "$6": _REGULAR_MSGS,
+                     "$7": _AT_RISK_DAYS, "$8": _NEW_DAYS}
+
+
+def segment_members_sql(key: str, limit: int) -> str:
+    """Запрос людей одного сегмента — по тому же условию, что и счётчик."""
+    cond = SEGMENT_PREDICATES[key]
+    for ph, val in _SEG_PARAM_VALUES.items():
+        cond = cond.replace(ph, str(int(val)))
+    return (_SEGMENTS_BASE
+            + f"SELECT user_id, last_seen, msgs FROM u WHERE ({cond})"
+              f" ORDER BY msgs DESC NULLS LAST, last_seen DESC NULLS LAST"
+              f" LIMIT {int(limit)}")
+
+
+async def segment_members(pool, owner_id: int, key: str, limit: int = 100,
+                          bot_id: int | None = None) -> list[dict]:
+    """Кто именно в сегменте. Пустой список, если ключ неизвестен.
+
+    Экран показывал «Спящие · 1 240» и на этом заканчивался: ни посмотреть,
+    кто это, ни забрать их номера было нечем.
+    """
+    if key not in SEGMENT_PREDICATES:
+        return []
+    try:
+        rows = await pool.fetch(
+            segment_members_sql(key, max(1, min(int(limit), 500))),
+            owner_id, bot_id)
+    except Exception as exc:
+        log.warning("segment_members failed owner=%s key=%s: %s", owner_id, key, exc)
+        return []
+    return [dict(r) for r in rows]
 
 
 async def segment_audience(

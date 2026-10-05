@@ -83,6 +83,7 @@ GET /api/miniapp/asset_templates
 GET /api/miniapp/audience/analyze/{bot_id}
 GET /api/miniapp/audience/segment/{bot_id}
 GET /api/miniapp/audience_analytics
+GET /api/miniapp/audience_analytics/segment
 GET /api/miniapp/audience_dna
 GET /api/miniapp/audience_dna/{bot_id}/history
 GET /api/miniapp/audience_dna/{bot_id}/profile
@@ -365,6 +366,7 @@ HEAD /api/miniapp/asset_templates
 HEAD /api/miniapp/audience/analyze/{bot_id}
 HEAD /api/miniapp/audience/segment/{bot_id}
 HEAD /api/miniapp/audience_analytics
+HEAD /api/miniapp/audience_analytics/segment
 HEAD /api/miniapp/audience_dna
 HEAD /api/miniapp/audience_dna/{bot_id}/history
 HEAD /api/miniapp/audience_dna/{bot_id}/profile

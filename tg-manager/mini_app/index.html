@@ -7252,6 +7252,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: AUDIENCE ANALYTICS ══════════════════════ -->
+<!-- Кто именно в сегменте аудитории. -->
+<div class="screen" id="s-audseg">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">👥 Люди сегмента</div>
+    <div class="hdr-meta"><div class="hdr-user" id="audseg-title"></div></div>
+  </div>
+  <div class="sub-sb"><div id="audsegBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+</div>
+
 <div class="screen" id="s-audience-analytics">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
@@ -28687,6 +28697,7 @@ async function loadAudienceAnalytics() {
     document.getElementById('aa-segments').textContent = segments.length;
     document.getElementById('aa-engagement').textContent = d.avg_engagement ? d.avg_engagement.toFixed(1).replace('.',',') + '%' : '—';
 
+    _AUD_SEGMENTS = segments;
     renderAudSegmentChips(segments);
     renderAudSegments(segments);
     renderAudInsights(insights);
@@ -28701,13 +28712,17 @@ async function loadAudienceAnalytics() {
 function renderAudSegmentChips(segments) {
   const el = document.getElementById('audSegmentChips');
   if (!segments.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="chip ${!_audSegFilter ? 'on' : ''}" onclick="filterAudSegment(null,this)">Все</div>` +
-    segments.map(s => `<div class="chip ${_audSegFilter === s.name ? 'on' : ''}" onclick="filterAudSegment('${esc(s.name)}',this)">${esc(s.name)}</div>`).join('');
+  el.innerHTML = `<div class="chip ${!_audSegFilter ? 'on' : ''}" onclick="filterAudSegment(null,this)" role="button" tabindex="0">Все</div>` +
+    segments.map((s,i) => `<div class="chip ${_audSegFilter === s.name ? 'on' : ''}" onclick="filterAudSegment(${i},this)" role="button" tabindex="0">${esc(s.name)}</div>`).join('');
 }
 
-function filterAudSegment(name, el) {
-  _audSegFilter = name;
-  loadAudienceAnalytics();
+let _AUD_SEGMENTS = [];
+function filterAudSegment(i, el) {
+  // Раньше смена чипа перезагружала весь экран по сети ради фильтра по уже
+  // загруженному списку: лишний запрос и мигание всех блоков.
+  _audSegFilter = (i === null || i === undefined) ? null : (_AUD_SEGMENTS[i]||{}).name;
+  renderAudSegmentChips(_AUD_SEGMENTS);
+  renderAudSegments(_AUD_SEGMENTS);
 }
 
 function renderAudSegments(segments) {
@@ -28722,7 +28737,8 @@ function renderAudSegments(segments) {
     const growth = s.growth_pct != null ? (s.growth_pct > 0 ? '📈 +' : '📉 ') + s.growth_pct.toFixed(1).replace('.',',') + '%' : '';
     const growthColor = s.growth_pct > 0 ? 'var(--green)' : s.growth_pct < 0 ? 'var(--red)' : 'var(--hint)';
     const barW = Math.min(s.percentage || 0, 100);
-    return `<div class="li">
+    const idx = segments.indexOf(s);
+    return `<div class="li${s.key?' tap':''}" ${s.key?`onclick="openAudSegment(${idx})" role="button" tabindex="0"`:''}>
       <div class="ava" style="background:${s.color || 'var(--bg-blue-16)'};color:${s.color || 'var(--blue)'}">👥</div>
       <div class="li-body">
         <div class="li-name">${esc(s.name)}</div>
@@ -28732,11 +28748,47 @@ function renderAudSegments(segments) {
       </div>
       <div class="li-right" style="flex-direction:column;align-items:flex-end;gap:2px">
         <span style="font-size:12px;color:${growthColor}">${growth}</span>
+        ${s.key?'<span class="chev">›</span>':''}
       </div>
     </div>`;
   }).join(''));
 }
 
+let _AUDSEG_ROWS = [];
+// Кто в сегменте: имя, сколько писал и когда был последний раз. Номера можно
+// забрать целиком — «1 240 спящих» нужны не для любования, а для рассылки.
+async function openAudSegment(i) {
+  const seg = _AUD_SEGMENTS[i];
+  if (!seg || !seg.key) return;
+  push('s-audseg');
+  txt('audseg-title', seg.name||'');
+  txt('audsegBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/audience_analytics/segment?key='+encodeURIComponent(seg.key));
+    _AUDSEG_ROWS = d.items||[];
+    if (!_AUDSEG_ROWS.length) {
+      txt('audsegBody', empty('👥','В сегменте пусто',
+        'Записанной активности по этим подписчикам нет'));
+      return;
+    }
+    txt('audsegBody',
+      `<div class="lst">` + _AUDSEG_ROWS.map(r=>{
+        const who = r.name ? esc(r.name)+(r.username?' · @'+esc(r.username):'')
+                  : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(String(r.user_id)));
+        return `<div class="li tap" onclick="copyToClipboard('${Number(r.user_id)}','📋 Номер скопирован')" role="button" tabindex="0">
+          <div class="row-body"><div class="row-name">${who}</div>
+            <div class="li-sub wrap">${num(r.msgs||0)} ${plural(r.msgs||0,'сообщение','сообщения','сообщений')}${
+              r.last_seen?' · был(а) '+esc(ago(r.last_seen)):' · активности не было'}</div></div>
+          <span class="chev">›</span></div>`;
+      }).join('') + `</div>`
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="audSegCopyIds()">📋 Скопировать номера (${num(_AUDSEG_ROWS.length)})</button>`);
+  } catch(e) { txt('audsegBody', errHtml(errRu(e),'openAudSegment('+i+')')); }
+}
+function audSegCopyIds() {
+  if (!_AUDSEG_ROWS.length) return;
+  copyToClipboard(_AUDSEG_ROWS.map(r=>String(r.user_id)).join('\n'),
+    '📋 Скопировано номеров: ' + _AUDSEG_ROWS.length);
+}
 function renderAudInsights(insights) {
   if (!insights.length) {
     txt('audInsightsList', '<div class="empty-inline">Пока нет инсайтов</div>');
