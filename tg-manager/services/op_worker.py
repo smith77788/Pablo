@@ -14612,6 +14612,20 @@ async def _exec_mass_invite(
     # вектор, от которого «Мать-Дочка» не защищает. Осмысленна только вместе с
     # дочерними группами: сама по себе она лишь добавляет звено.
     _use_showcase = bool(params.get("use_showcase")) and _use_daughter
+    # Переливание по резерву каналов: канал упёрся в лимит приглашённых или
+    # словил флуд — берём следующий пустой канал из резерва, оформляем его так
+    # же (channel_setup) и приглашаем туда оставшихся. С «Мать-Дочкой» не
+    # совмещается: у неё своя ротация расходных групп.
+    from services import invite_overflow as _ovf
+    _reserve_ids = _ovf.clean_reserve_ids(params.get("reserve_channels"))
+    _ch_setup = _ovf.clean_setup(params.get("channel_setup"))
+    _setup_main = bool((params.get("channel_setup") or {}).get("apply_main", True)) \
+        if isinstance(params.get("channel_setup"), dict) else False
+    try:
+        _per_channel_limit = max(0, int(params.get("per_channel_limit") or 0))
+    except (TypeError, ValueError):
+        _per_channel_limit = 0
+    _use_overflow = bool(_reserve_ids) and not _use_daughter
 
     if not group:
         return {"status": "failed", "summary": "⚠️ Не указана группа для инвайта"}
@@ -14923,6 +14937,49 @@ async def _exec_mass_invite(
                         "автоматически, когда флот освободится."),
         }
 
+    # ── Цепочка каналов: с какого канала продолжаем ───────────────────────────
+    # Продолжение (на следующий день или после перезапуска) начинает с канала,
+    # на котором остановились, а не снова с переполненного главного.
+    _main_ref = group
+    _chain_key = _group_key
+    _reserve: list = []           # каналы резерва, ещё не взятые (по порядку оператора)
+    _cur_chan_id: int | None = None
+    _chan_ok = 0                  # приглашено в ТЕКУЩИЙ канал этим прогоном
+    _chan_switches = 0
+    _chan_trail: list = []        # для итога: [{"ref","ok","why"}]
+    _main_needs_switch = False    # главный уже заполнен прошлым прогоном
+    _main_prev_status = ""
+    _main_prepared = False
+    if _use_overflow:
+        try:
+            _crow = await _ovf.chain_rows(pool, owner_id, _chain_key)
+            _busy = await _ovf.busy_channel_ids(pool, owner_id, _chain_key)
+            _reserve = [c for c in await _ovf.load_reserve(pool, owner_id, _reserve_ids)
+                        if int(c["channel_id"]) not in _busy]
+            _act = next((r for r in reversed(_crow)
+                         if r["status"] == _ovf.ST_ACTIVE and r["channel_ref"] != _main_ref),
+                        None)
+            _main_prepared = any(r["channel_ref"] == _main_ref and r["prepared"] for r in _crow)
+            if _act:
+                group = _act["channel_ref"]
+                _cur_chan_id = int(_act["channel_id"]) if _act.get("channel_id") else None
+                _reserve = [c for c in _reserve if int(c["channel_id"]) != _cur_chan_id]
+                log.info("mass_invite op=%d: цепочка каналов — продолжаем в %s",
+                         op_id, group[:80])
+            else:
+                _mrow = next((r for r in _crow if r["channel_ref"] == _main_ref), None)
+                if _mrow and _mrow["status"] != _ovf.ST_ACTIVE:
+                    _main_needs_switch = True
+                    _main_prev_status = _mrow["status"]
+            if not _reserve and not _act:
+                log.info("mass_invite op=%d: резерв каналов пуст (все уже заняты)", op_id)
+        except Exception:
+            # Учёт цепочки недоступен (нет таблицы, сбой БД) — инвайт в главный
+            # канал всё равно работает, просто без переливания.
+            log_exc_swallow(log, f"mass_invite op={op_id}: overflow chain load failed")
+            _use_overflow = False
+    _chan_trail.append({"ref": group, "ok": 0, "why": ""})
+
     # ── «Мать-Дочка»: подменяем group дочерней, пока она жива ──────────────────
     _mother_ref = group if _use_daughter else ""
     _daughter_id: int | None = None
@@ -15170,7 +15227,10 @@ async def _exec_mass_invite(
     if _invite_method == "link":
         _auto_promote = False
         _promote_trick = False
-    if (_auto_promote or _promote_trick) and accounts:
+    # Главный канал уже заполнен прошлым прогоном — раздавать в нём права и
+    # вводить туда инвайтеров незачем: прогон сразу уйдёт в канал резерва, а
+    # права там выдаются по ходу.
+    if (_auto_promote or _promote_trick) and accounts and not _main_needs_switch:
         from services import mass_inviter_engine as _inv
         from services import account_manager
         # tg_user_id инвайтеров — кого промоутить (в _ACC_COLS их нет).
@@ -15334,6 +15394,146 @@ async def _exec_mass_invite(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','ok',$2)", op_id, _promote_msg)
 
+    # Оформление главного канала тем же набором (описание/пост), что получат
+    # каналы резерва, — один раз на цепочку (повтор продолжения не дублирует
+    # пост). Делает промоутер: он админ чата. Оформить можно только публичный
+    # канал (@username): приватную ссылку без id канала не разрезолвить для
+    # редактирования — такой канал оператор оформляет сам.
+    _main_setup_note = ""
+    if _use_overflow and group == _main_ref and not _main_needs_switch:
+        _main_uname = str(_main_ref).strip()
+        _main_uname = _main_uname.lstrip("@") if _main_uname.startswith("@") else ""
+        _do_setup = bool(_ch_setup) and _setup_main and not _main_prepared
+        if _do_setup and _promoter is not None and _main_uname:
+            try:
+                _mp = await asyncio.wait_for(_ovf.prepare_channel(
+                    dict(_promoter), {"channel_id": 0, "access_hash": 0,
+                                      "username": _main_uname}, _ch_setup), timeout=180)
+            except Exception as _mpe:
+                _mp = {"ok": False, "error": str(_mpe)[:80]}
+            if _mp.get("ok"):
+                _main_prepared = True
+                _main_setup_note = ("оформлен: " + ", ".join(_mp.get("done") or [])
+                                    if _mp.get("done") else "")
+                if _mp.get("warnings"):
+                    _main_setup_note += (" · " if _main_setup_note else "") + \
+                        "; ".join(_mp["warnings"])
+            else:
+                _main_setup_note = f"не оформлен: {_mp.get('error')}"
+        elif _do_setup:
+            _main_setup_note = ("не оформлен: нужен публичный @канал и аккаунт-админ "
+                                "в операции — оформите главный канал вручную")
+        await _ovf.mark(pool, owner_id, _chain_key, _main_ref, None, _ovf.ST_ACTIVE,
+                        prepared=_main_prepared or None, op_id=op_id)
+
+    async def _switch_channel(reason: str, status: str) -> bool:
+        """Канал исчерпан — перейти в следующий пустой канал резерва.
+
+        Отмечает текущий канал в цепочке (full — лимит, burned — флуд/закрыт),
+        отдаёт места админа в старом канале, оформляет следующий канал резерва
+        его же админом, находит в нём промоутера и возвращает в круг аккаунты,
+        выбывшие только из-за прав (в новом канале они получат права заново).
+
+        True — group заменена, прогон продолжается. False — переливание
+        выключено, резерв кончился или исчерпан потолок переходов.
+        """
+        nonlocal group, _promoter, _invite_link, _cur_chan_id, _chan_ok
+        nonlocal _chan_switches
+        if not _use_overflow or _chan_switches >= _ovf.MAX_SWITCHES_PER_RUN:
+            return False
+        await _ovf.mark(pool, owner_id, _chain_key, group, _cur_chan_id, status,
+                        ok_delta=_chan_ok, reason=reason, op_id=op_id)
+        _chan_ok = 0
+        _chan_trail[-1]["why"] = reason
+        if _admin_seats:
+            await _release_admin_seats_batch(list(_admin_seats))
+        while _reserve:
+            ch = _reserve.pop(0)
+            _cid = int(ch["channel_id"])
+            _adm = next((a for a in accounts if int(a["id"]) == int(ch["acc_id"])), None)
+            if _adm is None:
+                # Админ канала не в операции — берём его в неё через тот же клейм,
+                # что и весь флот: подключать сессию, занятую другой операцией,
+                # нельзя (AUTH_KEY_DUPLICATED).
+                try:
+                    _sel = await resource_selector.select_all_active(
+                        pool, owner_id, include_ids=[int(ch["acc_id"])],
+                        min_trust_score=0.0, respect_cooldown=False)
+                    _got = await _claim_available_accounts(op_id, _sel or [], owner_id)
+                except Exception:
+                    _got = []
+                if _got:
+                    _adm = _got[0]
+                    accounts.append(_adm)
+                    _acc_by_id[int(_adm["id"])] = _adm
+            if _adm is None:
+                log.warning("mass_invite op=%d: канал резерва %s пропущен — его админ "
+                            "занят или недоступен", op_id, _cid)
+                _chan_trail.append({"ref": ch.get("title") or str(_cid), "ok": 0,
+                                    "why": "пропущен: админ канала занят или недоступен"})
+                continue
+            try:
+                _prep = await asyncio.wait_for(
+                    _ovf.prepare_channel(dict(_adm), ch, _ch_setup), timeout=180)
+            except Exception as _pe:
+                _prep = {"ok": False, "error": str(_pe)[:80]}
+            if not _prep.get("ok"):
+                await _ovf.mark(pool, owner_id, _chain_key, f"id:{_cid}", _cid,
+                                _ovf.ST_BURNED, reason=str(_prep.get("error") or ""),
+                                op_id=op_id)
+                _chan_trail.append({"ref": ch.get("title") or str(_cid), "ok": 0,
+                                    "why": f"пропущен: {_prep.get('error')}"})
+                continue
+            group = _prep["ref"]
+            _cur_chan_id = _cid
+            _chan_switches += 1
+            await _ovf.mark(pool, owner_id, _chain_key, group, _cid, _ovf.ST_ACTIVE,
+                            prepared=True, op_id=op_id)
+            _chan_trail.append({"ref": group, "ok": 0, "why": "",
+                                "setup": ", ".join(_prep.get("done") or [])})
+            # Промоутер нового канала — его админ (создатель резерва).
+            _promoter = None
+            _promoter_rest_until[0] = 0.0
+            try:
+                _st = await asyncio.wait_for(
+                    inv.channel_admin_status(_adm["session_str"], dict(_adm), group),
+                    timeout=45)
+                if _st.get("can_promote"):
+                    _promoter = _adm
+            except Exception:
+                log_exc_swallow(log, f"mass_invite op={op_id}: overflow admin probe")
+            # Аккаунт, взятый в операцию ради нового канала, промоутить некого
+            # без его user_id — дочитываем недостающие.
+            _missing_uid = [int(x["id"]) for x in accounts if int(x["id"]) not in _acc_uid]
+            if _missing_uid and _promoter is not None:
+                for _r in (await _safe_fetch(
+                        pool, "SELECT id, tg_user_id FROM tg_accounts "
+                        "WHERE owner_id=$1 AND id=ANY($2::bigint[])",
+                        owner_id, _missing_uid) or []):
+                    if _r.get("tg_user_id"):
+                        _acc_uid[int(_r["id"])] = _r["tg_user_id"]
+            # В новом канале права выдаются заново: выбывшие только из-за прав
+            # возвращаются в круг, счётчик попыток выдачи обнуляется.
+            for _nr in list(_no_rights_ids):
+                retired.discard(_nr)
+            _no_rights_ids.clear()
+            _no_rights_on_demand.clear()
+            if _invite_link:
+                try:
+                    _invite_link = await asyncio.wait_for(
+                        inv.export_group_invite_link(_adm["session_str"], dict(_adm), group),
+                        timeout=45) or _invite_link
+                except Exception:
+                    log_exc_swallow(log, f"mass_invite op={op_id}: overflow link export")
+            log.info("mass_invite op=%d: канал исчерпан (%s) — переходим в канал "
+                     "резерва %s", op_id, reason[:100], group[:80])
+            await _safe_execute(
+                pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,0,'overflow','ok',$2)", op_id,
+                f"канал исчерпан ({reason[:120]}) → следующий канал резерва: {group[:120]}")
+            return True
+        return False
+
     async def _leave_after_seat_release(acc_id: int) -> None:
         """Аккаунт, чья роль админа закончилась, выходит из чата САМ.
 
@@ -15449,6 +15649,7 @@ async def _exec_mass_invite(
     q_users: deque = deque(all_users)
     q_phones: deque = deque(all_phones)
     retired: set[int] = set()     # аккаунты, выбывшие из круга (флуд/лимит/сбой)
+    _no_rights_ids: set[int] = set()  # выбыли только из-за прав — вернутся в новом канале
     _no_rights_retired = 0        # аккаунтов выведено из-за отсутствия прав админа
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
@@ -15676,6 +15877,16 @@ async def _exec_mass_invite(
             # обычно). Тихо выключаем только этот последний шаг.
             _link_fallback = False
 
+    if _main_needs_switch:
+        # Главный канал этой цепочки уже заполнен (или закрыт) прошлым прогоном:
+        # сразу берём следующий канал резерва, а не стучимся в полный.
+        if not await _switch_channel("заполнен в прошлом прогоне",
+                                     _main_prev_status or _ovf.ST_FULL):
+            return {"status": "failed",
+                    "summary": ("⚠️ Главный канал этой кампании уже заполнен, а в резерве "
+                                "нет пустых каналов. Добавьте в резерв новые каналы "
+                                "и запустите снова.")}
+
     step = 0
     _given_back_n = 0
     _last_rebalance = time.monotonic()
@@ -15764,6 +15975,11 @@ async def _exec_mass_invite(
                 take_n = min(batch_size, cap)
                 if _max_invites:
                     take_n = min(take_n, _max_invites - step - _chunk_planned)
+                if _per_channel_limit:
+                    # Лимит приглашённых на канал: не набирать сверх остатка
+                    # текущего канала — переход в следующий канал резерва
+                    # случится после подсчёта этого чанка.
+                    take_n = min(take_n, _per_channel_limit - _chan_ok - _chunk_planned)
                 if take_n <= 0:
                     break
 
@@ -15790,6 +16006,8 @@ async def _exec_mass_invite(
                             # «нет данных» и поведёт себя ОСТОРОЖНЕЕ, а не рискованнее.
                             if await _rotate_daughter(_dec.reason):
                                 continue
+                            if await _switch_channel(_dec.reason, _ovf.ST_BURNED):
+                                continue
                             group_broken = True
                             _group_broken_reason = _dec.reason
                             log.warning("mass_invite op=%d: safe-режим СТОП по чату: %s",
@@ -15811,13 +16029,17 @@ async def _exec_mass_invite(
                 continue
 
             # ── Фаза B: разослать чанк ПАРАЛЛЕЛЬНО ──
+            # Канал, в который ушёл чанк: пока досчитываются его результаты,
+            # group может смениться (ротация/резерв) — ошибка старого канала
+            # не должна закрывать новый.
+            _sent_group = group
             _results = await asyncio.gather(*[
                 _fire(acc, batch, by_phone)
                 for (acc, acc_id, cap, batch, queue, by_phone) in _chunk])
 
             # ── Фаза C у вызывающего: отдаём результаты по одному ──
             for (acc, acc_id, cap, batch, queue, by_phone), res in zip(_chunk, _results):
-                yield acc, acc_id, cap, batch, queue, by_phone, res
+                yield acc, acc_id, cap, batch, queue, by_phone, res, _sent_group
 
     while (q_users or q_phones) and not group_broken and not flood_storm:
         if await _is_cancelled(pool, op_id):
@@ -15882,7 +16104,7 @@ async def _exec_mass_invite(
         # Круг флота: _iter_round набирает батчи чанками по _parallel и рассылает
         # их ПАРАЛЛЕЛЬНО, отдавая результаты по одному. Вся обработка результата
         # ниже — последовательная (без гонок по общему состоянию).
-        async for acc, acc_id, cap, batch, queue, by_phone, res in _iter_round(active):
+        async for acc, acc_id, cap, batch, queue, by_phone, res, sent_group in _iter_round(active):
             progressed = True
             if isinstance(res, Exception):
                 # Батч не отработан вовсе — цели возвращаем в очередь (их подберёт
@@ -15999,6 +16221,7 @@ async def _exec_mass_invite(
 
                 # Промоутера нет / попытки исчерпаны / отказ окончательный
                 retired.add(acc_id)
+                _no_rights_ids.add(acc_id)
                 await _release_admin_seat(acc_id)
                 _no_rights_retired += 1
                 log.info("mass_invite op=%d acc=%s: нет прав админа, выдать не удалось (%s) — "
@@ -16037,6 +16260,8 @@ async def _exec_mass_invite(
                     await _remember_invited(tried)
             total_ok += ok_n
             total_fail += fail_n
+            _chan_ok += ok_n
+            _chan_trail[-1]["ok"] += ok_n
             if _invite_method == "link" and not by_phone and ok_n:
                 # Метод «ссылка в ЛС» — это личные сообщения: учитываем их
                 # построчно, как рассылка, иначе дневной лимит ЛС их не видит.
@@ -16164,9 +16389,17 @@ async def _exec_mass_invite(
             _gerr = next((str(e) for e in (res.get("errors") or [])
                           if str(e).startswith("group error")), "")
             if _gerr:
-                _group_reason = _gerr.split("group error:", 1)[-1].strip()
                 await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
+                if sent_group != group:
+                    # Батч того же чанка, ушедший в канал, который уже сменили:
+                    # его цели вернулись в очередь, новый канал он не закрывает.
+                    continue
+                _group_reason = _gerr.split("group error:", 1)[-1].strip()
                 if await _rotate_daughter(_group_reason):
+                    continue
+                if await _switch_channel(
+                        _group_reason,
+                        _ovf.ST_FULL if "лимит участников" in _group_reason else _ovf.ST_BURNED):
                     continue
                 group_broken = True
                 log.warning(
@@ -16211,7 +16444,18 @@ async def _exec_mass_invite(
                     # Несколько суточных банов = флот у жёсткого потолка по этому чату:
                     # каждый следующий аккаунт тоже уйдёт в суточный бан. Стоп раньше.
                     _long_storm = _long_flood_stop and _long_floods >= _long_flood_stop
-                    if _storm_now or _dead_start or _long_storm:
+                    if (_storm_now and not _dead_start and not _long_storm
+                            and await _switch_channel(
+                                f"флуд: {len(_flood_times)} за "
+                                f"{_flood_window_sec // 60} мин", _ovf.ST_BURNED)):
+                        # Кучные флуды в этом канале — переходим в следующий
+                        # канал резерва. Зафлуженные аккаунты уже выбыли и
+                        # отдыхают; окно шторма считаем заново для нового
+                        # канала. Суточные баны (_long_floods) не обнуляются:
+                        # это потолок аккаунтов, а не канала.
+                        _flood_times.clear()
+                        flood_streak = 0
+                    elif _storm_now or _dead_start or _long_storm:
                         flood_storm = True
                         log.warning(
                             "mass_invite op=%d: стоп операции (флот перегрет) — "
@@ -16249,6 +16493,18 @@ async def _exec_mass_invite(
                 await _release_admin_seat(acc_id)
             await _humanize(acc)
             await asyncio.sleep(_invite_pause(acc_id))
+
+        # Лимит приглашённых на канал достигнут — следующий канал резерва.
+        # Резерва нет — канал полон по решению оператора, останавливаемся:
+        # продолжение в тот же полный канал не планируется (group_broken).
+        if (_per_channel_limit and _chan_ok >= _per_channel_limit
+                and (q_users or q_phones) and not group_broken and not flood_storm):
+            _lim_why = f"лимит {_per_channel_limit} приглашённых на канал"
+            if not await _switch_channel(_lim_why, _ovf.ST_FULL):
+                group_broken = True
+                _group_reason = _lim_why + (" — резерв каналов закончился"
+                                            if _use_overflow else "")
+            continue
 
         if not progressed:
             break
@@ -16450,6 +16706,21 @@ async def _exec_mass_invite(
                 f"{max(_lf_tried, _link_fallback_ok)}"
                 + (f", не успели отправить: {_link_fallback_left}" if _link_fallback_left else ""))
 
+    # Цепочка каналов: записать итог текущего канала. Флуд без резерва канал не
+    # закрывает — продолжение завтра начнёт с него же; закрытым/полным он
+    # становится только по ошибке самого канала или лимиту оператора.
+    if _use_overflow:
+        _chan_ok += _trick_ok
+        _chan_trail[-1]["ok"] += _trick_ok
+        _final_st = _ovf.ST_ACTIVE
+        if group_broken:
+            _final_st = _ovf.ST_FULL if "лимит" in (_group_reason or "") else _ovf.ST_BURNED
+        await _ovf.mark(pool, owner_id, _chain_key, group, _cur_chan_id, _final_st,
+                        ok_delta=_chan_ok, reason=_group_reason if group_broken else "",
+                        op_id=op_id)
+        if group_broken:
+            _chan_trail[-1]["why"] = _chan_trail[-1]["why"] or _group_reason
+
     # Запомнить обработанные цели, чтобы следующий прогон их не тыкал повторно.
     # Страховка: цели пишутся в дедуп по ходу прогона (_remember_invited), и к
     # этому моменту новых обычно нет. Вызов оставлен на случай пути, который
@@ -16576,6 +16847,27 @@ async def _exec_mass_invite(
             if _nc_advice:
                 _sess_hint = f"\n⚠️ {_nc_advice}"
 
+    def _overflow_summary() -> str:
+        """Строка итога о цепочке каналов: куда сколько пригласили и почему ушли."""
+        if not _use_overflow:
+            return ""
+        parts = []
+        for t in _chan_trail:
+            line = f"{str(t['ref'])[:60]} — {t['ok']}"
+            if t.get("setup"):
+                line += f" [оформлен: {t['setup']}]"
+            if t.get("why"):
+                line += f" ({str(t['why'])[:80]})"
+            parts.append(line)
+        out = "\n📺 Каналы: " + " → ".join(parts)
+        if _main_setup_note:
+            out += f"\n   Главный канал {_main_setup_note}."
+        out += (f"\n   В резерве осталось пустых каналов: {len(_reserve)}"
+                if _reserve else "\n   ⚠️ Резерв пустых каналов закончился — добавьте новые.")
+        if _per_channel_limit:
+            out += f"\n   Лимит на канал: {_per_channel_limit} приглашённых."
+        return out
+
     # Метод «ссылка в ЛС» не добавляет насильно — честно называем ok доставкой
     # ссылки, а не вступлением (вступление зависит от согласия человека).
     _method_hdr = {
@@ -16605,6 +16897,7 @@ async def _exec_mass_invite(
               "в боевой канал по закреплённой ссылке — всплеск вступлений он "
               "получает всё равно. Снимает это витрина (переключатель рядом).")
            if _use_daughter else "")
+        + _overflow_summary()
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
         + (f"\n🔗 Недостижимым отправлена ссылка в ЛС: {_link_fallback_ok}"

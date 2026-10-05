@@ -5190,6 +5190,22 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="hint" style="padding:4px 2px 0">Дочерняя группа снимает бан за сам инвайт, но приглашённые переходят в канал по одной ссылке — он получает всплеск вступлений, а это и есть сигнал, по которому каналы закрывают. Витрина копит аудиторию между ними и открывает вход порциями: ссылка выпускается с лимитом мест, кончились — следующая порция позже. Работает только вместе с «Мать-Дочкой». Цена — время: 200 человек доедут примерно за полтора часа.</div>
       </div>
       <div class="field">
+        <label class="chk-row" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invOverflow" onchange="invOverflowToggle()"> 📺 Переливать в каналы из резерва</label>
+        <div class="hint" style="padding:4px 2px 0">Канал упёрся в лимит приглашённых или поймал флуд — Infragram берёт следующий пустой канал из резерва, оформляет его так же (описание, пост) и приглашает туда оставшихся. И так по кругу, пока не пригласит всех, кого можно. Продолжение на следующий день начнёт с того канала, где остановились.</div>
+        <div id="invOverflowBox" style="display:none;margin-top:8px">
+          <label>Резерв пустых каналов — отмечайте в том порядке, в каком брать</label>
+          <div id="invReserveWrap" style="max-height:160px;overflow-y:auto;border:1.5px solid var(--border-input);border-radius:10px;padding:6px;background:var(--bg-select)"></div>
+          <label style="margin-top:8px">Лимит приглашённых на канал (пусто — до упора)</label>
+          <input type="number" id="invPerChannelLimit" min="0" max="100000" placeholder="например, 190">
+          <div class="hint" style="padding:4px 2px 0">В канал Telegram даёт добавить вручную только первые 200 участников; упёрлись раньше лимита — переход случится сам.</div>
+          <label style="margin-top:8px">Описание канала</label>
+          <textarea id="invSetupAbout" rows="2" maxlength="255" placeholder="Описание, которое получит каждый канал цепочки"></textarea>
+          <label style="margin-top:8px">Пост (опубликуется и закрепится)</label>
+          <textarea id="invSetupPost" rows="3" maxlength="4000" placeholder="Первый пост, который увидят приглашённые"></textarea>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:6px"><input type="checkbox" id="invSetupMain" checked> оформить так же и главный канал</label>
+        </div>
+      </div>
+      <div class="field">
         <label class="chk-row" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invSafeMode"> 🛡 Безопасный режим (умный темп по чату)</label>
         <div class="hint" style="padding:4px 2px 0">Держит частоту вступлений/мин под лимитом, замораживает приём при флуде чата, оценивает «живость» чата и останавливается, если приглашённые массово выходят/жалуются.</div>
       </div>

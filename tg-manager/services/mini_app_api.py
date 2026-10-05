@@ -9814,6 +9814,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # группами, поэтому исполнитель требует обе.
             if str(body.get("use_showcase")).lower() in ("1", "true", "yes", "on"):
                 params["use_showcase"] = True
+            # Переливание по резерву каналов: канал упёрся в лимит приглашённых
+            # или поймал флуд — исполнитель берёт следующий пустой канал из
+            # резерва, оформляет его так же (описание/пост) и приглашает туда
+            # оставшихся. Резерв — только свои каналы с привязанным аккаунтом-
+            # админом: в чужой канал оформить и пригласить нечем.
+            from services import invite_overflow as _ovf
+            _rids = _ovf.clean_reserve_ids(body.get("reserve_channels"))
+            if _rids:
+                _own = await _safe_fetch(pool,
+                    "SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1 "
+                    "AND channel_id = ANY($2::bigint[]) AND acc_id IS NOT NULL",
+                    uid, _rids)
+                _own_set = {int(r["channel_id"]) for r in (_own or [])}
+                _rids = [c for c in _rids if c in _own_set]
+                if _rids:
+                    params["reserve_channels"] = _rids
+            if body.get("per_channel_limit") is not None:
+                _pcl = _clamp(body.get("per_channel_limit"), 0, 100000, 0)
+                if _pcl:
+                    params["per_channel_limit"] = _pcl
+            _cs_in = body.get("channel_setup")
+            _cs = _ovf.clean_setup(_cs_in)
+            if _cs:
+                _cs["apply_main"] = bool(_cs_in.get("apply_main", True))
+                params["channel_setup"] = _cs
             # «Из парсера»: инвайтим ИМЕННО этот запуск (parse_run_id), симметрично
             # DM-мосту. Без него source=parsed брал всю аудиторию парсера.
             _pr = body.get("parse_run_id")

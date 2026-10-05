@@ -241,6 +241,10 @@ async function openMassInvite() {
   INV_FILE_REFS = null; INV_FILE_PHONES = null;
   massInviteSrcToggle();
   massInviteMethodToggle();
+  INV_RESERVE_ORDER = [];
+  ['invSetupAbout','invSetupPost','invPerChannelLimit'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  const _ovEl = document.getElementById('invOverflow');
+  if (_ovEl) { _ovEl.checked = false; invOverflowToggle(); }
   // Заглушка «Загрузка…» лежит ВНУТРИ massInviteAccsWrap, и ниже по функции
   // wrap.innerHTML затирает её насовсем. Поэтому при втором открытии экрана
   // getElementById возвращал null, присваивание падало — а падало оно ДО
@@ -282,6 +286,59 @@ async function openMassInvite() {
   } else {
     txt('massInviteHistory', empty('⚠️','Ошибка',opsD.reason?.message||''));
   }
+}
+
+// Резерв каналов для переливания: id в порядке, в котором оператор их отметил
+// (первый отмеченный возьмётся первым).
+let INV_RESERVE_ORDER = [];
+
+async function invOverflowToggle() {
+  const on = !!document.getElementById('invOverflow')?.checked;
+  const box = document.getElementById('invOverflowBox');
+  if (box) box.style.display = on ? '' : 'none';
+  if (!on) return;
+  const wrap = document.getElementById('invReserveWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="font-size:12px;color:var(--hint)">Загрузка каналов…</div>';
+  try {
+    const d = await api('/api/miniapp/channels?role=mine&limit=500');
+    const main = (document.getElementById('massInviteGroup')?.value || '').trim().replace(/^@/, '').toLowerCase();
+    const list = (d.channels || []).filter(c =>
+      !(c.username && c.username.toLowerCase() === main));
+    if (!list.length) {
+      wrap.innerHTML = '<div style="font-size:12px;color:var(--hint)">Своих каналов нет. Создайте пустые каналы (фабрика каналов) — они станут резервом.</div>';
+      return;
+    }
+    // Пустые — наверх: резерв это каналы без подписчиков.
+    list.sort((a, b) => (a.member_count || 0) - (b.member_count || 0));
+    wrap.innerHTML = list.map(c => {
+      const id = c.channel_id;
+      const on = INV_RESERVE_ORDER.includes(id) ? ' checked' : '';
+      const n = c.member_count || 0;
+      return `<label class="chk-row" style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:2px 0">
+        <input type="checkbox" data-ch="${id}"${on} onchange="invReservePick(${id}, this.checked)">
+        <span>${esc(c.title || (c.username ? '@' + c.username : String(id)))}</span>
+        <span style="color:var(--hint);margin-left:auto">${n ? n + ' уч.' : 'пустой'}</span>
+        <span class="inv-res-pos" data-pos="${id}" style="color:var(--accent);min-width:18px;text-align:right"></span>
+      </label>`;
+    }).join('');
+    _invReserveRenderPos();
+  } catch (e) {
+    wrap.innerHTML = `<div style="font-size:12px;color:var(--red)">Не удалось загрузить каналы: ${esc(e.message || '')}</div>`;
+  }
+}
+
+function invReservePick(id, on) {
+  INV_RESERVE_ORDER = INV_RESERVE_ORDER.filter(x => x !== id);
+  if (on) INV_RESERVE_ORDER.push(id);
+  _invReserveRenderPos();
+}
+
+function _invReserveRenderPos() {
+  document.querySelectorAll('.inv-res-pos').forEach(el => {
+    const i = INV_RESERVE_ORDER.indexOf(Number(el.dataset.pos));
+    el.textContent = i >= 0 ? '#' + (i + 1) : '';
+  });
 }
 
 function massInviteMethodToggle() {
@@ -504,6 +561,26 @@ async function submitMassInvite() {
   // добавляет звено, но не темп. Исполнитель требует обе, здесь не мешаем
   // отправить — он же и рассудит, чтобы правило жило в одном месте.
   if (document.getElementById('invShowcase')?.checked) body.use_showcase = true;
+  // Переливание по резерву каналов: порядок резерва — порядок отметок.
+  if (document.getElementById('invOverflow')?.checked) {
+    if (body.use_daughter_groups) {
+      errEl.textContent = 'Резерв каналов и «Мать-Дочка» не совмещаются — выберите что-то одно.';
+      return;
+    }
+    if (!INV_RESERVE_ORDER.length) {
+      errEl.textContent = 'Отметьте хотя бы один пустой канал в резерве.';
+      return;
+    }
+    body.reserve_channels = INV_RESERVE_ORDER.slice();
+    const lim = parseInt(document.getElementById('invPerChannelLimit')?.value || '0', 10);
+    if (lim > 0) body.per_channel_limit = lim;
+    const about = (document.getElementById('invSetupAbout')?.value || '').trim();
+    const post = (document.getElementById('invSetupPost')?.value || '').trim();
+    if (about || post) body.channel_setup = {
+      about, post,
+      apply_main: !!document.getElementById('invSetupMain')?.checked,
+    };
+  }
   // Пришли «из парсера» — инвайтим ИМЕННО тот запуск (backend фильтрует по
   // parse_run_id в исполнителе). Иначе source=parsed брал бы всю аудиторию.
   if (source==='parsed' && INV_PARSE_RUN) body.parse_run_id = INV_PARSE_RUN;
