@@ -10999,7 +10999,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         by_account = await _safe_fetch(
             pool,
             """SELECT l.account_id,
-                      COALESCE(a.first_name, a.phone, 'acc #' || l.account_id) AS label,
+                      COALESCE(a.first_name, a.phone, 'Аккаунт ' || l.account_id) AS label,
                       COUNT(*) FILTER (WHERE l.status='sent')  AS sent,
                       COUNT(*) FILTER (WHERE l.status<>'sent') AS failed
                  FROM dm_campaign_log l

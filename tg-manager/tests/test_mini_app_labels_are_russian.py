@@ -127,3 +127,27 @@ def test_labels_that_were_fixed_stay_fixed():
     for ru in ("🌱 Мягкий", "🌿 Обычный", "🔥 Интенсивный", "😊 Непринуждённый",
                "🀄 Иероглифы", "Имя в Telegram"):
         assert ru in html, f"пропала русская подпись: {ru}"
+
+
+def test_no_english_fallback_names_for_people_and_accounts():
+    """Когда имени нет, подпись всё равно русская.
+
+    У человека без имени и у аккаунта без подписи остаётся только номер, и
+    строка собиралась как «User #783215441» или «acc #12». Номер владельцу
+    и так ничего не говорит, а английское слово рядом — тем более. Семь таких
+    мест в мини-аппе и одно в SQL-подписи отчёта по рассылке.
+    """
+    bad = []
+    for name, src in _sources():
+        for m in re.finditer(r"['\"](?:User|user|Acc|acc|Bot|bot|Chan|chan)\s*#", src):
+            line = src[: m.start()].count("\n") + 1
+            bad.append(f"{name}:{line}  {src[m.start():m.start()+30]!r}")
+    api = os.path.join(ROOT, "services", "mini_app_api.py")
+    asrc = open(api, encoding="utf-8").read()
+    for m in re.finditer(r"'(?:User|user|Acc|acc|Bot|bot)\s*#", asrc):
+        line = asrc[: m.start()].count("\n") + 1
+        bad.append(f"services/mini_app_api.py:{line}  {asrc[m.start():m.start()+30]!r}")
+    assert not bad, (
+        "английская подпись вместо имени — владелец её не читает:\n  "
+        + "\n  ".join(bad)
+    )
