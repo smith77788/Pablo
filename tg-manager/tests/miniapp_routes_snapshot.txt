@@ -305,6 +305,7 @@ GET /api/miniapp/uch/smart-tags
 GET /api/miniapp/uch/smart-tags/rules
 GET /api/miniapp/uch/spotlight
 GET /api/miniapp/uch/stats
+GET /api/miniapp/uch/sync_center
 GET /api/miniapp/va/channel/{cid}
 GET /api/miniapp/va/channels
 GET /api/miniapp/va/strategy
@@ -582,6 +583,7 @@ HEAD /api/miniapp/uch/smart-tags
 HEAD /api/miniapp/uch/smart-tags/rules
 HEAD /api/miniapp/uch/spotlight
 HEAD /api/miniapp/uch/stats
+HEAD /api/miniapp/uch/sync_center
 HEAD /api/miniapp/va/channel/{cid}
 HEAD /api/miniapp/va/channels
 HEAD /api/miniapp/va/strategy

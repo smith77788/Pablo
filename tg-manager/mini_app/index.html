@@ -18260,7 +18260,10 @@ async function syncContacts() {
       toast(`🔄 Синхронизация ${d.accounts||''} аккаунтов запущена — контакты появятся по мере обработки`);
       [6000, 15000, 30000, 60000, 90000].forEach(ms => setTimeout(() => {
         loadContacts(); loadContactStats();
-        if (document.getElementById('s-uchsynccenter')?.classList.contains('active')) loadSyncCenter();
+        // Класс видимого экрана — show (его ставит push), а не active: с
+        // 'active' это условие не срабатывало никогда, и центр синхронизации
+        // всё время сбора показывал цифры, снятые до его начала.
+        if (document.getElementById('s-uchsynccenter')?.classList.contains('show')) loadSyncCenter();
       }, ms));
       return;
     }
@@ -19431,24 +19434,71 @@ function openUchSyncCenter() {
   setTimeout(()=>{ loadSyncCenter(); }, 100);
 }
 
+// Экран показывал «Всего контактов: N» и плоский список «Аккаунт #12 — 340
+// контактов». Список строился по contact_sources, то есть аккаунт, с которого
+// синхронизация ПАДАЕТ, в нём просто отсутствовал: сессия протухла, контакты
+// не идут, и узнать об этом было негде. Причина при этом пишется с самого
+// начала — sync_account кладёт в contact_sync_log понятный русский текст.
 async function loadSyncCenter() {
   try {
-    const d = await api('/api/miniapp/uch/stats');
+    const d = await api('/api/miniapp/uch/sync_center');
+    const accs = d.accounts||[];
+    const r = d.running;
     let html = `<div style="padding:12px 16px">
-      <div class="kpi-card" style="margin-bottom:12px;text-align:center"><div class="kpi-val">${num(d.total||0)}</div><div class="kpi-lbl">Всего контактов</div></div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <div class="kpi-card" style="flex:1;text-align:center"><div class="kpi-val" style="font-size:18px">${d.last_sync?new Date(d.last_sync).toLocaleString('ru-RU'):'—'}</div><div class="kpi-lbl">Последняя синхр.</div></div>
+        <div class="kpi-card" style="flex:1;text-align:center"><div class="kpi-val">${num(d.total||0)}</div><div class="kpi-lbl">Контактов собрано</div></div>
+        <div class="kpi-card" style="flex:1;text-align:center"><div class="kpi-val" style="font-size:18px">${d.last_sync?ago(d.last_sync):'ни разу'}</div><div class="kpi-lbl">Последний сбор</div></div>
       </div>`;
-    const accs = d.account_stats||[];
-    if (accs.length) {
-      html += '<div class="sec">По аккаунтам</div>';
-      accs.forEach(a=>{
-        html += `<div class="li"><div class="li-body"><div class="li-name">Аккаунт #${a.account_id} ${esc(a.account_name||'')}</div><div class="li-sub">${num(a.contact_count)} контактов</div></div></div>`;
-      });
+    if (r) {
+      const pc = r.total>0 ? Math.min(100, Math.round(r.done/r.total*100)) : 0;
+      html += `<div class="card" style="margin-bottom:12px;background:var(--bg-blue-16)">
+        <div style="font-size:14px;margin-bottom:6px">🔄 Идёт сбор контактов: ${num(r.done)} из ${num(r.total)} ${plural(r.total,'аккаунта','аккаунтов','аккаунтов')}</div>
+        <div style="height:6px;background:var(--sep);border-radius:3px;overflow:hidden"><div style="height:100%;width:${pc}%;background:var(--accent)"></div></div>
+        <div style="font-size:12px;color:var(--hint);margin-top:6px">Контакты появляются по мере обработки — экран обновится сам.</div>
+      </div>`;
     }
-    html += `<div style="margin-top:12px"><button class="btn btn-p" style="width:100%" onclick="syncContacts()">🔄 Синхронизировать все</button></div></div>`;
+    if (d.failed) {
+      html += `<div class="card" style="margin-bottom:12px;background:var(--bg-red-16);font-size:13px">
+        ⚠️ С ${num(d.failed)} ${plural(d.failed,'аккаунта','аккаунтов','аккаунтов')} контакты не идут — причина указана в строке аккаунта.
+      </div>`;
+    }
+    if (!accs.length) {
+      html += empty('🔄','Аккаунтов пока нет',
+        'Контакты собираются с подключённых аккаунтов Telegram. Подключите хотя бы один — и здесь появится, что он принёс.',
+        {label:'Перейти к аккаунтам', fn:'goTab(\'accounts\')'});
+      txt('syncBody', html+'</div>');
+      return;
+    }
+    html += '<div class="sec">Что принёс каждый аккаунт</div><div class="lst">';
+    accs.forEach(a=>{
+      const who = esc(a.name || a.phone || ('Аккаунт ' + a.account_id));
+      let sub, ico, bg;
+      if (a.error) {
+        sub = `<span style="color:var(--red)">${esc(a.error)}</span> · попытка ${ago(a.last_sync)}`;
+        ico = '⚠️'; bg = 'var(--bg-red-16)';
+      } else if (!a.has_session) {
+        sub = 'Нет сохранённой сессии — аккаунт в сборе не участвует';
+        ico = '🔌'; bg = 'var(--bg2)';
+      } else if (!a.last_sync) {
+        sub = 'Ни разу не собирался';
+        ico = '⏳'; bg = 'var(--bg2)';
+      } else {
+        sub = `${num(a.contact_count)} ${plural(a.contact_count,'контакт','контакта','контактов')} · собран ${ago(a.last_sync)}`
+            + (a.last_created ? ` · новых ${num(a.last_created)}` : '');
+        ico = '✅'; bg = 'var(--bg-green-16)';
+      }
+      html += `<div class="li">
+        <div class="row-ico" style="background:${bg}">${ico}</div>
+        <div class="li-body">
+          <div class="li-name">${who}${a.phone && a.name ? ' · '+esc(a.phone) : ''}</div>
+          <div class="li-sub wrap">${sub}</div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+    html += `<div style="margin-top:12px"><button class="btn btn-p" style="width:100%"${r?' disabled':''} onclick="syncContacts()">${r?'🔄 Сбор уже идёт':'🔄 Собрать контакты со всех аккаунтов'}</button></div></div>`;
     txt('syncBody', html);
-  } catch(e) { txt('syncBody', errHtml(errRu(e))); }
+  } catch(e) { txt('syncBody', errHtml(errRu(e), 'loadSyncCenter()')); }
 }
 
 let AI_CHAT_HISTORY = [];

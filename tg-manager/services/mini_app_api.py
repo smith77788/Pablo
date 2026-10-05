@@ -22853,6 +22853,85 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("uch_sync submit uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def uch_sync_center(request: web.Request) -> web.Response:
+        """Центр синхронизации: что принёс каждый аккаунт и почему не принёс.
+
+        Экран показывал «Всего контактов: N», дату последней синхронизации и
+        плоский список «Аккаунт #12 — 340 контактов». Список строился по
+        contact_sources, то есть аккаунт, у которого синхронизация ПАДАЕТ,
+        в нём просто отсутствовал: сессия протухла полгода назад, контакты
+        с него не идут, и узнать об этом было неоткуда.
+
+        При этом причина пишется с самого начала: sync_account кладёт в
+        contact_sync_log понятный русский текст (classify_session_error), а не
+        сырой Telethon. Отдаём по аккаунту: сколько контактов собрано, когда
+        была последняя попытка и чем кончилась.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            accs = await _safe_fetch(pool,
+                """SELECT a.id, a.first_name, a.phone, a.acc_status,
+                          (a.session_str IS NOT NULL AND a.session_str <> '') AS has_session,
+                          COALESCE(c.cnt, 0) AS contact_count,
+                          l.finished_at, l.contacts_synced, l.contacts_created,
+                          l.error_message
+                   FROM tg_accounts a
+                   LEFT JOIN (
+                       SELECT cs.account_id, COUNT(DISTINCT cs.contact_id) AS cnt
+                       FROM contact_sources cs
+                       JOIN unified_contacts uc ON uc.id = cs.contact_id
+                       WHERE uc.owner_id = $1
+                       GROUP BY cs.account_id
+                   ) c ON c.account_id = a.id
+                   LEFT JOIN LATERAL (
+                       SELECT finished_at, contacts_synced, contacts_created, error_message
+                       FROM contact_sync_log
+                       WHERE owner_id = $1 AND account_id = a.id
+                       ORDER BY COALESCE(finished_at, started_at) DESC
+                       LIMIT 1
+                   ) l ON TRUE
+                   WHERE a.owner_id = $1
+                   ORDER BY COALESCE(c.cnt, 0) DESC, a.id""", uid)
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1", uid)
+            last = await _safe_fetchrow(pool,
+                "SELECT MAX(COALESCE(finished_at, started_at)) AS ts "
+                "FROM contact_sync_log WHERE owner_id=$1", uid)
+            running = await _safe_fetchrow(pool,
+                "SELECT id, done_items, total_items FROM operation_queue "
+                "WHERE owner_id=$1 AND op_type='contacts_sync' "
+                "AND status IN ('pending','running') ORDER BY id DESC LIMIT 1", uid)
+            items = []
+            for a in accs:
+                items.append({
+                    "account_id": a["id"],
+                    "name": a["first_name"] or "",
+                    "phone": a["phone"] or "",
+                    "has_session": bool(a["has_session"]),
+                    "acc_status": a["acc_status"] or "",
+                    "contact_count": int(a["contact_count"] or 0),
+                    "last_sync": a["finished_at"].isoformat() if a["finished_at"] else None,
+                    "last_synced": int(a["contacts_synced"] or 0),
+                    "last_created": int(a["contacts_created"] or 0),
+                    "error": a["error_message"] or "",
+                })
+            return _json_resp({
+                "total": total,
+                "last_sync": last["ts"].isoformat() if last and last["ts"] else None,
+                "running": ({"op_id": running["id"],
+                             "done": int(running["done_items"] or 0),
+                             "total": int(running["total_items"] or 0)}
+                            if running else None),
+                "accounts": items,
+                "ready": sum(1 for i in items if i["has_session"]),
+                "failed": sum(1 for i in items if i["error"]),
+            })
+        except Exception:
+            log.exception("uch_sync_center uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def uch_groups(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -23853,6 +23932,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/uch/search", uch_search)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
+    app.router.add_get("/api/miniapp/uch/sync_center", uch_sync_center)
     app.router.add_get("/api/miniapp/uch/groups", uch_groups)
     app.router.add_post("/api/miniapp/uch/groups", uch_group_create)
     app.router.add_put("/api/miniapp/uch/groups/{group_id}", uch_group_update)
