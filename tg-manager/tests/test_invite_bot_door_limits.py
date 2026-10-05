@@ -163,7 +163,7 @@ async def test_settle_counts_bot_invites_in_daily_stats(monkeypatch):
     bump.assert_awaited_once_with(POOL, 7, ok=3, fail=1, invites=3, floods=1)
 
 
-# ── дверь бота: доля остановившегося аккаунта не пропадает ────────────────────
+# ── дверь карточки канала: та же операция, что у инвайтера и мини-аппа ─────────
 
 class _Msg:
     def __init__(self):
@@ -174,59 +174,89 @@ class _Msg:
         self.texts.append(text)
         return self
 
-    async def edit_text(self, text, **kw):
-        self.texts.append(text)
-
 
 class _DoorPool:
+    def __init__(self, username=None):
+        self.username = username
+
     async def fetchval(self, *a):
-        return None
+        return self.username
+
+
+async def _door(monkeypatch, refs, fsm, username=None, submit=None, fresh=None):
+    from bot.handlers import channel_ops
+    from services import operation_bus, task_registry
+
+    seen: list = []
+
+    async def _submit(pool, owner, op_type, params, **kw):
+        seen.append((owner, op_type, params, kw))
+        return 42
+
+    async def _filter(pool, owner, keys, refs_):
+        keep = [r for r in refs_ if fresh is None or r in fresh]
+        return keep, len(refs_) - len(keep), 0
+
+    tasks: list = []
+    monkeypatch.setattr(operation_bus, "submit", submit or _submit)
+    monkeypatch.setattr(idd, "filter_new", _filter)
+    monkeypatch.setattr(task_registry, "register", lambda *a: tasks.append(a))
+    msg = _Msg()
+    trigger = SimpleNamespace(from_user=SimpleNamespace(id=5), answer=msg.answer, bot=None)
+    await channel_ops._run_invite_bg(refs, trigger, _DoorPool(username), fsm)
+    return seen, msg, tasks
 
 
 @pytest.mark.asyncio
-async def test_bot_door_hands_stopped_accounts_share_to_others(monkeypatch):
-    from bot.handlers import channel_ops
-    from services import resource_selector, task_registry
+async def test_card_door_queues_mass_invite_instead_of_inprocess_task(monkeypatch):
+    """Задача в памяти процесса обрывалась деплоем и шла мимо тарифа и Ban Weather."""
+    seen, msg, tasks = await _door(
+        monkeypatch, ["@a", "@b", "@c"],
+        {"channel_id": 100, "channel_display": "Мой канал",
+         "inv_selected_accounts": [3, 1, 2], "primary_acc_id": 1},
+        username="mychan", fresh={"@a", "@c"})
+    assert not tasks, "инвайт не должен жить задачей в памяти процесса"
+    assert len(seen) == 1
+    owner, op_type, params, kw = seen[0]
+    assert (owner, op_type) == (5, "mass_invite")
+    assert params["group"] == "@mychan"
+    assert params["user_refs"] == ["@a", "@c"], "уже приглашённых в очередь не ставим"
+    assert params["account_ids"][0] == 1, "владелец канала — первым: он выдаёт права"
+    assert sorted(params["account_ids"]) == [1, 2, 3]
+    assert kw["total_items"] == 2
+    assert "#42" in msg.texts[-1] and "пропущено: 1" in msg.texts[-1]
 
-    accounts = [{"id": 1, "first_name": "A", "phone": "", "session_str": "s1"},
-                {"id": 2, "first_name": "B", "phone": "", "session_str": "s2"}]
-    calls: list = []
 
-    async def _inv(sess, ch, refs, _acc=None, **kw):
-        calls.append((_acc["id"], list(refs)))
-        if _acc["id"] == 2:
-            # второй аккаунт сразу ловит длинную паузу — никого не пригласил
-            return {"invited": 0, "invited_list": [], "failed": [], "untried": list(refs),
-                    "error": "Пауза Telegram", "flood_wait": 900}
-        return {"invited": len(refs), "invited_list": list(refs), "failed": [],
-                "untried": []}
+@pytest.mark.asyncio
+async def test_card_door_private_channel_goes_by_id(monkeypatch):
+    seen, _, _ = await _door(
+        monkeypatch, ["@a"],
+        {"channel_id": 2959208816, "inv_selected_accounts": [1], "primary_acc_id": 1})
+    assert seen[0][2]["group"] == "2959208816"
+    from services.mass_inviter_engine import _as_channel_id
+    assert _as_channel_id(seen[0][2]["group"]) == 2959208816
 
-    async def _filter(pool, owner, keys, refs):
-        return list(refs), 0, 0
 
-    tasks: list = []
-    monkeypatch.setattr(am, "invite_users_to_channel", _inv)
-    monkeypatch.setattr(am, "join_channel_by_id", AsyncMock(return_value={"ok": True}))
-    monkeypatch.setattr(am, "promote_to_admin", AsyncMock(return_value=True))
-    monkeypatch.setattr(resource_selector, "select_all_active", AsyncMock(return_value=accounts))
-    monkeypatch.setattr(idd, "filter_new", _filter)
-    monkeypatch.setattr(idd, "account_allowance", AsyncMock(return_value=(100, "")))
-    monkeypatch.setattr(idd, "settle", AsyncMock())
-    monkeypatch.setattr(task_registry, "register", lambda u, k, l, t: tasks.append(t))
-    monkeypatch.setattr(channel_ops.asyncio, "sleep", AsyncMock())
+@pytest.mark.asyncio
+async def test_card_door_respects_plan_gate(monkeypatch):
+    from services.operation_bus import PlanRequiredError
 
-    msg = _Msg()
-    trigger = SimpleNamespace(from_user=SimpleNamespace(id=5), answer=msg.answer, bot=None)
-    trigger.edit_text = msg.edit_text
-    refs = [f"@u{i}" for i in range(30)]
-    await channel_ops._run_invite_bg(
-        refs, trigger, _DoorPool(),
-        {"channel_id": 100, "inv_selected_accounts": [1, 2], "primary_acc_id": 1})
-    await asyncio.gather(*tasks)
+    async def _locked(*a, **k):
+        raise PlanRequiredError("mass_invite", "pro")
+    seen, msg, _ = await _door(
+        monkeypatch, ["@a"],
+        {"channel_id": 100, "inv_selected_accounts": [1], "primary_acc_id": 1},
+        submit=_locked)
+    assert "#" not in msg.texts[-1] and "Инвайт в канал" in msg.texts[-1]
 
-    invited_by_1 = [r for aid, chunk in calls if aid == 1 for r in chunk]
-    assert sorted(invited_by_1) == sorted(refs), "доля зафлуженного должна уйти живому"
-    assert "Не дошла очередь" not in msg.texts[-1]
+
+@pytest.mark.asyncio
+async def test_card_door_nothing_new_queues_nothing(monkeypatch):
+    seen, msg, _ = await _door(
+        monkeypatch, ["@a"],
+        {"channel_id": 100, "inv_selected_accounts": [1], "primary_acc_id": 1},
+        fresh=set())
+    assert not seen and "Новых для этого канала нет" in msg.texts[-1]
 
 
 def test_bot_doors_pass_pool_and_limit():
@@ -240,68 +270,12 @@ def test_bot_doors_pass_pool_and_limit():
     assert src.count("pool=pool,") >= calls
 
 
-@pytest.mark.asyncio
-async def test_bot_door_records_join_flood_and_promotes_with_pool(monkeypatch):
-    """Пауза на вступлении и выдаче прав ложится в пульс в базе."""
-    from bot.handlers import channel_ops
-    from services import resource_selector, task_registry
-
-    accounts = [{"id": 1, "first_name": "A", "phone": "", "session_str": "s1"},
-                {"id": 2, "first_name": "B", "phone": "", "session_str": "s2",
-                 "tg_user_id": 0},
-                {"id": 3, "first_name": "C", "phone": "", "session_str": "s3",
-                 "tg_user_id": 33}]
-    floods: list = []
-    promote_kw: list = []
-
-    async def _join(sess, ch, ah, _acc=None):
-        if _acc["id"] == 2:
-            return {"ok": False, "error": "пауза", "flood_wait": 500}
-        return {"ok": True}
-
-    async def _promote(*a, **k):
-        promote_kw.append(k)
-        return True
-
-    async def _rec(pool, acc, secs, action="default", operation_id=None):
-        floods.append((pool, acc, secs, action))
-        return secs
-
-    async def _inv(sess, ch, refs, _acc=None, **kw):
-        return {"invited": len(refs), "invited_list": list(refs), "failed": [], "untried": []}
-
-    async def _filter(pool, owner, keys, refs):
-        return list(refs), 0, 0
-
-    tasks: list = []
-    pool = _DoorPool()
-    monkeypatch.setattr(am, "invite_users_to_channel", _inv)
-    monkeypatch.setattr(am, "join_channel_by_id", _join)
-    monkeypatch.setattr(am, "promote_to_admin", _promote)
-    monkeypatch.setattr(flood_engine, "record_flood", _rec)
-    monkeypatch.setattr(resource_selector, "select_all_active", AsyncMock(return_value=accounts))
-    monkeypatch.setattr(idd, "filter_new", _filter)
-    monkeypatch.setattr(idd, "account_allowance", AsyncMock(return_value=(100, "")))
-    monkeypatch.setattr(idd, "settle", AsyncMock())
-    monkeypatch.setattr(task_registry, "register", lambda u, k, l, t: tasks.append(t))
-    monkeypatch.setattr(channel_ops.asyncio, "sleep", AsyncMock())
-
-    msg = _Msg()
-    trigger = SimpleNamespace(from_user=SimpleNamespace(id=5), answer=msg.answer, bot=None)
-    await channel_ops._run_invite_bg(
-        ["@a", "@b"], trigger, pool,
-        {"channel_id": 100, "inv_selected_accounts": [1, 2, 3], "primary_acc_id": 1})
-    await asyncio.gather(*tasks)
-    assert (pool, 2, 500, "join") in floods
-    assert promote_kw and all(k.get("pool") is pool for k in promote_kw)
-
-
 def test_contacts_door_records_join_flood_too():
     from pathlib import Path
 
     src = (Path(__file__).resolve().parents[1] / "bot" / "handlers"
            / "channel_ops.py").read_text(encoding="utf-8")
-    assert src.count("await _note_join_flood(") >= 2
+    assert src.count("await _note_join_flood(") >= 1
     import re
     for m in re.finditer(r"_am\.promote_to_admin\((.*?)\n\s*\)", src, re.S):
         assert "pool=pool" in m.group(1), "выдача прав в двери бота без пула"

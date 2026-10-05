@@ -2904,31 +2904,6 @@ async def fsm_invite_custom_count(
     await _run_invite_bg(selected_usernames, message, pool, fsm_data)
 
 
-def _format_invite_progress(
-    channel_display: str,
-    acc_status: dict,
-    total_usernames: int,
-) -> str:
-    lines = [
-        "⏳ <b>Мульти-инвайт запущен</b>",
-        f"Канал: <code>{html.escape(channel_display)}</code>",
-        f"Пользователей: <b>{total_usernames}</b>",
-        "",
-    ]
-    for _aid, st in acc_status.items():
-        name = html.escape((st["name"] or "")[:22])
-        inv = st["invited"]
-        fail = st["failed"]
-        tot = st["total"]
-        phase = st.get("phase", "")
-        icon = "✅" if st["done"] else "⏳"
-        err_s = f" ⚠️ {html.escape(st.get('error', '')[:40])}" if st.get("error") else ""
-        phase_s = f" [{phase}]" if phase and not st["done"] else ""
-        lines.append(f"{icon} <b>{name}</b>: ✅{inv} ❌{fail}/{tot}{phase_s}{err_s}")
-    lines += ["", "<i>Для отмены: /tasks</i>"]
-    return "\n".join(lines)
-
-
 async def _note_join_flood(pool, acc_id, res) -> None:
     """Пауза Telegram на вступлении — в пульс аккаунта, как и пауза на инвайте.
 
@@ -2953,23 +2928,25 @@ async def _run_invite_bg(
     pool,
     fsm_data: dict,
 ) -> None:
-    """Параллельный инвайт через N аккаунтов.
+    """Инвайт из карточки канала — операцией `mass_invite` в общей очереди.
 
-    Preflight для каждого не-основного аккаунта:
-      1. Вступить в канал (join_channel_by_id)
-      2. Основной аккаунт повышает его до admin (invite_users=True)
-    Затем все аккаунты инвайтят свою часть списка параллельно.
+    Раньше дверь гоняла свой инвайт задачей в памяти процесса: деплой (а пуш в
+    рабочую ветку — это деплой) молча обрывал её на середине, тарифа и
+    предохранителя Ban Weather она не видела, а резерва каналов, ротации мест
+    админа, продолжения и отчёта с повтором упавших у неё не было вовсе. Теперь
+    это та же операция, что у инвайтера и мини-аппа: вступление, выдачу прав,
+    сверку с журналом, лимиты и паузы Telegram берёт на себя исполнитель.
     """
-    from services import account_manager as _am
+    from services import invite_dedup as _idd
+    from services.operation_bus import PlanRequiredError, ImmunityBlockedError
 
     is_cb = hasattr(trigger, "message")
     user_id = trigger.from_user.id
     msg_obj = trigger.message if is_cb else trigger
 
     channel_id = fsm_data.get("channel_id")
-    access_hash = fsm_data.get("access_hash", 0)
     channel_display = fsm_data.get("channel_display") or str(channel_id)
-    selected_acc_ids = fsm_data.get("inv_selected_accounts") or []
+    selected_acc_ids = [int(i) for i in (fsm_data.get("inv_selected_accounts") or [])]
     primary_acc_id = fsm_data.get("primary_acc_id")
 
     if not channel_id:
@@ -2979,10 +2956,8 @@ async def _run_invite_bg(
         )
         return
 
-    # ── Без повторных приглашений: тот же журнал, что у массового инвайта ──
-    # Кого уже звали в этот канал (из бота или мини-аппа) и кто в реестре «не
-    # приглашать» — не зовём; повторы внутри списка убираем.
-    from services import invite_dedup as _idd
+    # Публичный канал — по @username (вступить в него может любой аккаунт),
+    # приватный — по id: исполнитель найдёт его у аккаунтов-участников.
     _ch_uname = ""
     try:
         _ch_uname = (await pool.fetchval(
@@ -2990,6 +2965,10 @@ async def _run_invite_bg(
             "AND username IS NOT NULL LIMIT 1", user_id, int(channel_id))) or ""
     except Exception:
         log_exc_swallow(log, "invite_bg: channel username lookup")
+    group = f"@{_ch_uname.lstrip('@')}" if _ch_uname else str(channel_id)
+
+    # Сверка с журналом здесь — только чтобы сразу сказать «новых нет» и не
+    # ставить пустую операцию. Исполнитель сверится ещё раз перед каждым батчем.
     _dedup_keys = _idd.dedup_keys(channel_id=channel_id, username=_ch_uname)
     usernames, _skip_dup, _skip_opt = await _idd.filter_new(
         pool, user_id, _dedup_keys, list(usernames))
@@ -3004,257 +2983,73 @@ async def _run_invite_bg(
             reply_markup=_back_kb().as_markup(),
         )
         return
+    if not selected_acc_ids:
+        await msg_obj.answer(
+            "⚠️ Не выбрано ни одного аккаунта. Начните заново: /ops",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
 
-    # ── Загружаем аккаунты (включая tg_user_id для promote_to_admin) ──────
-    # Инвайт — высокий риск бана: аккаунт в кулдауне не берём. Одна дверь —
-    # флуд-осознанный resource_selector: выбранные грузим через include_ids (с
-    # фильтром cooldown), иначе берём один лучший, а не первый попавшийся.
-    # min_trust=0.0 — порог доверия здесь не вводим, только защита от cooling.
-    from services import resource_selector as _rsel
+    # Владелец канала первым: он выдаёт права остальным, и исполнитель,
+    # перебирая аккаунты в поиске промоутера, найдёт его сразу.
+    if primary_acc_id in selected_acc_ids:
+        selected_acc_ids.remove(primary_acc_id)
+        selected_acc_ids.insert(0, int(primary_acc_id))
+
+    params = {
+        "group": group,
+        "account_ids": selected_acc_ids,
+        "user_refs": list(usernames),
+        "phones": [],
+        "batch_size": 5,
+    }
+    label = (f"Инвайт в {channel_display[:30]} ← {len(usernames)} польз. × "
+             f"{len(selected_acc_ids)} акк.")
     try:
-        if selected_acc_ids:
-            accounts = await _rsel.select_all_active(
-                pool, user_id, include_ids=[int(i) for i in selected_acc_ids],
-                action_type="invite", min_trust_score=0.0)
-        else:
-            _best = await _rsel.select_account(
-                pool, user_id, action_type="invite", min_trust_score=0.0)
-            accounts = [_best] if _best else []
+        op_id = await operation_bus.submit(
+            pool, user_id, "mass_invite", params,
+            total_items=len(usernames), label=label,
+        )
+    except PlanRequiredError as exc:
+        from bot.utils.subscription import locked_text
+        await msg_obj.answer(
+            locked_text("Инвайт в канал", exc.required_plan),
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+    except ImmunityBlockedError as exc:
+        await msg_obj.answer(
+            f"🌩 <b>Инвайт временно приостановлен</b>\n\n{html.escape(str(exc))}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     except Exception as exc:
-        mark_handled_error(f"invite_users accounts: {exc}")
+        log.exception("invite_bg: mass_invite submit owner=%s", user_id)
+        mark_handled_error(f"invite_bg submit: {exc}")
         await msg_obj.answer(
-            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            f"⚠️ Не удалось поставить инвайт в очередь: "
+            f"<code>{html.escape(str(exc)[:150])}</code>",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
-    if not accounts:
-        await msg_obj.answer(
-            "⚠️ Нет активных аккаунтов. Подключите аккаунты: /accounts",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-
-    n_acc = len(accounts)
-    total = len(usernames)
-
-    # Определяем основной аккаунт (владелец/admin канала)
-    primary_acc = next((a for a in accounts if a["id"] == primary_acc_id), accounts[0])
-
-    # Общая очередь вместо раздачи списка поровну заранее: аккаунт, упёршийся
-    # в суточный лимит, паузу Telegram или права, возвращает недошедших в
-    # очередь, и их добирают остальные. Раньше его доля просто пропадала —
-    # в отчёте «ошибки», хотя этих людей никто не отклонял.
-    import collections as _coll
-    pending: _coll.deque = _coll.deque(usernames)
-    _CHUNK = 20
-
-    acc_status: dict[int, dict] = {}
-    for acc in accounts:
-        acc_status[acc["id"]] = {
-            "name": acc["first_name"] or acc["phone"] or f"id={acc['id']}",
-            "invited": 0,
-            "failed": 0,
-            "done": False,
-            "total": 0,
-            "phase": "ожидание",
-        }
-    _prepared: set = set()
-    _stopped: set = set()
-
-    status_msg = await msg_obj.answer(
-        _format_invite_progress(channel_display, acc_status, total),
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+    kb.adjust(1)
+    await msg_obj.answer(
+        f"📨 <b>Инвайт поставлен в очередь</b> · операция <code>#{op_id}</code>\n\n"
+        f"Канал: <code>{html.escape(channel_display)}</code>\n"
+        f"Пользователей: <b>{len(usernames)}</b> · аккаунтов: <b>{len(selected_acc_ids)}</b>\n\n"
+        "Аккаунты сами вступят в канал и получат права. Суточные лимиты, паузы "
+        "Telegram и уже приглашённых учитывает очередь; перезапуск бота инвайт "
+        "не оборвёт." + _skip_note,
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
-
-    async def _upd(aid: int, phase: str) -> None:
-        acc_status[aid]["phase"] = phase
-        try:
-            await status_msg.edit_text(
-                _format_invite_progress(channel_display, acc_status, total),
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "invite_bg: update progress message")
-            pass
-
-    async def _run_one(acc: asyncpg.Record) -> None:
-        acc_dict = dict(acc)
-        aid = acc_dict["id"]
-        is_primary = aid == primary_acc["id"]
-
-        if aid not in _prepared:
-            _prepared.add(aid)
-            # ── Preflight: join + promote (только для не-основных аккаунтов) ──
-            if not is_primary:
-                await _upd(aid, "🔗 вступление...")
-                join_res = await _am.join_channel_by_id(
-                    acc_dict["session_str"],
-                    channel_id,
-                    access_hash,
-                    _acc=acc_dict,
-                )
-                if not join_res.get("ok"):
-                    await _note_join_flood(pool, aid, join_res)
-                    acc_status[aid]["error"] = join_res.get("error", "не удалось вступить")[:50]
-                    acc_status[aid]["done"] = True
-                    acc_status[aid]["phase"] = "❌ не вступил"
-                    _stopped.add(aid)
-                    await _upd(aid, "❌ не вступил")
-                    return
-
-                # tg_user_id: из БД или из get_me(), который join_channel_by_id вызвал
-                tg_uid = acc_dict.get("tg_user_id") or join_res.get("tg_user_id") or 0
-
-                if tg_uid:
-                    await _upd(aid, "👑 права...")
-                    promoted = await _am.promote_to_admin(
-                        primary_acc["session_str"],
-                        channel_id,
-                        tg_uid,
-                        _acc=dict(primary_acc),
-                        access_hash=access_hash,
-                        post_messages=False,
-                        invite_users=True,
-                        pool=pool,
-                    )
-                    if not promoted:
-                        log.warning(
-                            "invite preflight: promote failed acc=%s uid=%s", aid, tg_uid
-                        )
-                        # Не прерываем — для групп admin не обязателен
-                    await asyncio.sleep(random.uniform(1.5, 3.0))
-
-        # ── Invite: берём порции из общей очереди ─────────────────────────
-        # Умный суточный лимит и карантин — те же, что у массового инвайта.
-        allow, why = await _idd.account_allowance(pool, aid)
-        if not allow:
-            acc_status[aid]["error"] = why[:50]
-            acc_status[aid]["done"] = True
-            _stopped.add(aid)
-            return
-        await _upd(aid, "📨 инвайт...")
-        try:
-            while pending and allow > 0:
-                chunk = [pending.popleft() for _ in range(min(_CHUNK, allow, len(pending)))]
-                acc_status[aid]["total"] += len(chunk)
-                base_inv = acc_status[aid]["invited"]
-                base_fail = acc_status[aid]["failed"]
-
-                async def _progress(_done: int, _total: int, inv: int, fail_cnt: int,
-                                    _bi=base_inv, _bf=base_fail) -> None:
-                    acc_status[aid]["invited"] = _bi + inv
-                    acc_status[aid]["failed"] = _bf + fail_cnt
-                    try:
-                        await status_msg.edit_text(
-                            _format_invite_progress(channel_display, acc_status, total),
-                            parse_mode="HTML",
-                        )
-                    except Exception:
-                        log_exc_swallow(log, "invite_bg: update invite progress")
-
-                result = await _am.invite_users_to_channel(
-                    acc_dict["session_str"],
-                    channel_id,
-                    chunk,
-                    _acc=acc_dict,
-                    access_hash=access_hash,
-                    batch_size=len(chunk),
-                    batch_delay=0,
-                    progress_cb=_progress,
-                    pool=pool,
-                    max_invites=allow,
-                )
-                await _idd.settle(pool, user_id, _dedup_keys, aid, result)
-                got = int(result.get("invited") or 0)
-                allow -= got
-                acc_status[aid]["invited"] = base_inv + got
-                acc_status[aid]["failed"] = base_fail + len(result.get("failed") or [])
-                back = [u for u in (result.get("untried") or []) if u]
-                if back:
-                    pending.extendleft(reversed(back))
-                    acc_status[aid]["total"] -= len(back)
-                if result.get("error"):
-                    acc_status[aid]["error"] = str(result["error"])[:50]
-                    _stopped.add(aid)
-                    break
-                if result.get("limit_reached") or allow <= 0:
-                    acc_status[aid]["error"] = "суточный лимит исчерпан"
-                    _stopped.add(aid)
-                    break
-                if pending:
-                    await asyncio.sleep(random.uniform(35, 95))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            acc_status[aid]["error"] = str(exc)[:50]
-            _stopped.add(aid)
-            log.exception("invite_one acc=%s: %s", aid, exc)
-        finally:
-            acc_status[aid]["done"] = True
-            acc_status[aid]["phase"] = (
-                "✅" if not acc_status[aid].get("error") else "❌"
-            )
-
-    async def _bg() -> None:
-        tasks: list[asyncio.Task] = []
-        try:
-            # Круги: пока в очереди есть люди и есть аккаунты, которые не
-            # остановились. Второй круг нужен, когда аккаунт вернул недошедших
-            # уже после того, как остальные увидели пустую очередь и закончили.
-            while pending:
-                _live = [a for a in accounts if a["id"] not in _stopped]
-                if not _live:
-                    break
-                tasks = [asyncio.create_task(_run_one(a)) for a in _live]
-                await asyncio.gather(*tasks, return_exceptions=True)
-                tasks = []
-        except asyncio.CancelledError:
-            for t in tasks:
-                t.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            total_inv = sum(v["invited"] for v in acc_status.values())
-            total_fail = sum(v["failed"] for v in acc_status.values())
-            bot_obj = getattr(trigger, "bot", None) or getattr(msg_obj, "bot", None)
-            if bot_obj:
-                try:
-                    await bot_obj.send_message(
-                        user_id,
-                        f"❌ <b>Инвайт отменён</b>\n✅ Приглашено: {total_inv}  ❌ Ошибок: {total_fail}",
-                        parse_mode="HTML",
-                    )
-                except Exception:
-                    log_exc_swallow(
-                        log,
-                        f"channel_ops: invite cancel notification failed user_id={user_id}",
-                    )
-            return
-        except Exception as exc:
-            log.exception("invite bg FATAL: %s", exc)
-
-        total_inv = sum(v["invited"] for v in acc_status.values())
-        total_fail = sum(v["failed"] for v in acc_status.values())
-        kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
-        try:
-            await status_msg.edit_text(
-                f"✅ <b>Инвайт завершён</b>\n\n"
-                f"Канал: <code>{html.escape(channel_display)}</code>\n"
-                f"Аккаунтов: <b>{n_acc}</b>  Пользователей: <b>{total}</b>\n"
-                f"✅ Приглашено: <b>{total_inv}</b>  ❌ Ошибок: <b>{total_fail}</b>"
-                + (f"\n⏸ Не дошла очередь: <b>{len(pending)}</b> — у аккаунтов кончились "
-                   "лимиты на сегодня или Telegram поставил паузу. Запустите ещё раз "
-                   "позже: уже приглашённым повторно не придёт." if pending else "")
-                + _skip_note,
-                parse_mode="HTML",
-                reply_markup=kb.as_markup(),
-            )
-        except Exception:
-            log_exc_swallow(log, "invite_bg: update final invite result")
-            pass
-
-    task = asyncio.create_task(_bg())
-    _treg.register(user_id, "invite", f"Инвайт в {channel_display[:30]}", task)
 
 
 @router.callback_query(ChanCb.filter(F.action == "members_kick"))

@@ -183,7 +183,7 @@ def test_bot_doors_go_through_the_same_journal():
     """Каждый вызов invite_users_to_channel в боте окружён сверкой и записью."""
     src = (ROOT / "bot" / "handlers" / "channel_ops.py").read_text(encoding="utf-8")
     calls = src.count("_am.invite_users_to_channel(")
-    assert calls >= 2
+    assert calls >= 1
     assert src.count("_idd.filter_new(") >= calls, "дверь бота зовёт без сверки с журналом"
     assert src.count("_idd.settle(") >= calls, "дверь бота не пишет приглашённых"
     am = (ROOT / "services" / "account_manager.py").read_text(encoding="utf-8")

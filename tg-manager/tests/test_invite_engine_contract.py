@@ -14,8 +14,8 @@
 2. ГДЕ ЗОВУТ TELEGRAM. Сырые InviteToChannel / EditAdmin — только в известных
    функциях. Новый вызов в другом месте — это новая дверь мимо контракта.
 
-3. КТО ЗОВЁТ ДВИЖКИ. Только исполнитель массового инвайта и две двери бота —
-   они сверяются с журналом приглашений, лимитом и пульсом. Новый вызывающий
+3. КТО ЗОВЁТ ДВИЖКИ. Только исполнитель массового инвайта и дверь бота «из
+   контактов» (карточка канала ставит операцию `mass_invite`) — они сверяются с журналом приглашений, лимитом и пульсом. Новый вызывающий
    обязан пройти тот же путь и вписаться сюда осознанно.
 
 4. ЖУРНАЛ ПРИГЛАШЁННЫХ пишется одной функцией (`_record_invited_targets`), а
@@ -179,7 +179,6 @@ CALLERS_ALLOWED = {
     ("services/op_worker.py", "_exec_mass_invite"),
     ("services/op_worker.py", "_exec_mass_invite._fire"),
     ("services/op_worker.py", "_exec_mass_invite._lf_send"),
-    ("bot/handlers/channel_ops.py", "_run_invite_bg._run_one"),
     ("bot/handlers/channel_ops.py", "_cinv_bg_inner._invite_one"),
 }
 
@@ -250,4 +249,4 @@ def test_detectors_see_known_sites():
     raw = {(f, fn) for f, fn, _ in _calls(_RAW)}
     assert ("services/mass_inviter_engine.py", "invite_batch") in raw
     callers = {(f, fn) for f, fn, _ in _calls(_ENGINE_FUNCS)}
-    assert ("bot/handlers/channel_ops.py", "_run_invite_bg._run_one") in callers
+    assert ("bot/handlers/channel_ops.py", "_cinv_bg_inner._invite_one") in callers
