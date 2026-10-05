@@ -5216,13 +5216,23 @@ async def invite_users_to_channel(
     batch_size: int = 100,
     batch_delay: float = 60.0,
     progress_cb=None,
+    pool=None,
+    max_invites: int | None = None,
 ) -> dict:
-    """Invite users to a channel with batching (max batch_size per round).
+    """Пригласить людей в канал пачками (дверь инвайта из бота).
 
-    Telegram hard limit: ~200 invites/day per account per channel.
-    batch_size <= 100 is safe; batch_delay is pause between batches (seconds).
-    progress_cb(done, total, invited, failed_count) — optional async callback.
-    Returns {invited: int, failed: list[str], batches: int, error?: str}.
+    batch_size — размер пачки (не больше 200), batch_delay — пауза между пачками.
+    progress_cb(done, total, invited, failed_count) — необязательный колбэк.
+    pool — чтобы пауза Telegram легла в пульс здоровья аккаунта в базе, а не
+    только в память процесса (иначе подбор аккаунтов под следующую операцию
+    считал бы его спокойным). max_invites — сколько аккаунту ещё можно
+    пригласить сегодня по умному суточному лимиту.
+
+    Возвращает {invited, invited_list, failed, untried, batches, error?,
+    limit_reached?}. `untried` — до кого не дошло: флуд, нет прав, исчерпан
+    лимит. Их никто не отклонял, в ошибки они не входят — вызывающий отдаёт их
+    другому аккаунту или следующему запуску (контракт тот же, что у движков
+    services/mass_inviter_engine).
     """
     from telethon.tl.functions.channels import InviteToChannelRequest
     from telethon.errors import (
@@ -5234,161 +5244,135 @@ async def invite_users_to_channel(
         UserNotMutualContactError,
         UserChannelsTooMuchError,
     )
-    from services import session_simulator
+    from services import flood_engine, session_simulator
 
-    # Clamp batch_size to Telegram safe limit
     batch_size = max(1, min(batch_size, 200))
     invited = 0
     # Кого именно пригласили — вызывающий пишет их в журнал приглашений
     # (services/invite_dedup), иначе другая дверь позовёт их второй раз.
     invited_list: list[str] = []
     failed: list[str] = []
+    untried: list[str] = []
     batches_done = 0
+    acc_id = (_acc or {}).get("id")
+    cap = None if max_invites is None else max(0, int(max_invites))
     client = _make_client(session_string, _acc)
     client = timeboxed(client)   # потолок на запрос: см. _Timeboxed
+    pos = 0          # индекс следующей цели в usernames
+
+    def _result(**extra) -> dict:
+        out = {"invited": invited, "invited_list": invited_list,
+               "failed": failed, "untried": untried, "batches": batches_done}
+        out.update(extra)
+        return out
+
+    def _stop(at: int) -> None:
+        untried.extend(u.strip() for u in usernames[at:])
 
     try:
+        if cap == 0:
+            _stop(0)
+            return _result(limit_reached=True)
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
-        # Resolve channel entity
         try:
             channel_peer = await _resolve_channel_peer(client, channel_id, access_hash)
         except Exception as e:
             log.warning("invite_users_to_channel: resolve channel peer failed: %s", e)
-            return {
-                "invited": 0,
-                "failed": [],
-                "batches": 0,
-                "error": f"Канал {channel_id} не найден в диалогах аккаунта",
-            }
+            _stop(0)
+            return _result(error=f"Канал {channel_id} не найден в диалогах аккаунта")
 
-        # Split into batches of batch_size
-        batches = [
-            usernames[i : i + batch_size] for i in range(0, len(usernames), batch_size)
-        ]
         total = len(usernames)
-        done = 0
-        abort = False
-
-        for b_idx, batch in enumerate(batches):
-            if abort:
-                for u in batch:
-                    failed.append(f"{u.strip()}: пропущен (аккаунт ограничен)")
-                continue
-
-            if b_idx > 0:
-                log.info(
-                    "invite batch %d/%d: cooldown %.0fs",
-                    b_idx + 1,
-                    len(batches),
-                    batch_delay,
-                )
+        while pos < total:
+            if pos and pos % batch_size == 0:
+                batches_done += 1
+                log.info("invite batch done: cooldown %.0fs", batch_delay)
                 await asyncio.sleep(batch_delay)
-
-            for idx, username in enumerate(batch):
-                uname = username.strip()
+            if cap is not None and invited >= cap:
+                # Умный суточный лимит аккаунта исчерпан — остальные не
+                # «ошибки», их пригласит другой аккаунт или следующий запуск.
+                _stop(pos)
+                return _result(limit_reached=True)
+            uname = usernames[pos].strip()
+            flood_retried = False
+            while True:
                 try:
-                    user = await asyncio.wait_for(
-                        client.get_entity(uname), timeout=10.0
-                    )
-                    await client(
-                        InviteToChannelRequest(channel=channel_peer, users=[user])
-                    )
+                    user = await asyncio.wait_for(client.get_entity(uname), timeout=10.0)
+                    await client(InviteToChannelRequest(channel=channel_peer, users=[user]))
                     invited += 1
                     invited_list.append(uname)
-                    done += 1
-                    if progress_cb and done % 10 == 0:
-                        try:
-                            await progress_cb(done, total, invited, len(failed))
-                        except Exception as e:
-                            log.debug("invite_users_to_channel: progress_cb error: %s", e)
-                    if idx < len(batch) - 1:
-                        await asyncio.sleep(
-                            random.uniform(35, 95) * session_simulator.chaos_factor()
-                        )
                 except ChatAdminRequiredError:
-                    for u in batch[idx + 1 :] + [
-                        u2 for b2 in batches[b_idx + 1 :] for u2 in b2
-                    ]:
-                        failed.append(f"{u.strip()}: нет прав администратора")
-                    abort = True
-                    return {
-                        "invited": invited, "invited_list": invited_list,
-                        "failed": failed,
-                        "batches": batches_done,
-                        "error": "Нет прав администратора. Назначьте аккаунт администратором с правом 'Добавление участников'.",
-                    }
+                    _stop(pos)
+                    return _result(error="Нет прав администратора. Назначьте аккаунт "
+                                         "администратором с правом «Добавление участников».")
                 except PeerFloodError:
-                    for u in batch[idx + 1 :]:
-                        failed.append(f"{u.strip()}: PeerFlood")
-                    abort = True
-                    return {
-                        "invited": invited, "invited_list": invited_list,
-                        "failed": failed,
-                        "batches": batches_done,
-                        "error": "PeerFlood: account stopped to avoid spamblock escalation",
-                    }
+                    # Флуд — отказ АККАУНТУ, а не цели: и она, и все после неё
+                    # не пробовались. Раньше сама цель терялась из отчёта, а
+                    # ограничение аккаунта никуда не записывалось.
+                    if acc_id:
+                        try:
+                            await flood_engine.record_peer_flood(pool, int(acc_id), "invite")
+                        except Exception:
+                            log.warning("PeerFlood не записан в пульс", exc_info=True)
+                    _stop(pos)
+                    return _result(error="Аккаунт получил ограничение Telegram (PeerFlood) "
+                                         "и остановлен, чтобы не довести до спамблока.",
+                                   peer_flood=True)
+                except FloodWaitError as e:
+                    wait_s = await flood_engine.note_flood(pool, acc_id, e, "invite") \
+                        or int(getattr(e, "seconds", 60) or 60)
+                    log.warning("invite FloodWait %ds acc=%s", wait_s, acc_id or "?")
+                    if wait_s > 60 or flood_retried:
+                        # Длинную паузу не пережидаем на месте: инвайт во время
+                        # действующего флуда его только удлиняет. Раньше ждали
+                        # не больше 10 минут при любой паузе и пробовали снова —
+                        # повтор падал, цель списывалась в ошибки.
+                        _stop(pos)
+                        return _result(error=f"Пауза Telegram {wait_s} с — аккаунт "
+                                             "остановлен до её окончания.",
+                                       flood_wait=wait_s)
+                    flood_retried = True
+                    await asyncio.sleep(wait_s + random.uniform(2, 6))
+                    continue
                 except UserBannedInChannelError:
                     failed.append(f"{uname}: забанен в канале")
                 except (UserPrivacyRestrictedError, UserNotMutualContactError):
                     failed.append(f"{uname}: настройки конфиденциальности")
                 except UserChannelsTooMuchError:
                     failed.append(f"{uname}: слишком много каналов")
-                except FloodWaitError as e:
-                    wait_s = min(int(e.seconds), 600)
-                    acc_id = (_acc or {}).get("id")
-                    log.warning("invite FloodWait %ds acc=%s", wait_s, acc_id or "?")
-                    if acc_id:
-                        from services import flood_engine
-
-                        await flood_engine.record_flood(
-                            None, acc_id, wait_s, action_type="invite"
-                        )
-                    await asyncio.sleep(wait_s + random.uniform(5, 15))
-                    # Retry once after flood
-                    try:
-                        user = await asyncio.wait_for(
-                            client.get_entity(uname), timeout=10.0
-                        )
-                        await client(
-                            InviteToChannelRequest(channel=channel_peer, users=[user])
-                        )
-                        invited += 1
-                        invited_list.append(uname)
-                    except Exception as e:
-                        log.debug("invite_users_to_channel: flood retry failed: %s", e)
-                        failed.append(f"{uname}: FloodWait+retry_fail")
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
                     failed.append(f"{uname}: {str(e)[:60]}")
                     await asyncio.sleep(random.uniform(3, 8))
+                break
+            pos += 1
+            if progress_cb and pos % 10 == 0:
+                try:
+                    await progress_cb(pos, total, invited, len(failed))
+                except Exception as e:
+                    log.debug("invite_users_to_channel: progress_cb error: %s", e)
+            if pos < total and pos % batch_size:
+                await asyncio.sleep(
+                    random.uniform(35, 95) * session_simulator.chaos_factor())
 
+        if total:
             batches_done += 1
-            log.info(
-                "invite batch %d/%d done: +%d invited, %d failed total",
-                b_idx + 1,
-                len(batches),
-                invited,
-                len(failed),
-            )
-
         if progress_cb:
             try:
                 await progress_cb(total, total, invited, len(failed))
             except Exception as e:
                 log.debug("invite_users_to_channel: final progress_cb error: %s", e)
-
-        return {"invited": invited, "invited_list": invited_list, "failed": failed, "batches": batches_done}
+        return _result()
 
     except asyncio.CancelledError:
         raise
     except Exception as e:
         log.exception("invite_users_to_channel error: %s", e)
-        return {
-            "invited": invited, "invited_list": invited_list,
-            "failed": failed,
-            "batches": batches_done,
-            "error": str(e)[:150],
-        }
+        # Обрыв связи: до кого не дошли — не ошибки, а «не пробовали».
+        if not untried:
+            _stop(pos)
+        return _result(error=str(e)[:150])
     finally:
         try:
             await client.disconnect()

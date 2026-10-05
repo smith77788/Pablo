@@ -109,3 +109,46 @@ async def remember(pool, owner_id: int, keys: list[str], refs, op_id=None) -> bo
     for k in keys:
         ok = await _record_invited_targets(pool, owner_id, k, op_id, targets) and ok
     return ok
+
+
+# ── Лимит и учёт аккаунта для дверей бота ────────────────────────────────────
+#
+# Массовый инвайт перед каждым аккаунтом смотрит его умный суточный лимит и
+# карантин, а после — пишет сделанное в `account_daily_stats`. Двери бота не
+# делали ни того, ни другого: аккаунт, исчерпавший лимит в мини-аппе, получал из
+# бота ещё одну полную порцию, а приглашённые из бота не попадали в суточный
+# учёт — и массовый инвайт потом считал аккаунт свежим.
+
+async def account_allowance(pool, account_id) -> tuple[int, str]:
+    """Сколько этот аккаунт ещё может пригласить сегодня и почему столько.
+
+    (0, причина) — аккаунт сегодня не звать: карантин или лимит исчерпан.
+    Без пула (тесты, сбой) лимит не вводим — решает вызывающий.
+    """
+    if pool is None or not account_id:
+        return 10**6, ""
+    from services import flood_engine, infra_memory
+
+    if await infra_memory.is_account_quarantined(pool, int(account_id)):
+        return 0, "аккаунт в карантине после ограничения Telegram"
+    if flood_engine.is_account_cooling(int(account_id)):
+        return 0, "аккаунт пережидает паузу Telegram"
+    rec = await flood_engine.recommended_daily_limit(pool, int(account_id))
+    left = max(0, int(rec.get("remaining") or 0))
+    if not left:
+        return 0, f"суточный лимит исчерпан ({rec.get('used_today')}/{rec.get('limit')})"
+    return left, ""
+
+
+async def settle(pool, owner_id: int, keys: list[str], account_id, res: dict) -> None:
+    """Учесть итог одного вызова двери: журнал приглашённых и суточная статистика."""
+    if pool is None or not isinstance(res, dict):
+        return
+    await remember(pool, owner_id, keys, res.get("invited_list"))
+    if account_id:
+        from services.op_worker import bump_daily_stats
+
+        ok = int(res.get("invited") or 0)
+        await bump_daily_stats(
+            pool, int(account_id), ok=ok, fail=len(res.get("failed") or []),
+            invites=ok, floods=1 if (res.get("flood_wait") or res.get("peer_flood")) else 0)

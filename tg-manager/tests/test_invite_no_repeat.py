@@ -185,6 +185,6 @@ def test_bot_doors_go_through_the_same_journal():
     calls = src.count("_am.invite_users_to_channel(")
     assert calls >= 2
     assert src.count("_idd.filter_new(") >= calls, "дверь бота зовёт без сверки с журналом"
-    assert src.count("_idd.remember(") >= calls, "дверь бота не пишет приглашённых"
+    assert src.count("_idd.settle(") >= calls, "дверь бота не пишет приглашённых"
     am = (ROOT / "services" / "account_manager.py").read_text(encoding="utf-8")
     assert '"invited_list": invited_list' in am, "бот не узнал бы, кого именно пригласили"
