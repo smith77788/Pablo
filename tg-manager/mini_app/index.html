@@ -5716,6 +5716,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div id="wlogHead" style="padding:8px 16px 4px"></div>
     <div class="sec">Последние действия</div>
+    <div id="wlogSeg" style="padding:0 16px 6px"></div>
     <div class="lst" id="wlogList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -22354,36 +22355,96 @@ const WLOG_ACTION = {
   read_saved:'Заходил в Избранное', check_stickers:'Смотрел стикеры',
   top_peers:'Обновлял частые контакты', open_folders:'Открывал папки',
   settings_peek:'Заглядывал в настройки'};
+let _WL_ID = null;        // план, чей журнал открыт
+let _WL_ACTS = [];        // загруженные действия (60 последних)
+let _WL_FAIL_ONLY = false;
+// Длинную ошибку строка не вмещает: раньше её обрезало на 70 символах и
+// остаток пропадал, хотя именно в нём обычно сказано, что делать.
+function wlogTap(i) {
+  const a = _WL_ACTS[i]; if (!a) return;
+  const err = a.error ? String(a.error) : '';
+  if (err.length > 70) { showInfo(err); return; }
+  if (a.target) { openTgUser(a.target); return; }
+  if (err) { showInfo(err); return; }
+  toast('👌 Действие прошло без замечаний');
+}
+function wlogToggleFails(on) {
+  _WL_FAIL_ONLY = !!on;
+  wlogRender();
+}
+function wlogRender() {
+  const rows = _WL_FAIL_ONLY ? _WL_ACTS.filter(a=>!a.success) : _WL_ACTS;
+  if (!rows.length) {
+    txt('wlogList', _WL_FAIL_ONLY
+      ? empty('✅','Неудачных действий нет','Из загруженных действий все прошли успешно')
+      : empty('🌱','Действий пока нет','План ещё ни разу не отработал день'));
+    return;
+  }
+  txt('wlogList', rows.map(a=>{
+    const i = _WL_ACTS.indexOf(a);
+    const err = a.error ? String(a.error) : '';
+    return `<div class="li tap" onclick="wlogTap(${i})" role="button" tabindex="0">
+      <div class="row-ico" style="background:${a.success?'var(--bg-green-16)':'var(--bg2)'}">${a.success?'✅':'❌'}</div>
+      <div class="row-body">
+        <div class="row-name">${esc(WLOG_ACTION[a.action]||a.action)}${a.target?' · '+esc(String(a.target).substring(0,40)):''}</div>
+        <div class="li-sub wrap">${esc(ago(a.at))}${err?' · '+esc(err.substring(0,70)):''}</div>
+      </div><span class="chev">›</span></div>`;
+  }).join(''));
+}
 async function openWarmupLog(planId) {
   push('s-warmuplog');
+  _WL_ID = planId; _WL_FAIL_ONLY = false;
   txt('wlogHead','');
   txt('wlogList','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/warmup/'+planId+'/log');
     const p = d.plan||{}, h = p.health||{}, w = d.week||{}, c = d.circle||{};
     const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
+    // Управление планом жило только в списке прогрева, а решение «остановить»
+    // принимают здесь — увидев, что все действия падают.
+    const ctl = [];
+    if (p.status==='active') ctl.push(`<button class="btn btn-o" style="flex:1" onclick="pauseWarmupPlan(${planId})">⏸ Пауза</button>`);
+    if (p.status==='paused' && h.resumable) ctl.push(`<button class="btn btn-g" style="flex:1" onclick="resumeWarmupPlan(${planId})">▶ Продолжить</button>`);
+    if (p.status==='active' || p.status==='paused') ctl.push(`<button class="btn btn-o" style="flex:1" onclick="cancelWarmupPlan(${planId})">⏹ Остановить</button>`);
     txt('wlogHead',`
       <div style="background:var(--bg2);border-left:3px solid ${col};border-radius:8px;padding:11px 13px">
         <div style="font-weight:600;font-size:14px">${esc(h.label||'')} · День ${p.current_day||0}/${p.target_days||0}</div>
         ${h.hint?`<div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.4">${esc(h.hint)}</div>`:''}
         <div style="font-size:12px;margin-top:7px">За 7 дней: <b style="${kpiTone(w.ok,'green')}">${w.ok||0}</b> успешных · <b style="color:${(w.fail||0)?'var(--red,#ef4444)':'var(--hint)'}">${w.fail||0}</b> неудачных</div>
         ${p.last_action_at?`<div style="font-size:11px;color:var(--hint);margin-top:3px">Последнее действие: ${esc(ago(p.last_action_at))}</div>`:'<div style="font-size:11px;color:var(--hint);margin-top:3px">Действий ещё не было</div>'}
-        ${c.size?`<div style="font-size:11px;color:var(--hint);margin-top:5px;line-height:1.4">Круг каналов: <b>${c.size}</b>${c.found?` · нашёл сам: <b>${c.found}</b>`:''}${(c.examples&&c.examples.length)?`<br>${esc(c.examples.join(', '))}`:''}</div>`:''}
+        ${c.size?`<div style="font-size:11px;color:var(--hint);margin-top:5px;line-height:1.4">Круг каналов: <b>${c.size}</b>${c.found?` · нашёл сам: <b>${c.found}</b>`:''}${
+          (c.examples&&c.examples.length)?`<br>${c.examples.map((x,i)=>
+            `<span class="link-tap" onclick="wlogOpenChannel(${i})" role="button" tabindex="0" style="color:var(--accent)">${esc(x)}</span>`).join(', ')}`:''}</div>`:''}
+      </div>
+      ${ctl.length?`<div style="display:flex;gap:8px;margin-top:10px">${ctl.join('')}</div>`:''}`);
+    _WL_CIRCLE = c.examples||[];
+    _WL_ACTS = d.actions||[];
+    // Фильтр по загруженным действиям, а не по всей истории: так и написано,
+    // чтобы число под фильтром не спорило с недельной сводкой выше.
+    const fails = _WL_ACTS.filter(a=>!a.success).length;
+    if (_WL_ACTS.length && fails) {
+      txt('wlogSeg', `<div class="seg">
+        <div class="seg-opt on" onclick="wlogSeg(false,this)" role="button" tabindex="0">Все ${_WL_ACTS.length}</div>
+        <div class="seg-opt" onclick="wlogSeg(true,this)" role="button" tabindex="0">Неудачные ${fails}</div>
       </div>`);
-    const acts = d.actions||[];
-    if (!acts.length) { txt('wlogList', empty('🌱','Действий пока нет','План ещё ни разу не отработал день')); return; }
-    txt('wlogList', acts.map(a=>`
-      <div class="row">
-        <div class="row-ico" style="background:${a.success?'var(--bg-green-16)':'var(--bg2)'}">${a.success?'✅':'❌'}</div>
-        <div class="row-body">
-          <div class="row-name">${esc(WLOG_ACTION[a.action]||a.action)}${a.target?' · '+esc(String(a.target).substring(0,40)):''}</div>
-          <div class="row-val">${esc(ago(a.at))}${a.error?' · '+esc(String(a.error).substring(0,70)):''}</div>
-        </div>
-      </div>`).join(''));
+    } else { txt('wlogSeg',''); }
+    wlogRender();
   } catch(e) {
-    txt('wlogHead','');
+    txt('wlogHead',''); txt('wlogSeg','');
     txt('wlogList', empty('⚠️','Ошибка',errRu(e)));
   }
+}
+let _WL_CIRCLE = [];
+function wlogOpenChannel(i) {
+  const ref = _WL_CIRCLE[i];
+  if (ref) openTgUser(ref);
+}
+function wlogSeg(failOnly, el) {
+  if (el && el.parentNode) {
+    el.parentNode.querySelectorAll('.seg-opt').forEach(o=>o.classList.remove('on'));
+    el.classList.add('on');
+  }
+  wlogToggleFails(failOnly);
 }
 async function deleteWarmupPlan(id, _el) {
   if (!await confirmDelete('Удалить план прогрева', _el)) return;
