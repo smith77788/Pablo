@@ -2929,6 +2929,24 @@ def _format_invite_progress(
     return "\n".join(lines)
 
 
+async def _note_join_flood(pool, acc_id, res) -> None:
+    """Пауза Telegram на вступлении — в пульс аккаунта, как и пауза на инвайте.
+
+    Двери бота показывали её оператору («не вступил») и забывали: подбор
+    аккаунтов под следующую операцию считал аккаунт спокойным.
+    """
+    if not isinstance(res, dict) or not acc_id:
+        return
+    from services import flood_engine as _fe
+    try:
+        if res.get("peer_flood"):
+            await _fe.record_peer_flood(pool, int(acc_id), "join")
+        elif int(res.get("flood_wait") or 0) > 0:
+            await _fe.record_flood(pool, int(acc_id), int(res["flood_wait"]), "join")
+    except Exception:
+        log_exc_swallow(log, "invite: пауза на вступлении не записана")
+
+
 async def _run_invite_bg(
     usernames: list[str],
     trigger,
@@ -3077,6 +3095,7 @@ async def _run_invite_bg(
                     _acc=acc_dict,
                 )
                 if not join_res.get("ok"):
+                    await _note_join_flood(pool, aid, join_res)
                     acc_status[aid]["error"] = join_res.get("error", "не удалось вступить")[:50]
                     acc_status[aid]["done"] = True
                     acc_status[aid]["phase"] = "❌ не вступил"
@@ -3097,6 +3116,7 @@ async def _run_invite_bg(
                         access_hash=access_hash,
                         post_messages=False,
                         invite_users=True,
+                        pool=pool,
                     )
                     if not promoted:
                         log.warning(
@@ -6591,6 +6611,7 @@ async def _cinv_bg_inner(
                             "cinv: co-account %s joined %s", other["id"], chan_target
                         )
                     else:
+                        await _note_join_flood(pool, other["id"], result)
                         log.warning(
                             "cinv join error acc=%s: %s",
                             other["id"],
@@ -6656,6 +6677,7 @@ async def _cinv_bg_inner(
                         tg_uid,
                         _acc=primary_dict,
                         access_hash=access_hash,
+                        pool=pool,
                     )
                     if ok:
                         promo_ok += 1

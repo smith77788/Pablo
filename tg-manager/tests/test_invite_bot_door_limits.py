@@ -238,3 +238,70 @@ def test_bot_doors_pass_pool_and_limit():
     assert src.count("_idd.account_allowance(") >= calls
     assert src.count("max_invites=") >= calls
     assert src.count("pool=pool,") >= calls
+
+
+@pytest.mark.asyncio
+async def test_bot_door_records_join_flood_and_promotes_with_pool(monkeypatch):
+    """Пауза на вступлении и выдаче прав ложится в пульс в базе."""
+    from bot.handlers import channel_ops
+    from services import resource_selector, task_registry
+
+    accounts = [{"id": 1, "first_name": "A", "phone": "", "session_str": "s1"},
+                {"id": 2, "first_name": "B", "phone": "", "session_str": "s2",
+                 "tg_user_id": 0},
+                {"id": 3, "first_name": "C", "phone": "", "session_str": "s3",
+                 "tg_user_id": 33}]
+    floods: list = []
+    promote_kw: list = []
+
+    async def _join(sess, ch, ah, _acc=None):
+        if _acc["id"] == 2:
+            return {"ok": False, "error": "пауза", "flood_wait": 500}
+        return {"ok": True}
+
+    async def _promote(*a, **k):
+        promote_kw.append(k)
+        return True
+
+    async def _rec(pool, acc, secs, action="default", operation_id=None):
+        floods.append((pool, acc, secs, action))
+        return secs
+
+    async def _inv(sess, ch, refs, _acc=None, **kw):
+        return {"invited": len(refs), "invited_list": list(refs), "failed": [], "untried": []}
+
+    async def _filter(pool, owner, keys, refs):
+        return list(refs), 0, 0
+
+    tasks: list = []
+    pool = _DoorPool()
+    monkeypatch.setattr(am, "invite_users_to_channel", _inv)
+    monkeypatch.setattr(am, "join_channel_by_id", _join)
+    monkeypatch.setattr(am, "promote_to_admin", _promote)
+    monkeypatch.setattr(flood_engine, "record_flood", _rec)
+    monkeypatch.setattr(resource_selector, "select_all_active", AsyncMock(return_value=accounts))
+    monkeypatch.setattr(idd, "filter_new", _filter)
+    monkeypatch.setattr(idd, "account_allowance", AsyncMock(return_value=(100, "")))
+    monkeypatch.setattr(idd, "settle", AsyncMock())
+    monkeypatch.setattr(task_registry, "register", lambda u, k, l, t: tasks.append(t))
+    monkeypatch.setattr(channel_ops.asyncio, "sleep", AsyncMock())
+
+    msg = _Msg()
+    trigger = SimpleNamespace(from_user=SimpleNamespace(id=5), answer=msg.answer, bot=None)
+    await channel_ops._run_invite_bg(
+        ["@a", "@b"], trigger, pool,
+        {"channel_id": 100, "inv_selected_accounts": [1, 2, 3], "primary_acc_id": 1})
+    await asyncio.gather(*tasks)
+    assert (pool, 2, 500, "join") in floods
+    assert promote_kw and all(k.get("pool") is pool for k in promote_kw)
+
+
+def test_contacts_door_records_join_flood_too():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "bot" / "handlers"
+           / "channel_ops.py").read_text(encoding="utf-8")
+    assert src.count("await _note_join_flood(") >= 2
+    import re
+    for m in re.finditer(r"_am\.promote_to_admin\((.*?)\n\s*\)", src, re.S):
+        assert "pool=pool" in m.group(1), "выдача прав в двери бота без пула"
