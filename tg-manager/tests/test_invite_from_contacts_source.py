@@ -48,15 +48,25 @@ def test_tag_filter_is_parameterized_not_interpolated():
     assert "vip" not in where
 
 
-def test_split_prefers_username_over_id_over_phone():
+def test_split_prefers_username_then_phone_then_id():
+    """Номер раньше голого id: по id пригласит только аккаунт, у кого человек уже
+    в контактах, а по номеру — любой аккаунт флота (владелец, 05.10.2026:
+    «из хранилища контактов должны инвайтить все аккаунты»)."""
     rows = [
         {"telegram_user_id": 111, "username": "alice", "phones": ["+700"]},
         {"telegram_user_id": 222, "username": None, "phones": ["+711"]},
         {"telegram_user_id": None, "username": None, "phones": ["+722"]},
+        {"telegram_user_id": 333, "username": None, "phones": []},
     ]
     user_refs, phones = mi._crm_split_targets(rows)
-    assert user_refs == ["@alice", "222"], "username и id должны идти в user_refs"
-    assert phones == ["+722"], "телефон — только когда нет ни username, ни id"
+    assert user_refs == ["@alice", "333"], "id — только когда нет ни username, ни номера"
+    assert phones == ["+711", "+722"]
+
+
+def test_hub_phone_without_plus_is_normalised():
+    from services.contacts_hub.invite_target import invite_target
+    assert invite_target({"username": None, "phones": '["79001234567"]',
+                          "telegram_user_id": 5}) == ("phone", "+79001234567")
 
 
 def test_split_dedups_across_identifier_kinds():
@@ -190,3 +200,39 @@ def test_queries_run_on_real_schema():
             await conn.close()
 
     asyncio.run(_run())
+
+
+def test_segment_source_sends_hub_contact_by_phone_not_bare_id(monkeypatch):
+    """Исполнитель (источник «сегмент хранилища») отдаёт номер, а не голый id."""
+    from services import mass_inviter_engine as inv
+    from services.contacts_hub import repository as crepo
+    from tests.test_invite_queue_scheduler import (
+        _SourcePool, _ok, _run_source, source_stand as _ss, stand as _st)  # noqa: F401
+
+    async def _seg(pool, owner, filters, limit=None):
+        return [{"username": None, "telegram_user_id": 222, "phones": ["79001112233"]},
+                {"username": None, "telegram_user_id": 333, "phones": []}]
+    monkeypatch.setattr(crepo, "resolve_segment", _seg)
+    by_phone: list = []
+    by_ref: list = []
+
+    async def _batch(sess, acc, group, refs, pace_mult=1.0, bulk=None):
+        by_ref.extend(refs)
+        return _ok(len(refs))
+
+    async def _phones(sess, acc, group, refs, skip_keys=None):
+        by_phone.extend(refs)
+        return {**_ok(len(refs)), "invited_phones": list(refs), "invited_aliases": [],
+                "already_phones": []}
+    # стенд из соседнего файла: сначала общие заглушки, потом наши движки
+    import tests.test_invite_queue_scheduler as qs
+    install = qs.stand.__wrapped__(monkeypatch) if hasattr(qs.stand, "__wrapped__") else None
+    assert install is not None
+    s = qs.source_stand.__wrapped__(install, monkeypatch)(_SourcePool([]), lambda *a, **k: _ok(0))
+    del s
+    monkeypatch.setattr(inv, "invite_batch", _batch)
+    monkeypatch.setattr(inv, "invite_by_phones", _phones)
+    _run_source(_SourcePool([]), source="segment", segment_filters={})
+    assert "+79001112233" in by_phone, "номер контакта не дошёл до инвайта по номеру"
+    assert "222" not in [str(r) for r in by_ref], "голый id ушёл вместо номера"
+    assert "333" in [str(r) for r in by_ref], "без номера id всё ещё годится"

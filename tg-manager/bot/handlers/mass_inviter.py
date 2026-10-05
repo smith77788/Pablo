@@ -477,39 +477,27 @@ def _crm_invitable_where(owner_id: int, crm_filter: dict | None) -> tuple[str, l
 
 
 def _crm_split_targets(rows) -> tuple[list, list]:
-    """Разложить контакты на user_refs и phones, предпочитая ДЕШЁВЫЙ идентификатор.
+    """Разложить контакты хранилища на user_refs и phones.
 
-    Порядок предпочтения на контакт: @username → числовой id → телефон. Телефон
-    — только когда ни username, ни id нет: импорт контакта дороже и рискованнее
-    (лишний ImportContacts на аккаунт), поэтому не тащим номер там, где хватает
-    username. Дедуп сквозной, чтобы один и тот же человек не попал дважды.
+    Порядок на контакт: @username → телефон → числовой id
+    (services/contacts_hub/invite_target). Раньше id шёл впереди телефона, и
+    человека из книги контактов одного аккаунта получал другой аккаунт голым
+    id, которого он не знает: приглашали по сути только «родные» аккаунты
+    контактов. По номеру добавит любой аккаунт флота. Дедуп сквозной.
     """
-    import json as _json
+    from services.contacts_hub.invite_target import invite_target
     user_refs: list = []
     phones: list = []
     seen: set = set()
     for r in rows:
-        uname = (r["username"] or "").strip().lstrip("@")
-        uid = r["telegram_user_id"]
-        ref = f"@{uname}" if uname else (str(uid) if uid else None)
-        if ref:
-            key = ref.lower()
-            if key not in seen:
-                seen.add(key)
-                user_refs.append(ref)
+        kind, ref = invite_target(r)
+        if not ref:
             continue
-        raw = r["phones"]
-        if isinstance(raw, str):
-            try:
-                raw = _json.loads(raw)
-            except Exception:
-                raw = []
-        for p in (raw or []):
-            p = str(p).strip() if p else ""
-            if p and p not in seen:
-                seen.add(p)
-                phones.append(p)
-                break
+        key = ref.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        (phones if kind == "phone" else user_refs).append(ref)
     return user_refs, phones
 
 

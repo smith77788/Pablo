@@ -22502,17 +22502,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return None
 
     def _uch_invite_target(c: dict) -> tuple[str | None, str | None]:
-        """Кого приглашать: ('user', @username|id) или ('phone', номер). Для инвайта
-        телефон годится (движок добавляет по номеру через импорт контакта)."""
-        u = (c.get("username") or "").lstrip("@")
-        if u:
-            return "user", u
-        if c.get("telegram_user_id"):
-            return "user", str(c["telegram_user_id"])
-        phones = c.get("phones") or []
-        if isinstance(phones, list) and phones:
-            return "phone", str(phones[0])
-        return None, None
+        """Кого приглашать: ('user', @username|id) или ('phone', номер).
+
+        Порядок и причина — services/contacts_hub/invite_target: номер раньше
+        голого id, чтобы контакт мог пригласить любой аккаунт флота, а не только
+        тот, у кого он уже в книге контактов."""
+        from services.contacts_hub.invite_target import invite_target
+        return invite_target(c)
 
     async def uch_contact_message(request: web.Request) -> web.Response:
         """Написать контакту в ЛС с выбранных аккаунтов (одного/нескольких).

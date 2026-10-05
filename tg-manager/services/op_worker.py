@@ -14882,15 +14882,11 @@ async def _exec_mass_invite(
             seg_rows = await _crepo.resolve_segment(pool, owner_id, _filters, limit=_AUD_CAP)
             if len(seg_rows) >= _AUD_CAP:
                 _source_exhausted = False
+            # Номер — раньше голого id: по номеру пригласит любой аккаунт флота
+            # (см. services/contacts_hub/invite_target).
+            from services.contacts_hub.invite_target import invite_target as _inv_target
             for c in seg_rows:
-                u = (c.get("username") or "").lstrip("@")
-                if u:
-                    _ref = "@" + u
-                elif c.get("telegram_user_id"):
-                    _ref = c["telegram_user_id"]
-                else:
-                    _ph = c.get("phones")
-                    _ref = str(_ph[0]) if isinstance(_ph, list) and _ph else None
+                _ref = _inv_target(c)[1]
                 if _ref is None or not _fresh(_ref):
                     continue
                 (phones if str(_ref).startswith("+") else user_refs).append(_ref)
