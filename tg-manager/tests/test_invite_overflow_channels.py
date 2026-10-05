@@ -29,7 +29,7 @@ RESERVE = [
 def chain(stand, monkeypatch):
     """Стенд инвайта + учёт цепочки в памяти вместо базы."""
 
-    def _install(responder, *, rows=None, reserve=RESERVE, busy=()):
+    def _install(responder, *, rows=None, reserve=RESERVE, busy=(), taken=()):
         s = stand(lambda acc_id, refs, dry=False: {"ok": 0, "failed": 0, "errors": []})
         s.groups = []          # в какой канал ушёл каждый батч
         s.prepared = []        # какие каналы резерва оформлены и чем
@@ -61,6 +61,10 @@ def chain(stand, monkeypatch):
         async def _status(sess, acc, group):
             return {"ok": True, "can_promote": False}
 
+        async def _taken(pool, owner_id, key, cid):
+            return cid in set(taken)
+
+        monkeypatch.setattr(ovf, "taken_elsewhere", _taken)
         monkeypatch.setattr(ovf, "chain_rows", _rows)
         monkeypatch.setattr(ovf, "busy_channel_ids", _busy)
         monkeypatch.setattr(ovf, "load_reserve", _load)
@@ -272,3 +276,20 @@ def test_miniapp_and_api_carry_overflow_settings():
     # резерв — только свои каналы: чужой канал оформить и пригласить нечем
     assert "FROM managed_channels WHERE owner_id=$1" in seg
     assert 'params["per_channel_limit"]' in seg and 'params["channel_setup"]' in seg
+
+
+def test_channel_taken_by_another_campaign_midrun_is_skipped(chain):
+    """Резерв читается на старте, а прогон идёт часами: канал, который за это
+    время взяла другая кампания, пропускается — две аудитории в один канал не
+    приглашаем."""
+    def responder(group, refs):
+        if group == "@main":
+            return {"ok": 0, "failed": 0, "untried": list(refs),
+                    "errors": ["group error: в чате достигнут лимит участников Telegram"]}
+        return _all_ok(group, refs)
+
+    s = chain(responder, taken={501})
+    res = _run(_Pool(), TARGETS, group="@main", account_ids=[1, 2],
+               reserve_channels=[501, 502])
+    assert {g for g, _ in s.groups} == {"@main", "https://t.me/+ch502"}
+    assert "занят другой кампанией" in res["summary"]

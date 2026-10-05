@@ -15450,6 +15450,10 @@ async def _exec_mass_invite(
         while _reserve:
             ch = _reserve.pop(0)
             _cid = int(ch["channel_id"])
+            if await _ovf.taken_elsewhere(pool, owner_id, _chain_key, _cid):
+                _chan_trail.append({"ref": ch.get("title") or str(_cid), "ok": 0,
+                                    "why": "пропущен: уже занят другой кампанией"})
+                continue
             _adm = next((a for a in accounts if int(a["id"]) == int(ch["acc_id"])), None)
             if _adm is None:
                 # Админ канала не в операции — берём его в неё через тот же клейм,

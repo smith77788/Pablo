@@ -95,6 +95,24 @@ async def busy_channel_ids(pool, owner_id: int, chain_key: str) -> set[int]:
     return busy
 
 
+async def taken_elsewhere(pool, owner_id: int, chain_key: str, channel_id: int) -> bool:
+    """Канал уже взят ДРУГОЙ кампанией (после старта этого прогона).
+
+    Список занятых читается на старте, а прогон идёт часами: параллельная
+    кампания владельца могла за это время взять тот же канал резерва. Проверка
+    прямо перед оформлением сужает гонку до мгновения. Сбой — считаем занятым:
+    лучше пропустить канал, чем пригласить в него две аудитории.
+    """
+    try:
+        row = await pool.fetchrow(
+            "SELECT 1 FROM invite_overflow_channels WHERE owner_id=$1 AND channel_id=$2 "
+            "AND chain_key<>$3 LIMIT 1", owner_id, int(channel_id), chain_key)
+        return row is not None
+    except Exception:
+        log.warning("invite_overflow: проверка занятости канала не удалась", exc_info=True)
+        return True
+
+
 async def mark(pool, owner_id: int, chain_key: str, channel_ref: str,
                channel_id: int | None, status: str, *, prepared: bool | None = None,
                ok_delta: int = 0, reason: str = "", op_id: int | None = None) -> None:
