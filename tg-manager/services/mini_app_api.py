@@ -10097,6 +10097,120 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("ghost_delete uid=%d profile=%d", uid, profile_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    _GHOST_PERSONAS = ("ghost", "watcher", "active")
+
+    def _ghost_fields(data: dict) -> tuple[dict | None, str]:
+        """Разобрать настройки призрачного профиля. Возвращает (поля, ошибка).
+
+        Часы и потолок приходят из формы: без проверки диапазона в базу уезжали
+        «часы 99» и «1000 действий в день», а движок потом молча не находил
+        окна активности.
+        """
+        personality = str(data.get("personality") or "ghost").strip()
+        if personality not in _GHOST_PERSONAS:
+            return None, "Характер: ghost, watcher или active"
+        start = validate_integer(data.get("active_hours_start", 9), min_val=0, max_val=23)
+        end = validate_integer(data.get("active_hours_end", 23), min_val=0, max_val=23)
+        if start is None or end is None:
+            return None, "Часы активности — целые числа от 0 до 23"
+        if start == end:
+            return None, "Окно активности пустое: начало и конец совпадают"
+        cap = validate_integer(data.get("daily_cap", 8), min_val=1, max_val=200)
+        if cap is None:
+            return None, "Действий в день — от 1 до 200"
+        cooldown = validate_integer(data.get("cooldown_minutes", 60), min_val=1, max_val=1440)
+        if cooldown is None:
+            return None, "Пауза между действиями — от 1 до 1440 минут"
+        return {"personality": personality, "active_hours_start": start,
+                "active_hours_end": end, "daily_cap": cap,
+                "cooldown_minutes": cooldown}, ""
+
+    _GHOST_ACTION_RU = {
+        "update_status": "обновил статус «в сети»",
+        "read_dialogs": "прочитал диалоги",
+        "react": "поставил реакцию",
+        "forward_saved": "переслал в «Избранное»",
+    }
+    _GHOST_RESULT_RU = {"ok": "выполнено", "skip": "пропущено", "error": "ошибка"}
+
+    async def ghost_detail(request: web.Request) -> web.Response:
+        """Профиль + что он реально делал. Журнал действий вёлся, но экран
+        его не показывал: владелец не мог проверить, работает ли призрак."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            profile_id = int(request.match_info["profile_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор профиля", 400)
+        try:
+            row = await _safe_fetchrow(pool,
+                """SELECT gp.*, ta.phone, ta.first_name, ta.username, ta.is_active
+                     FROM ghost_profiles gp
+                     JOIN tg_accounts ta ON ta.id = gp.account_id
+                    WHERE gp.id=$1 AND gp.owner_id=$2""", profile_id, uid)
+            if not row:
+                return _err("Профиль не найден", 404)
+            today = await _safe_count(pool,
+                "SELECT COUNT(*) FROM ghost_action_log WHERE ghost_profile_id=$1 "
+                "AND result='ok' AND executed_at >= date_trunc('day', now())", profile_id)
+            logs = await _safe_fetch(pool,
+                """SELECT action_type, target, result, error_msg, executed_at
+                     FROM ghost_action_log WHERE ghost_profile_id=$1
+                    ORDER BY executed_at DESC LIMIT $2""",
+                profile_id, _list_limit(request, 30, 200))
+            prof = dict(row)
+            for key in ("created_at", "updated_at"):
+                if prof.get(key):
+                    prof[key] = prof[key].isoformat()
+            return _json_resp({
+                "profile": prof,
+                "today_actions": int(today or 0),
+                "log": [{
+                    "action_type": r["action_type"],
+                    "action_ru": _GHOST_ACTION_RU.get(r["action_type"], r["action_type"]),
+                    "target": r["target"],
+                    "result": r["result"],
+                    "result_ru": _GHOST_RESULT_RU.get(r["result"], r["result"]),
+                    "error_msg": r["error_msg"],
+                    "executed_at": r["executed_at"].isoformat() if r["executed_at"] else None,
+                } for r in (logs or [])],
+            })
+        except Exception:
+            log.exception("ghost_detail uid=%d profile=%d", uid, profile_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def ghost_update(request: web.Request) -> web.Response:
+        """Поменять настройки профиля. Раньше их можно было только пересоздать."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            profile_id = int(request.match_info["profile_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор профиля", 400)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        fields, err = _ghost_fields(data)
+        if err:
+            return _err(err, 400)
+        try:
+            upd = await _safe_fetchrow(pool,
+                """UPDATE ghost_profiles
+                      SET personality=$3, active_hours_start=$4, active_hours_end=$5,
+                          daily_cap=$6, cooldown_minutes=$7, updated_at=now()
+                    WHERE id=$1 AND owner_id=$2 RETURNING id""",
+                profile_id, uid, fields["personality"], fields["active_hours_start"],
+                fields["active_hours_end"], fields["daily_cap"], fields["cooldown_minutes"])
+            if not upd:
+                return _err("Профиль не найден", 404)
+            return _json_resp({"ok": True, **fields})
+        except Exception:
+            log.exception("ghost_update uid=%d profile=%d", uid, profile_id)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def ghost_create(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -10106,15 +10220,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
         account_id = data.get("account_id")
-        personality = data.get("personality", "ghost")
-        active_hours_start = int(data.get("active_hours_start", 9))
-        active_hours_end = int(data.get("active_hours_end", 23))
-        daily_cap = int(data.get("daily_cap", 8))
-        cooldown_minutes = int(data.get("cooldown_minutes", 60))
         if not account_id:
             return _err("account_id обязателен", 400)
-        if personality not in ("ghost", "watcher", "active"):
-            return _err("Характер: ghost, watcher или active", 400)
+        _f, _ferr = _ghost_fields(data)
+        if _ferr:
+            return _err(_ferr, 400)
+        personality = _f["personality"]
+        active_hours_start = _f["active_hours_start"]
+        active_hours_end = _f["active_hours_end"]
+        daily_cap = _f["daily_cap"]
+        cooldown_minutes = _f["cooldown_minutes"]
         try:
             acc = await pool.fetchrow(
                 "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", int(account_id), uid
@@ -19534,6 +19649,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Ghost Engine
     app.router.add_get("/api/miniapp/ghost", ghost_profiles)
     app.router.add_post("/api/miniapp/ghost", ghost_create)
+    app.router.add_get("/api/miniapp/ghost/{profile_id}", ghost_detail)
+    app.router.add_put("/api/miniapp/ghost/{profile_id}", ghost_update)
     app.router.add_put("/api/miniapp/ghost/{profile_id}/toggle", ghost_toggle)
     app.router.add_delete("/api/miniapp/ghost/{profile_id}", ghost_delete)
     # Bot Webhook

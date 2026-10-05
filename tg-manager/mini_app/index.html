@@ -5411,6 +5411,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<div class="screen" id="s-ghostdetail">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="ghdTitle">👻 Призрак</div></div>
+  <div class="sub-sb" id="ghdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
 <!-- Modal: Ghost Create -->
 <div class="mbg" id="mo-ghost" onclick="if(event.target===this)closeModal('mo-ghost')">
   <div class="modal">
@@ -20555,13 +20560,15 @@ async function openGhost() {
     const d = await api('/api/miniapp/ghost');
     const profiles = d.profiles||[];
     txt('m-ghost-val',`${profiles.filter(p=>p.enabled).length} активных · ${profiles.length} ${plural(profiles.length,'профиль','профиля','профилей')}`);
-    if (!profiles.length) { txt('ghostList', empty('👻','Нет призрачных профилей','Нажмите + Создать')); return; }
+    if (!profiles.length) { txt('ghostList', empty('👻','Призрачных профилей нет',
+      'Призрак сам заходит в Telegram за аккаунт: читает диалоги, обновляет «в сети», изредка ставит реакции. Аккаунт выглядит живым и меньше похож на брошенный.',
+      {label:'+ Создать профиль', fn:'openGhostModal()'})); return; }
     txt('ghostList', profiles.map(p=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-violet-16)">${p.enabled?'🟢':'⚫'}</div>
-        <div class="row-body">
+        <div class="row-body" onclick="openGhostDetail(${p.id})" role="button" tabindex="0" style="cursor:pointer">
           <div class="row-name">${esc(p.first_name||p.phone)} ${GHOST_PERSONA[p.personality]||p.personality}</div>
-          <div class="row-val">${p.daily_cap} действий/день · ${p.active_hours_start}:00–${p.active_hours_end}:00</div>
+          <div class="row-val">${p.daily_cap} действий в день · ${p.active_hours_start}:00–${p.active_hours_end}:00 · нажмите, чтобы посмотреть, что он делал</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px">
           <button class="btn ${p.enabled?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleGhost(${p.id},${p.enabled})">${p.enabled?'Выкл':'Вкл'}</button>
@@ -20570,9 +20577,87 @@ async function openGhost() {
       </div>
     `).join(''));
   } catch(e) {
-    txt('ghostList', empty('⚠️','Ошибка',errRu(e)));
+    txt('ghostList', errHtml(errRu(e), 'openGhost()'));
   }
 }
+
+// Журнал действий призрака вёлся с самого начала (ghost_action_log), но экран
+// его не показывал: владелец видел настройки и не мог проверить, работает ли
+// призрак вообще. Здесь — сколько сделано сегодня из потолка и что именно.
+async function openGhostDetail(id) {
+  push('s-ghostdetail');
+  _GHOST_CUR = id;
+  txt('ghdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/ghost/${id}`);
+    const p = d.profile||{};
+    txt('ghdTitle','👻 '+(p.first_name||p.phone||'Призрак'));
+    const cap = p.daily_cap||0, done = d.today_actions||0;
+    const pct = cap>0 ? Math.min(100, Math.round(done/cap*100)) : 0;
+    const logs = d.log||[];
+    let h = `<div style="padding:12px 16px">
+      <div class="li"><div class="li-body">
+        <div class="li-name">${p.enabled?'🟢 Включён':'⚫ Выключен'} · ${GHOST_PERSONA[p.personality]||esc(p.personality||'')}</div>
+        <div class="li-sub wrap">Окно активности ${p.active_hours_start}:00–${p.active_hours_end}:00, пауза между действиями ${p.cooldown_minutes} мин${p.is_active===false?' · ⚠️ аккаунт выключен, призрак не выйдет на связь':''}</div>
+      </div></div>
+      <div style="padding:10px 0 4px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><b>Сегодня: ${num(done)} из ${num(cap)}</b><span style="color:var(--hint)">${pct}%</span></div>
+        <div style="height:8px;background:var(--bg2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--accent)"></div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin:12px 0">
+        <button class="btn ${p.enabled?'btn-s':'btn-p'}" style="flex:1" onclick="toggleGhost(${id},${!!p.enabled});back()">${p.enabled?'⚫ Выключить':'🟢 Включить'}</button>
+        <button class="btn btn-s" style="flex:1" onclick="editGhost(${id})">⚙️ Настроить</button>
+      </div>
+      <div class="sec">Что делал</div>`;
+    if (!logs.length) {
+      h += empty('🕐','Действий пока не было',
+        p.enabled
+          ? 'Призрак выходит на связь только в своё окно активности и с паузами — первая запись появится, когда окно откроется.'
+          : 'Профиль выключен, поэтому действий нет. Включите — и призрак начнёт заходить за аккаунт.',
+        p.enabled ? null : {label:'🟢 Включить', fn:`toggleGhost(${id},false)`});
+    } else {
+      h += '<div class="lst">' + logs.map(l=>{
+        const bad = l.result!=='ok';
+        return `<div class="li"><div class="li-body">
+          <div class="li-name">${bad?'⚠️ ':'✅ '}${esc(l.action_ru||l.action_type||'')}</div>
+          <div class="li-sub wrap">${esc(l.result_ru||l.result||'')}${l.target?' · '+esc(String(l.target)):''}${l.error_msg?' · '+esc(String(l.error_msg).slice(0,120)):''} · ${ago(l.executed_at)}</div>
+        </div></div>`;
+      }).join('') + '</div>';
+    }
+    h += `<div style="padding:12px 0"><button class="btn btn-d" style="width:100%" onclick="deleteGhost(${id}, this)">🗑 Удалить профиль</button></div></div>`;
+    txt('ghdBody', h);
+  } catch(e) { txt('ghdBody', errHtml(errRu(e), `openGhostDetail(${Number(id)})`)); }
+}
+let _GHOST_CUR = 0;
+
+// Настройки профиля меняются на месте: раньше, чтобы изменить потолок или
+// часы, профиль нужно было удалить и создать заново.
+async function editGhost(id) {
+  try {
+    const d = await api(`/api/miniapp/ghost/${id}`);
+    const p = d.profile||{};
+    const persona = await askChoice('Характер призрака', [
+      {value:'ghost', label:'👻 Призрак', sub:'только читает и обновляет «в сети»'},
+      {value:'watcher', label:'👁 Наблюдатель', sub:'читает чаще, иногда реагирует'},
+      {value:'active', label:'🌟 Активный', sub:'реакции и пересылки в «Избранное»'},
+    ]);
+    if (!persona) return;
+    const cap = await askPrompt('Сколько действий в день?', {value:String(p.daily_cap||8), type:'number'});
+    if (cap === null) return;
+    const hs = await askPrompt('С какого часа активен? (0–23)', {value:String(p.active_hours_start||9), type:'number'});
+    if (hs === null) return;
+    const he = await askPrompt('До какого часа активен? (0–23)', {value:String(p.active_hours_end||23), type:'number'});
+    if (he === null) return;
+    await api(`/api/miniapp/ghost/${id}`, {method:'PUT', body:JSON.stringify({
+      personality: persona, daily_cap: Number(cap),
+      active_hours_start: Number(hs), active_hours_end: Number(he),
+      cooldown_minutes: Number(p.cooldown_minutes||60),
+    })});
+    toast('✅ Настройки сохранены');
+    openGhostDetail(id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
 async function toggleGhost(id, enabled) {
   try {
     await api(`/api/miniapp/ghost/${id}/toggle`,{method:'PUT'});
@@ -26417,9 +26502,12 @@ function askPrompt(title, opts) {
     const bg = document.createElement('div');
     bg.className = 'mbg show';
     bg.style.zIndex = '9999';
+    // opts.type — чтобы на телефоне для числа открывалась цифровая клавиатура,
+    // а не буквенная. Разрешаем только безопасный список.
+    const _t = ['text','number','tel','url','email'].includes(opts.type) ? opts.type : 'text';
     const fieldTag = opts.multiline
       ? '<textarea id="_apf" class="input-bc" rows="3"></textarea>'
-      : '<input id="_apf" class="input-l" type="text">';
+      : '<input id="_apf" class="input-l" type="' + _t + '">';
     bg.innerHTML = '<div class="modal"><div class="modal-title">' + esc(title || 'Ввод') + '</div>'
       + fieldTag
       + '<div style="display:flex;gap:8px;margin-top:12px">'

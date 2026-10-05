@@ -161,6 +161,7 @@ GET /api/miniapp/funnel/{funnel_id}/steps
 GET /api/miniapp/funnels
 GET /api/miniapp/geo_presets
 GET /api/miniapp/ghost
+GET /api/miniapp/ghost/{profile_id}
 GET /api/miniapp/gifts
 GET /api/miniapp/global_presence
 GET /api/miniapp/global_presence/{plan_id}
@@ -434,6 +435,7 @@ HEAD /api/miniapp/funnel/{funnel_id}/steps
 HEAD /api/miniapp/funnels
 HEAD /api/miniapp/geo_presets
 HEAD /api/miniapp/ghost
+HEAD /api/miniapp/ghost/{profile_id}
 HEAD /api/miniapp/gifts
 HEAD /api/miniapp/global_presence
 HEAD /api/miniapp/global_presence/{plan_id}
@@ -930,6 +932,7 @@ PUT /api/miniapp/content_mesh/{mesh_id}/toggle
 PUT /api/miniapp/crm/deal/{deal_id}/stage
 PUT /api/miniapp/editorial/policy
 PUT /api/miniapp/funnel/{funnel_id}/toggle
+PUT /api/miniapp/ghost/{profile_id}
 PUT /api/miniapp/ghost/{profile_id}/toggle
 PUT /api/miniapp/persona/{persona_id}/toggle
 PUT /api/miniapp/presence_pack/{pack_id}/config
