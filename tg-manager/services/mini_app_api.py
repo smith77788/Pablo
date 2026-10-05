@@ -9937,6 +9937,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Stars Hub ─────────────────────────────────────────────────────────────
 
+    # Порог показов берём из самого движка: экран называет его владельцу
+    # («не хватает ещё N показов»), и разъехаться они не должны.
+    from services.stars_optimizer import MIN_IMPRESSIONS_FOR_WINNER as _STARS_MIN_IMPRESSIONS
+
     async def stars_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -9972,6 +9976,99 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             })
         except Exception:
             log.exception("stars_overview uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def _own_stars_exp(uid: int, exp_id: int):
+        return await _safe_fetchrow(pool,
+            "SELECT * FROM stars_experiments WHERE id=$1 AND owner_id=$2", exp_id, uid)
+
+    async def stars_experiment_detail(request: web.Request) -> web.Response:
+        """Эксперимент по цене целиком: выручка по вариантам и достоверность.
+
+        Оценку (хи-квадрат, significance) движок считает раз в шесть часов и
+        показывал только в Telegram-боте; в мини-аппе строка эксперимента
+        давала лишь «A:⭐50 CR12% · B:⭐100 CR8%» и кнопку паузы. Здесь тот же
+        расчёт, но ТОЛЬКО на чтение: сохраняет вывод отдельная кнопка.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор теста", 400)
+        row = await _own_stars_exp(uid, exp_id)
+        if not row:
+            return _err("Тест не найден", 404)
+        try:
+            from services import stars_optimizer as _so
+            imp_a, imp_b = int(row["impressions_a"] or 0), int(row["impressions_b"] or 0)
+            conv_a, conv_b = int(row["conversions_a"] or 0), int(row["conversions_b"] or 0)
+            p_val = _so._chi_square_p(conv_a, imp_a, conv_b, imp_b)
+            enough = imp_a >= _STARS_MIN_IMPRESSIONS and imp_b >= _STARS_MIN_IMPRESSIONS
+            exp = dict(row)
+            for key in ("created_at", "completed_at"):
+                if exp.get(key):
+                    exp[key] = exp[key].isoformat()
+            recs = []
+            try:
+                recs = await _so.get_recommendations(pool, int(row["bot_id"]), uid)
+            except Exception:
+                log.debug("stars recommendations failed exp=%s", exp_id)
+            return _json_resp({
+                "experiment": exp,
+                "verdict": {
+                    "cr_a": (conv_a / imp_a) if imp_a else 0.0,
+                    "cr_b": (conv_b / imp_b) if imp_b else 0.0,
+                    "p_value": p_val,
+                    "enough_data": enough,
+                    "confident": bool(enough and p_val < 0.05),
+                    "min_impressions": _STARS_MIN_IMPRESSIONS,
+                    "need_a": max(0, _STARS_MIN_IMPRESSIONS - imp_a),
+                    "need_b": max(0, _STARS_MIN_IMPRESSIONS - imp_b),
+                },
+                "recommendations": recs,
+            })
+        except Exception:
+            log.exception("stars_experiment_detail uid=%d exp=%d", uid, exp_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def stars_experiment_evaluate(request: web.Request) -> web.Response:
+        """Подвести итог: та же оценка, что у фонового движка, но по кнопке."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор теста", 400)
+        if not await _own_stars_exp(uid, exp_id):
+            return _err("Тест не найден", 404)
+        try:
+            from services import stars_optimizer as _so
+            res = await _so.evaluate_experiment(pool, exp_id)
+            return _json_resp(res)
+        except Exception:
+            log.exception("stars_experiment_evaluate uid=%d exp=%d", uid, exp_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def stars_experiment_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            exp_id = int(request.match_info["exp_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор теста", 400)
+        try:
+            gone = await _safe_fetchrow(pool,
+                "DELETE FROM stars_experiments WHERE id=$1 AND owner_id=$2 RETURNING id",
+                exp_id, uid)
+            if not gone:
+                return _err("Тест не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("stars_experiment_delete uid=%d exp=%d", uid, exp_id)
             return _err(_INTERNAL_ERROR, 500)
 
     async def stars_experiment_create(request: web.Request) -> web.Response:
@@ -19947,6 +20044,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/stars", stars_overview)
     app.router.add_post("/api/miniapp/stars/experiment", stars_experiment_create)
     app.router.add_put("/api/miniapp/stars/experiment/{exp_id}/toggle", stars_experiment_toggle)
+    app.router.add_get("/api/miniapp/stars/experiment/{exp_id}", stars_experiment_detail)
+    app.router.add_post("/api/miniapp/stars/experiment/{exp_id}/evaluate", stars_experiment_evaluate)
+    app.router.add_delete("/api/miniapp/stars/experiment/{exp_id}", stars_experiment_delete)
     # Ghost Engine
     app.router.add_get("/api/miniapp/ghost", ghost_profiles)
     app.router.add_post("/api/miniapp/ghost", ghost_create)

@@ -149,6 +149,12 @@ def _norm_cdf(z: float) -> float:
     return result if z >= 0 else 1.0 - result
 
 
+# Сколько показов на вариант нужно, прежде чем объявлять победителя. Порог
+# называет и экран мини-аппа («не хватает ещё N показов»), поэтому он один на
+# двоих: разъехавшись, экран обещал бы вывод раньше, чем движок его сделает.
+MIN_IMPRESSIONS_FOR_WINNER = 100
+
+
 async def evaluate_experiment(pool: asyncpg.Pool, experiment_id: int) -> dict:
     """
     Compute conversion rates and statistical significance for the experiment.
@@ -173,7 +179,8 @@ async def evaluate_experiment(pool: asyncpg.Pool, experiment_id: int) -> dict:
     winner = None
     completed = False
 
-    if imp_a >= 100 and imp_b >= 100 and p_val < 0.05:
+    if (imp_a >= MIN_IMPRESSIONS_FOR_WINNER
+            and imp_b >= MIN_IMPRESSIONS_FOR_WINNER and p_val < 0.05):
         winner = "a" if cr_a >= cr_b else "b"
         completed = True
 

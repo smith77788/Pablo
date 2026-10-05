@@ -38,6 +38,7 @@ DELETE /api/miniapp/sales/persona/{pid}
 DELETE /api/miniapp/sales/product/{prid}
 DELETE /api/miniapp/sales/promo/{prid}
 DELETE /api/miniapp/self_promo/{tpl_id}
+DELETE /api/miniapp/stars/experiment/{exp_id}
 DELETE /api/miniapp/template/{tpl_id}
 DELETE /api/miniapp/uch/contacts/{contact_id}
 DELETE /api/miniapp/uch/contacts/{contact_id}/groups/{group_id}
@@ -262,6 +263,7 @@ GET /api/miniapp/seo
 GET /api/miniapp/settings
 GET /api/miniapp/shield
 GET /api/miniapp/stars
+GET /api/miniapp/stars/experiment/{exp_id}
 GET /api/miniapp/strike/history
 GET /api/miniapp/strike/status
 GET /api/miniapp/strike/takedown_kit
@@ -537,6 +539,7 @@ HEAD /api/miniapp/seo
 HEAD /api/miniapp/settings
 HEAD /api/miniapp/shield
 HEAD /api/miniapp/stars
+HEAD /api/miniapp/stars/experiment/{exp_id}
 HEAD /api/miniapp/strike/history
 HEAD /api/miniapp/strike/status
 HEAD /api/miniapp/strike/takedown_kit
@@ -858,6 +861,7 @@ POST /api/miniapp/shield/config
 POST /api/miniapp/spintax/expand
 POST /api/miniapp/spintax/generate
 POST /api/miniapp/stars/experiment
+POST /api/miniapp/stars/experiment/{exp_id}/evaluate
 POST /api/miniapp/strike/launch
 POST /api/miniapp/template
 POST /api/miniapp/transport/ipv6

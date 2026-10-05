@@ -5386,6 +5386,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<div class="screen" id="s-starsexp">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="sxTitle">⭐ Тест цены</div></div>
+  <div class="sub-sb" id="sxBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
 <!-- Modal: Stars Experiment -->
 <div class="mbg" id="mo-starsexp" onclick="if(event.target===this)closeModal('mo-starsexp')">
   <div class="modal">
@@ -20486,6 +20491,8 @@ async function joinAllToGroup() {
 
 // ── Stars Hub ──────────────────────────────────────────
 const STARS_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён'};
+// Подписи типов контента — те же четыре, что в форме создания теста (#se-ctype).
+const STARS_CTYPE_RU = {message:'💬 Сообщение',media:'📷 Медиа',subscription:'🔔 Подписка',gift:'🎁 Подарок'};
 async function openStars() {
   push('s-stars');
   txt('starsStats','<div class="spin-wrap"><div class="spin"></div></div>');
@@ -20500,7 +20507,9 @@ async function openStars() {
     `);
     txt('m-stars-val',`⭐${d.total_revenue||0} · ${d.active_exps||0} активных`);
     const exps = d.experiments||[];
-    if (!exps.length) { txt('starsExps', empty('⭐','Нет экспериментов','Нажмите + A/B тест')); return; }
+    if (!exps.length) { txt('starsExps', empty('⭐','Тестов цены ещё не было',
+      'Тест показывает половине пользователей одну цену в звёздах, половине другую, и считает, какая приносит больше.',
+      {label:'+ Создать тест цены', fn:'openStarsExpModal()'})); return; }
     txt('starsExps', exps.map(e=>{
       const crA = e.impressions_a>0?((e.conversions_a/e.impressions_a)*100).toFixed(1).replace('.',',')+'%':'—';
       const crB = e.impressions_b>0?((e.conversions_b/e.impressions_b)*100).toFixed(1).replace('.',',')+'%':'—';
@@ -20508,9 +20517,9 @@ async function openStars() {
       const isActive = e.status === 'active';
       return `<div class="row">
         <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
-        <div class="row-body">
+        <div class="row-body" onclick="openStarsExp(${e.id})" role="button" tabindex="0" style="cursor:pointer">
           <div class="row-name">${esc(e.name)}${winner}</div>
-          <div class="row-val">${STARS_STATUS[e.status]||e.status} · A:⭐${e.price_a} CR${crA} · B:⭐${e.price_b} CR${crB}</div>
+          <div class="row-val">${STARS_STATUS[e.status]||e.status} · цена ⭐${e.price_a} покупают ${crA} · цена ⭐${e.price_b} покупают ${crB}</div>
         </div>
         <div class="row-right">
           <button class="btn ${isActive?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleStarsExp(${e.id})">${isActive?'⏸':'▶️'}</button>
@@ -20519,8 +20528,102 @@ async function openStars() {
     }).join(''));
   } catch(e) {
     txt('starsStats','');
-    txt('starsExps', empty('⚠️','Ошибка',errRu(e)));
+    txt('starsExps', errHtml(errRu(e), 'openStars()'));
   }
+}
+
+// Оценку достоверности (хи-квадрат) движок считает раз в шесть часов и
+// показывал её только в Telegram-боте. В мини-аппе строка давала два процента
+// и кнопку паузы — понять, можно ли уже менять цену, было нельзя.
+async function openStarsExp(expId) {
+  push('s-starsexp');
+  txt('sxBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/stars/experiment/${expId}`);
+    const e = d.experiment||{};
+    const v = d.verdict||{};
+    const recs = d.recommendations||[];
+    txt('sxTitle','⭐ '+(e.name||'Тест цены'));
+    const pct = x => (x*100).toFixed(1).replace('.',',')+'%';
+    const arm = (price, imp, conv, rev, cr, isWin) => `
+      <div class="li"><div class="li-body">
+        <div class="li-name">${isWin?'🏆 ':''}Цена ⭐${num(price)}</div>
+        <div class="li-sub wrap">Показана ${num(imp)} ${plural(imp,'раз','раза','раз')} · купили ${num(conv)} · покупают ${pct(cr)}</div>
+        <div class="li-sub wrap">Принесла ⭐${num(rev)}</div>
+      </div></div>`;
+    let h = `<div style="padding:12px 16px">
+      <div class="li"><div class="li-body">
+        <div class="li-name">${STARS_STATUS[e.status]||esc(e.status||'')}</div>
+        <div class="li-sub wrap">Что продаём: ${esc(STARS_CTYPE_RU[e.content_type]||e.content_type||'—')} · создан ${ago(e.created_at)}</div>
+      </div></div>
+      <div class="sec">Варианты цены</div><div class="lst">
+      ${arm(e.price_a, e.impressions_a||0, e.conversions_a||0, e.revenue_a||0, v.cr_a||0, (e.winner||'')==='a')}
+      ${arm(e.price_b, e.impressions_b||0, e.conversions_b||0, e.revenue_b||0, v.cr_b||0, (e.winner||'')==='b')}
+      </div>
+      <div class="sec">Можно ли уже верить</div>`;
+    if (e.winner) {
+      h += `<div class="li" style="background:var(--bg-green-16);border-radius:10px"><div class="li-body">
+        <div class="li-name">🏆 Победила цена ⭐${num(e.winner==='a'?e.price_a:e.price_b)}</div>
+        <div class="li-sub wrap">Тест завершён${e.significance!=null?', вероятность случайности '+(e.significance*100).toFixed(1).replace('.',',')+'%':''}. Эту цену можно ставить основной.</div>
+      </div></div>`;
+    } else if (!v.enough_data) {
+      h += `<div class="li" style="background:var(--bg2);border-radius:10px"><div class="li-body">
+        <div class="li-name">⏳ Данных пока мало</div>
+        <div class="li-sub wrap">Вывод делается от ${num(v.min_impressions||100)} показов на каждую цену. Не хватает: ${num(v.need_a||0)} по первой и ${num(v.need_b||0)} по второй.</div>
+      </div></div>`;
+    } else if (v.confident) {
+      h += `<div class="li tap" style="background:var(--bg-green-16);border-radius:10px" onclick="evaluateStarsExp(${expId})" role="button" tabindex="0"><div class="li-body">
+        <div class="li-name">📈 Разница не случайна</div>
+        <div class="li-sub wrap">Вероятность совпадения ${(v.p_value*100).toFixed(1).replace('.',',')}%. Нажмите, чтобы подвести итог и закрыть тест.</div>
+      </div><span class="chev">›</span></div>`;
+    } else {
+      h += `<div class="li" style="background:var(--bg2);border-radius:10px"><div class="li-body">
+        <div class="li-name">🤝 Цены идут вровень</div>
+        <div class="li-sub wrap">Показов хватает, но разница укладывается в случайность (вероятность совпадения ${(v.p_value*100).toFixed(1).replace('.',',')}%). Пусть тест поработает ещё.</div>
+      </div></div>`;
+    }
+    if (recs.length) {
+      h += '<div class="sec">💡 Что это даёт</div><div class="li"><div class="li-body">'
+        + recs.map(r=>`<div class="li-sub wrap" style="margin-bottom:4px">${esc(r)}</div>`).join('')
+        + '</div></div>';
+    }
+    h += `<div style="display:flex;flex-direction:column;gap:8px;padding:12px 0">
+      <button class="btn ${e.status==='active'?'btn-s':'btn-p'}" onclick="toggleStarsExpHere(${expId})">${e.status==='active'?'⏸ Приостановить':'▶️ Запустить'}</button>
+      ${e.status!=='completed'?`<button class="btn btn-s" onclick="evaluateStarsExp(${expId})">🏁 Подвести итог сейчас</button>`:''}
+      <button class="btn btn-d" onclick="deleteStarsExp(${expId}, this)">🗑 Удалить тест</button>
+    </div></div>`;
+    txt('sxBody', h);
+  } catch(e) { txt('sxBody', errHtml(errRu(e), `openStarsExp(${Number(expId)})`)); }
+}
+
+// Пауза/запуск прямо с карточки теста. Общий toggleStarsExp возвращает на
+// список, а здесь владелец смотрит именно этот тест — перерисовываем на месте.
+async function toggleStarsExpHere(expId) {
+  try {
+    const r = await api(`/api/miniapp/stars/experiment/${expId}/toggle`,{method:'PUT'});
+    toast(r.status==='active'?'▶️ Активен':'⏸ Пауза');
+    openStarsExp(expId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function evaluateStarsExp(expId) {
+  if (!await askConfirm('Подвести итог теста? Если разница достоверна, тест закроется и победитель зафиксируется.')) return;
+  try {
+    const r = await api(`/api/miniapp/stars/experiment/${expId}/evaluate`, {method:'POST'});
+    toast(r.completed ? '🏆 Победитель определён, тест завершён'
+                      : '📊 Пока без вывода — разница в пределах случайности');
+    openStarsExp(expId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function deleteStarsExp(expId, el) {
+  if (!await confirmDelete('Удалить тест цены', el)) return;
+  try {
+    await api(`/api/miniapp/stars/experiment/${expId}`, {method:'DELETE'});
+    toast('🗑 Тест удалён');
+    back();
+    openStars();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 async function openStarsExpModal() {
