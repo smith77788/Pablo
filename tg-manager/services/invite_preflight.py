@@ -267,3 +267,74 @@ def _verdict(total: int, c: dict) -> str:
     if not parts:
         return "✅ Флот готов к инвайту."
     return " ".join(parts)
+
+
+# ── Сколько из источника реально пойдёт в прогон ─────────────────────────────
+#
+# Счётчик «Доступно целей» считал строки источника целиком. Исполнитель же
+# отбрасывает тех, кого уже звали в этот канал, реестр «не приглашать», повторы
+# внутри списка и — для аудитории парсера — фильтры (только с @username, не
+# боты…). На второй кампании в тот же канал экран обещал 5 000, а прогон
+# заканчивался словами «новых нет». Ключ каждой строки здесь строится ровно как
+# у исполнителя (`op_worker._row_to_ref` + `contact_opt_out.compare_key`).
+
+_KEY_SQL = {
+    "parsed": ("CASE WHEN COALESCE(username,'')<>'' THEN '@'||lower(ltrim(username,'@')) "
+               "WHEN tg_user_id IS NOT NULL THEN tg_user_id::text END"),
+    "crm": ("CASE WHEN COALESCE(username,'')<>'' THEN '@'||lower(ltrim(username,'@')) "
+            "WHEN tg_user_id IS NOT NULL THEN tg_user_id::text "
+            "WHEN COALESCE(btrim(phone),'')<>'' THEN "
+            "CASE WHEN left(btrim(phone),1)='+' THEN btrim(phone) ELSE '+'||btrim(phone) END END"),
+    "bot_users": "bu.user_id::text",
+}
+
+
+async def audience_breakdown(pool, owner_id: int, source: str, group: str = "",
+                             parse_run_id: int | None = None,
+                             aud_filters: dict | None = None) -> dict | None:
+    """Разбор источника: {rows, unique, already, opted_out, fresh}.
+
+    None — источник не поддержан или сбой (вызывающий показывает старое число).
+    Без группы «уже приглашались» не считается (0).
+    """
+    if source not in _KEY_SQL:
+        return None
+    from services.contact_opt_out import compare_key, load_opted_out
+    from services.mass_inviter_engine import parse_group_ref
+
+    key = _KEY_SQL[source]
+    args: list = [owner_id]
+    if source == "parsed":
+        from services.audience_filters import parsed_audience_filters
+        where = "owner_id=$1"
+        if parse_run_id:
+            args.append(int(parse_run_id))
+            where += " AND parse_run_id=$2"
+        fsql, fp = parsed_audience_filters(aud_filters or {}, base_params_count=len(args))
+        args.extend(fp)
+        src = f"SELECT {key} AS k FROM parsed_audiences WHERE {where}{fsql}"
+    elif source == "crm":
+        src = f"SELECT {key} AS k FROM crm_contacts WHERE owner_id=$1"
+    else:
+        src = (f"SELECT {key} AS k FROM bot_users bu JOIN managed_bots mb "
+               "ON mb.bot_id = bu.bot_id WHERE mb.added_by=$1 AND bu.is_active=TRUE")
+    try:
+        opted = sorted({compare_key(t) for t in await load_opted_out(pool, owner_id)})
+        gk = parse_group_ref(group) if group else ""
+        i_opt, i_gk = len(args) + 1, len(args) + 2
+        row = await pool.fetchrow(
+            f"WITH s AS ({src}), u AS (SELECT DISTINCT k FROM s WHERE k IS NOT NULL) "
+            "SELECT (SELECT COUNT(*) FROM s WHERE k IS NOT NULL) AS rows, "
+            "COUNT(*) AS uniq, "
+            f"COUNT(*) FILTER (WHERE k = ANY(${i_opt}::text[])) AS opted, "
+            f"COUNT(*) FILTER (WHERE NOT k = ANY(${i_opt}::text[]) AND ${i_gk}<>'' "
+            "AND EXISTS (SELECT 1 FROM invite_target_log l WHERE l.owner_id=$1 "
+            f"AND l.group_key=${i_gk} AND lower(l.target)=u.k)) AS already "
+            "FROM u", *args, opted, gk)
+    except Exception:
+        log.warning("audience_breakdown owner=%s source=%s", owner_id, source, exc_info=True)
+        return None
+    rows, uniq = int(row["rows"] or 0), int(row["uniq"] or 0)
+    opt, already = int(row["opted"] or 0), int(row["already"] or 0)
+    return {"rows": rows, "unique": uniq, "repeats": rows - uniq, "opted_out": opt,
+            "already": already, "fresh": max(0, uniq - opt - already)}

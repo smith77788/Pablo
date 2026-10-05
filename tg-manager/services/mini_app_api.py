@@ -8012,13 +8012,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # «источник пуст» и оттолкнул бы от запуска рабочей операции.
             return _json_resp({"source": source, "total": None, "hint": ""})
 
-        # Исполнитель берёт не больше 2000 целей за прогон — показываем это честно,
-        # иначе счётчик обещал бы больше, чем операция реально возьмёт.
+        # Сколько из этого реально пойдёт в прогон: фильтры аудитории, уже
+        # приглашённые в этот канал, «не приглашать», повторы — теми же
+        # ключами, что у исполнителя. Без этого вторая кампания в тот же канал
+        # обещала тысячи целей, а прогон заканчивался словами «новых нет».
+        breakdown = None
+        if source in ("parsed", "crm", "bot_users"):
+            from services.invite_preflight import audience_breakdown
+            _af = {}
+            try:
+                _af_raw = request.query.get("aud_filters")
+                _af = json.loads(_af_raw) if _af_raw else {}
+                if not isinstance(_af, dict):
+                    _af = {}
+            except Exception:
+                _af = {}
+            _pr_b = request.query.get("parse_run_id") if source == "parsed" else None
+            breakdown = await audience_breakdown(
+                pool, uid, source, (request.query.get("group") or "").strip(),
+                parse_run_id=int(_pr_b) if _pr_b and str(_pr_b).isdigit() else None,
+                aud_filters=_af)
+            if breakdown is not None:
+                total = breakdown["rows"]
+
+        # Потолок пула целей за прогон — тот же, что у исполнителя (остаток уходит
+        # в продолжение). Раньше здесь стояло 2000, когда исполнитель брал уже
+        # 20 000, и экран пугал «за прогон возьмём 2 000».
+        from services.op_worker import _INVITE_AUDIENCE_CAP as _INV_AUD_CAP
         return _json_resp({
             "source": source,
             "total": int(total or 0),
-            "capped_at": 2000,
+            "capped_at": _INV_AUD_CAP,
             "hint": hint if not total else "",
+            "breakdown": breakdown,
         })
 
     async def invite_segment_options(request: web.Request) -> web.Response:

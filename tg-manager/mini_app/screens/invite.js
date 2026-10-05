@@ -471,6 +471,17 @@ async function uploadInviteFile() {
   } finally { inp.value=''; }
 }
 
+// Фильтры аудитории парсера — одна сборка для счётчика и для запуска, чтобы
+// счётчик считал ровно то, что возьмёт операция.
+function _invAudFilters() {
+  const _af = {};
+  if (document.getElementById('invFltUsername')?.checked) _af.with_username = true;
+  if (document.getElementById('invFltNotBot')?.checked) _af.not_bot = true;
+  if (document.getElementById('invFltPremium')?.checked) _af.premium = true;
+  if (document.getElementById('invFltActive')?.checked) _af.active = true;
+  return _af;
+}
+
 async function loadInviteAudienceSize() {
   const el = document.getElementById('massInviteAudience');
   if (!el) return;
@@ -480,6 +491,12 @@ async function loadInviteAudienceSize() {
   try {
     let url = '/api/miniapp/invite/audience?source=' + encodeURIComponent(src);
     if (src === 'parsed' && INV_PARSE_RUN) url += '&parse_run_id=' + INV_PARSE_RUN;
+    // Канал и фильтры — чтобы число совпало с тем, что реально возьмёт прогон:
+    // уже приглашённые сюда, «не приглашать» и повторы исполнитель отбросит.
+    const _g = _invGroup();
+    if (_g) url += '&group=' + encodeURIComponent(_g);
+    const _af = _invAudFilters();
+    if (src === 'parsed' && Object.keys(_af).length) url += '&aud_filters=' + encodeURIComponent(JSON.stringify(_af));
     if (src === 'segment') {
       const s = _inviteSegSel();
       if (s.saved_segment_id) url += '&saved_segment_id=' + s.saved_segment_id;
@@ -493,10 +510,26 @@ async function loadInviteAudienceSize() {
       el.innerHTML = `<span style="color:#f59e0b">⚠️ Источник пуст — приглашать некого.</span> ${esc(d.hint||'')}`;
       return;
     }
-    const capped = d.capped_at && INV_AUDIENCE > d.capped_at
-      ? ` · за прогон возьмём ${num(d.capped_at)}` : '';
-    el.innerHTML = `👥 Доступно целей: <b>${num(INV_AUDIENCE)}</b>${capped}`;
-    loadInvitePreflight(INV_AUDIENCE);
+    const b = d.breakdown;
+    // «Пригласить повторно» включён — уже приглашённых исполнитель не отсеет.
+    const reinv = !!document.getElementById('massInviteReinvite')?.checked;
+    if (b && reinv) { b.fresh += b.already; b.already = 0; }
+    const fresh = b ? b.fresh : INV_AUDIENCE;
+    const capped = d.capped_at && fresh > d.capped_at
+      ? ` · за прогон возьмём ${num(d.capped_at)}, остальных — продолжением` : '';
+    let html = `👥 Доступно целей: <b>${num(INV_AUDIENCE)}</b>`;
+    if (b) {
+      const drop = [];
+      if (b.already) drop.push(`уже приглашались сюда: ${num(b.already)}`);
+      if (b.opted_out) drop.push(`в реестре «не приглашать»: ${num(b.opted_out)}`);
+      if (b.repeats) drop.push(`повторы в списке: ${num(b.repeats)}`);
+      if (drop.length) html += ` · пойдёт в прогон: <b>${num(fresh)}</b><div style="font-size:12px;color:var(--hint);margin-top:2px">Отсеются — ${drop.join(', ')}</div>`;
+      if (!fresh) {
+        html += `<div style="color:#f59e0b;margin-top:4px">⚠️ Новых для этого канала нет — все уже приглашались или стоят в реестре «не приглашать». Соберите свежую аудиторию.</div>`;
+      }
+    }
+    el.innerHTML = html + capped;
+    loadInvitePreflight(fresh);
   } catch(e) {
     // Не знаем — молчим. Ноль здесь означал бы «пусто» и оттолкнул бы от запуска
     // рабочей операции.
@@ -667,11 +700,7 @@ async function submitMassInvite() {
   }
   // Фильтры аудитории (только с username / не бот / premium / активные) —
   // применяются в исполнителе теми же условиями, что парсер-вью.
-  const _af = {};
-  if (document.getElementById('invFltUsername')?.checked) _af.with_username = true;
-  if (document.getElementById('invFltNotBot')?.checked) _af.not_bot = true;
-  if (document.getElementById('invFltPremium')?.checked) _af.premium = true;
-  if (document.getElementById('invFltActive')?.checked) _af.active = true;
+  const _af = _invAudFilters();
   if (Object.keys(_af).length) body.aud_filters = _af;
   // Инвайт — самая баноопасная операция → подтверждение перед запуском.
   // Без лимита на аккаунт риск бана максимальный — предупреждаем явно.

@@ -5151,7 +5151,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </details>
     <div class="sec">Настройка инвайта</div>
     <div style="padding:8px 16px">
-      <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group" onblur="checkInviteRights()"></div>
+      <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group" onblur="checkInviteRights();loadInviteAudienceSize()"></div>
       <div id="massInviteRights" style="font-size:12px;margin:-6px 0 10px;padding:0 2px"></div>
       <div class="field">
         <label>Источник аудитории</label>
@@ -5176,10 +5176,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field" id="massInviteFilters">
         <label>Фильтры аудитории</label>
         <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px">
-          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltUsername"> только с @username</label>
-          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltNotBot"> не боты</label>
-          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltPremium"> premium</label>
-          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltActive"> активные</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltUsername" onchange="loadInviteAudienceSize()"> только с @username</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltNotBot" onchange="loadInviteAudienceSize()"> не боты</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltPremium" onchange="loadInviteAudienceSize()"> premium</label>
+          <label class="chk-row" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="invFltActive" onchange="loadInviteAudienceSize()"> активные</label>
         </div>
         <div class="hint" style="padding:4px 2px 0">Отсеять ботов/удалённых/приватные аккаунты до запуска — меньше «пустых» приглашений и риска.</div>
       </div>
@@ -5326,7 +5326,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
           <span>🚀 Один проход (макс. интенсивность)</span>
         </label>
         <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
-          <input type="checkbox" id="massInviteReinvite">
+          <input type="checkbox" id="massInviteReinvite" onchange="loadInviteAudienceSize()">
           <span>♻️ Приглашать повторно (не пропускать уже приглашённых)</span>
         </label>
         <label class="chk-row field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">

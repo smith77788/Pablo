@@ -68,9 +68,14 @@ def test_counter_matches_what_the_executor_loads():
 
 
 def test_cap_is_disclosed():
-    """Исполнитель берёт не больше 2000 за прогон — счётчик не должен обещать больше."""
-    assert "LIMIT 2000" in _exec_body(), "предпосылка изменилась — проверить потолок"
-    assert "capped_at" in _handler(), "потолок обязан доезжать до пользователя"
+    """Потолок пула за прогон показывается тот же, что у исполнителя.
+
+    Раньше счётчик писал «за прогон возьмём 2 000», когда исполнитель брал уже
+    20 000 (_INVITE_AUDIENCE_CAP), — экран пугал ложным ограничением.
+    """
+    assert "_AUD_CAP = _INVITE_AUDIENCE_CAP" in _exec_body()
+    body = _handler()
+    assert '"capped_at": _INV_AUD_CAP' in body and "_INVITE_AUDIENCE_CAP" in body
 
 
 def test_db_failure_returns_unknown_not_zero():
@@ -127,3 +132,22 @@ def test_pace_auto_has_a_label():
     а подпись для диалога забыли."""
     m = re.search(r"const _paceLbl = \{[^}]*\}", HTML)
     assert m and "auto:" in m.group(0), "у режима «Авто» нет человеческой подписи"
+
+
+def test_counter_shows_what_actually_goes_into_the_run():
+    """Вторая кампания в тот же канал: экран обещал тысячи, прогон — «новых нет».
+
+    Счётчик обязан знать канал и фильтры и показывать, сколько отсеется (уже
+    приглашённые сюда, «не приглашать», повторы). Сам подсчёт по настоящему
+    Postgres сверяется с ключами исполнителя в
+    tests/test_invite_audience_breakdown_postgres.py.
+    """
+    body = _handler()
+    assert "audience_breakdown(" in body and '"breakdown": breakdown' in body
+    js = HTML
+    assert "'&group=' + encodeURIComponent(_g)" in js, "счётчик не знает канал"
+    assert "'&aud_filters='" in js, "счётчик не видит фильтры аудитории"
+    assert "пойдёт в прогон" in js
+    for fid in ("invFltUsername", "invFltNotBot", "invFltPremium", "invFltActive",
+                "massInviteReinvite"):
+        assert f'id="{fid}" onchange="loadInviteAudienceSize()"' in js, fid
