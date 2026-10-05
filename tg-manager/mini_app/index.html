@@ -3719,6 +3719,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="seg-opt" onclick="filterOps('paused',this)">⏸ Пауза</div>
       <div class="seg-opt" onclick="filterOps('failed',this)">❌ Ошибки</div>
       <div class="seg-opt" onclick="filterOps('done',this)">✅ Готово</div>
+      <div class="seg-opt" onclick="filterOps('partial',this)">⚠️ Недоведены</div>
     </div>
     <div style="padding:6px 0;display:flex;gap:6px">
       <button class="btn btn-s" style="flex:1 1 auto;font-size:12px;padding:8px 4px" onclick="pauseAllOps()" title="Приостановить все ожидающие в очереди (запущенные доигрывают)">⏸ Пауза</button>
@@ -12342,8 +12343,12 @@ function explainError(msg) {
 let OPS_FILTER = null;
 // Подписи статусов очереди по-русски. Пустое состояние показывало сырое
 // «running»/«failed» — владелец читает интерфейс на русском.
+// partial здесь не было, и срез «недоведённые» подписывался владельцу сырым
+// ключом: «по фильтру «partial»». Сам статус бэкенд принимает давно — он в
+// op_status.TERMINAL, то есть в OPERATION_STATUSES.
 const OPS_STATUS_LABELS = {pending:'ожидают', running:'работают', paused:'пауза',
-                           done:'готово', failed:'ошибки', cancelled:'отменены'};
+                           done:'готово', partial:'недоведены',
+                           failed:'ошибки', cancelled:'отменены'};
 function OPS_STATUS_RU(s) { return OPS_STATUS_LABELS[s] || s; }
 function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
 
@@ -16438,41 +16443,85 @@ async function loadPlatformUsers() {
 
 // ── Диагностика ──────────────────────────────────────────
 function openDiag() { push('s-diag'); txt('diagResult',''); }
+// Экран печатал стену чисел и галочек, и ни одна строка никуда не вела:
+// «Ошибок за 24ч: 7» — а каких, смотреть негде; «Всего / активны 28 / 3» — а
+// что с остальными; «CF relay выкл» — английским по-русски. Теперь каждая
+// строка, которая называет проблему, ведёт туда, где её чинят, а итог сказан
+// одной фразой сверху: пойдут операции или нет.
 async function runDiag() {
   const btn=document.getElementById('diagBtn'); btn.disabled=true; btn.textContent='Проверяю…';
   txt('diagResult','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/diag');
-    const yn = v => v ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>';
+    const yn = v => v ? '<span style="color:var(--green)">✓ есть</span>' : '<span style="color:var(--red)">✗ нет</span>';
     const env=d.env||{}, acc=d.accounts||{}, q=d.queue||{}, lt=d.live_test||{};
-    const ltColor = lt.ok ? 'var(--green)' : 'var(--red)';
-    let html = '';
-    html += `<div class="sec">Окружение</div><div class="lst">
-      <div class="row"><div class="row-body"><div class="row-name">API-ключи Telegram</div></div><div class="row-right">${yn(env.api_configured)}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">CF relay</div></div><div class="row-right">${env.cf_relay?'вкл':'выкл'}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Общий прокси</div></div><div class="row-right">${env.tg_proxy?'вкл':'выкл'}</div></div>
+    // Строка-ссылка: то же, что обычная строка списка, но с шевроном и
+    // переходом. Без этого диагностика называла проблему и бросала на ней.
+    const go = (name, val, fn, sub) => `<div class="li tap" onclick="${fn}" role="button" tabindex="0">
+        <div class="li-body"><div class="li-name">${name}</div>${sub?`<div class="li-sub wrap">${sub}</div>`:''}</div>
+        <div class="li-right">${val}</div><span class="chev">›</span></div>`;
+    const plain = (name, val, sub) => `<div class="li">
+        <div class="li-body"><div class="li-name">${name}</div>${sub?`<div class="li-sub wrap">${sub}</div>`:''}</div>
+        <div class="li-right">${val}</div></div>`;
+
+    // Главный вывод первой строкой: дальше идут подробности, но решение
+    // «работает / не работает» владелец должен прочитать сразу.
+    const ready = lt.ok && (acc.with_session||0) > 0 && env.api_configured;
+    let html = `<div class="card" style="margin-bottom:10px;background:${ready?'var(--bg-green-16)':'var(--bg-red-16)'}">
+      <div style="font-size:15px;font-weight:600">${ready?'✅ Операции пойдут':'⚠️ Операции не пойдут'}</div>
+      <div style="font-size:13px;color:var(--hint);margin-top:4px">${ready
+        ? 'Доступы на месте, живое подключение проходит. Ниже — подробности проверки.'
+        : 'Ниже отмечено красным, что мешает. Каждая строка ведёт туда, где это чинится.'}</div>
     </div>`;
+
+    html += `<div class="sec">Доступы и связь</div><div class="lst">
+      ${plain('Ключи Telegram', yn(env.api_configured),
+              env.api_configured?'':'Без них продукт не может подключиться к Telegram — настраивается на сервере, не из приложения.')}
+      ${plain('Обходной канал связи', env.cf_relay?'включён':'выключен',
+              'Запасной путь к Telegram, когда прямой закрыт. Выключенный — не поломка.')}
+      ${plain('Общий прокси', env.tg_proxy?'включён':'выключен',
+              'Используется, когда у аккаунта нет своего.')}
+    </div>`;
+
     html += `<div class="sec">Аккаунты</div><div class="lst">
-      <div class="row"><div class="row-body"><div class="row-name">Всего / активны</div></div><div class="row-right">${acc.total||0} / ${acc.active||0}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">С сессией / с прокси</div></div><div class="row-right">${acc.with_session||0} / ${acc.with_proxy||0}</div></div>
+      ${go('Всего аккаунтов', num(acc.total||0), "goTab('accounts')",
+           `Из них активных ${num(acc.active||0)}`)}
+      ${go('С сохранённой сессией', `<span style="color:${(acc.with_session||0)?'var(--green)':'var(--red)'}">${num(acc.with_session||0)}</span>`,
+           "goTab('accounts')",
+           (acc.with_session||0) ? '' : 'Без сессии аккаунт в операциях не участвует.')}
+      ${go('Со своим прокси', num(acc.with_proxy||0), 'openProxies()',
+           `Без прокси работают ${num(Math.max(0,(acc.total||0)-(acc.with_proxy||0)))} — они ходят с общего адреса.`)}
     </div>`;
+
     html += `<div class="sec">Очередь операций</div><div class="lst">
-      <div class="row"><div class="row-body"><div class="row-name">Ожидают / выполняются</div></div><div class="row-right">${q.pending||0} / ${q.running||0}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">За 24ч: успешно / ошибок</div></div><div class="row-right"><span style="${kpiTone(q.done_24h,'green')}">${q.done_24h||0}</span> / <span style="${kpiTone(q.failed_24h,'red')}">${q.failed_24h||0}</span></div></div>
+      ${go('Ждут очереди', num(q.pending||0), "opsGo('pending')")}
+      ${go('Выполняются сейчас', num(q.running||0), "opsGo('running')")}
+      ${go('Прошли за сутки', `<span style="${kpiTone(q.done_24h,'green')}">${num(q.done_24h||0)}</span>`, "opsGo('done')")}
+      ${go('Недоведены за сутки', `<span style="${kpiTone(q.partial_24h,'red')}">${num(q.partial_24h||0)}</span>`, "opsGo('partial')",
+           (q.partial_24h||0) ? 'Оборвались на половине — часть целей не обработана.' : '')}
+      ${go('Упали за сутки', `<span style="${kpiTone(q.failed_24h,'red')}">${num(q.failed_24h||0)}</span>`, "opsGo('failed')",
+           (q.failed_24h||0) ? 'Откройте, чтобы увидеть, какие именно и почему.' : '')}
     </div>`;
-    html += `<div class="sec">Живой тест подключения</div><div class="lst">
-      <div class="row"><div class="row-ico" style="background:${lt.ok?'rgba(52,211,153,.16)':'rgba(248,113,113,.16)'}">${lt.ok?'✅':'⚠️'}</div>
-        <div class="row-body"><div class="row-name" style="color:${ltColor}">${lt.ok?'Подключение работает':'Подключение НЕ работает'}</div>
-        <div class="row-val">${esc(lt.account?('Аккаунт: '+lt.account):'')}${lt.status?(' · '+esc(lt.status)):''}${lt.latency_ms!=null?(' · '+lt.latency_ms+'мс'):''}${lt.via_proxy!=null?(lt.via_proxy?' · через прокси':' · без прокси'):''}</div>
-        ${lt.reason?`<div class="row-val" style="color:var(--hint)">${esc(lt.reason)}</div>`:''}
+
+    html += `<div class="sec">Живая проверка подключения</div><div class="lst">
+      <div class="li"><div class="row-ico" style="background:${lt.ok?'var(--bg-green-16)':'var(--bg-red-16)'}">${lt.ok?'✅':'⚠️'}</div>
+        <div class="li-body"><div class="li-name" style="color:${lt.ok?'var(--green)':'var(--red)'}">${lt.ok?'Подключение работает':'Подключение не работает'}</div>
+        <div class="li-sub wrap">${lt.account?('Проверяли аккаунт '+esc(lt.account)):'Аккаунт для проверки не нашёлся'}${lt.status?(' · '+esc(accRu(lt.status))):''}${lt.latency_ms!=null?(' · ответ за '+num(lt.latency_ms)+' мс'):''}${lt.via_proxy!=null?(lt.via_proxy?' · через прокси':' · без прокси'):''}</div>
+        ${lt.reason?`<div class="li-sub wrap" style="color:var(--red)">${esc(lt.reason)}</div>`:''}
         </div></div>
     </div>`;
     if (!lt.ok) {
-      html += `<div style="padding:12px;margin-top:8px;background:rgba(248,113,113,.1);border-radius:12px;font-size:13px;color:var(--hint)">⚠️ Операции исполняются только через аккаунты. Если живой тест не проходит — операции не дадут результата. Причина выше — устраните её (релог аккаунта, прокси, FloodWait).</div>`;
+      html += `<div class="card" style="margin-top:8px;background:var(--bg-red-16)">
+        <div style="font-size:13px;color:var(--hint)">Операции исполняются только через аккаунты: пока живая проверка не проходит, любая запущенная операция вернётся ни с чем. Чаще всего помогает заново войти в аккаунт или дать ему рабочий прокси.</div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-p" style="flex:1" onclick="goTab('accounts')">К аккаунтам</button>
+          <button class="btn btn-s" style="flex:1" onclick="openProxies()">К прокси</button>
+        </div>
+      </div>`;
     }
     txt('diagResult', html);
   } catch(e) {
-    txt('diagResult', empty('⚠️','Ошибка диагностики',errRu(e)));
+    txt('diagResult', errHtml(errRu(e), 'runDiag()'));
   } finally { btn.disabled=false; btn.textContent='▶️ Запустить диагностику'; }
 }
 
@@ -26962,6 +27011,10 @@ function accRu(v) {
   return {active:'🟢 Активен', ok:'🟢 Активен', banned:'🚫 Забанен',
           deactivated:'⚫ Удалён', session_expired:'🔑 Нужна переавторизация',
           spamblock:'🔇 Спам-блок', limited:'⚠️ Ограничен',
+          // cooldown и no_session возвращает check_account_status_full, а в
+          // этой таблице их не было — на экране диагностики они уезжали
+          // владельцу английским ключом как есть.
+          cooldown:'⏸ Отдыхает после лимита', no_session:'🔌 Нет сессии',
           frozen:'🧊 Заморожен', unknown:'— Неизвестно'}[String(v||'').toLowerCase()] || (v || '—');
 }
 function opRu(v) { return OP_RU[String(v||'').toLowerCase()] || (v || '—'); }
