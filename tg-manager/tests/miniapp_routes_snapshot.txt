@@ -286,6 +286,7 @@ GET /api/miniapp/uch/duplicates
 GET /api/miniapp/uch/export/csv
 GET /api/miniapp/uch/export/json
 GET /api/miniapp/uch/export/vcf
+GET /api/miniapp/uch/graph/pairs
 GET /api/miniapp/uch/graph/stats
 GET /api/miniapp/uch/groups
 GET /api/miniapp/uch/intent/hits
@@ -558,6 +559,7 @@ HEAD /api/miniapp/uch/duplicates
 HEAD /api/miniapp/uch/export/csv
 HEAD /api/miniapp/uch/export/json
 HEAD /api/miniapp/uch/export/vcf
+HEAD /api/miniapp/uch/graph/pairs
 HEAD /api/miniapp/uch/graph/stats
 HEAD /api/miniapp/uch/groups
 HEAD /api/miniapp/uch/intent/hits

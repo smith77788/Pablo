@@ -177,10 +177,11 @@ async def get_graph_stats(pool, owner_id: int) -> dict:
            GROUP BY relationship_type ORDER BY cnt DESC''', owner_id)
     strongest = await pool.fetch(
         '''SELECT r.contact_a_id, r.contact_b_id, r.relationship_type, r.strength,
-                  uc1.first_name as a_name, uc2.first_name as b_name
+                  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', uc1.first_name, uc1.last_name)), ''), uc1.username, '') AS a_name,
+                  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', uc2.first_name, uc2.last_name)), ''), uc2.username, '') AS b_name
            FROM contact_relationships r
-           JOIN unified_contacts uc1 ON uc1.id = r.contact_a_id
-           JOIN unified_contacts uc2 ON uc2.id = r.contact_b_id
+           JOIN unified_contacts uc1 ON uc1.id = r.contact_a_id AND uc1.owner_id = $1
+           JOIN unified_contacts uc2 ON uc2.id = r.contact_b_id AND uc2.owner_id = $1
            WHERE r.owner_id = $1
            ORDER BY r.strength DESC LIMIT 10''', owner_id)
     return {
@@ -188,3 +189,37 @@ async def get_graph_stats(pool, owner_id: int) -> dict:
         'by_type': [dict(r) for r in by_type],
         'strongest': [dict(r) for r in strongest],
     }
+
+
+async def get_pairs_by_type(pool, owner_id: int, rel_type: str,
+                            limit: int = 50) -> list:
+    """Пары контактов одного типа связи — чтобы число «По типам» открывалось.
+
+    Экран графа показывал только счётчик по типу: «Совпадение телефона — 42
+    связи» и всё, дальше тупик. Отсюда берётся сам список пар, с обеими
+    сторонами и причиной из metadata, и каждая сторона открывается карточкой
+    контакта.
+    """
+    rows = await pool.fetch(
+        '''SELECT r.contact_a_id, r.contact_b_id, r.relationship_type, r.strength,
+                  r.metadata,
+                  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', uc1.first_name, uc1.last_name)), ''), uc1.username, '') AS a_name,
+                  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', uc2.first_name, uc2.last_name)), ''), uc2.username, '') AS b_name
+           FROM contact_relationships r
+           JOIN unified_contacts uc1 ON uc1.id = r.contact_a_id AND uc1.owner_id = $1
+           JOIN unified_contacts uc2 ON uc2.id = r.contact_b_id AND uc2.owner_id = $1
+           WHERE r.owner_id = $1 AND r.relationship_type = $2
+           ORDER BY r.strength DESC, r.updated_at DESC NULLS LAST
+           LIMIT $3''', owner_id, rel_type, limit)
+    out = []
+    for r in rows:
+        d = dict(r)
+        meta = d.get('metadata')
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+        d['metadata'] = meta or {}
+        out.append(d)
+    return out

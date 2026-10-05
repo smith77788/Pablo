@@ -3944,6 +3944,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="graphBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
+<div class="screen" id="s-uchgraphtype">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="grtTitle">🔗 Пары связи</div></div>
+  <div class="sub-sb" id="grtBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
 <div class="screen" id="s-uchreminders">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⏰ Напоминания</div></div>
   <div class="sub-sb" id="remBody"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -18060,6 +18065,35 @@ async function rollbackVersion(id, vnum) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
+// ── Типы связи между контактами: подписи и пояснения ────────────────────────
+// Словарь жил локально внутри openContactRelationships, а экран графа печатал
+// сырой ключ («same_username_pattern») — владелец читал служебное имя столбца.
+// Теперь подпись одна на оба экрана.
+//
+// Движок (services/contacts_hub/relationship_engine.compute_relationships)
+// реально считает только четыре первых типа; остальные заводятся вручную через
+// add_relationship, поэтому подписи для них тоже держим.
+const UCH_REL_RU = {
+  phone_match: 'Совпадение телефона',
+  same_username_pattern: 'Похожее имя в Telegram',
+  same_company: 'Одна компания',
+  mutual_account: 'Один аккаунт-источник',
+  mutual_group: 'Общая группа',
+  mutual_channel: 'Общий канал',
+  same_phone_domain: 'Один оператор телефона',
+};
+const UCH_REL_HINT = {
+  phone_match: 'один и тот же номер в двух карточках',
+  same_username_pattern: 'одинаковое имя — вероятно, один человек',
+  same_company: 'в карточках указана одна компания',
+  mutual_account: 'оба контакта пришли из одного аккаунта',
+  mutual_group: 'состоят в одной группе',
+  mutual_channel: 'подписаны на один канал',
+  same_phone_domain: 'номера одного оператора',
+};
+function uchRelRu(t) { return UCH_REL_RU[t] || String(t || '').replace(/_/g, ' '); }
+function uchRelHint(t) { return UCH_REL_HINT[t] || ''; }
+
 async function openContactRelationships(id) {
   push('s-contactdetail');
   txt('cdTitle','🕸 Связи');
@@ -18067,15 +18101,23 @@ async function openContactRelationships(id) {
   try {
     const d = await api('/api/miniapp/uch/contacts/'+id+'/relationships');
     const rels = d.relationships||[];
-    if (!rels.length) { txt('cdBody', empty('🕸','Нет связей','Связи обнаруживаются автоматически')); return; }
-    const typeLabels = {'mutual_group':'Общая группа','mutual_channel':'Общий канал','mutual_account':'Общий аккаунт','same_company':'Одна компания','same_username_pattern':'Похожий username','phone_match':'Телефон'};
+    if (!rels.length) {
+      txt('cdBody', empty('🕸','Связей не нашлось',
+        'Связи ищутся по пересечениям карточек: один номер, одинаковое имя в Telegram, одна компания, один аккаунт-источник. Пересчитать можно по всем контактам сразу.',
+        {label:'🔄 Рассчитать связи', fn:'computeGraph()'}));
+      return;
+    }
     let html = '<div style="padding:12px 16px">';
     rels.forEach(r=>{
-      html += `<div class="li"><div class="li-body"><div class="li-name">${esc(r.related_contact_name||'?')}</div><div class="li-sub">${esc(typeLabels[r.relationship_type]||r.relationship_type)} · ${Math.round((r.strength||0)*100)}%</div></div></div>`;
+      // Вторая сторона пары: таблица хранит a/b, «другой» — тот, кто не этот контакт.
+      const other = (String(r.contact_a_id)===String(id)) ? r.contact_b_id : r.contact_a_id;
+      const open = other ? ` onclick="openContactDetail('${esc(String(other))}')" role="button" tabindex="0"` : '';
+      html += `<div class="li${other?' tap':''}"${open}><div class="li-body"><div class="li-name">${esc(r.related_contact_name||'Без имени')}${r.related_is_premium?' 💎':''}</div><div class="li-sub wrap">${esc(uchRelRu(r.relationship_type))} · уверенность ${Math.round((r.strength||0)*100)}%${uchRelHint(r.relationship_type)?' · '+esc(uchRelHint(r.relationship_type)):''}</div></div>${other?'<span class="chev">›</span>':''}</div>`;
     });
-    html += '</div>';
+    html += `<div class="sec" style="margin-top:12px">Весь граф</div>
+      <button class="btn btn-s" style="width:100%" onclick="openUchGraph()">🕸 Открыть граф связей</button></div>`;
     txt('cdBody', html);
-  } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+  } catch(e) { txt('cdBody', errHtml(errRu(e), 'openContactRelationships(\''+id+'\')')); }
 }
 
 async function openContactIdentity(id) {
@@ -19223,23 +19265,77 @@ async function openUchGraph() {
   txt('graphBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/uch/graph/stats');
+    const total = d.total_relationships||0;
+    const types = d.by_type||[];
+    if (!total) {
+      txt('graphBody', empty('🕸','Связи ещё не рассчитаны',
+        'Движок сверяет карточки между собой и находит пересечения: один номер телефона, одинаковое имя в Telegram, одна компания, один аккаунт-источник. Пока ни одного пересечения не посчитано.',
+        {label:'🔄 Рассчитать связи', fn:'computeGraph()'}));
+      return;
+    }
+    const top = types.length ? types[0].relationship_type : '';
     let html = `<div style="padding:12px 16px">
-      <div class="kpi-card" style="margin-bottom:12px"><div class="kpi-val">${num(d.total_relationships||0)}</div><div class="kpi-lbl">Связей</div></div>`;
-    if (d.by_type&&d.by_type.length) {
-      html += '<div class="sec">По типам</div>';
-      d.by_type.forEach(t=>{
-        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(t.relationship_type)}</div><div class="li-sub">${t.cnt} ${plural(t.cnt,'связь','связи','связей')}</div></div></div>`;
+      <div class="kpi-card${top?' tap-card':''}" style="margin-bottom:12px"${top?` onclick="openUchGraphType('${esc(String(top))}')" role="button" tabindex="0"`:''}><div class="kpi-val">${num(total)}</div><div class="kpi-lbl">${plural(total,'Связь','Связи','Связей')} между контактами${top?' · нажмите, чтобы увидеть пары':''}</div></div>`;
+    if (types.length) {
+      html += '<div class="sec">По типам — нажмите, чтобы увидеть пары</div>';
+      types.forEach(t=>{
+        html += `<div class="li tap" onclick="openUchGraphType('${esc(String(t.relationship_type))}')" role="button" tabindex="0"><div class="li-body"><div class="li-name">${esc(uchRelRu(t.relationship_type))}</div><div class="li-sub wrap">${num(t.cnt)} ${plural(t.cnt,'связь','связи','связей')}${uchRelHint(t.relationship_type)?' · '+esc(uchRelHint(t.relationship_type)):''}</div></div><span class="chev">›</span></div>`;
       });
     }
     if (d.strongest&&d.strongest.length) {
-      html += '<div class="sec" style="margin-top:8px">Сильнейшие</div>';
-      d.strongest.forEach(r=>{
-        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(r.a_name||'?')} ↔ ${esc(r.b_name||'?')}</div><div class="li-sub">${esc(r.relationship_type)} · ${Math.round((r.strength||0)*100)}%</div></div></div>`;
-      });
+      html += '<div class="sec" style="margin-top:8px">Самые уверенные пары</div>';
+      d.strongest.forEach(r=>{ html += _uchPairRow(r); });
     }
-    html += '</div>';
+    html += `<div class="sec" style="margin-top:12px">Пересчёт</div>
+      <button class="btn btn-s" style="width:100%" onclick="computeGraph()">🔄 Пересчитать связи по всем контактам</button>
+      <div class="hint" style="margin-top:6px">Связи не обновляются сами: после загрузки новых контактов пересчитайте, иначе граф покажет старую картину.</div></div>`;
     txt('graphBody', html);
-  } catch(e) { txt('graphBody', errHtml(errRu(e))); }
+  } catch(e) { txt('graphBody', errHtml(errRu(e), 'openUchGraph()')); }
+}
+
+function _uchPairWhy(p) {
+  // Причина связи лежит в metadata — её и показываем, иначе «90%» ничего не значит.
+  const m = p.metadata || {};
+  if (m.phone) return 'номер ' + String(m.phone);
+  if (m.username) return 'имя @' + String(m.username);
+  if (m.company) return 'компания ' + String(m.company);
+  if (m.account_id) return 'аккаунт №' + String(m.account_id);
+  return '';
+}
+
+function _uchPairRow(r) {
+  // Пара — это две карточки, и обе должны открываться: раньше строка была
+  // мёртвым текстом «Имя ↔ Имя», и до самих контактов добраться было нельзя.
+  const why = _uchPairWhy(r);
+  const a = r.a_name || 'Без имени', b = r.b_name || 'Без имени';
+  return `<div class="li" style="flex-direction:column;align-items:stretch">
+    <div class="li-body" style="margin-bottom:8px"><div class="li-name">${esc(a)} ↔ ${esc(b)}</div><div class="li-sub wrap">${esc(uchRelRu(r.relationship_type))} · уверенность ${Math.round((r.strength||0)*100)}%${why?' · '+esc(why):''}</div></div>
+    <div style="display:flex;gap:8px">
+      <span class="chip" style="flex:1 1 0;min-width:0" onclick="openContactDetail('${esc(String(r.contact_a_id||''))}')" role="button" tabindex="0">👤&nbsp;<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a)}</span></span>
+      <span class="chip" style="flex:1 1 0;min-width:0" onclick="openContactDetail('${esc(String(r.contact_b_id||''))}')" role="button" tabindex="0">👤&nbsp;<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b)}</span></span>
+    </div>
+  </div>`;
+}
+
+async function openUchGraphType(relType) {
+  push('s-uchgraphtype');
+  txt('grtTitle','🔗 '+uchRelRu(relType));
+  txt('grtBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/uch/graph/pairs?type='+encodeURIComponent(relType));
+    const pairs = d.pairs||[];
+    if (!pairs.length) {
+      txt('grtBody', empty('🔗','Пар этого типа нет',
+        'Либо связи этого типа ещё не посчитаны, либо контакты по нему не пересекаются.',
+        {label:'🔄 Пересчитать связи', fn:'computeGraph()'}));
+      return;
+    }
+    let html = `<div style="padding:12px 16px">
+      <div class="hint" style="margin-bottom:10px">${esc(uchRelHint(relType)||uchRelRu(relType))}. Нажмите на имя — откроется карточка контакта.</div>`;
+    pairs.forEach(r=>{ html += _uchPairRow(r); });
+    html += '</div>';
+    txt('grtBody', html);
+  } catch(e) { txt('grtBody', errHtml(errRu(e), `openUchGraphType('${relType}')`)); }
 }
 
 async function computeGraph() {

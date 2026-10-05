@@ -22882,6 +22882,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("uch_graph_stats")
             return _err(_INTERNAL_ERROR, 500)
 
+    async def uch_graph_pairs(request: web.Request) -> web.Response:
+        """Пары одного типа связи — чтобы счётчик «По типам» открывался списком."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        rel_type = validate_string(request.query.get("type"), max_len=64)
+        if not rel_type:
+            return _err("Не указан тип связи", 400)
+        limit = _list_limit(request, default=50, maximum=200)
+        try:
+            from services.contacts_hub.relationship_engine import (
+                RELATIONSHIP_TYPES, get_pairs_by_type)
+            pairs = await get_pairs_by_type(pool, uid, rel_type, limit)
+            return _json_resp({
+                'type': rel_type,
+                'type_label': RELATIONSHIP_TYPES.get(rel_type, rel_type),
+                'pairs': pairs,
+            })
+        except Exception:
+            log.exception("uch_graph_pairs")
+            return _err(_INTERNAL_ERROR, 500)
+
     async def uch_graph_compute(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -23018,6 +23039,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/uch/export/json", uch_export_json)
     app.router.add_get("/api/miniapp/uch/reminders", uch_reminders)
     app.router.add_get("/api/miniapp/uch/graph/stats", uch_graph_stats)
+    app.router.add_get("/api/miniapp/uch/graph/pairs", uch_graph_pairs)
     app.router.add_post("/api/miniapp/uch/graph/compute", uch_graph_compute)
     app.router.add_post("/api/miniapp/uch/trust/update", uch_trust_update)
     app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
