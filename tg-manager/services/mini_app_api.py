@@ -8431,6 +8431,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("fleet_diagnose uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def fleet_diagnose_blocked(request: web.Request) -> web.Response:
+        """Какие именно аккаунты отсеялись на шаге воронки — и чем они больны.
+
+        Вердикт «Ни у одного аккаунта нет сессии» называет болезнь, но не
+        больных: выяснить, какие это аккаунты, экран не позволял, и чинить
+        приходилось наугад по всему флоту.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import fleet_doctor
+        step = validate_string(request.query.get("step"), 32, required=False) or ""
+        if step not in fleet_doctor.FUNNEL_STEPS:
+            return _err("Неизвестный шаг воронки", 400)
+        limit = _list_limit(request, 100, 300)
+        rows = await _safe_fetch(
+            pool,
+            "SELECT id, phone, first_name, username, is_active, "
+            "(session_str IS NOT NULL AND session_str <> '') AS has_session, "
+            "COALESCE(acc_status,'active') AS acc_status, "
+            "(cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS cd_active, "
+            "trust_score "
+            "FROM tg_accounts WHERE owner_id=$1 ORDER BY id",
+            uid,
+        )
+        blocked = fleet_doctor.step_blockers([dict(r) for r in rows], step)
+        items = [{
+            "id": b.get("id"),
+            "label": (b.get("first_name") or (("@" + b["username"]) if b.get("username") else None)
+                      or b.get("phone") or f"Аккаунт {b.get('id')}"),
+            "reason": b.get("reason", ""),
+        } for b in blocked[:limit]]
+        return _json_resp({"step": step, "items": items, "total": len(blocked)})
+
     async def chatwarmup_accounts(request: web.Request) -> web.Response:
         """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
         uid = _get_uid(request)
@@ -19349,6 +19383,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
     app.router.add_get("/api/miniapp/chatwarmup/accounts", chatwarmup_accounts)
     app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
+    app.router.add_get("/api/miniapp/fleet/diagnose/blocked", fleet_diagnose_blocked)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
     app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
     app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)

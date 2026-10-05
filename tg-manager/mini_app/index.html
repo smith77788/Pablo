@@ -2530,6 +2530,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb"><div id="fleetDoctorBody" style="padding:0 16px"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
+<!-- Кто отсеялся на шаге воронки отбора — и чем болен. -->
+<div class="screen" id="s-fdblocked">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🚫 Отсеялись</div>
+    <div class="hdr-meta"><div class="hdr-user" id="fdb-title"></div></div></div>
+  <div class="sub-sb"><div id="fdbBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+</div>
+
 <!-- ══════════════════════ CHAT WARMUP ══════════════════════ -->
 <div class="screen" id="s-chatwarmup">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">💬 Разогрев чата</div></div>
@@ -8818,6 +8826,26 @@ async function cwStatus(id,st){
 }
 // 🩺 Диагностика флота — почему операции не исполняются.
 function openFleetDoctor(){push('s-fleetdoctor'); fleetDoctorLoad();}
+// Что делать с вердиктом: раньше он говорил «нажмите „Поднять флот"», а
+// кнопки на экране не было — её искали на другом экране, в другой вкладке.
+const FD_FIX = {
+  no_accounts:   {label:'📱 Открыть аккаунты', fn:"goTab('accounts')"},
+  all_inactive:  {label:'🚀 Поднять флот',     fn:'reviveFleet()'},
+  all_cooldown:  {label:'🚀 Поднять флот',     fn:'reviveFleet()'},
+  low_trust:     {label:'🚀 Поднять флот',     fn:'reviveFleet()'},
+  no_session:    {label:'🚫 Кто без сессии',   fn:"fdBlocked('with_session')"},
+  all_dead:      {label:'🚫 Кто мёртв',        fn:"fdBlocked('alive')"},
+  transport_fail:{label:'🌐 Прокси',           fn:'openProxies()'},
+  auth_dup:      {label:'🌐 Прокси',           fn:'openProxies()'},
+};
+// Шаг воронки → подэкран с теми, кто на нём отсеялся. У «Всего» своего шага
+// нет: отсеиваться там не на чем.
+const FD_STEP_TITLE = {
+  active:'Выключены', with_session:'Без сессии', alive:'Мёртвые сессии',
+  not_cooldown:'На кулдауне', operable_join:'Доверие ниже порога вступления',
+  operable_invite:'Доверие ниже порога инвайта',
+};
+let _FD_ERRS = [];   // последние ошибки операций — тап открывает операцию
 async function fleetDoctorLoad(){
   const el=document.getElementById('fleetDoctorBody'); if(!el) return;
   el.innerHTML='<div class="spin-wrap"><div class="spin"></div></div>';
@@ -8825,9 +8853,12 @@ async function fleetDoctorLoad(){
     const d=await api('/api/miniapp/fleet/diagnose');
     const v=d.verdict||{}, f=d.funnel||{};
     const okc=v.ok?'rgba(52,211,153,.12)':'rgba(251,191,36,.12)';
+    const fix=FD_FIX[v.key];
     let h=`<div style="background:${okc};border-radius:14px;padding:14px 16px;margin-bottom:12px">
-      <div style="font-size:15px;font-weight:700;line-height:1.4">${v.ok?'🟢':'🟠'} ${esc(v.text||'—')}</div></div>`;
-    // Воронка отбора: где обнуляется — красным.
+      <div style="font-size:15px;font-weight:700;line-height:1.4">${v.ok?'🟢':'🟠'} ${esc(v.text||'—')}</div>${
+      fix?`<button class="btn btn-p" style="width:100%;margin-top:10px" onclick="${fix.fn}">${fix.label}</button>`:''}</div>`;
+    // Воронка отбора: где обнуляется — красным. Каждый шаг открывает тех, кто
+    // на нём отсеялся: «Готовы к инвайту: 0» без списка больных не лечится.
     const steps=[['Всего аккаунтов','total'],['Активны','active'],['С живой сессией','with_session'],
       ['Не мёртвые (статус)','alive'],['Не в кулдауне','not_cooldown'],
       ['Готовы к вступлению','operable_join'],['Готовы к инвайту/рассылке','operable_invite']];
@@ -8837,9 +8868,14 @@ async function fleetDoctorLoad(){
     steps.forEach(([lbl,key])=>{
       const val=f[key]||0;
       const drop=(prev!==null && prev>0 && val===0);  // здесь отсеялись все
-      h+=`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:13px;color:${drop?'var(--red)':'var(--hint)'}">${drop?'⛔ ':''}${esc(lbl)}</span>
-        <span style="font-size:14px;font-weight:600;color:${drop?'var(--red)':'inherit'}">${val}</span></div>`;
+      const lost=(prev!==null) ? Math.max(prev-val,0) : 0;
+      const tap=(key!=='total');
+      h+=`<div ${tap?`class="tap" onclick="fdBlocked('${key}')" role="button" tabindex="0"`:''}
+        style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--sep)">
+        <span style="font-size:13px;color:${drop?'var(--red)':'var(--hint)'}">${drop?'⛔ ':''}${esc(lbl)}${
+          lost?`<span style="color:var(--orange)"> · отсеялось ${num(lost)}</span>`:''}</span>
+        <span style="font-size:14px;font-weight:600;color:${drop?'var(--red)':'inherit'}">${val}${
+          tap?' <span class="chev">›</span>':''}</span></div>`;
       if(key!=='operable_invite') prev=val;
     });
     h+='</div>';
@@ -8850,8 +8886,9 @@ async function fleetDoctorLoad(){
     const tr=d.transport||{};
     if(tr.total){
       const warn=(tr.direct_only>0 && !tr.cf_relay_configured && !tr.ipv6_configured && !tr.global_proxy);
-      h+=`<div style="background:${warn?'rgba(251,191,36,.10)':'var(--bg)'};border:1px solid var(--sep);border-radius:12px;padding:10px 14px;margin-bottom:10px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:4px">🌐 Транспорт (выход в сеть)</div>
+      h+=`<div class="tap" onclick="openProxies()" role="button" tabindex="0"
+        style="background:${warn?'rgba(251,191,36,.10)':'var(--bg)'};border:1px solid var(--sep);border-radius:12px;padding:10px 14px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">🌐 Транспорт (выход в сеть) <span class="chev">›</span></div>
         <div style="font-size:12px;color:var(--hint);line-height:1.6">
           Со своим прокси: <b style="color:${tr.with_proxy?'var(--green)':'var(--hint)'}">${tr.with_proxy||0}</b> ·
           через CF-релей: <b>${tr.with_relay||0}</b> ·
@@ -8861,18 +8898,50 @@ async function fleetDoctorLoad(){
         ${warn?'<div style="font-size:11px;color:var(--orange);margin-top:6px;line-height:1.4">⚠️ У аккаунтов нет стабильного выходного IP. На общем datacenter-IP импортированные сессии падают в подключении/AUTH_KEY_DUPLICATED. Назначьте прокси или настройте CF-релей/IPv6.</div>':''}
       </div>`;
     }
+    // Что сейчас занято: числа вели в никуда, хотя экран операций умеет
+    // показать ровно эти срезы.
     const st=d.stuck||{};
-    h+=`<div style="font-size:12px;color:var(--hint);margin:0 0 10px">В работе: ${st.running_ops||0} · в очереди: ${st.pending_ops||0} · занято аккаунтов: ${f.in_operation||0}</div>`;
-    // Последние реальные ошибки операций.
-    const errs=d.recent_errors||[];
-    if(errs.length){
+    h+=`<div style="display:flex;gap:8px;margin:0 0 10px">
+      <div class="kpi-card tap-card" onclick="opsGo('running')" role="button" tabindex="0">
+        <div class="kpi-val">${num(st.running_ops||0)}</div><div class="kpi-lbl">В работе ›</div></div>
+      <div class="kpi-card tap-card" onclick="opsGo('pending')" role="button" tabindex="0">
+        <div class="kpi-val">${num(st.pending_ops||0)}</div><div class="kpi-lbl">В очереди ›</div></div>
+      <div class="kpi-card">
+        <div class="kpi-val">${num(f.in_operation||0)}</div><div class="kpi-lbl">Занято акк.</div></div>
+    </div>`;
+    // Последние реальные ошибки операций — тап открывает саму операцию.
+    _FD_ERRS=d.recent_errors||[];
+    if(_FD_ERRS.length){
       h+='<div class="sec" style="margin-top:4px">Последние ошибки операций</div>';
-      h+=errs.map(e=>`<div style="background:var(--bg2);border-radius:10px;padding:8px 12px;margin-bottom:6px">
-        <div style="font-size:12px;font-weight:600">${esc(e.op||'')}</div>
+      h+=_FD_ERRS.map((e,i)=>`<div ${e.id?`class="tap" onclick="openOpDetail(${Number(e.id)})" role="button" tabindex="0"`:''}
+        style="background:var(--bg2);border-radius:10px;padding:8px 12px;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:600">${esc(e.op||'')}${
+          e.finished_at?`<span style="color:var(--hint);font-weight:400"> · ${esc(ago(e.finished_at))}</span>`:''}${
+          e.id?' <span class="chev">›</span>':''}</div>
         <div style="font-size:11px;color:var(--red);margin-top:2px;line-height:1.4">${esc(e.error||'')}</div></div>`).join('');
     }
     el.innerHTML=h;
   }catch(e){ el.innerHTML=errHtml(errRu(e),'fleetDoctorLoad()'); }
+}
+// Кто отсеялся на шаге воронки: имя аккаунта и чем он болен, тап — в карточку.
+async function fdBlocked(step){
+  push('s-fdblocked');
+  txt('fdb-title', FD_STEP_TITLE[step]||'');
+  txt('fdbBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try{
+    const d=await api('/api/miniapp/fleet/diagnose/blocked?step='+encodeURIComponent(step));
+    const items=d.items||[];
+    if(!items.length){
+      txt('fdbBody', empty('✅','На этом шаге никто не отсеялся',
+        'Все аккаунты, дошедшие до этого шага, его прошли'));
+      return;
+    }
+    txt('fdbBody', `<div class="lst">`+items.map(a=>
+      `<div class="li tap" onclick="openAccount(${Number(a.id)})" role="button" tabindex="0">
+         <div class="row-body"><div class="row-name">${esc(a.label||('Аккаунт '+a.id))}</div>
+           <div class="li-sub wrap">${esc(a.reason||'')}</div></div>
+         <span class="chev">›</span></div>`).join('')+`</div>`);
+  }catch(e){ txt('fdbBody', errHtml(errRu(e),"fdBlocked('"+esc(step)+"')")); }
 }
 function pulseActionLabel(a) {
   return ({vault:'Открыть Хранилище', governor:'Открыть инвайт', operation:'Открыть операцию',

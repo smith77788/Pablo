@@ -16,6 +16,9 @@ import logging
 log = logging.getLogger(__name__)
 
 _DEAD = {"banned", "spamblock", "deactivated", "session_expired"}
+# Подписи «чем болен» — владелец читает по-русски, а в базе лежит код статуса.
+_DEAD_RU = {"banned": "забанен", "spamblock": "спамблок",
+            "deactivated": "аккаунт удалён", "session_expired": "сессия отозвана"}
 # Пороги trust (0..1) как в flood_engine._ACTION_MIN_TRUST — операции ниже режут.
 _TRUST_JOIN = 0.35
 _TRUST_INVITE = 0.50
@@ -55,6 +58,49 @@ def compute_funnel(rows: list[dict]) -> dict:
     return f
 
 
+# Шаги воронки в том же порядке, в каком их отсеивает select_all_active.
+FUNNEL_STEPS = ("active", "with_session", "alive", "not_cooldown",
+                "operable_join", "operable_invite")
+
+
+def step_blockers(rows: list[dict], step: str) -> list[dict]:
+    """Кто ДОШЁЛ до шага и не прошёл его. ЧИСТАЯ функция.
+
+    Экран показывал «Готовы к инвайту: 0» и на этом заканчивался: какие именно
+    аккаунты отсеялись и чем они больны — узнать было нечем, хотя это ровно то,
+    что нужно, чтобы флот поехал. Условия здесь те же, что в compute_funnel,
+    и меняться должны вместе с ней (стережёт тест паритета).
+    """
+    if step not in FUNNEL_STEPS:
+        return []
+    out: list[dict] = []
+    for r in rows:
+        if not r.get("is_active"):
+            if step == "active":
+                out.append(dict(r, reason="выключен"))
+            continue
+        if not r.get("has_session"):
+            if step == "with_session":
+                out.append(dict(r, reason="нет сессии"))
+            continue
+        st = (r.get("acc_status") or "active")
+        if st in _DEAD:
+            if step == "alive":
+                out.append(dict(r, reason=_DEAD_RU.get(st, st)))
+            continue
+        if r.get("cd_active"):
+            if step == "not_cooldown":
+                out.append(dict(r, reason="на кулдауне"))
+            continue
+        trust = r.get("trust_score")
+        trust = 1.0 if trust is None else float(trust)
+        if step == "operable_join" and trust < _TRUST_JOIN:
+            out.append(dict(r, reason=f"доверие {trust:.2f} ниже {_TRUST_JOIN:.2f}"))
+        elif step == "operable_invite" and trust < _TRUST_INVITE:
+            out.append(dict(r, reason=f"доверие {trust:.2f} ниже {_TRUST_INVITE:.2f}"))
+    return out
+
+
 def verdict(f: dict) -> dict:
     """Назвать первый шаг, где флот обнуляется, + человекочитаемое действие."""
     if f["total"] == 0:
@@ -62,19 +108,19 @@ def verdict(f: dict) -> dict:
                 "text": "Нет аккаунтов — добавьте флот в разделе «Аккаунты»."}
     if f["active"] == 0:
         return {"key": "all_inactive", "ok": False,
-                "text": "Все аккаунты выключены (is_active=FALSE). Нажмите «🚀 Поднять флот»."}
+                "text": "Все аккаунты выключены. Нажмите «🚀 Поднять флот»."}
     if f["with_session"] == 0:
         return {"key": "no_session", "ok": False,
                 "text": "Ни у одного аккаунта нет сессии — переимпортируйте сессии."}
     if f["alive"] == 0:
         return {"key": "all_dead", "ok": False,
-                "text": "Все сессии мертвы (бан/деактивация/session_expired) — переподключите аккаунты."}
+                "text": "Все сессии мертвы (бан, удаление аккаунта, отозванная сессия) — переподключите аккаунты."}
     if f["not_cooldown"] == 0:
         return {"key": "all_cooldown", "ok": False,
                 "text": "Все аккаунты на кулдауне (флуд/ограничения). Подождите или «🚀 Поднять флот» (сброс кулдауна)."}
     if f["operable_join"] == 0:
         return {"key": "low_trust", "ok": False,
-                "text": "Trust всех аккаунтов ниже порога операций. «🚀 Поднять флот» вернёт траст к рабочему уровню."}
+                "text": "Доверие всех аккаунтов ниже порога операций. «🚀 Поднять флот» вернёт его к рабочему уровню."}
     return {"key": "ok", "ok": True,
             "text": f"Флот готов: {f['operable_join']} для вступления, {f['operable_invite']} для инвайта/рассылки."}
 
@@ -210,14 +256,16 @@ async def diagnose(pool, owner_id: int) -> dict:
         # незакрытая работа, и её причина нужна в «последних реальных ошибках».
         _reason = _ost_reason.sql_error_reason()
         er = await pool.fetch(
-            f"SELECT COALESCE(label, op_type) AS op, {_reason} AS error_msg, "
+            f"SELECT id, COALESCE(label, op_type) AS op, {_reason} AS error_msg, "
             "finished_at "
             "FROM operation_queue WHERE owner_id=$1 "
             f"AND status IN {_ost_reason.sql_unfinished_list()} "
             f"AND COALESCE({_reason}, '') <> '' "
             "ORDER BY finished_at DESC NULLS LAST LIMIT 5", owner_id)
         out["recent_errors"] = [
-            {"op": r["op"], "error": (r["error_msg"] or "")[:200]} for r in er]
+            {"id": r["id"], "op": r["op"], "error": (r["error_msg"] or "")[:200],
+             "finished_at": r["finished_at"].isoformat() if r["finished_at"] else None}
+            for r in er]
     except Exception:
         pass
 

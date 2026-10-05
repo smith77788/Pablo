@@ -161,6 +161,7 @@ GET /api/miniapp/events
 GET /api/miniapp/experiment/{exp_id}
 GET /api/miniapp/experiments
 GET /api/miniapp/fleet/diagnose
+GET /api/miniapp/fleet/diagnose/blocked
 GET /api/miniapp/fleet/governor
 GET /api/miniapp/fleet/warnings
 GET /api/miniapp/flood/{bot_id}
@@ -442,6 +443,7 @@ HEAD /api/miniapp/events
 HEAD /api/miniapp/experiment/{exp_id}
 HEAD /api/miniapp/experiments
 HEAD /api/miniapp/fleet/diagnose
+HEAD /api/miniapp/fleet/diagnose/blocked
 HEAD /api/miniapp/fleet/governor
 HEAD /api/miniapp/fleet/warnings
 HEAD /api/miniapp/flood/{bot_id}
