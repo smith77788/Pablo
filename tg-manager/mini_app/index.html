@@ -6004,6 +6004,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: WORKSPACES ══════════════════════ -->
+<div class="screen" id="s-wsdetail">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title" id="wsdTitle">🏢 Пространство</div>
+  </div>
+  <div class="sub-sb" id="wsdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
 <div class="screen" id="s-workspaces">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
@@ -6014,6 +6022,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
       Командная работа: приглашайте участников и управляйте общими ботами в одном пространстве.
     </div>
+    <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="joinWsByCode()">🔑 Войти по коду приглашения</button>
     <div class="lst" id="wsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -23269,20 +23278,111 @@ async function loadWorkspaces() {
     const d = await api('/api/miniapp/workspaces');
     const ws = d.workspaces||[];
     txt('m-ws-cnt', ws.length+' пространств');
-    if (!ws.length) { txt('wsList', empty('🏢','Нет пространств','Создайте командное пространство')); return; }
+    if (!ws.length) { txt('wsList', empty('🏢','Пространств пока нет',
+      'Пространство — это общий доступ к вашим ботам и каналам для другого человека: он входит по коду приглашения.',
+      {label:'+ Создать пространство', fn:'openWsModal()'})); return; }
     txt('wsList', ws.map(w=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-blue-16)">🏢</div>
-        <div class="row-body">
+        <div class="row-body" onclick="openWsDetail(${w.id})" role="button" tabindex="0" style="cursor:pointer">
           <div class="row-name">${esc(w.name)}</div>
-          <div class="row-val">${w.member_count} ${plural(w.member_count,'участник','участника','участников')} · ${w.role==='owner'?'👑 Владелец':'👤 Участник'}</div>
+          <div class="row-val">${w.member_count} ${plural(w.member_count,'участник','участника','участников')} · ${WS_ROLE_RU[w.role]||WS_ROLE_RU.member}</div>
           ${w.description?`<div class="row-val" style="color:var(--hint)">${esc(w.description)}</div>`:''}
         </div>
-          <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="leaveWs(${w.id},'${esc(w.role)}')">${w.role==='owner'?'🗑':'🚪'}</button></div>
+          <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="leaveWs(${w.id},'${esc(w.role)}')" aria-label="${w.role==='owner'?'Удалить пространство':'Выйти из пространства'}">${w.role==='owner'?'🗑':'🚪'}</button></div>
       </div>
     `).join(''));
-  } catch(e) { txt('wsList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('wsList', errHtml(errRu(e), 'loadWorkspaces()')); }
 }
+
+// Роли пространства лежат в базе ключами (owner | admin | member | viewer) —
+// в подпись они уезжали как есть, и строка читалась «Роль: viewer».
+const WS_ROLE_RU = {owner:'👑 Владелец', admin:'🛡 Администратор',
+                    member:'👤 Участник', viewer:'👁 Только смотрит'};
+
+// Состав пространства и выписка приглашений в продукте были, но только в
+// Telegram-боте: мини-апп показывал «3 участника» и кнопку выхода, а кто эти
+// трое — узнать было негде. Вход в пространство даёт доступ к ботам владельца
+// (токен отдаётся расшифрованным) и к его каналам, поэтому состав должен быть
+// на виду, а лишнего участника надо уметь убрать.
+async function openWsDetail(wsId) {
+  push('s-wsdetail');
+  txt('wsdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/workspace/'+wsId);
+    const w = d.workspace||{};
+    const ms = d.members||[];
+    txt('wsdTitle','🏢 '+(w.name||'Пространство'));
+    const who = m => esc(m.first_name || (m.username ? '@'+m.username : 'Пользователь ' + m.user_id));
+    let h = `<div class="card" style="font-size:13px;color:var(--hint);margin-bottom:8px">
+      ${w.description?esc(w.description)+'<br>':''}Ваша роль: ${WS_ROLE_RU[d.my_role]||WS_ROLE_RU.member}. ${d.my_role==='owner'
+        ? 'Каждый участник работает с вашими ботами и каналами.'
+        : 'Здесь вы работаете с ботами и каналами владельца пространства.'}
+    </div>
+    <div class="sec">Кто в пространстве (${ms.length})</div><div class="lst">`;
+    h += ms.map(m=>`<div class="li"><div class="li-body">
+        <div class="li-name">${who(m)}${m.is_me?' · это вы':''}</div>
+        <div class="li-sub wrap">${WS_ROLE_RU[m.role]||WS_ROLE_RU.member}${m.username?' · @'+esc(m.username):''} · вошёл ${ago(m.joined_at)}</div>
+      </div>${(d.can_invite && !m.is_me && m.role!=='owner')
+        ? `<button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="removeWsMember(${wsId},${m.user_id},this)">Исключить</button>`
+        : ''}</div>`).join('');
+    h += '</div>';
+    if (d.can_invite) {
+      h += `<div class="sec">Пригласить</div>
+      <div class="card" style="font-size:13px;color:var(--hint)">
+        Код даёт войти пяти людям и работает ${num(d.invite_ttl_days||7)} ${plural(d.invite_ttl_days||7,'день','дня','дней')}, потом перестаёт.
+        ${d.live_invites ? 'Сейчас действует '+num(d.live_invites)+' '+plural(d.live_invites,'код','кода','кодов')+'.' : 'Действующих кодов нет.'}
+      </div>
+      <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="createWsInvite(${wsId})">🔗 Выписать код приглашения</button>`;
+      if (_WS_INVITE && _WS_INVITE.wsId === wsId) {
+        h += `<div class="card" style="margin-top:8px;background:var(--bg-green-16)">
+          <div style="font-size:13px;color:var(--hint);margin-bottom:6px">Перешлите этот код тому, кого приглашаете. Войти по нему смогут ${num(_WS_INVITE.uses)} ${plural(_WS_INVITE.uses,'человек','человека','человек')} в течение ${num(_WS_INVITE.ttl)} ${plural(_WS_INVITE.ttl,'дня','дней','дней')}.</div>
+          <div style="font-family:monospace;font-size:13px;word-break:break-all;user-select:all">${esc(_WS_INVITE.code)}</div>
+          <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="copyToClipboard('${esc(_WS_INVITE.code)}','🔗 Код скопирован')">📋 Скопировать код</button>
+        </div>`;
+      }
+    }
+    h += `<div style="display:flex;flex-direction:column;gap:8px;padding:12px 0">
+      <button class="btn btn-d" onclick="leaveWs(${wsId},'${esc(d.my_role||'member')}')">${d.my_role==='owner'?'🗑 Удалить пространство':'🚪 Выйти из пространства'}</button>
+    </div>`;
+    txt('wsdBody', h);
+  } catch(e) { txt('wsdBody', errHtml(errRu(e), `openWsDetail(${Number(wsId)})`)); }
+}
+
+// Выписанный код держим до ухода с экрана: его надо успеть переслать, а
+// повторно показать его нельзя — в базе лежит только сам код, и выписка
+// нового отнимает одну из попыток.
+let _WS_INVITE = null;
+async function createWsInvite(wsId) {
+  try {
+    const r = await api(`/api/miniapp/workspace/${wsId}/invite`, {method:'POST'});
+    _WS_INVITE = {wsId: wsId, code: r.code, ttl: r.ttl_days||7, uses: r.uses||5};
+    copyToClipboard(r.code, '🔗 Код скопирован');
+    openWsDetail(wsId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function removeWsMember(wsId, memberId, el) {
+  if (!await confirmDelete('Исключить участника', el,
+      'Он потеряет доступ к вашим ботам и каналам.')) return;
+  try {
+    await api(`/api/miniapp/workspace/${wsId}/member/${memberId}`, {method:'DELETE'});
+    toast('🚪 Участник исключён');
+    openWsDetail(wsId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function joinWsByCode() {
+  const code = await askPrompt('Код приглашения', {placeholder:'Вставьте код, который вам прислали'});
+  if (!code) return;
+  try {
+    const r = await api('/api/miniapp/workspace/join', {method:'POST', body:JSON.stringify({code:code.trim()})});
+    toast('✅ Вы вошли в пространство');
+    loadWorkspaces();
+    openWsDetail(r.ws_id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Код неверный или истёк')); }
+}
+
 function openWsModal() {
   document.getElementById('wsName').value='';
   document.getElementById('wsDesc').value='';
@@ -23311,6 +23411,9 @@ async function leaveWs(wsId, role) {
   try {
     await api('/api/miniapp/workspace/'+wsId, {method:'DELETE'});
     toast(role==='owner' ? '🗑 Пространство удалено' : '🚪 Вы покинули пространство');
+    // Кнопка есть и на карточке самого пространства: после удаления она
+    // показывала бы уже несуществующее пространство, пока не нажать «назад».
+    if (STACK[STACK.length-1] === 's-wsdetail') back();
     loadWorkspaces();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }

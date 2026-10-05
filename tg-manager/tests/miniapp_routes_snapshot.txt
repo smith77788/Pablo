@@ -51,6 +51,7 @@ DELETE /api/miniapp/warmup/{plan_id}
 DELETE /api/miniapp/workflow/{wf_id}
 DELETE /api/miniapp/workflows/{wf_id}
 DELETE /api/miniapp/workspace/{ws_id}
+DELETE /api/miniapp/workspace/{ws_id}/member/{member_id}
 GET /.well-known/assetlinks.json
 GET /api/miniapp/ab/results
 GET /api/miniapp/account/{acc_id}
@@ -323,6 +324,7 @@ GET /api/miniapp/warmup/{plan_id}/log
 GET /api/miniapp/workflow/{wf_id}/status
 GET /api/miniapp/workflows
 GET /api/miniapp/workflows/{wf_id}
+GET /api/miniapp/workspace/{ws_id}
 GET /api/miniapp/workspaces
 GET /metrics
 GET /miniapp
@@ -599,6 +601,7 @@ HEAD /api/miniapp/warmup/{plan_id}/log
 HEAD /api/miniapp/workflow/{wf_id}/status
 HEAD /api/miniapp/workflows
 HEAD /api/miniapp/workflows/{wf_id}
+HEAD /api/miniapp/workspace/{ws_id}
 HEAD /api/miniapp/workspaces
 HEAD /metrics
 HEAD /miniapp
@@ -930,6 +933,8 @@ POST /api/miniapp/workflow/{wf_id}/resume
 POST /api/miniapp/workflows
 POST /api/miniapp/workflows/{wf_id}/steps
 POST /api/miniapp/workspace
+POST /api/miniapp/workspace/join
+POST /api/miniapp/workspace/{ws_id}/invite
 PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle

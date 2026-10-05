@@ -6112,6 +6112,43 @@ async def delete_workspace_member(pool: asyncpg.Pool, ws_id: int, user_id: int) 
             target=f"ws:{ws_id} user:{user_id}")
 
 
+async def remove_workspace_member(
+    pool: asyncpg.Pool, ws_id: int, actor_id: int, target_id: int
+) -> str:
+    """Исключить участника. Возвращает "ok" либо причину отказа.
+
+    Право проверяется здесь, а не только в обработчике — по той же причине,
+    что и у create_workspace_invite: обработчиков со временем станет больше
+    одного, а номер пространства и номер участника приходят от клиента.
+
+    Исключить владельца нельзя никому: пространство осталось бы без хозяина,
+    а строка владельца в workspace_members — то, по чему он сам видит своё
+    пространство в списке. Уйти владелец может только удалив пространство.
+    """
+    role = await get_workspace_role(pool, ws_id, actor_id)
+    if role not in WORKSPACE_INVITE_ROLES:
+        log.warning(
+            "workspace remove отклонён: actor=%s ws=%s роль=%s",
+            actor_id, ws_id, role or "не участник",
+        )
+        return "forbidden"
+    target_role = await pool.fetchval(
+        "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+        ws_id, target_id,
+    )
+    if not target_role:
+        return "not_found"
+    if target_role == "owner":
+        return "owner"
+    if target_id == actor_id:
+        return "self"
+    await delete_workspace_member(pool, ws_id, target_id)
+    await record_manual_action(
+        pool, actor_id, "workspace_member_remove",
+        target=f"ws:{ws_id} user:{target_id}")
+    return "ok"
+
+
 async def get_platform_setting(pool: asyncpg.Pool, key: str, default: str = "") -> str:
     row = await pool.fetchrow("SELECT value FROM platform_settings WHERE key=$1", key)
     return row["value"] if row else default

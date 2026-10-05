@@ -13743,6 +13743,142 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("leave_workspace delete uid=%d ws=%d", uid, ws_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def workspace_detail(request: web.Request) -> web.Response:
+        """Состав пространства. Доступ — только участникам.
+
+        Экран списка показывал «3 участника» и кнопку выхода: кто эти трое,
+        увидеть было нельзя ни здесь, ни где-либо ещё в мини-аппе, хотя вход в
+        пространство даёт доступ к ботам владельца (токен отдаётся
+        расшифрованным) и к его каналам. Состав и выписка приглашений в
+        продукте были, но только в Telegram-боте.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ws_id = int(request.match_info["ws_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор рабочего пространства", 400)
+        try:
+            from database.db import (
+                WORKSPACE_INVITE_ROLES, WORKSPACE_INVITE_TTL_DAYS,
+                get_workspace, get_workspace_members, get_workspace_role,
+            )
+            role = await get_workspace_role(pool, ws_id, uid)
+            if not role:
+                return _err("Пространство не найдено", 404)
+            ws = await get_workspace(pool, ws_id, viewer_id=uid)
+            if not ws:
+                return _err("Пространство не найдено", 404)
+            members = await get_workspace_members(pool, ws_id, viewer_id=uid)
+            live = await _safe_count(pool,
+                "SELECT COUNT(*) FROM workspace_invites WHERE workspace_id=$1 "
+                "AND uses_left>0 AND now() < COALESCE(expires_at, created_at "
+                f"+ INTERVAL '{WORKSPACE_INVITE_TTL_DAYS} days')", ws_id)
+            return _json_resp({
+                "workspace": {
+                    "id": ws_id,
+                    "name": ws.get("name") or "",
+                    "description": ws.get("description") or "",
+                    "created_at": ws["created_at"].isoformat() if ws.get("created_at") else None,
+                },
+                "my_role": role,
+                "can_invite": role in WORKSPACE_INVITE_ROLES,
+                "invite_ttl_days": WORKSPACE_INVITE_TTL_DAYS,
+                "live_invites": live,
+                "members": [
+                    {
+                        "user_id": m["user_id"],
+                        "role": m["role"] or "member",
+                        "username": m["username"] or "",
+                        "first_name": m["first_name"] or "",
+                        "joined_at": m["joined_at"].isoformat() if m["joined_at"] else None,
+                        "is_me": int(m["user_id"]) == int(uid),
+                    }
+                    for m in members
+                ],
+            })
+        except Exception:
+            log.exception("workspace_detail uid=%d ws=%d", uid, ws_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def workspace_invite_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ws_id = int(request.match_info["ws_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор рабочего пространства", 400)
+        try:
+            from database.db import WORKSPACE_INVITE_TTL_DAYS, create_workspace_invite
+
+            # Право приглашать проверяет сама create_workspace_invite — она
+            # единственный источник правды и для бота тоже.
+            code = await create_workspace_invite(pool, ws_id, uid)
+            if code is None:
+                return _err("Приглашать может только владелец или администратор "
+                            "пространства", 403)
+            return _json_resp({"ok": True, "code": code,
+                               "ttl_days": WORKSPACE_INVITE_TTL_DAYS, "uses": 5})
+        except Exception:
+            log.exception("workspace_invite_create uid=%d ws=%d", uid, ws_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def workspace_join(request: web.Request) -> web.Response:
+        """Войти по коду приглашения — то же, что «Войти по коду» в боте."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        code = validate_string(body.get("code"), 100, required=True)
+        if not code:
+            return _err("Введите код приглашения", 400)
+        try:
+            from database.db import use_workspace_invite
+
+            ws_id = await use_workspace_invite(pool, code, uid)
+            if not ws_id:
+                return _err("Код неверный или истёк", 404)
+            return _json_resp({"ok": True, "ws_id": ws_id})
+        except Exception:
+            log.exception("workspace_join uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    _WS_REMOVE_ERR = {
+        "forbidden": ("Исключать участников может только владелец или "
+                      "администратор пространства", 403),
+        "not_found": ("Участник не найден", 404),
+        "owner": ("Владельца пространства исключить нельзя — пространство "
+                  "осталось бы без хозяина", 400),
+        "self": ("Себя исключить нельзя: выйдите из пространства", 400),
+    }
+
+    async def workspace_member_remove(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ws_id = int(request.match_info["ws_id"])
+            member_id = int(request.match_info["member_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        try:
+            from database.db import remove_workspace_member
+
+            res = await remove_workspace_member(pool, ws_id, uid, member_id)
+            if res != "ok":
+                msg, code = _WS_REMOVE_ERR.get(res, ("Не удалось исключить", 400))
+                return _err(msg, code)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("workspace_member_remove uid=%d ws=%d member=%d",
+                          uid, ws_id, member_id)
+            return _err(_INTERNAL_ERROR, 500)
+
     # ── Promo Platform ────────────────────────────────────────────────────────
 
     async def promo_overview(request: web.Request) -> web.Response:
@@ -19138,6 +19274,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/workspaces", workspaces_list)
     app.router.add_post("/api/miniapp/workspace", create_workspace)
     app.router.add_delete("/api/miniapp/workspace/{ws_id}", leave_workspace)
+    app.router.add_get("/api/miniapp/workspace/{ws_id}", workspace_detail)
+    app.router.add_post("/api/miniapp/workspace/{ws_id}/invite", workspace_invite_create)
+    app.router.add_post("/api/miniapp/workspace/join", workspace_join)
+    app.router.add_delete("/api/miniapp/workspace/{ws_id}/member/{member_id}", workspace_member_remove)
     # Promo Platform
     app.router.add_get("/api/miniapp/promo", promo_overview)
     app.router.add_post("/api/miniapp/promo/order", promo_create_order_api)
