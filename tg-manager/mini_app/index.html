@@ -5194,6 +5194,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <label class="chk-row" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="invOverflow" onchange="invOverflowToggle()"> 📺 Переливать в каналы из резерва</label>
         <div class="hint" style="padding:4px 2px 0">Канал упёрся в лимит приглашённых или поймал флуд — Infragram берёт следующий пустой канал из резерва, оформляет его так же (описание, пост) и приглашает туда оставшихся. И так по кругу, пока не пригласит всех, кого можно. Продолжение на следующий день начнёт с того канала, где остановились.</div>
         <div id="invOverflowBox" style="display:none;margin-top:8px">
+          <div id="invChainWrap"></div>
           <label>Резерв пустых каналов — отмечайте в том порядке, в каком брать</label>
           <div id="invReserveWrap" style="max-height:160px;overflow-y:auto;border:1.5px solid var(--border-input);border-radius:10px;padding:6px;background:var(--bg-select)"></div>
           <label style="margin-top:8px">Лимит приглашённых на канал (пусто — до упора)</label>

@@ -7954,13 +7954,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         from services import invite_overflow as _ovf
         from services.mass_inviter_engine import parse_group_ref
         group = (request.query.get("group") or "").strip()
+        _ck = parse_group_ref(group) if group else ""
         try:
-            chans = await _ovf.reserve_options(
-                pool, uid, parse_group_ref(group) if group else "")
+            chans = await _ovf.reserve_options(pool, uid, _ck)
+            # Цепочка этой кампании: по каким каналам она уже шла, сколько в
+            # каждый пригласили и с какого продолжит следующий запуск.
+            chain = await _ovf.chain_rows(pool, uid, _ck) if _ck else []
         except Exception:
             log.warning("invite_reserve_options uid=%s", uid, exc_info=True)
             return _err("Не удалось загрузить каналы", 500)
-        return _json_resp({"channels": chans})
+        return _json_resp({"channels": chans, "chain": chain})
 
     async def invite_audience_size(request: web.Request) -> web.Response:
         """Сколько целей даст выбранный источник — ДО запуска операции.

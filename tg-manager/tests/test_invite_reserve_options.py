@@ -93,3 +93,35 @@ def test_reserve_options_sql_runs_on_real_schema():
         assert loop.run_until_complete(_go()) == []
     finally:
         loop.close()
+
+
+def test_chain_panel_says_where_the_next_run_continues(tmp_path):
+    """Панель цепочки: каналы кампании и откуда продолжит запуск (правило исполнителя)."""
+    import json
+    import shutil
+    import subprocess
+
+    if not shutil.which("node"):
+        pytest.skip("нужен node")
+    api = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    assert '"chain": chain' in api
+    js = (ROOT / "mini_app" / "screens" / "invite.js").read_text(encoding="utf-8")
+    start = js.index("function _invRenderChain(")
+    end = js.index("\nfunction invReservePick(")
+    fn = js[start:end]
+    script = tmp_path / "t.js"
+    script.write_text(
+        "const el={innerHTML:''};const document={getElementById:()=>el};"
+        "const esc=s=>String(s);const num=n=>String(n);const _invGroup=()=>'@main';"
+        + fn +
+        "\nconst out=[];"
+        f"_invRenderChain({json.dumps([{'channel_ref': '@main', 'channel_id': 1, 'status': 'full', 'invited_ok': 190}, {'channel_ref': 'https://t.me/+r', 'channel_id': 2, 'status': 'active', 'invited_ok': 40}])},"
+        f"{json.dumps([{'channel_id': 2, 'title': 'Резерв-1'}])});out.push(el.innerHTML);"
+        f"_invRenderChain({json.dumps([{'channel_ref': '@main', 'channel_id': 1, 'status': 'full', 'invited_ok': 190}])}, []);out.push(el.innerHTML);"
+        "_invRenderChain([], []);out.push(el.innerHTML);"
+        "console.log(JSON.stringify(out));", encoding="utf-8")
+    out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True,
+                                    check=True).stdout)
+    assert "продолжит в «Резерв-1»" in out[0] and "✅ заполнен · 190" in out[0]
+    assert "сразу возьмёт канал из резерва" in out[1]
+    assert out[2] == ""

@@ -306,6 +306,7 @@ async function invOverflowToggle() {
     // аккаунта-админа он пропустит — показываем это до запуска, а не в итоге.
     const d = await api('/api/miniapp/invite/reserve_options?group=' + encodeURIComponent(_invGroup()));
     const main = (document.getElementById('massInviteGroup')?.value || '').trim().replace(/^@/, '').toLowerCase();
+    _invRenderChain(d.chain || [], d.channels || []);
     const list = (d.channels || []).filter(c =>
       !(c.username && c.username.toLowerCase() === main));
     if (!list.length) {
@@ -335,6 +336,37 @@ async function invOverflowToggle() {
   } catch (e) {
     wrap.innerHTML = `<div style="font-size:12px;color:var(--red)">Не удалось загрузить каналы: ${esc(e.message || '')}</div>`;
   }
+}
+
+// Цепочка каналов кампании: где уже приглашали, сколько и откуда продолжим.
+// Без неё оператор не знал, что запуск начнётся не с главного канала, а с
+// того, где кампания остановилась, — и что каналы цепочки уже заняты.
+function _invRenderChain(chain, chans) {
+  const el = document.getElementById('invChainWrap');
+  if (!el) return;
+  if (!chain.length) { el.innerHTML = ''; return; }
+  const byId = {};
+  chans.forEach(c => { byId[c.channel_id] = c; });
+  const st = {active: '▶️ в работе', full: '✅ заполнен', burned: '⛔ выбыл'};
+  const main = _invGroup();
+  const rows = chain.map(r => {
+    const c = byId[r.channel_id];
+    const name = c ? (c.title || (c.username ? '@' + c.username : r.channel_ref)) : r.channel_ref;
+    return `<div style="display:flex;gap:6px;font-size:12px;padding:1px 0">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+      <span style="color:var(--hint)">${st[r.status] || esc(r.status)} · ${num(r.invited_ok || 0)}</span></div>`;
+  }).join('');
+  // Тем же правилом, что исполнитель: последний активный канал резерва.
+  const act = [...chain].reverse().find(r => r.status === 'active' && String(r.channel_ref) !== main);
+  const next = act ? (byId[act.channel_id]?.title || act.channel_ref) : '';
+  const mrow = chain.find(r => String(r.channel_ref) === main);
+  const mainDone = !act && mrow && mrow.status !== 'active';
+  el.innerHTML = `<div style="margin-bottom:8px;padding:8px;border-radius:10px;background:var(--bg-select)">
+    <div style="font-size:12px;font-weight:600;margin-bottom:4px">📺 Эта кампания уже шла по каналам (приглашено):</div>
+    ${rows}
+    ${next ? `<div style="font-size:12px;margin-top:4px">Запуск продолжит в «${esc(next)}».</div>` : ''}
+    ${mainDone ? '<div style="font-size:12px;margin-top:4px">Главный канал уже закрыт для приглашений — запуск сразу возьмёт канал из резерва.</div>' : ''}
+  </div>`;
 }
 
 function invReservePick(id, on) {
