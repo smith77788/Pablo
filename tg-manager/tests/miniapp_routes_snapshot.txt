@@ -186,6 +186,7 @@ GET /api/miniapp/invite/analytics
 GET /api/miniapp/invite/audience
 GET /api/miniapp/invite/fleet_readiness
 GET /api/miniapp/invite/preflight
+GET /api/miniapp/invite/reserve_options
 GET /api/miniapp/invite/retention
 GET /api/miniapp/invite/rights_check
 GET /api/miniapp/invite/segment_options
@@ -258,6 +259,7 @@ GET /api/miniapp/sales/persona/{pid}
 GET /api/miniapp/sales/persona/{pid}/stats
 GET /api/miniapp/sales/personas
 GET /api/miniapp/self_promo
+GET /api/miniapp/self_promo/audience
 GET /api/miniapp/semantic_memory
 GET /api/miniapp/semantic_memory/{bot_id}
 GET /api/miniapp/seo
@@ -464,6 +466,7 @@ HEAD /api/miniapp/invite/analytics
 HEAD /api/miniapp/invite/audience
 HEAD /api/miniapp/invite/fleet_readiness
 HEAD /api/miniapp/invite/preflight
+HEAD /api/miniapp/invite/reserve_options
 HEAD /api/miniapp/invite/retention
 HEAD /api/miniapp/invite/rights_check
 HEAD /api/miniapp/invite/segment_options
@@ -536,6 +539,7 @@ HEAD /api/miniapp/sales/persona/{pid}
 HEAD /api/miniapp/sales/persona/{pid}/stats
 HEAD /api/miniapp/sales/personas
 HEAD /api/miniapp/self_promo
+HEAD /api/miniapp/self_promo/audience
 HEAD /api/miniapp/semantic_memory
 HEAD /api/miniapp/semantic_memory/{bot_id}
 HEAD /api/miniapp/seo

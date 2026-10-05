@@ -18338,6 +18338,46 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("self_promo_toggle uid=%d tpl=%d", uid, tpl_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    # Отбор получателей самопиара. Условие слово в слово повторяет
+    # op_worker._exec_self_promo_blast: число в подтверждении обязано совпадать
+    # с тем, скольким людям сообщение реально уйдёт, иначе подтверждение врёт.
+    # Расхождение стережёт tests/test_self_promo_names_the_scale.py.
+    _SELF_PROMO_AUDIENCE_WHERE = (
+        "FROM bot_users bu JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
+        "WHERE mb.added_by = $1 AND bu.is_active = TRUE AND mb.is_active = TRUE "
+        "AND mb.token IS NOT NULL"
+    )
+    # Тот же потолок, что в LIMIT исполнителя: за один запуск больше не уйдёт.
+    _SELF_PROMO_CAP = 1000
+
+    async def _self_promo_audience(uid: int) -> dict:
+        row = await _safe_fetchrow(pool,
+            "SELECT COUNT(*) AS people, COUNT(DISTINCT bu.bot_id) AS bots "
+            + _SELF_PROMO_AUDIENCE_WHERE, uid)
+        people = int(row["people"] or 0) if row else 0
+        return {
+            "people": people,
+            "bots": int(row["bots"] or 0) if row else 0,
+            "cap": _SELF_PROMO_CAP,
+            "will_send": min(people, _SELF_PROMO_CAP),
+        }
+
+    async def self_promo_audience(request: web.Request) -> web.Response:
+        """Скольким людям уйдёт самопиар — чтобы спросить до отправки.
+
+        Рассылка в личные сообщения необратима и банооопасна, а подтверждение
+        спрашивало «запустить рассылку?» не называя ни одного числа. Размер
+        аудитории исполнитель считает сам, но уже ПОСЛЕ запуска.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            return _json_resp(await _self_promo_audience(uid))
+        except Exception:
+            log.exception("self_promo_audience uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def self_promo_launch(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -18354,10 +18394,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             )
             if not tpl:
                 return _err("Шаблон не найден или неактивен", 404)
+            # total_items=1 означало, что в очереди операция до самого старта
+            # показывала «1 из 1» независимо от того, уходит она троим или
+            # тысяче: исполнитель поправляет число, только когда до неё дойдут
+            # руки воркера. Ставим настоящий размер сразу.
+            aud = await _self_promo_audience(uid)
             op_id = await _obus.submit(
                 pool, uid, "self_promo_blast", {"template_id": tpl_id},
-                total_items=1, label=f"Self Promo: {tpl['title'] or tpl_id}")
-            return _json_resp({"ok": True, "op_id": op_id})
+                total_items=max(1, int(aud["will_send"])),
+                label=f"Самопиар: {tpl['title'] or tpl_id}")
+            return _json_resp({"ok": True, "op_id": op_id,
+                               "recipients": aud["will_send"]})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
@@ -20348,6 +20395,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/spintax/expand", spintax_expand)
     # Self Promo
     app.router.add_get("/api/miniapp/self_promo", self_promo_list)
+    app.router.add_get("/api/miniapp/self_promo/audience", self_promo_audience)
     app.router.add_post("/api/miniapp/self_promo/template", self_promo_create)
     app.router.add_delete("/api/miniapp/self_promo/{tpl_id}", self_promo_delete)
     app.router.add_put("/api/miniapp/self_promo/{tpl_id}/toggle", self_promo_toggle)

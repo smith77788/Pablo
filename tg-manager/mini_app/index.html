@@ -26073,6 +26073,7 @@ function copySpRefLink() {
   if (!url) { toast('⚠️ Username бота не определён'); return; }
   copyToClipboard(url, '✅ Ссылка скопирована!');
 }
+let _SP_ROWS = [];
 async function openSelfPromo() {
   push('s-selfpromo');
   // Показать реальную реф-ссылку на системного бота
@@ -26082,24 +26083,38 @@ async function openSelfPromo() {
   txt('spList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/self_promo');
-    if (!rows.length) { txt('spList', empty('📣','Шаблонов нет','')); return; }
+    if (!rows.length) { txt('spList', empty('📣','Шаблонов самопиара нет',
+      'Шаблон — это текст, который разойдётся подписчикам ваших ботов со ссылкой на вас.',
+      {label:'+ Создать шаблон', fn:'openSelfPromoCreateModal()'})); return; }
     const styleLabel = {direct:'🎯 Прямая',native:'💡 Нативная'};
-    txt('spList', rows.map(r => `
-      <div class="row">
-        <div class="row-body">
-          <div class="row-name">${styleLabel[r.style]||r.style} · ${esc(r.title)}</div>
-          <div class="row-val">${esc((r.content||'').slice(0,80))}…</div>
-          ${r.cta_text?`<div class="row-val" style="color:var(--accent)">CTA: ${esc(r.cta_text)}</div>`:''}
-          <div class="row-val" style="color:var(--hint)">Использований: ${r.use_count||0} · ${r.is_active?'🟢 Активен':'🔴 Выключен'}${r.is_mine?' · ✏️ Мой':''}</div>
+    // Полный текст шаблона прочитать было негде: он резался на 80 символах, и
+    // «…» дописывалось даже к коротким. Длинный — разворачивается по строке.
+    txt('spList', rows.map(r => {
+      const full = r.content||'';
+      const cut = full.length > 90;
+      return `<div class="row">
+        <div class="row-body"${cut?` onclick="showSelfPromoText(${r.id})" role="button" tabindex="0" style="cursor:pointer"`:''}>
+          <div class="row-name">${styleLabel[r.style]||esc(r.style||'')} · ${esc(r.title)}</div>
+          <div class="row-val">${esc(cut ? full.slice(0,90)+'…' : full)}${cut?' <span style="color:var(--accent)">читать</span>':''}</div>
+          ${r.cta_text?`<div class="row-val" style="color:var(--accent)">Кнопка: ${esc(r.cta_text)}</div>`:''}
+          <div class="row-val" style="color:var(--hint)">${r.use_count?('Разослан '+num(r.use_count)+' '+plural(r.use_count,'раз','раза','раз')):'Ещё ни разу не рассылался'} · ${r.is_active?'🟢 Включён':'🔴 Выключен'}${r.is_mine?' · ✏️ Мой':''}</div>
         </div>
         <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleSelfPromo(${r.id},this)">${r.is_active?'Выкл':'Вкл'}</button>
-          ${r.is_active?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="launchSelfPromo(${r.id},this)">▶ Запуск</button>`:''}
+          ${r.is_active?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="launchSelfPromo(${r.id},this)">▶ Разослать</button>`:''}
           ${r.is_mine?`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;background:var(--bg-red-18);color:var(--red)" onclick="deleteSelfPromoTemplate(${r.id}, this)" aria-label="Удалить">🗑</button>`:''}
         </div>
-      </div>
-    `).join(''));
-  } catch(e) { txt('spList', empty('⚠️','Ошибка',errRu(e))); }
+      </div>`;
+    }).join(''));
+    _SP_ROWS = rows;
+  } catch(e) { txt('spList', errHtml(errRu(e), 'openSelfPromo()')); }
+}
+function showSelfPromoText(id) {
+  const r = (_SP_ROWS||[]).find(x => x.id === id);
+  if (!r) return;
+  // Показ, а не вопрос: showInfo даёт одну кнопку «ОК», askConfirm дал бы
+  // «Отмена/ОК» там, где отменять нечего.
+  showInfo((r.title ? r.title + '\n\n' : '') + (r.content || '—'));
 }
 async function toggleSelfPromo(id,btn) {
   btn.disabled=true;
@@ -26109,16 +26124,38 @@ async function toggleSelfPromo(id,btn) {
     openSelfPromo();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); btn.disabled=false; }
 }
+// Рассылка в личные сообщения необратима и банооопасна, а подтверждение
+// спрашивало «запустить рассылку?» не называя ни одного числа: владелец не
+// знал ни скольким людям уйдёт, ни с каких ботов. Размер аудитории продукт
+// считает сам — но уже ПОСЛЕ запуска, в исполнителе. Спрашиваем до.
 async function launchSelfPromo(id,btn) {
-  // Массовая рассылка подписчикам ботов → осознанное подтверждение (паритет с
-  // остальными blast-операциями).
-  if (!await askConfirm('Запустить рассылку самопиара по подписчикам ваших ботов?')) return;
-  btn.disabled=true; btn.textContent='...';
+  btn.disabled=true; btn.textContent='…';
+  let aud = null;
+  try { aud = await api('/api/miniapp/self_promo/audience'); }
+  catch(_) { /* не узнали размер — спросим без числа, но честно скажем об этом */ }
+  btn.disabled=false; btn.textContent='▶ Разослать';
+  let msg;
+  // Числа здесь — точные, без сокращений num(): «1,0К людям» в подтверждении
+  // необратимой рассылки скрывает ровно то, ради чего его показывают.
+  const exact = n => Number(n).toLocaleString('ru-RU');
+  if (aud && aud.people) {
+    msg = `Разослать ${exact(aud.will_send)} ${plural(aud.will_send,'человеку','людям','людям')}`
+        + (aud.bots ? `, подписанным на ${exact(aud.bots)} ${plural(aud.bots,'вашего бота','ваших ботов','ваших ботов')}` : '')
+        + '?\n\nСообщение придёт им в личку от имени бота. Отозвать рассылку нельзя.'
+        + (aud.people > aud.cap ? `\n\nВсего подписчиков ${exact(aud.people)}, за один запуск уйдёт не больше ${exact(aud.cap)}.` : '');
+  } else if (aud) {
+    msg = 'Подписчиков у ваших ботов сейчас нет — рассылать некому. Всё равно поставить в очередь?';
+  } else {
+    msg = 'Не удалось посчитать, скольким людям уйдёт рассылка. Запустить всё равно?\n\nСообщение придёт подписчикам ваших ботов в личку. Отозвать рассылку нельзя.';
+  }
+  if (!await askConfirm(msg)) return;
+  btn.disabled=true; btn.textContent='…';
   try {
-    await api(`/api/miniapp/self_promo/${id}/launch`,{method:'POST'});
-    toast('🚀 Рассылка запущена');
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
-  finally { btn.disabled=false; btn.textContent='▶ Запуск'; }
+    const r = await api(`/api/miniapp/self_promo/${id}/launch`,{method:'POST'});
+    toast(r.recipients ? `🚀 Рассылка запущена: ${exact(r.recipients)} ${plural(r.recipients,'получатель','получателя','получателей')}`
+                       : '🚀 Рассылка запущена');
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  finally { btn.disabled=false; btn.textContent='▶ Разослать'; }
 }
 
 // ── Bot Add Modal ──────────────────────────────────────
