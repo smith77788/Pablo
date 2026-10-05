@@ -873,6 +873,8 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     # частичном успехе помечал ВСЕХ целей пакета как обработанных (дубль-баг:
     # реально не добавленные никогда не получали повторной попытки).
     succeeded: list = []
+    # Добавлены, но права админа с них снять не удалось (флуд/обрыв на снятии).
+    admins_left: list = []
     # Как в invite_batch: цели, до которых не дошло (флуд/нет прав/обрыв), и
     # короткие паузы, пережитые на месте, — исполнителю для очереди и пульса.
     untried_from = len(user_refs)
@@ -895,13 +897,28 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                                             admin_rights=_grant, rank="")),
                     timeout=_ACTION_TIMEOUT)
                 await asyncio.sleep(random.uniform(1.0, 2.0))
-                # …и сразу снять права → остаётся обычным участником.
-                await asyncio.wait_for(
-                    client(EditAdminRequest(channel=group, user_id=user,
-                                            admin_rights=_revoke, rank="")),
-                    timeout=_ACTION_TIMEOUT)
+                # …и сразу снять права → остаётся обычным участником. Снятие —
+                # отдельно от выдачи: раньше флуд или обрыв на снятии уходил в
+                # общий разбор как «цель не добавлена», хотя человек УЖЕ в чате,
+                # и — главное — оставался анонимным админом с правом приглашать
+                # в канале владельца. Теперь он засчитан добавленным, а несостоявшееся
+                # снятие отдаётся наверх в admins_left (исполнитель повторит его).
+                _rev_err = await _revoke_admin(client, group, user, _revoke)
                 ok += 1
                 succeeded.append(ref)
+                if _rev_err is not None:
+                    admins_left.append(ref)
+                    _en = type(_rev_err).__name__
+                    if _en == "PeerFloodError":
+                        peer_flood = True
+                        untried_from = _cur + 1
+                        errors.append("account error: peer flood")
+                        break
+                    if _en == "FloodWaitError":
+                        flood_wait = int(getattr(_rev_err, "seconds", 0) or 60)
+                        untried_from = _cur + 1
+                        errors.append(f"account error: flood wait {flood_wait}s")
+                        break
                 await asyncio.sleep(random.uniform(2.5, 5.0))
             except UserAlreadyParticipantError:
                 ok += 1
@@ -970,7 +987,84 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
             "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights,
             "still_blocked": still_blocked,
             "untried": list(user_refs[untried_from:]),
-            "short_floods": short_floods}
+            "short_floods": short_floods,
+            "admins_left": admins_left}
+
+
+async def _revoke_admin(client, group, user, rights):
+    """Снять выданную трюком админку. None — снята, иначе исключение последней попытки.
+
+    Короткую паузу Telegram пережидаем и пробуем ещё раз: оставить постороннего
+    человека админом канала хуже, чем подождать минуту.
+    """
+    from telethon.tl.functions.channels import EditAdminRequest
+
+    last = None
+    for _attempt in range(2):
+        try:
+            await asyncio.wait_for(
+                client(EditAdminRequest(channel=group, user_id=user,
+                                        admin_rights=rights, rank="")),
+                timeout=_ACTION_TIMEOUT)
+            return None
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — решение принимает вызывающий
+            last = e
+            _fw = int(getattr(e, "seconds", 0) or 0) if type(e).__name__ == "FloodWaitError" else 0
+            if _fw and _fw <= _MAX_FLOOD_INLINE:
+                await asyncio.sleep(_fw)
+                continue
+            if type(e).__name__ in ("FloodWaitError", "PeerFloodError"):
+                break
+            await asyncio.sleep(random.uniform(1.0, 2.0))
+    log.warning("промоут-трюк: права админа не сняты: %s", last)
+    return last
+
+
+async def revoke_promoted(session_string: str, _acc: dict | None, group_ref: str,
+                          user_refs: list) -> dict[str, Any]:
+    """Повторно снять админку с людей, у которых промоут-трюк её не снял.
+
+    Возвращает {"revoked": [...], "left": [...]} — left остаётся админами, о них
+    нужно сказать оператору.
+    """
+    from services.account_manager import connect_client
+    from telethon.tl.types import ChatAdminRights
+
+    rights = ChatAdminRights(
+        post_messages=False, edit_messages=False, delete_messages=False,
+        ban_users=False, invite_users=False, pin_messages=False, add_admins=False,
+        manage_call=False, other=False, change_info=False, anonymous=False,
+        manage_topics=False)
+    revoked: list = []
+    left: list = list(user_refs)
+    client = None
+    try:
+        client = await connect_client(session_string, _acc, "invite")
+        group = await _resolve_group_entity(client, group_ref, acc_id=(_acc or {}).get("id"))
+        for ref in list(user_refs):
+            user = await asyncio.wait_for(
+                client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
+            err = await _revoke_admin(client, group, user, rights)
+            if err is not None:
+                if type(err).__name__ in ("FloodWaitError", "PeerFloodError"):
+                    break
+                continue
+            revoked.append(ref)
+            left.remove(ref)
+            await asyncio.sleep(random.uniform(1.0, 2.5))
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log.warning("revoke_promoted: %s", exc)
+    finally:
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "revoke_promoted: disconnect")
+    return {"revoked": revoked, "left": left}
 
 
 async def export_group_invite_link(session_string: str, _acc: dict | None,

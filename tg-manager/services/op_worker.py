@@ -15052,6 +15052,10 @@ async def _exec_mass_invite(
     # Аккаунты, получившие флуд в этом прогоне: им нельзя поручать ни промоут-
     # трюк, ни рассылку ссылки в конце — они под действующим ограничением.
     _flooded_ids: set[int] = set()
+    # Добавлены через админку (метод «через админку» или промоут-трюк), но права
+    # снять не удалось — оператор обязан узнать: посторонний человек остался
+    # админом его канала.
+    _admins_left: list = []
     _promoter_rest_until = [0.0]   # монотонные часы: до каких пор не звать промоутера
 
     def _promoter_resting() -> bool:
@@ -16287,6 +16291,7 @@ async def _exec_mass_invite(
             # её считали «попробованной» по срезу ok+failed — она уходила в дедуп
             # как обработанная и больше не приглашалась никогда, а пакетный флуд
             # так терял весь батч.
+            _admins_left.extend(res.get("admins_left") or [])
             _untried = res.get("untried")
             if _untried is not None:
                 _ut_keys = {str(x) for x in _untried}
@@ -16611,6 +16616,7 @@ async def _exec_mass_invite(
                     # повторной попытки/фолбэка — тихая потеря цели).
                     _part_blocked = list(_tr.get("still_blocked") or [])
                     _tried_blocked.extend(_part_blocked)
+                    _admins_left.extend(_tr.get("admins_left") or [])
                     await _note_short_floods(int(_promoter["id"]), _tr.get("short_floods"))
                     if _part_ok:
                         _pb_keys = {str(v) for v in _part_blocked}
@@ -16647,6 +16653,24 @@ async def _exec_mass_invite(
                 _added_keys = {str(v) for v in _trick_added}
                 _still_blocked = [x for x in _uniq_blocked
                                   if str(x) not in _added_keys] + _never_tried
+    if _admins_left and _promoter is not None and not _promoter_resting():
+        # Снятие сорвалось не из-за флуда промоутера (обрыв, таймаут, флуд
+        # другого инвайтера) — ещё одна попытка промоутером: снять права может
+        # тот, кто их выдал, или создатель канала.
+        from services import mass_inviter_engine as _inv_rv
+        try:
+            _rv = await _inv_rv.revoke_promoted(
+                _promoter["session_str"], dict(_promoter), group, _admins_left)
+            _admins_left = list(_rv.get("left") or [])
+        except Exception as _re:
+            log.warning("mass_invite op=%d: повторное снятие админки: %s", op_id, _re)
+    if _admins_left:
+        log.warning("mass_invite op=%d: права админа не сняты у %d человек",
+                    op_id, len(_admins_left))
+        await _safe_execute(
+            pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+            "VALUES($1,0,'promote_trick',$2,$3)", op_id, "fail",
+            "права админа не сняты: " + ", ".join(str(x) for x in _admins_left[:50]))
 
     # ── Финальный фолбэк: кого не взял НИ ОДИН способ — ссылка в ЛС ───────────
     # Явный запрос владельца: "тех кого не удаётся заинвайтить никаким способом
@@ -16950,6 +16974,10 @@ async def _exec_mass_invite(
         + _overflow_summary()
         + (f"\n🛡 Выдана админка инвайтерам: {_promoted_n}" if _promoted_n else "")
         + (f"\n➕ Добавлено промоут-трюком (обход приватности): {_trick_ok}" if _trick_ok else "")
+        + (f"\n⚠️ У {len(_admins_left)} добавленных трюком не сняты права админа "
+           "(Telegram не дал их снять). Снимите вручную в «Администраторах» канала: "
+           + ", ".join(str(x) for x in _admins_left[:10])
+           + (" …" if len(_admins_left) > 10 else "") if _admins_left else "")
         + (f"\n🔗 Недостижимым отправлена ссылка в ЛС: {_link_fallback_ok}"
            if _link_fallback_ok else "")
         + (f"\n🔗 Ссылку не успели отправить: {_link_fallback_left} — отправители "
