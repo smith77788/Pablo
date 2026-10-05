@@ -19795,31 +19795,97 @@ async function computeGraph() {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
+// ── Напоминания по контактам ────────────────────────────
+// Экран собирал всё просроченное и ближайшее — и не давал сделать ничего:
+// ни открыть контакт, о котором речь, ни отметить сделанным, ни отложить.
+// Просроченное висело вечно: снять его можно было, только найдя контакт
+// руками в другом разделе. Маршрут для этого есть с самого начала — он
+// принимает и новую дату, и пустую (тогда напоминание снимается).
+let REM_ROWS = [];
+
 async function openUchReminders() {
   push('s-uchreminders');
   txt('remBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/uch/reminders');
-    const overdue = d.overdue||[];
-    const upcoming = d.upcoming||[];
+    const overdue = listOf(d,'overdue');
+    const upcoming = listOf(d,'upcoming');
+    // Один массив на оба раздела: в обработчики уходит только индекс, а имя
+    // контакта — внешний текст, которому в onclick не место.
+    REM_ROWS = overdue.concat(upcoming);
+    if (!REM_ROWS.length) {
+      txt('remBody', empty('⏰','Напоминаний нет',
+        'Напоминание ставится в карточке контакта — здесь собираются все, что скоро или уже просрочены',
+        {label:'📇 К контактам', fn:'openContacts()'}));
+      return;
+    }
     let html = '';
     if (overdue.length) {
-      html += '<div class="sec" style="color:var(--red)">⚠️ Просроченные</div>';
-      overdue.forEach(r=>{
-        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru-RU'):''}</div></div></div>`;
-      });
+      html += `<div class="sec" style="color:var(--red)">⚠️ Просроченные · ${num(overdue.length)}</div>`;
+      html += overdue.map((r,i)=>remRow(r,i,true)).join('');
     }
     if (upcoming.length) {
       html += '<div class="sec" style="margin-top:8px">⏰ Ближайшие</div>';
-      upcoming.forEach(r=>{
-        html += `<div class="li" style="margin:0 16px 8px"><div class="li-body"><div class="li-name">${esc(r.contact_name||'?')}</div><div class="li-sub">${esc(r.next_reminder_text||'')} · ${r.next_reminder_at?new Date(r.next_reminder_at).toLocaleString('ru-RU'):''}</div></div></div>`;
-      });
+      html += upcoming.map((r,i)=>remRow(r,overdue.length+i,false)).join('');
     }
-    if (!overdue.length && !upcoming.length) { html = empty('⏰','Напоминаний нет',
-      'Напоминание ставится в карточке контакта — здесь собираются все, что скоро или уже просрочены',
-      {label:'📇 К контактам', fn:'openContacts()'}); }
     txt('remBody', html);
   } catch(e) { txt('remBody', errHtml(errRu(e), 'openUchReminders()')); }
+}
+
+function remRow(r, i, late) {
+  const when = r.next_reminder_at
+    ? (late ? ('просрочено ' + ago(r.next_reminder_at))
+            : new Date(r.next_reminder_at).toLocaleString('ru-RU'))
+    : 'без даты';
+  const uname = r.username ? `<span class="row-right" onclick="event.stopPropagation();remWrite(${i})" role="button" tabindex="0" title="Написать в Telegram">✉️</span>` : '';
+  return `<div class="li" style="margin:0 16px 8px;display:block">
+    <div class="li tap" style="padding:0" onclick="remOpen(${i})" role="button" tabindex="0">
+      <div class="li-body">
+        <div class="li-name">${esc(r.contact_name||'?')}</div>
+        <div class="li-sub wrap">${esc(r.next_reminder_text||'Без описания')}</div>
+        <div class="li-sub wrap" style="${late?'color:var(--red)':''}">${when}</div>
+      </div>${uname}<span class="chev">›</span></div>
+    <div style="display:flex;gap:6px;padding-top:8px">
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="remDone(${i})">✅ Готово</button>
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="remSnooze(${i},1)">⏭ На день</button>
+      <button class="btn btn-s" style="flex:1;font-size:12px;padding:8px 4px" onclick="remSnooze(${i},7)">⏭ На неделю</button>
+    </div></div>`;
+}
+
+function remOpen(i) {
+  const r = REM_ROWS[i];
+  if (r && r.contact_id) openContactDetail(r.contact_id);
+}
+
+function remWrite(i) {
+  const r = REM_ROWS[i];
+  if (r && r.username) openTgUser(r.username);
+}
+
+async function remDone(i) {
+  const r = REM_ROWS[i];
+  if (!r || !r.contact_id) return;
+  try {
+    await api(`/api/miniapp/uch/contacts/${encodeURIComponent(r.contact_id)}/crm/reminder`,
+      {method:'POST', body: JSON.stringify({remind_at: null, text: ''})});
+    toast('✅ Напоминание снято');
+    openUchReminders();
+  } catch(e) { toast('⚠️ ' + errRu(e,'Не удалось снять напоминание')); }
+}
+
+async function remSnooze(i, days) {
+  const r = REM_ROWS[i];
+  if (!r || !r.contact_id) return;
+  // Считаем от СЕЙЧАС, а не от прежней даты: отложить просроченное на день
+  // означает «напомни завтра», а не «напомни ещё раз во вчера+1».
+  const when = new Date(Date.now() + days*86400000);
+  try {
+    await api(`/api/miniapp/uch/contacts/${encodeURIComponent(r.contact_id)}/crm/reminder`,
+      {method:'POST', body: JSON.stringify({remind_at: when.toISOString(),
+                                            text: r.next_reminder_text || ''})});
+    toast(days===1 ? '⏭ Напомню завтра' : '⏭ Напомню через неделю');
+    openUchReminders();
+  } catch(e) { toast('⚠️ ' + errRu(e,'Не удалось отложить')); }
 }
 
 function openUchSyncCenter() {

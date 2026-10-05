@@ -127,7 +127,11 @@ async def get_upcoming_reminders(pool, owner_id: int, limit: int = 20) -> list:
     result = []
     for r in rows:
         d = dict(r)
-        d['contact_name'] = f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip() or d.pop('username', '?')
+        # username НЕ выбрасываем: он нужен, чтобы написать человеку прямо из
+        # напоминания. Раньше он исчезал всегда, когда имя непустое.
+        d['contact_name'] = (
+            f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip()
+            or (d.get('username') and '@' + d['username']) or '?')
         result.append(d)
     return result
 
@@ -161,7 +165,11 @@ async def get_crm_overdue(pool, owner_id: int) -> list:
     result = []
     for r in rows:
         d = dict(r)
-        d['contact_name'] = f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip() or d.pop('username', '?')
+        # username НЕ выбрасываем: он нужен, чтобы написать человеку прямо из
+        # напоминания. Раньше он исчезал всегда, когда имя непустое.
+        d['contact_name'] = (
+            f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip()
+            or (d.get('username') and '@' + d['username']) or '?')
         result.append(d)
     return result
 
@@ -230,6 +238,10 @@ async def get_crm_reminders(pool, owner_id: int, limit: int = 20) -> list:
     result = []
     for r in rows:
         d = dict(r)
-        d['contact_name'] = f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip() or d.pop('username', '?')
+        # username НЕ выбрасываем: он нужен, чтобы написать человеку прямо из
+        # напоминания. Раньше он исчезал всегда, когда имя непустое.
+        d['contact_name'] = (
+            f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip()
+            or (d.get('username') and '@' + d['username']) or '?')
         result.append(d)
     return result

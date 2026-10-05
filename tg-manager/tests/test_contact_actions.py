@@ -50,8 +50,21 @@ def test_target_resolver_prefers_username_then_id():
     assert '"username"' in ref and "telegram_user_id" in ref
     inv = api[api.index("def _uch_invite_target"):]
     inv = inv[:inv.index("async def uch_contact_message")]
-    # для инвайта телефон допустим
-    assert "phones" in inv
+    # Сам разбор переехал в services/contacts_hub/invite_target.py — хендлер
+    # обязан звать его, а не держать вторую копию порядка адресов.
+    assert "invite_target(c)" in inv, (
+        "хендлер инвайта больше не делегирует общему разбору адреса")
+    # Порядок проверяем на самой функции: она чистая, база не нужна.
+    from services.contacts_hub.invite_target import invite_target
+    assert invite_target({"username": "ivan", "phones": ["+70000000000"],
+                          "telegram_user_id": 7}) == ("user", "@ivan")
+    # для инвайта телефон допустим и стоит ВПЕРЕДИ голого id
+    assert invite_target({"username": "", "phones": ["70000000000"],
+                          "telegram_user_id": 7}) == ("phone", "+70000000000")
+    assert invite_target({"username": "", "phones": [],
+                          "telegram_user_id": 7}) == ("user", "7")
+    assert invite_target({"username": "", "phones": [],
+                          "telegram_user_id": None}) == (None, None)
 
 
 def test_frontend_has_buttons_modals_and_submit():
