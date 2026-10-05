@@ -14141,12 +14141,12 @@ async function loadMpOps() {
     txt('mpOpsList', ops.map(o=>{
       const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
       const [bc,bl]=stb(o.status);
-      return `<div class="li" style="display:block;cursor:default;padding:11px 14px">
+      return `<div class="li tap" style="display:block;padding:11px 14px" onclick="openOpDetail(${Number(o.id)})" role="button" tabindex="0">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-purple">📡</div>
           <div class="li-body">
             <div class="li-name">Массовая публикация${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰ '+new Date(o.scheduled_for).toLocaleString('ru-RU')+'</span>':''}</div>
-            <div class="li-sub">${progFrac(o)} каналов · ${ago(o.created_at)}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' · <a href="#" onclick="cancelOp('+o.id+');return false" style="color:var(--red)">отменить</a>':''}</div>
+            <div class="li-sub">${progFrac(o)} каналов · ${ago(o.created_at)}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' · <a href="#" onclick="event.stopPropagation();cancelOp('+o.id+');return false" style="color:var(--red)">отменить</a>':''}</div>
           </div>
           <span class="badge ${bc}">${bl}</span>
         </div>
@@ -16533,12 +16533,12 @@ async function openReporter() {
     const d = await api('/api/miniapp/operations?op_type=report_peer&limit=10&offset=0');
     const ops = d.operations||[];
     txt('reporterHistory', ops.length ? ops.map(o=>`
-      <div class="row">
+      <div class="row tap" onclick="openOpDetail(${Number(o.id)})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-red-16)">🚨</div>
         <div class="row-body">
           <div class="row-name">${esc(o.label||'Жалоба')}</div>
           <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)}</div>
-        </div>
+        </div><span class="chev">›</span>
       </div>
     `).join('') : empty('🚨','Жалоб ещё не было','Здесь появятся ваши запуски и их результат'));
   } catch(e) {
@@ -16612,12 +16612,12 @@ async function openBoost() {
     const ops = d.operations||[];
     const ICO={boost_views:'👁',boost_reactions:'❤',boost_stories:'📖',boost_subscribers:'👥',boost_bot_starts:'🚀'};
     txt('boostHistory', ops.length ? ops.map(o=>`
-      <div class="row">
+      <div class="row tap" onclick="openOpDetail(${Number(o.id)})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-blue-16)">${ICO[o.op_type]||'🚀'}</div>
         <div class="row-body">
           <div class="row-name">${esc(o.label||'Накрутка')}</div>
           <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)}</div>
-        </div>
+        </div><span class="chev">›</span>
       </div>
     `).join('') : empty('🚀','Накруток ещё не было','Запустите первую накрутку'));
   } catch(e) {
@@ -16932,12 +16932,12 @@ async function openGrowth() {
     const d = await api('/api/miniapp/operations?op_type=niche_growth_post&limit=10&offset=0');
     const ops = d.operations||[];
     txt('growthHistory', ops.length ? ops.map(o=>`
-      <div class="row">
+      <div class="row tap" onclick="openOpDetail(${Number(o.id)})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-green-16)">🌿</div>
         <div class="row-body">
           <div class="row-name">${esc(o.label||'Продвижение')}</div>
           <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)}</div>
-        </div>
+        </div><span class="chev">›</span>
       </div>
     `).join('') : empty('🌿','Продвижений ещё не было','Запустите первое продвижение'));
   } catch(e) {
@@ -20361,12 +20361,12 @@ async function openPhoneChecker() {
     const ops = d.operations||[];
     if (!ops.length) { txt('phoneCheckHistory', empty('📞','Проверок ещё не было','Здесь появятся ваши проверки и их результат')); return; }
     txt('phoneCheckHistory', ops.map(o=>`
-      <div class="row">
+      <div class="row tap" onclick="openOpDetail(${Number(o.id)})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-blue-16)">📞</div>
         <div class="row-body">
           <div class="row-name">${esc(o.label||'Проверка номеров')}</div>
           <div class="row-val"><span class="badge ${stb(o.status)[0]}">${stb(o.status)[1]}</span> · ${num(o.done_items||0)}/${num(o.total_items||0)} проверено</div>
-        </div>
+        </div><span class="chev">›</span>
       </div>
     `).join(''));
   } catch(e) {
@@ -25627,12 +25627,12 @@ async function openMassOps(focusId) {
       const opName = MASS_OP_LABELS[r.op_type]||esc(r.op_type);
       const progress = r.total_items?`${r.done_items||0}/${r.total_items}`:'—';
       return `
-        <div class="row" id="massop-${r.id}">
+        <div class="row tap" id="massop-${r.id}" onclick="openOpDetail(${Number(r.id)})" role="button" tabindex="0">
           <div class="row-body">
             <div class="row-name">#${r.id} ${opName}</div>
             <div class="row-val"><span class="badge ${cls}" data-op-badge="${r.id}">${lbl}</span> · Прогресс: <span data-op-cnt="${r.id}">${progress}</span></div>
             <div class="row-val" style="color:var(--hint)">${ago(r.created_at)} ${r.finished_at?'→ '+ago(r.finished_at):''}</div>
-          </div>
+          </div><span class="chev">›</span>
         </div>
       `;
     }).join(''));
