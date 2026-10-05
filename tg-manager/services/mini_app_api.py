@@ -18148,9 +18148,160 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             steps = await pool.fetch(
                 "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", fid
             )
-            return _json_resp({"funnel": dict(funnel), "steps": [dict(s) for s in steps]})
+            # Сколько людей в воронке и где они стоят. Экран показывал одно
+            # число «Активных: N» в списке и ничего — в самой воронке: нельзя
+            # было понять, на каком шаге люди застревают.
+            runs = await _safe_fetch(pool,
+                """SELECT status, next_step_num, COUNT(*) AS cnt
+                     FROM auto_funnel_runs WHERE funnel_id=$1
+                 GROUP BY status, next_step_num""", fid)
+            by_status: dict = {}
+            by_step: dict = {}
+            for r in (runs or []):
+                by_status[r["status"]] = by_status.get(r["status"], 0) + int(r["cnt"])
+                if r["status"] == "active":
+                    key = str(r["next_step_num"])
+                    by_step[key] = by_step.get(key, 0) + int(r["cnt"])
+            return _json_resp({
+                "funnel": dict(funnel), "steps": [dict(s) for s in steps],
+                "runs": {"by_status": by_status, "waiting_on_step": by_step,
+                         "total": sum(by_status.values())},
+            })
         except Exception:
             log.exception("auto_funnel_detail uid=%d fid=%d", uid, fid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def _own_funnel(uid: int, fid: int):
+        return await _safe_fetchrow(pool,
+            "SELECT id FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid)
+
+    def _funnel_step_fields(body: dict) -> tuple[dict | None, str]:
+        """Разобрать шаг воронки. Текст обязателен, кнопка — только с ссылкой."""
+        text = validate_string(body.get("message_text"), max_len=4000)
+        if not text:
+            return None, "Текст сообщения обязателен"
+        delay = validate_integer(body.get("delay_hours", 0), min_val=0, max_val=24 * 365)
+        if delay is None:
+            return None, "Задержка — целое число часов от 0 до 8760"
+        btn_text = validate_string(body.get("button_text") or "", max_len=64, required=False) or None
+        btn_url = validate_string(body.get("button_url") or "", max_len=2048, required=False) or None
+        if btn_url and not btn_url.lower().startswith(("http://", "https://", "tg://")):
+            return None, "Ссылка кнопки должна начинаться с http://, https:// или tg://"
+        if btn_text and not btn_url:
+            return None, "У кнопки нет ссылки — её некуда нажимать"
+        if btn_url and not btn_text:
+            return None, "У кнопки нет подписи"
+        return {"message_text": text, "delay_hours": delay,
+                "button_text": btn_text, "button_url": btn_url}, ""
+
+    async def auto_funnel_step_add(request: web.Request) -> web.Response:
+        """Добавить шаг. Раньше шаги заводились только из Telegram-бота."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор воронки", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        fields, err = _funnel_step_fields(body)
+        if err:
+            return _err(err, 400)
+        if not await _own_funnel(uid, fid):
+            return _err("Воронка не найдена", 404)
+        try:
+            # Номер шага считаем в той же транзакции, что и вставку: иначе два
+            # одновременных добавления получат одинаковый step_num и упрутся в
+            # UNIQUE (funnel_id, step_num).
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # Блокируем саму воронку: FOR UPDATE с агрегатом Postgres
+                    # не разрешает, а без блокировки два одновременных
+                    # добавления возьмут один и тот же номер.
+                    await conn.fetchval(
+                        "SELECT id FROM auto_funnels WHERE id=$1 FOR UPDATE", fid)
+                    nxt = await conn.fetchval(
+                        "SELECT COALESCE(MAX(step_num), 0) + 1 FROM auto_funnel_steps "
+                        "WHERE funnel_id=$1", fid)
+                    sid = await conn.fetchval(
+                        """INSERT INTO auto_funnel_steps
+                           (funnel_id, step_num, delay_hours, message_text,
+                            button_text, button_url)
+                           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id""",
+                        fid, int(nxt or 1), fields["delay_hours"], fields["message_text"],
+                        fields["button_text"], fields["button_url"])
+            return _json_resp({"ok": True, "id": sid, "step_num": int(nxt or 1)})
+        except Exception:
+            log.exception("auto_funnel_step_add uid=%d fid=%d", uid, fid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def auto_funnel_step_update(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["funnel_id"])
+            sid = int(request.match_info["step_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор шага", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        fields, err = _funnel_step_fields(body)
+        if err:
+            return _err(err, 400)
+        if not await _own_funnel(uid, fid):
+            return _err("Воронка не найдена", 404)
+        try:
+            # Шаг обязан принадлежать именно этой воронке.
+            upd = await _safe_fetchrow(pool,
+                """UPDATE auto_funnel_steps
+                      SET delay_hours=$3, message_text=$4, button_text=$5, button_url=$6
+                    WHERE id=$1 AND funnel_id=$2 RETURNING id""",
+                sid, fid, fields["delay_hours"], fields["message_text"],
+                fields["button_text"], fields["button_url"])
+            if not upd:
+                return _err("Шаг не найден", 404)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("auto_funnel_step_update uid=%d step=%d", uid, sid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def auto_funnel_step_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["funnel_id"])
+            sid = int(request.match_info["step_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор шага", 400)
+        if not await _own_funnel(uid, fid):
+            return _err("Воронка не найдена", 404)
+        try:
+            # После удаления номера перенумеровываются подряд: дырка в нумерации
+            # оставила бы людей на шаге, которого больше нет, и цепочка встала бы.
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    gone = await conn.fetchval(
+                        "DELETE FROM auto_funnel_steps WHERE id=$1 AND funnel_id=$2 "
+                        "RETURNING step_num", sid, fid)
+                    if gone is None:
+                        return _err("Шаг не найден", 404)
+                    await conn.execute(
+                        "UPDATE auto_funnel_steps SET step_num = step_num - 1 "
+                        "WHERE funnel_id=$1 AND step_num > $2", fid, int(gone))
+                    await conn.execute(
+                        "UPDATE auto_funnel_runs SET next_step_num = GREATEST(1, next_step_num - 1) "
+                        "WHERE funnel_id=$1 AND next_step_num > $2 AND status='active'",
+                        fid, int(gone))
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("auto_funnel_step_delete uid=%d step=%d", uid, sid)
             return _err(_INTERNAL_ERROR, 500)
 
     async def auto_funnel_create(request: web.Request) -> web.Response:
@@ -19753,6 +19904,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/toggle", auto_funnel_toggle)
     app.router.add_get("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_detail)
     app.router.add_delete("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_delete)
+    app.router.add_post("/api/miniapp/auto_funnel/{funnel_id}/step", auto_funnel_step_add)
+    app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/step/{step_id}", auto_funnel_step_update)
+    app.router.add_delete("/api/miniapp/auto_funnel/{funnel_id}/step/{step_id}", auto_funnel_step_delete)
     # ── Circuit Breaker & Adaptive Pacing ─────────────────────────────────────
     async def circuit_breaker_status(request: web.Request) -> web.Response:
         uid = _get_uid(request)

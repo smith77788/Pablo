@@ -26007,8 +26007,10 @@ async function openAutoFunnels() {
   txt('afList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/auto_funnels');
-    if (!rows.length) { txt('afList', empty('🔀','Воронок нет','Нажмите + Создать')); return; }
-    const segLabels = {all:'Все', new_7d:'Новые 7д', new_30d:'Новые 30д', inactive_30d:'Неактивные 30д'};
+    if (!rows.length) { txt('afList', empty('🔀','Авто-воронок нет',
+      'Воронка сама пишет человеку цепочку сообщений по расписанию после того, как он подошёл под выбранный сегмент.',
+      {label:'+ Создать воронку', fn:'openAutofunnelModal()'})); return; }
+    const segLabels = AF_SEG_RU;
     txt('afList', rows.map(r => `
       <div class="row tap" onclick="openFunnelSteps(${r.id},'${esc(r.name)}')">
         <div class="row-ico" style="background:var(--bg-green-16)">${r.enabled?'🟢':'🔴'}</div>
@@ -26024,7 +26026,7 @@ async function openAutoFunnels() {
         </div>
       </div>
     `).join(''));
-  } catch(e) { txt('afList', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('afList', errHtml(errRu(e), 'openAutoFunnels()')); }
 }
 async function toggleAutoFunnel(fid, btn) {
   btn.disabled=true;
@@ -26034,53 +26036,125 @@ async function toggleAutoFunnel(fid, btn) {
     openAutoFunnels();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); btn.disabled=false; }
 }
+const AF_SEG_RU = {all:'Все подписчики', new_7d:'Новые за 7 дней',
+  new_30d:'Новые за 30 дней', inactive_30d:'Неактивные 30 дней'};
+let _AF_CUR = 0;
+
 async function openFunnelSteps(fid, fname) {
   push('s-afsteps');
+  _AF_CUR = fid;
   document.getElementById('afsteps-name').textContent = fname||'Воронка';
   txt('afsteps-body', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api(`/api/miniapp/auto_funnel/${fid}`);
     const f = d.funnel;
     const steps = d.steps||[];
-    const segLabels = {all:'Все', new_7d:'Новые 7д', new_30d:'Новые 30д', inactive_30d:'Неактивные 30д'};
+    const runs = d.runs||{};
+    const st = runs.by_status||{};
+    const wait = runs.waiting_on_step||{};
     let html = `
       <div class="lst" style="margin:12px 16px 0">
-        <div class="row"><div class="row-body">
-          <div class="row-name">Бот</div>
-          <div class="row-val">${esc(f.bot_name||f.bot_username||'—')}</div>
-        </div></div>
-        <div class="row"><div class="row-body">
-          <div class="row-name">Сегмент</div>
-          <div class="row-val">${segLabels[f.target_segment]||f.target_segment}</div>
-        </div></div>
-        <div class="row"><div class="row-body">
-          <div class="row-name">Статус</div>
-          <div class="row-val">${f.enabled?'🟢 Активна':'🔴 Выключена'}</div>
-        </div></div>
+        <div class="li tap" onclick="openBot(${Number(f.bot_id||0)})" role="button" tabindex="0"><div class="li-body">
+          <div class="li-name">${esc(f.bot_name||f.bot_username||'Бот')}</div>
+          <div class="li-sub wrap">${esc(AF_SEG_RU[f.target_segment]||f.target_segment||'')} · ${f.enabled?'🟢 воронка работает':'🔴 воронка выключена'}</div>
+        </div><span class="chev">›</span></div>
       </div>
-      <div class="sec" style="margin-top:8px">Шаги воронки (${steps.length})</div>
-    `;
+      <div class="sec" style="margin-top:8px">Кто сейчас в воронке</div>`;
+    if (!runs.total) {
+      html += `<div class="hint" style="padding:0 16px 8px">Пока никто: люди попадают в воронку сами, когда подходят под сегмент «${esc(AF_SEG_RU[f.target_segment]||f.target_segment||'')}».</div>`;
+    } else {
+      html += `<div style="display:flex;gap:8px;padding:0 16px 8px;flex-wrap:wrap">
+        <div class="kpi-chip"><div class="kpi-chip-val">${num(st.active||0)}</div><div class="kpi-chip-lbl">идут</div></div>
+        <div class="kpi-chip"><div class="kpi-chip-val">${num(st.completed||0)}</div><div class="kpi-chip-lbl">дошли до конца</div></div>
+        <div class="kpi-chip"><div class="kpi-chip-val">${num((st.stopped||0)+(st.error||0))}</div><div class="kpi-chip-lbl">сошли</div></div>
+      </div>`;
+    }
+    html += `<div class="sec">Шаги воронки (${steps.length})</div>`;
     if (!steps.length) {
-      html += empty('📭','Шагов нет','Добавьте шаги через Telegram-бота');
+      html += empty('📭','Шагов нет',
+        'Шаг — это сообщение, которое уйдёт человеку через заданное время после попадания в воронку. Без шагов воронка ничего не отправит.',
+        {label:'+ Добавить первый шаг', fn:`afStepAdd(${fid})`});
     } else {
       html += '<div class="lst" style="margin:0 16px">';
-      steps.forEach(s => {
+      steps.forEach(s2 => {
+        const here = wait[String(s2.step_num)]||0;
         html += `
-          <div class="row">
-            <div class="row-ico" style="background:var(--bg-blue-16);font-size:16px;font-weight:700">${s.step_num}</div>
-            <div class="row-body">
-              <div class="row-name">Шаг ${s.step_num} · через ${s.delay_hours}ч</div>
-              <div class="row-val">${esc((s.message_text||'').slice(0,100))}${(s.message_text||'').length>100?'…':''}</div>
-              ${s.button_text?`<div class="row-val" style="color:var(--accent)">🔘 ${esc(s.button_text)}</div>`:''}
-            </div>
-          </div>
-        `;
+          <div class="li tap" onclick="afStepEdit(${fid},${s2.id})" role="button" tabindex="0">
+            <div class="row-ico" style="background:var(--bg-blue-16);font-size:16px;font-weight:700">${s2.step_num}</div>
+            <div class="li-body">
+              <div class="li-name">Шаг ${s2.step_num} · через ${s2.delay_hours} ${plural(s2.delay_hours,'час','часа','часов')}</div>
+              <div class="li-sub wrap">${esc((s2.message_text||'').slice(0,110))}${(s2.message_text||'').length>110?'…':''}</div>
+              ${s2.button_text?`<div class="li-sub wrap" style="color:var(--accent)">🔘 ${esc(s2.button_text)}</div>`:''}
+              ${here?`<div class="li-sub wrap">⏳ ждут этого шага: ${num(here)}</div>`:''}
+            </div><span class="chev">›</span>
+          </div>`;
       });
       html += '</div>';
+      html += `<div style="padding:12px 16px"><button class="btn btn-p" style="width:100%" onclick="afStepAdd(${fid})">+ Добавить шаг</button></div>`;
     }
     txt('afsteps-body', html);
-  } catch(e) { txt('afsteps-body', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) {
+    txt('afsteps-body', errHtml(errRu(e), `openFunnelSteps(${Number(fid)},'${esc(String(fname||''))}')`));
+  }
 }
+
+// Шаги заводились только из Telegram-бота, и экран честно отправлял туда.
+// Теперь их можно добавить и поправить здесь.
+async function _afStepForm(cur) {
+  cur = cur || {};
+  const text = await askPrompt('Текст сообщения', {value: cur.message_text||'', multiline:true});
+  if (text === null) return null;
+  if (!String(text).trim()) { toast('❗ Текст сообщения обязателен'); return null; }
+  const delay = await askPrompt('Через сколько часов после попадания в воронку?',
+    {value: String(cur.delay_hours!=null?cur.delay_hours:0), type:'number'});
+  if (delay === null) return null;
+  const btnText = await askPrompt('Подпись кнопки (пусто — без кнопки)', {value: cur.button_text||''});
+  if (btnText === null) return null;
+  let btnUrl = '';
+  if (String(btnText).trim()) {
+    btnUrl = await askPrompt('Ссылка кнопки', {value: cur.button_url||'', type:'url'});
+    if (btnUrl === null) return null;
+  }
+  return {message_text: String(text), delay_hours: Number(delay)||0,
+          button_text: String(btnText).trim()||null,
+          button_url: String(btnUrl||'').trim()||null};
+}
+
+async function afStepAdd(fid) {
+  const body = await _afStepForm(null);
+  if (!body) return;
+  try {
+    const r = await api(`/api/miniapp/auto_funnel/${fid}/step`, {method:'POST', body:JSON.stringify(body)});
+    toast(`✅ Шаг ${r.step_num||''} добавлен`);
+    openFunnelSteps(fid, document.getElementById('afsteps-name').textContent);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function afStepEdit(fid, stepId) {
+  try {
+    const d = await api(`/api/miniapp/auto_funnel/${fid}`);
+    const cur = (d.steps||[]).find(x=>x.id===stepId);
+    if (!cur) { toast('⚠️ Шаг не найден'); return; }
+    const act = await askChoice(`Шаг ${cur.step_num}`, [
+      {value:'edit', label:'✏️ Изменить шаг'},
+      {value:'del', label:'🗑 Удалить шаг', sub:'следующие шаги сдвинутся по номерам'},
+    ]);
+    if (act === 'del') {
+      if (!await askConfirm(`Удалить шаг ${cur.step_num}?`)) return;
+      await api(`/api/miniapp/auto_funnel/${fid}/step/${stepId}`, {method:'DELETE'});
+      toast('🗑 Шаг удалён');
+      openFunnelSteps(fid, document.getElementById('afsteps-name').textContent);
+      return;
+    }
+    if (act !== 'edit') return;
+    const body = await _afStepForm(cur);
+    if (!body) return;
+    await api(`/api/miniapp/auto_funnel/${fid}/step/${stepId}`, {method:'PUT', body:JSON.stringify(body)});
+    toast('✅ Шаг сохранён');
+    openFunnelSteps(fid, document.getElementById('afsteps-name').textContent);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
 async function openAutofunnelModal() {
   document.getElementById('af-name').value='';
   document.getElementById('af-msg').value='';

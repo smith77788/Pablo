@@ -3,6 +3,7 @@ DELETE /api/miniapp/ai_memory/{mem_id}
 DELETE /api/miniapp/api_key/{key_id}
 DELETE /api/miniapp/asset_template/{tpl_id}
 DELETE /api/miniapp/auto_funnel/{funnel_id}
+DELETE /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 DELETE /api/miniapp/auto_reply/{reply_id}
 DELETE /api/miniapp/bot/{bot_id}
 DELETE /api/miniapp/bot/{bot_id}/avatar
@@ -651,6 +652,7 @@ POST /api/miniapp/asset_template
 POST /api/miniapp/audience_dna/{bot_id}/compute
 POST /api/miniapp/auth
 POST /api/miniapp/auto_funnel
+POST /api/miniapp/auto_funnel/{funnel_id}/step
 POST /api/miniapp/autoreg
 POST /api/miniapp/boost
 POST /api/miniapp/bot/add
@@ -921,6 +923,7 @@ POST /api/miniapp/workflow/{wf_id}/resume
 POST /api/miniapp/workflows
 POST /api/miniapp/workflows/{wf_id}/steps
 POST /api/miniapp/workspace
+PUT /api/miniapp/auto_funnel/{funnel_id}/step/{step_id}
 PUT /api/miniapp/auto_funnel/{funnel_id}/toggle
 PUT /api/miniapp/auto_reply/{reply_id}/toggle
 PUT /api/miniapp/bot/{bot_id}/commands
