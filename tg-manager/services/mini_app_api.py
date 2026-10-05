@@ -9805,6 +9805,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 # не трогаем.
                 """SELECT gi.id, gi.gift_type, gi.stars_cost, gi.is_transferable,
                           gi.is_unique, gi.is_premium, gi.last_seen_at AS scanned_at,
+                          gi.account_id, gi.gift_id,
                           ta.phone, ta.first_name
                    FROM gift_inventory gi
                    JOIN tg_accounts ta ON ta.id=gi.account_id
@@ -9844,6 +9845,164 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("gift_scan_submit uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    # ── Передача подарков ────────────────────────────────────────────────────
+    #
+    # Экран назывался «Перевод подарков» и показывал два числа: подсистема
+    # (планы, позиции, отчёты, тип операции `gift_transfer` в реестре шины)
+    # существовала целиком, но дойти до неё можно было только через бота.
+
+    _GIFT_PAY = ("stars", "wallet", "auto")
+
+    def _gift_recipient(body: dict) -> tuple[str, str]:
+        """@username получателя из тела запроса. Возвращает (username, ошибка).
+
+        Имя приходит от пользователя и уходит в текст подтверждения и в план,
+        поэтому режем по формату Telegram, а не доверяем строке.
+        """
+        raw = (body.get("recipient") or "").strip()
+        uname = raw.lstrip("@").split("/")[-1].split("?")[0].strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{4,32}", uname or ""):
+            return "", "Укажите @username получателя (4–32 символа, латиница)"
+        return uname, ""
+
+    async def _gift_selection(uid: int, body: dict) -> tuple[list[dict], str]:
+        """Выбранные подарки ВЛАДЕЛЬЦА. Возвращает (позиции, ошибка)."""
+        ids = [int(x) for x in (body.get("inventory_ids") or [])
+               if str(x).lstrip("-").isdigit()][:200]
+        if not ids:
+            return [], "Выберите хотя бы один подарок"
+        rows = await _safe_fetch(pool,
+            "SELECT id, account_id, gift_id, gift_type, stars_cost, is_transferable "
+            "FROM gift_inventory WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            uid, ids)
+        mine = [dict(r) for r in (rows or [])]
+        if not mine:
+            return [], "Подарки не найдены"
+        # Непередаваемые отсекаем здесь, а не в движке: иначе владелец увидит в
+        # предпросмотре стоимость за то, что всё равно будет пропущено.
+        can = [g for g in mine if g.get("is_transferable")]
+        if not can:
+            return [], "Ни один из выбранных подарков нельзя передать"
+        return can, ""
+
+    async def gift_transfer_preview(request: web.Request) -> web.Response:
+        """Что именно уйдёт и во сколько обойдётся — ДО нажатия.
+
+        Передача необратима, поэтому предпросмотр ничего не создаёт: план
+        появляется только при самой отправке, иначе брошенные предпросмотры
+        копились бы в базе планами-призраками.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        try:
+            gifts, err = await _gift_selection(uid, body)
+            if err:
+                return _err(err, 400)
+            asked = len([x for x in (body.get("inventory_ids") or [])])
+            stars = sum(int(g.get("stars_cost") or 0) for g in gifts)
+            uname, uerr = _gift_recipient(body)
+            return _json_resp({
+                "count": len(gifts),
+                "skipped": max(0, asked - len(gifts)),
+                "stars": stars,
+                "recipient": uname,
+                "recipient_error": uerr,
+                "payment_source": (body.get("payment_source") or "auto"),
+            })
+        except Exception:
+            log.exception("gift_transfer_preview uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def gift_transfer_submit(request: web.Request) -> web.Response:
+        """Поставить передачу подарков в очередь операций."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        try:
+            uname, uerr = _gift_recipient(body)
+            if uerr:
+                return _err(uerr, 400)
+            gifts, err = await _gift_selection(uid, body)
+            if err:
+                return _err(err, 400)
+            pay = (body.get("payment_source") or "auto").strip().lower()
+            if pay not in _GIFT_PAY:
+                pay = "auto"
+            from services.gift_transfer import GiftTransferService as _gts
+            plan_id = await _gts.create_plan(
+                pool, uid, uname, 0, f"@{uname}", pay)
+            await _gts.add_items_to_plan(pool, plan_id, [
+                {"inventory_id": g["id"], "account_id": g["account_id"],
+                 "gift_id": g["gift_id"], "gift_type": g["gift_type"],
+                 "stars_cost": int(g.get("stars_cost") or 0)}
+                for g in gifts])
+            check = await _gts.validate_plan(pool, plan_id)
+            if not check.get("valid"):
+                return _err("; ".join(check.get("errors") or []) or
+                            "План передачи не прошёл проверку", 400)
+            label = f"Передача подарков @{uname}: {len(gifts)}"
+            op_id = await _obus.submit(
+                pool, uid, "gift_transfer", {"plan_id": plan_id},
+                total_items=len(gifts), label=label)
+            await pool.execute(
+                "UPDATE gift_transfer_plans SET status='queued' WHERE id=$1 AND owner_id=$2",
+                plan_id, uid)
+            return _json_resp({"ok": True, "op_id": op_id, "plan_id": plan_id,
+                               "count": len(gifts), "label": label,
+                               "warnings": check.get("warnings") or []})
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("gift_transfer_submit uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def gift_recipients(request: web.Request) -> web.Response:
+        """Сохранённые получатели владельца: в базе и в боте были, в приложении нет."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await _safe_fetch(pool,
+                "SELECT id, name, username, is_main_admin FROM gift_recipients "
+                "WHERE owner_id=$1 ORDER BY is_main_admin DESC, name LIMIT 100",
+                uid)
+            return _json_resp({"recipients": [dict(r) for r in (rows or [])]})
+        except Exception:
+            log.exception("gift_recipients uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def gift_recipient_add(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        try:
+            uname, uerr = _gift_recipient(body)
+            if uerr:
+                return _err(uerr, 400)
+            name = validate_string(body.get("name") or f"@{uname}", 64, False) or f"@{uname}"
+            rid = await pool.fetchval(
+                "INSERT INTO gift_recipients (owner_id, name, username) "
+                "VALUES ($1,$2,$3) ON CONFLICT (owner_id, name) DO UPDATE "
+                "SET username=EXCLUDED.username, updated_at=now() RETURNING id",
+                uid, name, uname)
+            return _json_resp({"ok": True, "id": rid, "name": name, "username": uname})
+        except Exception:
+            log.exception("gift_recipient_add uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
     # ── Mass Inviter ───────────────────────────────────────────────────────────
@@ -20521,6 +20680,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Gift Transfer
     app.router.add_get("/api/miniapp/gifts", gift_inventory)
     app.router.add_post("/api/miniapp/gifts/scan", gift_scan_submit)
+    app.router.add_post("/api/miniapp/gifts/transfer/preview", gift_transfer_preview)
+    app.router.add_post("/api/miniapp/gifts/transfer", gift_transfer_submit)
+    app.router.add_get("/api/miniapp/gifts/recipients", gift_recipients)
+    app.router.add_post("/api/miniapp/gifts/recipients", gift_recipient_add)
     # Mass Inviter
     app.router.add_post("/api/miniapp/mass_invite", mass_inviter_submit)
     # Stars Hub

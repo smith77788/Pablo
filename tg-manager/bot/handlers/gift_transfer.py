@@ -599,8 +599,11 @@ async def cb_use_recipient(callback: CallbackQuery, state: FSMContext, pool):
 
     recipient_id = int(callback.data.split(":")[2])
     try:
+        # Скоуп по владельцу обязателен: callback_data приходит от
+        # пользователя, и подстановка чужого id отдавала бы чужого получателя.
         recipient = await pool.fetchrow(
-            "SELECT * FROM gift_recipients WHERE id=$1", recipient_id
+            "SELECT * FROM gift_recipients WHERE id=$1 AND owner_id=$2",
+            recipient_id, callback.from_user.id
         )
     except Exception:
         log_exc_swallow(log, "use_recipient fetchrow failed")

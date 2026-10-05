@@ -114,18 +114,18 @@ class GiftTransferService:
             "SELECT * FROM gift_transfer_plans WHERE id=$1", plan_id
         )
         if not plan:
-            return {"valid": False, "errors": ["Plan not found"]}
+            return {"valid": False, "errors": ["План передачи не найден"]}
 
         # Check recipient
         if not plan["recipient_user_id"] and not plan["recipient_username"]:
-            errors.append("No recipient specified")
+            errors.append("Не указан получатель")
 
         # Check items exist
         items_count = await pool.fetchval(
             "SELECT COUNT(*) FROM gift_transfer_items WHERE plan_id=$1", plan_id
         )
         if items_count == 0:
-            errors.append("No gifts selected for transfer")
+            errors.append("Не выбрано ни одного подарка")
 
         # Check transferable status
         non_transferable = await pool.fetchval(
@@ -138,7 +138,8 @@ class GiftTransferService:
         )
         if non_transferable > 0:
             warnings.append(
-                f"{non_transferable} gifts are not transferable and will be skipped"
+                f"Подарков, которые передать нельзя: {non_transferable} — "
+                f"они будут пропущены"
             )
 
         # Check payment source availability
@@ -147,7 +148,8 @@ class GiftTransferService:
         )
         if not payment_ok:
             warnings.append(
-                "Payment source may not be available - transfers may require manual confirmation"
+                "Источник оплаты может быть недоступен — передача может "
+                "потребовать подтверждения вручную"
             )
 
         # Update plan status

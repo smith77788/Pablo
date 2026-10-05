@@ -172,6 +172,7 @@ GET /api/miniapp/geo_presets
 GET /api/miniapp/ghost
 GET /api/miniapp/ghost/{profile_id}
 GET /api/miniapp/gifts
+GET /api/miniapp/gifts/recipients
 GET /api/miniapp/global_presence
 GET /api/miniapp/global_presence/{plan_id}
 GET /api/miniapp/graph
@@ -455,6 +456,7 @@ HEAD /api/miniapp/geo_presets
 HEAD /api/miniapp/ghost
 HEAD /api/miniapp/ghost/{profile_id}
 HEAD /api/miniapp/gifts
+HEAD /api/miniapp/gifts/recipients
 HEAD /api/miniapp/global_presence
 HEAD /api/miniapp/global_presence/{plan_id}
 HEAD /api/miniapp/graph
@@ -765,7 +767,10 @@ POST /api/miniapp/flood/{bot_id}/purge
 POST /api/miniapp/flood/{bot_id}/unflag
 POST /api/miniapp/funnel/{funnel_id}/step
 POST /api/miniapp/ghost
+POST /api/miniapp/gifts/recipients
 POST /api/miniapp/gifts/scan
+POST /api/miniapp/gifts/transfer
+POST /api/miniapp/gifts/transfer/preview
 POST /api/miniapp/global_presence
 POST /api/miniapp/global_presence/{plan_id}/bulk_apply
 POST /api/miniapp/global_presence/{plan_id}/launch

@@ -5084,6 +5084,29 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div id="giftsStats" style="display:flex;gap:10px;padding:8px 16px 10px"></div>
     <div class="lst" id="giftsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="giftsBar" style="padding:10px 16px 16px"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ ПЕРЕДАЧА ПОДАРКОВ ══════════════════════ -->
+<div class="screen" id="s-gifttransfer">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📤 Передача подарков</div></div>
+  <div class="sub-sb">
+    <div class="lst" id="gtSummary"></div>
+    <div class="sec">Кому передать</div>
+    <div style="padding:0 16px 8px">
+      <input type="text" id="gtRecipient" class="inp" style="width:100%;box-sizing:border-box" placeholder="@username получателя" autocomplete="off" spellcheck="false" oninput="gtRecipInput()">
+    </div>
+    <div class="lst" id="gtSaved"></div>
+    <div class="sec">Чем платить за передачу</div>
+    <div class="seg" id="gt-seg">
+      <div class="seg-opt on" onclick="gtPay('auto',this)">Автоматически</div>
+      <div class="seg-opt" onclick="gtPay('stars',this)">⭐ Stars</div>
+      <div class="seg-opt" onclick="gtPay('wallet',this)">💼 Wallet</div>
+    </div>
+    <div style="padding:12px 16px 20px">
+      <button class="btn btn-p" style="width:100%" id="gtGo" onclick="giftsTransferSubmit()">📤 Передать</button>
+    </div>
   </div>
 </div>
 
@@ -20629,10 +20652,21 @@ async function openNodeThreads(nodeId, nodeName) {
 }
 
 // ── Gift Transfer ───────────────────────────────────────
+// ── Подарки: инвентарь и передача ────────────────────────
+// Экран назывался «Перевод подарков» и передать с него было нельзя: два числа
+// и список без единого действия. Подсистема (планы, позиции, отчёты, тип
+// операции gift_transfer в шине) существовала целиком, но жила только в боте.
+let GIFT_ROWS = [];
+let GIFT_SEL = new Set();
+let GIFT_PAY = 'auto';
+let GIFT_RECIPS = [];
+
 async function openGifts() {
   push('s-gifts');
+  GIFT_SEL = new Set();
   txt('giftsStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('giftsList','');
+  txt('giftsBar','');
   try {
     const d = await api('/api/miniapp/gifts');
     txt('giftsStats',`
@@ -20640,22 +20674,144 @@ async function openGifts() {
       <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.transferable,'green')}">${d.transferable||0}</div><div class="kpi-lbl">Передаваемых</div></div>
     `);
     txt('m-gifts-val',`${d.total||0} подарков · ${d.transferable||0} передаваемых`);
-    const items = d.items||[];
-    if (!items.length) { txt('giftsList', empty('🎁','Нет подарков','Нажмите 📡 Скан для поиска')); return; }
-    txt('giftsList', items.map(i=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-red-16)">${i.is_unique?'💎':i.is_premium?'⭐':'🎁'}</div>
-        <div class="row-body">
-          <div class="row-name">${esc(i.gift_type||'Подарок')}</div>
-          <div class="row-val">${esc(i.first_name||i.phone)} · ${i.stars_cost?'⭐'+i.stars_cost:'—'} · ${i.is_transferable?'✅ Передаваем':'❌ Нельзя'}</div>
-        </div>
-      </div>
-    `).join(''));
+    GIFT_ROWS = listOf(d,'items');
+    if (!GIFT_ROWS.length) {
+      txt('giftsList', empty('🎁','Нет подарков',
+        d.note || 'Нажмите «📡 Скан», чтобы собрать подарки со всех аккаунтов',
+        {label:'📡 Сканировать', fn:'scanGifts()'}));
+      return;
+    }
+    giftsRender();
   } catch(e) {
     txt('giftsStats','');
-    txt('giftsList', empty('⚠️','Ошибка',errRu(e)));
+    txt('giftsList', errHtml(errRu(e), 'openGifts()'));
   }
 }
+
+// Внешнего текста в onclick нет — только индекс строки.
+function giftsRender() {
+  txt('giftsList', GIFT_ROWS.map((i,n)=>{
+    const can = !!i.is_transferable;
+    const on = GIFT_SEL.has(n);
+    const who = esc(i.first_name || i.phone || 'аккаунт');
+    const cost = i.stars_cost ? ('⭐ ' + num(i.stars_cost)) : 'без списания';
+    return `<div class="row tap" onclick="giftToggle(${n})" role="button" tabindex="0">
+      <div class="row-ico" style="background:${can?'var(--bg-green-16)':'var(--bg2)'}">${on?'✅':(i.is_unique?'💎':i.is_premium?'⭐':'🎁')}</div>
+      <div class="row-body">
+        <div class="row-name">${esc(i.gift_type||'Подарок')}</div>
+        <div class="row-val" style="white-space:normal">${who} · ${cost} · ${can?'можно передать':'передать нельзя'}</div>
+      </div></div>`;
+  }).join(''));
+  giftsBar();
+}
+
+function giftToggle(n) {
+  const g = GIFT_ROWS[n];
+  if (!g) return;
+  if (!g.is_transferable) {
+    toast('🚫 Этот подарок Telegram передавать не разрешает');
+    return;
+  }
+  if (GIFT_SEL.has(n)) GIFT_SEL.delete(n); else GIFT_SEL.add(n);
+  giftsRender();
+}
+
+function giftsSelectAll() {
+  const all = GIFT_ROWS.map((g,n)=>g.is_transferable?n:-1).filter(n=>n>=0);
+  GIFT_SEL = new Set(GIFT_SEL.size === all.length ? [] : all);
+  giftsRender();
+}
+
+function giftsBar() {
+  const can = GIFT_ROWS.filter(g=>g.is_transferable).length;
+  if (!can) {
+    txt('giftsBar','<div class="li-sub wrap" style="text-align:center">Среди найденных подарков нет ни одного, который Telegram разрешает передавать</div>');
+    return;
+  }
+  const n = GIFT_SEL.size;
+  const stars = [...GIFT_SEL].reduce((s,i)=>s+Number((GIFT_ROWS[i]||{}).stars_cost||0),0);
+  txt('giftsBar', `
+    <button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="giftsSelectAll()">${n===can?'Снять выбор':'Выбрать все передаваемые · '+num(can)}</button>
+    <button class="btn btn-p" style="width:100%" ${n?'':'disabled'} onclick="giftsTransferStart()">📤 Передать выбранные${n?' · '+num(n)+(stars?' · ⭐ '+num(stars):''):''}</button>`);
+}
+
+// ── Шаг получателя ──────────────────────────────────────
+function giftsTransferStart() {
+  if (!GIFT_SEL.size) { toast('❗ Выберите подарки'); return; }
+  push('s-gifttransfer');
+  const n = GIFT_SEL.size;
+  const stars = [...GIFT_SEL].reduce((s,i)=>s+Number((GIFT_ROWS[i]||{}).stars_cost||0),0);
+  txt('gtSummary',`
+    <div class="row"><div class="row-body"><div class="row-name">Уйдёт подарков</div><div class="row-val">${num(n)}</div></div></div>
+    <div class="row"><div class="row-body"><div class="row-name">Расход на передачу</div><div class="row-val">${stars?('⭐ '+num(stars)):'без списания'}</div></div></div>
+    <div class="row"><div class="row-body"><div class="row-name">Отменить передачу нельзя</div><div class="li-sub wrap">Подарки уйдут получателю, вернуть их сможет только он</div></div></div>`);
+  gtLoadSaved();
+}
+
+async function gtLoadSaved() {
+  try {
+    const d = await api('/api/miniapp/gifts/recipients');
+    GIFT_RECIPS = listOf(d,'recipients');
+    if (!GIFT_RECIPS.length) { txt('gtSaved',''); return; }
+    txt('gtSaved', '<div class="sec">Сохранённые получатели</div>' + GIFT_RECIPS.map((r,n)=>`
+      <div class="row tap" onclick="gtPickSaved(${n})" role="button" tabindex="0">
+        <div class="row-ico" style="background:var(--bg-blue-16)">${r.is_main_admin?'👑':'👤'}</div>
+        <div class="row-body"><div class="row-name">${esc(r.name||('@'+(r.username||'')))}</div>
+          <div class="row-val">@${esc(r.username||'')}</div></div></div>`).join(''));
+  } catch(e) { txt('gtSaved',''); }
+}
+
+function gtPickSaved(n) {
+  const r = GIFT_RECIPS[n];
+  if (!r) return;
+  const el = document.getElementById('gtRecipient');
+  if (el) el.value = '@' + (r.username||'');
+}
+
+function gtRecipInput() { /* поле читается при отправке */ }
+
+function gtPay(src, btn) {
+  GIFT_PAY = src || 'auto';
+  document.querySelectorAll('#gt-seg .seg-opt').forEach(x=>x.classList.remove('on'));
+  if (btn) btn.classList.add('on');
+}
+
+async function giftsTransferSubmit() {
+  const el = document.getElementById('gtRecipient');
+  const recipient = (el ? el.value : '').trim();
+  if (!recipient) { toast('❗ Укажите @username получателя'); return; }
+  const ids = [...GIFT_SEL].map(i=>(GIFT_ROWS[i]||{}).id).filter(Boolean);
+  if (!ids.length) { toast('❗ Выберите подарки'); return; }
+  const btn = document.getElementById('gtGo');
+  if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
+  try {
+    // Сначала предпросмотр: сервер отсеивает непередаваемое и считает расход,
+    // и владелец подтверждает то, что уйдёт на самом деле.
+    const pv = await api('/api/miniapp/gifts/transfer/preview', {method:'POST',
+      body: JSON.stringify({inventory_ids: ids, recipient, payment_source: GIFT_PAY})});
+    if (pv.recipient_error) { toast('⚠️ ' + pv.recipient_error); return; }
+    const parts = [`Передать @${pv.recipient} ${num(pv.count)} ${plural(pv.count,'подарок','подарка','подарков')}?`];
+    if (pv.stars) parts.push(`Спишется на передачу: ⭐ ${num(pv.stars)}.`);
+    if (pv.skipped) parts.push(`Пропущено как непередаваемые: ${num(pv.skipped)}.`);
+    parts.push('Отменить передачу нельзя.');
+    if (!await askConfirm(parts.join('\n'))) return;
+    const r = await api('/api/miniapp/gifts/transfer', {method:'POST',
+      body: JSON.stringify({inventory_ids: ids, recipient, payment_source: GIFT_PAY})});
+    // Предупреждения проверки плана (например, источник оплаты может быть
+    // недоступен) показываем отдельно: в тосте они бы затёрли друг друга, а
+    // уходят реальные подарки — такое владелец должен прочитать.
+    const warns = r.warnings||[];
+    if (warns.length) await showInfo(warns.join('\n\n'));
+    toast(`📤 Передача поставлена в очередь: ${num(r.count||pv.count)}`);
+    GIFT_SEL = new Set();
+    if (r.op_id) openOpDetail(r.op_id); else back();
+  } catch(e) {
+    toast('⚠️ ' + errRu(e,'Не удалось поставить передачу'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Передать'; }
+  }
+}
+
 async function scanGifts() {
   try {
     const r = await api('/api/miniapp/gifts/scan',{method:'POST'});
