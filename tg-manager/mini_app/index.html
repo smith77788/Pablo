@@ -2996,7 +2996,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()">Выгрузить отчёт →</span></div>
     <div class="lst" id="complianceStats"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Последние записи</div>
+    <div class="seg" id="comp-seg">
+      <div class="seg-opt on" onclick="complianceFilter('',this)">Все</div>
+      <div class="seg-opt" onclick="complianceFilter('ok',this)">Выполнено</div>
+      <div class="seg-opt" onclick="complianceFilter('partial',this)">Частично</div>
+      <div class="seg-opt" onclick="complianceFilter('risk',this)">Рисковые</div>
+    </div>
     <div class="lst" id="complianceList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="complianceMore" style="padding:0 16px"></div>
   </div>
 </div>
 
@@ -25922,39 +25929,131 @@ async function openGraph() {
 }
 
 // ── Compliance Hub ──────────────────────────────────────
+// ── Комплаенс ────────────────────────────────────────────
+// Экран был витриной: пять строк с числами, двадцать записей без единого тапа
+// и ни одного среза. Хуже: «Успешных» и «Рисковых» считались по исходам,
+// которых в журнал не пишет никто (см. services/compliance_engine), поэтому там
+// всегда стояли нули — при полном журнале.
+let COMP_GROUP = '';
+let COMP_ROWS = [];
+let COMP_TOTAL = 0;
+const COMP_PAGE = 20;
+
 async function openCompliance() {
   push('s-compliance');
+  COMP_GROUP = ''; COMP_ROWS = []; COMP_TOTAL = 0;
+  document.querySelectorAll('#comp-seg .seg-opt').forEach((o,n)=>o.classList.toggle('on', n===0));
   txt('complianceStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('complianceList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('complianceMore','');
+  await loadCompliance(false);
+}
+
+// Срез по исходу чипом под списком.
+function complianceFilter(group, btn) {
+  COMP_GROUP = group || '';
+  document.querySelectorAll('#comp-seg .seg-opt').forEach(x=>x.classList.remove('on'));
+  if (btn) btn.classList.add('on');
+  COMP_ROWS = [];
+  txt('complianceList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('complianceMore','');
+  loadCompliance(false);
+}
+
+// Переход с числа в шапке: «Рисковых 12» обязано вести к этим двенадцати.
+function compGo(group) {
+  COMP_GROUP = group || '';
+  const want = "complianceFilter('" + COMP_GROUP + "'";
+  document.querySelectorAll('#comp-seg .seg-opt').forEach(o=>{
+    o.classList.toggle('on', (o.getAttribute('onclick')||'').indexOf(want) === 0);
+  });
+  COMP_ROWS = [];
+  txt('complianceList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('complianceMore','');
+  loadCompliance(false);
+}
+
+async function loadComplianceMore() { await loadCompliance(true); }
+
+async function loadCompliance(append) {
   try {
-    const d = await api('/api/miniapp/compliance');
+    const q = `/api/miniapp/compliance?limit=${COMP_PAGE}&offset=${append?COMP_ROWS.length:0}`
+            + (COMP_GROUP?`&group=${encodeURIComponent(COMP_GROUP)}`:'');
+    const d = await api(q);
     const t = d.totals||{}; const rep = d.report||{};
-    const sr = (rep.success_rate!=null) ? rep.success_rate+'%' : '—';
-    txt('complianceStats', `
-      <div class="row"><div class="row-body"><div class="row-name">Всего записей</div><div class="row-val">${num(t.total||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Успешных</div><div class="row-val" style="${kpiTone(t.ok_cnt,'green')}">${num(t.ok_cnt||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Рисковых</div><div class="row-val" style="${kpiTone(t.risk_cnt,'red')}">${num(t.risk_cnt||0)}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Успешность (30 дн.)</div><div class="row-val">${sr}</div></div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Охват (30 дн.)</div><div class="row-val">${num(rep.distinct_types||0)} тип. · ${num(rep.distinct_accounts||0)} акк.</div></div></div>
-    `);
-    const ct = t.total||0;
-    document.getElementById('m-compliance-val').textContent = ct + ' ' + plural(ct,'запись','записи','записей');
-    const rows = d.recent||[];
-    if (!rows.length) { txt('complianceList', empty('📋','Нет записей','')); return; }
-    const outCls = {success:'b-gr',ban:'b-rd',flood_wait:'b-or',error:'b-rd'};
-    txt('complianceList', rows.map(r => `
-      <div class="row">
-        <div class="row-body">
-          <div class="row-name">${esc(r.label || opRu(r.op_type))}</div>
-          <div class="row-val"><span class="badge ${outCls[r.outcome]||'b-gy'}">${esc(outRu(r.outcome))}</span> · ${ago(r.created_at)}</div>
-        </div>
-      </div>
-    `).join(''));
+    const sr = (rep.success_rate!=null) ? String(rep.success_rate).replace('.',',')+'%' : '—';
+    const rows = listOf(d,'recent');
+    COMP_ROWS = append ? COMP_ROWS.concat(rows) : rows;
+    COMP_TOTAL = (d.recent_total!=null) ? d.recent_total : COMP_ROWS.length;
+    // Шапку перерисовываем только на первой странице: числа от среза не зависят.
+    if (!append) {
+      txt('complianceStats', `
+        <div class="row tap" onclick="compGo('')" role="button" tabindex="0"><div class="row-body"><div class="row-name">Всего записей</div><div class="row-val">${num(t.total||0)}</div></div><span class="chev">›</span></div>
+        <div class="row tap" onclick="compGo('ok')" role="button" tabindex="0"><div class="row-body"><div class="row-name">Выполнено</div><div class="row-val" style="${kpiTone(t.ok,'green')}">${num(t.ok||0)}</div></div><span class="chev">›</span></div>
+        ${t.partial?`<div class="row tap" onclick="compGo('partial')" role="button" tabindex="0"><div class="row-body"><div class="row-name">Частично</div><div class="row-val" style="color:var(--orange)">${num(t.partial)}</div></div><span class="chev">›</span></div>`:''}
+        <div class="row tap" onclick="compGo('risk')" role="button" tabindex="0"><div class="row-body"><div class="row-name">Рисковых</div><div class="row-val" style="${kpiTone(t.risk,'red')}">${num(t.risk||0)}</div></div><span class="chev">›</span></div>
+        <div class="row"><div class="row-body"><div class="row-name">Успешность (30 дн.)</div><div class="row-val">${sr}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Охват (30 дн.)</div><div class="row-val">${num(rep.distinct_types||0)} тип. · ${num(rep.distinct_ops||0)} опер.</div></div></div>
+      `);
+      const ct = t.total||0;
+      const mEl = document.getElementById('m-compliance-val');
+      if (mEl) mEl.textContent = ct + ' ' + plural(ct,'запись','записи','записей');
+    }
+    compRender();
   } catch(e) {
-    txt('complianceStats', empty('⚠️','Ошибка',errRu(e)));
-    txt('complianceList','');
+    if (!append) txt('complianceStats','');
+    txt('complianceList', errHtml(errRu(e), 'openCompliance()'));
   }
 }
+
+const COMP_BADGE = {ok:'b-gr', partial:'b-or', risk:'b-rd', neutral:'b-gy'};
+const COMP_GROUP_RU = {ok:'выполненных', partial:'частичных', risk:'рисковых', neutral:'прочих'};
+
+function compRender() {
+  if (!COMP_ROWS.length) {
+    txt('complianceMore','');
+    txt('complianceList', COMP_GROUP
+      ? empty('🔍','Таких записей нет',
+              `Среди записей журнала нет ${COMP_GROUP_RU[COMP_GROUP]||''}`,
+              {label:'Показать все записи', fn:"compGo('')"})
+      : empty('📋','Журнал пуст',
+              'Здесь появится подписанная запись о каждой операции: что, когда и с каким исходом'));
+    return;
+  }
+  // Внешнего текста в onclick нет — только индекс строки.
+  txt('complianceList', COMP_ROWS.map((r,i)=>{
+    const cls = COMP_BADGE[r.group] || 'b-gy';
+    const alive = !!(r.op_id && r.op_alive);
+    const tail = r.op_id
+      ? (alive ? '' : ' · операция удалена из очереди')
+      : ' · без операции';
+    return `<div class="row tap" onclick="${alive?`openOpDetail(${Number(r.op_id)})`:`compShow(${i})`}" role="button" tabindex="0">
+        <div class="row-body">
+          <div class="row-name">${esc(opRu(r.op_type))}</div>
+          <div class="row-val" style="white-space:normal"><span class="badge ${cls}">${esc(outRu(r.outcome))}</span> · ${ago(r.created_at)}${tail}</div>
+        </div><span class="chev">›</span></div>`;
+  }).join(''));
+  txt('complianceMore', moreBtn(COMP_ROWS.length, COMP_TOTAL, 'loadComplianceMore()'));
+}
+
+// Запись, по которой открывать нечего: показываем саму запись. Смысл этого
+// журнала — доказуемость, поэтому главное в ней — что она подписана.
+function compShow(i) {
+  const r = COMP_ROWS[i];
+  if (!r) return;
+  const when = r.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : '—';
+  const lines = [
+    opRu(r.op_type),
+    'Исход: ' + outRu(r.outcome),
+    'Когда: ' + when,
+    r.op_id ? ('Операция №' + Number(r.op_id) + ' — удалена из очереди, открывать нечего')
+            : 'Запись не привязана к операции в очереди',
+    r.signed ? 'Запись подписана HMAC-SHA256 — подделать журнал нельзя'
+             : 'Подписи у записи нет',
+  ];
+  showInfo(lines.join('\n'));
+}
+
 // Выгрузка подписанного отчёта соответствия за 30 дней (текст → копирование).
 async function exportCompliance() {
   try {
@@ -27601,6 +27700,9 @@ const OP_RU = {
   boost_views:'Накрутка просмотров', boost_reactions:'Накрутка реакций',
   boost_stories:'Накрутка сторис', boost_subscribers:'Накрутка подписчиков',
   boost_bot_starts:'Накрутка запусков бота',
+  // Записи, которые есть только в журнале соответствия: их пишет не очередь, а
+  // запуск жалоб и проверка контента.
+  strike_legal_basis:'Правовое основание жалобы',
 };
 function accRu(v) {
   return {active:'🟢 Активен', ok:'🟢 Активен', banned:'🚫 Забанен',
@@ -27612,10 +27714,26 @@ function accRu(v) {
           cooldown:'⏸ Отдыхает после лимита', no_session:'🔌 Нет сессии',
           frozen:'🧊 Заморожен', unknown:'— Неизвестно'}[String(v||'').toLowerCase()] || (v || '—');
 }
-function opRu(v) { return OP_RU[String(v||'').toLowerCase()] || (v || '—'); }
+function opRu(v) {
+  const k = String(v||'').toLowerCase();
+  // Проверка контента пишет в журнал тип вида content_block:<где>, и без
+  // разбора префикса запись показывалась владельцу как «content_block:...».
+  if (k.indexOf('content_block:') === 0) {
+    const where = OP_RU[k.slice(14)] || k.slice(14);
+    return 'Проверка контента · ' + where;
+  }
+  return OP_RU[k] || (v || '—');
+}
+// Исходы. Список обязан покрывать всё, что продукт пишет в журнал
+// соответствия (словарь — services/compliance_engine.OUTCOME_RU, сверяет
+// test_compliance_screen_counts_real_outcomes): английское слово на экране у
+// владельца, который по-английски не читает, — это немой экран.
 function outRu(v) {
-  return {success:'✓ Успешно', ok:'✓ Успешно', ban:'⛔ Бан',
-          flood_wait:'⏳ Лимит Telegram', error:'✕ Ошибка',
+  return {success:'✓ Успешно', ok:'✓ Успешно', done:'✓ Выполнено', ban:'⛔ Бан',
+          flood_wait:'⏳ Лимит Telegram', error:'✕ Ошибка', failed:'✕ Не прошло',
+          partial:'◐ Частично', blocked:'🚫 Заблокировано',
+          cancelled:'⊘ Отменено владельцем', abuse_report:'⚖️ Основание жалобы',
+          unknown:'· Без исхода',
           skipped:'— Пропущено', timeout:'⏱ Таймаут'}[String(v||'').toLowerCase()] || (v || '—');
 }
 let _tt=null;

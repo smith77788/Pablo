@@ -17,7 +17,7 @@ def _html():
 def test_overview_includes_signed_report():
     src = _api()
     i = src.index("async def compliance_overview")
-    window = src[i:i + 1400]
+    window = src[i:src.index("async def compliance_export", i)]
     assert "compliance_engine.get_report" in window
     assert '"report"' in window
 

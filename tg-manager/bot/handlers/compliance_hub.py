@@ -40,19 +40,30 @@ async def cb_compliance_menu(
             "того что, когда и с каким результатом было сделано.</i>"
         )
     else:
-        text = (
-            f"📋 <b>Compliance — аудит операций</b>\n\n"
-            f"Период: <b>30 дней</b>\n"
-            f"Всего операций: <b>{report['total']}</b>\n"
-            f"Успешных: <b>{report['ok']}</b> ({report['success_rate']}%)\n"
-            f"Ошибок: <b>{report['errors']}</b>\n"
-            f"FloodWait: <b>{report['floods']}</b>\n"
-            f"Банов: <b>{report['bans']}</b>\n"
-            f"Типов операций: <b>{report['distinct_types']}</b>\n"
-            f"Аккаунтов: <b>{report['distinct_accounts']}</b>\n\n"
-            f"<i>Каждая запись подписана HMAC-SHA256 — "
-            f"гарантия целостности лога.</i>"
-        )
+        # Группы и подписи берём из движка: свой словарь здесь уже стоил
+        # отчёту правды — считались исходы, которых никто не пишет, и в боте,
+        # как и на экране, стояли нули при полном журнале.
+        rate = str(report["success_rate"]).replace(".", ",")
+        lines = [
+            "📋 <b>Аудит операций</b>",
+            "",
+            "Период: <b>30 дней</b>",
+            f"Всего записей: <b>{report['total']}</b>",
+            f"Выполнено: <b>{report['ok']}</b> ({rate}% от оценённых)",
+            f"Частично: <b>{report['partial']}</b>",
+            f"Рисковых: <b>{report['risk']}</b>",
+            f"Прочее (отмены, основания): <b>{report['neutral']}</b>",
+            f"Типов операций: <b>{report['distinct_types']}</b>",
+        ]
+        by = report.get("by_outcome") or {}
+        if by:
+            lines.append("")
+            lines.append("<b>По исходам:</b>")
+            for outcome, n in sorted(by.items(), key=lambda kv: -kv[1]):
+                lines.append(f"· {compliance_engine.outcome_ru(outcome)} — {n}")
+        lines += ["", "<i>Каждая запись подписана HMAC-SHA256 — "
+                      "гарантия целостности журнала.</i>"]
+        text = "\n".join(lines)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📜 История операций", callback_data=ComplianceCb(action="history", page=0))
@@ -77,24 +88,18 @@ async def cb_compliance_history(
         pool, callback.from_user.id, limit=_PAGE_SIZE, offset=offset
     )
 
-    outcome_icons = {
-        "success":    "✅",
-        "flood_wait": "⏳",
-        "error":      "❌",
-        "ban":        "🚫",
-        "unknown":    "·",
-    }
-
     if not entries:
         text = "📜 <b>История операций</b>\n\n<i>Нет записей.</i>"
     else:
         lines = [f"📜 <b>История операций</b> (стр. {page + 1})\n"]
         for e in entries:
-            icon = outcome_icons.get(e["outcome"], "·")
-            ts   = e["created_at"].strftime("%d.%m %H:%M")
-            acc  = f" acc:{e['account_id']}" if e.get("account_id") else ""
-            op   = f" op:{e['op_id']}" if e.get("op_id") else ""
-            lines.append(f"{icon} <code>{ts}</code> {e['op_type']}{acc}{op}")
+            # Подпись исхода — из движка, по-русски: свой список иконок знал
+            # только исходы, которых продукт не пишет, и каждая запись
+            # получала нейтральную точку.
+            ru  = e.get("outcome_ru") or compliance_engine.outcome_ru(e["outcome"])
+            ts  = e["created_at"].strftime("%d.%m %H:%M")
+            op  = f" · операция №{e['op_id']}" if e.get("op_id") else ""
+            lines.append(f"<code>{ts}</code> {e['op_type']} — {ru}{op}")
         text = "\n".join(lines)
 
     kb = InlineKeyboardBuilder()

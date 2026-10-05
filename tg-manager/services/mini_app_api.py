@@ -17707,30 +17707,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # ── Compliance Hub ────────────────────────────────────────────────────────
 
     async def compliance_overview(request: web.Request) -> web.Response:
+        """Шапка и записи журнала соответствия.
+
+        Словарь исходов — в `compliance_engine`: держать его в тексте запроса
+        уже стоило экрану правды (считались `success` / `ban` / `flood_wait`,
+        которых не пишет никто, и все счётчики были нулями при полном журнале).
+        Срез по группе исхода и страницы — чтобы «Рисковых 12» вело к этим
+        двенадцати, а не оставалось числом.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        group = (request.query.get("group") or "").strip().lower()
+        if group not in ("ok", "partial", "risk", "neutral"):
+            group = ""
+        limit = _list_limit(request, 20, 100)
         try:
-            totals = await pool.fetchrow(
-                """
-                SELECT COUNT(*) AS total,
-                       COUNT(*) FILTER (WHERE outcome='success') AS ok_cnt,
-                       COUNT(*) FILTER (WHERE outcome IN ('ban','flood_wait')) AS risk_cnt
-                FROM compliance_audit WHERE user_id=$1
-                """,
-                uid,
-            )
-            recent = await pool.fetch(
-                "SELECT op_type, outcome, created_at FROM compliance_audit "
-                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
-                uid,
-            )
-            # Подписанный отчёт за 30 дней (success_rate, охват типов/аккаунтов).
+            offset = max(0, int(request.query.get("offset", "0")))
+        except (TypeError, ValueError):
+            offset = 0
+        try:
             from services import compliance_engine
+            totals = await compliance_engine.get_totals(pool, uid)
+            recent = await compliance_engine.get_recent(
+                pool, uid, limit=limit, offset=offset, group=group or None)
+            recent_total = await compliance_engine.count_recent(
+                pool, uid, group=group or None)
+            # Подписанный отчёт за 30 дней (успешность, охват типов/аккаунтов).
             report = await compliance_engine.get_report(pool, uid, days=30)
             return _json_resp({
-                "totals": dict(totals) if totals else {},
-                "recent": [dict(r) for r in recent],
+                "totals": totals,
+                "recent": recent,
+                "recent_total": recent_total,
+                "group": group,
                 "report": report or {},
             })
         except Exception:
