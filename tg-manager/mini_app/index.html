@@ -15990,8 +15990,14 @@ async function clearBotCommands() {
 
 // ── Bot Stats (detailed) ───────────────────────────────
 let BSTATS_BOT_ID = null;
+// Имя бота держим рядом с номером: экраны, куда ведут числа статистики,
+// принимают его вторым аргументом, а подставлять его прямо в onclick нельзя —
+// в имени бота бывают кавычки и апострофы.
+let BSTATS_BOT_NAME = '';
+let BSTATS_SUBS = 0;
 async function openBotStats(botId, botName) {
   BSTATS_BOT_ID = botId;
+  BSTATS_BOT_NAME = botName || '';
   txt('bstats-title', '📊 ' + (botName || 'Статистика бота'));
   push('s-botstats');
   txt('bstatsGrid', '<div class="spin-wrap" style="grid-column:1/-1"><div class="spin"></div></div>');
@@ -15999,24 +16005,30 @@ async function openBotStats(botId, botName) {
   txt('bstatsDetails', '');
   try {
     const d = await api('/api/miniapp/bot/'+botId+'/stats');
+    BSTATS_SUBS = d.aud_total||0;
+    // Четырнадцать чисел, из которых не нажималось ни одно: «Воронок 3» — а
+    // каких, «Рассылок 12» — а чем кончились. Каждое число ведёт туда, где
+    // стоит то, что оно посчитало.
     const kpis = [
-      {v:num(d.aud_total),l:'Аудитория'},
-      {v:'+'+num(d.aud_today),l:'Новых за 24ч'},
-      {v:num(d.broadcasts_total),l:'Рассылок'},
-      {v:num(d.broadcasts_sent),l:'Отправлено'},
-      {v:num(d.active_replies),l:'Авто-ответов'},
-      {v:num(d.active_funnels),l:'Воронок'},
-      {v:num(d.relay_sessions),l:'Диалогов'},
-      {v:num(d.funnel_users),l:'В воронках'},
+      {v:num(d.aud_total),l:'Аудитория',go:'bstatsGo("subs")'},
+      {v:'+'+num(d.aud_today),l:'Новых за 24ч',go:'bstatsGo("subs")'},
+      {v:num(d.broadcasts_total),l:'Рассылок',go:'bstatsGo("bcast")'},
+      {v:num(d.broadcasts_sent),l:'Отправлено',go:'bstatsGo("bcast")'},
+      {v:num(d.active_replies),l:'Авто-ответов',go:'bstatsGo("ar")'},
+      {v:num(d.active_funnels),l:'Воронок',go:'bstatsGo("funnels")'},
+      {v:num(d.relay_sessions),l:'Диалогов',go:'bstatsGo("relay")'},
+      {v:num(d.funnel_users),l:'В воронках',go:'bstatsGo("funnels")'},
     ];
-    txt('bstatsGrid', kpis.map(k=>`<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:700">${k.v}</div><div style="font-size:11px;color:var(--hint);margin-top:2px">${k.l}</div></div>`).join(''));
+    txt('bstatsGrid', kpis.map(k=>`<div class="card" style="text-align:center;cursor:pointer" onclick='${k.go}' role="button" tabindex="0"><div style="font-size:22px;font-weight:700">${k.v}</div><div style="font-size:11px;color:var(--hint);margin-top:2px">${k.l} ›</div></div>`).join(''));
     // Draw simple bar chart for daily growth
     const daily = d.daily_growth||[];
     if (daily.length) {
       const maxC = Math.max(...daily.map(d2=>d2.count),1);
       const bars = daily.map(d2=>{
         const h = Math.max(4, Math.round(d2.count/maxC*60));
-        const date = d2.date.slice(5); // MM-DD
+        // ММ-ДД читалось как «10-05»: в русской записи это пятое октября,
+        // а выглядело как десятое мая. Переворачиваем в ДД.ММ.
+        const date = d2.date.slice(8,10) + '.' + d2.date.slice(5,7);
         return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">
           <div style="font-size:10px;color:var(--hint)">${num(d2.count)}</div>
           <div style="width:100%;height:${h}px;background:#7c3aed;border-radius:3px"></div>
@@ -16025,20 +16037,36 @@ async function openBotStats(botId, botName) {
       }).join('');
       txt('bstatsChart', `<div style="display:flex;align-items:flex-end;gap:4px;height:80px">${bars}</div>`);
     } else {
-      txt('bstatsChart', '<div class="empty-inline">Нет данных</div>');
+      txt('bstatsChart', '<div class="empty-inline">Пока не из чего строить график: нужны хотя бы сутки с новыми подписчиками</div>');
     }
     const compl = d.funnel_total_subs ? Math.round(d.funnel_completed/d.funnel_total_subs*100) : 0;
-    txt('bstatsDetails', `
-      <div class="row"><div class="row-body"><div class="row-name">Входящих сообщений</div></div><div class="row-right">${num(d.msg_in)}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Исходящих сообщений</div></div><div class="row-right">${num(d.msg_out)}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Новых диалогов за 24ч</div></div><div class="row-right">${num(d.relay_today)}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Завершили воронку</div></div><div class="row-right">${num(d.funnel_completed)} (${compl}%)</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Покинули воронку</div></div><div class="row-right">${num(d.funnel_dropped||0)}</div></div>
-      <div class="row"><div class="row-body"><div class="row-name">Рост за 7 дней</div></div><div class="row-right">+${num(d.aud_week)}</div></div>
-    `);
+    const dRow = (name, val, go) => `<div class="li tap" onclick='${go}' role="button" tabindex="0">
+      <div class="li-body"><div class="li-name">${name}</div></div>
+      <div class="li-right">${val}</div><span class="chev">›</span></div>`;
+    txt('bstatsDetails',
+      dRow('Входящих сообщений', num(d.msg_in), 'bstatsGo("relay")')
+      + dRow('Исходящих сообщений', num(d.msg_out), 'bstatsGo("relay")')
+      + dRow('Новых диалогов за 24ч', num(d.relay_today), 'bstatsGo("relay")')
+      + dRow('Завершили воронку', num(d.funnel_completed)+' ('+compl+'%)', 'bstatsGo("funnels")')
+      + dRow('Покинули воронку', num(d.funnel_dropped||0), 'bstatsGo("funnels")')
+      + dRow('Рост за 7 дней', '+'+num(d.aud_week), 'bstatsGo("subs")'));
   } catch(e) {
-    txt('bstatsGrid', `<div style="grid-column:1/-1">${empty('⚠️','Ошибка',errRu(e))}</div>`);
+    txt('bstatsChart', ''); txt('bstatsDetails', '');
+    txt('bstatsGrid', `<div style="grid-column:1/-1">${errHtml(errRu(e), `openBotStats(${Number(botId)}, ${JSON.stringify(String(botName||''))})`)}</div>`);
   }
+}
+
+// Куда ведёт каждое число статистики. Одной таблицей, а не строкой в onclick:
+// имя бота уходит вторым аргументом, и подставлять его в разметку опасно —
+// в именах ботов бывают кавычки.
+function bstatsGo(where) {
+  const id = BSTATS_BOT_ID, name = BSTATS_BOT_NAME;
+  if (!id) return;
+  if (where === 'subs') return openBotSubs(id, name);
+  if (where === 'funnels') return openBotFunnels(id, name);
+  if (where === 'relay') return openRelay(id, name);
+  if (where === 'ar') return openArScreen();
+  if (where === 'bcast') return openBcastForBot(id, name, BSTATS_SUBS);
 }
 
 // ── Profile Setter ─────────────────────────────────────
