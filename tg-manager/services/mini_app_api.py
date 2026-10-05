@@ -4256,9 +4256,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id = int(request.match_info["bot_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор бота", 400)
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
-        if not owns:
+        # Имя бота — не украшение: без него ссылку нельзя собрать, а значит и
+        # отдать человеку. Экран показывал «?start=promo» и кнопку удаления,
+        # то есть всё, кроме самой ссылки, ради которой экран и существует.
+        own = await _safe_fetchrow(pool,
+            "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid)
+        if not own:
             return _err("Бот не найден", 404)
         links = await _safe_fetch(pool,
             """SELECT id, name, start_param, click_count, unique_users, created_at
@@ -4266,7 +4270,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         total_clicks = sum(l["click_count"] or 0 for l in links)
         referrals = await _safe_count(pool,
             "SELECT COUNT(*) FROM referrals WHERE bot_id=$1", bot_id)
-        return _json_resp({"links": links, "total_clicks": total_clicks, "referrals": referrals})
+        for ln in links:
+            if ln.get("created_at") is not None:
+                ln["created_at"] = ln["created_at"].isoformat()
+        return _json_resp({"links": links, "total_clicks": total_clicks,
+                           "referrals": referrals,
+                           "bot_username": own["username"] or ""})
 
     async def create_deeplink(request: web.Request) -> web.Response:
         uid = _get_uid(request)

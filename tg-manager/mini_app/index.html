@@ -15824,26 +15824,58 @@ async function openDeeplinks(botId) {
   push('s-deeplinks');
   loadDeeplinks();
 }
+let _DL_ROWS = [];
+let _DL_BOT_UNAME = '';
+// Ссылка — то, ради чего экран и существует: её отдают людям. Экран показывал
+// «?start=promo» и кнопку удаления, а самой ссылки не было нигде.
+function dlUrl(i) {
+  const l = _DL_ROWS[i];
+  if (!l || !_DL_BOT_UNAME) return '';
+  return 'https://t.me/' + _DL_BOT_UNAME + '?start=' + l.start_param;
+}
+function dlCopy(i) {
+  const u = dlUrl(i);
+  if (!u) { toast('⚠️ У бота нет имени — ссылку не собрать'); return; }
+  copyToClipboard(u, '🔗 Ссылка скопирована');
+}
+function dlShare(i) {
+  const l = _DL_ROWS[i], u = dlUrl(i);
+  if (!u) { toast('⚠️ У бота нет имени — ссылку не собрать'); return; }
+  // Пересылка через Telegram — то, как такой ссылкой пользуются на самом деле.
+  const url = 'https://t.me/share/url?url=' + encodeURIComponent(u)
+            + '&text=' + encodeURIComponent(l && l.name ? l.name : '');
+  try { if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; } } catch(_) {}
+  copyToClipboard(u, '🔗 Ссылка скопирована');
+}
 async function loadDeeplinks() {
   txt('dlList', '<div class="spin-wrap"><div class="spin"></div></div>');
   txt('dlStats', '');
   try {
     const d = await api('/api/miniapp/bot/'+DL_BOT_ID+'/deeplinks');
     const links = d.links||[];
+    _DL_ROWS = links;
+    _DL_BOT_UNAME = (d.bot_username||'').replace(/^@/,'');
     txt('dlStats', `
       <div class="kpi-card"><div class="kpi-val">${links.length}</div><div class="kpi-lbl">Ссылок</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.total_clicks)}</div><div class="kpi-lbl">Кликов</div></div>
       <div class="kpi-card"><div class="kpi-val">${num(d.referrals)}</div><div class="kpi-lbl">Рефералов</div></div>
     `);
-    if (!links.length) { txt('dlList', empty('🔗','Нет ссылок','Создайте первую Deep Link',{label:'➕ Создать ссылку',fn:'openDlModal()'})); return; }
-    txt('dlList', links.map(l=>`
-      <div class="row">
+    if (!links.length) { txt('dlList', empty('🔗','Ссылок пока нет','Ссылка приводит человека в бота с меткой: видно, откуда он пришёл и сколько таких',{label:'➕ Создать ссылку',fn:'openDlModal()'})); return; }
+    if (!_DL_BOT_UNAME) {
+      txt('dlList', `<div style="font-size:12px;color:var(--orange);padding:0 16px 8px;line-height:1.4">⚠️ У бота не записано имя, поэтому ссылку собрать не из чего. Откройте карточку бота и обновите данные.</div>`);
+    }
+    txt('dlList', (document.getElementById('dlList').innerHTML||'') + links.map((l,i)=>`
+      <div class="li tap" onclick="dlCopy(${i})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-violet-16)">🔗</div>
         <div class="row-body">
           <div class="row-name">${esc(l.name)}</div>
-          <div class="row-val">?start=${esc(l.start_param)} · ${num(l.click_count)} кликов · ${num(l.unique_users)} уник.</div>
+          <div class="li-sub wrap">${_DL_BOT_UNAME?'t.me/'+esc(_DL_BOT_UNAME)+'?start='+esc(l.start_param):'?start='+esc(l.start_param)}</div>
+          <div class="li-sub" style="color:var(--hint)">${num(l.click_count)} ${plural(l.click_count,'клик','клика','кликов')} · ${num(l.unique_users)} ${plural(l.unique_users,'человек','человека','человек')}${l.created_at?' · создана '+esc(ago(l.created_at)):''}</div>
         </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${l.id}, this)" aria-label="Удалить">✕</button></div>
+        <div class="row-right" style="display:flex;align-items:center;gap:6px" onclick="event.stopPropagation()">
+          <button class="btn btn-s" style="padding:5px 10px;min-width:0;font-size:12px" onclick="dlShare(${i})" aria-label="Переслать">📨</button>
+          <button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${Number(l.id)}, this)" aria-label="Удалить">✕</button>
+        </div>
       </div>
     `).join(''));
   } catch(e) { txt('dlList', empty('⚠️','Ошибка загрузки',errRu(e))); }
