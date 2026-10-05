@@ -1238,10 +1238,18 @@ async def invite_by_phones(
     _acc: dict | None,
     group_ref: str,
     phones: list[str],
+    skip_keys=None,
 ) -> dict[str, Any]:
     """Добавить список номеров телефонов в группу.
 
     Алгоритм: ImportContactsRequest → получить user_id → InviteToChannel → DeleteContacts.
+
+    skip_keys — ключи сравнения уже приглашённых в эту группу (@username в
+    нижнем регистре, числовой id). Номер — лишь один из адресов человека: тот
+    же человек мог быть приглашён по @username или прийти в аудиторию и
+    номером, и именем. Импорт номера раскрывает его username и id — по ним и
+    сверяемся, а приглашённых возвращаем под всеми адресами (invited_aliases),
+    чтобы и обратный путь — сначала номер, потом @username — не звал дважды.
     """
     from services.account_manager import connect_client
     from telethon.tl.functions.channels import InviteToChannelRequest
@@ -1269,6 +1277,17 @@ async def invite_by_phones(
     untried_phones: list[str] = []    # не дошли из-за флуда/прав — вернуть в очередь
     short_floods: list[int] = []      # короткие паузы, пережитые на месте
     _connected_ok = False             # дошли ли до приглашения вообще
+    invited_aliases: list[str] = []   # @username и id приглашённых по номеру
+    already_phones: list[str] = []    # номер новый, а человек уже приглашён иначе
+    _skip = {str(k).lower() for k in (skip_keys or ())}
+
+    def _aliases(u) -> list[str]:
+        out = []
+        if getattr(u, "username", None):
+            out.append("@" + str(u.username))
+        if getattr(u, "id", None):
+            out.append(str(u.id))
+        return out
 
     try:
         client = await connect_client(session_string, _acc, "invite")
@@ -1303,55 +1322,70 @@ async def invite_by_phones(
                                   for _u in imported_users[_ui:]) if _p)
                 break
             _ph = _uid_to_phone.get(getattr(user, "id", None))
-            try:
-                await asyncio.wait_for(
-                    client(InviteToChannelRequest(channel=group, users=[user])),
-                    timeout=_ACTION_TIMEOUT,
-                )
-                ok += 1
+            _al = _aliases(user)
+            if _skip and any(a.lower() in _skip for a in _al):
                 if _ph:
-                    invited_phones.append(_ph)
-                await asyncio.sleep(random.uniform(2.5, 5.0))
-            except UserAlreadyParticipantError:
-                ok += 1
-                if _ph:
-                    invited_phones.append(_ph)
-            except ChatAdminRequiredError:
-                # Права — проблема ЭТОГО аккаунта, не группы. no_rights → вызывающий
-                # выводит аккаунт из круга и продолжает аккаунтами с правами (как в
-                # invite_batch), а не рушит всю операцию.
-                no_rights = True
-                untried_phones.extend(
-                    _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
-                                  for _u in imported_users[_ui:]) if _p)
-                errors.append("account error: у аккаунта нет прав добавлять участников "
-                              "(не админ / права ещё не применились)")
-                break
-            except UserPrivacyRestrictedError:
-                failed += 1
-            except PeerFloodError:
-                peer_flood = True
-                untried_phones.extend(
-                    _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
-                                  for _u in imported_users[_ui:]) if _p)
-                errors.append("account error: peer flood — аккаунт ограничен")
-                break
-            except FloodWaitError as e:
-                _fw = int(getattr(e, "seconds", 60) or 60)
-                if _fw > _MAX_FLOOD_INLINE:
-                    flood_wait = _fw  # длинный флуд → стоп, не инвайтим во время флуда
+                    already_phones.append(_ph)
+                continue
+            _fl_retried = False
+            while True:
+                try:
+                    await asyncio.wait_for(
+                        client(InviteToChannelRequest(channel=group, users=[user])),
+                        timeout=_ACTION_TIMEOUT,
+                    )
+                    ok += 1
+                    if _ph:
+                        invited_phones.append(_ph)
+                    invited_aliases.extend(_al)
+                    await asyncio.sleep(random.uniform(2.5, 5.0))
+                except UserAlreadyParticipantError:
+                    ok += 1
+                    if _ph:
+                        invited_phones.append(_ph)
+                    invited_aliases.extend(_al)
+                except ChatAdminRequiredError:
+                    # Права — проблема ЭТОГО аккаунта, не группы. no_rights → вызывающий
+                    # выводит аккаунт из круга и продолжает аккаунтами с правами (как в
+                    # invite_batch), а не рушит всю операцию.
+                    no_rights = True
                     untried_phones.extend(
                         _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
                                       for _u in imported_users[_ui:]) if _p)
-                    errors.append(f"account error: flood wait {_fw}s")
-                    break
-                failed += 1
-                short_floods.append(_fw)
-                await asyncio.sleep(min(_fw, 60))
-            except Exception as e:
-                log.warning('invite failed: %s', e)
-                failed += 1
-                errors.append(str(e)[:80])
+                    errors.append("account error: у аккаунта нет прав добавлять участников "
+                                  "(не админ / права ещё не применились)")
+                except UserPrivacyRestrictedError:
+                    failed += 1
+                except PeerFloodError:
+                    peer_flood = True
+                    untried_phones.extend(
+                        _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
+                                      for _u in imported_users[_ui:]) if _p)
+                    errors.append("account error: peer flood — аккаунт ограничен")
+                except FloodWaitError as e:
+                    _fw = int(getattr(e, "seconds", 60) or 60)
+                    if _fw > _MAX_FLOOD_INLINE:
+                        flood_wait = _fw  # длинный флуд → стоп, не инвайтим во время флуда
+                        untried_phones.extend(
+                            _p for _p in (_uid_to_phone.get(getattr(_u, "id", None))
+                                          for _u in imported_users[_ui:]) if _p)
+                        errors.append(f"account error: flood wait {_fw}s")
+                    else:
+                        short_floods.append(_fw)
+                        await asyncio.sleep(min(_fw, 60))
+                        if not _fl_retried:
+                            # Короткую паузу пережили — повторяем ЭТОТ номер: раньше
+                            # он сразу шёл в отказы, хотя его никто не отклонял.
+                            _fl_retried = True
+                            continue
+                        failed += 1
+                except Exception as e:
+                    log.warning('invite failed: %s', e)
+                    failed += 1
+                    errors.append(str(e)[:80])
+                break
+            if peer_flood or flood_wait or no_rights:
+                break
 
         # Удаляем импортированные контакты
         if imported_users:
@@ -1401,7 +1435,9 @@ async def invite_by_phones(
             "invited_phones": list(dict.fromkeys(invited_phones)),
             "not_found_phones": not_found_phones,
             "untried": list(dict.fromkeys(untried_phones)),
-            "short_floods": short_floods}
+            "short_floods": short_floods,
+            "invited_aliases": list(dict.fromkeys(invited_aliases)),
+            "already_phones": list(dict.fromkeys(already_phones))}
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────

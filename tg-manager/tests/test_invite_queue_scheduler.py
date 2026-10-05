@@ -85,7 +85,7 @@ class _Stand:
         self.calls.append((int(acc["id"]), list(refs)))
         return self.responder(int(acc["id"]), list(refs))
 
-    async def invite_by_phones(self, session_str, acc, group, refs):
+    async def invite_by_phones(self, session_str, acc, group, refs, skip_keys=None):
         return await self.invite_batch(session_str, acc, group, refs)
 
     @property

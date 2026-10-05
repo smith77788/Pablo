@@ -15813,6 +15813,10 @@ async def _exec_mass_invite(
 
     _dedup_live = 0   # отсеяно прямо перед отправкой: их успела пригласить другая операция
 
+    def _invited_keys_now() -> set:
+        """Кого уже звали в этот канал: журнал на старте плюс этот прогон."""
+        return set(_already) | {_coo.compare_key(t) for t in invited_this_run}
+
     def _alias_keys() -> list:
         """Другие ключи канала, куда сейчас приглашаем (id, ссылка канала резерва)."""
         from services import invite_dedup as _idd
@@ -15986,7 +15990,10 @@ async def _exec_mass_invite(
                 if by_phone:
                     # Телефоны идут импортом контакта: промоут-трюк требует уже
                     # резолвнутой сущности, поэтому номера всегда обычным путём.
-                    return await inv.invite_by_phones(acc["session_str"], dict(acc), group, batch)
+                    # Уже приглашённые по @username/id — номер их не позовёт.
+                    return await inv.invite_by_phones(
+                        acc["session_str"], dict(acc), group, batch,
+                        skip_keys=_invited_keys_now() if _skip_invited else None)
                 if _invite_method == "admin":
                     # «Через админку»: цель промоутится в админы (добавляется в
                     # чат) → права тут же снимаются → остаётся участником.
@@ -16326,7 +16333,14 @@ async def _exec_mass_invite(
                 if by_phone:
                     # Дедупим только УСПЕШНО приглашённые номера; «не в Telegram»
                     # не помечаем — их можно пробовать позже.
-                    await _remember_invited(res.get("invited_phones") or [])
+                    # Человек записан под всеми адресами: номером, @username и
+                    # id — иначе он же из очереди по @username (или следующая
+                    # кампания) получил бы второе приглашение.
+                    await _remember_invited(
+                        list(res.get("invited_phones") or [])
+                        + list(res.get("invited_aliases") or [])
+                        + list(res.get("already_phones") or []))
+                    _deduped += len(res.get("already_phones") or [])
                     _phones_not_found += len(res.get("not_found_phones") or [])
                 else:
                     await _remember_invited(tried)
