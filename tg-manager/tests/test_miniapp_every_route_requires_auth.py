@@ -165,6 +165,28 @@ def _python_files():
     yield from ROOT.glob("*.py")
 
 
+def _own_body(fn):
+    """Узлы САМОЙ функции, без вложенных определений.
+
+    Весь mini_app_api — один гигантский `setup_routes`, внутри которого лежат
+    все хендлеры. Обычный ast.walk по нему смешивал их в кучу: имя `err`,
+    которым один хендлер держит ответ `_admin_target`, попадало в общий список,
+    и после этого `if err:` в другом хендлере — где err обычная строка с текстом
+    ошибки — объявлялся «молча отключённой проверкой». Настоящая находка
+    (ответ aiohttp, проверенный на истинность) живёт в пределах одной функции,
+    поэтому и смотреть надо в пределах одной.
+    """
+    out = []
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue  # у вложенной функции своя область имён
+        out.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
 def test_no_truthiness_check_on_a_response():
     """`if resp:` вместо `if resp is not None:` — молча отключённая проверка."""
     offenders = []
@@ -178,7 +200,7 @@ def test_no_truthiness_check_on_a_response():
         for fn in [n for n in ast.walk(tree)
                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
             names: set[str] = set()
-            for node in ast.walk(fn):
+            for node in _own_body(fn):
                 if not isinstance(node, ast.Assign):
                     continue
                 value = node.value.value if isinstance(node.value, ast.Await) else node.value
@@ -193,7 +215,7 @@ def test_no_truthiness_check_on_a_response():
                         idx = TUPLE_RESPONSE[called]
                         if idx < len(target.elts) and isinstance(target.elts[idx], ast.Name):
                             names.add(target.elts[idx].id)
-            for node in ast.walk(fn):
+            for node in _own_body(fn):
                 if not isinstance(node, ast.If):
                     continue
                 test = node.test

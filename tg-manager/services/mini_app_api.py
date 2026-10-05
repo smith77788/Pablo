@@ -12644,7 +12644,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Вариант не из этого эксперимента", 400)
             await pool.execute(
                 "UPDATE experiments SET status='completed', winner_variant_id=$2, "
-                "ended_at=NOW() WHERE id=$1", exp_id, variant_id)
+                "ended_at=NOW() WHERE id=$1 AND bot_id IN ("
+                "SELECT bot_id FROM managed_bots WHERE added_by=$3)",
+                exp_id, variant_id, uid)
             return _json_resp({"ok": True, "winner_variant_id": variant_id})
         except Exception:
             log.exception("experiment_set_winner uid=%d exp=%d", uid, exp_id)

@@ -41,6 +41,15 @@ def test_frontend_banner_wired():
     html = _index()
     assert "function checkInviteRights(" in html, "нет обработчика проверки прав"
     assert "/api/miniapp/invite/rights_check?group=" in html, "фронт не зовёт эндпоинт"
-    assert 'onblur="checkInviteRights()"' in html, "проверка должна триггериться по вводу группы"
+    # Проверка должна срабатывать, когда поле группы теряет фокус. Сверять точную
+    # строку onblur="checkInviteRights()" нельзя: в тот же обработчик с тех пор
+    # добавили подсчёт аудитории и переливание, и тест краснел на добавлении
+    # соседнего вызова, хотя проверка прав никуда не девалась.
+    m = re.search(r'<input[^>]*id="massInviteGroup"[^>]*>', html)
+    assert m, "нет поля группы для инвайта"
+    ob = re.search(r'onblur="([^"]*)"', m.group(0))
+    assert ob and "checkInviteRights()" in ob.group(1), (
+        "проверка прав не вызывается при уходе из поля группы: "
+        + (ob.group(1) if ob else "onblur нет вовсе"))
     # честное предупреждение о причине «вступят, но не смогут приглашать»
     assert "вступят, но не смогут приглашать" in html

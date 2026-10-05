@@ -59,6 +59,22 @@ RECORDERS = (
 # считаются законным исходом для обработчика исключения.
 PROPAGATORS = ("flood_wait", "raise")
 
+# Третий законный исход: паузу назначили НОМЕРУ, которого во флоте ещё нет.
+#
+# Авторизация нового номера (запрос кода и его повтор) идёт ДО появления строки
+# в `tg_accounts`: аккаунта не существует, записать штраф некому, и единственный
+# честный адресат паузы — владелец. Обработчик отдаёт её структурно
+# (`flood=true`, `retry_after`), фронт по этому полю пейсит автоповтор и не
+# долбит Telegram. Пауза здесь не теряется, она просто живёт не в БД.
+#
+# Список ИМЁН, а не общее правило по `retry_after`: иначе любой обработчик
+# операции мог бы «отдать паузу в интерфейс» вместо записи аккаунту, и храповик
+# перестал бы ловить тот самый класс, ради которого написан. Имена проверяются
+# на существование (`test_no_account_yet_names_still_exist`) — переименовали
+# функцию, храповик краснеет, а не молча прощает.
+NO_ACCOUNT_YET = ("account_add_phone_resend",)
+SURFACES_TO_OWNER = ("retry_after",)
+
 
 def _functions(src: str):
     """Все функции файла, вместе с вложенными: исполнители воркера — это
@@ -82,9 +98,31 @@ def _worker_offenders(src: str) -> list[str]:
     return out
 
 
+def _enclosing_function(tree) -> dict:
+    """id(ExceptHandler) → имя ближайшей объемлющей функции.
+
+    Хендлеры мини-аппа — вложенные замыкания внутри `setup_routes`, поэтому
+    нужна именно ближайшая функция, а не верхняя.
+    """
+    out: dict = {}
+
+    def walk(node, fname: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk(child, child.name)
+                continue
+            if isinstance(child, ast.ExceptHandler):
+                out[id(child)] = fname
+            walk(child, fname)
+
+    walk(tree, "<модуль>")
+    return out
+
+
 def _handler_offenders(src: str) -> list[str]:
     out = []
     tree = ast.parse(src)
+    where = _enclosing_function(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.ExceptHandler) or node.type is None:
             continue
@@ -92,6 +130,9 @@ def _handler_offenders(src: str) -> list[str]:
             continue
         seg = ast.get_source_segment(src, node) or ""
         if any(m in seg for m in RECORDERS) or any(m in seg for m in PROPAGATORS):
+            continue
+        if (where.get(id(node)) in NO_ACCOUNT_YET
+                and any(m in seg for m in SURFACES_TO_OWNER)):
             continue
         out.append(f"строка {node.lineno}")
     return out
@@ -137,9 +178,45 @@ def test_worker_probe_sees_a_known_bad_example():
     assert not _worker_offenders(_GOOD_WORKER), "пробник ругается на здоровый код"
 
 
+_PRE_AUTH_HANDLER = '''
+async def account_add_phone_resend(request):
+    try:
+        return await am.resend_code(phone, pch)
+    except FloodWaitError as fw:
+        return _json_resp({"ok": False, "flood": True, "retry_after": fw.seconds})
+'''
+
+_PRE_AUTH_HANDLER_LOSING_IT = '''
+async def account_add_phone_resend(request):
+    try:
+        return await am.resend_code(phone, pch)
+    except FloodWaitError as fw:
+        log.warning("флуд %ds", fw.seconds)
+        return _err("Не получилось", 400)
+'''
+
+
 def test_handler_probe_sees_a_known_bad_example():
     assert _handler_offenders(_BAD_HANDLER), "пробник не видит потерянную паузу"
     assert not _handler_offenders(_GOOD_HANDLER), "пробник ругается на здоровый код"
+
+
+def test_pre_auth_exception_is_narrow():
+    """Исключение даётся за ОТДАННУЮ владельцу паузу, а не за имя функции."""
+    assert not _handler_offenders(_PRE_AUTH_HANDLER), (
+        "пауза уходит владельцу (retry_after), записать её некому — это законно")
+    assert _handler_offenders(_PRE_AUTH_HANDLER_LOSING_IT), (
+        "в том же обработчике пауза ушла только в лог — это потеря")
+
+
+def test_no_account_yet_names_still_exist():
+    """Исключение, переставшее кого-либо описывать, — тихо снятая защита."""
+    src = "\n".join(p.read_text(encoding="utf-8", errors="ignore")
+                    for p in sorted(SERVICES.rglob("*.py")))
+    for name in NO_ACCOUNT_YET:
+        assert f"def {name}(" in src, (
+            f"{name} больше нет — уберите имя из NO_ACCOUNT_YET, иначе "
+            f"исключение прощает что-то другое")
 
 
 # ── Собственно храповики ────────────────────────────────────────────────────

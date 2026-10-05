@@ -26062,7 +26062,7 @@ async function loadClonerTargets() {
   el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   try {
     const d = await api('/api/miniapp/channels?limit=500');
-    const chans = (d.channels||d.items||d||[]).filter(c=>c && c.channel_id);
+    const chans = listOf(d,'channels').filter(c=>c && c.channel_id);
     if (!chans.length) {
       el.innerHTML = empty('📢','Своих каналов нет',
         'Клонировать посты некуда: сначала добавьте канал, которым управляете.',
@@ -26902,8 +26902,9 @@ function semFactRu(k) { return SEM_FACT_RU[String(k||'').toLowerCase()] || (k ||
 async function forgetSemUser(userId, factCount, el) {
   if (!_SEMF_ARGS) return;
   const botId = _SEMF_ARGS[0];
-  if (!await confirmDelete('Забыть собеседника', el,
-      `Сотрутся ${factCount} ${plural(factCount,'факт','факта','фактов')} и вся переписка, которую бот о нём помнит. Вернуть нельзя.`)) return;
+  const note = `Сотрутся ${factCount} ${plural(factCount,'факт','факта','фактов')}`
+    + ' и вся переписка, которую бот о нём помнит. Вернуть нельзя.';
+  if (!await confirmDelete('Забыть собеседника', el, note)) return;
   try {
     const r = await api(`/api/miniapp/semantic_memory/${botId}/user/${userId}`, {method:'DELETE'});
     toast(`🗑 Забыто: ${num(r.facts||0)} ${plural(r.facts||0,'факт','факта','фактов')}`);

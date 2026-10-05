@@ -50,7 +50,29 @@ _OWNER = re.compile(r"\b(owner_id|added_by|created_by|user_id|uid)\b", re.I)
 # можно только fail-closed проверку: ошибка базы обязана ЗАКРЫВАТЬ доступ
 # (у `_user_can_use_bot` это `_safe_count`, отдающий 0). Проверка, которая при
 # сбое пускает, превратила бы храповик в разрешение на дыру.
-_ACCESS_GATES = ("_user_can_use_bot",)
+#
+# Разобранные поимённо (каждая — fail-closed, проверено в
+# test_every_gate_really_scopes ниже):
+#   _own_funnel      — SELECT ... FROM auto_funnels WHERE id=$1 AND owner_id=$2
+#                      через _safe_fetchrow: ошибка базы даёт None → 404.
+#   _own_mesh        — то же по content_meshes.
+#   _own_experiment  — JOIN managed_bots b ON b.bot_id=e.bot_id AND b.added_by=$2
+#                      (у experiments своей колонки владельца нет).
+#   get_workspace_role — роль участника из workspace_members; при сбое базы
+#                      бросает, хендлер ловит и отдаёт 500, то есть не пускает.
+_ACCESS_GATES = ("_user_can_use_bot", "_own_funnel", "_own_mesh",
+                 "_own_experiment", "get_workspace_role")
+
+# Чем проверка признаётся настоящей: условием по владельцу или по участию.
+_GATE_PROOF = {
+    # Условие видимости вынесено в константу _BOTS_VISIBLE_SQL; её содержимое
+    # проверяется отдельно, ниже в том же тесте.
+    "_user_can_use_bot": ("_BOTS_VISIBLE_SQL",),
+    "_own_funnel": ("owner_id",),
+    "_own_mesh": ("owner_id",),
+    "_own_experiment": ("added_by",),
+    "get_workspace_role": ("workspace_members",),
+}
 
 
 def _sql_literals(fn: ast.AST) -> list[str]:
@@ -126,6 +148,71 @@ def _unscoped(src: str) -> list[str]:
 
 
 # ── Сам храповик ───────────────────────────────────────────────────────────
+
+_DB_SRC = (pathlib.Path(__file__).resolve().parent.parent
+           / "database" / "db.py").read_text(encoding="utf-8")
+
+
+def _calls_outside_try(gate: str, src: str) -> set[str]:
+    """Хендлеры, зовущие проверку не под try (исключение уйдёт мимо отказа)."""
+    tree = ast.parse(src)
+    bad: set[str] = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        guarded = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Try):
+                for inner in ast.walk(node):
+                    guarded.add(id(inner))
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            name = f.attr if isinstance(f, ast.Attribute) else (
+                f.id if isinstance(f, ast.Name) else "")
+            if name == gate and id(node) not in guarded:
+                bad.add(fn.name)
+    return bad
+
+
+def test_every_gate_really_scopes():
+    """Список признанных проверок — не лазейка.
+
+    Запись в _ACCESS_GATES снимает требование скоупа с ЦЕЛОГО хендлера, поэтому
+    каждая обязана сама спрашивать владельца или участие. Если такую проверку
+    однажды выпотрошат — здесь станет красным, а не тихо разрешит всё, что на
+    неё сослалось.
+    """
+    db_src = _DB_SRC
+    for gate in _ACCESS_GATES:
+        body = _gate_source(gate, _SRC) or _gate_source(gate, db_src)
+        assert body, f"проверка {gate} не найдена — список устарел"
+        proof = _GATE_PROOF.get(gate, ())
+        assert proof, f"для {gate} не записано, чем он скоупит"
+        assert any(p in body for p in proof), (
+            f"{gate} больше не спрашивает владельца или участие: {body[:160]}")
+    # Условие видимости ботов — общее для списка и для проверки доступа.
+    m = re.search(r"_BOTS_VISIBLE_SQL\s*=\s*(?:f?\"\"\"|f?[\"'])(.*?)(?:\"\"\"|[\"'])",
+                  _SRC, re.DOTALL)
+    assert m, "_BOTS_VISIBLE_SQL не найден"
+    assert "added_by" in m.group(1), (
+        "видимость ботов больше не привязана к владельцу: " + m.group(1)[:200])
+
+
+def _gate_source(name: str, src: str) -> str:
+    """Текст функции целиком — по разбору, а не по отступам.
+
+    Отступы здесь обманывают: у проверки с многострочной сигнатурой первая
+    строка тела начинается не там, где кажется, и срез по отступу обрывал
+    функцию раньше её условий.
+    """
+    tree = ast.parse(src)
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)) and fn.name == name:
+            return ast.get_source_segment(src, fn) or ""
+    return ""
+
 
 def test_every_path_param_handler_is_owner_scoped():
     leaks = _unscoped(_SRC)
@@ -230,10 +317,28 @@ def test_every_recognised_gate_exists_and_is_fail_closed():
     `_safe_count` отдаёт 0 при ошибке, то есть доступ закрывается. Проверка,
     которая при сбое пускает, сделала бы запись в списке разрешением на дыру.
     """
+    # Помощники _safe_* ловят ошибку базы и отдают 0 / None — хендлер по такому
+    # ответу ОТКАЗЫВАЕТ. Это и есть fail-closed.
+    _FAIL_CLOSED = ("_safe_count(", "_safe_fetchval(", "_safe_fetchrow(")
     for gate in _ACCESS_GATES:
-        assert f"async def {gate}(" in _SRC, f"{gate} в списке, но в коде нет"
-        start = _SRC.index(f"async def {gate}(")
-        body = _SRC[start:start + 1500]
-        assert "_safe_count(" in body or "_safe_fetchval(" in body, (
-            f"{gate} не пользуется fail-closed помощником — при ошибке базы она "
-            f"может ОТКРЫТЬ доступ, и признавать её нельзя")
+        if f"async def {gate}(" in _SRC:
+            # Границы функции — по разбору: срез фиксированной длины рвёт
+            # длинную проверку и молча выключает утверждение ниже.
+            body = _gate_source(gate, _SRC)
+            assert body, f"{gate} в списке, но в коде нет"
+            assert any(h in body for h in _FAIL_CLOSED), (
+                f"{gate} не пользуется fail-closed помощником — при ошибке базы она "
+                f"может ОТКРЫТЬ доступ, и признавать её нельзя")
+            continue
+        # Проверка из database/db.py (get_workspace_role): она ошибку базы НЕ
+        # глотает, а бросает. Это тоже закрывает доступ, но только пока каждый
+        # её вызов стоит внутри try — иначе исключение улетит наверх уже за
+        # пределами хендлера. Поэтому проверяем оба условия.
+        body = _gate_source(gate, _DB_SRC)
+        assert body, f"{gate} в списке, но в коде нет"
+        assert "except" not in body, (
+            f"{gate} глотает ошибку базы — при сбое может ОТКРЫТЬ доступ")
+        unguarded = _calls_outside_try(gate, _SRC)
+        assert not unguarded, (
+            f"{gate} вызывается вне try в: {sorted(unguarded)} — при сбое базы "
+            f"ответ не превратится в отказ")

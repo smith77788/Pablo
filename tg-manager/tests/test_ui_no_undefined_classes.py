@@ -27,11 +27,31 @@ def _load():
     body = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL)
     used = {}
     for m in re.finditer(r'class="([^"]*)"', body):
-        for cls in m.group(1).split():
-            if "$" in cls or "{" in cls:
-                continue
+        for cls in _classes_in(m.group(1)):
             used[cls] = used.get(cls, 0) + 1
     return defined, used
+
+
+def _classes_in(value: str) -> list[str]:
+    """Имена классов из значения class=, включая спрятанные в подстановке.
+
+    Половина разметки собирается шаблонными строками:
+    `class="li${cond?' tap':''}"`. Раньше такой кусок рубился по пробелам, и
+    обломок `tap':''}` считался «классом без оформления» — детектор упирался
+    в собственный разбор, а класс внутри условия при этом не проверялся
+    вообще. Теперь подстановка разбирается отдельно: из неё берутся строковые
+    литералы (там и лежат настоящие имена классов), а остальной текст
+    выбрасывается.
+    """
+    names: list[str] = []
+    for sub in re.findall(r"\$\{.*?\}", value, re.DOTALL):
+        for single, double in re.findall(r"'([^']*)'|\"([^\"]*)\"", sub):
+            names.extend((single or double).split())
+    for cls in re.sub(r"\$\{.*?\}", " ", value, flags=re.DOTALL).split():
+        if "$" in cls or "{" in cls or "}" in cls:
+            continue
+        names.append(cls)
+    return names
 
 
 def test_frequent_classes_are_defined():

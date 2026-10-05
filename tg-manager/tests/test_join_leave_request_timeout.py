@@ -91,20 +91,99 @@ def _is_wait_for(node) -> bool:
            (isinstance(f, ast.Name) and f.id == "wait_for")
 
 
-def _naked_requests(fn_name: str) -> list[int]:
-    """Строки запросов к Telegram, не обёрнутых в wait_for."""
-    _src, tree = _tree()
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.AsyncFunctionDef) and n.name == fn_name)
+def _timeboxed_from(fn) -> int | None:
+    """Строка, с которой клиент обёрнут потолком на КАЖДЫЙ запрос.
+
+    `client = timeboxed(client)` (`_Timeboxed`) ставит `asyncio.wait_for` на
+    каждый сетевой вызов обёрнутого клиента — это тот же потолок, только одной
+    строкой вместо оборачивания каждого из десятков вызовов (в
+    `report_peer_deep_v2` их 32). Проба, которая знает только про явный
+    `wait_for`, считает такую функцию голой и краснеет на здоровом коде.
+
+    Возвращаем номер строки, а не признак: вызовы ВЫШЕ этой строки идут по
+    необёрнутому клиенту и потолка не имеют.
+    """
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Assign):
+            continue
+        v = n.value
+        if not (isinstance(v, ast.Call) and isinstance(v.func, ast.Name)
+                and v.func.id == "timeboxed"):
+            continue
+        if any(isinstance(t, ast.Name) and t.id == "client" for t in n.targets):
+            return n.lineno
+    return None
+
+
+def _naked_in(fn) -> list[int]:
+    """Строки запросов к Telegram, не обёрнутых в потолок."""
     wrapped: set[int] = set()
     for n in ast.walk(fn):
         if isinstance(n, ast.Call) and _is_wait_for(n) and n.args:
             for sub in ast.walk(n.args[0]):
                 if _is_client_call(sub):
                     wrapped.add(id(sub))
+    box = _timeboxed_from(fn)
     return [n.lineno for n in ast.walk(fn)
             if isinstance(n, ast.Await) and _is_client_call(n.value)
-            and id(n.value) not in wrapped]
+            and id(n.value) not in wrapped
+            and not (box is not None and n.lineno > box)]
+
+
+def _naked_requests(fn_name: str) -> list[int]:
+    _src, tree = _tree()
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == fn_name)
+    return _naked_in(fn)
+
+
+# ── Проверка самой пробы ─────────────────────────────────────────────────────
+
+_NAKED = """
+async def go(client):
+    await client.connect()
+    return await client(JoinChannelRequest(x))
+"""
+
+_WAIT_FOR = """
+async def go(client):
+    await asyncio.wait_for(client.connect(), timeout=_OP_TIMEOUT)
+    return await asyncio.wait_for(client(JoinChannelRequest(x)), timeout=_OP_TIMEOUT)
+"""
+
+_TIMEBOXED = """
+async def go(client):
+    client = timeboxed(client)
+    await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+    return await client(JoinChannelRequest(x))
+"""
+
+_TIMEBOXED_TOO_LATE = """
+async def go(client):
+    await client(JoinChannelRequest(x))
+    client = timeboxed(client)
+    return await client(JoinChannelRequest(y))
+"""
+
+
+def _probe(src: str) -> list[int]:
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.AsyncFunctionDef))
+    return _naked_in(fn)
+
+
+def test_probe_sees_a_naked_request():
+    assert _probe(_NAKED), "проба не видит запрос без потолка"
+
+
+def test_probe_accepts_both_ways_of_putting_a_ceiling():
+    assert not _probe(_WAIT_FOR), "проба ругается на явный wait_for"
+    assert not _probe(_TIMEBOXED), "проба не знает про обёртку timeboxed"
+
+
+def test_probe_still_sees_requests_made_before_the_wrapper():
+    """Обёртка защищает только то, что идёт ПОСЛЕ неё."""
+    assert _probe(_TIMEBOXED_TOO_LATE) == [3]
 
 
 # ── Сам инвариант ────────────────────────────────────────────────────────────
@@ -227,12 +306,14 @@ def test_no_operation_path_function_was_left_out_of_guarded():
 def test_the_computed_check_can_actually_flag_something():
     """Проверка, которая ничего не способна найти, вечно зелёная и потому лживая.
 
-    `report_peer_deep` (первая версия, без вызывающих) держит два десятка голых
-    запросов. Детектор обязан их видеть — и при этом не жаловаться на них: в
-    путь операции эта функция не входит, её никто не зовёт. Обе половины важны:
-    первая доказывает, что механизм работает, вторая — что он не шумит.
+    Что детектор вообще видит голый запрос, доказано на синтетическом примере
+    (`test_probe_sees_a_naked_request`): раньше эту роль играла
+    `report_peer_deep`, но её обвязали потолком (`client = timeboxed(client)`),
+    и пример перестал быть плохим — живой код для такой проверки ненадёжен.
+    Здесь остаётся вторая половина: детектор не шумит на функции, которой в
+    пути операции нет, — `report_peer_deep` никто не зовёт.
     """
-    assert len(_naked_requests("report_peer_deep")) > 10, (
+    assert _probe(_NAKED), (
         "детектор перестал видеть голые запросы — проверка выше стала пустой")
     delegated = _modules_executors_delegate_to() | {"op_worker"}
     import re

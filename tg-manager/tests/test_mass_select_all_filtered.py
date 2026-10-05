@@ -26,9 +26,12 @@ def test_backend_resolves_whole_filter_scoped():
     # использует тот же билдер WHERE со скоупом owner/admin — и с ТЕМИ ЖЕ
     # срезами, что видит владелец: фильтр, CRM-этап, поиск и пул. Пропущенный
     # срез здесь означает, что операция уйдёт шире показанного списка.
-    call = re.search(r"_accounts_where\((.*?)\)\n", mass)
+    # Вызов переносится на несколько строк, как только добавляется новый срез,
+    # поэтому ищем с re.S: без этого проба перестаёт видеть здоровый код и
+    # краснеет на правильной правке вместо того, чтобы ловить пропущенный срез.
+    call = re.search(r"_accounts_where\((.*?)\)\n", mass, re.S)
     assert call, "accounts_mass не зовёт общий билдер WHERE"
-    for part in ("uid", "flt", "stage", "qterm", "admin=admin", "acc_pool="):
+    for part in ("uid", "flt", "stage", "qterm", "admin=admin", "acc_pool=", "geo="):
         assert part in call.group(1), f"в срезе масс-действия нет {part}"
     # предохранитель от неограниченного enqueue
     assert "LIMIT 5000" in mass
@@ -41,7 +44,7 @@ def test_ui_sends_select_all_filtered():
     body = m.group(1)
     assert "select_all_filtered: true" in body
     for part in ("filter: ACC_FILTER", "stage: ACC_STAGE_FILTER", "q: ACC_SEARCH",
-                 "pool: ACC_POOL_FILTER"):
+                 "pool: ACC_POOL_FILTER", "geo: ACC_GEO_FILTER"):
         assert part in body, f"UI не передаёт {part} в масс-действие"
     # все масс-пути идут через _massSel (не жёстко account_ids)
     assert "op, ..._massSel()" in ui        # runAccMass
