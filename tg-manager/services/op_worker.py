@@ -14680,6 +14680,8 @@ async def _exec_mass_invite(
     _oo_keys = {_coo.compare_key(t) for t in _oo}
     _deduped = 0
     _opted_out = 0
+    _dup_in_list = 0              # повторы внутри самого списка аудитории
+    _seen_keys: set = set()
     _source_exhausted = True     # источник вычитан до конца (не упёрлись в потолок)
 
     def _fresh(ref) -> bool:
@@ -14691,7 +14693,7 @@ async def _exec_mass_invite(
         аудиторию из двух парсингов с разным регистром, получал два инвайта в
         одну группу (opt-out это уже учитывал, дедуп — нет).
         """
-        nonlocal _deduped, _opted_out
+        nonlocal _deduped, _opted_out, _dup_in_list
         key = _coo.compare_key(str(ref))
         if key in _oo_keys:
             _opted_out += 1
@@ -14699,6 +14701,13 @@ async def _exec_mass_invite(
         if _skip_invited and key in _already:
             _deduped += 1
             return False
+        # Один человек дважды в самом списке: спаршен из двух каналов, вставлен
+        # дважды, '@Ivan' и '@ivan'. Раньше такой получал два приглашения за
+        # один прогон — дедуп сверял только с прошлыми прогонами.
+        if key in _seen_keys:
+            _dup_in_list += 1
+            return False
+        _seen_keys.add(key)
         return True
 
     if not user_refs and not phones:
@@ -15722,6 +15731,14 @@ async def _exec_mass_invite(
         _dedup_unconfirmed.update(_new)
         if not _dedup_unconfirmed:
             return
+        # Перелив по резерву: человек, приглашённый в канал цепочки, записан и
+        # под ключом самой кампании (его видят все её каналы и продолжения), и
+        # под ключом канала, куда реально пригласили, — чтобы и отдельная
+        # кампания прямо в этот канал его не позвала второй раз.
+        if group != _main_ref:
+            from services import invite_dedup as _idd
+            _extra = [k for k in _idd.dedup_keys(group, _cur_chan_id) if k != _group_key]
+            await _idd.remember(pool, owner_id, _extra, _new, op_id=op_id)
         if await _record_invited_targets(
                 pool, owner_id, _group_key, op_id, _dedup_unconfirmed):
             _dedup_unconfirmed.clear()
@@ -15780,6 +15797,35 @@ async def _exec_mass_invite(
         _parallel = max(1, int(_os_env.getenv("INVITE_PARALLEL", "4")))
     except (TypeError, ValueError):
         _parallel = 4
+
+    _dedup_live = 0   # отсеяно прямо перед отправкой: их успела пригласить другая операция
+
+    async def _drop_invited_meanwhile(batch: list) -> list:
+        """Отсеять из батча тех, кого пригласили ПОСЛЕ старта этого прогона.
+
+        Дедуп читается один раз на старте, а прогон идёт часами. Параллельная
+        операция в тот же канал (продолжение и ручной перезапуск, две вкладки)
+        за это время приглашает людей из той же аудитории, и без сверки перед
+        отправкой они получали второе приглашение. Сверяем по журналу дедупа
+        одним запросом на батч. Сбой — отправляем как есть (как и на старте).
+        """
+        nonlocal _dedup_live
+        if not _skip_invited or not batch:
+            return batch
+        _vals = sorted({str(b) for b in batch} | {_coo.compare_key(b) for b in batch})
+        try:
+            rows = await pool.fetch(
+                "SELECT target FROM invite_target_log "
+                "WHERE owner_id=$1 AND group_key=$2 AND target = ANY($3::text[])",
+                owner_id, _group_key, _vals)
+        except Exception:
+            return batch
+        _taken = {_coo.compare_key(r["target"]) for r in (rows or [])}
+        if not _taken:
+            return batch
+        _keep = [b for b in batch if _coo.compare_key(b) not in _taken]
+        _dedup_live += len(batch) - len(_keep)
+        return _keep
 
     def _take(q: deque, n: int) -> list:
         out: list = []
@@ -15991,7 +16037,7 @@ async def _exec_mass_invite(
                 # дороже (импорт контакта) и оставлять их на конец безопаснее.
                 by_phone = not q_users
                 queue = q_phones if by_phone else q_users
-                batch = _take(queue, take_n)
+                batch = await _drop_invited_meanwhile(_take(queue, take_n))
                 if not batch:
                     continue
 
@@ -16911,6 +16957,9 @@ async def _exec_mass_invite(
         + ("\n⏸ Промоут-трюк пропущен: аккаунт, выдающий права, словил паузу Telegram "
            "в этом прогоне — его берегли от бана." if _trick_skipped_flood else "")
         + (f"\n♻️ Пропущено уже приглашённых: {_deduped}" if _deduped else "")
+        + (f"\n♻️ Повторы в списке убраны: {_dup_in_list}" if _dup_in_list else "")
+        + (f"\n♻️ Пропущено — их по ходу прогона пригласила другая операция: {_dedup_live}"
+           if _dedup_live else "")
         + (f"\n📦 Источник больше {_INVITE_AUDIENCE_CAP} целей — взята первая порция; "
            "остальные подтянутся следующими прогонами." if not _source_exhausted else "")
         + (f"\n🚫 Пропущено из реестра «не приглашать»: {_opted_out}" if _opted_out else "")

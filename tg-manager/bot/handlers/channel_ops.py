@@ -2961,6 +2961,32 @@ async def _run_invite_bg(
         )
         return
 
+    # ── Без повторных приглашений: тот же журнал, что у массового инвайта ──
+    # Кого уже звали в этот канал (из бота или мини-аппа) и кто в реестре «не
+    # приглашать» — не зовём; повторы внутри списка убираем.
+    from services import invite_dedup as _idd
+    _ch_uname = ""
+    try:
+        _ch_uname = (await pool.fetchval(
+            "SELECT username FROM managed_channels WHERE owner_id=$1 AND channel_id=$2 "
+            "AND username IS NOT NULL LIMIT 1", user_id, int(channel_id))) or ""
+    except Exception:
+        log_exc_swallow(log, "invite_bg: channel username lookup")
+    _dedup_keys = _idd.dedup_keys(channel_id=channel_id, username=_ch_uname)
+    usernames, _skip_dup, _skip_opt = await _idd.filter_new(
+        pool, user_id, _dedup_keys, list(usernames))
+    _skip_note = "".join([
+        f"\n♻️ Уже приглашались в этот канал — пропущено: {_skip_dup}" if _skip_dup else "",
+        f"\n🚫 Из реестра «не приглашать» — пропущено: {_skip_opt}" if _skip_opt else "",
+    ])
+    if not usernames:
+        await msg_obj.answer(
+            "♻️ Новых для этого канала нет — все из списка уже приглашались "
+            "или стоят в реестре «не приглашать»." + _skip_note,
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
     # ── Загружаем аккаунты (включая tg_user_id для promote_to_admin) ──────
     # Инвайт — высокий риск бана: аккаунт в кулдауне не берём. Одна дверь —
     # флуд-осознанный resource_selector: выбранные грузим через include_ids (с
@@ -3103,6 +3129,7 @@ async def _run_invite_bg(
             )
             acc_status[aid]["invited"] = result.get("invited", 0)
             acc_status[aid]["failed"] = len(result.get("failed") or [])
+            await _idd.remember(pool, user_id, _dedup_keys, result.get("invited_list"))
             if result.get("error"):
                 acc_status[aid]["error"] = str(result["error"])[:50]
         except asyncio.CancelledError:
@@ -3156,7 +3183,8 @@ async def _run_invite_bg(
                 f"✅ <b>Инвайт завершён</b>\n\n"
                 f"Канал: <code>{html.escape(channel_display)}</code>\n"
                 f"Аккаунтов: <b>{n_acc}</b>  Пользователей: <b>{total}</b>\n"
-                f"✅ Приглашено: <b>{total_inv}</b>  ❌ Ошибок: <b>{total_fail}</b>",
+                f"✅ Приглашено: <b>{total_inv}</b>  ❌ Ошибок: <b>{total_fail}</b>"
+                + _skip_note,
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
@@ -6652,6 +6680,27 @@ async def _cinv_bg_inner(
         )
         return
 
+    # Без повторных приглашений: тот же журнал, что у массового инвайта и
+    # инвайта из карточки канала. Уже приглашённых в этот канал и реестр
+    # «не приглашать» не зовём.
+    from services import invite_dedup as _idd
+    _dedup_keys = _idd.dedup_keys(group_ref=str(channel_identifier or ""),
+                                  channel_id=channel_id)
+    _skip_dup = _skip_opt = 0
+    if pool is not None:
+        identifiers, _skip_dup, _skip_opt = await _idd.filter_new(
+            pool, user_id, _dedup_keys, identifiers)
+    _skip_note = "".join([
+        f"\n♻️ Уже приглашались в этот канал — пропущено: {_skip_dup}" if _skip_dup else "",
+        f"\n🚫 Из реестра «не приглашать» — пропущено: {_skip_opt}" if _skip_opt else "",
+    ])
+    if not identifiers:
+        await _upd(
+            f"♻️ <b>Инвайт · {_ch_disp}</b>\n\n"
+            "Новых для этого канала нет — все контакты уже приглашались "
+            "или стоят в реестре «не приглашать»." + _skip_note)
+        return
+
     # 3. Split contacts round-robin among prepared admin accounts.
     per_account_cap = 25 if len(invite_accounts) == 1 else 35
     total_cap = max(1, len(invite_accounts)) * per_account_cap
@@ -6694,6 +6743,8 @@ async def _cinv_bg_inner(
             )
             invited = res.get("invited", 0)
             failed = len(res.get("failed", []))
+            if pool is not None:
+                await _idd.remember(pool, user_id, _dedup_keys, res.get("invited_list"))
             if res.get("error"):
                 log.warning("cinv hard error acc=%s: %s", acc["id"], res["error"])
                 failed += max(0, len(chunk) - invited)
@@ -6723,5 +6774,6 @@ async def _cinv_bg_inner(
         f"✅ <b>Инвайт завершён!</b>\n\n"
         f"Канал: <b>{_ch_disp}</b>\n"
         f"Контактов: <b>{len(identifiers):,}</b> · приглашено: <b>{total_invited}</b> · ошибок: <b>{total_failed}</b>"
+        + _skip_note
         + (f"\n\n📊 <b>Разбивка:</b>\n{_breakdown}" if _breakdown else "")
     )

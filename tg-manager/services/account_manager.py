@@ -5239,6 +5239,9 @@ async def invite_users_to_channel(
     # Clamp batch_size to Telegram safe limit
     batch_size = max(1, min(batch_size, 200))
     invited = 0
+    # Кого именно пригласили — вызывающий пишет их в журнал приглашений
+    # (services/invite_dedup), иначе другая дверь позовёт их второй раз.
+    invited_list: list[str] = []
     failed: list[str] = []
     batches_done = 0
     client = _make_client(session_string, _acc)
@@ -5292,6 +5295,7 @@ async def invite_users_to_channel(
                         InviteToChannelRequest(channel=channel_peer, users=[user])
                     )
                     invited += 1
+                    invited_list.append(uname)
                     done += 1
                     if progress_cb and done % 10 == 0:
                         try:
@@ -5309,7 +5313,7 @@ async def invite_users_to_channel(
                         failed.append(f"{u.strip()}: нет прав администратора")
                     abort = True
                     return {
-                        "invited": invited,
+                        "invited": invited, "invited_list": invited_list,
                         "failed": failed,
                         "batches": batches_done,
                         "error": "Нет прав администратора. Назначьте аккаунт администратором с правом 'Добавление участников'.",
@@ -5319,7 +5323,7 @@ async def invite_users_to_channel(
                         failed.append(f"{u.strip()}: PeerFlood")
                     abort = True
                     return {
-                        "invited": invited,
+                        "invited": invited, "invited_list": invited_list,
                         "failed": failed,
                         "batches": batches_done,
                         "error": "PeerFlood: account stopped to avoid spamblock escalation",
@@ -5350,6 +5354,7 @@ async def invite_users_to_channel(
                             InviteToChannelRequest(channel=channel_peer, users=[user])
                         )
                         invited += 1
+                        invited_list.append(uname)
                     except Exception as e:
                         log.debug("invite_users_to_channel: flood retry failed: %s", e)
                         failed.append(f"{uname}: FloodWait+retry_fail")
@@ -5372,14 +5377,14 @@ async def invite_users_to_channel(
             except Exception as e:
                 log.debug("invite_users_to_channel: final progress_cb error: %s", e)
 
-        return {"invited": invited, "failed": failed, "batches": batches_done}
+        return {"invited": invited, "invited_list": invited_list, "failed": failed, "batches": batches_done}
 
     except asyncio.CancelledError:
         raise
     except Exception as e:
         log.exception("invite_users_to_channel error: %s", e)
         return {
-            "invited": invited,
+            "invited": invited, "invited_list": invited_list,
             "failed": failed,
             "batches": batches_done,
             "error": str(e)[:150],
