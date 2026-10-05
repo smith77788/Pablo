@@ -350,7 +350,8 @@ def classify_invite_error(exc: BaseException) -> str:
     # ValueError без своего типа, и они уходили в «прочее».
     if "already" in text and "participant" in text:
         return FAIL_ALREADY_IN
-    if "too many members" in text or "users_too_much" in text:
+    if "too many members" in text or "users_too_much" in text \
+            or "maximum number of users" in text:
         return FAIL_CHAT_FULL
     if "admin" in text and ("required" in text or "privileges" in text):
         return FAIL_PERM
@@ -988,6 +989,15 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                 failed += 1
                 errors.append(f"{ref}: privacy (промоут-трюк не помог)")
             except Exception as e:
+                # Канал физически полон (лимит участников Telegram) — это беда
+                # ЧАТА, а не цели: прекращаем трюк, текущую и остаток возвращаем
+                # в очередь (их доинвайтит следующий канал резерва или повтор),
+                # в failed НЕ пишем. Иначе сотни невиновных целей списывались в
+                # «Ошибка: maximum number of users exceeded» (жалоба владельца).
+                if classify_invite_error(e) == FAIL_CHAT_FULL:
+                    untried_from = _cur
+                    errors.append("group error: в чате достигнут лимит участников Telegram")
+                    break
                 log.warning("add_via_promote failed: %s", e)
                 failed += 1
                 errors.append(f"{ref}: {str(e)[:80]}")
