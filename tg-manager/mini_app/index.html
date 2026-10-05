@@ -5515,6 +5515,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- Список получателей кампании с фильтром: «кому именно не дошло». -->
+<div class="screen" id="s-dmrlog">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">👥 Получатели</div>
+    <div class="hdr-meta"><div class="hdr-user" id="dmrl-title"></div></div>
+  </div>
+  <div class="sub-sb">
+    <div id="dmrlBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: ACCOUNT WARMUP ══════════════════════ -->
 <div class="screen" id="s-warmup">
   <div class="hdr">
@@ -21270,44 +21282,186 @@ const DM_LOG_STATUS = {
   sent:'✅ доставлено', blocked:'🚫 заблокирован', skip:'🔒 недоступен',
   auth:'🔑 сессия мертва', peer_flood:'⛔ слишком много сообщений незнакомым', retry:'⚠️ сбой', failed:'⚠️ сбой',
 };
+// Причина недоставки приходит от Telegram английской строкой
+// (USER_PRIVACY_RESTRICTED, PEER_FLOOD) и в таком виде показывалась владельцу,
+// который по-английски не читает. Переводим известные, неизвестную оставляем
+// как есть — выдумывать перевод нельзя, по ней потом ищут в поддержке.
+const DM_ERR_RU = {
+  USER_PRIVACY_RESTRICTED:'Настройки приватности запрещают писать первым',
+  USER_IS_BLOCKED:'Получатель заблокировал этот аккаунт',
+  YOU_BLOCKED_USER:'Этот аккаунт сам заблокировал получателя',
+  USER_DEACTIVATED:'Аккаунт получателя удалён',
+  USER_DEACTIVATED_BAN:'Аккаунт получателя заблокирован Telegram',
+  INPUT_USER_DEACTIVATED:'Аккаунт получателя удалён',
+  PEER_ID_INVALID:'Telegram не нашёл такого пользователя',
+  PEER_FLOOD:'Telegram ограничил аккаунт за сообщения незнакомым',
+  FLOOD_WAIT:'Слишком часто — Telegram попросил подождать',
+  SLOWMODE_WAIT:'Медленный режим — отправка разрешена реже',
+  AUTH_KEY_UNREGISTERED:'Сессия аккаунта больше не действует',
+  SESSION_REVOKED:'Сессию аккаунта отозвали',
+  USER_IS_BOT:'Это бот, личные сообщения ему не отправляются',
+  MESSAGE_TOO_LONG:'Текст длиннее, чем принимает Telegram',
+  MEDIA_CAPTION_TOO_LONG:'Подпись к медиа длиннее, чем принимает Telegram',
+  CHAT_WRITE_FORBIDDEN:'Писать в этот чат запрещено',
+};
+function dmErrRu(raw) {
+  const s = String(raw||'').trim();
+  if (!s) return '';
+  // FLOOD_WAIT_60 и SLOWMODE_WAIT_10 — один и тот же класс с числом в хвосте.
+  const key = s.toUpperCase().replace(/[^A-Z_]/g,'').replace(/_+$/,'');
+  return DM_ERR_RU[key] || DM_ERR_RU[key.replace(/_WAIT.*$/,'_WAIT')] || s;
+}
+// Кто за id: в CRM и в спарсенной аудитории имя почти всегда есть, и
+// «Пётр» в отчёте читается, а «id 783215441» — нет.
+function dmrWho(r) {
+  if (r.name) return esc(r.name) + (r.username ? ' · @' + esc(r.username) : '');
+  if (r.username) return '@' + esc(r.username);
+  return 'Пользователь ' + esc(String(r.tg_user_id));
+}
+// Ни имя, ни причина, ни статус в onclick не попадают: это внешний текст из
+// Telegram, и в атрибуте он — исполняемый код. Через onclick едет только
+// индекс в массиве, сами строки берём из памяти экрана.
+let _DMR_ID = null;        // кампания, чей отчёт открыт
+let _DMR_RECENT = [];      // последние отправки на экране отчёта
+let _DMR_STATUSES = [];    // строки сводки «Исходы»
+let _DMR_ERRS = [];        // строки сводки «Частые причины недоставки»
+let _DMR_LOG = [];         // получатели на подэкране списка
+let _DMRL_Q = null;        // фильтр открытого списка: {status, reason, title, limit}
+function dmrRow(src, i) {
+  const r = (src === 'rep' ? _DMR_RECENT : _DMR_LOG)[i];
+  if (!r) return '';
+  const err = r.error_msg ? String(r.error_msg) : '';
+  return `<div class="li tap" onclick="dmrTap('${src}',${i})" role="button" tabindex="0">
+    <div class="row-body">
+      <div class="row-name">${dmrWho(r)}</div>
+      <div class="li-sub wrap">${esc(DM_LOG_STATUS[r.status]||r.status)}${
+        err ? ' · ' + esc(dmErrRu(err).slice(0, 80)) : ''}${
+        r.sent_at ? ' · ' + esc(ago(r.sent_at)) : ''}</div>
+    </div><span class="chev">›</span></div>`;
+}
+// Тап по получателю: длинную причину показываем целиком (в строку влезает
+// 80 символов, а суть бывает в хвосте), иначе копируем номер — с ним можно
+// найти человека в CRM или передать в другой инструмент.
+function dmrTap(src, i) {
+  const r = (src === 'rep' ? _DMR_RECENT : _DMR_LOG)[i];
+  if (!r) return;
+  const err = r.error_msg ? String(r.error_msg) : '';
+  if (err.length > 80) { showInfo(err); return; }
+  copyToClipboard(String(r.tg_user_id), '📋 Номер скопирован');
+}
+function dmrCopyIds(src) {
+  const rows = (src === 'rep' ? _DMR_RECENT : _DMR_LOG);
+  if (!rows.length) return;
+  copyToClipboard(rows.map(r=>String(r.tg_user_id)).join('\n'),
+    '📋 Скопировано номеров: ' + rows.length);
+}
+function dmrGoStatus(i) {
+  const s = _DMR_STATUSES[i]; if (!s) return;
+  openDmLog({status:String(s.status), reason:'', title:(DM_LOG_STATUS[s.status]||String(s.status))});
+}
+function dmrGoReason(i) {
+  const e = _DMR_ERRS[i]; if (!e) return;
+  openDmLog({status:'', reason:String(e.reason), title:'Причина недоставки'});
+}
 async function openDmReport(id) {
   push('s-dmreport');
+  _DMR_ID = id;
   txt('dmrBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/dm_campaign/'+id+'/report');
     const c = d.campaign||{};
-    txt('dmr-title', c.name || ('Кампания #'+id));
-    const statuses = d.by_status||[];
+    txt('dmr-title', c.name || ('Кампания №'+id));
+    _DMR_STATUSES = d.by_status||[];
+    _DMR_ERRS = d.top_errors||[];
+    _DMR_RECENT = d.recent||[];
     const accs = d.by_account||[];
-    const errs = d.top_errors||[];
-    const rec = d.recent||[];
     let h = '';
-    if (!statuses.length) {
-      h = empty('📭','Отправок ещё не было','Отчёт заполнится, как только кампания начнёт отправлять');
+    // Сколько осталось: экран показывал только исходы уже отправленных, и
+    // понять «кампания прошла полностью или встала на трети» было нельзя.
+    const sent = Number(c.sent_count||0), fail = Number(c.fail_count||0);
+    const tot = Number(c.total_targets||0);
+    const left = tot ? Math.max(tot - sent - fail, 0) : 0;
+    h += `<div style="display:flex;gap:10px;padding:0 0 10px">
+      <div class="kpi-card tap-card" onclick="openDmLog({status:'sent',reason:'',title:'Доставлено'})" role="button" tabindex="0">
+        <div class="kpi-val" style="${kpiTone(sent,'green')}">${num(sent)}</div><div class="kpi-lbl">Дошло ›</div></div>
+      <div class="kpi-card tap-card" onclick="openDmLog({failed:true,title:'Не дошло'})" role="button" tabindex="0">
+        <div class="kpi-val" style="color:${fail?'var(--red)':'var(--hint)'}">${num(fail)}</div><div class="kpi-lbl">Не дошло ›</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:${left?'var(--orange)':'var(--hint)'}">${
+        tot ? num(left) : '—'}</div><div class="kpi-lbl">Осталось</div></div>
+    </div>`;
+    if (!_DMR_STATUSES.length) {
+      h += empty('📭','Отправок ещё не было','Отчёт заполнится, как только кампания начнёт отправлять');
     } else {
-      h += `<div class="sec-t">Исходы</div><div class="lst">` + statuses.map(s=>
-        `<div class="row"><div class="row-body"><div class="row-name">${esc(DM_LOG_STATUS[s.status]||s.status)}</div></div>
-         <div class="row-right"><span class="badge b-bl">${num(s.n)}</span></div></div>`).join('') + `</div>`;
-      if (errs.length) {
-        h += `<div class="sec-t">Частые причины недоставки</div><div class="lst">` + errs.map(e=>
-          `<div class="row"><div class="row-body"><div class="row-name" style="font-weight:400">${esc(e.reason)}</div></div>
-           <div class="row-right"><span class="badge b-rd">${num(e.n)}</span></div></div>`).join('') + `</div>`;
+      // Каждая строка сводки ведёт к списку тех, кто за числом стоит: раньше
+      // отчёт отвечал «заблокировали: 54» и не отвечал «кто именно».
+      h += `<div class="sec-t">Исходы</div><div class="lst">` + _DMR_STATUSES.map((s,i)=>
+        `<div class="li tap" onclick="dmrGoStatus(${i})" role="button" tabindex="0">
+           <div class="row-body"><div class="row-name">${esc(DM_LOG_STATUS[s.status]||s.status)}</div></div>
+           <div class="row-right"><span class="badge b-bl">${num(s.n)}</span></div><span class="chev">›</span></div>`).join('') + `</div>`;
+      if (_DMR_ERRS.length) {
+        h += `<div class="sec-t">Частые причины недоставки</div><div class="lst">` + _DMR_ERRS.map((e,i)=>
+          `<div class="li tap" onclick="dmrGoReason(${i})" role="button" tabindex="0">
+             <div class="row-body"><div class="row-name" style="font-weight:400">${esc(dmErrRu(e.reason))}</div>${
+               dmErrRu(e.reason) !== String(e.reason) ? `<div class="li-sub wrap">${esc(e.reason)}</div>` : ''}</div>
+             <div class="row-right"><span class="badge b-rd">${num(e.n)}</span></div><span class="chev">›</span></div>`).join('') + `</div>`;
       }
       if (accs.length) {
+        // Аккаунт, который сыплет ошибками, чинят в его карточке — тап ведёт
+        // туда, а не оставляет владельца с номером на руках.
         h += `<div class="sec-t">По аккаунтам</div><div class="lst">` + accs.map(a=>
-          `<div class="row"><div class="row-body"><div class="row-name">${esc(a.label||('Аккаунт '+a.account_id))}</div>
-             <div class="row-val">✅ ${num(a.sent||0)} · ❌ ${num(a.failed||0)}</div></div></div>`).join('') + `</div>`;
+          `<div class="li tap" onclick="openAccount(${Number(a.account_id)})" role="button" tabindex="0">
+             <div class="row-body"><div class="row-name">${esc(a.label||('Аккаунт '+a.account_id))}</div>
+               <div class="li-sub wrap">✅ ${num(a.sent||0)} · ❌ ${num(a.failed||0)}</div></div>
+             <span class="chev">›</span></div>`).join('') + `</div>`;
       }
-      if (rec.length) {
-        h += `<div class="sec-t">Последние отправки</div><div class="lst">` + rec.map(r=>
-          `<div class="row"><div class="row-body"><div class="row-name" style="font-weight:400">id ${esc(String(r.tg_user_id))}</div>
-             <div class="row-val">${esc(DM_LOG_STATUS[r.status]||r.status)}${r.error_msg?' · '+esc(String(r.error_msg).slice(0,80)):''}</div></div></div>`).join('') + `</div>`;
+      if (_DMR_RECENT.length) {
+        h += `<div class="sec-t">Последние отправки</div><div class="lst">`
+           + _DMR_RECENT.slice(0,20).map((r,i)=>dmrRow('rep',i)).join('') + `</div>`;
+        if (_DMR_RECENT.length > 20) {
+          h += `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="openDmLog({status:'',reason:'',title:'Все получатели'})">Показать всех получателей</button>`;
+        }
       }
     }
     txt('dmrBody', h);
   } catch(e) {
     txt('dmrBody', errHtml(errRu(e),'openDmReport('+id+')'));
   }
+}
+// Список получателей кампании под фильтром: исход (status) или причина
+// недоставки (reason). Пустой фильтр — все подряд.
+async function openDmLog(q) {
+  if (_DMR_ID == null) return;
+  _DMRL_Q = {status:(q&&q.status)||'', reason:(q&&q.reason)||'',
+             failed:!!(q&&q.failed),
+             title:(q&&q.title)||'Получатели', limit:Number(q&&q.limit)||100};
+  push('s-dmrlog');
+  txt('dmrl-title', _DMRL_Q.title);
+  txt('dmrlBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const p = new URLSearchParams({limit:String(_DMRL_Q.limit)});
+    if (_DMRL_Q.status) p.set('status', _DMRL_Q.status);
+    if (_DMRL_Q.reason) p.set('reason', _DMRL_Q.reason);
+    if (_DMRL_Q.failed) p.set('failed', '1');
+    const d = await api('/api/miniapp/dm_campaign/'+_DMR_ID+'/log?'+p.toString());
+    _DMR_LOG = d.items||[];
+    if (!_DMR_LOG.length) {
+      txt('dmrlBody', empty('📭','Таких получателей нет',
+        'По этому фильтру в журнале кампании пока нет ни одной записи'));
+      return;
+    }
+    txt('dmrlBody',
+      `<div class="lst">` + _DMR_LOG.map((r,i)=>dmrRow('log',i)).join('') + `</div>`
+      + moreBtn(_DMR_LOG.length, d.total||0, 'openDmLogMore()')
+      // Список нужен не для чтения, а для работы: выгрузить в другой канал,
+      // вычистить из базы, передать коллеге. Без копирования это тупик.
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="dmrCopyIds('log')">📋 Скопировать номера (${num(_DMR_LOG.length)})</button>`);
+  } catch(e) {
+    txt('dmrlBody', errHtml(errRu(e),'openDmLogMore()'));
+  }
+}
+function openDmLogMore() {
+  if (!_DMRL_Q) return;
+  openDmLog(Object.assign({}, _DMRL_Q, {limit: Math.min(_DMRL_Q.limit*2, 500)}));
 }
 
 // Правка неидущей кампании: раньше опечатка в тексте означала удалить её и

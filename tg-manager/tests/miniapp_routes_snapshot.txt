@@ -148,6 +148,7 @@ GET /api/miniapp/dashboard/visual
 GET /api/miniapp/dashboard_realtime
 GET /api/miniapp/devices
 GET /api/miniapp/diag
+GET /api/miniapp/dm_campaign/{campaign_id}/log
 GET /api/miniapp/dm_campaign/{campaign_id}/report
 GET /api/miniapp/dm_campaigns
 GET /api/miniapp/ecosystem/{eco_id}
@@ -428,6 +429,7 @@ HEAD /api/miniapp/dashboard/visual
 HEAD /api/miniapp/dashboard_realtime
 HEAD /api/miniapp/devices
 HEAD /api/miniapp/diag
+HEAD /api/miniapp/dm_campaign/{campaign_id}/log
 HEAD /api/miniapp/dm_campaign/{campaign_id}/report
 HEAD /api/miniapp/dm_campaigns
 HEAD /api/miniapp/ecosystem/{eco_id}

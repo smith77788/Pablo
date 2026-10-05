@@ -11018,11 +11018,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "GROUP BY reason ORDER BY n DESC LIMIT 10",
             campaign_id,
         )
+        # Имя получателя вместо голого id: «id 783215441» владельцу ничего не
+        # говорит, а имя у нас почти всегда есть — цели берутся из CRM или из
+        # спарсенной аудитории, и обе таблицы хранят имя и @username.
         recent = await _safe_fetch(
             pool,
-            "SELECT tg_user_id, status, error_msg, sent_at FROM dm_campaign_log "
-            "WHERE campaign_id=$1 ORDER BY sent_at DESC LIMIT 100",
-            campaign_id,
+            """SELECT l.tg_user_id, l.status, l.error_msg, l.sent_at,
+                      COALESCE(c.first_name, p.first_name) AS name,
+                      COALESCE(c.username, p.username)     AS username
+                 FROM dm_campaign_log l
+            LEFT JOIN LATERAL (SELECT first_name, username FROM crm_contacts
+                                WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
+                                LIMIT 1) c ON TRUE
+            LEFT JOIN LATERAL (SELECT first_name, username FROM parsed_audiences
+                                WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
+                                LIMIT 1) p ON TRUE
+                WHERE l.campaign_id=$1
+             ORDER BY l.sent_at DESC
+                LIMIT 100""",
+            campaign_id, uid,
         )
         for r in recent:
             if r.get("sent_at") is not None:
@@ -11033,6 +11047,79 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "by_account": by_account,
             "top_errors": top_errors,
             "recent": recent,
+        })
+
+    async def dm_campaign_log_list(request: web.Request) -> web.Response:
+        """Кому именно не дошло — список получателей с фильтром по исходу/причине.
+
+        Сводка отвечала «заблокировали: 54», но не «кто» — а это ровно тот
+        вопрос, ради которого отчёт и открывают: вычистить мёртвые контакты,
+        переслать другим каналом, понять, одна ли это аудитория.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            campaign_id = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор кампании", 400)
+        # IDOR: лог только по своей кампании.
+        own = await _safe_fetchrow(
+            pool,
+            "SELECT name FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+            campaign_id, uid,
+        )
+        if not own:
+            return _err("Не найдено", 404)
+        status = validate_string(request.query.get("status"), 32, required=False) or None
+        reason = validate_string(request.query.get("reason"), 200, required=False) or None
+        limit = _list_limit(request, 100, 500)
+
+        # Фильтры подставляются как параметры, а не склейкой условий: так в
+        # обоих запросах (счётчик и список) одинаковое число аргументов и
+        # неподставленный $N не разъедется при добавлении третьего фильтра.
+        # 'без описания' — та же подпись, которой сводка называет пустую
+        # причину, поэтому тап по ней фильтрует именно пустые error_msg.
+        # «Не дошло» — это не один статус: доставка ломается blocked,
+        # peer_flood, auth и retry. Поэтому отдельный фильтр, а не перечисление
+        # статусов на стороне экрана, которое разъедется с движком.
+        failed_only = request.query.get("failed") in ("1", "true", "yes")
+        _f = ("($%d::text IS NULL OR l.status=$%d) AND "
+              "($%d::text IS NULL OR COALESCE(NULLIF(l.error_msg,''),"
+              "'без описания')=$%d) AND "
+              "($%d::bool IS NOT TRUE OR l.status<>'sent')")
+
+        total = await _safe_count(
+            pool,
+            "SELECT COUNT(*) FROM dm_campaign_log l WHERE l.campaign_id=$1 AND "
+            + _f % (2, 2, 3, 3, 4),
+            campaign_id, status, reason, failed_only,
+        )
+        rows = await _safe_fetch(
+            pool,
+            f"""SELECT l.tg_user_id, l.status, l.error_msg, l.sent_at,
+                       COALESCE(c.first_name, p.first_name) AS name,
+                       COALESCE(c.username, p.username)     AS username
+                  FROM dm_campaign_log l
+             LEFT JOIN LATERAL (SELECT first_name, username FROM crm_contacts
+                                 WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
+                                 LIMIT 1) c ON TRUE
+             LEFT JOIN LATERAL (SELECT first_name, username FROM parsed_audiences
+                                 WHERE owner_id=$2 AND tg_user_id=l.tg_user_id
+                                 LIMIT 1) p ON TRUE
+                 WHERE l.campaign_id=$1 AND {_f % (3, 3, 4, 4, 5)}
+              ORDER BY l.sent_at DESC
+                 LIMIT {limit}""",
+            campaign_id, uid, status, reason, failed_only,
+        )
+        for r in rows:
+            if r.get("sent_at") is not None:
+                r["sent_at"] = r["sent_at"].isoformat()
+        return _json_resp({
+            "campaign_name": own["name"],
+            "items": rows,
+            "total": total,
+            "shown": len(rows),
         })
 
     async def dm_campaign_pause(request: web.Request) -> web.Response:
@@ -19489,6 +19576,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/launch", dm_campaign_launch)
     app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/pause", dm_campaign_pause)
     app.router.add_get("/api/miniapp/dm_campaign/{campaign_id}/report", dm_campaign_report)
+    app.router.add_get("/api/miniapp/dm_campaign/{campaign_id}/log", dm_campaign_log_list)
     app.router.add_patch("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_update)
     app.router.add_delete("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_delete)
     # Account Warmup
