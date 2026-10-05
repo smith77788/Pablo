@@ -301,7 +301,10 @@ async function invOverflowToggle() {
   if (!wrap) return;
   wrap.innerHTML = '<div style="font-size:12px;color:var(--hint)">Загрузка каналов…</div>';
   try {
-    const d = await api('/api/miniapp/channels?role=mine&limit=500');
+    // Сервер говорит про каждый канал, возьмёт ли его исполнитель: занятые
+    // другой кампанией, заполненные или выбывшие в этой и каналы без живого
+    // аккаунта-админа он пропустит — показываем это до запуска, а не в итоге.
+    const d = await api('/api/miniapp/invite/reserve_options?group=' + encodeURIComponent(_invGroup()));
     const main = (document.getElementById('massInviteGroup')?.value || '').trim().replace(/^@/, '').toLowerCase();
     const list = (d.channels || []).filter(c =>
       !(c.username && c.username.toLowerCase() === main));
@@ -309,17 +312,23 @@ async function invOverflowToggle() {
       wrap.innerHTML = '<div style="font-size:12px;color:var(--hint)">Своих каналов нет. Создайте пустые каналы (фабрика каналов) — они станут резервом.</div>';
       return;
     }
-    // Пустые — наверх: резерв это каналы без подписчиков.
-    list.sort((a, b) => (a.member_count || 0) - (b.member_count || 0));
+    // Годные — наверх, среди них пустые первыми: резерв это каналы без подписчиков.
+    list.sort((a, b) => (b.usable - a.usable) || ((a.member_count || 0) - (b.member_count || 0)));
+    // Отмеченный раньше канал, который стал негодным, из резерва убираем.
+    INV_RESERVE_ORDER = INV_RESERVE_ORDER.filter(id => list.some(c => c.channel_id === id && c.usable));
     wrap.innerHTML = list.map(c => {
       const id = c.channel_id;
       const on = INV_RESERVE_ORDER.includes(id) ? ' checked' : '';
       const n = c.member_count || 0;
-      return `<label class="chk-row" style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:2px 0">
-        <input type="checkbox" data-ch="${id}"${on} onchange="invReservePick(${id}, this.checked)">
+      const off = c.usable ? '' : ' disabled';
+      const why = c.usable ? '' :
+        `<div style="font-size:11px;color:var(--hint);flex-basis:100%;padding-left:24px">⛔ ${esc(c.reason || 'не подходит')}</div>`;
+      return `<label class="chk-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;cursor:${c.usable ? 'pointer' : 'default'};font-size:13px;padding:2px 0;${c.usable ? '' : 'opacity:.6'}">
+        <input type="checkbox" data-ch="${id}"${on}${off} onchange="invReservePick(${id}, this.checked)">
         <span>${esc(c.title || (c.username ? '@' + c.username : String(id)))}</span>
         <span style="color:var(--hint);margin-left:auto">${n ? n + ' уч.' : 'пустой'}</span>
         <span class="inv-res-pos" data-pos="${id}" style="color:var(--accent);min-width:18px;text-align:right"></span>
+        ${why}
       </label>`;
     }).join('');
     _invReserveRenderPos();

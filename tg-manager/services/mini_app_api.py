@@ -7930,6 +7930,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "already_invited": already, "new": max(0, total - already),
         })
 
+    async def invite_reserve_options(request: web.Request) -> web.Response:
+        """Каналы для резерва перелива: кого исполнитель возьмёт, а кого нет и почему."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import invite_overflow as _ovf
+        from services.mass_inviter_engine import parse_group_ref
+        group = (request.query.get("group") or "").strip()
+        try:
+            chans = await _ovf.reserve_options(
+                pool, uid, parse_group_ref(group) if group else "")
+        except Exception:
+            log.warning("invite_reserve_options uid=%s", uid, exc_info=True)
+            return _err("Не удалось загрузить каналы", 500)
+        return _json_resp({"channels": chans})
+
     async def invite_audience_size(request: web.Request) -> web.Response:
         """Сколько целей даст выбранный источник — ДО запуска операции.
 
@@ -19104,6 +19120,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
     app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
+    app.router.add_get("/api/miniapp/invite/reserve_options", invite_reserve_options)
     app.router.add_get("/api/miniapp/invite/segment_options", invite_segment_options)
     app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
     app.router.add_post("/api/miniapp/invite/parse_file", invite_parse_file)

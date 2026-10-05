@@ -221,3 +221,50 @@ async def prepare_channel(acc: dict, ch: dict, setup: dict) -> dict:
             return {"ok": False, "error": "не удалось получить ссылку канала "
                                           "(аккаунт должен быть его админом)"}
     return {"ok": True, "ref": ref, "done": done, "warnings": warnings}
+
+
+async def reserve_options(pool, owner_id: int, chain_key: str) -> list[dict]:
+    """Свои каналы для резерва — с ответом, возьмёт ли их исполнитель и почему нет.
+
+    Раньше мини-апп показывал все свои каналы одинаково, а исполнитель молча
+    пропускал занятые другой кампанией, уже заполненные или выбывшие в этой
+    цепочке и каналы, чей аккаунт-админ недоступен. Оператор отмечал пять
+    каналов резерва, а работало два — и узнавал об этом только по итогу.
+
+    Правило занятости — то же, что у `busy_channel_ids`.
+    """
+    rows = await pool.fetch(
+        "SELECT DISTINCT ON (mc.channel_id) mc.channel_id, mc.title, mc.username, "
+        "mc.members_count, mc.is_admin, mc.is_creator, a.is_active, a.acc_status, "
+        "(a.session_str IS NOT NULL) AS has_session "
+        "FROM managed_channels mc LEFT JOIN tg_accounts a ON a.id = mc.acc_id "
+        "WHERE mc.owner_id=$1 ORDER BY mc.channel_id, mc.is_creator DESC NULLS LAST",
+        owner_id)
+    ov = await pool.fetch(
+        "SELECT channel_id, chain_key, status, reason FROM invite_overflow_channels "
+        "WHERE owner_id=$1 AND channel_id IS NOT NULL", owner_id)
+    used: dict[int, str] = {}
+    for r in ov or []:
+        cid = int(r["channel_id"])
+        if r["chain_key"] != chain_key:
+            used.setdefault(cid, "уже взят другой кампанией — в нём другая аудитория")
+        elif r["status"] == ST_FULL:
+            used[cid] = "заполнен в прошлых прогонах этой кампании"
+        elif r["status"] == ST_BURNED:
+            used[cid] = "выбыл в этой кампании" + (f": {r['reason']}" if r["reason"] else "")
+    out: list[dict] = []
+    for r in rows or []:
+        cid = int(r["channel_id"])
+        why = used.get(cid, "")
+        if not why:
+            if r["is_active"] is False or not r["has_session"] or \
+                    str(r["acc_status"] or "active") in ("banned", "deactivated",
+                                                         "session_expired"):
+                why = "аккаунт-админ канала недоступен"
+            elif r["is_admin"] is False and not r["is_creator"]:
+                why = "привязанный аккаунт не админ канала"
+        out.append({"channel_id": cid, "title": r["title"] or "",
+                    "username": r["username"] or "",
+                    "member_count": int(r["members_count"] or 0),
+                    "usable": not why, "reason": why})
+    return out
