@@ -4331,6 +4331,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not owns:
             return _err("Бот не найден", 404)
         # Try user_activity table first, fallback to bot_users.last_seen
+        # Источник важен не для отладки: кампания по когорте (target_type=cohort)
+        # ВСЕГДА считает по user_activity. Если здесь сработал запасной путь по
+        # bot_users, экран показал бы «🔥 142», а рассылка по той же когорте
+        # нашла бы ноль получателей — и выглядело бы это как поломка рассылки.
+        source = "user_activity"
         try:
             row = await pool.fetchrow(
                 """SELECT
@@ -4344,6 +4349,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM user_activity WHERE bot_id=$1""", bot_id)
         except Exception as e:
             log.warning("bot_engagement user_activity uid=%d bot=%d: %s", uid, bot_id, e)
+            source = "bot_users"
             try:
                 row = await pool.fetchrow(
                     """SELECT
@@ -4358,9 +4364,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception as e2:
                 log.warning("bot_engagement bot_users uid=%d bot=%d: %s", uid, bot_id, e2)
                 row = None
+                source = "none"
         if not row:
-            return _json_resp({"hot": 0, "warm": 0, "cold": 0, "lost": 0, "total": 0})
-        return _json_resp({k: int(row[k] or 0) for k in ("hot", "warm", "cold", "lost", "total")})
+            return _json_resp({"hot": 0, "warm": 0, "cold": 0, "lost": 0, "total": 0,
+                               "source": source, "cohort_ready": False})
+        out = {k: int(row[k] or 0) for k in ("hot", "warm", "cold", "lost", "total")}
+        out["source"] = source
+        # Кампанию по когорте можно обещать только когда числа посчитаны по
+        # тому же журналу, по которому её считает движок.
+        out["cohort_ready"] = source == "user_activity"
+        return _json_resp(out)
 
     # ── Bot Notes ─────────────────────────────────────────────────────────────
 

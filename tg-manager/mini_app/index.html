@@ -6831,12 +6831,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field" id="cmpCohortField" style="display:none">
       <label>Когорта по активности</label>
       <select id="cmpCohort">
-        <option value="hot">🔥 Hot — активны за последние 24 часа</option>
-        <option value="warm" selected>🌤 Warm — активны за 7 дней</option>
-        <option value="cold">❄️ Cold — активны за 30 дней</option>
-        <option value="lost">💤 Lost — неактивны 30+ дней</option>
+        <option value="hot">🔥 Горячие — заходили за последние сутки</option>
+        <option value="warm" selected>🌤 Тёплые — заходили за неделю</option>
+        <option value="cold">❄️ Остывшие — заходили за месяц</option>
+        <option value="lost">💤 Ушедшие — не заходили больше месяца</option>
       </select>
-      <div class="field-note">Сегментация по last_seen; нужен выбор бота выше</div>
+      <div class="field-note">Группы считаются по последнему визиту; бота нужно выбрать выше</div>
     </div>
     <div class="field" id="cmpImportField" style="display:none">
       <label>Список получателей</label>
@@ -15797,25 +15797,66 @@ async function openEngagement(botId) {
   push('s-engagement');
   loadEngagement();
 }
+// Четыре карточки с числами и больше ничего: кто эти «142 горячих», узнать
+// было нельзя, написать им — тоже. А движок рассылок ровно эти четыре когорты
+// умеет с самого начала (target_type=cohort, те же hot|warm|cold|lost по
+// user_activity). Связываем: карточка ведёт в рассылку по своей когорте.
+const ENG_SEGS = [
+  {ico:'🔥',label:'Горячие',key:'hot', color:'rgba(248,113,113,.15)',
+   when:'заходили за последние сутки'},
+  {ico:'🌤',label:'Тёплые',key:'warm', color:'rgba(249,115,22,.15)',
+   when:'заходили за неделю'},
+  {ico:'❄️',label:'Остывшие',key:'cold', color:'rgba(96,165,250,.15)',
+   when:'заходили за месяц'},
+  {ico:'💤',label:'Ушедшие',key:'lost', color:'rgba(107,114,128,.15)',
+   when:'не заходили больше месяца'},
+];
 async function loadEngagement() {
   txt('engGrid', '<div class="spin-wrap" style="grid-column:1/-1"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/bot/'+ENG_BOT_ID+'/engagement');
-    const segs = [
-      {ico:'🔥',label:'Горячие',key:'hot',color:'rgba(248,113,113,.15)'},
-      {ico:'🌡',label:'Тёплые',key:'warm',color:'rgba(249,115,22,.15)'},
-      {ico:'❄️',label:'Холодные',key:'cold',color:'rgba(96,165,250,.15)'},
-      {ico:'💀',label:'Потерянные',key:'lost',color:'rgba(107,114,128,.15)'},
-    ];
-    txt('engGrid', segs.map(s=>`
-      <div class="card" style="background:${s.color};text-align:center">
+    // Кампания по когорте считает получателей по журналу активности. Если
+    // числа выше посчитаны запасным путём, карточка обещала бы рассылку,
+    // которая не найдёт никого.
+    const ready = d.cohort_ready !== false;
+    let h = ENG_SEGS.map(s=>{
+      const n = d[s.key]||0;
+      const pc = d.total?Math.round(n/d.total*100):0;
+      const act = (ready && n) ? ` onclick="startCampaignFromCohort('${s.key}')" role="button" tabindex="0" style="background:${s.color};text-align:center;cursor:pointer"`
+                               : ` style="background:${s.color};text-align:center"`;
+      return `<div class="card"${act}>
         <div style="font-size:28px">${s.ico}</div>
-        <div style="font-size:24px;font-weight:700;margin:4px 0">${num(d[s.key]||0)}</div>
+        <div style="font-size:24px;font-weight:700;margin:4px 0">${num(n)}</div>
         <div style="font-size:12px;color:var(--hint)">${s.label}</div>
-        <div style="font-size:11px;color:var(--hint);margin-top:2px">${d.total?Math.round((d[s.key]||0)/d.total*100)+'%':'0%'}</div>
-      </div>
-    `).join(''));
-  } catch(e) { txt('engGrid', `<div style="grid-column:1/-1">${empty('⚠️','Ошибка',errRu(e))}</div>`); }
+        <div style="font-size:11px;color:var(--hint);margin-top:2px">${pc}% · ${s.when}</div>
+        ${(ready && n) ? '<div style="font-size:11px;color:var(--accent);margin-top:4px">Написать им ›</div>' : ''}
+      </div>`;
+    }).join('');
+    if (!ready) {
+      h += `<div style="grid-column:1/-1" class="card">
+        <div style="font-size:13px;color:var(--hint)">Числа посчитаны по последнему визиту подписчика, а рассылка по когорте берёт журнал активности — его сейчас прочитать не удалось. Пока он недоступен, написать когорте отсюда нельзя.</div>
+      </div>`;
+    } else if (!d.total) {
+      h += `<div style="grid-column:1/-1">${empty('👥','У бота ещё нет подписчиков',
+        'Как только люди начнут ему писать, они разойдутся по этим четырём группам, и каждой можно будет написать отдельно.')}</div>`;
+    }
+    txt('engGrid', h);
+  } catch(e) { txt('engGrid', `<div style="grid-column:1/-1">${errHtml(errRu(e), 'loadEngagement()')}</div>`); }
+}
+// Тот же мост, что startCampaignFromParse: с экрана аудитории — сразу в
+// рассылку по ИМЕННО этой группе, без повторного выбора бота и когорты.
+function startCampaignFromCohort(key) {
+  const seg = ENG_SEGS.find(x=>x.key===key) || {label:key, when:''};
+  openCmpModal();
+  const tt = document.getElementById('cmpTargetType');
+  tt.value = 'cohort';
+  updateCmpTargetBot();
+  const bot = document.getElementById('cmpBot');
+  if (bot) bot.value = String(ENG_BOT_ID);
+  const co = document.getElementById('cmpCohort');
+  if (co) co.value = key;
+  document.getElementById('cmpName').value = 'Рассылка · ' + seg.label.toLowerCase();
+  toast(`📨 Пишем группе «${seg.label}» — введите текст`);
 }
 
 // ── Bot Note ───────────────────────────────────────────
