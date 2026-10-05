@@ -860,11 +860,27 @@ def _spintax_pack(templates: list[str], random_sample: bool = False) -> list[dic
                 sample = spintax_service.first_option_render(tpl)
         except Exception:
             sample = ""
+        # Сколько РАЗНЫХ сообщений даёт шаблон — произведение размеров групп.
+        # Ради этого числа spintax в продукте и существует: одинаковый текст,
+        # разосланный сотне людей, Telegram ловит как спам. Экран его не
+        # показывал, и «хороший» шаблон было не отличить от шаблона с двумя
+        # группами по два слова. Потолок — чтобы длинный шаблон не выдал
+        # астрономическое число, которое ничего не значит.
+        groups = spintax_service.count_group_variants(tpl)
+        combos = 1
+        for g in groups:
+            combos *= max(1, int(g))
+            if combos > 10 ** 9:
+                combos = 10 ** 9
+                break
         items.append(
             {
                 "template": tpl,
                 "sample": sample,
                 "warnings": spintax_service.quality_warnings(tpl),
+                "groups": len(groups),
+                "combos": combos,
+                "combos_capped": combos >= 10 ** 9,
             }
         )
     return items
