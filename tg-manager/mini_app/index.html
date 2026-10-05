@@ -6177,6 +6177,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <option value="all">Всем подписчикам</option>
         <option value="active_7d">Активным за 7 дней</option>
         <option value="active_30d">Активным за 30 дней</option>
+        <option value="inactive_14d">Спящим: не заходили 14 дней и больше</option>
       </select>
     </div>
     <div class="field">
@@ -25757,43 +25758,94 @@ async function openAudienceDna() {
 }
 
 let _dnaDetailBotId = null;
+let _dnaBotName = '';
+
+// Советы приходят из движка с HTML-разметкой (<b>…</b>) — их шлёт бот с
+// parse_mode. Экран экранировал всё подряд, и владелец читал «<b>Лучшее время
+// публикации:</b>» прямо в тексте. Экранируем, а потом возвращаем только <b>.
+function _dnaRecHtml(text) {
+  return esc(String(text || '')).replace(/&lt;(\/?b)&gt;/g, '<$1>');
+}
+
 function _renderDnaProfile(d) {
   if (!d.computed) {
-    return empty('📭','ДНК-профиль ещё не вычислен','Нажмите «🔄 Пересчитать» вверху для первичного анализа аудитории');
+    return empty('📭','ДНК аудитории ещё не вычислена',
+      'Разбор смотрит, когда ваши подписчики активны, какие темы им заходят и сколько из них засыпает. Нажмите — посчитаю по текущей аудитории.',
+      {label:'🔄 Рассчитать ДНК', fn:'recomputeDna()'});
   }
   const er = d.avg_engagement_rate ? d.avg_engagement_rate.toFixed(1).replace('.',',')+'%' : 'нет данных';
   const risk = d.churn_risk_pct||0;
   const riskE = risk>40?'🔴':risk>20?'🟡':'🟢';
-  const peaksH = (d.peak_hours||[]).map(h=>h+':00').join(', ')||'нет данных';
+  const hours = (d.peak_hours||[]);
+  const peaksH = hours.map(h=>h+':00').join(', ')||'нет данных';
   const peaksD = (d.peak_days||[]).join(', ')||'нет данных';
-  const topics = (d.top_topics||[]).join(', ')||'нет данных';
+  const topics = (d.top_topics||[]);
   const types = (d.best_content_types||[]).join(', ')||'нет данных';
   const recs = (d.recommendations||[]);
-  return `
-    <div class="row">
-      <div class="row-body">
-        <div class="row-val">⏰ <b>Пик активности (часы):</b> ${esc(peaksH)}</div>
-        <div class="row-val">📆 <b>Пик активности (дни):</b> ${esc(peaksD)}</div>
-        <div class="row-val">📝 <b>Лучшие форматы:</b> ${esc(types)}</div>
-        <div class="row-val">📈 <b>Вовлечённость:</b> ${er}</div>
-        <div class="row-val">⚠️ <b>Риск оттока:</b> ${riskE} ${risk.toFixed(0)}%</div>
-        <div class="row-val">🏷️ <b>Топ-темы:</b> ${esc(topics)}</div>
-        <div class="row-val">👥 <b>Проанализировано:</b> ${d.total_users_analyzed||0}</div>
-        <div class="row-val" style="color:var(--hint)">🕐 ${ago(d.computed_at)}</div>
-      </div>
-    </div>
-    ${recs.length ? `<div class="sec">💡 Рекомендации</div><div class="row"><div class="row-body">${recs.map(r=>`<div class="row-val">${esc(r)}</div>`).join('')}</div></div>` : ''}
-  `;
+  const bid = Number(d.bot_id||_dnaDetailBotId||0);
+  // Раньше это была стена фактов без единого действия. Теперь каждая строка,
+  // из которой есть что сделать, — кнопка.
+  let h = `<div class="li${hours.length?' tap':''}"${hours.length?` onclick="dnaBcastAtPeak(${hours[0]})" role="button" tabindex="0"`:''}>
+      <div class="li-body"><div class="li-name">⏰ Пик активности: ${esc(peaksH)}</div>
+        <div class="li-sub wrap">${esc(peaksD)}${hours.length?' · нажмите, чтобы запланировать рассылку на пиковый час':''}</div></div>${hours.length?'<span class="chev">›</span>':''}</div>
+    <div class="li${risk>0?' tap':''}"${risk>0?' onclick="dnaReactivate()" role="button" tabindex="0"':''}>
+      <div class="li-body"><div class="li-name">${riskE} Засыпают: ${risk.toFixed(0)}% аудитории</div>
+        <div class="li-sub wrap">Не заходили 14 дней и больше${risk>0?' · нажмите, чтобы написать именно им':''}</div></div>${risk>0?'<span class="chev">›</span>':''}</div>
+    <div class="li"><div class="li-body"><div class="li-name">📈 Вовлечённость: ${esc(er)}</div>
+      <div class="li-sub wrap">Лучшие форматы: ${esc(types)}</div></div></div>
+    <div class="li${topics.length?' tap':''}"${topics.length?` onclick="copyToClipboard('${esc(topics.join(', ')).replace(/'/g,"\\'")}','🏷️ Темы скопированы')" role="button" tabindex="0"`:''}>
+      <div class="li-body"><div class="li-name">🏷️ Темы аудитории</div>
+        <div class="li-sub wrap">${esc(topics.join(', ')||'нет данных')}${topics.length?' · нажмите, чтобы скопировать':''}</div></div></div>
+    <div class="li${bid?' tap':''}"${bid?` onclick="openBot(${bid})" role="button" tabindex="0"`:''}>
+      <div class="li-body"><div class="li-name">👥 Проанализировано: ${num(d.total_users_analyzed||0)}</div>
+        <div class="li-sub wrap">Обновлено ${ago(d.computed_at)}${bid?' · открыть бота':''}</div></div>${bid?'<span class="chev">›</span>':''}</div>`;
+  if (recs.length) {
+    h += '<div class="sec">💡 Что с этим делать</div><div class="li"><div class="li-body">'
+      + recs.map(r=>`<div class="li-sub wrap" style="margin-bottom:4px">${_dnaRecHtml(r)}</div>`).join('')
+      + '</div></div>';
+  }
+  return h;
 }
+
+// Рассылка в пиковый час: в форме есть только фиксированные «через N часов»,
+// поэтому нужную задержку досыпаем отдельным пунктом и выбираем её.
+function dnaBcastAtPeak(hour) {
+  const now = new Date();
+  let mins = Math.round((hour - now.getUTCHours()) * 60 - now.getUTCMinutes());
+  while (mins <= 0) mins += 1440;
+  openBcastForBot(_dnaDetailBotId, _dnaBotName || ('Бот #'+_dnaDetailBotId), 0);
+  const sc = document.getElementById('bcastSchedule');
+  if (sc) {
+    const hrs = Math.floor(mins/60), rest = mins%60;
+    const label = `⏰ В пик активности (${hour}:00 UTC, через ${hrs} ч ${rest} мин)`;
+    let opt = document.getElementById('bcastSchedulePeak');
+    if (!opt) { opt = document.createElement('option'); opt.id = 'bcastSchedulePeak'; sc.appendChild(opt); }
+    opt.value = String(mins); opt.textContent = label;
+    sc.value = String(mins);
+  }
+  toast('⏰ Рассылка запланирована на пиковый час — осталось написать текст');
+}
+
+// Реактивация спящих: тот самый совет из ДНК, теперь с готовым сегментом.
+function dnaReactivate() {
+  openBcastForBot(_dnaDetailBotId, _dnaBotName || ('Бот #'+_dnaDetailBotId), 0);
+  const sg = document.getElementById('bcastSegment');
+  if (sg) { sg.value = 'inactive_14d'; updateBcastRecip(); }
+  toast('😴 Выбраны спящие подписчики — напишите, чем их вернуть');
+}
+
 async function openDnaDetail(botId, botName) {
   _dnaDetailBotId = botId;
+  _dnaBotName = botName || '';
   push('s-dna-detail');
   document.getElementById('dnaDetail-name').textContent = '🧬 ' + botName;
   txt('dnaDetailBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api(`/api/miniapp/audience_dna/${botId}/profile`);
     txt('dnaDetailBody', _renderDnaProfile(d));
-  } catch(e) { txt('dnaDetailBody', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) {
+    txt('dnaDetailBody', errHtml(errRu(e), `openDnaDetail(${Number(botId)},'${esc(String(botName||''))}')`));
+  }
 }
 async function recomputeDna() {
   if (!_dnaDetailBotId) return;
@@ -25805,7 +25857,7 @@ async function recomputeDna() {
     txt('dnaDetailBody', _renderDnaProfile(d));
     toast('✅ ДНК обновлён');
   } catch(e) {
-    txt('dnaDetailBody', empty('⚠️','Ошибка',errRu(e)));
+    txt('dnaDetailBody', errHtml(errRu(e), 'recomputeDna()'));
     toast('⚠️ '+errRu(e,'Ошибка').substring(0,60));
   } finally {
     btn.disabled = false; btn.textContent = oldTxt;

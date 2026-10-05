@@ -601,6 +601,10 @@ async def mass_broadcast_with_scheduling(
     _seg_sql = {
         "active_7d": " AND last_seen >= now() - interval '7 days'",
         "active_30d": " AND last_seen >= now() - interval '30 days'",
+        # Спящие: ДНК аудитории советует реактивационную рассылку, а выбрать
+        # эту аудиторию было нечем. Порог 14 дней — тот же, по которому
+        # audience_dna считает churn_risk_pct.
+        "inactive_14d": " AND (last_seen IS NULL OR last_seen < now() - interval '14 days')",
     }.get(segment, "")
 
     # safe_count: сегментный фильтр по last_seen может ссылаться на колонку,
