@@ -168,9 +168,26 @@ async def _resolve_group_entity(client: Any, group_ref: str, acc_id=None) -> Any
     _chan_id = _as_channel_id(group_ref)
     if _chan_id is not None:
         from telethon.tl.types import PeerChannel
-        ent = await asyncio.wait_for(
-            client.get_entity(PeerChannel(_chan_id)), timeout=_ACTION_TIMEOUT
-        )
+        try:
+            ent = await asyncio.wait_for(
+                client.get_entity(PeerChannel(_chan_id)), timeout=_ACTION_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            raise
+        except Exception:
+            # Сессия из строки приходит с пустым кэшем сущностей: get_entity по
+            # голому id не знает access_hash даже у аккаунта-участника. Раньше
+            # на этом падали все проверки канала, выбранного из своего списка
+            # без @username, — «система не видит ни одного аккаунта». Список
+            # диалогов наполняет кэш, после чего канал находится по id.
+            ent = None
+            async for d in client.iter_dialogs(limit=None):
+                if int(getattr(d.entity, "id", 0) or 0) == int(_chan_id):
+                    ent = d.entity
+                    break
+            if ent is None:
+                raise ValueError("Канал не найден среди чатов аккаунта — "
+                                 "аккаунт в нём не состоит")
         _store_entity(acc_id, group_ref, ent)
         return ent
 

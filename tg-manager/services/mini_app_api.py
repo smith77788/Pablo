@@ -8265,6 +8265,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("invite_preflight uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def _own_channel_acc_ids(uid: int, group: str) -> list[int]:
+        """Аккаунты, к которым этот канал привязан в «Моих каналах».
+
+        Канал узнаём по id (голый или -100…) или по @username/ссылке."""
+        from services.mass_inviter_engine import _as_channel_id
+        cid = _as_channel_id(group)
+        uname = ""
+        if cid is None:
+            g = group.strip()
+            for pre in ("https://", "http://", "t.me/", "telegram.me/", "@"):
+                if g.lower().startswith(pre):
+                    g = g[len(pre):]
+            g = g.split("/")[0].split("?")[0]
+            if g and not g.startswith("+") and g.lower() != "joinchat":
+                uname = g
+        if cid is None and not uname:
+            return []
+        rows = await _safe_fetch(pool,
+            "SELECT acc_id FROM managed_channels WHERE owner_id=$1 AND acc_id IS NOT NULL "
+            "AND (channel_id=$2 OR (LOWER(username)=LOWER($3) AND $3<>''))",
+            uid, int(cid or 0), uname)
+        return [int(r["acc_id"]) for r in rows or [] if r.get("acc_id")]
+
     async def invite_rights_check(request: web.Request) -> web.Response:
         """Живая проверка прав ДО запуска: есть ли среди аккаунтов админ ЦЕЛЕВОГО
         чата, способный раздать право приглашать остальным.
@@ -8291,7 +8314,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
                 "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
                 "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
-                "ORDER BY a.id LIMIT 8", uid) or []
+                # Сначала аккаунты, к которым канал привязан в «Моих каналах»:
+                # создатель канала — и есть промоутер. Раньше брались первые
+                # восемь по id, и если владельца среди них не было, а остальные
+                # ещё не вступили, экран говорил «ни один аккаунт не админ».
+                "ORDER BY (a.id = ANY($2::bigint[])) DESC, a.id LIMIT 8",
+                uid, await _own_channel_acc_ids(uid, group)) or []
             if not rows:
                 return _json_resp({"has_promoter": False, "has_inviter": False,
                                    "checked": 0, "usable": 0, "promoter_label": None})
@@ -8690,7 +8718,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
                 "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
                 "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
-                "ORDER BY a.id LIMIT 8", uid) or []
+                # Владелец канала из «Моих каналов» — первым (см. rights_check).
+                "ORDER BY (a.id = ANY($2::bigint[])) DESC, a.id LIMIT 8",
+                uid, await _own_channel_acc_ids(uid, group)) or []
             if not rows:
                 return _err("Нет доступных аккаунтов", 404)
             promoter = None

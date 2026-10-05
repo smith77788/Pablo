@@ -121,3 +121,45 @@ async def test_empty_join_answer_is_checked_against_the_chat(monkeypatch, left, 
         assert res.get("channel_id") == 5 and not res.get("error"), res
     else:
         assert res.get("error") and "Telegram did not" not in res["error"], res
+
+
+@pytest.mark.asyncio
+async def test_no_long_account_switch_pause(monkeypatch):
+    """Пауза «смены аккаунта» 30–90 с шла после каждого — полчаса на флот."""
+    slept: list = []
+
+    async def _sleep(sec, *a, **k):
+        slept.append(sec)
+
+    async def _join(sess, link, _acc=None):
+        return {"channel_id": 1}
+
+    monkeypatch.setattr(account_manager, "join_channel", _join)
+    monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _not_quarantined)
+    _no_pacing(monkeypatch)
+    monkeypatch.setattr(asyncio, "sleep", _sleep)
+    await op_worker._exec_bulk_join_inner(
+        _Pool(), object(), 77, 555, {"links": ["@chan"]}, _accounts(6))
+    assert slept and max(slept) <= 15, f"паузы между аккаунтами: {slept}"
+
+
+class _DialogClient:
+    def __init__(self, chan_id):
+        self.chan_id = chan_id
+
+    async def get_entity(self, peer):
+        raise ValueError("Could not find the input entity")
+
+    async def iter_dialogs(self, limit=None):
+        for i in (1, self.chan_id):
+            yield SimpleNamespace(entity=SimpleNamespace(id=i, title=f"ch{i}"))
+
+
+@pytest.mark.asyncio
+async def test_own_list_channel_by_id_found_through_dialogs():
+    """Канал из своего списка без @username: пустой кэш сессии — ищем в диалогах."""
+    from services import mass_inviter_engine as mie
+    ent = await mie._resolve_group_entity(_DialogClient(2959208816), "-1002959208816")
+    assert ent.id == 2959208816
+    with pytest.raises(ValueError):
+        await mie._resolve_group_entity(_DialogClient(5), "2959208816")

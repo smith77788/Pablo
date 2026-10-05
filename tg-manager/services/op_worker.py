@@ -5745,9 +5745,12 @@ async def _exec_bulk_join_inner(
                 )
             await asyncio.sleep(pause)
 
-        # Пауза при смене аккаунта — защита от account-hopping detection
+        # Небольшой разнос перед тем, как слот возьмёт следующий аккаунт.
+        # Раньше здесь была пауза «смены аккаунта» 30–90 с (between_accounts_pause)
+        # — она нужна одному IP, а у каждого аккаунта своя сессия и свой прокси.
+        # На флоте из 50 аккаунтов она одна давала больше получаса ожидания.
         if acc_idx < len(accounts) - 1:
-            await session_simulator.between_accounts_pause(acc_idx)
+            await asyncio.sleep(random.uniform(4.0, 12.0))
 
     _results = await asyncio.gather(
         *[_join_account(i, a) for i, a in enumerate(accounts)], return_exceptions=True)

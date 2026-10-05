@@ -53,3 +53,26 @@ def test_frontend_banner_wired():
         + (ob.group(1) if ob else "onblur нет вовсе"))
     # честное предупреждение о причине «вступят, но не смогут приглашать»
     assert "вступят, но не смогут приглашать" in html
+
+
+def test_own_channel_account_is_checked_first():
+    """Жалоба 05.10.2026: канал из своего списка — «система не видит ни одного
+    аккаунта». Проверялись первые восемь аккаунтов по id; владельца канала среди
+    них могло не быть, остальные ещё не вступили — и экран говорил «ни один не
+    админ». Теперь первыми идут аккаунты, к которым канал привязан."""
+    src = _src()
+    for name in ("invite_rights_check", "invite_grant_admin"):
+        m = re.search(rf"async def {name}\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
+        assert m, name
+        assert "_own_channel_acc_ids(uid, group)" in m.group(1), name
+        assert "ORDER BY a.id LIMIT 8" not in m.group(1), name
+
+
+def test_unchecked_is_not_reported_as_no_admin():
+    html = _index()
+    i = html.index("function checkInviteRights(")
+    body = html[i:i + 4000]
+    assert "!d.checked" in body, "«проверить было некому» сливалось с «админа нет»"
+    j = html.index("async function openMassInviteForChannel(")
+    assert "loadFleetReadiness()" in html[j:j + 2500], (
+        "канал из своего списка — готовность флота должна проверяться сразу")
