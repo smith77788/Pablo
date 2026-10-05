@@ -49,6 +49,18 @@ log = logging.getLogger(__name__)
 # Ключ хранится в tg_accounts.stage; подпись/эмодзи — на клиенте.
 ACCOUNT_STAGES = {"new", "warming", "ready", "in_work", "resting", "frozen", "reserve"}
 
+# Срезы списка аккаунтов — ОДИН список на все входы.
+#
+# Был рукописный в каждом хендлере, и `proxy_down` (аккаунты, простаивающие
+# из-за мёртвого прокси) в них не попал, хотя билдер WHERE его умеет, а на
+# экране есть плитка, которая его ставит. Несовпадение не отвергало запрос, а
+# молча подменяло срез на «все»: плитка показывала пять аккаунтов и открывала
+# пятьсот, а «применить ко всему срезу» ставило массовую операцию по всему
+# флоту вместо тех пяти. Список сверяется с ветками билдера тестом
+# tests/test_account_filter_is_not_silently_widened.py.
+ACCOUNT_FILTERS = ("all", "active", "cooldown", "banned", "spamblock",
+                   "proxy_down", "dead")
+
 # Статусы operation_queue, которые вправе прийти фильтром с фронта. Колонка —
 # обычный TEXT без CHECK, поэтому список живёт здесь и его сторожит тест
 # tests/test_miniapp_paused_operations.py.
@@ -3024,7 +3036,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Параметры серверной пагинации/фильтрации
         qs = request.rel_url.query
         flt = qs.get("filter", "all")
-        if flt not in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
+        if flt not in ACCOUNT_FILTERS:
             flt = "all"
         stage = (qs.get("stage") or "").strip().lower()
         if stage and stage not in ACCOUNT_STAGES:
@@ -5181,7 +5193,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # и список) со скоупом owner/admin. Снимает 100-лимит для масс-операций.
         if body.get("select_all_filtered"):
             flt = body.get("filter", "all")
-            if flt not in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
+            if flt not in ACCOUNT_FILTERS:
                 flt = "all"
             stage = (body.get("stage") or "").strip().lower()
             if stage and stage not in ACCOUNT_STAGES:

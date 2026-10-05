@@ -18800,21 +18800,33 @@ async function loadDashboard() {
   try {
     const d = await api('/api/miniapp/analytics/dashboard');
     const a = d.accounts||{}, o = d.operations_24h||{}, au = d.audience||{}, h = d.health||{};
-    const card = (val, lbl, color) =>
-      `<div class="kpi-card" style="min-width:64px;text-align:center">`
-      + `<div class="kpi-val"${color?` style="color:${color}"`:''}>${val}</div>`
-      + `<div class="kpi-lbl">${lbl}</div></div>`;
-    let html = card(num(a.active||0)+' / '+num(a.total||0), 'Аккаунты в строю');
-    if (a.banned || a.spamblock) {
-      html += card(num((a.banned||0)+(a.spamblock||0)), 'Бан и спамблок', 'var(--red)');
-    }
-    html += card(num(o.total||0), 'Операций за сутки');
-    if (o.failed) html += card(num(o.failed), 'С ошибкой', 'var(--red)');
-    if (o.running) html += card(num(o.running), 'Сейчас в работе', 'var(--blue)');
-    html += card(num(au.total_users||0), 'Аудитория');
-    html += card('+'+num(au.new_7d||0), 'За неделю', 'var(--green)');
-    html += card(String(h.avg_trust != null ? h.avg_trust : '—'), 'Средний траст');
-    if (h.accounts_at_risk) html += card(num(h.accounts_at_risk), 'Под риском', 'var(--orange)');
+    // Панель — первое, что видит владелец, и каждое её число отвечает на
+    // вопрос «а какие именно?». Раньше это был просто текст: чтобы увидеть те
+    // самые упавшие операции или забаненные аккаунты, надо было уйти в другой
+    // раздел и повторить срез руками. Переходы существовали, панель ими не
+    // пользовалась.
+    const card = (val, lbl, color, go) =>
+      `<div class="kpi-card${go?' tap-card':''}" style="min-width:64px;text-align:center"`
+      + (go?` onclick="${go}" role="button" tabindex="0" aria-label="${lbl}: открыть"`:'')
+      + `><div class="kpi-val"${color?` style="color:${color}"`:''}>${val}</div>`
+      + `<div class="kpi-lbl">${lbl}${go?' ›':''}</div></div>`;
+    let html = card(num(a.active||0)+' / '+num(a.total||0), 'Аккаунты в строю', '',
+                    "healthGoAccounts('active')");
+    // Бан и спам-блок были одной цифрой на два разных среза: открыть можно
+    // только один из них, то есть честного перехода у такой плитки нет.
+    if (a.banned) html += card(num(a.banned), 'Забанены', 'var(--red)',
+                               "healthGoAccounts('banned')");
+    if (a.spamblock) html += card(num(a.spamblock), 'Спамблок', 'var(--orange)',
+                                  "healthGoAccounts('spamblock')");
+    html += card(num(o.total||0), 'Операций за сутки', '', "opsGo(null)");
+    if (o.failed) html += card(num(o.failed), 'С ошибкой', 'var(--red)', "opsGo('failed')");
+    if (o.running) html += card(num(o.running), 'Сейчас в работе', 'var(--blue)', "opsGo('running')");
+    html += card(num(au.total_users||0), 'Аудитория', '', "openNewUsers()");
+    html += card('+'+num(au.new_7d||0), 'За неделю', 'var(--green)', "openNewUsers()");
+    html += card(h.avg_trust != null ? String(h.avg_trust).replace('.',',') : '—', 'Средний траст', '',
+                 "openHealth()");
+    if (h.accounts_at_risk) html += card(num(h.accounts_at_risk), 'Под риском', 'var(--orange)',
+                                         "openHealth()");
     txt('dashKpi', html);
   } catch(e) {
     // Нули вместо цифр — утверждение, которого мы не проверяли.
