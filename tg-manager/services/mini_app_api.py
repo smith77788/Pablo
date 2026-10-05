@@ -17515,6 +17515,141 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("content_mesh_create uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def _own_mesh(uid: int, mesh_id: int):
+        return await _safe_fetchrow(pool,
+            "SELECT * FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid)
+
+    async def content_mesh_detail(request: web.Request) -> web.Response:
+        """Сеть целиком: настройки, цели и очередь репостов.
+
+        mesh_queue с самого начала хранит, что ушло, что ждёт и что упало с
+        текстом ошибки. Экран показывал из этого одно число «В очереди», и
+        почему репост не дошёл, узнать было негде.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            mesh_id = int(request.match_info["mesh_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор сети", 400)
+        mesh = await _own_mesh(uid, mesh_id)
+        if not mesh:
+            return _err("Сеть не найдена", 404)
+        try:
+            targets = await _safe_fetch(pool,
+                "SELECT id, target_channel, enabled, added_at FROM mesh_targets "
+                "WHERE mesh_id=$1 ORDER BY id", mesh_id)
+            counts = await _safe_fetch(pool,
+                "SELECT status, COUNT(*) AS cnt FROM mesh_queue WHERE mesh_id=$1 "
+                "GROUP BY status", mesh_id)
+            recent = await _safe_fetch(pool,
+                """SELECT q.id, q.source_msg_id, q.status, q.scheduled_at, q.sent_at,
+                          q.error_msg, t.target_channel
+                     FROM mesh_queue q
+                     LEFT JOIN mesh_targets t ON t.id = q.target_id
+                    WHERE q.mesh_id=$1
+                 ORDER BY COALESCE(q.sent_at, q.scheduled_at) DESC LIMIT $2""",
+                mesh_id, _list_limit(request, 30, 200))
+            m = dict(mesh)
+            for key in ("created_at", "updated_at"):
+                if m.get(key):
+                    m[key] = m[key].isoformat()
+            return _json_resp({
+                "mesh": m,
+                "targets": [dict(t) for t in (targets or [])],
+                "queue": {r["status"]: int(r["cnt"]) for r in (counts or [])},
+                "recent": [{
+                    "id": r["id"], "source_msg_id": r["source_msg_id"],
+                    "status": r["status"], "target_channel": r["target_channel"],
+                    "error_msg": r["error_msg"],
+                    "scheduled_at": r["scheduled_at"].isoformat() if r["scheduled_at"] else None,
+                    "sent_at": r["sent_at"].isoformat() if r["sent_at"] else None,
+                } for r in (recent or [])],
+            })
+        except Exception:
+            log.exception("content_mesh_detail uid=%d mesh=%d", uid, mesh_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def content_mesh_update(request: web.Request) -> web.Response:
+        """Поменять настройки сети. Раньше их нельзя было поправить вообще."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            mesh_id = int(request.match_info["mesh_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор сети", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        name = validate_string(body.get("name"), max_len=120)
+        if not name:
+            return _err("Название сети обязательно", 400)
+        delay = validate_integer(body.get("delay_minutes", 30), min_val=1, max_val=1440)
+        if delay is None:
+            return _err("Задержка репоста — от 1 до 1440 минут", 400)
+        append_text = validate_string(body.get("append_text") or "", max_len=512,
+                                      required=False) or None
+        if not await _own_mesh(uid, mesh_id):
+            return _err("Сеть не найдена", 404)
+        try:
+            await pool.execute(
+                "UPDATE content_meshes SET name=$3, delay_minutes=$4, append_text=$5, "
+                "updated_at=now() WHERE id=$1 AND owner_id=$2",
+                mesh_id, uid, name, delay, append_text)
+            return _json_resp({"ok": True, "name": name, "delay_minutes": delay})
+        except Exception:
+            log.exception("content_mesh_update uid=%d mesh=%d", uid, mesh_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def content_mesh_delete(request: web.Request) -> web.Response:
+        """Удалить сеть. Её можно было только выключить — список копился."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            mesh_id = int(request.match_info["mesh_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор сети", 400)
+        try:
+            gone = await _safe_fetchrow(pool,
+                "DELETE FROM content_meshes WHERE id=$1 AND owner_id=$2 RETURNING id",
+                mesh_id, uid)
+            if not gone:
+                return _err("Сеть не найдена", 404)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("content_mesh_delete uid=%d mesh=%d", uid, mesh_id)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def content_mesh_target_toggle(request: web.Request) -> web.Response:
+        """Приостановить одну цель, не трогая всю сеть."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            target_id = int(request.match_info["target_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор цели", 400)
+        try:
+            # Скоуп через владельца сети: по голому id цели можно было бы
+            # выключить чужую.
+            row = await _safe_fetchrow(pool,
+                """SELECT mt.id, mt.enabled FROM mesh_targets mt
+                     JOIN content_meshes cm ON cm.id = mt.mesh_id
+                    WHERE mt.id=$1 AND cm.owner_id=$2""", target_id, uid)
+            if not row:
+                return _err("Цель не найдена", 404)
+            new_val = not row["enabled"]
+            await pool.execute("UPDATE mesh_targets SET enabled=$2 WHERE id=$1",
+                               target_id, new_val)
+            return _json_resp({"ok": True, "enabled": new_val})
+        except Exception:
+            log.exception("content_mesh_target_toggle uid=%d target=%d", uid, target_id)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def content_mesh_targets_list(request: web.Request) -> web.Response:
         """Список целевых каналов меша. Без целей меш ничего не репостит (runner
         читает mesh_targets) — в mini-app их раньше нельзя было задать вообще."""
@@ -19875,6 +20010,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/content_mesh/{mesh_id}/target", content_mesh_target_add)
     app.router.add_delete("/api/miniapp/content_mesh/target/{target_id}", content_mesh_target_delete)
     app.router.add_put("/api/miniapp/content_mesh/{mesh_id}/toggle", content_mesh_toggle)
+    app.router.add_get("/api/miniapp/content_mesh/{mesh_id}", content_mesh_detail)
+    app.router.add_put("/api/miniapp/content_mesh/{mesh_id}", content_mesh_update)
+    app.router.add_delete("/api/miniapp/content_mesh/{mesh_id}", content_mesh_delete)
+    app.router.add_put("/api/miniapp/content_mesh/target/{target_id}/toggle", content_mesh_target_toggle)
     # Narrative Engine
     app.router.add_get("/api/miniapp/narrative", narrative_campaigns_list)
     app.router.add_post("/api/miniapp/narrative", narrative_campaign_create)

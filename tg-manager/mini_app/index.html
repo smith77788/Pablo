@@ -3492,7 +3492,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="mo-mesh" onclick="if(event.target===this)closeModal('mo-mesh')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-mesh')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🕸 Новая Content Mesh</div>
+    <div class="modal-title">🕸 Новая сеть контента</div>
     <div class="field"><label>Название сети</label><input id="mc-name" type="text" placeholder="Моя сеть репостинга" class="inp"></div>
     <div class="field"><label>Источник (канал)</label><input id="mc-src" type="text" placeholder="@username или -100xxx" class="inp"></div>
     <div class="field"><label>Аккаунт для чтения</label><select id="mc-account" class="sel"><option value="">— без аккаунта —</option></select></div>
@@ -3507,12 +3507,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<div class="screen" id="s-meshdetail">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="mdTitle">🕸 Сеть контента</div></div>
+  <div class="sub-sb" id="mdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
 <!-- Modal: Mesh Targets -->
 <div class="mbg" id="mo-mesh-targets" onclick="if(event.target===this)closeModal('mo-mesh-targets')">
   <div class="modal">
     <div class="modal-x" onclick="closeModal('mo-mesh-targets')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">🎯 Цели меша: <span id="mt-mesh-name"></span></div>
-    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Каналы, в которые репостится источник. Без целей меш не работает.</div>
+    <div class="modal-title">🎯 Куда репостим: <span id="mt-mesh-name"></span></div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Каналы, в которые уходит контент из источника. Без них сеть ничего не репостит.</div>
     <div class="field" style="display:flex;gap:6px">
       <input id="mt-input" type="text" placeholder="@channel или -100xxx" class="input-flex">
       <button class="btn btn-p" style="flex:0 0 auto;padding:10px 14px" onclick="addMeshTarget()" aria-label="Добавить">➕</button>
@@ -25306,23 +25311,152 @@ async function openContentMesh() {
   txt('meshList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/content_meshes');
-    if (!rows.length) { txt('meshList', empty('🕸','Мешей нет','Нажмите + Создать')); return; }
+    if (!rows.length) { txt('meshList', empty('🕸','Сетей контента нет',
+      'Сеть берёт посты из канала-источника и с задержкой повторяет их в ваших каналах. Нужен источник и хотя бы один канал-получатель.',
+      {label:'+ Создать сеть', fn:'openMeshModal()'})); return; }
     txt('meshList', rows.map(r => `
       <div class="row">
         <div class="row-ico" style="background:var(--bg-purple-16)">${r.enabled?'🟢':'🔴'}</div>
-        <div class="row-body">
+        <div class="row-body" onclick="openMeshDetail(${r.id})" role="button" tabindex="0" style="cursor:pointer">
           <div class="row-name">${esc(r.name)}</div>
-          <div class="row-val">Источник: ${esc(r.source_channel||'—')} · Задержка: ${r.delay_minutes}м</div>
-          <div class="row-val">Целей: ${r.targets_count||0} · В очереди: ${r.pending_posts||0}</div>
+          <div class="row-val">Источник: ${esc(r.source_channel||'не указан')} · задержка ${r.delay_minutes} ${plural(r.delay_minutes,'минута','минуты','минут')}</div>
+          <div class="row-val">${num(r.targets_count||0)} ${plural(r.targets_count||0,'получатель','получателя','получателей')} · в очереди ${num(r.pending_posts||0)}${(r.targets_count||0)?'':' · ⚠️ без получателей сеть ничего не делает'}</div>
         </div>
         <div class="row-right" style="display:flex;gap:6px;flex-direction:column">
-          <button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="openMeshTargets(${r.id},'${esc((r.name||'').replace(/'/g,''))}')">🎯 Цели${r.targets_count?' ('+r.targets_count+')':''}</button>
+          <button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="openMeshDetail(${r.id})">Открыть</button>
           <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleMesh(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
         </div>
       </div>
     `).join(''));
-    document.getElementById('m-mesh-val').textContent = rows.length+' сетей';
-  } catch(e) { txt('meshList', empty('⚠️','Ошибка',errRu(e))); }
+    document.getElementById('m-mesh-val').textContent = rows.length+' '+plural(rows.length,'сеть','сети','сетей');
+  } catch(e) { txt('meshList', errHtml(errRu(e), 'openContentMesh()')); }
+}
+
+const MESH_Q_RU = {pending:'⏳ ждёт отправки', sent:'✅ отправлено', error:'⚠️ ошибка'};
+
+// Для ждущего репоста время в БУДУЩЕМ, и ago() показывал «только что».
+function _meshWhen(iso) {
+  const t = iso ? new Date(iso).getTime() : 0;
+  if (!t) return 'время не задано';
+  const diff = Math.round((t - Date.now()) / 60000);
+  if (diff <= 0) return 'вот-вот уйдёт';
+  if (diff < 60) return 'уйдёт через ' + diff + ' ' + plural(diff,'минуту','минуты','минут');
+  const h = Math.round(diff/60);
+  return 'уйдёт через ' + h + ' ' + plural(h,'час','часа','часов');
+}
+
+// Очередь репостов (mesh_queue) с самого начала хранит, что ушло, что ждёт и
+// что упало с текстом ошибки. Экран показывал из этого одно число.
+async function openMeshDetail(meshId) {
+  push('s-meshdetail');
+  txt('mdBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/content_mesh/${meshId}`);
+    const m = d.mesh||{};
+    const q = d.queue||{};
+    const targets = d.targets||[];
+    const recent = d.recent||[];
+    txt('mdTitle','🕸 '+(m.name||'Сеть контента'));
+    let h = `<div style="padding:12px 16px">
+      <div class="li"><div class="li-body">
+        <div class="li-name">${m.enabled?'🟢 Работает':'🔴 Выключена'}</div>
+        <div class="li-sub wrap">Источник ${esc(m.source_channel||'не указан')} · задержка ${m.delay_minutes} ${plural(m.delay_minutes,'минута','минуты','минут')}${m.append_text?' · подпись «'+esc(String(m.append_text).slice(0,60))+'»':''}</div>
+      </div></div>
+      <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
+        <div class="kpi-chip"><div class="kpi-chip-val">${num(q.pending||0)}</div><div class="kpi-chip-lbl">ждут</div></div>
+        <div class="kpi-chip"><div class="kpi-chip-val">${num(q.sent||0)}</div><div class="kpi-chip-lbl">ушли</div></div>
+        <div class="kpi-chip"><div class="kpi-chip-val" style="color:${(q.error||0)?'var(--red)':'inherit'}">${num(q.error||0)}</div><div class="kpi-chip-lbl">с ошибкой</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn ${m.enabled?'btn-s':'btn-p'}" style="flex:1" onclick="toggleMeshFrom(${meshId})">${m.enabled?'⏸ Выключить':'▶️ Включить'}</button>
+        <button class="btn btn-s" style="flex:1" onclick="editMesh(${meshId})">⚙️ Настроить</button>
+      </div>
+      <div class="sec">Куда репостим (${targets.length})</div>`;
+    if (!targets.length) {
+      h += empty('🎯','Получателей нет',
+        'Пока не задан ни один канал-получатель, сеть читает источник впустую.',
+        {label:'+ Добавить канал', fn:`openMeshTargets(${meshId},'${esc(String(m.name||'').replace(/'/g,''))}')`});
+    } else {
+      h += '<div class="lst">' + targets.map(t=>`
+        <div class="li"><div class="li-body">
+          <div class="li-name">${t.enabled?'📡':'⏸'} ${esc(t.target_channel)}</div>
+          <div class="li-sub wrap">${t.enabled?'получает репосты':'на паузе — репосты сюда не идут'}</div>
+        </div>
+        <div class="row-right" style="display:flex;gap:6px">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleMeshTarget(${t.id},${meshId})">${t.enabled?'Пауза':'Включить'}</button>
+          <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Убрать канал" onclick="deleteMeshTargetFrom(${t.id},${meshId}, this)">🗑</span>
+        </div></div>`).join('') + '</div>';
+      h += `<div style="padding:8px 0"><button class="btn btn-s" style="width:100%" onclick="openMeshTargets(${meshId},'${esc(String(m.name||'').replace(/'/g,''))}')">+ Добавить канал-получатель</button></div>`;
+    }
+    h += '<div class="sec" style="margin-top:8px">Последние репосты</div>';
+    if (!recent.length) {
+      h += empty('🕐','Репостов ещё не было',
+        m.enabled ? 'Сеть ждёт новый пост в источнике — как появится, он встанет в очередь.'
+                  : 'Сеть выключена, поэтому ничего не репостится.');
+    } else {
+      h += '<div class="lst">' + recent.map(r=>`
+        <div class="li"><div class="li-body">
+          <div class="li-name">${esc(MESH_Q_RU[r.status]||r.status)} → ${esc(r.target_channel||'канал удалён')}</div>
+          <div class="li-sub wrap">Пост №${r.source_msg_id}${r.error_msg?' · '+esc(String(r.error_msg).slice(0,120)):''} · ${r.status==='pending'?_meshWhen(r.scheduled_at):ago(r.sent_at||r.scheduled_at)}</div>
+        </div></div>`).join('') + '</div>';
+    }
+    h += `<div style="padding:12px 0"><button class="btn btn-d" style="width:100%" onclick="deleteMesh(${meshId}, this)">🗑 Удалить сеть</button></div></div>`;
+    txt('mdBody', h);
+  } catch(e) { txt('mdBody', errHtml(errRu(e), `openMeshDetail(${Number(meshId)})`)); }
+}
+
+async function toggleMeshFrom(meshId) {
+  try {
+    const r = await api(`/api/miniapp/content_mesh/${meshId}/toggle`,{method:'PUT'});
+    toast(r.enabled?'🟢 Сеть включена':'🔴 Сеть выключена');
+    openMeshDetail(meshId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function toggleMeshTarget(targetId, meshId) {
+  try {
+    const r = await api(`/api/miniapp/content_mesh/target/${targetId}/toggle`,{method:'PUT'});
+    toast(r.enabled?'📡 Канал снова получает репосты':'⏸ Канал на паузе');
+    openMeshDetail(meshId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function deleteMeshTargetFrom(targetId, meshId, el) {
+  if (!await confirmDelete('Убрать канал из сети', el)) return;
+  try {
+    await api(`/api/miniapp/content_mesh/target/${targetId}`,{method:'DELETE'});
+    openMeshDetail(meshId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function editMesh(meshId) {
+  try {
+    const d = await api(`/api/miniapp/content_mesh/${meshId}`);
+    const m = d.mesh||{};
+    const name = await askPrompt('Название сети', {value: m.name||''});
+    if (name === null) return;
+    const delay = await askPrompt('Задержка репоста, минут (1–1440)',
+      {value: String(m.delay_minutes||30), type:'number'});
+    if (delay === null) return;
+    const append = await askPrompt('Подпись в конце поста (пусто — без подписи)',
+      {value: m.append_text||''});
+    if (append === null) return;
+    await api(`/api/miniapp/content_mesh/${meshId}`, {method:'PUT', body:JSON.stringify({
+      name: String(name), delay_minutes: Number(delay)||30, append_text: String(append),
+    })});
+    toast('✅ Настройки сохранены');
+    openMeshDetail(meshId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function deleteMesh(meshId, el) {
+  if (!await confirmDelete('Удалить сеть контента', el)) return;
+  try {
+    await api(`/api/miniapp/content_mesh/${meshId}`, {method:'DELETE'});
+    toast('🗑 Сеть удалена');
+    back();
+    openContentMesh();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 async function toggleMesh(meshId, btn) {
   btn.disabled=true;
@@ -25346,14 +25480,14 @@ async function loadMeshTargets() {
   try {
     const d = await api(`/api/miniapp/content_mesh/${MT_MESH_ID}/targets`);
     const t = d.targets||[];
-    if (!t.length) { el.innerHTML = empty('🎯','Целей нет','Добавьте канал выше — иначе меш не репостит'); return; }
+    if (!t.length) { el.innerHTML = empty('🎯','Получателей нет','Добавьте канал выше — без получателей сеть ничего не репостит'); return; }
     el.innerHTML = t.map(x=>`
       <div class="row">
         <div class="row-ico" style="background:var(--bg-purple-16)">${x.enabled?'📡':'⏸'}</div>
         <div class="row-body"><div class="row-name">${esc(x.target_channel)}</div></div>
         <div class="row-right"><span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить цель" onclick="deleteMeshTarget(${x.id}, this)">🗑</span></div>
       </div>`).join('');
-  } catch(e){ el.innerHTML = empty('⚠️','Ошибка',errRu(e)); }
+  } catch(e){ el.innerHTML = errHtml(errRu(e), 'loadMeshTargets()'); }
 }
 async function addMeshTarget() {
   const v = document.getElementById('mt-input').value.trim();

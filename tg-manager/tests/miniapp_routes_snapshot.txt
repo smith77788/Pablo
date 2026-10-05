@@ -13,6 +13,7 @@ DELETE /api/miniapp/chatlist_folders/{folder_id}
 DELETE /api/miniapp/community/node/{node_id}
 DELETE /api/miniapp/competitor/{comp_id}
 DELETE /api/miniapp/content_mesh/target/{target_id}
+DELETE /api/miniapp/content_mesh/{mesh_id}
 DELETE /api/miniapp/crm/contact/{contact_id}
 DELETE /api/miniapp/crm/deal/{deal_id}
 DELETE /api/miniapp/deeplink/{link_id}
@@ -132,6 +133,7 @@ GET /api/miniapp/compliance
 GET /api/miniapp/compliance/export
 GET /api/miniapp/config
 GET /api/miniapp/content_cloner/history
+GET /api/miniapp/content_mesh/{mesh_id}
 GET /api/miniapp/content_mesh/{mesh_id}/targets
 GET /api/miniapp/content_meshes
 GET /api/miniapp/crm/contacts
@@ -406,6 +408,7 @@ HEAD /api/miniapp/compliance
 HEAD /api/miniapp/compliance/export
 HEAD /api/miniapp/config
 HEAD /api/miniapp/content_cloner/history
+HEAD /api/miniapp/content_mesh/{mesh_id}
 HEAD /api/miniapp/content_mesh/{mesh_id}/targets
 HEAD /api/miniapp/content_meshes
 HEAD /api/miniapp/crm/contacts
@@ -931,6 +934,8 @@ PUT /api/miniapp/bot/{bot_id}/note
 PUT /api/miniapp/bot/{bot_id}/relay/toggle
 PUT /api/miniapp/bot/{bot_id}/role
 PUT /api/miniapp/bot/{bot_id}/toggle
+PUT /api/miniapp/content_mesh/target/{target_id}/toggle
+PUT /api/miniapp/content_mesh/{mesh_id}
 PUT /api/miniapp/content_mesh/{mesh_id}/toggle
 PUT /api/miniapp/crm/deal/{deal_id}/stage
 PUT /api/miniapp/editorial/policy
