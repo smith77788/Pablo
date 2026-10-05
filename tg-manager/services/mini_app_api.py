@@ -17331,14 +17331,29 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             account_ids = [r["id"] for r in acc_rows]
         if not account_ids:
             return _err("Нет активного аккаунта с сессией для клонирования", 400)
-        chan_rows = await _safe_fetch(pool,
-            "SELECT username, channel_id FROM managed_channels WHERE owner_id=$1", uid)
+        # Куда клонировать. Экран отправлял только источник, и операция уходила
+        # ВО ВСЕ каналы владельца разом, молча: выбора на экране не было, а
+        # публикация наружу — необратима. Теперь цели можно назвать явно, и
+        # «во все» остаётся только как осознанный выбор на экране.
+        want_ids = [i for i in (
+            validate_integer(x, min_val=-(2 ** 63), max_val=2 ** 63 - 1)
+            for x in (body.get("channel_ids") or [])[:500]) if i is not None]
+        if want_ids:
+            chan_rows = await _safe_fetch(pool,
+                "SELECT username, channel_id FROM managed_channels "
+                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, want_ids)
+            if len(chan_rows or []) != len(set(want_ids)):
+                return _err("Среди выбранных каналов есть чужой или удалённый", 400)
+        else:
+            chan_rows = await _safe_fetch(pool,
+                "SELECT username, channel_id FROM managed_channels WHERE owner_id=$1", uid)
         target_refs = [
             ("@" + r["username"]) if r["username"] else r["channel_id"]
             for r in chan_rows
         ]
         if not target_refs:
             return _err("Нет управляемых каналов — добавьте канал, куда клонировать контент", 400)
+        msg_count = validate_integer(body.get("msg_count", 10), min_val=1, max_val=100) or 10
         try:
             op_id = await _obus.submit(
                 pool, uid, "content_clone", {
@@ -17347,7 +17362,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "target_refs": target_refs,
                     "account_ids": account_ids,
                     "mode": "forward",
-                    "msg_count": 10,
+                    "msg_count": msg_count,
                 },
                 total_items=len(target_refs),
                 label=f"Клонировать контент: {source} → {len(target_refs)} канал(ов)")

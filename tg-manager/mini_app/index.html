@@ -3045,7 +3045,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div class="sec">Клонирование контента</div>
     <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <div style="font-size:12px;color:var(--hint);line-height:1.5;margin-bottom:8px">Берёт последние посты канала-источника и пересылает их в выбранные ваши каналы. Публикация необратима: что ушло в канал, оттуда уже не отозвать.</div>
       <input type="text" id="clonerSrc" placeholder="@channel или -100xxx" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <label style="font-size:13px;color:var(--hint);flex:1">Сколько последних постов</label>
+        <input type="number" id="clonerCount" min="1" max="100" value="10" style="width:84px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:8px 10px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+      </div>
+      <div class="sec" style="margin:10px 0 4px;padding:0">Куда клонировать</div>
+      <div id="clonerTargets" style="max-height:220px;overflow-y:auto"><div class="spin-wrap"><div class="spin"></div></div></div>
       <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCloner()">📋 Клонировать</button>
       <div id="clonerErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
     </div>
@@ -25200,37 +25207,84 @@ async function openContentCloner() {
   push('s-contentcloner');
   document.getElementById('clonerSrc').value='';
   document.getElementById('clonerErr').textContent='';
+  loadClonerTargets();
   loadClonerHistory();
+}
+
+// Выбор каналов-получателей. Раньше его не было вовсе: одна кнопка
+// пересылала посты источника ВО ВСЕ каналы владельца, и экран об этом молчал.
+async function loadClonerTargets() {
+  const el = document.getElementById('clonerTargets');
+  if (!el) return;
+  el.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/channels?limit=500');
+    const chans = (d.channels||d.items||d||[]).filter(c=>c && c.channel_id);
+    if (!chans.length) {
+      el.innerHTML = empty('📢','Своих каналов нет',
+        'Клонировать посты некуда: сначала добавьте канал, которым управляете.',
+        {label:'📢 К каналам', fn:"goTab('channels')"});
+      return;
+    }
+    el.innerHTML = chans.map(c=>{
+      const name = c.title || c.name || (c.username?'@'+c.username:('Канал '+c.channel_id));
+      return `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:13px;color:var(--text)">
+        <input type="checkbox" class="cloner-ch" value="${c.channel_id}" style="width:18px;height:18px">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span>
+      </label>`;
+    }).join('')
+      + `<div class="field-note" style="margin-top:4px">Отметьте, куда пересылать. Ничего не отмечено — кнопка спросит, точно ли во все ${chans.length}.</div>`;
+  } catch(e) {
+    el.innerHTML = errHtml(errRu(e), 'loadClonerTargets()');
+  }
 }
 async function loadClonerHistory() {
   txt('clonerHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/content_cloner/history');
-    if (!rows.length) { txt('clonerHistory', empty('📋','Нет операций','')); return; }
+    if (!rows.length) { txt('clonerHistory', empty('📋','Клонирований ещё не было',
+      'Здесь появятся запуски: источник, статус и отчёт по каждому каналу.')); return; }
     txt('clonerHistory', rows.map(r => {
-      const payload = r.params||r.payload||{};
-      const src = typeof payload==='object' ? (payload.source||'—') : '—';
+      let payload = r.params||r.payload||{};
+      if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch(_) { payload = {}; } }
+      const src = payload.source||'не указан';
+      const tgts = (payload.target_refs||[]).length;
       const [cls,lbl]=stb(r.status);
       return `
-        <div class="row">
-          <div class="row-body">
-            <div class="row-name">Источник: ${esc(src)}</div>
-            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${ago(r.created_at)}</div>
-          </div>
+        <div class="li tap" onclick="openOpDetail(${Number(r.id)})" role="button" tabindex="0">
+          <div class="li-body">
+            <div class="li-name">Из ${esc(src)}${tgts?' в '+num(tgts)+' '+plural(tgts,'канал','канала','каналов'):''}</div>
+            <div class="li-sub wrap"><span class="badge ${cls}">${lbl}</span> · ${ago(r.created_at)} · нажмите, чтобы увидеть отчёт</div>
+          </div><span class="chev">›</span>
         </div>
       `;
     }).join(''));
-  } catch(e) { txt('clonerHistory', empty('⚠️','Ошибка',errRu(e))); }
+  } catch(e) { txt('clonerHistory', errHtml(errRu(e), 'loadClonerHistory()')); }
 }
 async function submitCloner() {
   const src = document.getElementById('clonerSrc').value.trim();
   const errEl = document.getElementById('clonerErr');
   errEl.textContent='';
   if (!src) { errEl.textContent='Укажите источник'; return; }
+  const boxes = [...document.querySelectorAll('.cloner-ch')];
+  const picked = boxes.filter(b=>b.checked).map(b=>Number(b.value));
+  const count = Math.max(1, Math.min(100, Number(document.getElementById('clonerCount').value)||10));
+  const toAll = !picked.length;
+  if (toAll && !boxes.length) { errEl.textContent='Нет каналов, куда клонировать'; return; }
+  const n = toAll ? boxes.length : picked.length;
+  // Публикация наружу необратима, а раньше это уходило в один тап без вопроса.
+  const ok = await askConfirm(
+    `Переслать ${count} ${plural(count,'пост','поста','постов')} из ${src} в ${n} ${plural(n,'ваш канал','ваших канала','ваших каналов')}?`
+    + (toAll ? ' Отмечено ничего не было, поэтому уйдёт во все.' : '')
+    + ' Отменить публикацию в канале будет нельзя.');
+  if (!ok) return;
   try {
-    await api('/api/miniapp/content_cloner/submit',{method:'POST',body:JSON.stringify({source:src})});
+    await api('/api/miniapp/content_cloner/submit',{method:'POST',body:JSON.stringify({
+      source:src, msg_count:count, channel_ids: toAll ? [] : picked,
+    })});
     toast('✅ Операция клонирования запущена');
     document.getElementById('clonerSrc').value='';
+    boxes.forEach(b=>{b.checked=false;});
     loadClonerHistory();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
 }
