@@ -24100,21 +24100,38 @@ async function openErrorReport() {
   document.getElementById('errRepErr').textContent='';
   loadErrReports();
 }
+const ERR_REP_STATUS = {new:'🆕 Новый', viewing:'👀 Просмотрен', fixing:'🔧 В работе',
+  fixed:'✅ Исправлен', duplicate:'🔁 Дубликат'};
+let _ERR_REPS = [];
+// Ответ на отчёт писали в заметки разбора, и он никогда не доходил до того,
+// кто отчёт прислал: экран показывал только статус и первые 120 символов
+// собственного текста.
+function errRepTap(i) {
+  const r = _ERR_REPS[i]; if (!r) return;
+  const parts = ['Отчёт №' + r.id + ' · ' + (ERR_REP_STATUS[r.status] || r.status),
+                 '', String(r.description || '')];
+  if (r.answer) parts.push('', '— Ответ —', String(r.answer));
+  showInfo(parts.join('\n'));
+}
 async function loadErrReports() {
   txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/error_reports');
-    const rs = d.reports||[];
-    if (!rs.length) { txt('errRepList', empty('🐛','Нет отчётов','')); return; }
-    const statusLabels = {new:'🆕 Новый', viewing:'👀 Просмотрен', fixing:'🔧 В работе', fixed:'✅ Исправлен', duplicate:'🔁 Дубликат'};
-    txt('errRepList', rs.map(r=>`
-      <div class="row">
+    _ERR_REPS = d.reports||[];
+    if (!_ERR_REPS.length) {
+      txt('errRepList', empty('🐛','Отчётов пока нет',
+        'Опишите проблему в поле выше — отчёт появится здесь, и сюда же придёт ответ по нему'));
+      return;
+    }
+    txt('errRepList', _ERR_REPS.map((r,i)=>`
+      <div class="li tap" onclick="errRepTap(${i})" role="button" tabindex="0">
         <div class="row-body">
-          <div class="row-name">#${r.id} · ${statusLabels[r.status]||r.status}</div>
-          <div class="row-val">${esc(r.description)}</div>
-          <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
-        </div>
-      </div>
+          <div class="row-name">№${r.id} · ${esc(ERR_REP_STATUS[r.status]||r.status)}${
+            r.answer?' · <span style="color:var(--green)">есть ответ</span>':''}</div>
+          <div class="li-sub wrap">${esc(String(r.description||'').slice(0,120))}${
+            String(r.description||'').length>120?'…':''}</div>
+          <div class="li-sub" style="color:var(--hint)">${esc(ago(r.created_at))}</div>
+        </div><span class="chev">›</span></div>
     `).join(''));
   } catch(e) { txt('errRepList', empty('⚠️','Ошибка',errRu(e))); }
 }

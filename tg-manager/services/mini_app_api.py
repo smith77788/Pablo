@@ -14347,19 +14347,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
-                "SELECT id, description, status, created_at FROM error_reports "
+                "SELECT id, description, status, created_at, updated_at, notes "
+                "FROM error_reports "
                 "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
                 uid,
             )
         except Exception:
             log.exception("my_error_reports uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+        # Описание целиком, а не первые 120 символов: отправитель не мог
+        # перечитать, что именно он написал, — а именно это и нужно, когда
+        # отчёт обрастает ответом. `notes` — единственный канал ответа
+        # обратно: разбор отчёта писали туда, и он никогда не доходил.
         return _json_resp({"reports": [
             {
                 "id": r["id"],
-                "description": (r["description"] or "")[:120],
+                "description": r["description"] or "",
                 "status": r["status"] or "new",
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "updated_at": r["updated_at"].isoformat() if r.get("updated_at") else None,
+                "answer": (r.get("notes") or "").strip() or None,
             }
             for r in rows
         ]})
