@@ -388,6 +388,18 @@ INLINE_MIGRATIONS: list[str] = [
         created_at TIMESTAMPTZ DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
+    # Сокращатель ссылок («bit.ly для себя»): код → целевой URL + счётчик кликов.
+    """CREATE TABLE IF NOT EXISTS short_links (
+        code TEXT PRIMARY KEY,
+        owner_id BIGINT NOT NULL,
+        target_url TEXT NOT NULL,
+        title TEXT,
+        clicks BIGINT NOT NULL DEFAULT 0,
+        disabled BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_click_at TIMESTAMPTZ
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
 ]
 
 
@@ -19580,9 +19592,107 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 _sse_streams.pop(uid, None)
         return response
 
+    # ── Сокращатель ссылок («bit.ly для себя») ─────────────────────────────────
+    from services import link_shortener as _lnk
+    from urllib.parse import urlparse as _urlparse
+
+    def _short_base(request: web.Request) -> str:
+        """Базовый адрес короткой ссылки: env SHORT_LINK_BASE (напр.
+        https://infragram.app) либо домен текущего запроса (учитывая прокси
+        Railway через X-Forwarded-*)."""
+        base = (os.getenv("SHORT_LINK_BASE") or "").strip().rstrip("/")
+        if base:
+            return base
+        _proto = (request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip()
+                  or request.scheme or "https")
+        _host = (request.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
+                 or request.headers.get("Host", "") or request.host or "")
+        return f"{_proto}://{_host}" if _host else ""
+
+    def _self_hosts(request: web.Request) -> set[str]:
+        """Наши собственные хосты — чтобы не дать завернуть ссылку на наш же
+        редирект (бесконечная петля)."""
+        hosts: set[str] = set()
+        for h in (os.getenv("SHORT_LINK_BASE"),
+                  request.headers.get("X-Forwarded-Host"),
+                  request.headers.get("Host"), request.host):
+            if not h:
+                continue
+            _n = _urlparse(h if "://" in h else "http://" + h).hostname
+            if _n:
+                hosts.add(_n.lower())
+        return hosts
+
+    async def short_link_redirect(request: web.Request) -> web.Response:
+        """Публичный редирект: короткая ссылка → 302 на цель + учёт клика."""
+        code = request.match_info.get("code", "")
+        target = await _lnk.resolve(pool, code)
+        if not target:
+            return web.Response(status=404, text="Ссылка не найдена или отключена",
+                                content_type="text/plain", charset="utf-8")
+        raise web.HTTPFound(target)
+
+    async def links_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        target = validate_string(body.get("target_url") or body.get("url"), max_len=2048)
+        title = validate_string(body.get("title"), max_len=200, required=False)
+        code = validate_string(body.get("code"), max_len=40, required=False)
+        res = await _lnk.create(pool, uid, target or "", title,
+                                self_hosts=_self_hosts(request),
+                                custom_code=(code or None))
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось создать ссылку")
+        res["short_url"] = f"{_short_base(request)}/{res['code']}"
+        return _json_resp(res)
+
+    async def links_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        items = await _lnk.list_for_owner(pool, uid)
+        base = _short_base(request)
+        for it in items:
+            it["short_url"] = f"{base}/{it['code']}"
+        return _json_resp({"links": items, "base": base})
+
+    async def links_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        code = validate_string(body.get("code"), max_len=40)
+        ok = await _lnk.set_disabled(pool, uid, code or "", bool(body.get("disabled")))
+        return _json_resp({"ok": ok}) if ok else _err("Ссылка не найдена", 404)
+
+    async def links_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        code = validate_string(body.get("code"), max_len=40)
+        ok = await _lnk.delete(pool, uid, code or "")
+        return _json_resp({"ok": ok}) if ok else _err("Ссылка не найдена", 404)
+
     # ── Route registration ────────────────────────────────────────────────────
 
     app.router.add_options("/api/miniapp/{path:.*}", handle_options)
+    app.router.add_post("/api/miniapp/links/create", links_create)
+    app.router.add_get("/api/miniapp/links", links_list)
+    app.router.add_post("/api/miniapp/links/toggle", links_toggle)
+    app.router.add_post("/api/miniapp/links/delete", links_delete)
+    app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
     app.router.add_post("/api/miniapp/pair", pair_device)
     app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
@@ -25614,3 +25724,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         log.info("Mini App static served from %s at /miniapp", _static_dir)
     else:
         log.warning("mini_app/ directory not found — static serving skipped")
+
+    # Красивый корневой редирект короткой ссылки: infragram.app/<код>.
+    # РЕГИСТРИРУЕТСЯ ПОСЛЕДНИМ — это одно-сегментный динамический роут, и он
+    # перехватил бы любой конкретный путь, объявленный ПОЗЖЕ. Все наши точные
+    # пути (/, /health, /miniapp, /api/*, /webhook/*, /metrics, /.well-known/*,
+    # /s/<code>) уже объявлены выше и матчатся раньше; зарезервированные слова
+    # внутри link_shortener.resolve дополнительно отдают 404. Не добавляйте после
+    # этой строки новых одно-сегментных корневых роутов, не вынеся их выше.
+    app.router.add_get("/{code:" + _lnk.ROUTE_CODE_PATTERN + "}", short_link_redirect)
