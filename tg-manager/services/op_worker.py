@@ -616,6 +616,13 @@ _FLOOD_INLINE_MAX_S = _inline_pause_cap(_FLOOD_INLINE_MAX_S, _OP_STALL_MIN)
 # отвечает за секунды, ложный таймаут увёл бы цель в лишний повтор.
 _OP_REQUEST_TIMEOUT = 45
 
+# Анти-детект публикации ССЫЛОК на каналы. Одна и та же ссылка, ушедшая в десятки
+# каналов залпом (~30с шаг), — прямая сигнатура искусственного буста: целевой
+# канал сносят «почти сразу». Когда в тексте есть ссылка на канал, межканальный
+# разнос поднимается до этого безопасного минимума (плюс джиттер в цикле), а сама
+# форма ссылки варьируется на канал (services/link_vary). Настраивается env.
+_LINK_SAFE_MIN_DELAY_S = _int_env("PUBLISH_LINK_MIN_DELAY_SEC", 90, 15, 3600)
+
 
 
 def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
@@ -4764,6 +4771,16 @@ async def _exec_mass_publish(
     if not mp_text:
         return {"status": "failed", "summary": "⚠️ Текст сообщения не указан"}
 
+    # Анти-детект ссылок. Если в тексте есть ссылка/упоминание канала, публикация
+    # его «бустит»: та же ссылка в десятки каналов залпом = сигнатура накрутки,
+    # за которую Telegram сносит ЦЕЛЕВОЙ канал. Поднимаем межканальный разнос до
+    # безопасного минимума (джиттер — ниже в цикле), а форму ссылки варьируем на
+    # каждый канал (ниже, _ch_text). Без ссылки всё работает как раньше (no-op).
+    from services import link_vary as _link_vary
+    _has_channel_link = _link_vary.contains_channel_link(mp_text)
+    if _has_channel_link:
+        delay = max(delay, _LINK_SAFE_MIN_DELAY_S)
+
     if target == "channels":
         type_filter = "(mc.type = 'channel' OR mc.type IS NULL)"
     elif target == "groups":
@@ -5045,6 +5062,10 @@ async def _exec_mass_publish(
             else dialog["id"]
         )
         _ch_text = _expand_spintax(mp_text)  # свой вариант текста на этот канал
+        if _has_channel_link:
+            # Форму ссылки варьируем на канал: один и тот же URL во всех постах —
+            # самый явный паттерн накрутки. Адрес не меняется, ведёт туда же.
+            _ch_text = _link_vary.vary_channel_links(_ch_text, int(dialog["id"]))
         for _attempt in range(2):  # per-item retry: 1 initial + 1 retry on FloodWait
             try:
                 result = await account_manager.post_to_channel(
@@ -5344,7 +5365,13 @@ async def _exec_mass_publish(
                     max(delay, float(flood_wait) + 5), "mass_publish")
             else:
                 # Базовый темп — под глобальным губернатором (давление флота).
-                await _governed_sleep(pool, owner_id, delay)
+                # Для публикаций со ссылкой добавляем джиттер: РОВНЫЙ шаг (каждые
+                # N секунд ровно) сам по себе машинная сигнатура. Рваный интервал
+                # +/- похож на живую редакцию.
+                _step = delay
+                if _has_channel_link:
+                    _step = delay * random.uniform(0.7, 1.6)
+                await _governed_sleep(pool, owner_id, _step)
 
     await release_accounts(mp_used_acc_ids)
 
@@ -5360,13 +5387,25 @@ async def _exec_mass_publish(
             log.warning("mass_publish: update growth_goals failed for goal %s: %s", goal_id_param, e)
 
     parts = [f"Опубликовано: {ok_count}", f"ошибок: {fail_count}"]
+    _summary = ", ".join(parts)
+    if _has_channel_link and ok_count > 0:
+        # Владелец должен понимать природу риска: код снизил сигнатуру, но
+        # окончательно сохранность целевого канала решают его прогретость и то,
+        # не льётся ли ссылка отовсюду залпом.
+        _summary += (
+            "\n\n🔗 <b>В посте ссылка на канал — включён безопасный режим</b>\n"
+            "Форма ссылки разнесена по каналам, паузы увеличены. Чтобы целевой "
+            "канал не сняли за «накрутку»: не публикуйте ссылку сразу во все "
+            "каналы, прогрейте целевой канал (посты, подписчики, возраст) и "
+            "добавляйте ссылочную массу постепенно."
+        )
     return {
         "status": "done",
         "ok": ok_count,
         "failed": fail_count,
         "failed_channels": failed_channels[:50],
         "published_to": published_to[:50],
-        "summary": ", ".join(parts),
+        "summary": _summary,
     }
 
 
@@ -11197,6 +11236,12 @@ async def _exec_bulk_post_chans(
     if not acc_id or not channel_ids or not text:
         return {"status": "failed", "reason": "Не указан аккаунт, каналы или текст"}
 
+    # Анти-детект ссылок (см. _exec_mass_publish): та же ссылка в десятки каналов
+    # залпом = сигнатура накрутки, целевой канал сносят. Форму варьируем на канал,
+    # разнос увеличиваем. Без ссылки — no-op.
+    from services import link_vary as _link_vary
+    _has_channel_link = _link_vary.contains_channel_link(text)
+
     row = await _safe_fetchrow(
             pool,
         "SELECT id, session_str, first_name, phone, device_model, system_version, app_version, "
@@ -11318,6 +11363,8 @@ async def _exec_bulk_post_chans(
                     }
                 await asyncio.sleep(_cool_left + random.uniform(2, 8))
             _body = _expand_spintax(text)  # свой вариант текста в этот канал
+            if _has_channel_link:
+                _body = _link_vary.vary_channel_links(_body, int(ch_id))
             try:
                 last_result = await account_manager.post_to_channel(
                     acc["session_str"], ch_id, _body,
@@ -11378,13 +11425,25 @@ async def _exec_bulk_post_chans(
             # Тот же класс, что в bulk_post: max() не ограничивал flood_wait.
             slept = await bounded_flood_sleep(
                 last_result.get("flood_wait", 0) or 0, "bulk_publish")
-            await asyncio.sleep(max(0.0, backoff(attempt, base=2.0, cap=30.0) - slept))
+            _pace = backoff(attempt, base=2.0, cap=30.0)
+            if _has_channel_link:
+                # Ссылку нельзя лить залпом — поднимаем разнос до безопасного
+                # минимума с рваным джиттером (см. _exec_mass_publish).
+                _pace = max(_pace, _LINK_SAFE_MIN_DELAY_S * random.uniform(0.7, 1.6))
+            await asyncio.sleep(max(0.0, _pace - slept))
 
+        _summary = f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}"
+        if _has_channel_link and ok_count > 0:
+            _summary += (
+                "\n\n🔗 Ссылка в посте — включён безопасный режим (форма разнесена, "
+                "паузы увеличены). Чтобы целевой канал не сняли: прогрейте его и не "
+                "публикуйте ссылку сразу во все каналы."
+            )
         return {
             "status": "done",
             "ok": ok_count,
             "fail": err_count,
-            "summary": f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}",
+            "summary": _summary,
         }
     finally:
         await release_accounts([_claimed_acc])
