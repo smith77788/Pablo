@@ -134,6 +134,57 @@ def test_no_owner_id_keeps_legacy_whole_claim():
     assert len(claimed) == 9   # без owner-контекста — прежнее поведение
 
 
+class _QueryAwarePool(_FakePool):
+    """Как _FakePool, но различает запрос числа 'running' и запрос числа
+    ПАРКОВАННЫХ ждущих флот операций (acct_wait_since). Нужно для проверки, что
+    держащий весь флот уступает долю операции, которая ждёт в 'pending'."""
+
+    def __init__(self, running=0, waiting=0, held_by_others=None):
+        super().__init__(running=running, held_by_others=held_by_others)
+        self._waiting = waiting
+
+    async def fetchval(self, q, *a):
+        if "acct_wait_since" in q:
+            return self._waiting
+        return self._running
+
+
+def test_rebalance_sheds_to_a_parked_waiting_op():
+    """Регресс «операция #251 не запустилась: все аккаунты 20 мин были заняты».
+
+    Ждущая свободный флот операция паркуется _requeue_op_no_accounts в
+    status='pending' с отметкой acct_wait_since — её НЕТ в _active_op_ids и она
+    не 'running'. Прежний счётчик _rebalance_claim видел только 'running' среди
+    _active_op_ids, поэтому держащий весь флот не уступал ждущему НИЧЕГО, и тот
+    крутился в живой очереди до предела (20 мин) и падал «все аккаунты заняты».
+    Теперь ждущие учитываются как конкурентный спрос, и держащий отдаёт долю.
+    """
+    _reset()
+    ow._active_op_ids.clear()
+    ow._active_op_ids.add(900)          # в памяти только держащая операция
+    ow._db_pool = _QueryAwarePool(running=0, waiting=1)  # соперников-'running' нет, но один ждёт
+    held = _accts(10)
+    ow._accounts_in_use.update(a["id"] for a in held)
+    ow._operation_account_locks[900] = {a["id"] for a in held}
+    kept = asyncio.run(ow._rebalance_claim(900, 7, held))
+    assert len(kept) == 5, (
+        f"держащий весь флот обязан уступить половину ждущей (паркованной) "
+        f"операции, оставил {len(kept)} из 10")
+
+
+def test_rebalance_noop_when_no_rivals_and_none_waiting():
+    """Без соперников и без ждущих — делить нечего, флот остаётся за операцией."""
+    _reset()
+    ow._active_op_ids.clear()
+    ow._active_op_ids.add(900)
+    ow._db_pool = _QueryAwarePool(running=0, waiting=0)
+    held = _accts(10)
+    ow._accounts_in_use.update(a["id"] for a in held)
+    ow._operation_account_locks[900] = {a["id"] for a in held}
+    kept = asyncio.run(ow._rebalance_claim(900, 7, held))
+    assert len(kept) == 10, "в одиночку и без ждущих флот не дробится"
+
+
 def test_busy_fleet_requeues_instead_of_failing():
     src = open("services/op_worker.py", encoding="utf-8").read()
     # исполнители при занятом флоте возвращают requeue, а не failed

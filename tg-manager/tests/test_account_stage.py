@@ -55,13 +55,29 @@ def test_stage_stats_scoped_and_whitelisted():
     src = _read("services/mini_app_api.py")
     # разбивка by_stage должна считаться по owner_id и фильтроваться whitelist'ом
     assert '"by_stage"' in src, "нет разбивки by_stage в stats"
-    assert re.search(
-        r"FROM tg_accounts\s+\"?\s*\n?\s*\"?WHERE owner_id=\$1 AND stage IS NOT NULL GROUP BY stage",
-        src,
-    ) or "WHERE owner_id=$1 AND stage IS NOT NULL GROUP BY stage" in src, (
-        "by_stage считается без скоупа owner_id"
+    # Скоуп по owner_id сохранён (нет межтенантной утечки разбивки стадий).
+    # Запрос считает COALESCE(stage,'new'): аккаунты без стадии попадают в 'new',
+    # чтобы сумма чипов сходилась со всем флотом, а не с подмножеством со стадией.
+    assert "WHERE owner_id=$1 GROUP BY COALESCE(stage,'new')" in src, (
+        "by_stage считается без скоупа owner_id или не покрывает весь флот (NULL→new)"
     )
     assert 'r.get("stage") in ACCOUNT_STAGES' in src, "by_stage не фильтрует по whitelist"
+
+
+def test_stage_stats_cover_whole_fleet_not_just_staged():
+    """Регресс: чип «Все» показывал сумму только аккаунтов со стадией (7 из 52) —
+    владелец читал это как «всего 7 аккаунтов». Разбивка обязана покрывать ВЕСЬ
+    флот: аккаунты без стадии считаются 'new', а не выбрасываются условием
+    stage IS NOT NULL."""
+    src = _read("services/mini_app_api.py")
+    assert "stage IS NOT NULL GROUP BY stage" not in src, (
+        "by_stage снова отбрасывает аккаунты без стадии — чип «Все» занизит флот")
+    assert src.count("COALESCE(stage,'new')") >= 2, (
+        "обе ветки by_stage (owner и admin) должны считать NULL-стадию как 'new'")
+    # Фильтр по стадии 'new' обязан включать и аккаунты без стадии (stage IS NULL),
+    # иначе клик по чипу «Новый N» откроет меньше, чем обещает счётчик.
+    assert "stage = ${len(args)} OR stage IS NULL" in src, (
+        "фильтр 'new' не включает аккаунты без стадии — счётчик и список разойдутся")
 
 
 def test_ui_stage_filter_composes_with_health():

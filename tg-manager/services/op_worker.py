@@ -1362,14 +1362,31 @@ async def _rebalance_claim(op_id: int, owner_id: int, held: list) -> list:
     try:
         async with _active_lock:
             other_ids = [int(i) for i in _active_op_ids if int(i) != op_id]
-        if not other_ids:
-            return held
-        n = await _db_pool.fetchval(
+        n_run = 0
+        if other_ids:
+            n_run = int(await _db_pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue "
+                "WHERE owner_id=$1 AND status='running' AND id = ANY($2::bigint[])",
+                owner_id, other_ids,
+            ) or 0)
+        # Операции того же владельца, ПАРКОВАННЫЕ в ожидании свободного флота:
+        # _requeue_op_no_accounts вернул их в status='pending' с отметкой
+        # acct_wait_since, поэтому в _active_op_ids этого процесса их уже нет и
+        # прежний счётчик (только 'running' среди other_ids) их НЕ видел. Из-за
+        # этого операция, захватившая весь свободный флот, НИКОГДА не уступала
+        # ждущему — тот крутился в «живой очереди» до предела _ACCT_WAIT_MAX_MIN
+        # и падал «все аккаунты заняты» (жалоба: операция #251 «не запустилась:
+        # все аккаунты 20 мин были заняты»). Теперь ждущие учитываются как
+        # реальный конкурентный спрос, и держащий отдаёт им справедливую долю —
+        # на следующем повторе ожидающая операция её забирает и стартует.
+        n_wait = int(await _db_pool.fetchval(
             "SELECT COUNT(*) FROM operation_queue "
-            "WHERE owner_id=$1 AND status='running' AND id = ANY($2::bigint[])",
-            owner_id, other_ids,
-        )
-        concurrency = 1 + max(0, int(n or 0))
+            "WHERE owner_id=$1 AND status='pending' AND acct_wait_since IS NOT NULL",
+            owner_id,
+        ) or 0)
+        if not n_run and not n_wait:
+            return held
+        concurrency = 1 + max(0, n_run) + max(0, n_wait)
     except Exception:
         return held
     if concurrency <= 1:
@@ -1380,9 +1397,9 @@ async def _rebalance_claim(op_id: int, owner_id: int, held: list) -> list:
     keep, give_back = held[:fair_share], held[fair_share:]
     await release_accounts([int(a["id"]) for a in give_back])
     log.info(
-        "op=%d: отдал %d/%d аккаунтов в общий пул — конкурентных running-операций "
-        "владельца стало %d (справедливая доля %d)",
-        op_id, len(give_back), len(held), concurrency, fair_share,
+        "op=%d: отдал %d/%d аккаунтов в общий пул — конкурентный спрос владельца "
+        "стал %d (идут %d + ждут флот %d, справедливая доля %d)",
+        op_id, len(give_back), len(held), concurrency, n_run, n_wait, fair_share,
     )
     return keep
 

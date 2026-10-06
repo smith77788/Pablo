@@ -3004,7 +3004,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             clauses.append("COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')")
         if stage in ACCOUNT_STAGES:
             args.append(stage)
-            clauses.append(f"stage = ${len(args)}")
+            if stage == "new":
+                # «Новый» в разбивке включает аккаунты без проставленной стадии
+                # (stage IS NULL трактуется как 'new'). Фильтр обязан показывать
+                # ровно тех, кого считает чип, иначе клик по «Новый N» открыл бы
+                # меньше, чем обещал счётчик.
+                clauses.append(f"(stage = ${len(args)} OR stage IS NULL)")
+            else:
+                clauses.append(f"stage = ${len(args)}")
         if q:
             args.append(f"%{q}%")
             n = len(args)
@@ -3154,14 +3161,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                            "active", "proxy_down")} if st else {}
         # by_stage скоупим по owner_id для не-админа (иначе — межтенантная утечка
         # разбивки стадий по ВСЕЙ платформе). Админ видит всё, как в основной статистике.
+        # Аккаунты без проставленной CRM-стадии (stage IS NULL) считаем «new» —
+        # это и есть первая стадия воронки «только заведён, ещё не обработан».
+        # Иначе разбивка охватывала лишь аккаунты со стадией, и чип «Все»
+        # показывал их сумму (7 из 52) — владелец читал это как «всего 7
+        # аккаунтов». Теперь COALESCE(stage,'new') покрывает ВЕСЬ флот, и сумма
+        # чипов сходится с «Все 52» сверху (жалоба: «количество аккаунтов и
+        # готовых не верное»).
         if admin:
             stage_rows = await _safe_fetch(pool,
-                "SELECT stage, COUNT(*) AS c FROM tg_accounts "
-                "WHERE stage IS NOT NULL GROUP BY stage")
+                "SELECT COALESCE(stage,'new') AS stage, COUNT(*) AS c FROM tg_accounts "
+                "GROUP BY COALESCE(stage,'new')")
         else:
             stage_rows = await _safe_fetch(pool,
-                "SELECT stage, COUNT(*) AS c FROM tg_accounts "
-                "WHERE owner_id=$1 AND stage IS NOT NULL GROUP BY stage", uid)
+                "SELECT COALESCE(stage,'new') AS stage, COUNT(*) AS c FROM tg_accounts "
+                "WHERE owner_id=$1 GROUP BY COALESCE(stage,'new')", uid)
         by_stage = {r["stage"]: int(r["c"] or 0) for r in (stage_rows or [])
                     if r.get("stage") in ACCOUNT_STAGES}
         stats["by_stage"] = by_stage
