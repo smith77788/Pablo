@@ -13939,6 +13939,18 @@ async def _filter_unwarmed_fresh_accounts(
 # продлеваться не должен, иначе забытая операция будет жить месяцами.
 _MAX_INVITE_CHAIN = 14
 
+# Защита промоутера: промоут-трюк делает по ДВА EditAdmin на цель (выдать+снять
+# админку). Сотни EditAdmin подряд ОДНИМ аккаунтом за прогон — прямая дорога к
+# бану именно промоутера, на котором держится выдача прав всему флоту. Поэтому
+# трюк за один прогон берёт не больше этого числа целей; остаток уходит в
+# фолбэк-ссылку/следующий прогон (цепочка инвайта всё равно продолжается днями).
+# Env override — чтобы владелец мог поднять под свой риск-профиль.
+try:
+    _PROMOTE_TRICK_MAX_PER_RUN = max(
+        1, int(os.getenv("INVITE_PROMOTE_TRICK_MAX_PER_RUN", "40")))
+except (TypeError, ValueError):
+    _PROMOTE_TRICK_MAX_PER_RUN = 40
+
 # Потолок пула целей, читаемых из источника за одну операцию инвайта. Прежние
 # 2000 были зашиты в каждый запрос и служили одновременно потолком и причиной
 # ложного тупика «все уже приглашены» (дедуп применялся ПОСЛЕ усечения). Остаток
@@ -15300,6 +15312,7 @@ async def _exec_mass_invite(
             log.debug("mass_invite: record_success failed acc=%s", acc_id)
 
     total_ok, total_fail = 0, 0
+    _already_in_total = 0   # уже были в чате — показываем отдельно, не как инвайт
     all_users = list(user_refs)
     all_phones = list(phones)
 
@@ -16457,6 +16470,7 @@ async def _exec_mass_invite(
 
             ok_n = int(res.get("ok") or 0)
             fail_n = int(res.get("failed") or 0)
+            _already_in_total += int(res.get("already_in") or 0)
             # Движок обрывает батч на флуде/закрытой группе — хвост НЕ пробовали.
             # Кого именно не пробовали, движок говорит поимённо (untried): цель,
             # на которой пришёл флуд, Telegram не добавлял и не отклонял. Раньше
@@ -16830,6 +16844,10 @@ async def _exec_mass_invite(
             and not flood_storm and not await _is_cancelled(pool, op_id):
         from services import mass_inviter_engine as _inv
         _cap = 200 if not _max_invites else max(0, _max_invites - (total_ok + total_fail))
+        # Защита промоутера от сотен EditAdmin за прогон (M3): трюк берёт не больше
+        # _PROMOTE_TRICK_MAX_PER_RUN целей. Остаток не теряется — он в _never_tried,
+        # уйдёт в фолбэк-ссылку ниже и в следующий прогон цепочки.
+        _cap = min(_cap, _PROMOTE_TRICK_MAX_PER_RUN)
         _uniq_blocked = _all_blocked_uniq[:_cap]
         _never_tried = _all_blocked_uniq[_cap:]  # не уместились в лимит прогона — не пробовали
         if _uniq_blocked:
@@ -16868,9 +16886,10 @@ async def _exec_mass_invite(
                         await _remember_invited(_part_added)
                         await bump_daily_stats(pool, int(_promoter["id"]),
                                                ok=_part_ok, invites=_part_ok)
-                        await _safe_execute(
-                            pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
-                            op_id, _part_ok)
+                        # done_items НЕ трогаем: эти цели уже посчитаны прогрессом в
+                        # основном цикле (как privacy-отказ). Трюк их ПЕРЕВОДИТ из
+                        # провала в успех, а не добавляет новую обработанную цель —
+                        # иначе прогресс переваливал за 100% (жалоба владельца).
                     if _tr.get("peer_flood") or _tr.get("flood_wait"):
                         # Пауза промоутеру — та же запись в пульс, что у инвайтеров.
                         await _rest_invite_account(int(_promoter["id"]), _tr)
@@ -16895,6 +16914,11 @@ async def _exec_mass_invite(
                         _tried_blocked.extend(_uniq_blocked[_ci + len(_part):])
                         break
                 total_ok += _trick_ok
+                # Цели, добавленные трюком, были посчитаны как провал (privacy) в
+                # основном цикле — переводим их из провала в успех, иначе одна
+                # цель сидела и в total_fail, и в total_ok (двойной счёт, итог
+                # «добавлено+ошибок» превышал размер аудитории).
+                total_fail = max(0, total_fail - _trick_ok)
                 _still_blocked = _tried_blocked + _never_tried
                 await _safe_execute(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -16904,6 +16928,7 @@ async def _exec_mass_invite(
             except Exception as _te:
                 log.warning("mass_invite op=%d: промоут-трюк сбой: %s", op_id, _te)
                 total_ok += _trick_ok
+                total_fail = max(0, total_fail - _trick_ok)
                 # Сбой посреди пачек: всё, что не подтверждено как добавленное,
                 # остаётся кандидатом на фолбэк (ссылка в ЛС).
                 _added_keys = {str(v) for v in _trick_added}
@@ -17010,9 +17035,9 @@ async def _exec_mass_invite(
                 # и кампания в тот же день не перебирает аккаунт сверх лимита.
                 await _lf_budget.record_actions(pool, owner_id, _sid, "dm", _ok_lf,
                                                 result="sent", operation_id=op_id)
-                await _safe_execute(
-                    pool, "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
-                    op_id, _ok_lf)
+                # done_items НЕ трогаем: эти цели уже посчитаны прогрессом в
+                # основном цикле (privacy-отказ). Фолбэк переводит их из провала в
+                # успех, а не добавляет новую обработанную цель (прогресс >100%).
             if _untried_lf:
                 _give_back(_lf_queue, _untried_lf)
             if _lf.get("peer_flood") or _lf.get("flood_wait"):
@@ -17036,6 +17061,9 @@ async def _exec_mass_invite(
                     _lf_live.remove(_snd)
         _link_fallback_left = len(_lf_queue)
         total_ok += _link_fallback_ok
+        # Цели, доставленные ссылкой в ЛС, были посчитаны провалом (privacy) в
+        # основном цикле — переводим их из провала в успех (без двойного счёта).
+        total_fail = max(0, total_fail - _link_fallback_ok)
         if _uniq_fallback:
             await _safe_execute(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -17227,6 +17255,10 @@ async def _exec_mass_invite(
         f"{_method_hdr}{group}\n"
         f"{_ok_word}: {total_ok}/{total}"
         + _acc_line
+        # «Уже в чате» — не новый инвайт: показываем отдельно, чтобы счётчик
+        # «добавлено» не был завышен теми, кто и так состоял в чате (жалоба).
+        + (f"\n👥 Уже были в чате: {_already_in_total} — это не новый инвайт, "
+           "лимиты аккаунтов на них не тратились" if _already_in_total else "")
         # «Мать-Дочка» была не видна в отчёте ВООБЩЕ: ни строки о том, что инвайт
         # шёл в расходную группу, ни счётчика ротаций. Ссылка выше при этом —
         # дочерней группы, а подписана как обычная цель, то есть отчёт выглядел

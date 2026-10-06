@@ -598,8 +598,9 @@ async def invite_batch(
     # (добавлен / уже в чате / мёртвый username), а временные сбои (флуд, таймаут,
     # «прочее») не писал в журнал приглашённых: иначе человек, на котором один раз
     # моргнула сеть, больше НИКОГДА не приглашался (жалоба владельца).
-    added_refs: list = []        # реально добавлены или уже в чате
+    added_refs: list = []        # реально добавлены или уже в чате (для дедупа)
     dead_refs: list = []         # username не существует / аккаунт удалён (перманентно)
+    already_in = 0               # уже были в чате — не новый инвайт, в ok не считаем
 
     def _note(kind: str) -> None:
         fail_kinds[kind] = fail_kinds.get(kind, 0) + 1
@@ -635,6 +636,7 @@ async def invite_batch(
                         "account_dead": False, "account_dead_reason": "",
                         "added": list(_bulk.get("added") or []),
                         "dead": list(_bulk.get("dead") or []),
+                        "already_in": 0,
                         "untried": list(_bulk.get("untried") or []),
                         "short_floods": list(_bulk.get("short_floods") or []),
                         "bulk": True}
@@ -669,8 +671,13 @@ async def invite_batch(
                     added_refs.append(ref)
                 await asyncio.sleep(random.uniform(2.0, 4.0) * _pm)
             except UserAlreadyParticipantError:
-                ok += 1  # уже в группе = успех
-                added_refs.append(ref)  # уже в чате — дедупим, повторять незачем
+                # УЖЕ в чате — это не новый инвайт: добавления не было, дневной
+                # лимит аккаунта на инвайты тратить на него нельзя, и в «приглашено
+                # N» он врёт (жалоба владельца: счётчик завышен). Считаем отдельной
+                # корзиной already_in; дедупим (повторять незачем), но в ok/invites
+                # НЕ кладём.
+                already_in += 1
+                added_refs.append(ref)
             except UserPrivacyRestrictedError:
                 failed += 1
                 _note(FAIL_PRIVACY)
@@ -804,7 +811,7 @@ async def invite_batch(
             "flood_wait": flood_wait, "errors": errors,
             "privacy_failed": privacy_failed, "no_rights": no_rights,
             "account_dead": account_dead, "account_dead_reason": account_dead_reason,
-            "added": added_refs, "dead": dead_refs,
+            "added": added_refs, "dead": dead_refs, "already_in": already_in,
             "fail_kinds": fail_kinds,
             "untried": list(user_refs[untried_from:]),
             "short_floods": short_floods}
