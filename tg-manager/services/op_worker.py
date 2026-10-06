@@ -10804,8 +10804,14 @@ async def _exec_bulk_post_to_channel(
                 result.get("flood_wait", 0) or 0, "bulk_post")
             await asyncio.sleep(max(0.0, backoff(attempt) - slept))
 
+        # channel_ref по контракту бывает ЧИСЛОВЫМ (mini-app шлёт int channel_id,
+        # см. submit в mini_app_api). html.escape внутри делает s.replace(...) и
+        # на int роняет «'int' object has no attribute 'replace'». Падало это ПОСЛЕ
+        # цикла публикации — то есть посты уже ушли, а операция всё равно уходила
+        # в «ошибка» (прод: «операции падают, хотя флот активный»). str() снимает
+        # ровно этот разрыв между «пост опубликован» и «операция провалена».
         lines = (
-            [f"\U0001f4e4 <b>Публикация в {_html.escape(channel_ref)}</b>\n"]
+            [f"\U0001f4e4 <b>Публикация в {_html.escape(str(channel_ref))}</b>\n"]
             + ok_list
             + err_list
         )
