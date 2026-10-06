@@ -205,3 +205,21 @@ def test_bulk_post_to_channel_first_run_logs_accounts(_stubs, _accounts):
     assert sorted(t for t, st in pool.logged if st == "ok") == ["11", "12"], (
         "ключ журнала здесь — аккаунт: единица работы это пост ОТ аккаунта"
     )
+
+
+def test_bulk_post_to_channel_numeric_ref_does_not_crash_summary(_stubs, _accounts):
+    """channel_ref ЧИСЛОМ (id канала) не должен ронять операцию на сборке сводки.
+
+    Жалоба владельца: «Массовая публикация в канал» падала с
+    'int' object has no attribute 'replace'. Корень — html.escape(channel_ref) в
+    сборке итогового текста: html.escape зовёт .replace, а на int это AttributeError.
+    Падение в сводке — ПОСЛЕ публикации — роняло всю операцию и уводило её в
+    повтор, хотя посты уже ушли."""
+    pool = _AccPool()
+    res = _run(op_worker._exec_bulk_post_to_channel(
+        pool, None, 42, 777,
+        {"account_ids": [11, 12], "channel_ref": -1001234567890,
+         "text_to_post": "привет"}))
+    assert res["status"] == "done", f"операция не должна падать на числовом ref: {res}"
+    assert res["ok"] == 2
+    assert len(_stubs["posted"]) == 2
