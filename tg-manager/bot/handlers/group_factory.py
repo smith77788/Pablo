@@ -18,7 +18,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AccCb, BmCb, GroupFCb, EcoPickCb
+from bot.callbacks import AccCb, BmCb, GroupFCb, GeoPresenceCb, EcoPickCb
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from bot.keyboards import subscription_locked_markup
@@ -61,6 +61,10 @@ async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="📋 Мои группы", callback_data=GroupFCb(action="list"))
     kb.button(text="👥 Участники", callback_data=GroupFCb(action="members"))
     kb.button(text="📢 Объявление", callback_data=GroupFCb(action="announce"))
+    # Гео-сеть умеет собирать группы «по городам» (чат города, барахолка) с
+    # авто-подстановкой названий. Движок общий с каналами — ведём в тот же
+    # конструктор, тип актива выбирается там.
+    kb.button(text="🌍 Гео-сеть по городам", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
     kb.adjust(2, 2, 2, 1)
     await callback.message.edit_text(
@@ -69,6 +73,7 @@ async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
         "• <b>Импорт из Telegram</b> — подключить существующие группы\n"
         "• <b>Мои группы</b> — список всех групп аккаунтов\n"
         "• <b>Участники</b> — просмотр участников группы\n"
+        "• <b>Гео-сеть по городам</b> — сеть групп по регионам с авто-названиями\n"
         "• <b>Объявление</b> — отправить сообщение во все группы",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

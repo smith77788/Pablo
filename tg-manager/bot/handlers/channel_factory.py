@@ -22,7 +22,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AccCb, ChanFactCb, SeoCb, EcoPickCb
+from bot.callbacks import AccCb, ChanFactCb, GeoPresenceCb, SeoCb, EcoPickCb
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from database import db
 from services.logger import log_exc_swallow
@@ -73,6 +73,13 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(
         text="📋 Массовое создание", callback_data=ChanFactCb(action="bulk_create")
     )
+    # Гео-сеть — это массовое создание каналов «по городам» с авто-подстановкой
+    # названий ({{CITY_NAME}} → Москва, Самара…). Движок живёт в «Гео-сети», но из
+    # фабрики к нему не было ни одного перехода — владелец не находил, как собрать
+    # сеть по регионам. Ведём в тот же конструктор, а не дублируем его здесь.
+    kb.button(
+        text="🌍 Гео-сеть по городам", callback_data=GeoPresenceCb(action="menu")
+    )
     kb.button(text="📥 Импорт из Telegram", callback_data=ChanFactCb(action="import"))
     kb.button(text="✏️ Редактировать", callback_data=ChanFactCb(action="bulk_edit"))
     kb.button(
@@ -83,7 +90,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="📈 SEO-оптимизация", callback_data=ChanFactCb(action="seo_pick"))
     kb.button(text="🔗 Генерация ссылок", callback_data=ChanFactCb(action="gen_links"))
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="back_to_ops"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2)
     return kb
 
 
@@ -94,6 +101,8 @@ async def cb_chanf_menu(callback: CallbackQuery) -> None:
         "📡 <b>Фабрика каналов — менеджер каналов</b>\n\n"
         "• <b>Создать канал</b> — новый Telegram-канал через ваш аккаунт\n"
         "• <b>Массовое создание</b> — несколько каналов с умными задержками\n"
+        "• <b>Гео-сеть по городам</b> — сеть каналов по регионам с авто-названиями "
+        "(«Новости Москвы», «Новости Самары»…)\n"
         "• <b>Импорт из Telegram</b> — подключить уже существующие каналы\n"
         "• <b>Редактировать</b> — массово изменить название/описание\n"
         "• <b>Публикация / рассылка</b> — опубликовать пост во все каналы\n"
