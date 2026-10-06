@@ -189,8 +189,12 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
         # НАПРЯМУЮ с host-IP, пока остальные подсистемы того же аккаунта шли
         # через назначенный прокси/релей, — одна сессия с двух адресов даёт
         # AUTH_KEY_DUPLICATED, после которого Telegram отзывает ключ.
-        client = _make_client(acc["session_str"], acc)
+        # _make_client — ВНУТРИ try: его сбой (битая сессия) иначе уводил
+        # захваченный аккаунт мимо _release_lease, и он залипал «занятым» в
+        # _accounts_in_use до рестарта процесса (корень «весь флот занят»).
+        client = None
         try:
+            client = _make_client(acc["session_str"], acc)
             await asyncio.wait_for(client.connect(), timeout=12)
             # Запоминаем, чьим аккаунтом работаем: без этого паузу Telegram
             # некуда записать — обработчик ошибки видит только клиента.
@@ -200,12 +204,14 @@ async def _get_client(pool: asyncpg.Pool, owner_id: int):
             return client
         except Exception:
             log_exc_swallow(log, "connect to Telegram client")
-            await _close_quietly(client)
+            if client is not None:
+                await _close_quietly(client)
             await _release_lease(_lease_id)
         except BaseException:
             # Отмена внешним таймаутом мимо `except Exception` проходит насквозь,
             # а ссылки на подключённого клиента ни у кого нет — закрываем здесь.
-            await _close_quietly(client)
+            if client is not None:
+                await _close_quietly(client)
             await _release_lease(_lease_id)
             raise
     return None

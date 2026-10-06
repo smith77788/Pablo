@@ -330,11 +330,12 @@ async def parse_members(
                 "error": "Нет свободных аккаунтов — все заняты или на паузе. "
                          "Повторите через минуту."}
 
-    run_id = await _create_run(
-        pool, owner_id, "channel", source_ref, "members", acc["id"]
-    )
-
-    client = account_manager._make_client(acc["session_str"], acc)
+    # Пост-захватный путь под одним try с release в finally. Раньше _create_run
+    # (INSERT в БД) и _make_client стояли ВНЕ try — их сбой уводил захваченный
+    # аккаунт мимо release: он залипал «занятым» в _accounts_in_use до рестарта,
+    # а аренда продлевалась вечно (корень «весь флот занят без операций»).
+    client = None
+    run_id = None
     t0_parse = time.monotonic()
     total_found = 0
     total_saved = 0
@@ -344,6 +345,10 @@ async def parse_members(
     source_username = source_ref.lstrip("@")
 
     try:
+        run_id = await _create_run(
+            pool, owner_id, "channel", source_ref, "members", acc["id"]
+        )
+        client = account_manager._make_client(acc["session_str"], acc)
         await asyncio.wait_for(client.connect(), timeout=15)
         try:
             entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
@@ -436,10 +441,11 @@ async def parse_members(
                 break
 
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "Сбой disconnect клиента в parser")
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "Сбой disconnect клиента в parser")
         await _release_account(_leased)
 
     status = "done" if total_found > 0 else "empty"
@@ -593,9 +599,11 @@ async def parse_active_users(
                 "error": "Нет свободных аккаунтов — все заняты или на паузе. "
                          "Повторите через минуту."}
 
-    run_id = await _create_run(pool, owner_id, "group", source_ref, "active", acc["id"])
-
-    client = account_manager._make_client(acc["session_str"], acc)
+    # Пост-захватный путь под одним try с release в finally (см. parse_members):
+    # _create_run (INSERT в БД) и _make_client раньше стояли ВНЕ try, их сбой
+    # оставлял захваченный аккаунт залипшим «занятым» до рестарта процесса.
+    client = None
+    run_id = None
     t0_parse = time.monotonic()
     total_found = 0
     total_saved = 0
@@ -603,6 +611,8 @@ async def parse_active_users(
     source_title = source_ref
 
     try:
+        run_id = await _create_run(pool, owner_id, "group", source_ref, "active", acc["id"])
+        client = account_manager._make_client(acc["session_str"], acc)
         await asyncio.wait_for(client.connect(), timeout=15)
         try:
             entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
@@ -636,10 +646,11 @@ async def parse_active_users(
         )
 
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "Сбой disconnect клиента в parser")
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "Сбой disconnect клиента в parser")
         await _release_account(_leased)
 
     status = "done" if total_found > 0 else "empty"
@@ -693,11 +704,11 @@ async def parse_commenters(
                 "error": "Нет свободных аккаунтов — все заняты или на паузе. "
                          "Повторите через минуту."}
 
-    run_id = await _create_run(
-        pool, owner_id, "comments", source_ref, "comments", acc["id"]
-    )
-
-    client = account_manager._make_client(acc["session_str"], acc)
+    # Пост-захватный путь под одним try с release в finally (см. parse_members):
+    # _create_run (INSERT в БД) и _make_client раньше стояли ВНЕ try, их сбой
+    # оставлял захваченный аккаунт залипшим «занятым» до рестарта процесса.
+    client = None
+    run_id = None
     t0_parse = time.monotonic()
     total_found = 0
     total_saved = 0
@@ -705,6 +716,10 @@ async def parse_commenters(
     source_username = source_ref.lstrip("@")
 
     try:
+        run_id = await _create_run(
+            pool, owner_id, "comments", source_ref, "comments", acc["id"]
+        )
+        client = account_manager._make_client(acc["session_str"], acc)
         await asyncio.wait_for(client.connect(), timeout=15)
         try:
             entity = await asyncio.wait_for(client.get_entity(source_ref), timeout=_OP_TIMEOUT)
@@ -755,10 +770,11 @@ async def parse_commenters(
         )
 
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "Сбой disconnect клиента в parser")
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "Сбой disconnect клиента в parser")
         await _release_account(_leased)
 
     status = "done" if total_found > 0 else "empty"

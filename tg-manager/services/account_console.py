@@ -270,9 +270,12 @@ async def list_dialogs(session_string: str, acc: dict | None,
     _acc_id, _busy = await _claim(acc)
     if _busy:
         return dict(_BUSY_RESULT)
-    client = _make_client(session_string, acc)
+    # _make_client — ВНУТРИ try: его сбой (битая сессия) иначе уводил захваченный
+    # аккаунт мимо _unclaim, и он залипал «занятым» до рестарта процесса.
+    client = None
     out: list[dict] = []
     try:
+        client = _make_client(session_string, acc)
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         dialogs = await asyncio.wait_for(client.get_dialogs(limit=limit),
                                          timeout=_ACTION_TIMEOUT)
@@ -307,10 +310,11 @@ async def list_dialogs(session_string: str, acc: dict | None,
         log.warning("account_console.list_dialogs acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
         await _unclaim(_acc_id)
 
 
@@ -323,9 +327,12 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
     _acc_id, _busy = await _claim(acc)
     if _busy:
         return dict(_BUSY_RESULT)
-    client = _make_client(session_string, acc)
+    # _make_client — ВНУТРИ try: его сбой (битая сессия) иначе уводил захваченный
+    # аккаунт мимо _unclaim, и он залипал «занятым» до рестарта процесса.
+    client = None
     msgs: list[dict] = []
     try:
+        client = _make_client(session_string, acc)
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
                                         timeout=_ACTION_TIMEOUT)
@@ -360,10 +367,11 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
         log.warning("account_console.get_history acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
         await _unclaim(_acc_id)
 
 
@@ -384,8 +392,11 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
     _acc_id, _busy = await _claim(acc)
     if _busy:
         return dict(_BUSY_RESULT)
-    client = _make_client(session_string, acc)
+    # _make_client — ВНУТРИ try: его сбой (битая сессия) иначе уводил захваченный
+    # аккаунт мимо _unclaim, и он залипал «занятым» до рестарта процесса.
+    client = None
     try:
+        client = _make_client(session_string, acc)
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
                                         timeout=_ACTION_TIMEOUT)
@@ -405,10 +416,11 @@ async def send_text(session_string: str, acc: dict | None, peer: int | str,
         log.warning("account_console.send_text acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
         await _unclaim(_acc_id)
 
 
@@ -430,8 +442,11 @@ async def send_file(session_string: str, acc: dict | None, peer: int | str,
     _acc_id, _busy = await _claim(acc)
     if _busy:
         return dict(_BUSY_RESULT)
-    client = _make_client(session_string, acc)
+    # _make_client — ВНУТРИ try: его сбой (битая сессия) иначе уводил захваченный
+    # аккаунт мимо _unclaim, и он залипал «занятым» до рестарта процесса.
+    client = None
     try:
+        client = _make_client(session_string, acc)
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await asyncio.wait_for(_warm_entity(client, peer, access_hash),
                                         timeout=_ACTION_TIMEOUT)
@@ -450,10 +465,11 @@ async def send_file(session_string: str, acc: dict | None, peer: int | str,
         log.warning("account_console.send_file acc=%s: %s", (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
         await _unclaim(_acc_id)
 
 

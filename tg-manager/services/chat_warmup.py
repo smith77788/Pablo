@@ -511,12 +511,18 @@ async def _process_session(pool, session: dict) -> None:
     if not leased:
         return
 
-    own_tg = await _fleet_tg_ids(pool, account_ids)
-    acc_d = dict(acc)
-    client = account_manager._make_client(acc_d["session_str"], acc_d)
+    # Пост-захватный путь под одним try с release в finally. Раньше _fleet_tg_ids
+    # (запрос в БД) и _make_client стояли ВНЕ try — их сбой (ошибка БД, битая
+    # сессия) уводил аккаунт мимо release: он залипал «занятым» в _accounts_in_use
+    # до рестарта процесса, а аренда продлевалась вечно (корень «весь флот занят
+    # без операций»).
+    client = None
     sent = False
     max_seen = int(session.get("last_seen_msg") or 0)
     try:
+        own_tg = await _fleet_tg_ids(pool, account_ids)
+        acc_d = dict(acc)
+        client = account_manager._make_client(acc_d["session_str"], acc_d)
         await account_manager._connect_and_track(client, acc_d, "chat_warmup")
         entity = await _resolve_and_join(client, session["chat_ref"])
         if entity is None:
@@ -577,10 +583,11 @@ async def _process_session(pool, session: dict) -> None:
                         exc_info=True)
         log.debug("chat_warmup s=%d acc=%s ход не удался: %s", sid, speaker, e)
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
         if op_worker is not None:
             try:
                 await op_worker.release_accounts([int(speaker)])

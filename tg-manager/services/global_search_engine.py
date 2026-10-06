@@ -121,8 +121,11 @@ async def search_public(
                 "results": [],
             }
 
-    client = _make_client(session_string, _acc)
+    # _make_client — под try с release в finally: его сбой (битая сессия) иначе
+    # уводил захваченный аккаунт мимо release, и он залипал «занятым» до рестарта.
+    client = None
     try:
+        client = _make_client(session_string, _acc)
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         try:
             found = await asyncio.wait_for(
@@ -181,10 +184,11 @@ async def search_public(
                 _out["flood_wait"] = _secs
         return _out
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
         if _leased:
             try:
                 from services import op_worker as _opw

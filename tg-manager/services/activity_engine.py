@@ -386,22 +386,24 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
             _act_leased = True  # op_worker недоступен — best-effort
         if not _act_leased:
             continue
-        acc_row = await db.get_account_for_telethon(pool, acc_id)
-        if not acc_row or not acc_row["session_str"]:
-            if _opw and _act_leased:
-                try:
-                    await _opw.release_accounts([int(acc_id)])
-                except Exception:
-                    pass
-            continue
 
-        device = dict(acc_row) if acc_row["device_model"] else None
-        client = account_manager._make_client(acc_row["session_str"], device)
-
-        flood_multiplier = 1.0
-        base_delay = random.uniform(12, 35)
-
+        # Весь пост-захватный путь — под одним try с release в finally. Раньше
+        # get_account_for_telethon и _make_client стояли ВНЕ try: исключение в
+        # них (сбой БД, битая сессия) уводило аккаунт мимо release — он залипал
+        # «занятым» в _accounts_in_use до рестарта процесса, а renew_leases
+        # продлевал его аренду вечно (корень «весь флот занят без операций»).
+        client = None
         try:
+            acc_row = await db.get_account_for_telethon(pool, acc_id)
+            if not acc_row or not acc_row["session_str"]:
+                continue
+
+            device = dict(acc_row) if acc_row["device_model"] else None
+            client = account_manager._make_client(acc_row["session_str"], device)
+
+            flood_multiplier = 1.0
+            base_delay = random.uniform(12, 35)
+
             await asyncio.wait_for(client.connect(), timeout=15)
 
             for i in range(actions_per_acc):
@@ -518,10 +520,11 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                 except Exception as e:
                     log_exc_swallow(log, "run_resource_activity_session")
         finally:
-            try:
-                await asyncio.wait_for(client.disconnect(), timeout=5)
-            except Exception as e:
-                log_exc_swallow(log, "run_resource_activity_session: disconnect")
+            if client is not None:
+                try:
+                    await asyncio.wait_for(client.disconnect(), timeout=5)
+                except Exception:
+                    log_exc_swallow(log, "run_resource_activity_session: disconnect")
             # Возвращаем аккаунт арбитру — иначе он «зомби» до реконсилера.
             if _opw and _act_leased:
                 try:
