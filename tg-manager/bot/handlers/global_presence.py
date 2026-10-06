@@ -2160,6 +2160,29 @@ async def _submit_plan(
         )
     except Exception as exc:
         log.error("global_presence: постановка операции %s не удалась: %s", op_type, exc)
+        # План уже в БД со статусом 'queued', но операции за ним нет. Без пометки
+        # он навсегда остаётся «Ожидает 0/N»: UI показывает «в очереди», а старта
+        # не будет никогда — и, главное, кнопка «Повтор» его НЕ оживит, потому что
+        # reset_failed_targets сбрасывает только цели со статусом 'failed', а тут
+        # все цели остались 'pending' (операция их не трогала) → «нет повторяемых
+        # ошибок». Это и есть «гео-сеть не начинает создавать»: зомби-план.
+        # Переводим и план, и его цели в 'failed' с причиной — статус становится
+        # честным («❌ ошибка» + причина в меню), а повтор начинает работать.
+        try:
+            reason = (str(exc)[:180] or "операция не поставлена в очередь").strip()
+            await pool.execute(
+                "UPDATE global_presence_plans SET status='failed', updated_at=now() "
+                "WHERE id=$1 AND owner_id=$2 AND status IN ('queued', 'draft')",
+                plan_id, owner_id,
+            )
+            await pool.execute(
+                "UPDATE global_presence_targets SET status='failed', retryable=TRUE, "
+                "error_message=$2 WHERE plan_id=$1 AND status='pending'",
+                plan_id, f"Операция не поставлена в очередь: {reason}",
+            )
+        except Exception:
+            log_exc_swallow(
+                log, f"global_presence: пометка незапущенного плана {plan_id} не удалась")
         return plan_id, None
 
     if op_id:
