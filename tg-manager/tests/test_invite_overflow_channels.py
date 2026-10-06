@@ -170,6 +170,57 @@ def test_final_flota_leaves_channel_releases_admin_seats():
     )
 
 
+def test_promote_trick_chat_full_marks_channel_and_requeues(chain, monkeypatch):
+    """«0 из 34»: продолжение стартовало в переполненном резервном канале.
+
+    Корень жалобы (операция #242): канал наполнялся промоут-трюком, но в цепочке
+    оставался ST_ACTIVE, и следующее продолжение снова бралось за него и вставало
+    на 0 (весь флот — в полный канал, 0 добавлено). Теперь трюк, упёршийся в
+    лимит участников, помечает канал ЗАПОЛНЕННЫМ (продолжение возьмёт следующий
+    резерв), а недобавленных возвращает в очередь — они не теряются.
+    """
+    rows = [
+        {"channel_ref": "@main", "channel_id": None, "status": ovf.ST_FULL,
+         "prepared": True, "invited_ok": 200},
+        {"channel_ref": "https://t.me/+ch501", "channel_id": 501,
+         "status": ovf.ST_ACTIVE, "prepared": True, "invited_ok": 40},
+    ]
+
+    def responder(group, refs):
+        # Прямой инвайт всех отбивает приватностью → уходят в промоут-трюк.
+        return {"ok": 0, "failed": len(refs), "errors": [], "untried": [],
+                "privacy_failed": list(refs)}
+
+    s = chain(responder, rows=rows)
+
+    async def _status(sess, acc, group):
+        # Промоутер есть (can_promote), канал ещё не по лимиту отправленных.
+        return {"ok": True, "can_promote": True, "channel_id": 501, "participants": 150}
+    monkeypatch.setattr(mie, "channel_admin_status", _status)
+
+    async def _trick(sess, acc, group, refs):
+        # Трюк упирается в лимит участников канала на первой же пачке.
+        return {"ok": 0, "failed": 0, "peer_flood": False, "flood_wait": 0,
+                "errors": ["group error: в чате достигнут лимит участников Telegram"],
+                "no_rights": False, "chat_full": True,
+                "still_blocked": list(refs), "untried": list(refs),
+                "short_floods": [], "admins_left": []}
+    monkeypatch.setattr(mie, "add_via_promote", _trick)
+
+    res = _run(_Pool(), TARGETS, group="@main", account_ids=[1, 2],
+               reserve_channels=[501, 502], per_channel_limit=200)
+
+    # Финальный статус резервного канала — ЗАПОЛНЕН (а не ACTIVE): продолжение
+    # больше не вернётся в полный канал (корень «0 из 34»).
+    ch501_marks = [m for m in s.marks if m[1] == 501]
+    assert ch501_marks, "резервный канал обязан получить финальную отметку статуса"
+    assert ch501_marks[-1][2] == ovf.ST_FULL, (
+        f"полный канал должен помечаться ЗАПОЛНЕННЫМ, а не {ch501_marks[-1][2]}")
+    # Недобавленные цели вернулись в очередь — продолжение их доинвайтит в
+    # следующий резерв, а не теряет.
+    assert res["left"] == len(TARGETS), "цели из переполненного канала не потеряны"
+
+
 def test_per_channel_limit_without_reserve_stops_instead_of_overfilling(chain):
     s = chain(_all_ok)
     res = _run(_Pool(), TARGETS, group="@main", account_ids=[1, 2], batch_size=5,

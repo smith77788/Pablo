@@ -15799,6 +15799,7 @@ async def _exec_mass_invite(
     budget: dict[int, int] = {}   # остаток инвайтов на аккаунт за прогон
     group_broken = False          # группа недоступна — гнать по ней флот бессмысленно
     _group_broken_reason = ""     # почему остановились по чату (safe-режим/недоступность)
+    _trick_chat_full = False      # промоут-трюк упёрся в лимит участников канала
 
     # Безопасный режим: ДО массового притока оцениваем живость чата (участники +
     # свежесть переписки). «Холодный» приток в тихий/малолюдный чат мгновенно
@@ -16805,6 +16806,19 @@ async def _exec_mass_invite(
                     if _tr.get("no_rights"):
                         _tried_blocked.extend(_uniq_blocked[_ci + len(_part):])
                         break
+                    if _tr.get("chat_full"):
+                        # Канал упёрся в лимит участников прямо в трюке. Отмечаем
+                        # флагом, а не прямым mark(): финальная запись статуса
+                        # канала (ниже, `if _use_overflow:`) всё равно перезапишет
+                        # его — там и учтём флаг, пометив канал ЗАПОЛНЕННЫМ.
+                        # Иначе продолжение операции возьмёт этот же полный канал
+                        # как «активный» и встанет на 0 (жалоба: #242 стартовало в
+                        # переполненном @Dubai_Myau → «работали 0 из 34»). НЕ ставим
+                        # group_broken: при наличии резерва продолжение обязано уйти
+                        # в следующий канал, а group_broken отменил бы продолжение.
+                        _trick_chat_full = True
+                        _tried_blocked.extend(_uniq_blocked[_ci + len(_part):])
+                        break
                 total_ok += _trick_ok
                 _still_blocked = _tried_blocked + _never_tried
                 await _safe_execute(
@@ -16820,6 +16834,14 @@ async def _exec_mass_invite(
                 _added_keys = {str(v) for v in _trick_added}
                 _still_blocked = [x for x in _uniq_blocked
                                   if str(x) not in _added_keys] + _never_tried
+    if _trick_chat_full and _still_blocked:
+        # Канал переполнился в трюке — недобавленных возвращаем в очередь, чтобы
+        # продолжение доинвайтило их в СЛЕДУЮЩИЙ резервный канал, а не потеряло
+        # (жалоба владельца: «доинвайтить всех, кто упал по лимиту канала»). В
+        # журнал приглашённых они не писались, повтор их возьмёт. Это цели из
+        # username-пути (_privacy_blocked) — место им в q_users.
+        _give_back(q_users, list(_still_blocked))
+        _still_blocked = []
     if _admins_left and _promoter is not None and not _promoter_resting():
         # Снятие сорвалось не из-за флуда промоутера (обрыв, таймаут, флуд
         # другого инвайтера) — ещё одна попытка промоутером: снять права может
@@ -16847,6 +16869,7 @@ async def _exec_mass_invite(
     _link_fallback_ok = 0
     _link_fallback_left = 0
     if _link_fallback and _invite_link and _still_blocked and not group_broken \
+            and not _trick_chat_full \
             and not flood_storm and not await _is_cancelled(pool, op_id):
         from services import mass_inviter_engine as _inv2
         _seen_lf: set = set()
@@ -16954,13 +16977,22 @@ async def _exec_mass_invite(
         _chan_ok += _trick_ok
         _chan_trail[-1]["ok"] += _trick_ok
         _final_st = _ovf.ST_ACTIVE
+        _final_reason = ""
         if group_broken:
             _final_st = _ovf.ST_FULL if "лимит" in (_group_reason or "") else _ovf.ST_BURNED
+            _final_reason = _group_reason
+        elif _trick_chat_full:
+            # Промоут-трюк упёрся в лимит участников канала. Фиксируем ЗАПОЛНЕН,
+            # иначе продолжение возьмёт этот же полный канал как активный и встанет
+            # на 0 (жалоба #242: продолжение стартовало в переполненном @Dubai_Myau
+            # → «работали 0 из 34»). group_broken не ставили — продолжение должно
+            # уйти в следующий резервный канал, а не отмениться.
+            _final_st = _ovf.ST_FULL
+            _final_reason = "лимит участников Telegram (выявлен промоут-трюком)"
         await _ovf.mark(pool, owner_id, _chain_key, group, _cur_chan_id, _final_st,
-                        ok_delta=_chan_ok, reason=_group_reason if group_broken else "",
-                        op_id=op_id)
-        if group_broken:
-            _chan_trail[-1]["why"] = _chan_trail[-1]["why"] or _group_reason
+                        ok_delta=_chan_ok, reason=_final_reason, op_id=op_id)
+        if _final_reason:
+            _chan_trail[-1]["why"] = _chan_trail[-1]["why"] or _final_reason
 
     # Запомнить обработанные цели, чтобы следующий прогон их не тыкал повторно.
     # Страховка: цели пишутся в дедуп по ходу прогона (_remember_invited), и к

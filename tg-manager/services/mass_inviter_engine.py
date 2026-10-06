@@ -900,6 +900,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     peer_flood = False
     flood_wait = 0
     no_rights = False  # у вызывающего нет add_admins — проблема аккаунта, не группы
+    chat_full = False  # канал упёрся в лимит участников — не вина цели, помечаем full
     # Кто РЕАЛЬНО добавлен трюком — нужно вызывающему, чтобы понять, кого трюк
     # так и не взял (для финального фолбэка — ссылка в ЛС, см. op_worker
     # _exec_mass_invite). Раньше вызывающий узнавал только общее число ok/failed
@@ -995,6 +996,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                 # в failed НЕ пишем. Иначе сотни невиновных целей списывались в
                 # «Ошибка: maximum number of users exceeded» (жалоба владельца).
                 if classify_invite_error(e) == FAIL_CHAT_FULL:
+                    chat_full = True
                     untried_from = _cur
                     errors.append("group error: в чате достигнут лимит участников Telegram")
                     break
@@ -1028,6 +1030,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
     still_blocked = [r for r in user_refs if str(r) not in _done]
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors, "no_rights": no_rights,
+            "chat_full": chat_full,
             "still_blocked": still_blocked,
             "untried": list(user_refs[untried_from:]),
             "short_floods": short_floods,
