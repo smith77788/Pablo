@@ -16491,7 +16491,19 @@ async def _exec_mass_invite(
                     _deduped += len(res.get("already_phones") or [])
                     _phones_not_found += len(res.get("not_found_phones") or [])
                 else:
-                    await _remember_invited(tried)
+                    # Дедупим ТОЛЬКО реально решённых: добавлен/уже в чате (added)
+                    # и перманентно мёртвый username (dead). Временные сбои (флуд,
+                    # таймаут, «прочее») и приватность в `tried` в журнал НЕ пишем —
+                    # иначе человек, на котором один раз моргнула сеть, больше
+                    # никогда не приглашался (жалоба владельца). Приватные уйдут в
+                    # промоут-трюк (там дедупятся по факту добавления), остальное
+                    # вернётся следующим прогоном. Фолбэк для старого контракта
+                    # движка (нет added/dead) — прежнее поведение по `tried`.
+                    if ("added" in res) or ("dead" in res):
+                        await _remember_invited(
+                            list(res.get("added") or []) + list(res.get("dead") or []))
+                    else:
+                        await _remember_invited(tried)
             total_ok += ok_n
             total_fail += fail_n
             _chan_ok += ok_n
@@ -16643,6 +16655,46 @@ async def _exec_mass_invite(
                 # НЕ break: батчи текущего чанка уже разосланы параллельно —
                 # их результаты нужно досчитать. Флаг group_broken не даст
                 # _iter_round набрать следующий чанк, и круг остановится.
+                continue
+
+            # Забанен/отозван САМ инвайтер (self-ban). Цели уже обработаны выше:
+            # хвост (untried) вернулся в очередь, реально добавленные — в дедуп.
+            # Здесь только выводим аккаунт из круга и пишем в пульс здоровья — это
+            # бан/отзыв АККАУНТА, а не провал целей. Раньше это ловилось как провал
+            # цели (FAIL_RESTRICTED/FAIL_BANNED) → цель списывалась и дедупилась
+            # навсегда, и человек больше не дозывался (жалоба владельца).
+            if res.get("account_dead"):
+                if ok_n or fail_n:
+                    await bump_daily_stats(pool, acc_id, ok=ok_n, fail=fail_n, invites=ok_n)
+                retired.add(acc_id)
+                await _release_admin_seat(acc_id)
+                _reason_sb = res.get("account_dead_reason") or "banned"
+                try:
+                    if _reason_sb == "session":
+                        # Мёртвая/отозванная сессия — выводим из выборки до
+                        # переавторизации (как в mass_publish).
+                        await _safe_execute(
+                            pool, "UPDATE tg_accounts SET is_active=FALSE, "
+                            "acc_status='session_expired', status_reason=$2 "
+                            "WHERE id=$1 AND is_active=TRUE",
+                            acc_id, "Инвайт: сессия отозвана/недействительна")
+                    elif _reason_sb != "channel_ban":
+                        # Бан самого аккаунта Telegram'ом (спам/деактивация):
+                        # помечаем и дёргаем Anti-Storm (волна банов → сон флота).
+                        await _safe_execute(
+                            pool, "UPDATE tg_accounts SET is_active=FALSE, "
+                            "acc_status='banned', status_reason=$2 "
+                            "WHERE id=$1 AND is_active=TRUE",
+                            acc_id, "Инвайт: аккаунт заблокирован Telegram")
+                        await _on_account_banned(pool, owner_id, acc_id, "invite", bot=bot)
+                    # channel_ban: в других каналах аккаунт жив — не деактивируем,
+                    # только вывели из круга на этот прогон.
+                except Exception as _sbe:
+                    log.debug("mass_invite op=%d: self-ban pulse acc=%s: %s",
+                              op_id, acc_id, _sbe)
+                log.warning(
+                    "mass_invite op=%d: инвайтер #%s заблокирован/отозван (%s) — "
+                    "выведен из круга, цели остались в очереди", op_id, acc_id, _reason_sb)
                 continue
 
             if res.get("peer_flood") or res.get("flood_wait"):

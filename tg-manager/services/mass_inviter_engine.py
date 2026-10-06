@@ -254,6 +254,10 @@ FAIL_ALREADY_IN = "already_in"    # цель УЖЕ в чате — это не 
 FAIL_CHAT_FULL = "chat_full"      # в чате предел участников
 FAIL_RESTRICTED = "restricted"    # аккаунт цели ограничен Telegram
 FAIL_IS_BOT = "is_bot"            # цель — бот, его так не добавить
+# Бан/отзыв САМОГО аккаунта-инвайтера (не цели): Telegram цель даже не
+# рассматривал. Такую «ошибку» нельзя вешать на цель — её нужно вернуть в
+# очередь, а аккаунт вывести из круга и записать в пульс здоровья.
+FAIL_SELF_BAN = "self_ban"
 FAIL_OTHER = "other"
 
 FAIL_LABELS = {
@@ -269,6 +273,7 @@ FAIL_LABELS = {
     FAIL_CHAT_FULL: "📦 в чате предел участников",
     FAIL_RESTRICTED: "🚫 аккаунт цели ограничен Telegram",
     FAIL_IS_BOT: "🤖 цель — бот",
+    FAIL_SELF_BAN: "🛑 инвайтер заблокирован/отозван (не вина цели)",
     FAIL_OTHER: "❓ прочее",
 }
 
@@ -318,7 +323,17 @@ def classify_invite_error(exc: BaseException) -> str:
         return FAIL_NOT_MUTUAL
     if name in ("UserChannelsTooMuchError", "ChannelsTooMuchError"):
         return FAIL_TOO_MANY_CHATS
-    if name in ("UserBannedInChannelError", "UserKickedError"):
+    # Бан/отзыв САМОГО инвайтера, а не цели. UserBannedInChannelError — «вы
+    # забанены в этом канале» (про аккаунт, не про цель); остальные — сессия
+    # мертва/отозвана/аккаунт деактивирован Telegram. Цель тут ни при чём —
+    # возвращаем её в очередь, аккаунт выводим. Раньше это уходило в FAIL_BANNED/
+    # FAIL_RESTRICTED (как вина цели) → цель списывалась и дедупилась навсегда.
+    if name in ("UserBannedInChannelError", "UserDeactivatedBanError",
+                "AuthKeyUnregisteredError", "AuthKeyDuplicatedError",
+                "SessionRevokedError", "SessionExpiredError",
+                "UserDeactivatedError"):
+        return FAIL_SELF_BAN
+    if name in ("UserKickedError",):
         return FAIL_BANNED
     if name in ("UserBlockedError", "YouBlockedUserError"):
         return FAIL_BLOCKED
@@ -327,7 +342,7 @@ def classify_invite_error(exc: BaseException) -> str:
         return FAIL_ALREADY_IN
     if name in ("UsersTooMuchError", "ChatTooMuchError"):
         return FAIL_CHAT_FULL
-    if name in ("UserRestrictedError", "UserDeactivatedBanError"):
+    if name in ("UserRestrictedError",):
         return FAIL_RESTRICTED
     if name in ("BotGroupsBlockedError", "BotsTooMuchError"):
         return FAIL_IS_BOT
@@ -400,6 +415,8 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
     resolved: list = []
     errors: list[str] = []
     privacy_failed: list = []
+    added: list = []     # реально добавленные — для дедупа у вызывающего
+    dead: list = []      # перманентно мёртвые (username не существует)
     failed = 0
     for ref in user_refs:
         try:
@@ -411,6 +428,8 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
             kind = classify_invite_error(e)
             note(kind)
             failed += 1
+            if kind == FAIL_DEAD:
+                dead.append(ref)
             errors.append(f"{ref}: {FAIL_LABELS.get(kind, str(e)[:80])}")
             continue
         resolved.append((ref, ent))
@@ -419,6 +438,7 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
         return {"ok": 0, "failed": failed, "errors": errors,
                 "privacy_failed": privacy_failed, "peer_flood": False,
                 "flood_wait": 0, "no_rights": False, "untried": [],
+                "added": added, "dead": dead,
                 "short_floods": []}
 
     short_floods: list[int] = []
@@ -459,6 +479,7 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
                     errors + ["account error: peer flood — аккаунт ограничен"],
                     "privacy_failed": privacy_failed, "peer_flood": True,
                     "flood_wait": 0, "no_rights": False, "untried": _untried,
+ "added": [], "dead": dead,
                     "short_floods": short_floods}
         if name == "FloodWaitError":
             _fw = int(getattr(e, "seconds", 60) or 60)
@@ -466,17 +487,20 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
                     "errors": errors + [f"account error: flood wait {_fw}s"],
                     "privacy_failed": privacy_failed, "peer_flood": False,
                     "flood_wait": _fw, "no_rights": False, "untried": _untried,
+ "added": [], "dead": dead,
                     "short_floods": short_floods}
         if name == "ChatAdminRequiredError":
             return {"ok": 0, "failed": failed, "errors": errors + [
                 "account error: у аккаунта нет прав добавлять участников"],
                 "privacy_failed": privacy_failed, "peer_flood": False,
                 "flood_wait": 0, "no_rights": True, "untried": _untried,
+ "added": [], "dead": dead,
                 "short_floods": short_floods}
         return {"ok": 0, "failed": failed,
                 "errors": errors + [f"group error: {name}"],
                 "privacy_failed": privacy_failed, "peer_flood": False,
                 "flood_wait": 0, "no_rights": False, "untried": _untried,
+ "added": [], "dead": dead,
                 "short_floods": short_floods}
 
     # Кого Telegram не добавил — говорит поимённо. Это ТОЧНЕЕ поштучного обхода:
@@ -508,9 +532,11 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
             errors.append(f"{ref}: not added (privacy/limit — missing_invitee)")
         else:
             ok += 1
+            added.append(ref)
     return {"ok": ok, "failed": failed, "errors": errors,
             "privacy_failed": privacy_failed, "peer_flood": False,
             "flood_wait": 0, "no_rights": False, "untried": [],
+            "added": added, "dead": dead,
             "short_floods": short_floods}
 
 
@@ -562,7 +588,18 @@ async def invite_batch(
     peer_flood = False
     flood_wait = 0
     no_rights = False  # у ЭТОГО аккаунта нет прав админа (проблема аккаунта, не группы)
+    # Бан/отзыв САМОГО инвайтера: цель(и) не виноваты, их Telegram не рассматривал.
+    # Вызывающий выводит аккаунт из круга, пишет в пульс здоровья, а цели (они в
+    # untried) возвращает в очередь — НЕ в провал и НЕ в дедуп.
+    account_dead = False
+    account_dead_reason = ""     # "banned" | "session" | "channel_ban"
     fail_kinds: dict[str, int] = {}
+    # Исход ПО КАЖДОЙ цели — чтобы вызывающий дедупил только РЕАЛЬНО решённых
+    # (добавлен / уже в чате / мёртвый username), а временные сбои (флуд, таймаут,
+    # «прочее») не писал в журнал приглашённых: иначе человек, на котором один раз
+    # моргнула сеть, больше НИКОГДА не приглашался (жалоба владельца).
+    added_refs: list = []        # реально добавлены или уже в чате
+    dead_refs: list = []         # username не существует / аккаунт удалён (перманентно)
 
     def _note(kind: str) -> None:
         fail_kinds[kind] = fail_kinds.get(kind, 0) + 1
@@ -595,6 +632,9 @@ async def invite_batch(
                         "flood_wait": _bulk["flood_wait"], "errors": errors,
                         "privacy_failed": privacy_failed,
                         "no_rights": _bulk["no_rights"], "fail_kinds": fail_kinds,
+                        "account_dead": False, "account_dead_reason": "",
+                        "added": list(_bulk.get("added") or []),
+                        "dead": list(_bulk.get("dead") or []),
                         "untried": list(_bulk.get("untried") or []),
                         "short_floods": list(_bulk.get("short_floods") or []),
                         "bulk": True}
@@ -626,9 +666,11 @@ async def invite_batch(
                     errors.append(f"{ref}: not added (privacy/limit — missing_invitee)")
                 else:
                     ok += 1
+                    added_refs.append(ref)
                 await asyncio.sleep(random.uniform(2.0, 4.0) * _pm)
             except UserAlreadyParticipantError:
                 ok += 1  # уже в группе = успех
+                added_refs.append(ref)  # уже в чате — дедупим, повторять незачем
             except UserPrivacyRestrictedError:
                 failed += 1
                 _note(FAIL_PRIVACY)
@@ -695,10 +737,29 @@ async def invite_batch(
                 # все они уходили в отчёт сырым английским текстом Telethon и
                 # считались одной корзиной «прочее».
                 _kind = classify_invite_error(e)
+                if _kind == FAIL_SELF_BAN:
+                    # Забанен/отозван САМ инвайтер — не вина цели: Telegram её
+                    # даже не рассматривал. Цель (и хвост) возвращаются в очередь
+                    # (untried), аккаунт выводится из круга и пишется в пульс
+                    # здоровья. Раньше это ловилось как FAIL_RESTRICTED/FAIL_BANNED
+                    # → цель списывалась в провал и в дедуп, и человек больше
+                    # никогда не дозывался.
+                    account_dead = True
+                    _en = type(e).__name__
+                    account_dead_reason = (
+                        "session" if _en.startswith("AuthKey") or "Session" in _en
+                        else "channel_ban" if _en == "UserBannedInChannelError"
+                        else "banned")
+                    untried_from = _cur
+                    errors.append(
+                        f"account error: инвайтер заблокирован/отозван ({_en})")
+                    break
                 _note(_kind)
                 failed += 1
                 if _kind in (FAIL_PRIVACY, FAIL_NOT_MUTUAL):
                     privacy_failed.append(ref)
+                if _kind == FAIL_DEAD:
+                    dead_refs.append(ref)  # перманентно мёртвый — дедупим
                 errors.append(f"{ref}: {FAIL_LABELS.get(_kind, str(e)[:80])}")
                 if _kind == FAIL_OTHER:
                     log.warning("invite failed: %s", e)
@@ -720,6 +781,13 @@ async def invite_batch(
         elif _en == "FloodWaitError":
             flood_wait = int(getattr(exc, "seconds", 0) or 0)
             _note(FAIL_FLOOD)
+        elif classify_invite_error(exc) == FAIL_SELF_BAN:
+            # Сессия отозвана/аккаунт забанен уже на подключении — не вина целей:
+            # весь батч возвращается в очередь, аккаунт выводится из круга.
+            account_dead = True
+            account_dead_reason = (
+                "session" if _en.startswith("AuthKey") or "Session" in _en
+                else "banned")
         log.warning("invite_batch connect/group error: %s", exc)
         errors.append(f"connect: {str(exc)[:100]}")
     finally:
@@ -735,6 +803,8 @@ async def invite_batch(
     return {"ok": ok, "failed": failed, "peer_flood": peer_flood,
             "flood_wait": flood_wait, "errors": errors,
             "privacy_failed": privacy_failed, "no_rights": no_rights,
+            "account_dead": account_dead, "account_dead_reason": account_dead_reason,
+            "added": added_refs, "dead": dead_refs,
             "fail_kinds": fail_kinds,
             "untried": list(user_refs[untried_from:]),
             "short_floods": short_floods}
