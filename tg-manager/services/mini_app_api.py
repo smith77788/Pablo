@@ -5750,17 +5750,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     return _err("Введите текст поста", 400)
                 if len(text) > 4096:
                     return _err("Слишком длинный текст (макс. 4096)", 400)
-                from services.operation_bus import submit
-                op_ids = []
-                for c in chans:
-                    oid = await submit(pool, uid, "bulk_post_to_channel", {
-                        "account_ids": [int(c["acc_id"])],
-                        "channel_ref": int(c["channel_id"]),
-                        "text_to_post": text,
-                        "bulk_access_hash": int(c.get("access_hash") or 0),
-                    }, total_items=1)
-                    op_ids.append(int(oid))
-                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
+                # ОДНА операция на все каналы, а не по одной на канал. Цикл
+                # submit плодил десятки «Массовая публикация в канал» в
+                # диспетчере: у каждой свой предохранитель и пейсинг, общий
+                # разнос (в т.ч. анти-детект ссылок) ломался, а прогресс и отчёт
+                # дробились. mass_publish публикует в channel_ids от управляющего
+                # аккаунта КАЖДОГО канала (mc.acc_id) одной операцией — с единым
+                # пейсингом, идемпотентностью повтора, spintax и варьированием
+                # ссылок. target="all": пользователь выбрал каналы явно, среди
+                # них могут быть и группы — по типу не отсекаем.
+                acc_ids = sorted({int(c["acc_id"]) for c in chans})
+                ch_ids = [int(c["channel_id"]) for c in chans]
+                op_id = await _obus.submit(
+                    pool, uid, "mass_publish",
+                    {"text": text, "channel_ids": ch_ids,
+                     "account_ids": acc_ids, "target": "all"},
+                    total_items=n, label=f"Публикация в каналы: {n}")
+                return _json_resp(
+                    {"ok": True, "op_id": op_id, "op_ids": [op_id], "count": n})
             if op == "promote":
                 op_ids = []
                 for c in chans:

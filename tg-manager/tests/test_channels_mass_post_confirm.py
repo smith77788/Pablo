@@ -1,9 +1,14 @@
-"""Массовый пост в каналы: подтверждение + spintax-подсказка (паритет с mass_publish).
+"""Массовый пост в каналы: подтверждение + ОДНА операция (паритет с mass_publish).
 
 Публикация в N выбранных каналов необратима — как mass_publish/invite, должна идти
 через осознанное подтверждение. Правки метаданных (title/about/username) обратимы —
-без подтверждения. Плюс каждый канал получает свой spintax-вариант (post → отдельный
-bulk_post_to_channel на канал, а тот спинтит text_to_post).
+без подтверждения.
+
+Пост во все выбранные каналы — ОДНА операция mass_publish, а не по одной на канал:
+дробление плодило десятки «Массовая публикация в канал» в диспетчере, у каждой свой
+предохранитель и пейсинг, общий разнос (в т.ч. анти-детект ссылок) ломался, прогресс
+и отчёт дробились. mass_publish спинтит текст на каждый канал — spintax-паритет
+сохраняется.
 """
 from __future__ import annotations
 
@@ -33,12 +38,32 @@ def test_metadata_edits_not_gated_by_confirm():
     assert body.count("askConfirm") == 1
 
 
-def test_mass_post_backend_spintax_per_channel():
-    # channels_mass(post) шлёт отдельный bulk_post_to_channel на канал → свой вариант
-    from services import mini_app_api
+def _channels_mass_src() -> str:
+    """Исходник хендлера channels_mass по ТОЧНЫМ границам функции (ast), а не по
+    срезу фиксированной длины: иначе отрицательная проверка ниже промахнулась бы
+    окном при сдвиге кода и выключилась молча (храповик про это)."""
+    import ast
     import inspect
+    from services import mini_app_api
+
     src = inspect.getsource(mini_app_api)
-    i = src.index("async def channels_mass")
-    seg = src[i:i + 4000]
-    assert 'submit(pool, uid, "bulk_post_to_channel"' in seg
-    assert '"text_to_post": text' in seg
+    tree = ast.parse(src)
+    lines = src.splitlines()
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "channels_mass"):
+            return "\n".join(lines[node.lineno - 1:node.end_lineno])
+    raise AssertionError("channels_mass не найдена")
+
+
+def test_mass_post_is_a_single_operation():
+    # channels_mass(post) ставит ОДНУ mass_publish на все каналы, не по одной на
+    # канал: иначе десятки операций в диспетчере и дроблёный пейсинг/отчёт.
+    body = _channels_mass_src()
+    assert '"mass_publish"' in body, "пост не идёт одной mass_publish"
+    assert '"channel_ids": ch_ids' in body, "mass_publish без списка каналов"
+    # После объединения в одну операцию дробящий bulk_post_to_channel исчезает из
+    # хендлера совсем: edit → bulk_chan_exec, promote → promote_all_admins,
+    # post → mass_publish. Его возврат = регресс к операции-на-канал.
+    assert '"bulk_post_to_channel"' not in body, \
+        "пост снова дробится на отдельные bulk_post_to_channel"
