@@ -2115,7 +2115,8 @@ async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = No
             await _ok(pool, admin, await _next_at(pool, admin, now))
             return "daily_cap"
         channel = await channel_row(pool, owner_id, channel_id) or {}
-        if is_news_channel({**admin, "title": channel.get("title") or ""}):
+        if (not admin.get("intro_pending")
+                and is_news_channel({**admin, "title": channel.get("title") or ""})):
             # News channels are event-driven; the calendar must not create filler.
             await pool.execute(
                 "UPDATE va_admin_plan SET status='skipped' WHERE id=(SELECT id FROM va_admin_plan "

@@ -32,6 +32,11 @@ def test_control_cards_explain_knowledge_sources_accounts_and_learning():
     assert by_key["sources"]["level"] == "warning"
     assert by_key["accounts"]["level"] == "warning"
     assert "минимум две" in by_key["learning"]["detail"]
+    assert result["summary"]["total"] == len(result["cards"])
+    assert result["summary"]["warnings"] == sum(
+        card["level"] == "warning" for card in result["cards"]
+    )
+    assert 0 <= result["summary"]["score"] <= 100
 
 
 def test_knowledge_marks_local_and_network_sources_separately():
@@ -131,4 +136,5 @@ def test_interface_connects_control_cards_network_actions_and_safe_rollback():
     assert "openHealth()" in control and "openOps()" in control
     assert "openEditorialRules(_vaCid)" in control and "openVaStrategy()" in control
     assert "vaRollbackLearning" in control
+    assert "control.summary" in control and "Проверки без предупреждений" in control
     assert "/learning/rollback" in js and "/learning/rollback" in api

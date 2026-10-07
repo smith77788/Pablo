@@ -33,11 +33,11 @@ async def eligible_accounts(pool, owner_id: int, channel_id: int) -> list[int]:
         "AND COALESCE(a.acc_status,'active') NOT IN ('banned','session_expired','deleted','restricted','flood','warming') "
         "AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())", int(owner_id), int(channel_id),
     )
-    safe = []
-    for row in rows:
-        if not await infra_memory.is_account_quarantined(pool, int(row["id"])):
-            safe.append(int(row["id"]))
-    return safe
+    account_ids = [int(row["id"]) for row in rows]
+    quarantined = await asyncio.gather(*(
+        infra_memory.is_account_quarantined(pool, account_id) for account_id in account_ids
+    ))
+    return [account_id for account_id, blocked in zip(account_ids, quarantined) if not blocked]
 
 
 def knowledge(profile: dict, strategy: dict) -> list[dict]:
@@ -139,8 +139,13 @@ def build(profile, strategy, refs, plan, recent, lessons, safe_accounts, operati
          f"Рубрик с минимум тремя новыми суточными замерами: {ready}. Для сравнения нужны минимум две. "
          "Старые накопленные просмотры не заменяют суточный замер.", "decisions",
          "ok" if ready >= 2 else "info")
+    warnings = sum(card["level"] == "warning" for card in cards)
+    ready_cards = sum(card["level"] == "ok" for card in cards)
+    score = max(0, round(100 * (len(cards) - warnings) / max(1, len(cards))))
     return {"cards": cards, "knowledge": fields, "decisions": decisions,
-            "samples": sample_counts, "plan_issues": issues}
+            "samples": sample_counts, "plan_issues": issues,
+            "summary": {"score": score, "warnings": warnings, "ready": ready_cards,
+                        "total": len(cards)}}
 
 
 async def load(pool, owner_id: int, channel_id: int) -> dict:

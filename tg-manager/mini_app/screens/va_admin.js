@@ -510,6 +510,9 @@ function _vaControlHtml(control) {
   control = control || {};
   const cards = control.cards || [];
   if (!cards.length) return '';
+  const summary = control.summary || {};
+  const score = summary.score !== undefined && summary.score !== null && isFinite(Number(summary.score))
+    ? Math.max(0, Math.min(100, Math.round(Number(summary.score)))) : null;
   const icon = {ok:'✓', warning:'!', info:'i'};
   const actions = {
     knowledge:"vaSelectTab('knowledge')", strategy:'openVaStrategy()', plan:"vaSelectTab('plan')",
@@ -517,6 +520,10 @@ function _vaControlHtml(control) {
   };
   let h = '<div class="sec">Контроль администратора</div>' +
     '<div class="field-note" style="margin:0 0 8px">Знания, стратегия, источники, план, аккаунты, операции, редактор и обучение проверяются вместе.</div>' +
+    (score === null ? '' : '<div class="lst" style="padding:12px 14px;margin-bottom:8px">' +
+      '<b>Проверки без предупреждений: ' + score + ' %</b><br>' +
+      '<span style="font-size:12px;color:var(--hint)">Требуют внимания: ' + _vaNum(summary.warnings || 0) +
+      ' из ' + _vaNum(summary.total || cards.length) + '.</span></div>') +
     '<div class="lst">';
   cards.slice(0, 4).forEach(function (card) {
     h += '<div class="li"><div style="width:28px;height:28px;border-radius:50%;display:grid;place-items:center;' +

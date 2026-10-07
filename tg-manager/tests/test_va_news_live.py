@@ -107,6 +107,30 @@ async def test_scheduled_news_slot_waits_for_event_instead_of_writing_filler(mon
 
 
 @pytest.mark.asyncio
+async def test_news_channel_writes_intro_before_switching_to_event_mode(monkeypatch):
+    pool = _Pool()
+    monkeypatch.setattr(ca, "channel_row", AsyncMock(return_value={"title": "Свежие Новости"}))
+    write = AsyncMock(return_value=ca.Draft("Знакомство", "Приветствие", [], True, True))
+    monkeypatch.setattr(ca, "write_post", write)
+    monkeypatch.setattr(ca, "save_draft", AsyncMock(return_value=41))
+    monkeypatch.setattr(ca, "notify_draft", AsyncMock())
+    monkeypatch.setattr(ca, "log_event", AsyncMock())
+    monkeypatch.setattr(ca, "_ok", AsyncMock())
+    monkeypatch.setattr(ca, "_next_at", AsyncMock(return_value=datetime.now(UTC)))
+    admin = {
+        "owner_id": 7, "channel_id": 8, "publish_mode": "review", "posts_per_day": 2,
+        "window_start": 9, "window_end": 21, "tz_offset": 3, "fail_streak": 0,
+        "intro_pending": True,
+    }
+
+    result = await ca.tick_post(pool, None, admin, now=datetime.now(UTC))
+
+    assert result == "draft"
+    write.assert_awaited_once()
+    assert not any("id=(SELECT id" in query for query, _ in pool.executed)
+
+
+@pytest.mark.asyncio
 async def test_news_scan_processes_bounded_batch_and_enqueues_events(monkeypatch):
     class ScanPool:
         def __init__(self):

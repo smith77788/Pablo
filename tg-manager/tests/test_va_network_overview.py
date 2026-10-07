@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services import channel_admin as ca  # noqa: E402
+from services import channel_admin as ca
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -125,7 +125,7 @@ def test_network_actions_render_only_in_network_summary():
     network = js[network_start:network_end]
     control = js[control_start:control_end]
     assert network.count("n.next_actions") == 3
-    assert "openVaChannel" in network and "Что сделать дальше" in network
+    assert "n.next_actions.map" in network and "openVaChannel" in network
     assert "n.next_actions" not in control
 
 
