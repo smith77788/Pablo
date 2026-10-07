@@ -388,7 +388,8 @@ INLINE_MIGRATIONS: list[str] = [
         created_at TIMESTAMPTZ DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
-    # Сокращатель ссылок («bit.ly для себя»): код → целевой URL + счётчик кликов.
+    # Сокращатель ссылок («bit.ly для себя»): код → целевой URL + счётчик кликов,
+    # срок действия (expires_at) и теги (как у bit.ly).
     """CREATE TABLE IF NOT EXISTS short_links (
         code TEXT PRIMARY KEY,
         owner_id BIGINT NOT NULL,
@@ -397,8 +398,12 @@ INLINE_MIGRATIONS: list[str] = [
         clicks BIGINT NOT NULL DEFAULT 0,
         disabled BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        last_click_at TIMESTAMPTZ
+        last_click_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ,
+        tags TEXT
     )""",
+    "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
+    "ALTER TABLE short_links ADD COLUMN IF NOT EXISTS tags TEXT",
     "CREATE INDEX IF NOT EXISTS idx_short_links_owner ON short_links(owner_id, created_at DESC)",
 ]
 
@@ -19643,13 +19648,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         target = validate_string(body.get("target_url") or body.get("url"), max_len=2048)
         title = validate_string(body.get("title"), max_len=200, required=False)
         code = validate_string(body.get("code"), max_len=40, required=False)
+        tags = validate_string(body.get("tags"), max_len=400, required=False)
+        expires_at = validate_string(body.get("expires_at"), max_len=40, required=False)
+        _utm_in = body.get("utm") if isinstance(body.get("utm"), dict) else {}
+        utm = {k: validate_string(_utm_in.get(k), max_len=100, required=False) or ""
+               for k in ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content")}
         res = await _lnk.create(pool, uid, target or "", title,
                                 self_hosts=_self_hosts(request),
-                                custom_code=(code or None))
+                                custom_code=(code or None), utm=utm,
+                                tags=(tags or None), expires_at=(expires_at or None))
         if not res.get("ok"):
             return _err(res.get("error") or "Не удалось создать ссылку")
         res["short_url"] = f"{_short_base(request)}/{res['code']}"
+        if body.get("qr"):
+            res["qr"] = _lnk.make_qr_data_uri(res["short_url"])
         return _json_resp(res)
+
+    async def links_qr(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        code = validate_string(body.get("code"), max_len=40)
+        link = await _lnk.get_one(pool, uid, code or "")
+        if not link:
+            return _err("Ссылка не найдена", 404)
+        short_url = f"{_short_base(request)}/{code}"
+        qr = _lnk.make_qr_data_uri(short_url)
+        if not qr:
+            return _err("QR временно недоступен")
+        return _json_resp({"ok": True, "qr": qr, "short_url": short_url})
 
     async def links_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -19692,6 +19723,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/links", links_list)
     app.router.add_post("/api/miniapp/links/toggle", links_toggle)
     app.router.add_post("/api/miniapp/links/delete", links_delete)
+    app.router.add_post("/api/miniapp/links/qr", links_qr)
     app.router.add_get("/s/{code}", short_link_redirect)
     app.router.add_post("/api/miniapp/auth", auth)
     app.router.add_post("/api/miniapp/pair", pair_device)

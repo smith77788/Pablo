@@ -2021,6 +2021,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Публикация / рассылка</div>
         <div class="mgmt-tile-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openLinks()">
+        <div class="mgmt-tile-ico">✂️</div>
+        <div class="mgmt-tile-lbl">Короткие ссылки</div>
+        <div class="mgmt-tile-val" id="m-links-cnt"></div>
+      </div>
       <div class="mgmt-tile" onclick="openBotFactory()">
         <div class="mgmt-tile-ico">🏭</div>
         <div class="mgmt-tile-lbl">Фабрика ботов</div>
@@ -4163,6 +4168,66 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="sub-sb">
     <div class="lst" id="tplList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ КОРОТКИЕ ССЫЛКИ ══════════════════════ -->
+<div class="screen" id="s-links">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">✂️ Короткие ссылки</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Создать короткую ссылку</div>
+    <div class="lst" style="padding:14px">
+      <div class="field" style="margin-bottom:10px">
+        <label>Длинная ссылка</label>
+        <input id="lnkUrl" type="url" inputmode="url" placeholder="https://очень-длинная-ссылка.example.com/…">
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label>Короткий код <span style="opacity:.6">(необязательно)</span></label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="lnkBase" style="font-size:13px;opacity:.7;white-space:nowrap"></span>
+          <input id="lnkCode" placeholder="link" style="flex:1" autocapitalize="off" autocomplete="off">
+          <button class="btn btn-s" onclick="lnkGenCode()" title="Сгенерировать">🎲</button>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label>Название <span style="opacity:.6">(для себя, необязательно)</span></label>
+        <input id="lnkTitle" placeholder="Напр. Инвайт в канал">
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label>Теги <span style="opacity:.6">(через запятую, необязательно)</span></label>
+        <input id="lnkTags" placeholder="реклама, канал, октябрь">
+      </div>
+
+      <div class="field" style="margin-bottom:6px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="lnkQr" style="width:auto"> 📱 Сгенерировать QR-код
+        </label>
+      </div>
+
+      <div onclick="lnkToggleAdv()" style="cursor:pointer;font-size:13px;opacity:.85;margin:8px 0;user-select:none">
+        <span id="lnkAdvChev">▸</span> Дополнительно: UTM-метки и срок действия
+      </div>
+      <div id="lnkAdv" style="display:none;border-left:2px solid rgba(255,255,255,.1);padding-left:10px;margin-bottom:8px">
+        <div style="font-size:12px;opacity:.6;margin-bottom:6px">UTM-метки — для аналитики переходов в рекламе/каналах</div>
+        <div class="field" style="margin-bottom:8px"><label>utm_source</label><input id="lnkUtmSource" placeholder="telegram"></div>
+        <div class="field" style="margin-bottom:8px"><label>utm_medium</label><input id="lnkUtmMedium" placeholder="invite"></div>
+        <div class="field" style="margin-bottom:8px"><label>utm_campaign</label><input id="lnkUtmCampaign" placeholder="launch"></div>
+        <div class="field" style="margin-bottom:8px">
+          <label>⏳ Срок действия <span style="opacity:.6">(после этой даты ссылка перестанет открываться)</span></label>
+          <input id="lnkExpires" type="datetime-local">
+        </div>
+      </div>
+
+      <button class="btn" id="lnkBtn" onclick="lnkCreate()" style="width:100%">✂️ Сократить</button>
+      <div id="lnkErr" style="display:none;color:var(--danger,#ff6b6b);font-size:12px;margin-top:8px"></div>
+      <div id="lnkResult" style="display:none;margin-top:12px"></div>
+    </div>
+
+    <div class="sec">Мои ссылки <span id="lnkCount" style="opacity:.6"></span></div>
+    <div class="lst" id="lnkList" style="padding:6px"><div style="padding:14px;opacity:.6;font-size:13px">Загрузка…</div></div>
   </div>
 </div>
 
@@ -13989,6 +14054,158 @@ async function saveTpl() {
 // Сколько каналов реально получат пост. null = ещё не знаем (или узнать не
 // удалось) — тогда кнопка и подтверждение обязаны сказать это вслух, а не
 // молчать: публикация необратима.
+// ── Короткие ссылки («bit.ly для себя») ────────────────────────────────────
+let LNK_BASE = '';
+
+function openLinks() {
+  push('s-links');
+  ['lnkUrl','lnkCode','lnkTitle','lnkTags','lnkUtmSource','lnkUtmMedium','lnkUtmCampaign','lnkExpires'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  const _qr=document.getElementById('lnkQr'); if(_qr) _qr.checked=false;
+  const _adv=document.getElementById('lnkAdv'); if(_adv) _adv.style.display='none';
+  const _chev=document.getElementById('lnkAdvChev'); if(_chev) _chev.textContent='▸';
+  const _res=document.getElementById('lnkResult'); if(_res){ _res.style.display='none'; _res.innerHTML=''; }
+  const _err=document.getElementById('lnkErr'); if(_err) _err.style.display='none';
+  const _btn=document.getElementById('lnkBtn'); if(_btn){ _btn.disabled=false; _btn.textContent='✂️ Сократить'; }
+  lnkLoad();
+}
+
+function lnkToggleAdv() {
+  const a=document.getElementById('lnkAdv'), c=document.getElementById('lnkAdvChev');
+  if(!a) return;
+  const show = a.style.display==='none';
+  a.style.display = show ? 'block' : 'none';
+  if(c) c.textContent = show ? '▾' : '▸';
+}
+
+function lnkGenCode() {
+  // Случайный читаемый код (base58 без похожих символов) — как «Generate» в bit.ly.
+  const abc='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let s=''; for(let i=0;i<7;i++) s+=abc[Math.floor(Math.random()*abc.length)];
+  const el=document.getElementById('lnkCode'); if(el) el.value=s;
+}
+
+function _lnkBaseLabel(base) {
+  // Короткая подпись домена рядом с полем кода: «infragram.app/»
+  try { const u=new URL(base); return u.host + '/'; } catch(_) { return (base||'').replace(/^https?:\/\//,'') + '/'; }
+}
+
+async function lnkCreate() {
+  const err=document.getElementById('lnkErr'); err.style.display='none';
+  const url=(document.getElementById('lnkUrl').value||'').trim();
+  if(!url){ err.textContent='Вставьте длинную ссылку'; err.style.display='block'; return; }
+  const body={
+    target_url:url,
+    code:(document.getElementById('lnkCode').value||'').trim()||undefined,
+    title:(document.getElementById('lnkTitle').value||'').trim()||undefined,
+    tags:(document.getElementById('lnkTags').value||'').trim()||undefined,
+    qr:!!document.getElementById('lnkQr').checked,
+    utm:{
+      utm_source:(document.getElementById('lnkUtmSource').value||'').trim(),
+      utm_medium:(document.getElementById('lnkUtmMedium').value||'').trim(),
+      utm_campaign:(document.getElementById('lnkUtmCampaign').value||'').trim(),
+    },
+  };
+  const _exp=(document.getElementById('lnkExpires').value||'').trim();
+  if(_exp){ const d=new Date(_exp); if(!isNaN(d)) body.expires_at=d.toISOString(); }
+  const btn=document.getElementById('lnkBtn'); btn.disabled=true; btn.textContent='Сокращаю…';
+  try {
+    const r=await api('/api/miniapp/links/create',{method:'POST',body:JSON.stringify(body)});
+    lnkRenderResult(r);
+    toast(r.existing ? 'Ссылка уже была — показываю её' : '✅ Короткая ссылка готова');
+    lnkLoad();
+  } catch(e){ err.textContent=errRu(e,'Не удалось создать ссылку'); err.style.display='block'; }
+  finally { btn.disabled=false; btn.textContent='✂️ Сократить'; }
+}
+
+function _lnkEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function lnkRenderResult(r) {
+  const box=document.getElementById('lnkResult'); if(!box) return;
+  const su=r.short_url||'';
+  let html='<div style="background:rgba(80,220,160,.08);border:1px solid rgba(80,220,160,.25);border-radius:12px;padding:12px">';
+  html+='<div style="font-size:12px;opacity:.7;margin-bottom:4px">Короткая ссылка</div>';
+  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+  html+='<a href="'+_lnkEsc(su)+'" target="_blank" style="font-weight:600;word-break:break-all">'+_lnkEsc(su)+'</a>';
+  html+='<button class="btn btn-s" onclick="lnkCopy(\''+_lnkEsc(su).replace(/'/g,"\\'")+'\')">📋 Копировать</button>';
+  html+='</div>';
+  if(r.qr){ html+='<div style="margin-top:10px;text-align:center"><img src="'+_lnkEsc(r.qr)+'" alt="QR" style="width:160px;height:160px;background:#fff;border-radius:8px;padding:6px"></div>'; }
+  html+='</div>';
+  box.innerHTML=html; box.style.display='block';
+}
+
+async function lnkLoad() {
+  const list=document.getElementById('lnkList'); if(!list) return;
+  try {
+    const r=await api('/api/miniapp/links');
+    LNK_BASE=r.base||LNK_BASE;
+    const bl=document.getElementById('lnkBase'); if(bl) bl.textContent=_lnkBaseLabel(LNK_BASE);
+    lnkRenderList(r.links||[]);
+  } catch(e){ list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">Не удалось загрузить: '+_lnkEsc(errRu(e,'ошибка'))+'</div>'; }
+}
+
+function lnkRenderList(items) {
+  const list=document.getElementById('lnkList');
+  const cnt=document.getElementById('lnkCount'); if(cnt) cnt.textContent=items.length?('· '+items.length):'';
+  if(!items.length){ list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">Пока ссылок нет — создайте первую выше.</div>'; return; }
+  let html='';
+  for(const it of items){
+    const su=it.short_url||'';
+    const dim=(it.disabled||it.expired)?'opacity:.5;':'';
+    let badge='';
+    if(it.disabled) badge=' <span style="font-size:10px;color:#ffb020">⏸ выкл</span>';
+    else if(it.expired) badge=' <span style="font-size:10px;color:#ff6b6b">⏳ истекла</span>';
+    html+='<div class="li" style="'+dim+'display:block;padding:10px 12px">';
+    html+='<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">';
+    html+='<a href="'+_lnkEsc(su)+'" target="_blank" style="font-weight:600;word-break:break-all">'+_lnkEsc(su)+'</a>'+badge;
+    html+='<span style="font-size:12px;opacity:.7;white-space:nowrap">👁 '+(it.clicks||0)+'</span>';
+    html+='</div>';
+    if(it.title) html+='<div style="font-size:12px;opacity:.75;margin-top:2px">'+_lnkEsc(it.title)+'</div>';
+    html+='<div style="font-size:11px;opacity:.55;margin-top:2px;word-break:break-all">→ '+_lnkEsc(it.target_url)+'</div>';
+    if(it.tags) html+='<div style="font-size:11px;opacity:.6;margin-top:2px">🏷 '+_lnkEsc(it.tags)+'</div>';
+    const c=_lnkEsc(it.code).replace(/'/g,"\\'");
+    html+='<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">';
+    html+='<button class="btn btn-s" onclick="lnkCopy(\''+_lnkEsc(su).replace(/'/g,"\\'")+'\')">📋</button>';
+    html+='<button class="btn btn-s" onclick="lnkShowQr(\''+c+'\')">📱 QR</button>';
+    html+='<button class="btn btn-s" onclick="lnkToggle(\''+c+'\','+(it.disabled?'false':'true')+')">'+(it.disabled?'▶ Вкл':'⏸ Выкл')+'</button>';
+    html+='<button class="btn btn-s" onclick="lnkDelete(\''+c+'\')">🗑</button>';
+    html+='</div></div>';
+  }
+  list.innerHTML=html;
+}
+
+async function lnkCopy(text) {
+  try { await navigator.clipboard.writeText(text); toast('📋 Скопировано'); }
+  catch(_) {
+    try { const t=document.createElement('textarea'); t.value=text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('📋 Скопировано'); }
+    catch(e){ toast('Не удалось скопировать'); }
+  }
+}
+
+async function lnkShowQr(code) {
+  try {
+    const r=await api('/api/miniapp/links/qr',{method:'POST',body:JSON.stringify({code})});
+    if(!r.qr){ toast('QR недоступен'); return; }
+    let ov=document.getElementById('lnkQrOverlay');
+    if(!ov){ ov=document.createElement('div'); ov.id='lnkQrOverlay';
+      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999';
+      ov.onclick=()=>ov.remove(); document.body.appendChild(ov); }
+    ov.innerHTML='<div style="background:#fff;border-radius:16px;padding:16px;text-align:center"><img src="'+_lnkEsc(r.qr)+'" style="width:220px;height:220px"><div style="color:#333;font-size:12px;margin-top:6px;word-break:break-all">'+_lnkEsc(r.short_url||'')+'</div><div style="color:#888;font-size:11px;margin-top:6px">нажмите, чтобы закрыть</div></div>';
+  } catch(e){ toast(errRu(e,'QR недоступен')); }
+}
+
+async function lnkToggle(code, disabled) {
+  try { await api('/api/miniapp/links/toggle',{method:'POST',body:JSON.stringify({code,disabled})}); lnkLoad(); }
+  catch(e){ toast(errRu(e,'Не удалось изменить')); }
+}
+
+async function lnkDelete(code) {
+  if(!confirm('Удалить ссылку? Переходы по ней перестанут работать.')) return;
+  try { await api('/api/miniapp/links/delete',{method:'POST',body:JSON.stringify({code})}); toast('Удалено'); lnkLoad(); }
+  catch(e){ toast(errRu(e,'Не удалось удалить')); }
+}
+
 let MP_TOTAL = null;
 let MP_SAMPLE = [];
 

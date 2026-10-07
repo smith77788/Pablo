@@ -24,34 +24,53 @@ class _FakePool:
     def __init__(self):
         self.rows: dict[str, dict] = {}
 
+    @staticmethod
+    def _live(r):
+        import datetime as _dt
+        if r["disabled"]:
+            return False
+        exp = r.get("expires_at")
+        return not (exp and exp <= _dt.datetime.now(_dt.timezone.utc))
+
     async def fetchrow(self, q, *a):
         if "INSERT INTO short_links" in q:
-            code, owner, url, title = a
+            code, owner, url, title, tags, expires = a
             if code in self.rows:
                 return None  # ON CONFLICT DO NOTHING
             self.rows[code] = {"code": code, "owner_id": int(owner), "target_url": url,
-                               "title": title, "clicks": 0, "disabled": False,
+                               "title": title, "tags": tags, "expires_at": expires,
+                               "clicks": 0, "disabled": False,
                                "created_at": None, "last_click_at": None}
             return {"code": code}
         if "SELECT code, clicks, title FROM short_links" in q:
             owner, url = a
             for r in self.rows.values():
-                if r["owner_id"] == int(owner) and r["target_url"] == url and not r["disabled"]:
+                if r["owner_id"] == int(owner) and r["target_url"] == url and self._live(r):
                     return {"code": r["code"], "clicks": r["clicks"], "title": r["title"]}
+            return None
+        if "SELECT code, target_url, title, clicks FROM short_links" in q:  # get_one
+            code, owner = a
+            r = self.rows.get(code)
+            if r and r["owner_id"] == int(owner):
+                return {"code": r["code"], "target_url": r["target_url"],
+                        "title": r["title"], "clicks": r["clicks"]}
             return None
         if "UPDATE short_links SET clicks=clicks+1" in q:
             r = self.rows.get(a[0])
-            if r and not r["disabled"]:
+            if r and self._live(r):
                 r["clicks"] += 1
                 return {"target_url": r["target_url"]}
             return None
         if "SELECT target_url FROM short_links" in q:
             r = self.rows.get(a[0])
-            return {"target_url": r["target_url"]} if r and not r["disabled"] else None
+            return {"target_url": r["target_url"]} if r and self._live(r) else None
         return None
 
     async def fetch(self, q, *a):
-        return [dict(r) for r in self.rows.values() if r["owner_id"] == int(a[0])]
+        class _Row(dict):
+            def keys(self):
+                return super().keys()
+        return [_Row(r) for r in self.rows.values() if r["owner_id"] == int(a[0])]
 
     async def execute(self, q, *a):
         if "SET disabled=" in q:
@@ -167,6 +186,51 @@ def test_list_scoped_and_shaped():
     items = _run(ls.list_for_owner(pool, 42))
     assert {i["code"] for i in items} == {"one", "two"}
     assert all("clicks" in i and "target_url" in i for i in items)
+
+
+# ── UTM / теги / срок действия / QR (как у bit.ly) ───────────────────────────
+
+def test_utm_params_appended_to_target():
+    assert ls.apply_utm("https://t.me/x",
+                        {"utm_source": "tg", "utm_medium": "invite"}) == \
+        "https://t.me/x?utm_source=tg&utm_medium=invite"
+    # пустые метки пропускаются, существующий query сохраняется
+    assert ls.apply_utm("https://a.com/?p=1", {"utm_source": ""}) == "https://a.com/?p=1"
+
+
+def test_create_with_utm_stores_target_with_marks():
+    pool = _FakePool()
+    res = _run(ls.create(pool, 42, "https://t.me/chan",
+                         utm={"utm_source": "telegram", "utm_campaign": "launch"}))
+    assert res["ok"]
+    assert "utm_source=telegram" in res["target_url"]
+    assert "utm_campaign=launch" in res["target_url"]
+
+
+def test_create_with_tags_and_list_returns_them():
+    pool = _FakePool()
+    _run(ls.create(pool, 42, "https://a.com", custom_code="promo",
+                   tags="реклама, канал, реклама"))  # дубль схлопывается
+    items = _run(ls.list_for_owner(pool, 42))
+    assert items[0]["tags"] == "реклама, канал"
+
+
+def test_expired_link_does_not_resolve():
+    pool = _FakePool()
+    past = "2000-01-01T00:00:00+00:00"
+    r = _run(ls.create(pool, 42, "https://a.com", custom_code="old", expires_at=past))
+    assert not r["ok"], "дата в прошлом отклоняется при создании"
+    # будущая дата — создаётся и резолвится
+    r2 = _run(ls.create(pool, 42, "https://a.com", custom_code="fut",
+                        expires_at="2099-01-01T00:00:00+00:00"))
+    assert r2["ok"]
+    assert _run(ls.resolve(pool, "fut")) == "https://a.com"
+
+
+def test_qr_data_uri_generated():
+    uri = ls.make_qr_data_uri("https://infragram.app/link")
+    # qrcode есть в requirements; если вдруг нет — None (не падаем)
+    assert uri is None or uri.startswith("data:image/png;base64,")
 
 
 # ── роуты зарегистрированы и редирект работает ──────────────────────────────
