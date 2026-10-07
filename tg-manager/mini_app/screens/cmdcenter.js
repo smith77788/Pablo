@@ -15,8 +15,8 @@
 // 'ok' здесь потому, что его пишут в acc_status наравне с 'active': без него
 // в легенде вылезало сырое английское «ok».
 const CC_STATUS = {
-  active:           { c: '#2dd4bf', label: 'Активные',    go: ['active', ''] },
-  ok:               { c: '#2dd4bf', label: 'Активные',    go: ['active', ''] },
+  active:           { c: '#3bb6a6', label: 'Активные',    go: ['active', ''] },
+  ok:               { c: '#3bb6a6', label: 'Активные',    go: ['active', ''] },
   warming:          { c: '#38bdf8', label: 'Прогрев',     go: ['all', 'warming'] },
   cooldown:         { c: '#f59e0b', label: 'Кулдаун',     go: ['cooldown', ''] },
   spamblock:        { c: '#fb923c', label: 'Спамблок',    go: ['spamblock', ''] },
@@ -161,7 +161,7 @@ function _ccRender(d) {
   // ── Прокси-пул ──
   const pt = prx.total || 0;
   const prxCard = _ccCard('🌐 Прокси-пул',
-    _ccBar('Живые', prx.alive || 0, pt, '#2dd4bf', 'openProxies()') +
+    _ccBar('Живые', prx.alive || 0, pt, '#3bb6a6', 'openProxies()') +
     _ccBar('Мёртвые', prx.dead || 0, pt, '#ef4444', 'openProxies()') +
     _ccBar('Назначены аккаунтам', prx.assigned || 0, pt, '#38bdf8', 'openProxies()') +
     _ccBar('Резервные', prx.backup || 0, pt, '#f59e0b', 'openProxies()') +
@@ -171,14 +171,14 @@ function _ccRender(d) {
   // ── Health-гейдж (trust_score 0–100) ──
   const avg = hl.avg || 0;
   const hTotal = (hl.good || 0) + (hl.warn || 0) + (hl.bad || 0);
-  const gcol = avg >= 70 ? '#2dd4bf' : avg >= 40 ? '#f59e0b' : '#ef4444';
+  const gcol = avg >= 70 ? '#3bb6a6' : avg >= 40 ? '#f59e0b' : '#ef4444';
   const gauge = _ccDonut([{ value: avg, color: gcol }, { value: 100 - avg, color: 'rgba(0,0,0,0)' }],
                          String(avg), 'trust');
   const healthCard = _ccCard('❤️ Здоровье сетки',
     '<div style="display:flex;align-items:center;gap:12px">' +
     '<div onclick="openHealth()" role="button" tabindex="0" style="cursor:pointer">' + gauge + '</div>' +
     '<div style="flex:1">' +
-    _ccBar('Здоровы (≥70)', hl.good || 0, hTotal, '#2dd4bf', 'openHealth()') +
+    _ccBar('Здоровы (≥70)', hl.good || 0, hTotal, '#3bb6a6', 'openHealth()') +
     _ccBar('Внимание (40–69)', hl.warn || 0, hTotal, '#f59e0b', 'openHealth()') +
     _ccBar('Риск (<40)', hl.bad || 0, hTotal, '#ef4444', 'openHealth()') +
     '</div></div>');
@@ -192,7 +192,7 @@ function _ccRender(d) {
         return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">' +
           '<div style="display:flex;flex-direction:column;justify-content:flex-end;height:64px;width:60%">' +
           `<div style="background:#ef4444;height:${hFail}px;border-radius:3px 3px 0 0" title="ошибок ${_n(o.failed)}"></div>` +
-          `<div style="background:#2dd4bf;height:${hDone}px;border-radius:${hFail?0:'3px 3px 0 0'}" title="успешно ${_n(o.done)}"></div>` +
+          `<div style="background:#3bb6a6;height:${hDone}px;border-radius:${hFail?0:'3px 3px 0 0'}" title="успешно ${_n(o.done)}"></div>` +
           '</div>' +
           `<div style="font-size:10px;color:var(--hint)">${esc(o.day)}</div></div>`;
       }).join('')
@@ -201,7 +201,7 @@ function _ccRender(d) {
     '<div onclick="openOps()" role="button" tabindex="0" ' +
     `style="cursor:pointer;display:flex;align-items:flex-end;gap:4px;min-height:76px">${bars}</div>` +
     '<div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--hint)">' +
-    '<span><span style="color:#2dd4bf">■</span> успешно</span>' +
+    '<span><span style="color:#3bb6a6">■</span> успешно</span>' +
     '<span><span style="color:#ef4444">■</span> ошибки</span>' +
     '<span onclick="openOps()" role="button" tabindex="0" style="cursor:pointer;margin-left:auto">' +
     `▶ выполняется: <b style="color:var(--fg)">${now.running || 0}</b> · ` +

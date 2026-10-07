@@ -52,7 +52,7 @@ function _udRenderTabs() {
     const on = t.key === _udTabCur;
     return `<span onclick="_udTab('${t.key}')" style="white-space:nowrap;cursor:pointer;` +
       `padding:7px 13px;border-radius:20px;font-size:13px;font-weight:600;` +
-      (on ? 'background:var(--accent,#2dd4bf);color:#04201c'
+      (on ? 'background:var(--accent,#3bb6a6);color:#04201c'
           : 'background:rgba(128,128,128,.15);color:var(--hint)') +
       `">${esc(t.label)}</span>`;
   }).join('');
@@ -213,12 +213,12 @@ function _udLine(series, color) {
 function _udRenderAnalytics(d) {
   d = d || {};
   const g = d.growth_7d || 0;
-  const gcol = g > 0 ? 'var(--green,#2dd4bf)' : g < 0 ? 'var(--red,#ef4444)' : 'var(--fg)';
+  const gcol = g > 0 ? 'var(--green,#3bb6a6)' : g < 0 ? 'var(--red,#ef4444)' : 'var(--fg)';
   const chips = '<div style="display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;' +
     '-ms-overflow-style:none;scrollbar-width:none">' +
     _udChip('👥', _udNum(d.total_subscribers), 'Подписчики', 'var(--blue,#38bdf8)') +
     _udChip('📡', _udNum(d.total_channels), 'Каналы', 'var(--purple,#a78bfa)') +
-    _udChip('📝', _udNum(d.total_posts), 'Посты', 'var(--green,#2dd4bf)') +
+    _udChip('📝', _udNum(d.total_posts), 'Посты', 'var(--green,#3bb6a6)') +
     _udChip('📱', _udNum(d.total_accounts), 'Аккаунты', 'var(--orange,#f59e0b)') +
     _udChip('📈', (g > 0 ? '+' : '') + _udNum(g), 'Рост 7д', gcol) +
     '</div>';
@@ -234,7 +234,7 @@ function _udRenderAnalytics(d) {
     '<div style="font-size:12px;color:var(--hint);margin:8px 0 2px">Просмотры</div>' +
     _udLine(d.views_history, 'var(--orange,#f59e0b)') +
     '<div style="font-size:12px;color:var(--hint);margin:8px 0 2px">Вовлечённость</div>' +
-    _udLine(d.engagement_history, 'var(--green,#2dd4bf)'));
+    _udLine(d.engagement_history, 'var(--green,#3bb6a6)'));
 
   const tc = d.top_channels || [];
   const topCard = card('🏆 Топ каналов', tc.length
@@ -261,7 +261,7 @@ function _udRenderAnalytics(d) {
   const hTotal = (h.healthy || 0) + (h.at_risk || 0) + (h.quarantine || 0);
   const pulseCard = hTotal ? card('❤️ Пульс аккаунтов',
     '<div style="display:flex;gap:8px">' +
-    _udChip('✅', _udNum(h.healthy), 'Здоровы', 'var(--green,#2dd4bf)') +
+    _udChip('✅', _udNum(h.healthy), 'Здоровы', 'var(--green,#3bb6a6)') +
     _udChip('⚠️', _udNum(h.at_risk), 'Под риском', 'var(--orange,#f59e0b)') +
     _udChip('⛔', _udNum(h.quarantine), 'Карантин', 'var(--red,#ef4444)') +
     '</div>') : '';
@@ -281,7 +281,7 @@ function _udRenderAnalytics(d) {
       '<div style="display:flex;gap:8px">' +
       _udChip('🗺', _udNum(geo.plans), 'Планов', 'var(--fg)') +
       _udChip('▶️', _udNum(geo.running), 'В работе', 'var(--orange,#f59e0b)') +
-      _udChip('✅', _udNum(geo.done), 'Готово', 'var(--green,#2dd4bf)') +
+      _udChip('✅', _udNum(geo.done), 'Готово', 'var(--green,#3bb6a6)') +
       '</div>'));
   }
 

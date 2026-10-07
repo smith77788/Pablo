@@ -47,7 +47,7 @@
         '<div style="font-size:34px;margin-bottom:14px">⚠️</div>' +
         '<div style="font-size:17px;font-weight:700;margin-bottom:10px">' + title + '</div>' +
         '<div style="color:#7a8ba1;margin-bottom:18px;white-space:pre-wrap">' + detail + '</div>' +
-        '<button onclick="location.reload()" style="background:#2dd4bf;color:#06231f;' +
+        '<button onclick="location.reload()" style="background:#3bb6a6;color:#06231f;' +
         'border:0;border-radius:11px;padding:12px 20px;font-size:15px;font-weight:700;' +
         'cursor:pointer">↻ Перезагрузить</button>';
     } catch (_) { /* показать не смогли — хотя бы не мешаем */ }
@@ -118,40 +118,46 @@
      всё равно не получилась бы целой. Поэтому палитра одна и всегда
      согласованная, а системной панели Telegram ниже сообщается наш цвет,
      чтобы её полоса не спорила с приложением. */
-  --bg:#0c1016;
-  --bg2:#151d29;
-  --bg3:#1a2432;
-  --text:#dce4ee;
-  --hint:#7a8ba1;--hint-strong:#93a3b8;
-  --accent:#2dd4bf;
-  --accent-2:#14b8a6;
-  --accent-3:#0d9488;
-  --accent-soft:rgba(45,212,191,.13);--accent-soft-2:rgba(45,212,191,.20);
-  --btn:linear-gradient(135deg,#2dd4bf 0%,#14b8a6 50%,#0ea5a4 100%);
-  --btn-solid:#14b8a6;
-  --btn-text:#041a17;
-  --sep:rgba(255,255,255,.06);
-  --border:rgba(255,255,255,.08);
-  --border-strong:rgba(255,255,255,.12);
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.26);
-  --shadow-lg:0 10px 34px rgba(0,0,0,.44),0 2px 8px rgba(0,0,0,.22);
-  --shadow-glow:0 0 22px rgba(45,212,191,.18),0 6px 18px rgba(45,212,191,.1);
-  --glow:0 6px 20px rgba(45,212,191,.30);
-  --bg-input:rgba(255,255,255,.04);--border-input:rgba(255,255,255,.10);--bg-select:rgba(21,29,41,.97);
+  /* Палитра переработана под долгую работу без усталости глаз (2026-10):
+     фон приподнят от чёрного (меньше ореола вокруг текста и ниже контраст),
+     текст чуть мягче, бирюзовый акцент успокоен и уведён от неона, свечения
+     (--glow/--shadow-glow) убраны — именно они «вибрировали» на тёмном.
+     Разметка и классы не тронуты: это чистая смена значений токенов. */
+  --bg:#0f141c;
+  --bg2:#161d27;
+  --bg3:#1d2733;
+  --text:#c8d2df;
+  --hint:#7f8c9d;--hint-strong:#9aa6b6;
+  --accent:#3bb6a6;
+  --accent-2:#2a9d91;
+  --accent-3:#1f8479;
+  --accent-soft:rgba(59,182,166,.12);--accent-soft-2:rgba(59,182,166,.18);
+  --btn:linear-gradient(135deg,#3bb6a6 0%,#2a9d91 55%,#1f8479 100%);
+  --btn-solid:#2a9d91;
+  --btn-text:#042019;
+  --sep:rgba(255,255,255,.055);
+  --border:rgba(255,255,255,.085);
+  --border-strong:rgba(255,255,255,.13);
+  --shadow:0 1px 2px rgba(0,0,0,.34),0 4px 16px rgba(0,0,0,.22);
+  --shadow-lg:0 10px 30px rgba(0,0,0,.40),0 2px 8px rgba(0,0,0,.20);
+  --shadow-glow:0 4px 16px rgba(0,0,0,.28);
+  --glow:0 4px 14px rgba(0,0,0,.30);
+  --bg-input:rgba(255,255,255,.04);--border-input:rgba(255,255,255,.10);--bg-select:rgba(22,29,39,.97);
   /* Псевдонимы: в разметке встречаются имена, которых в палитре не было, и
      побеждало запасное значение — цвет уходил мимо палитры (серая рамка
      #2a2a2a вместо --border, жёлтый .16 вместо .14 и так далее). */
   --card:var(--bg2);--card-2:var(--bg-yellow-16);--line:var(--border);
   --amber:var(--orange);--bg-orange-16:var(--bg-yellow-16);
   --bg-blue-16:rgba(96,165,250,.14);--bg-green-16:rgba(52,211,153,.14);--bg-purple-16:rgba(192,132,252,.14);--bg-yellow-16:rgba(251,191,36,.14);--bg-red-16:rgba(248,113,113,.14);--bg-violet-16:rgba(167,139,250,.14);--bg-red-18:rgba(248,113,113,.16);
-  --green:#34d399;--orange:#fbbf24;--purple:#c084fc;--red:#f87171;--blue:#60a5fa;--teal:#2dd4bf;--purple-light:#a78bfa;
-  /* Палитра иконок модулей: приглушённые оттенки, ничего не «кричит». */
-  --c-teal:#2dd4bf;--c-blue:#5b9dff;--c-violet:#a78bfa;--c-amber:#f4b860;
-  --c-rose:#f78ba3;--c-emerald:#4ade80;--c-cyan:#38bdf8;--c-indigo:#818cf8;--c-pink:#f472b6;
+  --green:#5cc49a;--orange:#e0b268;--purple:#b196e0;--red:#e58e8e;--blue:#74a4de;--teal:#3bb6a6;--purple-light:#9d94de;
+  /* Палитра иконок модулей: мягкие пастельные оттенки, ничего не «кричит»
+     и не утомляет при долгой работе (насыщенность снижена 2026-10). */
+  --c-teal:#3bb6a6;--c-blue:#74a4de;--c-violet:#9d94de;--c-amber:#d6a865;
+  --c-rose:#e298ac;--c-emerald:#5fc39a;--c-cyan:#63b3d2;--c-indigo:#8a91d4;--c-pink:#d68cc0;
   --tab-h:58px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
   --radius:14px;--radius-lg:18px;--radius-xl:24px;
   --spring:cubic-bezier(.34,1.5,.6,1);--ease:cubic-bezier(.4,0,.2,1);
-  --glass:rgba(21,29,41,.78);--glass-border:rgba(255,255,255,.08);
+  --glass:rgba(22,29,39,.82);--glass-border:rgba(255,255,255,.07);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI','Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
@@ -159,7 +165,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 #content{flex:1;overflow:hidden;position:relative}
 
 /* ─── Screens ───────────────────────────────────────────────── */
-.screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:none;background:radial-gradient(130% 52% at 100% -8%,rgba(45,212,191,.06),transparent 60%),radial-gradient(95% 42% at -12% 2%,rgba(91,157,255,.045),transparent 55%),var(--bg)}
+.screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:none;background:radial-gradient(130% 52% at 100% -8%,rgba(59,182,166,.035),transparent 60%),radial-gradient(95% 42% at -12% 2%,rgba(116,164,222,.028),transparent 55%),var(--bg)}
 .screen.show{display:block;animation:fadeIn .2s var(--ease)}
 /* Страховка от длинного слова без пробелов. Имя канала, @username, ссылка или
    склеенная фамилия не переносятся по обычным правилам и вылезают за рамку
@@ -310,7 +316,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Cards ──────────────────────────────────────────────────── */
 .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px 16px 0}
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;cursor:pointer;transition:transform .2s var(--spring),box-shadow .2s var(--ease),border-color .2s;min-height:90px;box-shadow:var(--shadow)}
-.card:active{transform:translateY(1px) scale(.975);box-shadow:var(--shadow-lg);border-color:rgba(45,212,191,.15)}
+.card:active{transform:translateY(1px) scale(.975);box-shadow:var(--shadow-lg);border-color:rgba(59,182,166,.18)}
 .card-ico{font-size:20px;margin-bottom:6px}
 .card-val{font-size:22px;font-weight:700;letter-spacing:-.5px}
 .card-lbl{font-size:12px;color:var(--hint);margin-top:3px;line-height:1.3}
@@ -341,7 +347,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .ava-orange{background:rgba(251,191,36,.15);color:var(--orange)}
 .ava-purple{background:rgba(192,132,252,.15);color:var(--purple)}
 .ava-red{background:rgba(248,113,113,.15);color:var(--red)}
-.ava-teal{background:rgba(45,212,191,.15);color:var(--teal)}
+.ava-teal{background:rgba(59,182,166,.15);color:var(--teal)}
 /* Имя в строке списка не должно ужиматься до нечитаемого огрызка. В
    «Диспетчере задач» правая колонка (значок статуса + «Отмена» + «Повтор»)
    забирала всё место, и от названия операции оставалось 67px — семь букв.
@@ -396,8 +402,8 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 @media (max-width:330px){.btn{min-width:72px;padding-left:8px;padding-right:8px;text-overflow:ellipsis}}
 .btn:disabled,.btn[disabled]{background:var(--bg3) !important;color:var(--hint-strong) !important;
   box-shadow:none !important;opacity:1;pointer-events:none;border:1px solid var(--sep)}
-.btn-p{background:var(--btn);color:var(--btn-text);box-shadow:0 2px 12px rgba(45,212,191,.25),inset 0 1px 0 rgba(255,255,255,.15)}
-.btn-p:active{box-shadow:0 1px 6px rgba(45,212,191,.2),inset 0 1px 0 rgba(255,255,255,.1)}
+.btn-p{background:var(--btn);color:var(--btn-text);box-shadow:0 2px 10px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.14)}
+.btn-p:active{box-shadow:0 1px 5px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.10)}
 .btn-s{background:var(--bg3);color:var(--text);border:1px solid var(--border-strong)}
 .btn-s:active{background:rgba(255,255,255,.06)}
 .btn-g{background:rgba(52,211,153,.12);color:var(--green)}
@@ -459,7 +465,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 
 /* ─── Spinner ────────────────────────────────────────────────── */
 .spin-wrap{padding:28px;display:flex;justify-content:center}
-.spin{width:24px;height:24px;border:2.5px solid rgba(45,212,191,.12);border-top-color:var(--accent);border-radius:50%;animation:sp .65s linear infinite}
+.spin{width:24px;height:24px;border:2.5px solid rgba(59,182,166,.12);border-top-color:var(--accent);border-radius:50%;animation:sp .65s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 
 /* ─── Toast ──────────────────────────────────────────────────── */
@@ -485,7 +491,7 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 .field{margin-bottom:12px}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--hint);margin-bottom:5px;letter-spacing:.03em}
 .field textarea,.field input,.field select{width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 12px;font-size:14px;color:var(--text);font-family:inherit;resize:none;outline:none;-webkit-appearance:none;appearance:none;transition:border-color .2s,box-shadow .2s}
-.field textarea:focus,.field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.12)}
+.field textarea:focus,.field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,182,166,.12)}
 /* Поле формы, лежащее ПРЯМО в теле экрана (без обёртки с отступом), упиралось в
    край: рамка ввода вплотную к границе экрана — визуально «кривое окно». 16px —
    канонический отступ приложения (тот же, что у .sec). Правило узкое, только для
@@ -678,7 +684,7 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .seg:has(> :nth-child(5)) > .seg-opt{flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;line-height:20px;max-width:100%;padding-left:10px;padding-right:10px}
 .seg-opt.on{background:var(--accent-soft-2);color:var(--accent);font-weight:600}
 .seg-btn{flex:1;padding:7px 10px;text-align:center;font-size:13px;font-weight:600;color:var(--hint);cursor:pointer;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2);transition:all .2s var(--ease)}
-.seg-btn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(45,212,191,.25)}
+.seg-btn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);border-color:transparent;box-shadow:0 2px 10px rgba(59,182,166,.25)}
 .mini-btn{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:8px 12px;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:none;border-radius:var(--radius);cursor:pointer;white-space:nowrap;transition:opacity .12s}
 .mini-btn:active{opacity:.7}
 .kpi-mini{flex:1;background:var(--bg2);border-radius:var(--radius);padding:9px;text-align:center;border:1px solid var(--border)}
@@ -690,20 +696,20 @@ select:not([multiple]):not([size]){-webkit-appearance:none;appearance:none;backg
 .sel-bar-link{color:var(--accent);cursor:pointer;font-weight:600}
 .sel-bar-acts{display:flex;gap:6px;flex-wrap:wrap}
 .sel-bar-acts .mini-btn{flex:1;min-width:calc(50% - 3px);text-align:center;padding:8px 6px}
-.acc-row.sel{background:rgba(45,212,191,.08)}
+.acc-row.sel{background:rgba(59,182,166,.08)}
 .bot-card.sel{outline:2px solid var(--accent);outline-offset:-2px;box-shadow:var(--shadow-glow)}
-.li.tap.sel{background:rgba(45,212,191,.08)}
+.li.tap.sel{background:rgba(59,182,166,.08)}
 .acc-check{width:20px;height:20px;border-radius:6px;border:2px solid var(--hint);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text);flex-shrink:0;margin-right:2px;transition:all .15s var(--spring)}
-.acc-check.on{background:var(--accent);border-color:var(--accent);box-shadow:0 0 8px rgba(45,212,191,.3)}
+.acc-check.on{background:var(--accent);border-color:var(--accent);box-shadow:0 0 8px rgba(59,182,166,.3)}
 
 /* ─── Profile header (Telegram-style) ───────────────────── */
 .profile-hdr{display:flex;flex-direction:column;align-items:center;padding:20px 16px 14px;text-align:center}
 .profile-ava{width:76px;height:76px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:var(--text);margin-bottom:10px;flex-shrink:0}
 .pava-blue{background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
-.pava-green{background:linear-gradient(135deg,#34d399,#0f766e)}
+.pava-green{background:linear-gradient(135deg,#34d399,#1f8479)}
 .pava-orange{background:linear-gradient(135deg,#fbbf24,#b45309)}
 .pava-purple{background:linear-gradient(135deg,#c084fc,#6d28d9)}
-.pava-teal{background:linear-gradient(135deg,#2dd4bf,#0f766e)}
+.pava-teal{background:linear-gradient(135deg,#3bb6a6,#1f8479)}
 .pava-red{background:linear-gradient(135deg,#f87171,#991b1b)}
 .profile-name{font-size:20px;font-weight:700;letter-spacing:-.2px;margin-bottom:2px}
 .profile-sub{font-size:13px;color:var(--hint);margin-bottom:6px}
@@ -909,7 +915,7 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .acc-actions>summary::-webkit-details-marker{display:none}
 .acc-chev{display:inline-block;transition:transform .2s var(--ease)}
 .acc-actions[open]>summary .acc-chev{transform:rotate(180deg)}
-.chip.on{background:rgba(45,212,191,.12);color:var(--accent);border-color:rgba(45,212,191,.2);box-shadow:0 0 8px rgba(45,212,191,.1)}
+.chip.on{background:rgba(59,182,166,.12);color:var(--accent);border-color:rgba(59,182,166,.2);box-shadow:0 0 8px rgba(59,182,166,.1)}
 .chip:active{opacity:.7}
 
 /* ─── Enhanced account row ───────────────────────────────── */
@@ -948,7 +954,7 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .kpi-scroll{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
 .kpi-chip{background:var(--bg2);border-radius:var(--radius-lg);padding:10px 14px;flex-shrink:0;min-width:82px;cursor:pointer;transition:transform .18s var(--spring),box-shadow .2s var(--ease);border:1px solid var(--border);box-shadow:var(--shadow)}
 .kpi-chip:active{transform:translateY(1px) scale(.96)}
-.kpi-chip.hi{border-color:rgba(45,212,191,.25);box-shadow:var(--shadow-glow)}
+.kpi-chip.hi{border-color:rgba(59,182,166,.25);box-shadow:var(--shadow-glow)}
 .kpi-chip-val{font-size:24px;font-weight:700;letter-spacing:-.4px;line-height:1;margin-bottom:4px}
 /* Заглушка «нет данных»: тот же размер, чтобы лента не прыгала, но без
    акцентного цвета и веса — прочерк не должен спорить с настоящими числами. */
@@ -1003,12 +1009,12 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 /* ═══════════════ Advanced UI polish (Infragram) ═══════════════ */
 @media (prefers-color-scheme: dark){
   body{background:
-     radial-gradient(1400px 400px at 50% -160px, rgba(45,212,191,.08), transparent 65%),
+     radial-gradient(1400px 400px at 50% -160px, rgba(59,182,166,.045), transparent 65%),
      var(--bg);}
   .screen{background:transparent}
 }
-.btn-p{background:var(--btn);color:var(--btn-text);font-weight:700;box-shadow:0 2px 14px rgba(45,212,191,.22),inset 0 1px 0 rgba(255,255,255,.12);border:none}
-.btn-p:active{transform:translateY(1px) scale(.98);box-shadow:0 1px 6px rgba(45,212,191,.18),inset 0 1px 0 rgba(255,255,255,.08)}
+.btn-p{background:var(--btn);color:var(--btn-text);font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.12);border:none}
+.btn-p:active{transform:translateY(1px) scale(.98);box-shadow:0 1px 5px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.08)}
 .btn-s{background:var(--bg3);color:var(--text);border:1px solid var(--border-strong)}
 .btn-s:active{background:rgba(255,255,255,.05)}
 .card,.lst,.mgmt-tile,.qa-tile{border-color:var(--border);box-shadow:var(--shadow)}
@@ -1017,19 +1023,19 @@ details[open] > summary:not([style*="display:flex"])::before{transform:rotate(90
 .mgmt-tile:active,.qa-tile:active{box-shadow:var(--shadow-lg)}
 .mgmt-tile-ico,.qa-tile-ico{background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
 .mgmt-tile-val{color:var(--accent)}
-.ava-teal{background:rgba(45,212,191,.14);color:var(--teal)}
+.ava-teal{background:rgba(59,182,166,.14);color:var(--teal)}
 .ava-green{background:rgba(52,211,153,.14);color:var(--green)}
 .sec{text-transform:uppercase;letter-spacing:.08em;font-size:11px;font-weight:700;color:var(--hint)}
 .hdr{background:var(--glass);backdrop-filter:saturate(150%) blur(16px);-webkit-backdrop-filter:saturate(150%) blur(16px);border-bottom:1px solid var(--glass-border)}
 .back{border-color:var(--border)}
 .back:active{background:var(--sep);transform:scale(.88)}
 .prog-fill{background:linear-gradient(90deg,var(--accent-3),var(--accent))}
-.field textarea:focus,.field input:focus,.field select:focus,.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.12)}
+.field textarea:focus,.field input:focus,.field select:focus,.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,182,166,.12)}
 /* Фокус и неактивное состояние для полей, у которых нет класса: 107 из 491 поля
    стоят с инлайновым стилем, и без этого правила при вводе ничего не подсвечивается. */
-input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(45,212,191,.12);border-color:var(--accent)}
+input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(59,182,166,.12);border-color:var(--accent)}
 input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
-.nav-item.on{background:rgba(45,212,191,.10);color:var(--accent)}
+.nav-item.on{background:rgba(59,182,166,.10);color:var(--accent)}
 </style>
 <script>
   /* PWA: регистрируем service worker после загрузки — не мешаем запуску
@@ -7575,7 +7581,7 @@ function askPairingCode() {
     // подсветку фокуса ставим вручную, чтобы она была фирменной бирюзовой,
     // а не системной рамкой браузера.
     input.onfocus = function(){ this.style.borderColor='var(--accent)';
-      this.style.boxShadow='0 0 0 3px rgba(45,212,191,.12)'; };
+      this.style.boxShadow='0 0 0 3px rgba(59,182,166,.12)'; };
     input.onblur  = function(){ this.style.borderColor='var(--border-input)';
       this.style.boxShadow='none'; };
     ov.querySelector('#pairErr').textContent = '';
@@ -8712,7 +8718,7 @@ async function loadOnboarding() {
 }
 
 // 🫀 Пульс организма — единый живой контекст + цепочки следующих действий.
-const ORG_SEV = {urgent:{c:'#ef4444',e:'🔴'}, warn:{c:'#f59e0b',e:'🟠'}, opportunity:{c:'#2dd4bf',e:'🟢'}, info:{c:'var(--hint)',e:'💡'}};
+const ORG_SEV = {urgent:{c:'#ef4444',e:'🔴'}, warn:{c:'#f59e0b',e:'🟠'}, opportunity:{c:'#3bb6a6',e:'🟢'}, info:{c:'var(--hint)',e:'💡'}};
 async function loadOrganismPulse() {
   const el = document.getElementById('organismPulse');
   if (!el) return;
@@ -9599,7 +9605,7 @@ const BOT_GRADS = [
   'linear-gradient(135deg,#34d399,#15803d)',
   'linear-gradient(135deg,#c084fc,#6d28d9)',
   'linear-gradient(135deg,#fbbf24,#b45309)',
-  'linear-gradient(135deg,#2dd4bf,#0f766e)',
+  'linear-gradient(135deg,#3bb6a6,#1f8479)',
   'linear-gradient(135deg,#f87171,#991b1b)',
 ];
 
@@ -11631,7 +11637,7 @@ function buildAccDetail(d) {
   const transportRow = !tp ? '' : `
     <div class="lst" style="margin:8px 14px 0">
       <div class="row" onclick="openAccProxy(${a.id}, ${tp.proxy_id||'null'})" style="cursor:pointer">
-        <div class="row-ico" style="background:rgba(45,212,191,.14)">${_tpIco}</div>
+        <div class="row-ico" style="background:rgba(59,182,166,.14)">${_tpIco}</div>
         <div class="row-body">
           <div class="row-name">Прокси / IP</div>
           <div class="row-val" style="color:${_tpColor};white-space:normal">${esc(tp.title||'')}</div>
@@ -28806,7 +28812,7 @@ function renderRankingChart(kw) {
     return;
   }
   const maxPos = Math.max(...withPos.flatMap(k => k.history.map(h => h.position)), 1);
-  const colors = ['#2dd4bf', '#60a5fa', '#f59e0b', '#c084fc', '#f87171', '#34d399', '#a78bfa'];
+  const colors = ['#3bb6a6', '#60a5fa', '#f59e0b', '#c084fc', '#f87171', '#34d399', '#a78bfa'];
 
   withPos.slice(0, 7).forEach((k, idx) => {
     const hist = k.history;
@@ -29022,7 +29028,7 @@ function renderNetTopology(d) {
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.setAttribute('x1', from.x); line.setAttribute('y1', from.y);
       line.setAttribute('x2', to.x); line.setAttribute('y2', to.y);
-      line.setAttribute('stroke', 'rgba(45,212,191,.3)');
+      line.setAttribute('stroke', 'rgba(59,182,166,.3)');
       line.setAttribute('stroke-width', '2');
       svg.appendChild(line);
     }
@@ -29041,8 +29047,8 @@ function renderNetTopology(d) {
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', pos.x); circle.setAttribute('cy', pos.y);
     circle.setAttribute('r', '14');
-    circle.setAttribute('fill', 'rgba(45,212,191,.12)');
-    circle.setAttribute('stroke', 'rgba(45,212,191,.4)');
+    circle.setAttribute('fill', 'rgba(59,182,166,.12)');
+    circle.setAttribute('stroke', 'rgba(59,182,166,.4)');
     circle.setAttribute('stroke-width', '1.5');
     svg.insertBefore(circle, text);
   });
@@ -29555,7 +29561,7 @@ function renderAudHeatmap(heatmap) {
     const x = (h.hour || 0) * barW + 10;
     const barH = ((h.count || 0) / maxVal) * (H - 25);
     const intensity = (h.count || 0) / maxVal;
-    ctx.fillStyle = `rgba(45,212,191,${0.15 + intensity * 0.7})`;
+    ctx.fillStyle = `rgba(59,182,166,${0.15 + intensity * 0.7})`;
     ctx.beginPath();
     if (ctx.roundRect) { ctx.roundRect(x, H - barH - 15, barW - 2, barH, 2); }
     else { ctx.rect(x, H - barH - 15, barW - 2, barH); }
