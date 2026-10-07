@@ -13192,7 +13192,8 @@ async def _exec_community_liven(
         finally:
             # join_channel закрывает сессию сам — держать аккаунт дольше незачем.
             await release_accounts([_claimed_acc])
-        if isinstance(res, dict) and not res.get("error"):
+        if isinstance(res, dict) and (not res.get("error") or res.get("already_member")):
+            # «Уже в чате» — тоже член сообщества: засчитываем, не теряем аккаунт.
             await nodes_engine.add_node_member(pool, node_id, int(acc["id"]), "member")
             joined += 1
             await _governed_sleep(pool, owner_id, random.uniform(20, 45))
@@ -14265,7 +14266,11 @@ async def _exec_boost_subscribers(
                 continue
             try:
                 res = await account_manager.join_channel(acc["session_str"], target, _acc=dict(acc))
-                if res.get("error"):
+                # «Уже в чате» (already_member) — НЕ провал: аккаунт уже подписчик,
+                # цель накрутки достигнута. join_channel возвращает already_member с
+                # заполненным error, поэтому проверять только error нельзя — иначе
+                # уже-подписчики раздували «ошибок» (как в bulk_join, стр. ~5679).
+                if res.get("error") and not res.get("already_member"):
                     fail_count += 1
                     await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
                     await _safe_execute(

@@ -4523,8 +4523,17 @@ async def join_channel(
             result = await asyncio.wait_for(
                 client(ImportChatInviteRequest(hash=ref_value)), timeout=_OP_TIMEOUT)
         else:
-            entity = await asyncio.wait_for(
-                client.get_entity(ref_value), timeout=_OP_TIMEOUT)
+            # Числовой id (напр. -100123…) через голый get_entity роняет «Invalid
+            # channel object»: на свежей сессии Telethon не знает access_hash и не
+            # понимает, что число — это КАНАЛ. Резолвим как post_to_channel — через
+            # PeerChannel (Telethon добирает access_hash сам), с запасным обходом
+            # диалогов. Username/ссылку резолвим как раньше.
+            if ref_value.lstrip("-").isdigit():
+                entity = await asyncio.wait_for(
+                    _resolve_channel_peer(client, ref_value), timeout=_OP_TIMEOUT)
+            else:
+                entity = await asyncio.wait_for(
+                    client.get_entity(ref_value), timeout=_OP_TIMEOUT)
             result = await asyncio.wait_for(
                 client(JoinChannelRequest(channel=entity)), timeout=_OP_TIMEOUT)
         chats = getattr(result, "chats", None) or []
