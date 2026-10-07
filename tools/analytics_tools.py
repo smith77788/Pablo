@@ -1,4 +1,5 @@
 """Analytics and reporting tools for BASIC.FOOD AI agents (Supabase-backed)."""
+
 from __future__ import annotations
 from datetime import datetime, timedelta
 
@@ -12,9 +13,6 @@ def _since(days: int) -> str:
 def get_sales_summary(days: int = 30) -> dict:
     """Revenue, order count, and average order value for the last N days."""
     since = _since(days)
-    res = get_client().rpc("get_investor_monthly_revenue", {}).execute()
-
-    # Fallback: direct query
     orders = (
         get_client()
         .table("orders")
@@ -31,7 +29,9 @@ def get_sales_summary(days: int = 30) -> dict:
         "order_count": len(orders),
         "revenue_kopecks": total_revenue,
         "revenue_uah": round(total_revenue / 100, 2),
-        "avg_order_uah": round(total_revenue / max(len(orders) - cancelled, 1) / 100, 2),
+        "avg_order_uah": round(
+            total_revenue / max(len(orders) - cancelled, 1) / 100, 2
+        ),
         "cancelled_count": cancelled,
     }
 
@@ -48,6 +48,7 @@ def get_orders_by_status_count(days: int = 30) -> list[dict]:
     ).data or []
 
     from collections import defaultdict
+
     counts: dict[str, dict] = defaultdict(lambda: {"count": 0, "total_kopecks": 0})
     for o in orders:
         counts[o["status"]]["count"] += 1
@@ -65,12 +66,15 @@ def get_top_products(days: int = 30, limit: int = 10) -> list[dict]:
     items = (
         get_client()
         .table("order_items")
-        .select("product_id, product_name, product_price, quantity, orders(status, created_at)")
+        .select(
+            "product_id, product_name, product_price, quantity, orders(status, created_at)"
+        )
         .gte("orders.created_at", since)
         .execute()
     ).data or []
 
     from collections import defaultdict
+
     stats: dict = defaultdict(lambda: {"name": "", "units": 0, "revenue_kopecks": 0})
     for item in items:
         order = item.get("orders") or {}
@@ -79,9 +83,13 @@ def get_top_products(days: int = 30, limit: int = 10) -> list[dict]:
         pid = item["product_id"]
         stats[pid]["name"] = item.get("product_name", pid)
         stats[pid]["units"] += item.get("quantity", 0)
-        stats[pid]["revenue_kopecks"] += item.get("product_price", 0) * item.get("quantity", 0)
+        stats[pid]["revenue_kopecks"] += item.get("product_price", 0) * item.get(
+            "quantity", 0
+        )
 
-    sorted_products = sorted(stats.items(), key=lambda x: -x[1]["revenue_kopecks"])[:limit]
+    sorted_products = sorted(stats.items(), key=lambda x: -x[1]["revenue_kopecks"])[
+        :limit
+    ]
     return [
         {"product_id": pid, **v, "revenue_uah": round(v["revenue_kopecks"] / 100, 2)}
         for pid, v in sorted_products
@@ -101,14 +109,19 @@ def get_top_customers(days: int = 30, limit: int = 10) -> list[dict]:
     ).data or []
 
     from collections import defaultdict
-    stats: dict = defaultdict(lambda: {"customer": {}, "orders": 0, "revenue_kopecks": 0})
+
+    stats: dict = defaultdict(
+        lambda: {"customer": {}, "orders": 0, "revenue_kopecks": 0}
+    )
     for o in orders:
         uid = o.get("user_id") or "guest"
         stats[uid]["customer"] = o.get("customers") or {}
         stats[uid]["orders"] += 1
         stats[uid]["revenue_kopecks"] += o["total"]
 
-    sorted_customers = sorted(stats.items(), key=lambda x: -x[1]["revenue_kopecks"])[:limit]
+    sorted_customers = sorted(stats.items(), key=lambda x: -x[1]["revenue_kopecks"])[
+        :limit
+    ]
     return [
         {
             "user_id": uid,
@@ -149,13 +162,9 @@ def get_inventory_snapshot() -> dict:
 
 def get_customer_lifecycle_breakdown() -> list[dict]:
     """Count customers per lifecycle stage."""
-    res = (
-        get_client()
-        .table("customers")
-        .select("lifecycle_stage")
-        .execute()
-    )
+    res = get_client().table("customers").select("lifecycle_stage").execute()
     from collections import Counter
+
     counts = Counter(c["lifecycle_stage"] for c in (res.data or []))
     return [{"stage": stage, "count": cnt} for stage, cnt in counts.most_common()]
 
@@ -172,6 +181,7 @@ def get_daily_revenue(days: int = 14) -> list[dict]:
     ).data or []
 
     from collections import defaultdict
+
     daily: dict = defaultdict(lambda: {"orders": 0, "revenue_kopecks": 0})
     for o in orders:
         if o["status"] == "cancelled":

@@ -1,0 +1,15 @@
+{
+  "name": "@platform/ai-agent",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@platform/db": "workspace:*",
+    "@platform/clickhouse": "workspace:*",
+    "axios": "^1.6.0"
+  }
+}

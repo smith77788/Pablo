@@ -1,4 +1,5 @@
 """Base class for all BASIC.FOOD AI agents."""
+
 from __future__ import annotations
 import json
 import os
@@ -27,10 +28,31 @@ class BaseAgent:
         """Run one agent turn and return the final text response."""
         system = self.system_prompt
         if context:
-            system += f"\n\n<context>{json.dumps(context, ensure_ascii=False)}</context>"
+            system += (
+                f"\n\n<context>{json.dumps(context, ensure_ascii=False)}</context>"
+            )
 
         messages: list[dict] = [{"role": "user", "content": user_message}]
+        return self._run_loop(system, messages)
 
+    def run_with_history(
+        self,
+        system: str,
+        history: list[dict],
+        user_message: str,
+    ) -> tuple[str, list[dict]]:
+        """Run one turn with persistent message history.
+
+        Appends the new user message to history, runs the tool loop, and
+        returns (reply_text, updated_history) so the caller can persist it.
+        History is mutated in place and also returned for convenience.
+        """
+        history.append({"role": "user", "content": user_message})
+        reply = self._run_loop(system, history)
+        return reply, history
+
+    def _run_loop(self, system: str, messages: list[dict]) -> str:
+        """Inner tool-loop shared by run() and run_with_history()."""
         while True:
             with self.client.messages.stream(
                 model=MODEL,
@@ -43,23 +65,31 @@ class BaseAgent:
                 response = stream.get_final_message()
 
             if response.stop_reason == "end_turn":
-                return self._extract_text(response)
+                text = self._extract_text(response)
+                messages.append({"role": "assistant", "content": response.content})
+                return text
 
             if response.stop_reason == "tool_use":
                 tool_results = []
                 for block in response.content:
                     if block.type == "tool_use":
                         result = self._call_tool(block.name, block.input)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str),
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": json.dumps(
+                                    result, ensure_ascii=False, default=str
+                                ),
+                            }
+                        )
 
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
             else:
-                return self._extract_text(response)
+                text = self._extract_text(response)
+                messages.append({"role": "assistant", "content": response.content})
+                return text
 
     def _call_tool(self, name: str, inputs: dict) -> Any:
         handler = self._tool_handlers.get(name)

@@ -1,0 +1,999 @@
+"""Health Dashboard — infrastructure health monitoring.
+
+Entry point: HealthCb(action="menu")
+"""
+from __future__ import annotations
+
+import asyncio
+import html
+import logging
+from datetime import datetime, timezone
+
+import asyncpg
+from aiogram import F, Router
+from aiogram.types import CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot.callbacks import HealthCb, BotCb, BmCb
+from bot.utils.op_helpers import safe_edit
+
+log = logging.getLogger(__name__)
+router = Router()
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _back_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
+    return kb
+
+
+# ── Sparklines & Visualization ────────────────────────────────────────────────────
+
+# Unicode block elements for sparklines (8 levels)
+_SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def _make_sparkline(values: list[float], width: int = 12) -> str:
+    """Render a sparkline from a list of numeric values.
+
+    Uses Unicode block elements scaled to 8 levels.
+    Returns empty string for empty input.
+    """
+    if not values:
+        return ""
+
+    vmin = min(values)
+    vmax = max(values)
+    span = vmax - vmin
+
+    if span < 0.001:
+        # All values equal — flat line
+        return "▄" * min(width, len(values))
+
+    # Optionally compress if more values than width
+    if len(values) > width:
+        step = len(values) / width
+        compressed = [values[int(i * step)] for i in range(width)]
+    else:
+        compressed = values
+
+    chars = []
+    for v in compressed:
+        level = int((v - vmin) / span * 7)
+        chars.append(_SPARK_CHARS[min(7, max(0, level))])
+
+    return "".join(chars)
+
+
+def _make_bar(value: float, max_val: float = 100.0, width: int = 10) -> str:
+    """Render a horizontal bar. Returns string like '████░░░░░░'."""
+    if max_val <= 0:
+        return "█" * width
+    filled = max(0, min(width, round(value / max_val * width)))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _make_comparison_chart(
+    accounts: list[dict], title: str, metric_key: str, max_val: float = 100.0
+) -> str:
+    """Side-by-side comparison chart for multiple accounts.
+
+    Args:
+        accounts: list of dicts with 'label', metric_key, and optional 'trend'
+        title: chart title
+        metric_key: key for the metric to compare
+        max_val: maximum value for bar scaling (default 100)
+    """
+    if not accounts:
+        return title + "\n<i>Нет данных</i>"
+
+    lines = [title, ""]
+    max_label = max(len(a.get("label", "?")) for a in accounts)
+
+    for a in accounts[:12]:
+        label = a.get("label", "?")
+        val = float(a.get(metric_key, 0) or 0)
+        bar = _make_bar(val, max_val, 12)
+        trend = a.get("trend", "")
+        lines.append(f"{trend} <code>{label:<{max_label}}</code> {bar} {val:.0f}")
+
+    return "\n".join(lines)
+
+
+async def _fetch_account_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
+    row = await pool.fetchrow(
+        """
+        SELECT
+            COUNT(*) AS total,
+            COUNT(CASE WHEN is_active THEN 1 END) AS active,
+            COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
+            ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust,
+            COUNT(CASE WHEN trust_score < 0.3 AND is_active THEN 1 END) AS critical,
+            COUNT(CASE WHEN trust_score >= 0.3 AND trust_score < 0.6 AND is_active THEN 1 END) AS low_trust
+        FROM tg_accounts
+        WHERE owner_id=$1
+        """,
+        owner_id,
+    )
+    result = dict(row) if row else {"total": 0, "active": 0, "in_cooldown": 0, "avg_trust": 0,
+                                     "critical": 0, "low_trust": 0}
+    # Попробуем получить средний health_score из истории
+    try:
+        hrow = await pool.fetchrow(
+            """SELECT ROUND(AVG(h.health_score)::numeric, 1) AS avg_health
+               FROM account_health_history h
+               JOIN tg_accounts a ON a.id = h.account_id
+               WHERE a.owner_id=$1
+                 AND h.recorded_at > now() - INTERVAL '24 hours'""",
+            owner_id,
+        )
+        result["avg_health"] = float(hrow["avg_health"] or 0) if hrow else 0.0
+    except Exception:
+        result["avg_health"] = 0.0
+    return result
+
+
+async def _fetch_flood_events_7d(pool: asyncpg.Pool, owner_id: int) -> int:
+    try:
+        val = await pool.fetchval(
+            """
+            SELECT COUNT(*) FROM account_flood_log afl
+            JOIN tg_accounts ta ON ta.id = afl.account_id
+            WHERE ta.owner_id=$1 AND afl.created_at > now() - interval '7 days'
+            """,
+            owner_id,
+        )
+        return int(val or 0)
+    except Exception:
+        return 0
+
+
+# ── Menu ───────────────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "menu"))
+async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    stats = await _fetch_account_stats(pool, user_id)
+    flood_7d = await _fetch_flood_events_7d(pool, user_id)
+
+    # Health score bar
+    avg_health = stats.get("avg_health", 0)
+    health_bar = "█" * int(avg_health / 10) + "░" * (10 - int(avg_health / 10)) if avg_health else "—"
+
+    text = (
+        "❤️ <b>Здоровье инфраструктуры</b>\n\n"
+        f"🩺 Health score: <b>{avg_health:.0f}</b>/100  [{health_bar}]\n"
+        f"📱 Аккаунтов: <b>{stats['total']}</b> (активных: <b>{stats['active']}</b>)\n"
+        f"⭐ Средний trust: <b>{stats['avg_trust']}</b>\n"
+        f"🌊 В кулдауне: <b>{stats['in_cooldown']}</b>"
+    )
+    if stats["critical"] or stats["low_trust"]:
+        alerts = []
+        if stats["critical"]:
+            alerts.append(f"🔴 Критический trust: <b>{stats['critical']}</b>")
+        if stats["low_trust"]:
+            alerts.append(f"🟡 Низкий trust: <b>{stats['low_trust']}</b>")
+        text += "\n\n" + " | ".join(alerts)
+    text += f"\n📋 Flood за 7д: <b>{flood_7d}</b>"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Аккаунты",       callback_data=HealthCb(action="accounts"))
+    kb.button(text="🤖 Боты",           callback_data=HealthCb(action="bots_health"))
+    kb.button(text="📈 Тренд trust",    callback_data=HealthCb(action="trust_trend"))
+    kb.button(text="📊 Тренд health",   callback_data=HealthCb(action="health_trend"))
+    kb.button(text="📉 Sparklines",     callback_data=HealthCb(action="sparklines"))
+    kb.button(text="📊 Сравнить все",   callback_data=HealthCb(action="compare"))
+    kb.button(text="🌊 Flood log",      callback_data=HealthCb(action="flood_log"))
+    kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
+    kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
+    kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
+    kb.button(text="◀️ Назад",          callback_data=BmCb(action="infrastructure"))
+    kb.adjust(2, 2, 2, 2, 2, 1)
+
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
+
+
+# ── Accounts health ────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "accounts"))
+async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    rows = await pool.fetch(
+        """
+        SELECT a.id, a.phone, a.first_name, a.username, a.trust_score, a.cooldown_until,
+               COALESCE(a.flood_count_7d, 0) AS flood_count_7d, a.is_active,
+               (SELECT ROUND(h.health_score::numeric, 1)
+                FROM account_health_history h
+                WHERE h.account_id = a.id
+                ORDER BY h.recorded_at DESC LIMIT 1) AS health_score
+        FROM tg_accounts a
+        WHERE a.owner_id=$1
+        ORDER BY a.trust_score DESC NULLS LAST
+        """,
+        user_id,
+    )
+
+    lines = ["📱 <b>Здоровье аккаунтов</b>\n"]
+    if not rows:
+        lines.append("Нет подключённых аккаунтов.")
+    else:
+        now = datetime.now(timezone.utc)
+        for acc in rows:
+            trust = float(acc["trust_score"] or 1.0)
+            health = float(acc["health_score"] or 0) if acc["health_score"] is not None else None
+            phone = acc["phone"] or ""
+            name = acc["username"] or acc["first_name"] or phone or f"id{acc['id']}"
+            flood_until = acc["cooldown_until"]
+            flood_cnt = int(acc["flood_count_7d"] or 0)
+
+            hs_str = f" | health: {health:.0f}" if health is not None else ""
+
+            if flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
+                time_str = flood_until.strftime("%H:%M")
+                lines.append(f"❌ @{name} ({phone}) | <b>КУЛДАУН до {time_str}</b>{hs_str}")
+            elif trust < 0.5:
+                lines.append(
+                    f"⚠️ @{name} ({phone}) | trust: <b>{trust:.2f}</b> | flood: {flood_cnt}{hs_str}"
+                )
+            else:
+                lines.append(
+                    f"✅ @{name} ({phone}) | trust: <b>{trust:.2f}</b> | flood: {flood_cnt}{hs_str}"
+                )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+# ── Bots health ────────────────────────────────────────────────────────────────
+
+_http_session: aiohttp.ClientSession | None = None
+
+
+async def _check_bot_alive(token: str, http_session: aiohttp.ClientSession | None = None) -> tuple[bool, str]:
+    """Check if a bot token is valid via Bot API /getMe.
+
+    Uses the shared http_session to avoid connection leaks.
+    """
+    import aiohttp
+    url = f"https://api.telegram.org/bot{token}/getMe"
+    session = http_session or _http_session
+    if session is None:
+        session = aiohttp.ClientSession()
+        _http_session = session
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            data = await resp.json()
+            if data.get("ok"):
+                username = data["result"].get("username", "")
+                return True, username
+            return False, ""
+    except Exception:
+        return False, ""
+
+
+@router.callback_query(HealthCb.filter(F.action == "bots_health"))
+async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    bots = await pool.fetch(
+        """
+        SELECT b.bot_id, b.username, b.first_name, b.token,
+               COALESCE(aud.cnt, 0) AS user_count
+        FROM managed_bots b
+        LEFT JOIN (
+            SELECT bot_id, COUNT(*) AS cnt
+            FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+        ) aud ON aud.bot_id = b.bot_id
+        WHERE b.added_by=$1 AND b.is_active=TRUE
+        ORDER BY b.added_at DESC
+        """,
+        user_id,
+    )
+
+    lines = ["🤖 <b>Здоровье ботов</b>\n"]
+    if not bots:
+        lines.append("Нет добавленных ботов.")
+    else:
+        tasks = [_check_bot_alive(b["token"]) for b in bots]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for bot_rec, result in zip(bots, results):
+            name = bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
+            user_count = bot_rec["user_count"]
+            if isinstance(result, Exception) or not result[0]:
+                lines.append(f"❌ @{name} — токен недействителен")
+            else:
+                lines.append(
+                    f"✅ @{name} — активен | {user_count:,} пользователей"
+                )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+# ── Flood log ──────────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "flood_log"))
+async def cb_flood_log(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT afl.operation, afl.flood_seconds, afl.created_at, ta.phone
+            FROM account_flood_log afl
+            JOIN tg_accounts ta ON ta.id = afl.account_id
+            WHERE ta.owner_id=$1
+            ORDER BY afl.created_at DESC
+            LIMIT 15
+            """,
+            user_id,
+        )
+        table_available = True
+    except Exception:
+        rows = []
+        table_available = False
+
+    lines = ["🌊 <b>Flood log</b>\n"]
+    if not table_available:
+        lines.append("ℹ️ Таблица flood-событий ещё не создана.\nFlood-события будут записываться автоматически.")
+    elif not rows:
+        lines.append("Нет flood-событий за последнее время.")
+    else:
+        for row in rows:
+            dt = row["created_at"].strftime("%m-%d %H:%M") if row["created_at"] else "—"
+            phone = row["phone"] or "—"
+            op = row["operation"] or "—"
+            secs = row["flood_seconds"] or 0
+            lines.append(f"<code>{dt}</code> | {phone} | {op} | ⏱ {secs}s")
+
+    kb = _back_kb()
+    kb.adjust(1)
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+# ── Trust score trends ─────────────────────────────────────────────────────────
+
+
+@router.callback_query(HealthCb.filter(F.action == "trust_trend"))
+async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT ta.phone, ta.first_name, ta.username,
+                   ROUND(AVG(h.trust_score)::numeric, 2) AS avg_7d,
+                   ROUND(MIN(h.trust_score)::numeric, 2) AS min_7d,
+                   ta.trust_score AS current_score
+            FROM account_trust_history h
+            JOIN tg_accounts ta ON ta.id = h.account_id
+            WHERE ta.owner_id=$1
+              AND h.recorded_at > now() - INTERVAL '7 days'
+            GROUP BY ta.id, ta.phone, ta.first_name, ta.username, ta.trust_score
+            ORDER BY ta.trust_score DESC
+            """,
+            user_id,
+        )
+        table_ok = True
+    except Exception:
+        rows = []
+        table_ok = False
+
+    lines = ["📈 <b>Тренд доверия аккаунтов (7 дней)</b>\n"]
+    if not table_ok:
+        lines.append("ℹ️ История ещё накапливается. Данные появятся через 30 минут.")
+    elif not rows:
+        lines.append("Нет данных за последние 7 дней.")
+    else:
+        for r in rows:
+            name = r["username"] or r["first_name"] or r["phone"] or "—"
+            cur = float(r["current_score"] or 0)
+            avg = float(r["avg_7d"] or 0)
+            mn = float(r["min_7d"] or 0)
+            trend = "↗️" if cur >= avg else ("↘️" if cur < avg * 0.9 else "→")
+            # 10-segment bar scaled 0.0-1.0
+            filled = min(10, round(cur * 10))
+            bar = "█" * filled + "░" * (10 - filled)
+            delta = cur - avg
+            delta_str = f"+{delta:.2f}" if delta >= 0 else f"{delta:.2f}"
+            lines.append(
+                f"{trend} <b>{html.escape(name[:20])}</b>\n"
+                f"   [{bar}] {cur:.2f}  <i>avg {avg:.2f}  Δ{delta_str}  min {mn:.2f}</i>"
+            )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+# ── Health score trends ────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "health_trend"))
+async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Show health_score trends from account_health_history."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """SELECT a.phone, a.first_name, a.username,
+                      ROUND(AVG(h.health_score)::numeric, 1) AS avg_health_7d,
+                      ROUND(AVG(h.health_score) FILTER (
+                          WHERE h.recorded_at > now() - INTERVAL '24 hours'
+                      )::numeric, 1) AS avg_health_24h,
+                      ROUND(MIN(h.health_score)::numeric, 1) AS min_health_7d,
+                      a.trust_score AS current_trust
+               FROM account_health_history h
+               JOIN tg_accounts a ON a.id = h.account_id
+               WHERE a.owner_id=$1
+                 AND h.recorded_at > now() - INTERVAL '7 days'
+               GROUP BY a.id, a.phone, a.first_name, a.username, a.trust_score
+               ORDER BY avg_health_7d DESC""",
+            user_id,
+        )
+        table_ok = True
+    except Exception:
+        rows = []
+        table_ok = False
+
+    lines = ["📊 <b>Тренд здоровья аккаунтов (Health Score)</b>\n"]
+    if not table_ok:
+        lines.append("ℹ️ История здоровья накапливается. Первые данные появятся в течение часа.")
+    elif not rows:
+        lines.append("Нет данных за последние 7 дней.\n"
+                     "Система сохраняет снапшоты health_score каждый час.")
+    else:
+        for r in rows:
+            name = r["username"] or r["first_name"] or r["phone"] or "—"
+            h7 = float(r["avg_health_7d"] or 0)
+            h24 = float(r["avg_health_24h"] or 0)
+            hmin = float(r["min_health_7d"] or 0)
+            trust = float(r["current_trust"] or 0)
+
+            # Trend direction
+            if h24 >= h7:
+                trend = "↗️"
+            elif h24 < h7 * 0.9:
+                trend = "↘️"
+            else:
+                trend = "→"
+
+            # Health bar (0-100)
+            bar_len = int(h7 / 10)
+            bar = "█" * bar_len + "░" * (10 - bar_len)
+
+            # Status emoji
+            if h7 >= 80:
+                status = "✅"
+            elif h7 >= 50:
+                status = "⚠️"
+            else:
+                status = "🔴"
+
+            lines.append(
+                f"{status} {trend} @{name}  [{bar}] {h7:.0f}/100\n"
+                f"   <i>24ч: {h24:.0f} | min: {hmin:.0f} | trust: {trust:.2f}</i>"
+            )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
+
+
+# ── Sparkline charts ─────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "sparklines"))
+async def cb_health_sparklines(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Sparkline charts for health score trends over 14 days per account."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """SELECT a.phone, a.first_name, a.username,
+                      d.day::date AS day,
+                      COALESCE(ROUND(AVG(h.health_score)::numeric, 1), 0) AS avg_health
+               FROM tg_accounts a
+               CROSS JOIN LATERAL generate_series(
+                   current_date - INTERVAL '14 days',
+                   current_date,
+                   INTERVAL '1 day'
+               ) AS d(day)
+               LEFT JOIN account_health_history h
+                 ON h.account_id = a.id
+                AND h.recorded_at >= d.day
+                AND h.recorded_at < d.day + INTERVAL '1 day'
+               WHERE a.owner_id = $1
+                 AND a.is_active = TRUE
+               GROUP BY a.id, a.phone, a.first_name, a.username, d.day
+               ORDER BY a.id, d.day""",
+            user_id,
+        )
+    except Exception:
+        rows = []
+
+    if not rows:
+        kb = _back_kb()
+        kb.adjust(1)
+        await safe_edit(
+            callback,
+            "📉 <b>Sparkline — тренды здоровья</b>\n\n"
+            "ℹ️ Данные ещё накапливаются. Зайдите позже.",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Group by account
+    accounts: dict[int, dict] = {}
+    for r in rows:
+        aid = r["phone"] or str(r.get("username", "")) or str(r.get("first_name", ""))
+        # Use phone as key
+        key = str(r["phone"]) if r["phone"] else str(id(r))
+        if key not in accounts:
+            name = r["username"] or r["first_name"] or r["phone"] or "?"
+            accounts[key] = {
+                "label": name,
+                "values": [],
+                "current": 0,
+            }
+        val = float(r["avg_health"] or 0)
+        accounts[key]["values"].append(val)
+
+    # Build lines
+    lines = ["📉 <b>Sparklines — Health Score за 14 дней</b>\n"]
+    lines.append("<code>" + "·" * 14 + "</code>  ← каждый символ = 1 день\n")
+
+    for key, data in sorted(accounts.items(), key=lambda x: sum(x[1]["values"]) / max(len(x[1]["values"]), 1), reverse=True):
+        vals = data["values"]
+        if vals:
+            spark = _make_sparkline(vals, 14)
+            avg = sum(vals) / len(vals)
+            cur = vals[-1] if vals else 0
+            trend = "↗️" if cur >= avg * 1.05 else ("↘️" if cur < avg * 0.95 else "→")
+            lines.append(
+                f"{trend} <b>{html.escape(data['label'][:15])}</b> "
+                f"<code>{spark}</code> {cur:.0f}/100"
+            )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
+
+
+# ── Comparison chart ──────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "compare"))
+async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Side-by-side comparison chart of all accounts."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """SELECT a.phone, a.first_name, a.username,
+                      COALESCE(
+                          (SELECT ROUND(AVG(h2.health_score)::numeric, 0)
+                           FROM account_health_history h2
+                           WHERE h2.account_id = a.id
+                             AND h2.recorded_at > now() - INTERVAL '7 days'),
+                          0
+                      ) AS health_7d,
+                      COALESCE(
+                          (SELECT ROUND(AVG(h2.health_score)::numeric, 0)
+                           FROM account_health_history h2
+                           WHERE h2.account_id = a.id
+                             AND h2.recorded_at > now() - INTERVAL '24 hours'),
+                          0
+                      ) AS health_24h,
+                      a.trust_score,
+                      a.is_active
+               FROM tg_accounts a
+               WHERE a.owner_id = $1
+               ORDER BY health_7d DESC""",
+            user_id,
+        )
+    except Exception:
+        rows = []
+
+    if not rows:
+        kb = _back_kb()
+        kb.adjust(1)
+        await safe_edit(
+            callback,
+            "📊 <b>Сравнение аккаунтов</b>\n\n"
+            "ℹ️ Нет данных. Добавьте аккаунты через 🏗️ Infrastructure → 📱 Аккаунты.",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    lines = ["📊 <b>Сравнительная карта здоровья</b>\n"]
+    lines.append(f"<code>{'Аккаунт':<16} {'Health':>7} {'Trust':>6} {'Статус'}</code>")
+
+    max_health = max((float(r["health_7d"] or 0) for r in rows), default=100)
+    max_health = max(max_health, 100)
+
+    for r in rows:
+        name = r["username"] or r["first_name"] or r["phone"] or "?"
+        h7 = float(r["health_7d"] or 0)
+        trust = float(r["trust_score"] or 0)
+        active = r["is_active"]
+
+        bar = _make_bar(h7, max_health, 8)
+        status = "✅" if active else "⛔"
+        h24 = float(r["health_24h"] or 0)
+        trend_sym = "↗️" if h24 >= h7 else "↘️"
+
+        lines.append(
+            f"{status}{trend_sym} <code>{name:<14}</code> {bar} {h7:>4.0f}   "
+            f"<code>{trust:.2f}</code>"
+        )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
+
+@router.callback_query(HealthCb.filter(F.action == "recommendations"))
+async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    now = datetime.now(timezone.utc)
+
+    accounts = await pool.fetch(
+        "SELECT id, phone, first_name, username, trust_score, cooldown_until, "
+        "flood_count_7d, is_active, added_at "
+        "FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score ASC NULLS LAST LIMIT 20",
+        user_id,
+    )
+    # Fetch health scores from history
+    try:
+        health_rows = await pool.fetch(
+            """SELECT h.account_id,
+                      ROUND(h.health_score::numeric, 1) AS health_score,
+                      h.warmup_state,
+                      h.success_ops, h.fail_ops
+               FROM account_health_history h
+               WHERE h.recorded_at > now() - INTERVAL '24 hours'
+                 AND h.account_id = ANY(
+                     SELECT id FROM tg_accounts WHERE owner_id=$1
+                 )""",
+            user_id,
+        )
+        health_map: dict[int, dict] = {}
+        for hr in health_rows:
+            aid = hr["account_id"]
+            if aid not in health_map or hr["health_score"] < health_map[aid].get("health_score", 100):
+                health_map[aid] = {
+                    "health_score": float(hr["health_score"] or 0),
+                    "warmup_state": hr["warmup_state"] or "raw",
+                    "success_ops": int(hr["success_ops"] or 0),
+                    "fail_ops": int(hr["fail_ops"] or 0),
+                }
+    except Exception:
+        health_map = {}
+
+    try:
+        flood_7d_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM account_flood_log afl "
+            "JOIN tg_accounts ta ON ta.id=afl.account_id "
+            "WHERE ta.owner_id=$1 AND afl.created_at > now() - interval '7 days'",
+            user_id,
+        ) or 0
+    except Exception:
+        flood_7d_total = 0
+
+    recs: list[str] = []
+    critical_count = 0
+    health_tips: set[str] = set()
+
+    for acc in accounts:
+        trust = float(acc["trust_score"] or 1.0)
+        name = acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}"
+        flood_cnt = int(acc["flood_count_7d"] or 0)
+        in_cooldown = bool(acc["cooldown_until"] and acc["cooldown_until"].replace(tzinfo=timezone.utc) > now)
+        hinfo = health_map.get(acc["id"], {})
+        health_s = hinfo.get("health_score")
+        warmup = hinfo.get("warmup_state", "raw")
+
+        if not acc["is_active"]:
+            recs.append(
+                f"🔴 <b>{name}</b> — деактивирован.\n"
+                "   ↳ Используйте 🔄 Релог для переподключения.\n"
+                "   ↳ Если не помогает — создайте новый аккаунт."
+            )
+            critical_count += 1
+            health_tips.add("relog")
+        elif in_cooldown:
+            until = acc["cooldown_until"].strftime("%H:%M %d.%m")
+            remaining = acc["cooldown_until"].replace(tzinfo=timezone.utc) - now
+            hours_left = max(0, remaining.total_seconds() / 3600)
+            recs.append(
+                f"🟠 <b>{name}</b> — кулдаун до {until} ({hours_left:.0f}ч).\n"
+                "   ↳ Не запускайте операции через этот аккаунт.\n"
+                "   ↳ Авто-ротация уже защищает этот аккаунт."
+            )
+            critical_count += 1
+        elif trust < 0.15:
+            recs.append(
+                f"🔴 <b>{name}</b> — trust {trust:.2f} (экстренно).\n"
+                "   ↳ НЕМЕДЛЕННО прекратите все операции.\n"
+                "   ↳ Дайте отдых 72+ часов. Проверьте прокси.\n"
+                "   ↳ Риск перманентного бана высокий."
+            )
+            critical_count += 1
+            health_tips.add("proxy_check")
+        elif trust < 0.3:
+            hs_line = f"   ↳ Health score: {health_s:.0f}/100\n" if health_s else ""
+            recs.append(
+                f"🔴 <b>{name}</b> — trust {trust:.2f} (критично).\n"
+                f"{hs_line}"
+                "   ↳ Дайте отдохнуть 48-72ч без операций.\n"
+                "   ↳ Проверьте вручную — возможен shadowban."
+            )
+            critical_count += 1
+            health_tips.add("shadowban_check")
+        elif trust < 0.6:
+            hs_line = f"   ↳ Health score: {health_s:.0f}/100\n" if health_s else ""
+            recs.append(
+                f"🟡 <b>{name}</b> — trust {trust:.2f} (низкий).\n"
+                f"{hs_line}"
+                f"   ↳ Снизьте интенсивность на 50%.\n"
+                f"   ↳ Только read-only операции 24ч.\n"
+                f"   ↳ Warmup state: {warmup}"
+            )
+            health_tips.add("intensity_reduce")
+        elif flood_cnt > 5:
+            avg_trust = float(acc["trust_score"] or 0)
+            recs.append(
+                f"🟡 <b>{name}</b> — {flood_cnt} flood-событий за 7д.\n"
+                "   ↳ Увеличьте задержки до 60-90s.\n"
+                "   ↳ Используйте pacing_mode=safe.\n"
+                "   ↳ Чередуйте с другими аккаунтами."
+            )
+            health_tips.add("pacing_safe")
+
+    # Health-aware general recommendations
+    general: list[str] = []
+    if len(accounts) == 0:
+        general.append("ℹ️ Нет подключённых аккаунтов.\n   Добавьте через Infrastructure → 📱 Аккаунты.")
+    elif critical_count == 0 and not recs:
+        general.append("✅ <b>Все аккаунты в норме</b> — проблем не обнаружено.")
+        general.append("💪 Продолжайте соблюдать safe pacing и мониторинг.")
+
+    if flood_7d_total > 20:
+        general.append(
+            f"⚠️ <b>Высокая flood-активность</b>: {flood_7d_total} событий за неделю.\n"
+            "   ↳ Снизьте параллельность операций.\n"
+            "   ↳ Используйте pacing_mode=safe (120-180s задержки).\n"
+            "   ↳ Проверьте расписания на предмет пересечений."
+        )
+
+    active_count = sum(1 for a in accounts if a["is_active"])
+    low_trust = sum(1 for a in accounts if float(a["trust_score"] or 1) < 0.5)
+    if active_count > 0 and low_trust / active_count > 0.5:
+        general.append(
+            "🔴 <b>Критическая ситуация</b>: >50% аккаунтов с низким trust.\n"
+            "   ↳ Приостановите ВСЕ bulk-операции на 48 часов.\n"
+            "   ↳ Запустите 🔄 Авто-ротацию для защиты аккаунтов.\n"
+            "   ↳ Проверьте прокси — возможно, они скомпрометированы."
+        )
+
+    lines = ["💡 <b>Рекомендации по здоровью аккаунтов</b>\n"]
+    if general:
+        lines.extend(general)
+    if recs:
+        if general:
+            lines.append("")
+        lines.extend(recs)
+
+    # Health tips based on detected patterns
+    if health_tips:
+        tips_text = []
+        if "relog" in health_tips:
+            tips_text.append("💡 <b>Совет:</b> Используйте кнопку 🔄 Релог в списке аккаунтов для быстрого переподключения.")
+        if "proxy_check" in health_tips:
+            tips_text.append("💡 <b>Совет:</b> Проверьте прокси в Infrastructure → 🌐 Прокси. Скомпрометированные IP снижают trust.")
+        if "shadowban_check" in health_tips:
+            tips_text.append("💡 <b>Совет:</b> Откройте Visibility → 🔔 Алерты — проверьте restriction events.")
+        if "intensity_reduce" in health_tips:
+            tips_text.append("💡 <b>Совет:</b> Используйте pacing_mode=safe в bulk-операциях для автоматических безопасных задержек.")
+        if "pacing_safe" in health_tips:
+            tips_text.append("💡 <b>Совет:</b> При создании каналов/групп выбирайте темп «Безопасный» для минимального риска.")
+        if tips_text:
+            lines.append("")
+            lines.append("─" * 10)
+            lines.extend(tips_text)
+
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3750] + "\n\n<i>... и другие аккаунты</i>"
+
+    kb = _back_kb()
+    kb.button(text="🔄 Авто-ротация", callback_data=HealthCb(action="auto_rotate_confirm"))
+    kb.button(text="🔄 Обновить", callback_data=HealthCb(action="recommendations"))
+    kb.adjust(1)
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
+
+
+# ── Auto-rotation ──────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "auto_rotate_confirm"))
+async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Show confirmation before auto-rotating unhealthy accounts."""
+    await callback.answer()
+    user_id = callback.from_user.id
+    now = datetime.now(timezone.utc)
+
+    critical = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND trust_score < 0.3",
+        user_id,
+    ) or 0
+    low = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6",
+        user_id,
+    ) or 0
+    cooldown = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > now()",
+        user_id,
+    ) or 0
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить авто-ротацию", callback_data=HealthCb(action="auto_rotate"))
+    kb.button(text="❌ Отмена", callback_data=HealthCb(action="recommendations"))
+    kb.adjust(1)
+
+    await safe_edit(
+        callback,
+        "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
+        "Система проверит все аккаунты и применит защитные меры:\n\n"
+        f"🔴 Критически низкий trust (<0.3): <b>{critical}</b> акк.\n"
+        "   → Поставить кулдаун 72 часа\n"
+        f"🟡 Низкий trust (0.3–0.6): <b>{low}</b> акк.\n"
+        "   → Поставить кулдаун 24 часа\n"
+        f"🌊 Уже в кулдауне: <b>{cooldown}</b> акк.\n"
+        "   → Пропустить\n\n"
+        "⚠️ Аккаунты в кулдауне не будут использоваться для операций автоматически.",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(HealthCb.filter(F.action == "auto_rotate"))
+async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Execute auto-rotation: apply cooldowns to low-trust accounts."""
+    await callback.answer("⏳ Ротирую аккаунты...")
+    user_id = callback.from_user.id
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+
+    # Critical: trust < 0.3 → 72h cooldown
+    critical_updated = await pool.execute(
+        "UPDATE tg_accounts SET cooldown_until = $1 "
+        "WHERE owner_id=$2 AND is_active=TRUE AND trust_score < 0.3 "
+        "AND (cooldown_until IS NULL OR cooldown_until < now())",
+        now + timedelta(hours=72), user_id,
+    )
+    # Low: trust 0.3–0.6 → 24h cooldown
+    low_updated = await pool.execute(
+        "UPDATE tg_accounts SET cooldown_until = $1 "
+        "WHERE owner_id=$2 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6 "
+        "AND (cooldown_until IS NULL OR cooldown_until < now())",
+        now + timedelta(hours=24), user_id,
+    )
+
+    def _count(pg_result: str) -> int:
+        try:
+            return int(pg_result.split()[-1])
+        except Exception:
+            return 0
+
+    crit_n = _count(critical_updated)
+    low_n = _count(low_updated)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❤️ К панели здоровья", callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+    await safe_edit(
+        callback,
+        "✅ <b>Авто-ротация выполнена</b>\n\n"
+        f"🔴 Критических → 72ч кулдаун: <b>{crit_n}</b>\n"
+        f"🟡 С низким trust → 24ч кулдаун: <b>{low_n}</b>\n\n"
+        "Эти аккаунты не будут использоваться в операциях до окончания кулдауна.\n"
+        "Trust score восстановится со временем при отсутствии операций.",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── CSV Export ─────────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "export_csv"))
+async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Export account health data as CSV file."""
+    user_id = callback.from_user.id
+    now = datetime.now(timezone.utc)
+
+    accounts = await pool.fetch(
+        """SELECT phone, first_name, username, trust_score, is_active,
+                  cooldown_until, flood_count_7d, device_model, added_at
+           FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score DESC NULLS LAST""",
+        user_id,
+    )
+    if not accounts:
+        await callback.answer("Нет аккаунтов для экспорта", show_alert=True)
+        return
+    await callback.answer("⏳ Генерирую CSV...")
+
+    try:
+        flood_map: dict[str, int] = {}
+        flood_rows = await pool.fetch(
+            """SELECT ta.phone, COUNT(afl.id) AS cnt
+               FROM account_flood_log afl
+               JOIN tg_accounts ta ON ta.id = afl.account_id
+               WHERE ta.owner_id=$1 AND afl.created_at > now() - interval '7 days'
+               GROUP BY ta.phone""",
+            user_id,
+        )
+        for r in flood_rows:
+            flood_map[r["phone"] or ""] = int(r["cnt"])
+    except Exception:
+        flood_map = {}
+
+    import csv
+    import io
+    from aiogram.types import BufferedInputFile
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "phone", "first_name", "username", "trust_score", "status",
+        "cooldown_until", "flood_events_7d", "device_model", "added_at",
+    ])
+    for acc in accounts:
+        cd = acc["cooldown_until"]
+        in_cooldown = bool(cd and cd.replace(tzinfo=timezone.utc) > now)
+        status = "cooldown" if in_cooldown else ("active" if acc["is_active"] else "inactive")
+        writer.writerow([
+            acc["phone"] or "",
+            acc["first_name"] or "",
+            acc["username"] or "",
+            f"{float(acc['trust_score'] or 0):.2f}",
+            status,
+            cd.strftime("%Y-%m-%d %H:%M") if cd else "",
+            flood_map.get(acc["phone"] or "", 0),
+            acc["device_model"] or "",
+            acc["added_at"].strftime("%Y-%m-%d") if acc.get("added_at") else "",
+        ])
+
+    data = buf.getvalue().encode("utf-8-sig")
+    file = BufferedInputFile(data, filename="account_health.csv")
+    await callback.message.answer_document(
+        file,
+        caption=(
+            "📥 <b>Экспорт здоровья аккаунтов</b>\n"
+            f"Всего: {len(accounts)} аккаунтов\n"
+            "<i>trust_score, status, flood за 7 дней, device_model</i>"
+        ),
+        parse_mode="HTML",
+    )

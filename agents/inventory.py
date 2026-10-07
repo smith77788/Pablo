@@ -1,4 +1,5 @@
 """Inventory monitoring and management agent for BASIC.FOOD."""
+
 from __future__ import annotations
 from agents.base import BaseAgent
 from tools.database_tools import (
@@ -118,7 +119,9 @@ class InventoryAgent(BaseAgent):
             "Підготуй список для поповнення з рекомендованою кількістю, враховуючи темп продажів за останні 30 днів."
         )
 
-    def receive_stock(self, product_id: str, quantity: int, reason: str = "Надходження товару") -> str:
+    def receive_stock(
+        self, product_id: str, quantity: int, reason: str = "Надходження товару"
+    ) -> str:
         return self.run(
             f"Зареєструй надходження {quantity} одиниць товару з ID {product_id}. "
             f"Причина: {reason}. Оновити залишок і підтвердити."

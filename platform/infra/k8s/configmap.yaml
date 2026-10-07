@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+  namespace: tg-platform
+data:
+  CLICKHOUSE_URL: "http://clickhouse:8123"
+  CLICKHOUSE_DATABASE: "tgplatform"
+  CLICKHOUSE_USER: "default"
+  CLICKHOUSE_PASSWORD: ""
+  REDIS_URL: "redis://redis:6379"
+  NODE_ENV: "production"
+  GATEWAY_PORT: "3001"
+  API_PORT: "3002"
+  WORKER_PORT: "3003"
