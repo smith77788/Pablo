@@ -8,6 +8,7 @@ snapshot композит: флот+губернатор, операции, гр
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 log = logging.getLogger(__name__)
@@ -15,24 +16,46 @@ log = logging.getLogger(__name__)
 HOT_TAGS = ["горячий", "интерес-цена"]
 HOT_STAGES = ("proposal", "negotiation")
 
+# Потолок на ОДНУ секцию снимка. Секции независимы и fail-soft, поэтому зависшая
+# подсистема (медленный запрос, недоступный сервис) не должна держать весь пульс
+# до клиентского таймаута «Сервер не отвечает (30с)»: лучше пульс без одной
+# секции, чем пустой экран. Общий бюджет снимка ≈ этому потолку, т.к. секции
+# идут параллельно.
+_SECTION_TIMEOUT_S = 12.0
+
 
 async def snapshot(pool, owner_id: int) -> dict:
-    return {
-        "fleet": await _fleet(pool, owner_id),
-        "ops": await _ops(pool, owner_id),
-        "graph": await _graph(pool, owner_id),
-        "vault": await _vault(pool, owner_id),
-        "goal": await _goal(pool, owner_id),
-        "growth": await _growth(pool, owner_id),
-        "seo": await _seo(pool, owner_id),
-        "retention": await _retention(pool, owner_id),
-        "anomalies": await _anomalies(pool, owner_id),
-        "invite_chats": await _invite_chats(pool, owner_id),
-        "bots": await _bots(pool, owner_id),
-        "chat_warmup": await _chat_warmup(pool, owner_id),
-        "events_24h": await _events(pool, owner_id),
-        "vlayer": await _vlayer(pool, owner_id),
-    }
+    # Секции собираются ПАРАЛЛЕЛЬНО, а не одна за другой. Их 14, каждая делает по
+    # несколько запросов и дёргает подсистемы (губернатор, vault, geo, sentry);
+    # последовательно на крупном флоте (десятки ботов/аккаунтов, сотни каналов)
+    # это суммировалось в >30с — и «Пульс» падал по таймауту клиента. Секции
+    # независимы и fail-soft (см. докстринг модуля), поэтому gather безопасен, а
+    # общий бюджет снимка сжимается с суммы до самой долгой секции. На каждую —
+    # свой потолок: зависшая подсистема не утягивает весь пульс.
+    _sections = (
+        ("fleet", _fleet), ("ops", _ops), ("graph", _graph), ("vault", _vault),
+        ("goal", _goal), ("growth", _growth), ("seo", _seo),
+        ("retention", _retention), ("anomalies", _anomalies),
+        ("invite_chats", _invite_chats), ("bots", _bots),
+        ("chat_warmup", _chat_warmup), ("events_24h", _events),
+        ("vlayer", _vlayer),
+    )
+
+    async def _run(name, fn):
+        try:
+            return await asyncio.wait_for(
+                fn(pool, owner_id), timeout=_SECTION_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            log.warning("world.snapshot: секция %s не успела за %.0fс",
+                        name, _SECTION_TIMEOUT_S)
+            return {}
+        except Exception:
+            log.debug("world.snapshot: секция %s упала owner=%s", name, owner_id)
+            return {}
+
+    results = await asyncio.gather(
+        *(_run(name, fn) for name, fn in _sections))
+    return {name: res for (name, _), res in zip(_sections, results)}
 
 
 async def _vlayer(pool, owner_id: int) -> dict:
