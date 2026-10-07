@@ -3058,11 +3058,21 @@ async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
         result, checked_at = cached
         if now - checked_at < _CANCEL_CACHE_TTL:
             return result
-    row = await _safe_fetchrow(
-        pool, "SELECT status FROM operation_queue WHERE id=$1", op_id,
-        log_ctx=f"[is_cancelled op={op_id}]",
-    )
-    result = bool(row and row["status"] == "cancelled")
+    # Прямой запрос (не _safe_fetchrow): нам нужно ОТЛИЧИТЬ «строки нет» (операция
+    # удалена) от «ошибка БД». _safe_fetchrow в обоих случаях вернул бы None.
+    try:
+        row = await pool.fetchrow(
+            "SELECT status FROM operation_queue WHERE id=$1", op_id)
+    except Exception as e:
+        # Транзиентная ошибка БД: НЕ трактуем как отмену — рвать живую операцию
+        # из-за сетевого блипа опаснее, чем разок не заметить отмену (заметим на
+        # следующей проверке). Отдаём прошлый кэш либо «не отменена».
+        log.warning("op_worker is_cancelled op=%d DB error: %s", op_id, e)
+        return cached[0] if cached is not None else False
+    # Строки НЕТ = операция удалена владельцем → задача обязана остановиться.
+    # Раньше row=None давал False, и удалённая операция доигрывала до конца
+    # (жалоба: «исполняются давно удалённые/отменённые операции»).
+    result = (row is None) or (row["status"] == "cancelled")
     _cancel_cache[op_id] = (result, now)
     return result
 

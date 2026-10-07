@@ -7639,6 +7639,11 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
       _raw = ((location.hash || '').replace(/^#/, '').split('&')
                 .find(p => p && !p.startsWith('tgWebApp')) || '').trim();
     }
+    // Telegram доклеивает свои tgWebApp*-параметры к нашему сегменту и через «&»,
+    // и через «?» (видели «health?tgWebAppData=…»). Разбиваем по ОБОИМ разделителям
+    // и берём наш токен (не tgWebApp*), иначе kind получается мусором и «Открыть»
+    // ругается «Не знаю раздела «health?tgWebAppData=quer»».
+    _raw = (_raw.split(/[?&]/).find(p => p && !p.startsWith('tgWebApp')) || '').trim();
     const _ci = _raw.indexOf(':');
     const _screen = _ci > 0 ? _raw.slice(0, _ci) : _raw;
     const _param = _ci > 0 ? _raw.slice(_ci + 1) : null;
