@@ -28,11 +28,13 @@ client.interceptors.response.use(
   },
 );
 
+// The response interceptor unwraps `response.data`, so each method resolves to
+// the payload itself (typed as `any`), not an AxiosResponse.
 export const api = {
-  get: (url: string) => client.get(url),
-  post: (url: string, data?: unknown) => client.post(url, data),
-  patch: (url: string, data?: unknown) => client.patch(url, data),
-  delete: (url: string) => client.delete(url),
+  get: (url: string): Promise<any> => client.get(url),
+  post: (url: string, data?: unknown): Promise<any> => client.post(url, data),
+  patch: (url: string, data?: unknown): Promise<any> => client.patch(url, data),
+  delete: (url: string): Promise<any> => client.delete(url),
 };
 
 export const authApi = api;

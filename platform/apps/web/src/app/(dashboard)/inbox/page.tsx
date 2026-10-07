@@ -4,15 +4,16 @@ import { useState, useEffect, useRef } from 'react';
 import { authApi } from '@/lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Send, User, Clock, CheckCircle, MessageSquare } from 'lucide-react';
-import clsx from 'clsx';
+import { Send, ChevronLeft, CheckCircle, MessageSquare } from 'lucide-react';
 import io from 'socket.io-client';
+import { cn, Button, Avatar, Segmented, StatusBadge } from '@/components/ui';
+import { haptic } from '@/lib/telegram';
 
 export default function InboxPage() {
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [text, setText] = useState('');
-  const [filter, setFilter] = useState('OPEN');
+  const [filter, setFilter] = useState<'OPEN' | 'PENDING' | 'RESOLVED'>('OPEN');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations } = useQuery({
@@ -30,19 +31,24 @@ export default function InboxPage() {
 
   const sendMsg = useMutation({
     mutationFn: (t: string) => authApi.post(`/conversations/${selectedId}/messages`, { text: t }),
-    onSuccess: () => { setText(''); qc.invalidateQueries({ queryKey: ['conversation', selectedId] }); },
+    onSuccess: () => {
+      setText('');
+      qc.invalidateQueries({ queryKey: ['conversation', selectedId] });
+    },
   });
 
   const resolve = useMutation({
     mutationFn: () => authApi.patch(`/conversations/${selectedId}/status`, { status: 'RESOLVED' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      setSelectedId(null);
+    },
   });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conv?.messages]);
 
-  // WebSocket for real-time
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -51,95 +57,101 @@ export default function InboxPage() {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       if (selectedId) qc.invalidateQueries({ queryKey: ['conversation', selectedId] });
     });
-    return () => { socket.disconnect(); };
+    return () => {
+      socket.disconnect();
+    };
   }, [selectedId, qc]);
 
   const items = conversations?.items ?? [];
-  const STATUS_COLORS: Record<string, string> = { OPEN: 'bg-green-100 text-green-700', PENDING: 'bg-yellow-100 text-yellow-700', RESOLVED: 'bg-slate-100 text-slate-500' };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-[calc(100dvh-164px)] md:h-[calc(100dvh-100px)]">
       {/* Conversation list */}
-      <div className="w-80 border-r border-slate-200 bg-white flex flex-col">
-        <div className="p-4 border-b border-slate-100">
-          <h1 className="font-semibold text-slate-800 mb-3">Входящие</h1>
-          <div className="flex gap-1">
-            {['OPEN','PENDING','RESOLVED'].map((s) => (
-              <button key={s} onClick={() => setFilter(s)}
-                className={clsx('flex-1 text-xs py-1 rounded font-medium',
-                  filter === s ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}>
-                {s === 'OPEN' ? 'Открытые' : s === 'PENDING' ? 'Ожидание' : 'Решено'}
-              </button>
-            ))}
-          </div>
+      <div
+        className={cn(
+          'flex w-full flex-col border-r border-line bg-surface md:w-80',
+          selectedId && 'hidden md:flex',
+        )}
+      >
+        <div className="border-b border-line p-3">
+          <Segmented
+            value={filter}
+            onChange={setFilter}
+            className="w-full"
+            options={[
+              { value: 'OPEN', label: 'Открытые' },
+              { value: 'PENDING', label: 'Ожидание' },
+              { value: 'RESOLVED', label: 'Решено' },
+            ]}
+          />
         </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+        <div className="flex-1 divide-y divide-line overflow-y-auto">
           {items.map((c: any) => (
-            <button key={c.id} onClick={() => setSelectedId(c.id)}
-              className={clsx('w-full p-4 text-left hover:bg-slate-50 transition-colors',
-                selectedId === c.id && 'bg-sky-50 border-r-2 border-sky-500')}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-slate-800 truncate">
-                  {c.user?.username ? `@${c.user.username}` : c.user?.firstName ?? 'Аноним'}
-                </span>
-                <span className="text-xs text-slate-400">
-                  {c.lastMessageAt ? formatDistanceToNow(new Date(c.lastMessageAt), { locale: ru, addSuffix: true }) : ''}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500 truncate">{c.bot?.username ? `@${c.bot.username}` : c.bot?.firstName}</span>
-                <span className={clsx('text-xs px-1.5 py-0.5 rounded font-medium', STATUS_COLORS[c.status] ?? '')}>{c.status}</span>
-              </div>
-              {c.messages?.[0] && (
-                <p className="text-xs text-slate-400 mt-1 truncate">{c.messages[0].text}</p>
+            <button
+              key={c.id}
+              onClick={() => {
+                haptic('select');
+                setSelectedId(c.id);
+              }}
+              className={cn(
+                'flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-surface-2',
+                selectedId === c.id && 'bg-accent-weak',
               )}
+            >
+              <Avatar name={c.user?.username ?? c.user?.firstName ?? '?'} size={40} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold text-fg">
+                    {c.user?.username ? `@${c.user.username}` : c.user?.firstName ?? 'Аноним'}
+                  </span>
+                  <span className="shrink-0 text-2xs text-fg-hint">
+                    {c.lastMessageAt ? formatDistanceToNow(new Date(c.lastMessageAt), { locale: ru }) : ''}
+                  </span>
+                </div>
+                <p className="truncate text-xs text-fg-hint">{c.messages?.[0]?.text ?? c.bot?.username ?? ''}</p>
+              </div>
             </button>
           ))}
           {items.length === 0 && (
-            <div className="p-8 text-center text-slate-400 text-sm">Нет диалогов</div>
+            <div className="p-10 text-center text-sm text-fg-hint">Нет диалогов</div>
           )}
         </div>
       </div>
 
       {/* Chat area */}
       {selectedId && conv ? (
-        <div className="flex-1 flex flex-col">
-          {/* Header */}
-          <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-sky-100 rounded-full flex items-center justify-center">
-                <User size={16} className="text-sky-600" />
-              </div>
-              <div>
-                <p className="font-medium text-slate-800 text-sm">
-                  {conv.user?.username ? `@${conv.user.username}` : conv.user?.firstName ?? 'Аноним'}
-                </p>
-                <p className="text-xs text-slate-400">{conv.bot?.username ? `@${conv.bot.username}` : conv.bot?.firstName}</p>
-              </div>
+        <div className="flex flex-1 flex-col bg-bg">
+          <div className="flex items-center gap-3 border-b border-line bg-surface p-3">
+            <button onClick={() => setSelectedId(null)} className="rounded-lg p-1 text-fg-muted hover:bg-surface-2 md:hidden">
+              <ChevronLeft size={20} />
+            </button>
+            <Avatar name={conv.user?.username ?? conv.user?.firstName ?? '?'} size={38} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-fg">
+                {conv.user?.username ? `@${conv.user.username}` : conv.user?.firstName ?? 'Аноним'}
+              </p>
+              <p className="truncate text-xs text-fg-hint">{conv.bot?.username ? `@${conv.bot.username}` : conv.bot?.firstName}</p>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => resolve.mutate()}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 text-xs font-medium rounded-lg hover:bg-green-100">
-                <CheckCircle size={13} /> Закрыть
-              </button>
-            </div>
+            <Button size="sm" variant="success" onClick={() => resolve.mutate()}>
+              <CheckCircle size={14} /> Закрыть
+            </Button>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
             {(conv.messages ?? []).map((m: any) => (
-              <div key={m.id} className={clsx('flex', m.direction === 'OUTBOUND' ? 'justify-end' : 'justify-start')}>
-                <div className={clsx(
-                  'max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm',
-                  m.direction === 'OUTBOUND'
-                    ? 'bg-sky-500 text-white rounded-tr-sm'
-                    : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm'
-                )}>
-                  {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
-                  {!m.text && m.type && <p className="italic opacity-70">[{m.type}]</p>}
-                  <p className={clsx('text-xs mt-1', m.direction === 'OUTBOUND' ? 'text-sky-200' : 'text-slate-400')}>
+              <div key={m.id} className={cn('flex', m.direction === 'OUTBOUND' ? 'justify-end' : 'justify-start')}>
+                <div
+                  className={cn(
+                    'max-w-[78%] rounded-2xl px-3.5 py-2 text-sm',
+                    m.direction === 'OUTBOUND'
+                      ? 'rounded-tr-sm bg-accent text-accent-fg'
+                      : 'rounded-tl-sm border border-line bg-surface text-fg',
+                  )}
+                >
+                  {m.text ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : <p className="italic opacity-70">[{m.type}]</p>}
+                  <p className={cn('mt-1 text-2xs', m.direction === 'OUTBOUND' ? 'text-accent-fg/70' : 'text-fg-hint')}>
                     {new Date(m.sentAt).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
-                    {m.direction === 'OUTBOUND' && <span> · {m.senderType === 'OPERATOR' ? 'Оператор' : 'Бот'}</span>}
+                    {m.direction === 'OUTBOUND' && ` · ${m.senderType === 'OPERATOR' ? 'Оператор' : 'Бот'}`}
                   </p>
                 </div>
               </div>
@@ -147,25 +159,29 @@ export default function InboxPage() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input */}
-          <div className="p-4 border-t border-slate-200 bg-white">
-            <div className="flex gap-2">
+          <div className="border-t border-line bg-surface p-3 pb-safe">
+            <div className="flex items-end gap-2">
               <textarea
-                value={text} onChange={e => setText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (text.trim()) sendMsg.mutate(text.trim()); } }}
-                placeholder="Напишите сообщение... (Enter — отправить)"
-                rows={2}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:border-sky-500 resize-none"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (text.trim()) sendMsg.mutate(text.trim());
+                  }
+                }}
+                placeholder="Сообщение… (Enter — отправить)"
+                rows={1}
+                className="max-h-32 min-h-[44px] flex-1 resize-none rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-sm text-fg outline-none focus:border-accent focus:bg-surface focus:ring-2 focus:ring-[var(--ring)]"
               />
-              <button onClick={() => text.trim() && sendMsg.mutate(text.trim())} disabled={!text.trim() || sendMsg.isPending}
-                className="px-4 bg-sky-500 hover:bg-sky-600 text-white rounded-xl flex items-center justify-center disabled:opacity-40 transition-colors">
-                <Send size={16} />
-              </button>
+              <Button size="icon" onClick={() => text.trim() && sendMsg.mutate(text.trim())} disabled={!text.trim() || sendMsg.isPending} className="h-11 w-11">
+                <Send size={17} />
+              </Button>
             </div>
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center text-slate-400">
+        <div className="hidden flex-1 items-center justify-center text-fg-hint md:flex">
           <div className="text-center">
             <MessageSquare size={40} className="mx-auto mb-3 opacity-30" />
             <p className="text-sm">Выберите диалог</p>

@@ -2,7 +2,21 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { authApi } from '@/lib/api';
-import { Zap, Plus, Trash2, ToggleLeft, ToggleRight, X } from 'lucide-react';
+import { Zap, Plus, Trash2, MessageSquare, Tag, Webhook } from 'lucide-react';
+import {
+  PageHeader,
+  Button,
+  Card,
+  Badge,
+  Sheet,
+  Input,
+  Textarea,
+  Select,
+  Label,
+  EmptyState,
+  useToast,
+  cn,
+} from '@/components/ui';
 
 interface AutomationItem {
   id: string;
@@ -20,382 +34,214 @@ const TRIGGER_LABELS: Record<string, string> = {
   keyword: 'Ключевое слово',
   user_joined: 'Новый пользователь',
 };
-
-const ACTION_LABELS: Record<string, string> = {
-  send_message: 'Отправить сообщение',
-  add_tag: 'Добавить тег',
-  webhook: 'Вебхук',
+const ACTION_META: Record<string, { label: string; Icon: typeof MessageSquare }> = {
+  send_message: { label: 'Сообщение', Icon: MessageSquare },
+  add_tag: { label: 'Тег', Icon: Tag },
+  webhook: { label: 'Вебхук', Icon: Webhook },
 };
 
-const MOCK_AUTOMATIONS: AutomationItem[] = [
-  {
-    id: 'mock-1',
-    name: 'Приветствие новых',
-    triggerType: 'user_joined',
-    actionType: 'send_message',
-    actionPayload: 'Добро пожаловать! Чем могу помочь?',
-    isActive: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'mock-2',
-    name: 'Тег по ключевому слову',
-    triggerType: 'keyword',
-    keyword: 'цена',
-    actionType: 'add_tag',
-    actionPayload: 'interested',
-    isActive: false,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'mock-3',
-    name: 'Уведомление на вебхук',
-    triggerType: 'message_received',
-    actionType: 'webhook',
-    actionPayload: 'https://example.com/webhook',
-    isActive: true,
-    createdAt: new Date().toISOString(),
-  },
+const MOCK: AutomationItem[] = [
+  { id: 'm1', name: 'Приветствие новых', triggerType: 'user_joined', actionType: 'send_message', actionPayload: 'Добро пожаловать! Чем могу помочь?', isActive: true, createdAt: '' },
+  { id: 'm2', name: 'Тег по ключевому слову', triggerType: 'keyword', keyword: 'цена', actionType: 'add_tag', actionPayload: 'interested', isActive: false, createdAt: '' },
+  { id: 'm3', name: 'Уведомление на вебхук', triggerType: 'message_received', actionType: 'webhook', actionPayload: 'https://example.com/webhook', isActive: true, createdAt: '' },
 ];
+
+const EMPTY_FORM = { name: '', triggerType: 'message_received', keyword: '', actionType: 'send_message', actionPayload: '' };
 
 export default function AutomationsPage() {
   const qc = useQueryClient();
-
+  const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<AutomationItem | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  // Form state
-  const [formName, setFormName] = useState('');
-  const [formTriggerType, setFormTriggerType] = useState('message_received');
-  const [formKeyword, setFormKeyword] = useState('');
-  const [formActionType, setFormActionType] = useState('send_message');
-  const [formActionPayload, setFormActionPayload] = useState('');
-
-  const { data: automations, isError } = useQuery<AutomationItem[]>({
+  const { data, isError } = useQuery<AutomationItem[]>({
     queryKey: ['automations'],
     queryFn: () => authApi.get('/automations'),
   });
+  const rules = isError ? MOCK : data ?? [];
 
-  const displayAutomations: AutomationItem[] = isError
-    ? MOCK_AUTOMATIONS
-    : (automations ?? []);
-
-  const createAutomation = useMutation({
+  const create = useMutation({
     mutationFn: () =>
       authApi.post('/automations', {
-        name: formName,
-        triggerType: formTriggerType,
-        keyword: formTriggerType === 'keyword' ? formKeyword : undefined,
-        actionType: formActionType,
-        actionPayload: formActionPayload,
+        name: form.name,
+        triggerType: form.triggerType,
+        keyword: form.triggerType === 'keyword' ? form.keyword : undefined,
+        actionType: form.actionType,
+        actionPayload: form.actionPayload,
       }),
     onSuccess: () => {
-      setFormName('');
-      setFormTriggerType('message_received');
-      setFormKeyword('');
-      setFormActionType('send_message');
-      setFormActionPayload('');
+      setForm(EMPTY_FORM);
       setAdding(false);
+      toast('Правило создано', 'success');
       qc.invalidateQueries({ queryKey: ['automations'] });
     },
+    onError: () => toast('Ошибка при создании правила', 'error'),
   });
 
-  const toggleAutomation = useMutation({
+  const toggle = useMutation({
     mutationFn: (id: string) => authApi.patch(`/automations/${id}/toggle`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['automations'] });
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['automations'] }),
   });
 
-  const deleteAutomation = useMutation({
+  const remove = useMutation({
     mutationFn: (id: string) => authApi.delete(`/automations/${id}`),
     onSuccess: () => {
       setDeleteConfirm(null);
+      toast('Правило удалено', 'success');
       qc.invalidateQueries({ queryKey: ['automations'] });
     },
   });
 
-  const actionPayloadPlaceholder: Record<string, string> = {
-    send_message: 'Текст сообщения...',
-    add_tag: 'Название тега',
-    webhook: 'https://example.com/webhook',
-  };
-
-  const isFormValid =
-    formName.trim() &&
-    formActionPayload.trim() &&
-    (formTriggerType !== 'keyword' || formKeyword.trim());
+  const payloadLabel =
+    form.actionType === 'send_message' ? 'Текст сообщения' : form.actionType === 'add_tag' ? 'Название тега' : 'URL вебхука';
+  const valid = form.name.trim() && form.actionPayload.trim() && (form.triggerType !== 'keyword' || form.keyword.trim());
+  const set = (k: keyof typeof EMPTY_FORM, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-          <p className="text-sm text-slate-400 mt-0.5">Правила автоматических действий на события</p>
+    <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
+      <PageHeader
+        title="Автоматизации"
+        subtitle="Правила автодействий на события"
+        action={
+          <Button onClick={() => setAdding(true)}>
+            <Plus size={16} /> Добавить
+          </Button>
+        }
+      />
+
+      {rules.length === 0 ? (
+        <EmptyState
+          icon={<Zap size={26} />}
+          title="Нет правил"
+          description="Создайте первое правило автоматизации."
+          action={
+            <Button onClick={() => setAdding(true)}>
+              <Plus size={16} /> Создать правило
+            </Button>
+          }
+        />
+      ) : (
+        <div className="space-y-2.5">
+          {rules.map((r) => {
+            const am = ACTION_META[r.actionType] ?? { label: r.actionType, Icon: Zap };
+            return (
+              <Card key={r.id} className="flex items-center gap-3 p-3.5">
+                <span
+                  className={cn(
+                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
+                    r.isActive ? 'bg-accent-weak text-accent' : 'bg-surface-2 text-fg-hint',
+                  )}
+                >
+                  <Zap size={18} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-fg">{r.name}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <Badge tone="violet">{TRIGGER_LABELS[r.triggerType] ?? r.triggerType}</Badge>
+                    {r.triggerType === 'keyword' && r.keyword && <Badge tone="neutral">«{r.keyword}»</Badge>}
+                    <Badge tone="success">
+                      <am.Icon size={10} /> {am.label}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 truncate text-2xs text-fg-hint" title={r.actionPayload}>
+                    {r.actionPayload}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <button
+                    onClick={() => toggle.mutate(r.id)}
+                    disabled={toggle.isPending}
+                    className={cn('relative h-6 w-11 rounded-full transition-colors', r.isActive ? 'bg-accent' : 'bg-surface-2')}
+                    title={r.isActive ? 'Выключить' : 'Включить'}
+                  >
+                    <span className={cn('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all', r.isActive ? 'left-[22px]' : 'left-0.5')} />
+                  </button>
+                  <Button size="icon" variant="ghost" onClick={() => setDeleteConfirm(r)} title="Удалить" className="h-7 w-7">
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              </Card>
+            );
+          })}
         </div>
-        <button
-          onClick={() => setAdding(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-sky-500 text-white text-sm font-medium rounded-lg hover:bg-sky-600 transition-colors"
-        >
-          <Plus size={15} /> Добавить правило
-        </button>
-      </div>
+      )}
 
-      {/* Add Form */}
-      {adding && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-slate-700 text-sm">Новое правило</h2>
-            <button onClick={() => setAdding(false)} className="text-slate-400 hover:text-slate-600">
-              <X size={16} />
-            </button>
+      {/* Create sheet */}
+      <Sheet
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="Новое правило"
+        description="Если случится событие → выполнить действие"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAdding(false)}>
+              Отмена
+            </Button>
+            <Button onClick={() => create.mutate()} disabled={!valid} loading={create.isPending}>
+              Создать
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 py-1">
+          <div>
+            <Label>Название</Label>
+            <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Приветствие новых" />
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Name */}
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-medium text-slate-500 mb-1">Название</label>
-              <input
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="Например: Приветствие новых пользователей"
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
-              />
-            </div>
-
-            {/* Trigger Type */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Триггер</label>
-              <select
-                value={formTriggerType}
-                onChange={(e) => {
-                  setFormTriggerType(e.target.value);
-                  setFormKeyword('');
-                }}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 bg-white"
-              >
+              <Label>Триггер</Label>
+              <Select value={form.triggerType} onChange={(e) => { set('triggerType', e.target.value); set('keyword', ''); }}>
                 <option value="message_received">Любое сообщение</option>
                 <option value="keyword">Ключевое слово</option>
                 <option value="user_joined">Новый пользователь</option>
-              </select>
+              </Select>
             </div>
-
-            {/* Keyword (conditional) */}
-            {formTriggerType === 'keyword' && (
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Ключевое слово</label>
-                <input
-                  value={formKeyword}
-                  onChange={(e) => setFormKeyword(e.target.value)}
-                  placeholder="Например: цена"
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
-                />
-              </div>
-            )}
-
-            {/* Action Type */}
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Действие</label>
-              <select
-                value={formActionType}
-                onChange={(e) => setFormActionType(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 bg-white"
-              >
+              <Label>Действие</Label>
+              <Select value={form.actionType} onChange={(e) => set('actionType', e.target.value)}>
                 <option value="send_message">Отправить сообщение</option>
                 <option value="add_tag">Добавить тег</option>
                 <option value="webhook">Вызвать вебхук</option>
-              </select>
-            </div>
-
-            {/* Action Payload */}
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-medium text-slate-500 mb-1">
-                {formActionType === 'send_message'
-                  ? 'Текст сообщения'
-                  : formActionType === 'add_tag'
-                  ? 'Название тега'
-                  : 'URL вебхука'}
-              </label>
-              <textarea
-                value={formActionPayload}
-                onChange={(e) => setFormActionPayload(e.target.value)}
-                placeholder={actionPayloadPlaceholder[formActionType]}
-                rows={formActionType === 'send_message' ? 3 : 1}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none"
-              />
+              </Select>
             </div>
           </div>
-
-          {createAutomation.isError && (
-            <p className="text-red-500 text-sm">Ошибка при создании правила. Попробуйте снова.</p>
+          {form.triggerType === 'keyword' && (
+            <div>
+              <Label>Ключевое слово</Label>
+              <Input value={form.keyword} onChange={(e) => set('keyword', e.target.value)} placeholder="цена" />
+            </div>
           )}
+          <div>
+            <Label>{payloadLabel}</Label>
+            {form.actionType === 'send_message' ? (
+              <Textarea value={form.actionPayload} onChange={(e) => set('actionPayload', e.target.value)} placeholder="Текст сообщения…" />
+            ) : (
+              <Input value={form.actionPayload} onChange={(e) => set('actionPayload', e.target.value)} placeholder={form.actionType === 'add_tag' ? 'interested' : 'https://example.com/webhook'} />
+            )}
+          </div>
+        </div>
+      </Sheet>
 
-          <div className="flex gap-3 justify-end pt-1">
-            <button
-              onClick={() => setAdding(false)}
-              className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-            >
+      {/* Delete confirm */}
+      <Sheet
+        open={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        size="sm"
+        title="Удалить правило?"
+        description={`«${deleteConfirm?.name}» будет удалено. Действие необратимо.`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteConfirm(null)}>
               Отмена
-            </button>
-            <button
-              onClick={() => createAutomation.mutate()}
-              disabled={!isFormValid || createAutomation.isPending}
-              className="px-4 py-2 bg-sky-500 text-white text-sm font-medium rounded-lg disabled:opacity-40 hover:bg-sky-600 transition-colors"
-            >
-              {createAutomation.isPending ? 'Сохранение...' : 'Создать'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Mock data notice */}
-      {isError && (
-        <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 text-sm text-orange-600">
-          API недоступен — показаны демо-данные
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                Название
-              </th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                Триггер
-              </th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                Действие
-              </th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                Статус
-              </th>
-              <th className="px-5 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {displayAutomations.map((rule) => (
-              <tr key={rule.id} className="hover:bg-slate-50 transition-colors">
-                {/* Name */}
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-2">
-                    <span className="w-7 h-7 bg-sky-50 rounded-lg flex items-center justify-center shrink-0">
-                      <Zap size={13} className="text-sky-500" />
-                    </span>
-                    <div>
-                      <p className="font-medium text-slate-800">{rule.name}</p>
-                      {rule.triggerType === 'keyword' && rule.keyword && (
-                        <p className="text-xs text-slate-400">«{rule.keyword}»</p>
-                      )}
-                    </div>
-                  </div>
-                </td>
-
-                {/* Trigger */}
-                <td className="px-5 py-3.5">
-                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-50 text-violet-700">
-                    {TRIGGER_LABELS[rule.triggerType] ?? rule.triggerType}
-                  </span>
-                </td>
-
-                {/* Action */}
-                <td className="px-5 py-3.5">
-                  <div>
-                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-700">
-                      {ACTION_LABELS[rule.actionType] ?? rule.actionType}
-                    </span>
-                    <p className="text-xs text-slate-400 mt-1 max-w-[200px] truncate" title={rule.actionPayload}>
-                      {rule.actionPayload}
-                    </p>
-                  </div>
-                </td>
-
-                {/* Status */}
-                <td className="px-5 py-3.5">
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      rule.isActive
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-slate-100 text-slate-500'
-                    }`}
-                  >
-                    {rule.isActive ? 'Активно' : 'Выключено'}
-                  </span>
-                </td>
-
-                {/* Actions */}
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-1 justify-end">
-                    <button
-                      onClick={() => toggleAutomation.mutate(rule.id)}
-                      disabled={toggleAutomation.isPending}
-                      title={rule.isActive ? 'Выключить' : 'Включить'}
-                      className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${
-                        rule.isActive
-                          ? 'text-green-600 hover:bg-green-50'
-                          : 'text-slate-400 hover:bg-slate-100'
-                      }`}
-                    >
-                      {rule.isActive ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
-                    </button>
-                    <button
-                      onClick={() => setDeleteConfirm(rule)}
-                      title="Удалить"
-                      className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {displayAutomations.length === 0 && (
-          <div className="text-center py-12 text-slate-400">
-            <Zap size={36} className="mx-auto mb-3 opacity-30" />
-            <p>Нет правил автоматизации. Создайте первое.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Delete Confirmation Modal */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4 space-y-4">
-            <div className="flex items-start justify-between">
-              <h2 className="font-semibold text-slate-800 text-base">Удалить правило?</h2>
-              <button onClick={() => setDeleteConfirm(null)} className="text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-            <p className="text-sm text-slate-500">
-              Вы уверены, что хотите удалить правило{' '}
-              <span className="font-medium text-slate-700">«{deleteConfirm.name}»</span>? Это
-              действие необратимо.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={() => deleteAutomation.mutate(deleteConfirm.id)}
-                disabled={deleteAutomation.isPending}
-                className="px-4 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-40 transition-colors"
-              >
-                {deleteAutomation.isPending ? 'Удаление...' : 'Удалить'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </Button>
+            <Button variant="danger" onClick={() => deleteConfirm && remove.mutate(deleteConfirm.id)} loading={remove.isPending}>
+              Удалить
+            </Button>
+          </>
+        }
+      />
     </div>
   );
 }

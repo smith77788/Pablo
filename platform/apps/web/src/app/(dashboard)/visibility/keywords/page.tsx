@@ -1,6 +1,19 @@
 'use client';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Search, Plus, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import {
+  PageHeader,
+  Button,
+  Card,
+  Badge,
+  Sheet,
+  Input,
+  Select,
+  Label,
+  Segmented,
+  EmptyState,
+  useToast,
+} from '@/components/ui';
 
 interface Keyword {
   id: string;
@@ -12,174 +25,169 @@ interface Keyword {
   lastChecked: string;
 }
 
-const MOCK_KEYWORDS: Keyword[] = [
-  { id: '1', keyword: 'купить телеграм аккаунт', language: 'RU', group: 'Покупка', position: 2, delta: 3, lastChecked: '1 ч назад' },
-  { id: '2', keyword: 'телеграм прокси бесплатно', language: 'RU', group: 'Прокси', position: 1, delta: 5, lastChecked: '1 ч назад' },
-  { id: '3', keyword: 'telegram bot api python', language: 'EN', group: 'API', position: 3, delta: 2, lastChecked: '2 ч назад' },
-  { id: '4', keyword: 'telegram channel buy', language: 'EN', group: 'Покупка', position: 4, delta: -1, lastChecked: '2 ч назад' },
-  { id: '5', keyword: 'tg account farm', language: 'EN', group: 'Аккаунты', position: 2, delta: 6, lastChecked: '3 ч назад' },
-  { id: '6', keyword: 'купить бота телеграм', language: 'RU', group: 'Боты', position: 8, delta: -3, lastChecked: '3 ч назад' },
-  { id: '7', keyword: 'телеграм рассылка сервис', language: 'RU', group: 'Рассылки', position: 12, delta: -5, lastChecked: '4 ч назад' },
-  { id: '8', keyword: 'telegram spam tool', language: 'EN', group: 'Инструменты', position: 15, delta: 0, lastChecked: '5 ч назад' },
-  { id: '9', keyword: 'telegram automation', language: 'EN', group: 'Автоматизация', position: 6, delta: 1, lastChecked: '6 ч назад' },
+const INITIAL: Keyword[] = [
+  { id: '1', keyword: 'telegram каналы каталог', language: 'RU', group: 'Каталог', position: 2, delta: 3, lastChecked: '1 ч' },
+  { id: '2', keyword: 'telegram прокси', language: 'RU', group: 'Прокси', position: 1, delta: 5, lastChecked: '1 ч' },
+  { id: '3', keyword: 'telegram bot api python', language: 'EN', group: 'API', position: 3, delta: 2, lastChecked: '2 ч' },
+  { id: '4', keyword: 'telegram channel analytics', language: 'EN', group: 'Аналитика', position: 4, delta: -1, lastChecked: '2 ч' },
+  { id: '5', keyword: 'telegram automation', language: 'EN', group: 'Автоматизация', position: 2, delta: 6, lastChecked: '3 ч' },
+  { id: '6', keyword: 'telegram crm', language: 'RU', group: 'CRM', position: 8, delta: -3, lastChecked: '3 ч' },
+  { id: '7', keyword: 'telegram рассылка сервис', language: 'RU', group: 'Рассылки', position: 12, delta: -5, lastChecked: '4 ч' },
+  { id: '8', keyword: 'telegram scheduler', language: 'EN', group: 'Планировщик', position: 15, delta: 0, lastChecked: '5 ч' },
 ];
 
-function DeltaBadge({ delta }: { delta: number }) {
-  if (delta > 0) return (
-    <span className="flex items-center gap-0.5 text-green-600 font-medium text-xs">
-      <TrendingUp size={11} /> +{delta}
-    </span>
-  );
-  if (delta < 0) return (
-    <span className="flex items-center gap-0.5 text-red-600 font-medium text-xs">
-      <TrendingDown size={11} /> {delta}
-    </span>
-  );
+function Delta({ delta }: { delta: number }) {
+  if (delta > 0)
+    return (
+      <span className="flex items-center gap-0.5 text-xs font-semibold text-success">
+        <TrendingUp size={12} /> +{delta}
+      </span>
+    );
+  if (delta < 0)
+    return (
+      <span className="flex items-center gap-0.5 text-xs font-semibold text-danger">
+        <TrendingDown size={12} /> {delta}
+      </span>
+    );
   return (
-    <span className="flex items-center gap-0.5 text-slate-400 text-xs">
-      <Minus size={11} /> 0
+    <span className="flex items-center gap-0.5 text-xs text-fg-hint">
+      <Minus size={12} /> 0
     </span>
   );
 }
 
 export default function KeywordsPage() {
-  const [showForm, setShowForm] = useState(false);
+  const toast = useToast();
+  const [list, setList] = useState<Keyword[]>(INITIAL);
+  const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState('');
-  const [langFilter, setLangFilter] = useState('');
-  const [newKw, setNewKw] = useState({ keyword: '', language: 'RU', group: '' });
+  const [lang, setLang] = useState<'ALL' | 'RU' | 'EN' | 'DE' | 'UA'>('ALL');
+  const [form, setForm] = useState({ keyword: '', language: 'RU', group: '' });
 
-  const filtered = MOCK_KEYWORDS.filter((k) => {
-    if (search && !k.keyword.toLowerCase().includes(search.toLowerCase())) return false;
-    if (langFilter && k.language !== langFilter) return false;
-    return true;
-  });
+  const filtered = useMemo(
+    () =>
+      list.filter(
+        (k) =>
+          (lang === 'ALL' || k.language === lang) &&
+          (!search || k.keyword.toLowerCase().includes(search.toLowerCase())),
+      ),
+    [list, lang, search],
+  );
+
+  function add() {
+    if (!form.keyword) return;
+    setList((p) => [
+      {
+        id: String(Date.now()),
+        keyword: form.keyword,
+        language: form.language,
+        group: form.group || '—',
+        position: 0,
+        delta: 0,
+        lastChecked: 'только что',
+      },
+      ...p,
+    ]);
+    setForm({ keyword: '', language: 'RU', group: '' });
+    setAdding(false);
+    toast('Ключевое слово добавлено в отслеживание', 'success');
+  }
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Ключевые слова</h1>
-          <p className="text-sm text-slate-400 mt-0.5">Отслеживание позиций в поиске</p>
+    <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
+      <PageHeader
+        title="Ключевые слова"
+        subtitle="Отслеживание позиций в поиске"
+        action={
+          <Button onClick={() => setAdding(true)}>
+            <Plus size={16} /> Добавить
+          </Button>
+        }
+      />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-hint" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск…" className="pl-9" />
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white text-sm rounded-lg hover:bg-sky-700 transition-colors"
-        >
-          <Plus size={15} /> Добавить keyword
-        </button>
+        <Segmented
+          value={lang}
+          onChange={setLang}
+          options={[
+            { value: 'ALL', label: 'Все' },
+            { value: 'RU', label: 'RU' },
+            { value: 'EN', label: 'EN' },
+            { value: 'DE', label: 'DE' },
+          ]}
+        />
       </div>
 
-      {/* Add keyword form */}
-      {showForm && (
-        <div className="bg-white rounded-xl border border-sky-200 p-5">
-          <h3 className="font-semibold text-slate-800 mb-4">Новое ключевое слово</h3>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-1">
-              <label className="block text-xs font-medium text-slate-600 mb-1">Ключевое слово</label>
-              <input
-                type="text"
-                value={newKw.keyword}
-                onChange={(e) => setNewKw((f) => ({ ...f, keyword: e.target.value }))}
-                placeholder="telegram bot api"
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-300"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Язык</label>
-              <select
-                value={newKw.language}
-                onChange={(e) => setNewKw((f) => ({ ...f, language: e.target.value }))}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+      {filtered.length === 0 ? (
+        <EmptyState icon={<Search size={26} />} title="Ничего не найдено" description="Измените запрос или добавьте новое ключевое слово." />
+      ) : (
+        <div className="space-y-2.5">
+          {filtered.map((kw) => (
+            <Card key={kw.id} className="flex items-center gap-3 p-3.5">
+              <span
+                className="flex h-9 w-11 shrink-0 items-center justify-center rounded-lg text-sm font-bold tabular-nums"
+                style={{
+                  background: kw.position && kw.position <= 3 ? 'var(--success-weak)' : 'var(--surface-2)',
+                  color: kw.position && kw.position <= 3 ? 'var(--success)' : 'var(--fg-muted)',
+                }}
               >
+                {kw.position ? `#${kw.position}` : '—'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-fg">{kw.keyword}</p>
+                <div className="mt-1 flex items-center gap-2 text-2xs text-fg-hint">
+                  <Badge tone="neutral">{kw.language}</Badge>
+                  <span>{kw.group}</span>
+                  <span>· {kw.lastChecked}</span>
+                </div>
+              </div>
+              <Delta delta={kw.delta} />
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Sheet
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="Новое ключевое слово"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAdding(false)}>
+              Отмена
+            </Button>
+            <Button onClick={add} disabled={!form.keyword}>
+              Добавить
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 py-1">
+          <div>
+            <Label>Ключевое слово</Label>
+            <Input value={form.keyword} onChange={(e) => setForm((f) => ({ ...f, keyword: e.target.value }))} placeholder="telegram bot api" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Язык</Label>
+              <Select value={form.language} onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))}>
                 <option value="RU">RU</option>
                 <option value="EN">EN</option>
                 <option value="DE">DE</option>
                 <option value="UA">UA</option>
-              </select>
+              </Select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Группа</label>
-              <input
-                type="text"
-                value={newKw.group}
-                onChange={(e) => setNewKw((f) => ({ ...f, group: e.target.value }))}
-                placeholder="Покупка"
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-300"
-              />
+              <Label>Группа</Label>
+              <Input value={form.group} onChange={(e) => setForm((f) => ({ ...f, group: e.target.value }))} placeholder="Каталог" />
             </div>
           </div>
-          <div className="flex gap-2 mt-4">
-            <button className="px-4 py-2 bg-sky-600 text-white text-sm rounded-lg hover:bg-sky-700">Добавить</button>
-            <button onClick={() => setShowForm(false)} className="px-4 py-2 border border-slate-200 text-sm rounded-lg text-slate-600 hover:bg-slate-50">Отмена</button>
-          </div>
         </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Поиск по ключевым словам..."
-            className="w-full text-sm border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
-          />
-        </div>
-        <select
-          value={langFilter}
-          onChange={(e) => setLangFilter(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-300"
-        >
-          <option value="">Все языки</option>
-          <option value="RU">RU</option>
-          <option value="EN">EN</option>
-          <option value="DE">DE</option>
-        </select>
-        <span className="text-xs text-slate-400">{filtered.length} ключевых слов</span>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200">
-        <div className="p-4 border-b border-slate-100 flex items-center gap-2">
-          <Search size={15} className="text-slate-400" />
-          <h2 className="font-semibold text-slate-800">Keywords</h2>
-        </div>
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Ключевое слово</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Язык</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Группа</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Позиция</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Изменение</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Проверено</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {filtered.map((kw) => (
-              <tr key={kw.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-4 py-3 font-medium text-slate-800">{kw.keyword}</td>
-                <td className="px-4 py-3">
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{kw.language}</span>
-                </td>
-                <td className="px-4 py-3 text-slate-600">{kw.group}</td>
-                <td className="px-4 py-3">
-                  <span className={`font-bold ${kw.position <= 3 ? 'text-green-600' : kw.position <= 10 ? 'text-slate-800' : 'text-slate-400'}`}>
-                    #{kw.position}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <DeltaBadge delta={kw.delta} />
-                </td>
-                <td className="px-4 py-3 text-slate-400 text-xs">{kw.lastChecked}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      </Sheet>
     </div>
   );
 }

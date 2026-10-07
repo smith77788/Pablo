@@ -1,7 +1,9 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { LogIn } from 'lucide-react';
 import { api } from '@/lib/api';
+import { Button, Input, Label } from '@/components/ui';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,44 +14,74 @@ export default function LoginPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
       const data = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', data.accessToken);
       localStorage.setItem('refreshToken', data.refreshToken);
-      router.push('/inbox');
+      router.push('/dashboard');
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? 'Ошибка входа');
-    } finally { setLoading(false); }
+      setError(err?.response?.data?.message ?? 'Неверный email или пароль');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-slate-800 mb-2">TG Platform</h1>
-        <p className="text-slate-500 text-sm mb-6">Войдите в панель оператора</p>
-        <form onSubmit={submit} className="space-y-4">
-          <input
-            type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500"
-            required
-          />
-          <input
-            type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500"
-            required
-          />
-          {error && <p className="text-red-500 text-sm">{error}</p>}
-          <button
-            type="submit" disabled={loading}
-            className="w-full bg-sky-500 hover:bg-sky-600 text-white py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {loading ? 'Вход...' : 'Войти'}
-          </button>
+    <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-10">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-2xl font-bold text-accent-fg shadow-md">
+            i
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight text-fg">Infragram</h1>
+          <p className="mt-1 text-sm text-fg-muted">Операционная система Telegram-инфраструктуры</p>
+        </div>
+
+        <form
+          onSubmit={submit}
+          className="space-y-4 rounded-3xl border border-line bg-surface p-6 shadow-md"
+        >
+          <div>
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div>
+            <Label htmlFor="password">Пароль</Label>
+            <Input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {error && (
+            <p className="rounded-lg bg-danger-weak px-3 py-2 text-sm font-medium text-danger">
+              {error}
+            </p>
+          )}
+          <Button type="submit" size="lg" block loading={loading}>
+            <LogIn size={17} /> Войти
+          </Button>
         </form>
-        <p className="mt-4 text-center text-sm text-slate-500">
+
+        <p className="mt-5 text-center text-sm text-fg-muted">
           Нет аккаунта?{' '}
-          <a href="/register" className="text-sky-500 hover:underline">Зарегистрироваться</a>
+          <a href="/register" className="font-medium text-link hover:underline">
+            Зарегистрироваться
+          </a>
         </p>
       </div>
     </div>

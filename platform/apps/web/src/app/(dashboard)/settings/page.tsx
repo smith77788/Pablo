@@ -1,6 +1,19 @@
 'use client';
 import { useState } from 'react';
-import { Key, Plus, Trash2, X, Copy, Check, AlertTriangle } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, AlertTriangle, Moon, Sun, Monitor, Bell } from 'lucide-react';
+import {
+  PageHeader,
+  Button,
+  Card,
+  CardHeader,
+  Sheet,
+  Input,
+  Label,
+  EmptyState,
+  Segmented,
+  useToast,
+  cn,
+} from '@/components/ui';
 
 interface ApiKeyItem {
   id: string;
@@ -12,263 +25,244 @@ interface ApiKeyItem {
 
 const MOCK_KEYS: ApiKeyItem[] = [
   { id: '1', name: 'Production', prefix: 'sk_prod_a', createdAt: new Date().toISOString(), expiresAt: null },
-  { id: '2', name: 'Development', prefix: 'sk_dev_b1', createdAt: new Date(Date.now() - 86400000).toISOString(), expiresAt: '2026-12-31' },
+  { id: '2', name: 'Development', prefix: 'sk_dev_b1', createdAt: new Date(Date.now() - 8.64e7).toISOString(), expiresAt: '2026-12-31' },
 ];
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const fmt = (iso: string) => new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+function applyTheme(mode: 'system' | 'light' | 'dark') {
+  const root = document.documentElement;
+  if (mode === 'system') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', mode);
+  try {
+    localStorage.setItem('ig_theme', mode);
+  } catch {
+    /* noop */
+  }
 }
 
 export default function SettingsPage() {
+  const toast = useToast();
   const [keys, setKeys] = useState<ApiKeyItem[]>(MOCK_KEYS);
-
-  // Create form state
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
-
-  // Modal state for showing newly created key
   const [createdKey, setCreatedKey] = useState<{ name: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
-
-  // Revoke confirmation state
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyItem | null>(null);
+  const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
 
-  function handleCreate() {
+  function create() {
     if (!newName.trim()) return;
-
-    // Generate a mock key for demonstration (in production, this comes from the API)
-    const mockKey = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map(b => b.toString(16).padStart(2, '0'))
+    const key = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
-    const prefix = mockKey.slice(0, 8);
-
-    const newItem: ApiKeyItem = {
-      id: Date.now().toString(),
-      name: newName.trim(),
-      prefix,
-      createdAt: new Date().toISOString(),
-      expiresAt: null,
-    };
-
-    setKeys(prev => [newItem, ...prev]);
-    setCreatedKey({ name: newItem.name, key: mockKey });
+    setKeys((p) => [
+      { id: Date.now().toString(), name: newName.trim(), prefix: key.slice(0, 8), createdAt: new Date().toISOString(), expiresAt: null },
+      ...p,
+    ]);
+    setCreatedKey({ name: newName.trim(), key });
     setNewName('');
     setAdding(false);
   }
 
-  function handleRevoke(key: ApiKeyItem) {
-    setKeys(prev => prev.filter(k => k.id !== key.id));
+  function revoke(k: ApiKeyItem) {
+    setKeys((p) => p.filter((x) => x.id !== k.id));
     setRevokeTarget(null);
+    toast('Ключ отозван', 'success');
   }
 
-  function handleCopy(text: string) {
+  function copy(text: string) {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
+      toast('Скопировано', 'success');
       setTimeout(() => setCopied(false), 2000);
     });
   }
 
+  function setThemeMode(m: 'system' | 'light' | 'dark') {
+    setTheme(m);
+    applyTheme(m);
+  }
+
   return (
-    <div className="p-6 space-y-6">
-      {/* Page Header */}
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Настройки</h1>
-        <p className="text-sm text-slate-400 mt-0.5">Управление настройками аккаунта и интеграциями</p>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
+      <PageHeader title="Настройки" subtitle="Аккаунт, оформление и интеграции" />
 
-      {/* General settings placeholder */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 text-slate-500 text-sm">
-        Управление настройками аккаунта, операторами и интеграциями.
-      </div>
-
-      {/* ─── API Keys Section ─────────────────────────────────────────────────── */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-slate-800">API ключи</h2>
-            <p className="text-sm text-slate-400 mt-0.5">Ключи для доступа к API платформы из внешних приложений</p>
-          </div>
-          <button
-            onClick={() => setAdding(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-sky-500 text-white text-sm font-medium rounded-lg hover:bg-sky-600 transition-colors"
-          >
-            <Plus size={15} /> Создать API ключ
-          </button>
+      {/* Appearance */}
+      <Card>
+        <CardHeader title="Оформление" subtitle="Тема вне Telegram (в Mini App берётся из клиента)" icon={<Monitor size={16} />} />
+        <div className="p-4">
+          <Segmented
+            value={theme}
+            onChange={setThemeMode}
+            options={[
+              { value: 'system', label: '◐ Система' },
+              { value: 'light', label: '☀ Светлая' },
+              { value: 'dark', label: '☾ Тёмная' },
+            ]}
+          />
         </div>
+      </Card>
 
-        {/* Create Form */}
-        {adding && (
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-700 text-sm">Новый API ключ</h3>
-              <button
-                onClick={() => { setAdding(false); setNewName(''); }}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex gap-3">
-              <input
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                placeholder="Название ключа (например: Production)"
-                className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
-                autoFocus
-              />
-              <button
-                onClick={handleCreate}
-                disabled={!newName.trim()}
-                className="px-4 py-2 bg-sky-500 text-white text-sm font-medium rounded-lg disabled:opacity-40 hover:bg-sky-600 transition-colors"
-              >
-                Создать
-              </button>
-            </div>
+      {/* Notifications (visual toggles) */}
+      <Card>
+        <CardHeader title="Уведомления" subtitle="Что присылать в Telegram" icon={<Bell size={16} />} />
+        <div className="divide-y divide-line">
+          {[
+            { k: 'ops', label: 'Статусы операций', on: true },
+            { k: 'health', label: 'Падение health / flood-wait', on: true },
+            { k: 'ranks', label: 'Изменения позиций', on: false },
+          ].map((n) => (
+            <Toggle key={n.k} label={n.label} defaultOn={n.on} onChange={(v) => toast(v ? 'Уведомление включено' : 'Уведомление выключено', 'info')} />
+          ))}
+        </div>
+      </Card>
+
+      {/* API Keys */}
+      <Card>
+        <CardHeader
+          title="API ключи"
+          subtitle="Доступ к API из внешних приложений"
+          icon={<Key size={16} />}
+          action={
+            <Button size="sm" onClick={() => setAdding(true)}>
+              <Plus size={14} /> Создать
+            </Button>
+          }
+        />
+        {keys.length === 0 ? (
+          <div className="p-4">
+            <EmptyState icon={<Key size={24} />} title="Нет ключей" description="Создайте первый API-ключ." className="border-0" />
+          </div>
+        ) : (
+          <div className="divide-y divide-line">
+            {keys.map((k) => (
+              <div key={k.id} className="flex items-center gap-3 px-4 py-3.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-fg">{k.name}</p>
+                  <p className="mt-0.5 text-xs text-fg-hint">
+                    <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono">{k.prefix}…</code> · создан {fmt(k.createdAt)} ·{' '}
+                    {k.expiresAt ? <span className="text-warning">до {fmt(k.expiresAt)}</span> : 'бессрочный'}
+                  </p>
+                </div>
+                <Button size="icon" variant="ghost" onClick={() => setRevokeTarget(k)} title="Отозвать">
+                  <Trash2 size={16} />
+                </Button>
+              </div>
+            ))}
           </div>
         )}
+      </Card>
 
-        {/* Keys Table */}
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          {keys.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              <Key size={36} className="mx-auto mb-3 opacity-30" />
-              <p>Нет API ключей. Создайте первый ключ.</p>
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50">
-                  <th className="text-left px-5 py-3 font-medium text-slate-500">Название</th>
-                  <th className="text-left px-5 py-3 font-medium text-slate-500">Prefix</th>
-                  <th className="text-left px-5 py-3 font-medium text-slate-500">Создан</th>
-                  <th className="text-left px-5 py-3 font-medium text-slate-500">Истекает</th>
-                  <th className="px-5 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {keys.map((k, i) => (
-                  <tr
-                    key={k.id}
-                    className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}
-                  >
-                    <td className="px-5 py-3.5 font-medium text-slate-800">{k.name}</td>
-                    <td className="px-5 py-3.5">
-                      <code className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-mono">
-                        {k.prefix}…
-                      </code>
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-500">{formatDate(k.createdAt)}</td>
-                    <td className="px-5 py-3.5 text-slate-500">
-                      {k.expiresAt ? (
-                        <span className="text-orange-600">{formatDate(k.expiresAt)}</span>
-                      ) : (
-                        <span className="text-slate-400">Бессрочный</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <button
-                        onClick={() => setRevokeTarget(k)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-colors ml-auto"
-                      >
-                        <Trash2 size={13} /> Отозвать
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      {/* Create key sheet */}
+      <Sheet
+        open={adding}
+        onClose={() => {
+          setAdding(false);
+          setNewName('');
+        }}
+        title="Новый API ключ"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAdding(false)}>
+              Отмена
+            </Button>
+            <Button onClick={create} disabled={!newName.trim()}>
+              Создать
+            </Button>
+          </>
+        }
+      >
+        <div className="py-1">
+          <Label>Название ключа</Label>
+          <Input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} placeholder="Production" autoFocus />
         </div>
-      </div>
+      </Sheet>
 
-      {/* ─── Modal: Show New Key ──────────────────────────────────────────────── */}
-      {createdKey && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-lg mx-4 space-y-4">
-            <div className="flex items-start justify-between">
-              <h2 className="font-semibold text-slate-800 text-base">API ключ создан</h2>
-              <button
-                onClick={() => { setCreatedKey(null); setCopied(false); }}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Warning */}
-            <div className="flex gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-              <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-sm text-amber-700">
-                <span className="font-semibold">Сохраните ключ — он показывается один раз.</span>{' '}
-                После закрытия этого окна ключ нельзя будет восстановить.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs text-slate-500 mb-1.5">Ключ для «{createdKey.name}»</p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 bg-slate-100 text-slate-700 px-4 py-3 rounded-lg text-xs font-mono break-all select-all">
-                  {createdKey.key}
-                </code>
-                <button
-                  onClick={() => handleCopy(createdKey.key)}
-                  className={`shrink-0 flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-                    copied
-                      ? 'bg-green-500 text-white'
-                      : 'bg-sky-500 text-white hover:bg-sky-600'
-                  }`}
-                >
-                  {copied ? <Check size={15} /> : <Copy size={15} />}
-                  {copied ? 'Скопировано' : 'Скопировать'}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => { setCreatedKey(null); setCopied(false); }}
-                className="px-4 py-2 text-sm font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
-              >
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Modal: Revoke Confirmation ───────────────────────────────────────── */}
-      {revokeTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4 space-y-4">
-            <div className="flex items-start justify-between">
-              <h2 className="font-semibold text-slate-800 text-base">Отозвать ключ?</h2>
-              <button onClick={() => setRevokeTarget(null)} className="text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-            <p className="text-sm text-slate-500">
-              Ключ{' '}
-              <span className="font-medium text-slate-700">«{revokeTarget.name}»</span>{' '}
-              будет немедленно деактивирован. Все приложения, использующие этот ключ, потеряют доступ.
+      {/* Show created key */}
+      <Sheet
+        open={!!createdKey}
+        onClose={() => {
+          setCreatedKey(null);
+          setCopied(false);
+        }}
+        title="API ключ создан"
+        footer={
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setCreatedKey(null);
+              setCopied(false);
+            }}
+          >
+            Закрыть
+          </Button>
+        }
+      >
+        <div className="space-y-3 py-1">
+          <div className="flex gap-3 rounded-xl bg-warning-weak px-4 py-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-warning" />
+            <p className="text-sm text-warning">
+              <b>Сохраните ключ — он показывается один раз.</b> После закрытия восстановить его нельзя.
             </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setRevokeTarget(null)}
-                className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={() => handleRevoke(revokeTarget)}
-                className="px-4 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors"
-              >
-                Отозвать
-              </button>
+          </div>
+          <div>
+            <Label>Ключ для «{createdKey?.name}»</Label>
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 select-all break-all rounded-xl bg-surface-2 px-3.5 py-3 font-mono text-xs text-fg">
+                {createdKey?.key}
+              </code>
+              <Button size="icon" variant={copied ? 'success' : 'primary'} onClick={() => createdKey && copy(createdKey.key)} className="h-11 w-11">
+                {copied ? <Check size={16} /> : <Copy size={16} />}
+              </Button>
             </div>
           </div>
         </div>
-      )}
+      </Sheet>
+
+      {/* Revoke confirm */}
+      <Sheet
+        open={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        size="sm"
+        title="Отозвать ключ?"
+        description={`«${revokeTarget?.name}» будет деактивирован немедленно. Приложения с этим ключом потеряют доступ.`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRevokeTarget(null)}>
+              Отмена
+            </Button>
+            <Button variant="danger" onClick={() => revokeTarget && revoke(revokeTarget)}>
+              Отозвать
+            </Button>
+          </>
+        }
+      />
+    </div>
+  );
+}
+
+function Toggle({ label, defaultOn, onChange }: { label: string; defaultOn?: boolean; onChange?: (v: boolean) => void }) {
+  const [on, setOn] = useState(!!defaultOn);
+  return (
+    <div className="flex items-center justify-between px-4 py-3.5">
+      <span className="text-sm text-fg">{label}</span>
+      <button
+        onClick={() => {
+          const v = !on;
+          setOn(v);
+          onChange?.(v);
+        }}
+        className={cn('relative h-6 w-11 rounded-full transition-colors', on ? 'bg-accent' : 'bg-surface-2')}
+        aria-pressed={on}
+      >
+        <span
+          className={cn(
+            'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+            on ? 'left-[22px]' : 'left-0.5',
+          )}
+        />
+      </button>
     </div>
   );
 }

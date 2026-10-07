@@ -1,7 +1,21 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
+import {
+  Users,
+  MessageSquare,
+  GitBranch,
+  MessageCircleReply,
+  Clock,
+  Server,
+  Shield,
+  Send,
+  PlusCircle,
+  Activity,
+  ChevronRight,
+} from 'lucide-react';
 import { authApi } from '@/lib/api';
-import { Users, MessageSquare, GitBranch, MessageCircleReply, ArrowUp, Clock } from 'lucide-react';
+import { PageHeader, Stat, Card, Badge, SkeletonCards } from '@/components/ui';
 
 interface StatsOverview {
   totalUsers: number;
@@ -12,57 +26,20 @@ interface StatsOverview {
   activeReplies: number;
 }
 
-interface MetricCardProps {
-  label: string;
-  value: number;
-  subLabel?: string;
-  subValue?: number;
-  icon: React.ReactNode;
-  accent?: string;
-}
-
-function MetricCard({ label, value, subLabel, subValue, icon, accent = 'bg-sky-50 text-sky-600' }: MetricCardProps) {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-slate-500 font-medium">{label}</span>
-        <span className={`w-9 h-9 rounded-lg flex items-center justify-center ${accent}`}>
-          {icon}
-        </span>
-      </div>
-      <div>
-        <p className="text-3xl font-bold text-slate-800">{value.toLocaleString('ru')}</p>
-        {subLabel && subValue !== undefined && (
-          <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-            <ArrowUp size={11} className="text-green-500" />
-            <span className="text-green-600 font-medium">+{subValue.toLocaleString('ru')}</span>
-            &nbsp;{subLabel}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const MOCK_EVENTS = [
-  { id: 1, type: 'Новый пользователь', detail: '@user_ivan подписался на бота', time: '2 мин назад' },
-  { id: 2, type: 'Сообщение', detail: 'Входящее сообщение от @user_maria', time: '5 мин назад' },
-  { id: 3, type: 'Цепочка запущена', detail: 'Funnel "Онбординг" — шаг 1', time: '12 мин назад' },
-  { id: 4, type: 'Авто-ответ', detail: 'Сработало правило "Приветствие"', time: '18 мин назад' },
-  { id: 5, type: 'Рассылка', detail: 'Broadcast "Акция мая" отправлен 142 пользователям', time: '34 мин назад' },
-  { id: 6, type: 'Новый пользователь', detail: '@user_alexey подписался на бота', time: '51 мин назад' },
-  { id: 7, type: 'Сообщение', detail: 'Входящее сообщение от @user_oksana', time: '1 ч назад' },
-  { id: 8, type: 'Цепочка завершена', detail: 'Funnel "Регистрация" — финальный шаг', time: '1 ч назад' },
+const QUICK_ACTIONS = [
+  { href: '/operations/new', label: 'Новая операция', icon: PlusCircle, tone: 'accent' as const },
+  { href: '/broadcasts', label: 'Рассылка', icon: Send, tone: 'violet' as const },
+  { href: '/telegram-accounts', label: 'Аккаунты', icon: Shield, tone: 'success' as const },
+  { href: '/assets', label: 'Активы', icon: Server, tone: 'warning' as const },
 ];
 
-const EVENT_TYPE_STYLES: Record<string, string> = {
-  'Новый пользователь': 'bg-green-100 text-green-700',
-  'Сообщение': 'bg-sky-100 text-sky-700',
-  'Цепочка запущена': 'bg-violet-100 text-violet-700',
-  'Цепочка завершена': 'bg-violet-100 text-violet-700',
-  'Авто-ответ': 'bg-orange-100 text-orange-700',
-  'Рассылка': 'bg-pink-100 text-pink-700',
-};
+const ACTIVITY = [
+  { type: 'Аккаунт', detail: '@account_main прошёл прогрев', time: '2 мин', tone: 'success' as const },
+  { type: 'Операция', detail: 'Mass Publish — 142/200 выполнено', time: '9 мин', tone: 'accent' as const },
+  { type: 'Воронка', detail: '«Онбординг» — запущена для 38 человек', time: '14 мин', tone: 'violet' as const },
+  { type: 'Внимание', detail: '@account_promo: flood-wait 3600s', time: '26 мин', tone: 'warning' as const },
+  { type: 'Рассылка', detail: '«Акция» доставлена 1 204 получателям', time: '51 мин', tone: 'violet' as const },
+];
 
 export default function DashboardPage() {
   const { data, isLoading } = useQuery<StatsOverview>({
@@ -71,7 +48,7 @@ export default function DashboardPage() {
     refetchInterval: 30_000,
   });
 
-  const stats: StatsOverview = data ?? {
+  const s: StatsOverview = data ?? {
     totalUsers: 0,
     newToday: 0,
     messagesSent: 0,
@@ -81,83 +58,87 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Статистика</h1>
-        <p className="text-sm text-slate-400 mt-0.5">Общий обзор активности платформы</p>
-      </div>
+    <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+      <PageHeader title="Обзор" subtitle="Состояние вашей Telegram-инфраструктуры" />
 
       {/* Metric cards */}
       {isLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 h-28 animate-pulse">
-              <div className="h-4 bg-slate-100 rounded w-2/3 mb-4" />
-              <div className="h-8 bg-slate-100 rounded w-1/2" />
-            </div>
-          ))}
-        </div>
+        <SkeletonCards count={4} className="grid-cols-2 lg:grid-cols-4" />
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-          <MetricCard
-            label="Всего пользователей"
-            value={stats.totalUsers}
-            subLabel="новых сегодня"
-            subValue={stats.newToday}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat
+            label="Пользователей"
+            value={s.totalUsers.toLocaleString('ru')}
             icon={<Users size={17} />}
-            accent="bg-sky-50 text-sky-600"
+            tone="accent"
+            delta={s.newToday}
+            deltaLabel="сегодня"
           />
-          <MetricCard
-            label="Сообщений отправлено"
-            value={stats.messagesSent}
+          <Stat
+            label="Отправлено"
+            value={s.messagesSent.toLocaleString('ru')}
             icon={<MessageSquare size={17} />}
-            accent="bg-violet-50 text-violet-600"
+            tone="violet"
           />
-          <MetricCard
-            label="Сообщений получено"
-            value={stats.messagesReceived}
+          <Stat
+            label="Получено"
+            value={s.messagesReceived.toLocaleString('ru')}
             icon={<MessageCircleReply size={17} />}
-            accent="bg-emerald-50 text-emerald-600"
+            tone="success"
           />
-          <MetricCard
-            label="Активных цепочек"
-            value={stats.activeFunnels}
+          <Stat
+            label="Активных воронок"
+            value={s.activeFunnels.toLocaleString('ru')}
             icon={<GitBranch size={17} />}
-            accent="bg-orange-50 text-orange-600"
-          />
-          <MetricCard
-            label="Активных авто-ответов"
-            value={stats.activeReplies}
-            icon={<MessageCircleReply size={17} />}
-            accent="bg-pink-50 text-pink-600"
+            tone="warning"
           />
         </div>
       )}
 
-      {/* Recent events table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
-          <Clock size={15} className="text-slate-400" />
-          <h2 className="font-semibold text-slate-700 text-sm">Последние события</h2>
-          <span className="ml-auto text-xs text-slate-400">Mock-данные</span>
-        </div>
-        <div className="divide-y divide-slate-50">
-          {MOCK_EVENTS.map((event) => (
-            <div key={event.id} className="px-5 py-3 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+      {/* Quick actions */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {QUICK_ACTIONS.map((a) => (
+          <Link key={a.href} href={a.href}>
+            <Card interactive className="flex items-center gap-3 p-4">
               <span
-                className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${
-                  EVENT_TYPE_STYLES[event.type] ?? 'bg-slate-100 text-slate-600'
-                }`}
+                className="flex h-10 w-10 items-center justify-center rounded-xl"
+                style={{
+                  background: `var(--${a.tone}-weak)`,
+                  color: `var(--${a.tone})`,
+                }}
               >
-                {event.type}
+                <a.icon size={19} />
               </span>
-              <span className="flex-1 text-sm text-slate-600 truncate">{event.detail}</span>
-              <span className="text-xs text-slate-400 whitespace-nowrap">{event.time}</span>
+              <span className="text-sm font-semibold text-fg">{a.label}</span>
+            </Card>
+          </Link>
+        ))}
+      </div>
+
+      {/* Activity feed */}
+      <Card>
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3.5">
+          <Activity size={16} className="text-fg-muted" />
+          <h2 className="text-sm font-semibold text-fg">Последние события</h2>
+          <Link
+            href="/operations/history"
+            className="ml-auto flex items-center gap-0.5 text-xs font-medium text-link hover:underline"
+          >
+            Вся история <ChevronRight size={13} />
+          </Link>
+        </div>
+        <div className="divide-y divide-line">
+          {ACTIVITY.map((e, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3">
+              <Badge tone={e.tone}>{e.type}</Badge>
+              <span className="min-w-0 flex-1 truncate text-sm text-fg">{e.detail}</span>
+              <span className="flex items-center gap-1 whitespace-nowrap text-xs text-fg-hint">
+                <Clock size={11} /> {e.time}
+              </span>
             </div>
           ))}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

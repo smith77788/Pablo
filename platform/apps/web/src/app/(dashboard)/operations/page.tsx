@@ -1,89 +1,87 @@
 'use client';
-import { Play, Clock, CheckCircle, XCircle, Cog } from 'lucide-react';
+import Link from 'next/link';
+import { Play, Clock, CheckCircle, XCircle, PlusCircle, ChevronRight } from 'lucide-react';
+import { PageHeader, Button, Card, Badge, StatusBadge } from '@/components/ui';
 
-const STATUS_COLOR: Record<string, string> = {
-  RUNNING: 'bg-sky-100 text-sky-700',
-  QUEUED: 'bg-yellow-100 text-yellow-700',
-  COMPLETED: 'bg-green-100 text-green-700',
-  FAILED: 'bg-red-100 text-red-700',
-  DRAFT: 'bg-slate-100 text-slate-600',
-};
-
-const MOCK_OPS = [
-  { id: '1', name: 'Mass follow Cluster A', type: 'FOLLOW', status: 'RUNNING', created: '10 мин назад', estimated: '25 мин' },
-  { id: '2', name: 'Broadcast "Акция"', type: 'BROADCAST', status: 'QUEUED', created: '15 мин назад', estimated: '10 мин' },
-  { id: '3', name: 'Warm-up accounts #3', type: 'WARMUP', status: 'COMPLETED', created: '2 ч назад', estimated: '-' },
-  { id: '4', name: 'Scrape competitors', type: 'SCRAPE', status: 'FAILED', created: '3 ч назад', estimated: '-' },
-  { id: '5', name: 'Channel post schedule', type: 'POST', status: 'QUEUED', created: '30 мин назад', estimated: '5 мин' },
-  { id: '6', name: 'Proxy health check', type: 'HEALTH', status: 'COMPLETED', created: '4 ч назад', estimated: '-' },
+const OPS = [
+  { id: '1', name: 'Mass follow Cluster A', type: 'FOLLOW', status: 'RUNNING', created: '10 мин', estimated: '25 мин', progress: 62 },
+  { id: '2', name: 'Broadcast «Акция»', type: 'BROADCAST', status: 'QUEUED', created: '15 мин', estimated: '10 мин', progress: 0 },
+  { id: '5', name: 'Публикация по расписанию', type: 'POST', status: 'QUEUED', created: '30 мин', estimated: '5 мин', progress: 0 },
+  { id: '3', name: 'Прогрев аккаунтов #3', type: 'WARMUP', status: 'COMPLETED', created: '2 ч', estimated: '—', progress: 100 },
+  { id: '6', name: 'Проверка прокси', type: 'HEALTH', status: 'COMPLETED', created: '4 ч', estimated: '—', progress: 100 },
+  { id: '4', name: 'Сбор конкурентов', type: 'SCRAPE', status: 'FAILED', created: '3 ч', estimated: '—', progress: 34 },
 ];
 
 const METRICS = [
-  { label: 'Активных', value: 1, icon: Play, color: 'text-sky-600', bg: 'bg-sky-50' },
-  { label: 'В очереди', value: 2, icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-50' },
-  { label: 'Завершённых', value: 2, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
-  { label: 'Провальных', value: 1, icon: XCircle, color: 'text-red-600', bg: 'bg-red-50' },
+  { label: 'Активных', value: 1, Icon: Play, tone: 'accent' as const },
+  { label: 'В очереди', value: 2, Icon: Clock, tone: 'warning' as const },
+  { label: 'Завершено', value: 2, Icon: CheckCircle, tone: 'success' as const },
+  { label: 'С ошибкой', value: 1, Icon: XCircle, tone: 'danger' as const },
 ];
 
 export default function OperationsPage() {
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Операции</h1>
-        <p className="text-sm text-slate-400 mt-0.5">Управление и мониторинг операций</p>
-      </div>
+    <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
+      <PageHeader
+        title="Операции"
+        subtitle="Мониторинг и управление массовыми операциями"
+        action={
+          <Link href="/operations/new">
+            <Button>
+              <PlusCircle size={16} /> Создать
+            </Button>
+          </Link>
+        }
+      />
 
-      {/* Metric cards */}
-      <div className="grid grid-cols-4 gap-4">
-        {METRICS.map(({ label, value, icon: Icon, color, bg }) => (
-          <div key={label} className="bg-white rounded-xl border border-slate-200 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm text-slate-500 font-medium">{label}</span>
-              <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${bg} ${color}`}>
-                <Icon size={15} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {METRICS.map((m) => (
+          <Card key={m.label} className="p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-fg-muted">{m.label}</span>
+              <span
+                className="flex h-8 w-8 items-center justify-center rounded-xl"
+                style={{ background: `var(--${m.tone}-weak)`, color: `var(--${m.tone})` }}
+              >
+                <m.Icon size={15} />
               </span>
             </div>
-            <p className={`text-3xl font-bold ${color}`}>{value}</p>
-          </div>
+            <p className="mt-2 text-3xl font-bold tabular-nums" style={{ color: `var(--${m.tone})` }}>
+              {m.value}
+            </p>
+          </Card>
         ))}
       </div>
 
-      {/* Recent operations table */}
-      <div className="bg-white rounded-xl border border-slate-200">
-        <div className="p-4 border-b border-slate-100 flex items-center gap-2">
-          <Cog size={15} className="text-slate-400" />
-          <h2 className="font-semibold text-slate-800">Последние операции</h2>
+      <Card>
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3.5">
+          <h2 className="text-sm font-semibold text-fg">Последние операции</h2>
+          <Link href="/operations/history" className="ml-auto flex items-center gap-0.5 text-xs font-medium text-link hover:underline">
+            История <ChevronRight size={13} />
+          </Link>
         </div>
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Название</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Тип</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Статус</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Создана</th>
-              <th className="text-left px-4 py-3 font-medium text-slate-500">Оценка времени</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {MOCK_OPS.map((op) => (
-              <tr key={op.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-4 py-3 font-medium text-slate-800">{op.name}</td>
-                <td className="px-4 py-3">
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{op.type}</span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_COLOR[op.status] ?? 'bg-slate-100 text-slate-600'}`}>
-                    {op.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-slate-400 text-xs">{op.created}</td>
-                <td className="px-4 py-3 text-slate-600 text-xs">{op.estimated}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <div className="divide-y divide-line">
+          {OPS.map((op) => (
+            <div key={op.id} className="px-4 py-3.5">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-fg">{op.name}</p>
+                  <p className="mt-0.5 text-xs text-fg-hint">
+                    {op.created} назад{op.estimated !== '—' && ` · осталось ${op.estimated}`}
+                  </p>
+                </div>
+                <Badge tone="neutral">{op.type}</Badge>
+                <StatusBadge status={op.status} />
+              </div>
+              {op.status === 'RUNNING' && (
+                <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
+                  <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${op.progress}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }
