@@ -27,6 +27,10 @@ concurrency:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    # Полный набор обычно занимает около 8 минут. Без явного предела зависший
+    # тест удерживает runner до стандартного шестичасового лимита GitHub и при
+    # частых push накапливает очередь прогонов вместо быстрого красного сигнала.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: tg-manager

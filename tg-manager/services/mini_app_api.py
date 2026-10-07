@@ -5821,6 +5821,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     return _err("Укажите значение", 400)
                 if op == "title" and len(value) > 128:
                     return _err("Название канала — до 128 символов", 400)
+                if op == "title" and len(chans) != 1:
+                    return _err("Название можно менять только у одного явно выбранного канала", 400)
                 worker_op = channel_edit_worker_op(op)
                 pairs = [{"channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
                           "title": c.get("title") or "",
@@ -7205,8 +7207,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Нет каналов с SEO-предложениями для применения", 400)
         try:
             op_id = await _obus.submit(
-                pool, uid, "bulk_seo_apply", {"channel_ids": chan_ids},
-                total_items=len(chan_ids), label=f"SEO по сетке: {len(chan_ids)} каналов")
+                pool, uid, "bulk_seo_apply", {"channel_ids": chan_ids, "fields": ["about"]},
+                total_items=len(chan_ids), label=f"SEO-описания: {len(chan_ids)} каналов")
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})
@@ -7887,7 +7889,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if check_sql_suspicious(value):
             return _err("Недопустимые символы в значении", 400)
 
-        if kind == "bots":
+        if kind == "channels":
+            if len(value) > 128:
+                return _err("Название канала — до 128 символов", 400)
+            from services import channel_change_approval
+            acc_ids = [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()]
+            targets = await _safe_fetch(
+                pool,
+                "SELECT DISTINCT ON (mc.channel_id) mc.channel_id,mc.acc_id,mc.title,"
+                "mc.access_hash,mc.username FROM managed_channels mc JOIN tg_accounts a "
+                "ON a.id=mc.acc_id AND a.owner_id=mc.owner_id WHERE mc.owner_id=$1 "
+                "AND a.is_active AND a.session_str IS NOT NULL"
+                + (" AND mc.acc_id=ANY($2::bigint[])" if acc_ids else "")
+                + " ORDER BY mc.channel_id,mc.id",
+                *([uid, acc_ids] if acc_ids else [uid]),
+            )
+            pairs = [dict(row) for row in targets or []]
+            if not pairs:
+                return _err("Нет каналов с доступными аккаунтами", 400)
+            approval_token = str(data.get("approval_token") or "")
+            if not approval_token:
+                try:
+                    token = channel_change_approval.issue(uid, value, pairs)
+                except channel_change_approval.ApprovalError as exc:
+                    return _err(str(exc), 503)
+                return _json_resp({
+                    "ok": True, "confirmation_required": True, "approval_token": token,
+                    "total": len(pairs), "field": field,
+                    "sample": [{"channel_id": str(item["channel_id"]),
+                                "old": item.get("title") or "", "new": value}
+                               for item in pairs[:20]],
+                })
+            try:
+                channel_change_approval.verify(
+                    approval_token, uid, value, pairs,
+                )
+            except channel_change_approval.ApprovalError as exc:
+                return _err(str(exc), 409)
+            params = {
+                "op": "chan_title",
+                "value": value,
+                "base_uname": value,
+                "channel_acc_pairs": pairs,
+                "approval_token": approval_token,
+            }
+            total = len(pairs)
+            label = f"Подтверждённые названия: {total} каналов"
+        elif kind == "bots":
             # Контракт бота: боты не перечисляются, операция берёт всех своих.
             cnt = await _safe_count(
                 pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active", uid)
@@ -7914,7 +7962,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             what = "каналов" if kind == "channels" else "профилей"
             label = f"Массовое изменение {what}: {field} ({total} акк.)"
 
-        op_type = {"channels": "bulk_edit_channels", "bots": "bulk_bot_edit",
+        op_type = {"channels": "bulk_chan_exec", "bots": "bulk_bot_edit",
                    "profile": "bulk_update_profile"}[kind]
         try:
             from services import operation_bus
@@ -25098,6 +25146,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # Позиции в поиске — вынесено в свой модуль.
     mini_app_ranking.setup_routes(app, pool)
+    from services import mini_app_va_media
+    mini_app_va_media.setup_routes(app, pool, _get_uid)
 
     # ── Network Builder ──────────────────────────────────────────────────────
     async def network_templates(request: web.Request) -> web.Response:

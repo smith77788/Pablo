@@ -38,7 +38,7 @@ import json
 import logging
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Optional
 
@@ -162,6 +162,7 @@ _BUSINESS_TEXT = (
     ("facts", 800), ("banned_topics", 600), ("competitors", 300),
     ("faq", 1500), ("objections", 1000), ("voice_examples", 1500),
     ("editorial_policy", 1000),
+    ("geography", 200), ("service_limits", 800),
 )
 
 
@@ -288,6 +289,14 @@ def _business_lines(profile: dict, today: Optional[date] = None) -> list[str]:
     out: list[str] = []
     if b.get("goal"):
         out.append(f"Главная цель канала: {BUSINESS_GOALS[b['goal']]}")
+    if b.get("geography"):
+        out.append("Подтверждённая география этого канала (важнее догадок из названия и разбора):")
+        out.append(_fence([b["geography"]], cap=200))
+        out.append("Не переноси услуги, адреса и события из других городов. "
+                   "Не выдумывай местные факты; при нехватке данных дай полезный материал без таких утверждений.")
+    if b.get("service_limits"):
+        out.append("Границы услуг: не обещай ничего за их пределами:")
+        out.append(_fence([b["service_limits"]], cap=800))
     for key, label in (("products", "Товары и услуги (цены — только отсюда)"),
                        ("promo", "Действующая акция или предложение"),
                        ("usp", "Чем мы лучше конкурентов (со слов владельца)"),
@@ -1625,6 +1634,13 @@ async def _post_context(pool, owner_id: int, channel_id: int, *,
         topic = ""
     best = await _best_texts(pool, owner_id, channel_id)
     lessons = await owner_lessons(pool, owner_id, channel_id)
+    from services import va_media
+    if await va_media.has_photos(pool, owner_id, channel_id):
+        rules = replace(
+            rules,
+            max_chars=min(rules.max_chars, va_media.CAPTION_LIMIT),
+            min_chars=min(rules.min_chars, va_media.CAPTION_LIMIT),
+        )
     return {
         "profile": profile, "recent": recent, "is_intro": is_intro, "news_mode": news_mode,
         "names": names, "weights": weights, "brain": brain, "rules": rules,
@@ -1800,19 +1816,31 @@ async def prewrite(pool, owner_id: int, channel_id: int, *,
 # ── Публикация и черновики ──────────────────────────────────────────────────
 
 
-async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str) -> int:
+async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, *,
+                  media_id: int | None = None, select_media: bool = True) -> int:
     """Опубликовать пост в канал штатной операцией (mass_publish на один канал)."""
-    from services import operation_bus, va_control
+    from services import operation_bus, va_control, va_media
 
     acc_ids = await va_control.eligible_accounts(pool, owner_id, channel_id)
     if not acc_ids:
         raise ChannelAdminError("Нет доступного аккаунта для публикации: проверьте активность, ограничения и карантин")
     ch = await channel_row(pool, owner_id, channel_id) or {}
+    if not ch:
+        raise ChannelAdminError("Канал не найден среди ваших каналов")
+    try:
+        photo = (await va_media.get_photo(pool, owner_id, channel_id, media_id) if media_id
+                 else await va_media.choose_photo(pool, owner_id, channel_id, text) if select_media else None)
+        if photo and not va_media.caption_fits(text):
+            raise va_media.MediaError("Текст с изображением слишком длинный: нужен более короткий черновик")
+    except va_media.MediaError as exc:
+        raise ChannelAdminError(str(exc)) from exc
+    media_params = ({"media_file_id": photo["file_id"], "media_type": "photo", "require_media": True}
+                    if photo else {})
     try:
         op_id = await operation_bus.submit(
             pool, owner_id, "mass_publish",
             {"text": text, "channel_ids": [int(channel_id)], "account_ids": acc_ids,
-             "delay_seconds": 0, "pillar": pillar or None, "source": "virtual_admin"},
+             "delay_seconds": 0, "pillar": pillar or None, "source": "virtual_admin", **media_params},
             total_items=1,
             label=f"🧠 Администратор: {(ch.get('title') or channel_id)}"[:120],
         )
@@ -1826,11 +1854,13 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str) 
 
 
 async def save_draft(pool, owner_id: int, channel_id: int, d: Draft) -> int:
+    from services import va_media
+    photo = await va_media.choose_photo(pool, owner_id, channel_id, d.text)
     row = await pool.fetchrow(
-        "INSERT INTO va_admin_drafts(owner_id, channel_id, pillar, body, reasons, is_intro) "
-        "VALUES($1,$2,$3,$4,$5::jsonb,$6) RETURNING id",
+        "INSERT INTO va_admin_drafts(owner_id, channel_id, pillar, body, reasons, is_intro, media_id) "
+        "VALUES($1,$2,$3,$4,$5::jsonb,$6,$7) RETURNING id",
         int(owner_id), int(channel_id), d.pillar, d.text,
-        json.dumps(d.reasons, ensure_ascii=False), bool(d.is_intro))
+        json.dumps(d.reasons, ensure_ascii=False), bool(d.is_intro), photo["id"] if photo else None)
     return int(row["id"])
 
 
@@ -1843,7 +1873,9 @@ async def _after_publish(pool, owner_id: int, channel_id: int, op_id: int, is_in
 
 
 async def list_drafts(pool, owner_id: int, channel_id: Optional[int] = None) -> list[dict]:
-    q = ("SELECT d.id, d.channel_id, d.pillar, d.body, d.reasons, d.created_at, "
+    q = ("SELECT d.id, d.channel_id, d.pillar, d.body, d.reasons, d.created_at, d.media_id, "
+         "(SELECT description FROM va_media m WHERE m.id=d.media_id AND m.owner_id=d.owner_id "
+         "AND m.channel_id=d.channel_id) AS media_description, "
          "(SELECT MAX(title) FROM managed_channels mc WHERE mc.owner_id=d.owner_id "
          " AND mc.channel_id=d.channel_id) AS title "
          "FROM va_admin_drafts d WHERE d.owner_id=$1 AND d.status='pending'")
@@ -1862,6 +1894,7 @@ async def list_drafts(pool, owner_id: int, channel_id: Optional[int] = None) -> 
                 reasons = []
         out.append({"id": r["id"], "channel_id": str(r["channel_id"]), "title": r["title"] or "",
                     "pillar": r["pillar"] or "", "body": r["body"], "reasons": reasons or [],
+                    "media_id": r.get("media_id"), "media_description": r.get("media_description") or "",
                     "created_at": r["created_at"].isoformat() if r["created_at"] else None})
     return out
 
@@ -1870,7 +1903,7 @@ async def _claim_draft(pool, owner_id: int, draft_id: int, status: str) -> Optio
     row = await pool.fetchrow(
         "UPDATE va_admin_drafts SET status=$3, decided_at=now() "
         "WHERE id=$1 AND owner_id=$2 AND status='pending' "
-        "RETURNING id, channel_id, pillar, body, is_intro",
+        "RETURNING id, channel_id, pillar, body, is_intro, media_id",
         int(draft_id), int(owner_id), status)
     return dict(row) if row else None
 
@@ -1900,7 +1933,8 @@ async def publish_draft(pool, owner_id: int, draft_id: int, body: Any = None) ->
         await log_event(pool, owner_id, d["channel_id"], "edited",
                         "Владелец поправил текст перед публикацией")
     try:
-        op_id = await publish(pool, owner_id, d["channel_id"], text, d["pillar"] or "")
+        op_id = await publish(pool, owner_id, d["channel_id"], text, d["pillar"] or "",
+                              media_id=d.get("media_id"), select_media=False)
     except Exception:
         await pool.execute("UPDATE va_admin_drafts SET status='failed' WHERE id=$1", d["id"])
         raise
@@ -2058,6 +2092,10 @@ async def notify_draft(pool, bot, owner_id: int, channel_id: int, draft_id: int,
         return
     ch = await channel_row(pool, owner_id, channel_id) or {}
     try:
+        from services import va_media
+        photo = await va_media.draft_photo(pool, owner_id, draft_id)
+        if photo:
+            await bot.send_photo(owner_id, photo["file_id"], caption="Изображение к черновику ниже")
         await bot.send_message(
             owner_id, draft_message(ch.get("title") or str(channel_id), d.pillar, d.text, d.reasons),
             parse_mode="HTML", reply_markup=draft_keyboard(draft_id))

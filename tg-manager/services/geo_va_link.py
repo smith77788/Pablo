@@ -62,6 +62,7 @@ def settings_for_target(config, target):
              f"{place or 'тематике канала'}. Не выдумывай новости, адреса, даты "
              "и источники. Если достоверной информации нет, не публикуй пост.")
     return {"topic": topic[:500], "notes": notes[:1000],
+            "business": {"geography": place[:200]} if place else {},
             "publish_mode": config["publish_mode"],
             "posts_per_day": config["posts_per_day"],
             "lead_contact": config.get("lead_contact", "")}

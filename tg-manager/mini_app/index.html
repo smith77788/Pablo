@@ -11125,7 +11125,9 @@ async function runAccMass(op) {
   if (confirmMsg && !await askConfirm(confirmMsg)) return;
   try {
     const r = await api('/api/miniapp/accounts/mass', {method:'POST', body:JSON.stringify({op, ..._massSel()})});
-    const cnt = r.count||n;
+    // Ноль — честный результат, а не отсутствие поля. `r.count || n` превращал
+    // нулевой эффект в ложный успех для всех выбранных аккаунтов.
+    const cnt = Number.isFinite(Number(r.count)) ? Number(r.count) : n;
     // delete / detach_proxy / set_stage — мгновенные DB-действия, не очередь
     if (op==='delete') toast(`🗑 Удалено аккаунтов: ${cnt}`);
     else if (op==='detach_proxy') toast(`✅ Снят прокси с ${cnt} аккаунтов — работают напрямую`);
@@ -12792,7 +12794,7 @@ async function openOpDetail(opId) {
   try {
     // Берём операцию ПО ID (любой статус) — раньше искали только среди running,
     // из-за чего завершённые/упавшие операции показывали «не найдена».
-    const o = await api('/api/miniapp/operation/'+opId).catch(()=>null);
+    const o = await api('/api/miniapp/operation/'+opId);
     if (!o || !o.id) { txt('opdetBody',empty('⚙️','Операция не найдена')); return; }
     const pct = o.total_items>0?Math.min(100,Math.round((o.done_items||0)/o.total_items*100)):0;
     const dDone = o.total_items>0?Math.min(o.done_items||0,o.total_items):(o.done_items||0);
@@ -12804,7 +12806,12 @@ async function openOpDetail(opId) {
     OPLOG_ID = opId;
     if (!_sameOp) { OPLOG_FILTER = ''; OPLOG_Q = ''; }
     OPLOG_ROWS = [];
-    const logs = await api(_opLogQuery(0)).catch(()=>({logs:[]}));
+    let logs = {logs:[]}, logLoadError = '';
+    try {
+      logs = await api(_opLogQuery(0));
+    } catch (e) {
+      logLoadError = errRu(e, 'Не удалось загрузить журнал операции');
+    }
     let html = `
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || o.op_type || '')}</div></div></div>
@@ -12895,6 +12902,12 @@ async function openOpDetail(opId) {
         <div id="oplogChips" class="lf-chips"></div>
         <div class="lst" id="oplogList" style="margin:0 16px;max-height:300px;overflow-y:auto"></div>
         <div class="lst-more" id="oplogMore"></div>`;
+    }
+    if (logLoadError) {
+      html += `<div class="lst" style="margin:12px 16px;padding:12px 14px;color:var(--red)">
+        ${esc(logLoadError)}
+        <button class="btn btn-s" style="width:100%;margin-top:10px" onclick="openOpDetail(${o.id})">Повторить загрузку журнала</button>
+      </div>`;
     }
     txt('opdetBody', html);
     if (OPLOG_ROWS.length) renderOpLog();
@@ -17454,10 +17467,10 @@ async function toggleReopt(el) {
 }
 // Применить SEO-предложение к каналу в один клик (замыкает петлю анализ→применение)
 async function applySeo(chanId, btn) {
-  if (!await askConfirm('Применить SEO-оптимизацию (название/описание/username) к каналу?')) return;
+  if (!await askConfirm('Применить SEO-описание к каналу? Название и username не изменятся.')) return;
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   try {
-    const r = await api('/api/miniapp/seo/apply', {method:'POST', body:JSON.stringify({chan_id:chanId})});
+    const r = await api('/api/miniapp/seo/apply', {method:'POST', body:JSON.stringify({chan_id:chanId,fields:['about']})});
     const parts = Object.keys(r.applied||{});
     if (r.partial) {
       const errs = Object.entries(r.errors||{}).map(([k,v])=>`${k}: ${v}`).join('; ');
@@ -17473,7 +17486,7 @@ async function applySeo(chanId, btn) {
 }
 // Массовое применение SEO по всей сетке (в очередь — результат в боте/операциях)
 async function applySeoAll() {
-  if (!await askConfirm('Применить SEO-оптимизацию ко ВСЕМ каналам сети с готовыми предложениями?')) return;
+  if (!await askConfirm('Обновить SEO-описания всех каналов с готовыми предложениями? Названия и username не изменятся.')) return;
   try {
     const r = await api('/api/miniapp/seo/apply_all', {method:'POST'});
     toast(`✅ Поставлено в очередь: ${r.count||0} каналов. Результат — в операциях/боте.`);
@@ -25672,7 +25685,7 @@ const BE_FIELDS = {
 const BE_HINTS = {
   'profile:username': '⚠️ К значению автоматически добавляется номер: имя1, имя2… Одинаковая основа у всех аккаунтов — координационная сигнатура, используйте осознанно.',
   'bots:commands': 'Список команд, по одной на строку: start - Описание',
-  'channels:title': 'Применится ко ВСЕМ каналам выбранных аккаунтов.',
+  'channels:title': 'Сначала покажем точный список «старое → новое». Без второго подтверждения ничего не изменится.',
 };
 function beSyncFields() {
   const t = document.getElementById('beTarget').value;
@@ -25693,15 +25706,24 @@ async function submitBulkEdit() {
   const field = document.getElementById('beField').value;
   const value = (document.getElementById('beValue').value || '').trim();
   if (!value) { errEl.textContent = 'Введите новое значение'; return; }
-  const what = target==='bots' ? 'всех ваших ботов'
-             : target==='channels' ? 'все каналы ваших аккаунтов'
-             : 'профили всех активных аккаунтов';
-  if (!await askConfirm(`Изменить «${field}» у ${what}?\n\nНовое значение: ${value}\n\nИзменения применяются в Telegram — откатить массово нельзя.`)) return;
   const url = target==='bots' ? '/api/miniapp/bots/bulk_edit'
             : target==='channels' ? '/api/miniapp/channels/bulk_edit'
             : '/api/miniapp/accounts/bulk_profile';
   try {
-    const r = await api(url, {method:'POST', body:JSON.stringify({field, value})});
+    let payload = {field, value};
+    let r;
+    if (target === 'channels') {
+      r = await api(url, {method:'POST', body:JSON.stringify(payload)});
+      const sample = (r.sample||[]).slice(0,8).map(x=>`• ${x.old||'#'+x.channel_id} → ${x.new}`).join('\n');
+      const more = r.total > 8 ? `\n…и ещё ${r.total-8}` : '';
+      if (!await askConfirm(`Проверьте ${r.total} изменений:\n\n${sample}${more}\n\nПосле этого названия изменятся в Telegram.`)) return;
+      payload.approval_token = r.approval_token;
+      r = await api(url, {method:'POST', body:JSON.stringify(payload)});
+    } else {
+      const what = target==='bots' ? 'всех ваших ботов' : 'профили всех активных аккаунтов';
+      if (!await askConfirm(`Изменить «${field}» у ${what}?\n\nНовое значение: ${value}`)) return;
+      r = await api(url, {method:'POST', body:JSON.stringify(payload)});
+    }
     toast(`✏️ Изменение «${r.field}» запущено · ${r.total} шт. · операция #${r.op_id}`);
     if (r.op_id) pollOpResult(r.op_id, 'Массовое редактирование');
     document.getElementById('beValue').value = '';

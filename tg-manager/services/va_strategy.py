@@ -104,13 +104,14 @@ def apply_strategy(profile, strategy):
     if not strategy.get("enabled") or role == "independent":
         return result
     shared = _object(strategy.get("business"))
+    shared = {key: value for key, value in shared.items() if key != "geography"}
     # Empty UI fields inherit; explicit numeric zero remains a local override.
     result["business"] = {**shared, **{
         key: value for key, value in own.items()
         if value is not None and not (isinstance(value, str) and not value.strip())
     }}
     # Обязательные запреты сети дополняют местные, а не стираются ими.
-    for key in ("banned_topics", "competitors"):
+    for key in ("banned_topics", "competitors", "service_limits"):
         result["business"][key] = "\n".join(
             value.strip() for value in (shared.get(key), own.get(key))
             if value and value.strip())

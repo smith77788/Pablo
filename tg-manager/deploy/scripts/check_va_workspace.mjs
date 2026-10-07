@@ -44,6 +44,11 @@ await page.addInitScript(() => {
         (state !== 'active' || (item.installed && item.enabled && item.setup_done)));
       result = {ok:true,channels:filtered.slice(page*30,page*30+30),total:filtered.length,
         has_more:(page+1)*30<filtered.length,page,drafts:[],network:null};
+    } else if (/\/media\/\d+$/.test(pathname)) {
+      if (options.method === 'DELETE') window.vaSmokeMediaRemoved = true;
+      else result = {ok:true,image:document.createElement('canvas').toDataURL('image/jpeg')};
+    } else if (pathname.endsWith('/media')) {
+      result = {ok:true,items:window.vaSmokeMediaRemoved ? [] : [{id:12,description:'Гости деловой конференции'}]};
     } else if (pathname.includes('/api/miniapp/va/channel/')) {
       const id = pathname.split('/').filter(Boolean).at(-1);
       if (options.method === 'PUT') {
@@ -97,6 +102,9 @@ try {
   await page.waitForSelector('#vaTab-settings');
   await page.locator('#vaTab-settings').click();
   await page.locator('#vaProject').fill('Несохранённый текст');
+  await page.locator('details').filter({has:page.locator('#vaGeography')}).locator('summary').click();
+  await page.locator('#vaGeography').fill('Киев');
+  await page.locator('#vaServiceLimits').fill('Только сопровождение мероприятий');
   await page.locator('#vaTab-knowledge').click();
   await page.locator('#vaTab-settings').click();
   if (await page.locator('#vaProject').inputValue() !== 'Несохранённый текст') throw new Error('Вкладка потеряла черновик');
@@ -105,6 +113,17 @@ try {
   await page.locator('#vaSaveBtn').click();
   await page.waitForFunction(() => window.vaSmokeSaves.length === 1);
   if (await page.evaluate(() => window.vaSmokeSaves[0].project_info) !== 'Несохранённый текст') throw new Error('Сохранён неверный текст');
+  if (await page.evaluate(() => window.vaSmokeSaves[0].business.geography) !== 'Киев') throw new Error('Город не сохранён');
+  if (await page.evaluate(() => window.vaSmokeSaves[0].business.service_limits) !== 'Только сопровождение мероприятий') throw new Error('Границы услуг не сохранены');
+  await page.locator('#vaTab-knowledge').click();
+  await page.getByText('Изображения для постов', {exact:true}).click();
+  await page.getByRole('button', {name:'Открыть медиатеку',exact:true}).click();
+  await page.getByRole('button', {name:'Показать фото',exact:true}).click();
+  await page.waitForFunction(() => document.querySelector('#vaMediaList img')?.naturalWidth > 0);
+  if (process.env.VA_SCREENSHOT) await page.screenshot({path:process.env.VA_SCREENSHOT,fullPage:true});
+  await page.evaluate(() => { window.askConfirm = async () => true; });
+  await page.getByRole('button', {name:'Отключить',exact:true}).click();
+  await page.waitForFunction(() => window.vaSmokeMediaRemoved && document.querySelector('#vaMediaList').textContent.includes('Пока нет'));
   await page.evaluate(async () => {
     const slow = openVaChannel('slow'), current = openVaChannel('2');
     await Promise.all([slow,current]);
@@ -113,7 +132,9 @@ try {
   const width = await page.evaluate(() => ({document:document.documentElement.scrollWidth,window:innerWidth}));
   if (width.document > width.window) throw new Error('Экран прокручивается по горизонтали: ' + JSON.stringify(width));
   if (errors.length) throw new Error('Ошибки браузера: ' + errors.join('; '));
-  console.log('Готово: поиск, страницы по 30 каналов, фильтр, сохранение черновика, защита от устаревшего ответа и мобильная ширина.');
+  await page.setViewportSize({width:1280,height:900});
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('Горизонтальный скролл на десктопе');
+  console.log('Готово: поиск, пагинация, сохранение города и границ услуг, предпросмотр и отключение фото, защита от устаревшего ответа, мобильная и десктопная ширина.');
 } finally {
   await browser.close();
 }

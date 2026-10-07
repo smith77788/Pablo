@@ -32,10 +32,10 @@ def test_admin_screens_do_not_use_latin_number_format():
 def test_ai_banner_says_where_to_enter_key(monkeypatch):
     """Плашка «ИИ не подключён» обязана сказать, ГДЕ ввести ключ: иначе владелец
     видит запрет без выхода (ключ задаётся только в боте, в /admin)."""
-    from services import channel_admin as ca, ai_claude
-    from services import ai_providers
+    from services import ai_claude, ai_providers
+    from services import channel_admin as ca
     monkeypatch.setattr(ai_claude, "enabled", lambda: False)
-    monkeypatch.setattr(ai_providers, "configured_providers", lambda: [])
+    monkeypatch.setattr(ai_providers, "configured_providers", list)
     ok, note = ca.ai_ready()
     assert not ok and "/admin" in note and "AI-ключи" in note
 
@@ -88,3 +88,21 @@ def test_draft_buttons_do_not_share_one_narrow_row():
     assert "'publish')\">✅ Опубликовать</button>" in body.replace("\\'", "'")
     assert 'style="width:100%"' in body, "главное действие не во всю ширину"
     assert "Пропустить</button>" in body, "у кнопки отказа нет подписи"
+
+
+def test_live_draft_publish_requires_explicit_confirmation():
+    va = _va()
+    start = va.index("async function vaDraftAct")
+    body = va[start:va.index("\nasync function openVaChannel", start)]
+    assert "action === 'publish'" in body
+    assert "await askConfirm(" in body
+    assert body.index("await askConfirm(") < body.index("await api(")
+
+
+def test_reopening_admin_resets_channel_pagination():
+    va = _va()
+    start = va.index("async function openVaAdmin")
+    body = va[start:va.index("\nasync function _vaLoadList", start)]
+    assert "_vaListPage = 0" in body
+    assert "_vaChannels = []" in body
+    assert body.index("_vaListPage = 0") < body.index("await _vaLoadList()")

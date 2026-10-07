@@ -159,6 +159,10 @@ function _vaState(c) {
 }
 
 async function openVaAdmin() {
+  // Повторный вход всегда начинается с первой страницы. Иначе после «Показать
+  // ещё» экран заменял список поздней страницей и скрывал первые каналы.
+  _vaListPage = 0;
+  _vaChannels = [];
   _vaMkScreen('s-va', '🧠 Виртуальный администратор', 's-va-body');
   push('s-va');
   await _vaLoadList();
@@ -354,12 +358,11 @@ function _vaNetworkHtml(n) {
       }).join('') + '</div>';
   }
   if (n.next_actions && n.next_actions.length) {
-    h += '<div class="sec">Что сделать дальше</div><div class="lst">' +
-      n.next_actions.map(function (a) {
-        return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')">' +
-          '<div class="ava">→</div><div class="li-body"><div class="li-name">' + esc(a.title) + '</div>' +
-          '<div class="li-sub">' + esc(a.reason) + '</div></div><span class="chev">›</span></div>';
-      }).join('') + '</div>';
+    h += '<div class="sec">Следующие действия</div><div class="lst">' + n.next_actions.map(function (a) {
+      return '<div class="li tap" onclick="openVaChannel(\'' + esc(a.channel_id) + '\')"><div class="ava ava-teal">→</div>' +
+        '<div class="li-body"><div class="li-name">' + esc(a.title) + '</div><div class="li-sub wrap">' +
+        esc(a.reason) + '</div></div><span class="chev">›</span></div>';
+    }).join('') + '</div>';
   }
   return h;
 }
@@ -375,6 +378,8 @@ function _vaDraftsHtml(drafts, ctx) {
       '<div style="font-size:12px;color:var(--hint);margin-bottom:6px">' + esc(x.title || '') +
         (x.pillar ? ' · ' + esc(x.pillar) : '') + '</div>' +
       '<div id="vaBody' + ctx + '-' + x.id + '" style="white-space:pre-wrap;font-size:14px;line-height:1.45">' + esc(x.body) + '</div>' + reasons +
+      (x.media_id ? '<div style="margin-top:8px">Фото: ' + esc(x.media_description || '') +
+        '<button class="btn btn-s" onclick="vaMediaPreview(\'' + esc(x.channel_id) + '\',' + Number(x.media_id) + ',this)">Показать фото</button></div>' : '') +
       // Три кнопки в один ряд при 360px не помещались: «Опубликовать» ломалось
       // на две строки и вылезало за кнопку, а безымянный «✖️» занимал треть
       // ряда, не говоря, что он делает. Главное действие во всю ширину,
@@ -446,6 +451,9 @@ function vaDraftWhy(id, ctx) {
 
 async function vaDraftAct(id, action, reason, draftContext) {
   const ctx = draftContext || _vaDraftCtx, cid = _vaCid, key = 'draft:' + id;
+  if (action === 'publish' && !(await askConfirm(
+    'Опубликовать этот черновик в живом канале? После отправки отменить публикацию автоматически нельзя.'
+  ))) return;
   if (!_vaWorkspace.lock(key)) return;
   const msgs = { publish: 'Публикую…', regenerate: 'Пишу другой вариант…', reject: 'Пропускаю…' };
   toast(msgs[action] || '…');
@@ -650,6 +658,8 @@ function _vaBusinessHtml(b) {
     '<div class="field"><label>Цель канала</label><select id="vaGoal">' +
       _VA_GOALS.map(function (g) { return _vaOpt(g[0], b.goal || '', g[1]); }).join('') + '</select></div>' +
     _vaArea('vaProducts', 'Товары и услуги с ценами', b.products, 1500, 'Например: стрижка — 1500 ₽, окрашивание — от 4000 ₽', 3) +
+    _vaArea('vaGeography', 'Город и зона обслуживания этого канала', b.geography, 200, 'Город, район, допустимые выезды') +
+    _vaArea('vaServiceLimits', 'Границы услуг и обязательные условия', b.service_limits, 800, 'Что входит и не входит в услугу; ограничения и условия участия', 3) +
     _vaArea('vaPromo', 'Действующая акция', b.promo, 300, 'Например: −20% на первый визит') +
     '<div class="field"><label>Акция действует до</label><input type="date" id="vaPromoUntil" value="' + esc(b.promo_until || '') + '">' +
       '<div class="field-note">' + (_vaPromoOver(b) ? '⚠️ Срок прошёл — администратор больше не упоминает эту акцию.' :
@@ -708,6 +718,7 @@ function _vaBusinessVal() {
     faq: _vaVal('vaFaq') || '', objections: _vaVal('vaObjections') || '',
     voice_examples: _vaVal('vaVoice') || '', editorial_policy: _vaVal('vaPolicy') || '',
     network_role: _vaVal('vaRole') || 'discovery',
+    geography: _vaVal('vaGeography') || '', service_limits: _vaVal('vaServiceLimits') || '',
   };
 }
 
@@ -820,6 +831,7 @@ function _vaChannelHtml(d) {
   h += '</section>' + _vaPanel('knowledge');
   h += _vaBriefHtml(s.brief || {});
   h += _vaRefsHtml(d.references || []);
+  h += _vaMediaHtml(ch.id);
   h += '</section>' + _vaPanel('plan');
   const plan = d.plan || [];
   h += '<div class="sec">Контент-план</div><div class="lst">' + (plan.length ? plan.slice(0, 14).map(function (p) {
@@ -889,6 +901,60 @@ function _vaChannelHtml(d) {
       '</div></details>';
   }
   return h;
+}
+
+function _vaMediaHtml(cid) {
+  return '<details class="acc-actions"><summary style="padding:14px;cursor:pointer">Изображения для постов</summary>' +
+    '<div class="lst" style="padding:14px;font-size:13px;line-height:1.5">' +
+    'Отправьте основному боту фотографию с подписью:<br><code style="overflow-wrap:anywhere">/va_photo ' + esc(cid) +
+    ' описание изображения</code><br>Добавляйте только свои или разрешённые для публикации фото. ' +
+    'Отправка разрешает использовать фото в этом канале. Описание должно точно отражать изображение. ' +
+    'Фото подбирается по совпадению слов с темой поста и не выбирается повторно 7 дней. ' +
+    'Если подходящего фото нет, пост останется текстовым. Сначала проверьте результат в режиме «На одобрение».' +
+    '<button class="btn btn-s" style="width:100%;margin-top:12px" onclick="vaMediaLoad(\'' + esc(cid) + '\')">Открыть медиатеку</button>' +
+    '<div id="vaMediaList"></div></div></details>';
+}
+
+async function vaMediaLoad(cid) {
+  const box = document.getElementById('vaMediaList');
+  if (!box) return;
+  box.textContent = 'Загрузка изображений…';
+  try {
+    const data = await api('/api/miniapp/va/channel/' + encodeURIComponent(cid) + '/media');
+    if (!box.isConnected || String(cid) !== String(_vaCid)) return;
+    box.innerHTML = (data.items || []).map(function (item) {
+      return '<div style="margin-top:12px">' + esc(item.description) + '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn btn-s" onclick="vaMediaPreview(\'' + esc(cid) + '\',' + Number(item.id) + ',this)">Показать фото</button>' +
+        '<button class="btn btn-s" onclick="vaMediaRemove(\'' + esc(cid) + '\',' + Number(item.id) + ')">Отключить</button></div></div>';
+    }).join('') || 'Пока нет одобренных изображений.';
+  } catch (e) {
+    if (box.isConnected) box.textContent = (e && e.message) || 'Не удалось загрузить медиатеку';
+  }
+}
+
+async function vaMediaPreview(cid, id, button) {
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const data = await api('/api/miniapp/va/channel/' + encodeURIComponent(cid) + '/media/' + id);
+    if (!button.isConnected) return;
+    if (!data.image || !data.image.startsWith('data:image/jpeg;base64,')) throw new Error('Не удалось показать фото');
+    const img = document.createElement('img');
+    img.src = data.image;
+    img.alt = 'Одобренное изображение к публикации';
+    img.style.cssText = 'display:block;max-width:100%;max-height:360px;object-fit:contain;margin-top:8px;border-radius:8px';
+    button.replaceWith(img);
+  } catch (e) {
+    toast((e && e.message) || 'Не удалось показать фото');
+  } finally { button.disabled = false; }
+}
+
+async function vaMediaRemove(cid, id) {
+  if (!(await askConfirm('Отключить изображение? Черновик с этим фото больше нельзя будет опубликовать. Создайте другой вариант черновика.'))) return;
+  try {
+    await api('/api/miniapp/va/channel/' + encodeURIComponent(cid) + '/media/' + id, {method:'DELETE'});
+    if (String(cid) === String(_vaCid)) await vaMediaLoad(cid);
+  } catch (e) { toast((e && e.message) || 'Не удалось отключить изображение'); }
 }
 
 function _vaVal(id) { const el = document.getElementById(id); return el ? el.value : undefined; }

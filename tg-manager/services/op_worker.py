@@ -4799,6 +4799,11 @@ async def _exec_mass_publish(
             )
             media_bytes = None
 
+    from services.va_media import require_download
+    media_failure = require_download(params, media_bytes)
+    if media_failure:
+        return media_failure
+
     # Brand injection: free-tier users get @MEXAHI3MBOT appended to every channel post
     try:
         from services import brand_injection as _bi
@@ -9937,6 +9942,9 @@ async def _exec_bulk_seo_apply(
     from services.seo_apply import apply_seo_to_channel
 
     channel_ids = [int(x) for x in (params.get("channel_ids") or [])]
+    # Jobs created by older clients did not carry fields and could rename a
+    # whole network. Only descriptions are safe to mutate in bulk.
+    fields = [field for field in (params.get("fields") or ["about"]) if field == "about"]
     if not channel_ids:
         return {"status": "failed", "summary": "⚠️ Нет каналов для применения SEO"}
 
@@ -9949,7 +9957,7 @@ async def _exec_bulk_seo_apply(
         if await _is_cancelled(pool, op_id):
             break
         try:
-            res = await apply_seo_to_channel(pool, owner_id, chan_id)
+            res = await apply_seo_to_channel(pool, owner_id, chan_id, fields)
         except Exception as exc:
             log.warning("bulk_seo_apply op=%d chan=%s: %s", op_id, chan_id, exc)
             res = {"ok": False, "error": str(exc)[:200]}
@@ -9977,90 +9985,11 @@ async def _exec_bulk_seo_apply(
 async def _exec_bulk_edit_channels(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Массовое редактирование title/about каналов всех указанных аккаунтов."""
-    from services import account_manager
-
-    account_ids = [int(x) for x in (params.get("account_ids") or [])]
-    field = params.get("field", "title")
-    value = params.get("value", "")
-
-    if not account_ids or not value:
-        return {"status": "failed", "reason": "Не указаны аккаунты или значение поля"}
-
-    rows = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=[int(_i) for _i in account_ids], min_trust_score=0.0)
-    accounts = [dict(r) for r in rows]
-    if not accounts:
-        return {"status": "failed", "reason": "Нет активных аккаунтов"}
-
-    # Отказной захват: массовое редактирование открывает живую сессию на каждом
-    # аккаунте через account_manager. Без захвата аккаунт мог одновременно вести
-    # другую операцию → две сессии на одном auth-key → AUTH_KEY_DUPLICATED.
-    claimed_ids = await try_claim_accounts([int(a["id"]) for a in accounts])
-    if not claimed_ids:
-        return {"status": "requeue",
-                "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
-    _busy = len(accounts) - len(claimed_ids)
-    accounts = [a for a in accounts if int(a["id"]) in set(claimed_ids)]
-
-    try:
-        ok_total = 0
-        err_total = 0
-        step = 0
-        await _safe_execute(
-                pool,
-            "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
-        )
-
-        for acc in accounts:
-            if await _is_cancelled(pool, op_id):
-                return {
-                    "status": "cancelled",
-                    "ok": ok_total,
-                    "fail": err_total,
-                    "summary": f"Отменено. Изменено: {ok_total}",
-                }
-            try:
-                dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-            except Exception as exc:
-                log.warning("_exec_bulk_edit_channels get_dialogs acc=%s: %s", acc.get("id"), exc)
-                err_total += 1
-                await _safe_execute(
-                        pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-                continue
-
-            channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
-            for ch in channels:
-                ch_id = ch["id"]
-                step += 1
-                try:
-                    if field == "title":
-                        ok = await account_manager.edit_channel_title(acc["session_str"], ch_id, value, _acc=acc)
-                    else:
-                        ok = await account_manager.edit_channel_about(acc["session_str"], ch_id, value, _acc=acc)
-                    if ok:
-                        ok_total += 1
-                    else:
-                        err_total += 1
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    log_exc_swallow(log, "bulk_edit_channels ch=%s: %s", ch_id, exc)
-                    err_total += 1
-                await asyncio.sleep(2)
-
-            await _safe_execute(
-                    pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-
-        return {
-            "status": "done",
-            "ok": ok_total,
-            "fail": err_total,
-            "summary": (f"✏️ Редактирование каналов ({field}): ✅ {ok_total} ❌ {err_total}"
-                        + (f" · пропущено занятых аккаунтов: {_busy}" if _busy else "")),
-        }
-    finally:
-        await release_accounts(claimed_ids)
+    """Reject legacy jobs that could assign one title to an entire account fleet."""
+    return {
+        "status": "failed",
+        "reason": "Массовая смена названий отключена: выберите один канал",
+    }
 
 
 async def _exec_group_import_all(
@@ -11104,6 +11033,20 @@ async def _exec_bulk_chan_exec(
 
     if not channel_acc_pairs or op not in ("chan_uname", "chan_about", "chan_title"):
         return {"status": "failed", "reason": "Не указаны channel_acc_pairs или неверный op"}
+    if op == "chan_title" and len(channel_acc_pairs) != 1:
+        from services import channel_change_approval
+        try:
+            channel_change_approval.verify(
+                str(params.get("approval_token") or ""),
+                owner_id,
+                value,
+                channel_acc_pairs,
+            )
+        except channel_change_approval.ApprovalError:
+            return {
+                "status": "failed",
+                "reason": "Состав массового переименования не был подтверждён",
+            }
 
     # Collect unique acc_ids and fetch sessions from DB (never pass session_str in params)
     acc_ids = list({int(p["acc_id"]) for p in channel_acc_pairs})
@@ -11220,6 +11163,11 @@ async def _exec_bulk_chan_exec(
                     if ok:
                         ok_list.append(f"✅ {chan_title} → {_html.escape(value[:40])}")
                         try:
+                            await pool.execute(
+                                "INSERT INTO channel_identity_history(owner_id,channel_id,old_title,new_title,"
+                                "source,operation_id) VALUES($1,$2,$3,$4,'manual',$5)",
+                                owner_id, ch_id, str(pair.get("title") or ""), value, op_id,
+                            )
                             await pool.execute(
                                 "UPDATE managed_channels SET title=$1 WHERE owner_id=$2 AND channel_id=$3",
                                 value, owner_id, ch_id,

@@ -10,13 +10,41 @@ import html
 import logging
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, Message
 
 from bot.callbacks import VaCb
 from services import channel_admin as ca
 
 log = logging.getLogger(__name__)
 router = Router()
+
+
+@router.message(Command("va_photo"), F.chat.type == "private")
+async def va_add_photo(message: Message, pool) -> None:
+    """Фото с явным разрешением владельца использовать его для конкретного канала."""
+    from services import va_media
+    parts = (message.caption or message.text or "").split(maxsplit=2)
+    try:
+        if not message.photo or len(parts) != 3:
+            raise va_media.MediaError(
+                "Отправьте фото с подписью: /va_photo ID_КАНАЛА описание изображения. "
+                "Добавляйте только свои или разрешённые для публикации фото. "
+                "Отправка разрешает администратору использовать фото в этом канале.")
+        try:
+            channel_id = int(parts[1])
+        except ValueError as exc:
+            raise va_media.MediaError("ID канала должен быть числом из экрана администратора") from exc
+        photo = message.photo[-1]
+        if not photo.file_size or photo.file_size > va_media.MAX_PHOTO_BYTES:
+            raise va_media.MediaError("Нужна фотография размером не более 5 МБ")
+        item = await va_media.add_photo(pool, message.from_user.id, channel_id, photo.file_id,
+                                        photo.file_unique_id, parts[2])
+    except va_media.MediaError as exc:
+        await message.answer(str(exc), parse_mode=None)
+        return
+    await message.answer(f"Фото №{item['id']} добавлено в медиатеку канала. "
+                         "Проверить и отключить его можно на экране администратора.", parse_mode=None)
 
 
 async def _done(callback: CallbackQuery, note: str) -> None:
@@ -89,6 +117,10 @@ async def va_regen(callback: CallbackQuery, callback_data: VaCb, pool) -> None:
         await _done(callback, "⚠️ Не удалось написать другой вариант, попробуйте ещё раз.")
         return
     await _done(callback, "🔄 Заменён новым вариантом ниже.")
+    from services import va_media
+    photo = await va_media.draft_photo(pool, callback.from_user.id, d["id"])
+    if photo:
+        await callback.message.answer_photo(photo["file_id"], caption="Изображение к черновику ниже")
     await callback.message.answer(
         ca.draft_message(d.get("title") or "канал", d["pillar"], d["body"], d["reasons"]),
         parse_mode="HTML", reply_markup=ca.draft_keyboard(d["id"]),

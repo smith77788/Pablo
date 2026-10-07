@@ -1,8 +1,9 @@
 """Живая редакция обрабатывает свежие события Telegram ровно один раз."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from services import channel_admin as ca
@@ -10,13 +11,31 @@ from services import channel_admin_runner as runner
 from services import va_references
 
 
+class _Transaction:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+class _Connection:
+    def __init__(self):
+        self.executed = []
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+
+    def transaction(self):
+        return _Transaction()
+
+
 class _Pool:
     def __init__(self, events=None):
         self.events = events or []
         self.fetchvals = [0, 0]
         self.executed = []
-        self.conn = MagicMock()
-        self.conn.execute = AsyncMock()
+        self.conn = _Connection()
 
     async def fetchval(self, query, *args):
         return self.fetchvals.pop(0)
@@ -34,10 +53,6 @@ class _Pool:
 
     @asynccontextmanager
     async def acquire(self):
-        tx = AsyncMock()
-        tx.__aenter__.return_value = None
-        tx.__aexit__.return_value = False
-        self.conn.transaction = MagicMock(return_value=tx)
         yield self.conn
 
 
@@ -57,21 +72,33 @@ async def test_live_events_create_one_review_draft_and_are_consumed(monkeypatch)
                "published_at": now, "source_text": "Срочное решение принято"}]
     pool = _Pool(events)
     draft = ca.Draft("Срочные новости", "Текст", [ca._NEWS_REVIEW_REASON], False, False)
-    monkeypatch.setattr(ca, "write_post", AsyncMock(return_value=draft))
-    monkeypatch.setattr(ca, "save_draft", AsyncMock(return_value=44))
-    monkeypatch.setattr(ca, "notify_draft", AsyncMock())
-    monkeypatch.setattr(ca, "log_event", AsyncMock())
+    calls = {}
 
-    created = await runner._draft_live_news(
+    async def write_post(*args, **kwargs):
+        calls["events"] = kwargs["news_events"]
+        return draft
+
+    async def save_draft(*args):
+        calls["saved"] = True
+        return 44
+
+    async def noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(ca, "write_post", write_post)
+    monkeypatch.setattr(ca, "save_draft", save_draft)
+    monkeypatch.setattr(ca, "notify_draft", noop)
+    monkeypatch.setattr(ca, "log_event", noop)
+
+    created = await asyncio.wait_for(runner._draft_live_news(
         pool, None, {"owner_id": 7, "channel_id": 8, "posts_per_day": 3},
-    )
+    ), timeout=2)
 
     assert created is True
-    assert ca.write_post.await_args.kwargs["news_events"] == events
-    ca.save_draft.assert_awaited_once()
-    update = pool.conn.execute.await_args
-    assert "status='drafted'" in update.args[0]
-    assert update.args[1:] == ([11], 44, 7, 8)
+    assert calls == {"events": events, "saved": True}
+    update = pool.conn.executed[-1]
+    assert "status='drafted'" in update[0]
+    assert update[1] == ([11], 44, 7, 8)
     assert any("@source" in reason for reason in draft.reasons)
 
 
