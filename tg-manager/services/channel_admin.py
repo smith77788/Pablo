@@ -1875,13 +1875,32 @@ async def _claim_draft(pool, owner_id: int, draft_id: int, status: str) -> Optio
     return dict(row) if row else None
 
 
-async def publish_draft(pool, owner_id: int, draft_id: int) -> dict:
-    """Одобрить черновик → в канал. Повторное нажатие не публикует второй раз."""
+# Лимит Telegram на текст поста. Правку владельца режем по нему, а не по
+# произвольному числу: иначе длинная правка уйдёт в операцию и упадёт уже там.
+MAX_POST_CHARS = 4096
+
+
+async def publish_draft(pool, owner_id: int, draft_id: int, body: Any = None) -> dict:
+    """Одобрить черновик → в канал. Повторное нажатие не публикует второй раз.
+
+    `body` — правка владельца. До неё выбор был только «как есть», «другой» и
+    «пропустить»: из-за одной неверной цены или лишней фразы приходилось
+    выбрасывать весь пост и надеяться, что следующий окажется лучше. Правка
+    публикуется и сохраняется вместо исходного текста, чтобы память канала и
+    журнал говорили о том, что действительно вышло в канал.
+    """
     d = await _claim_draft(pool, owner_id, draft_id, "published")
     if not d:
         raise ChannelAdminError("Черновик уже обработан или не найден")
+    text = d["body"]
+    edited = str(body).strip() if body is not None else ""
+    if edited and edited != (text or "").strip():
+        text = edited[:MAX_POST_CHARS]
+        await pool.execute("UPDATE va_admin_drafts SET body=$2 WHERE id=$1", d["id"], text)
+        await log_event(pool, owner_id, d["channel_id"], "edited",
+                        "Владелец поправил текст перед публикацией")
     try:
-        op_id = await publish(pool, owner_id, d["channel_id"], d["body"], d["pillar"] or "")
+        op_id = await publish(pool, owner_id, d["channel_id"], text, d["pillar"] or "")
     except Exception:
         await pool.execute("UPDATE va_admin_drafts SET status='failed' WHERE id=$1", d["id"])
         raise

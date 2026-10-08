@@ -15934,8 +15934,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         fn = {"publish": _ca.publish_draft, "reject": _ca.reject_draft,
               "regenerate": _ca.regenerate_draft}[action]
         kw = {}
-        if action != "publish":
-            body = await _va_body(request) or {}
+        body = await _va_body(request) or {}
+        if action == "publish":
+            # Правка владельца перед публикацией: публикуем её вместо исходного
+            # текста. Пустое поле — публикуем как есть.
+            if str(body.get("body") or "").strip():
+                kw["body"] = body["body"]
+        else:
             kw["reason"] = body.get("reason") or ""
         try:
             res = await fn(pool, uid, did, **kw)

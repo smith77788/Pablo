@@ -374,19 +374,61 @@ function _vaDraftsHtml(drafts, ctx) {
     return '<div class="lst" style="padding:12px 14px">' +
       '<div style="font-size:12px;color:var(--hint);margin-bottom:6px">' + esc(x.title || '') +
         (x.pillar ? ' · ' + esc(x.pillar) : '') + '</div>' +
-      '<div style="white-space:pre-wrap;font-size:14px;line-height:1.45">' + esc(x.body) + '</div>' + reasons +
+      '<div id="vaBody' + ctx + '-' + x.id + '" style="white-space:pre-wrap;font-size:14px;line-height:1.45">' + esc(x.body) + '</div>' + reasons +
       // Три кнопки в один ряд при 360px не помещались: «Опубликовать» ломалось
       // на две строки и вылезало за кнопку, а безымянный «✖️» занимал треть
       // ряда, не говоря, что он делает. Главное действие во всю ширину,
       // второстепенные — рядом и с подписями.
-      '<div style="margin-top:10px">' +
-        '<button class="btn btn-p" style="width:100%" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + x.id + ',\'publish\')">✅ Опубликовать</button>' +
-        '<div style="display:flex;gap:8px;margin-top:8px">' +
-          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + x.id + ',\'regenerate\')">🔄 Другой</button>' +
-          '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftWhy(' + x.id + ',\'' + ctx + '\')">✖️ Пропустить</button>' +
-        '</div>' +
+      '<div id="vaActs' + ctx + '-' + x.id + '" style="margin-top:10px">' + _vaDraftButtons(x.id, ctx) +
       '</div><div id="vaWhy' + x.id + '"></div></div>';
   }).join('');
+}
+
+function _vaDraftButtons(id, ctx) {
+  return '<button class="btn btn-p" style="width:100%" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + id + ',\'publish\')">✅ Опубликовать</button>' +
+    '<div style="display:flex;gap:8px;margin-top:8px">' +
+      '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="vaDraftEdit(' + id + ',\'' + ctx + '\')">✏️ Поправить</button>' +
+      '<button class="btn btn-s" style="flex:1 1 0;min-width:0" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + id + ',\'regenerate\')">🔄 Другой</button>' +
+    '</div>' +
+    '<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftWhy(' + id + ',\'' + ctx + '\')">✖️ Пропустить</button>';
+}
+
+// Идентификаторы карточки черновика склеены с контекстом ('list' или 'ch'):
+// один и тот же черновик показан и в списке каналов, и на экране канала, оба
+// экрана живут в разметке одновременно, и по общему id правка открывалась в
+// невидимой карточке — владелец жал «Поправить», и на экране не менялось
+// ничего.
+//
+// Правка текста перед публикацией. До неё выбор был только «как есть»,
+// «другой» и «пропустить»: из-за одной неверной цены или лишней фразы
+// приходилось выбрасывать весь пост и надеяться, что следующий окажется
+// лучше. Исходный текст держим в data-атрибуте, чтобы «Отмена» возвращала
+// его без похода на сервер.
+function vaDraftEdit(id, ctx) {
+  const box = document.getElementById('vaBody' + ctx + '-' + id), acts = document.getElementById('vaActs' + ctx + '-' + id);
+  if (!box || !acts || box.dataset.edit) return;
+  const was = box.textContent;
+  box.dataset.edit = '1';
+  box.dataset.orig = was;
+  // Высота поля по длине поста: фиксированные двенадцать строк под коротким
+  // постом оставляли полэкрана пустоты, а длинный всё равно приходилось крутить.
+  const rows = Math.min(18, Math.max(5, was.split('\n').length + Math.ceil(was.length / 40)));
+  box.innerHTML = '<textarea id="vaEd' + ctx + '-' + id + '" rows="' + rows + '" maxlength="4096" style="width:100%;background:var(--bg3);' +
+    'border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 12px;font-size:14px;line-height:1.45;' +
+    'color:var(--text);font-family:inherit;resize:vertical;outline:none">' + esc(was) + '</textarea>' +
+    '<div class="field-note">В канал уйдёт ровно этот текст.</div>';
+  acts.innerHTML = '<button class="btn btn-p" style="width:100%" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + id + ',\'publish\')">✅ Опубликовать правку</button>' +
+    '<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="vaDraftEditCancel(' + id + ',\'' + ctx + '\')">Отмена</button>';
+  const ed = document.getElementById('vaEd' + ctx + '-' + id);
+  if (ed) { ed.focus(); ed.setSelectionRange(ed.value.length, ed.value.length); }
+}
+
+function vaDraftEditCancel(id, ctx) {
+  const box = document.getElementById('vaBody' + ctx + '-' + id), acts = document.getElementById('vaActs' + ctx + '-' + id);
+  if (!box || !acts) return;
+  box.textContent = box.dataset.orig || '';
+  delete box.dataset.edit;
+  acts.innerHTML = _vaDraftButtons(id, ctx);
 }
 
 // Причины отказа — те же коды, что channel_admin.REJECT_REASONS.
@@ -408,8 +450,12 @@ async function vaDraftAct(id, action, reason, draftContext) {
   const msgs = { publish: 'Публикую…', regenerate: 'Пишу другой вариант…', reject: 'Пропускаю…' };
   toast(msgs[action] || '…');
   try {
-    await api('/api/miniapp/va/drafts/' + id + '/' + action, { method: 'POST', body: JSON.stringify({ reason: reason || '' }), timeoutMs: 180000 });
-    toast(action === 'publish' ? '✅ Отправлено в канал' : (action === 'regenerate' ? '✅ Новый вариант готов' : 'Пропущено'));
+    // Поле правки есть только в режиме редактирования; пустое — публикуем как есть.
+    const ed = document.getElementById('vaEd' + ctx + '-' + id);
+    const edited = (action === 'publish' && ed) ? ed.value : '';
+    await api('/api/miniapp/va/drafts/' + id + '/' + action, {
+      method: 'POST', body: JSON.stringify({ reason: reason || '', body: edited }), timeoutMs: 180000 });
+    toast(action === 'publish' ? (edited ? '✅ Правка отправлена в канал' : '✅ Отправлено в канал') : (action === 'regenerate' ? '✅ Новый вариант готов' : 'Пропущено'));
   } catch (e) {
     toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
   } finally {
