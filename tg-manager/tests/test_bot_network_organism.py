@@ -41,7 +41,10 @@ def test_all_active_or_no_bots_no_suggestion():
 def test_world_snapshot_has_bots_block():
     src = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
     assert "async def _bots" in src
-    assert '"bots": await _bots(' in src
+    # Секции снимка собираются параллельно таблицей (name, fn), а не
+    # построчным await, — проводку проверяем по этой таблице.
+    assert '("bots", _bots)' in src, (
+        "секция «bots» пропала из снимка мира")
     assert "managed_bots WHERE added_by" in src
 
 

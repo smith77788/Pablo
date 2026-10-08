@@ -104,7 +104,10 @@ def test_world_retention_fail_open():
 def test_world_snapshot_wires_retention():
     src = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
     assert "async def _retention" in src
-    assert '"retention": await _retention(' in src
+    # Секции снимка собираются параллельно таблицей (name, fn), а не
+    # построчным await, — проводку проверяем по этой таблице.
+    assert '("retention", _retention)' in src, (
+        "секция «retention» пропала из снимка мира")
     assert "invite_retention" in src
 
 

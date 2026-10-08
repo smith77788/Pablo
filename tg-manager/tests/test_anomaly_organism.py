@@ -95,7 +95,10 @@ def test_world_anomalies_fail_open():
 def test_world_snapshot_wires_anomalies():
     src = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
     assert "async def _anomalies" in src
-    assert '"anomalies": await _anomalies(' in src
+    # Секции снимка собираются параллельно таблицей (name, fn), а не
+    # построчным await, — проводку проверяем по этой таблице.
+    assert '("anomalies", _anomalies)' in src, (
+        "секция «anomalies» пропала из снимка мира")
     assert "anomaly_events" in src
 
 

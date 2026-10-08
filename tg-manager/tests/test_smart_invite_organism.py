@@ -75,5 +75,8 @@ def test_world_invite_chats_fail_open():
 def test_world_snapshot_wires_invite_chats():
     src = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
     assert "async def _invite_chats" in src
-    assert '"invite_chats": await _invite_chats(' in src
+    # Секции снимка собираются параллельно таблицей (name, fn), а не
+    # построчным await, — проводку проверяем по этой таблице.
+    assert '("invite_chats", _invite_chats)' in src, (
+        "секция «invite_chats» пропала из снимка мира")
     assert "chat_invite_state" in src

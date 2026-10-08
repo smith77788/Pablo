@@ -95,7 +95,10 @@ def test_world_seo_fail_open_on_db_error():
 def test_world_snapshot_wires_seo_block():
     src = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
     assert "async def _seo" in src
-    assert '"seo": await _seo(' in src
+    # Секции снимка собираются параллельно таблицей (name, fn), а не
+    # построчным await, — проводку проверяем по этой таблице.
+    assert '("seo", _seo)' in src, (
+        "секция «seo» пропала из снимка мира")
     assert "seo_advisor" in src
 
 
