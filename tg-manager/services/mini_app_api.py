@@ -7936,7 +7936,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 try:
                     token = channel_change_approval.issue(uid, value, pairs)
                 except channel_change_approval.ApprovalError as exc:
-                    return _err(str(exc), 503)
+                    # Единственная причина — на сервере нет ключа подписи
+                    # (BOT_TOKEN). Это поломка окружения, а не ошибка владельца,
+                    # поэтому она идёт в лог; наружу — внятная русская фраза, а
+                    # не текст исключения и не 503: «Сервис недоступен» фронт
+                    # показывает вместо причины, и владелец думает, что упал весь
+                    # продукт, тогда как не работает одно подтверждение.
+                    log.error("_bulk_edit_op: подтверждение состава не выдано: %s", exc)
+                    return _err(
+                        "Подтверждение изменения сейчас не выдаётся: на сервере "
+                        "не настроен ключ подписи. Передайте это администратору.",
+                        500)
                 return _json_resp({
                     "ok": True, "confirmation_required": True, "approval_token": token,
                     "total": len(pairs), "field": field,

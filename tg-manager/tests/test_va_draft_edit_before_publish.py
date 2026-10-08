@@ -68,9 +68,17 @@ def published(monkeypatch):
     """Перехватываем publish(): операция и доступные аккаунты тут ни при чём."""
     seen = {}
 
-    async def fake_publish(pool, owner_id, channel_id, text, pillar):
+    async def fake_publish(pool, owner_id, channel_id, text, pillar,
+                           media_id=None, select_media=True):
+        # Подпись повторяет channel_admin.publish: у публикации черновика
+        # появилась картинка (media_id) и запрет повторного подбора
+        # (select_media=False — картинка выбрана при создании черновика).
+        # Заглушка со старой подписью валила пять тестов TypeError'ом, то есть
+        # прятала настоящую проверку текста за ошибкой вызова.
         seen["text"] = text
         seen["pillar"] = pillar
+        seen["media_id"] = media_id
+        seen["select_media"] = select_media
         return 42
 
     monkeypatch.setattr(ca, "publish", fake_publish)
@@ -82,6 +90,9 @@ def test_without_an_edit_the_original_goes_out(published):
     _run(ca.publish_draft(pool, 1, 7))
     assert published["text"] == "Исходный текст поста"
     assert pool.saved_body() is None, "текст переписали, хотя владелец его не трогал"
+    assert published["select_media"] is False, (
+        "публикация черновика не должна подбирать картинку заново: она выбрана "
+        "при создании черновика, повторный подбор поставит другую")
 
 
 def test_the_edit_is_what_reaches_the_channel(published):
