@@ -1050,28 +1050,6 @@ async def cb_chanf_be_field(
 ) -> None:
     await safe_answer(callback)
     field = "title" if callback_data.action == "be_field_title" else "about"
-    if field == "title":
-        # Массовое переименование каналов исполняется ТОЛЬКО с подтверждённым
-        # составом: владелец видит список «было → станет» и подтверждает его
-        # токеном (services/channel_change_approval). В боте такого шага нет,
-        # поэтому экран больше не ставит операцию, которую некому исполнить:
-        # раньше он отвечал «✅ запущено», а операция сразу падала отказом
-        # «Массовая смена названий отключена», и владелец узнавал об этом в /ops.
-        await state.clear()
-        kb = InlineKeyboardBuilder()
-        kb.button(text="📄 Описание", callback_data=ChanFactCb(action="be_field_about"))
-        kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
-        kb.adjust(1)
-        await callback.message.edit_text(
-            "✏️ <b>Название сразу у нескольких каналов</b>\n\n"
-            "Такое изменение применяется только после подтверждения состава: "
-            "нужно увидеть список «было → станет» по каждому каналу и подтвердить "
-            "его. Этот шаг есть в мини-аппе, на экране каналов.\n\n"
-            "Здесь можно изменить <b>описание</b> — оно подтверждения не требует.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
-        return
     await state.update_data(edit_field=field)
     await state.set_state(EditChannelBulkFSM.choosing_scope)
     kb = InlineKeyboardBuilder()
@@ -1157,8 +1135,34 @@ async def cb_chanf_be_pick_acc(
     )
 
 
+_BE_SAMPLE = 8
+
+
+async def _be_targets(pool: asyncpg.Pool, owner_id: int,
+                      acc_ids: list[int]) -> list[dict]:
+    """Пары «канал + аккаунт, которым он управляется» — что именно изменится.
+
+    Тот же источник, что у подтверждённого переименования в мини-аппе:
+    исполнитель `bulk_chan_exec` работает парами, и подтверждение владельца
+    считается по этому же списку.
+    """
+    ids = [int(i) for i in (acc_ids or []) if i]
+    rows = await pool.fetch(
+        "SELECT DISTINCT ON (mc.channel_id) mc.channel_id, mc.acc_id, mc.title, "
+        "mc.access_hash, mc.username FROM managed_channels mc "
+        "JOIN tg_accounts a ON a.id=mc.acc_id AND a.owner_id=mc.owner_id "
+        "WHERE mc.owner_id=$1 AND a.is_active AND a.session_str IS NOT NULL"
+        + (" AND mc.acc_id = ANY($2::bigint[])" if ids else "")
+        + " ORDER BY mc.channel_id, mc.id",
+        *([int(owner_id), ids] if ids else [int(owner_id)]),
+    )
+    return [dict(row) for row in (rows or [])]
+
+
 @router.message(EditChannelBulkFSM.waiting_value)
-async def fsm_be_value(message: Message, state: FSMContext) -> None:
+async def fsm_be_value(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     value = (message.text or "").strip()
     if not value:
         kb = InlineKeyboardBuilder()
@@ -1167,13 +1171,64 @@ async def fsm_be_value(message: Message, state: FSMContext) -> None:
             "⚠️ Введите непустое значение:", reply_markup=kb.as_markup()
         )
         return
-    await state.update_data(edit_value=value)
-    await state.set_state(EditChannelBulkFSM.previewing)
     data = await state.get_data()
-    field = data["edit_field"]
-    scope = data["be_scope"]
+    field = data.get("edit_field", "title")
+    if field == "title" and len(value) > 128:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
+        await message.answer(
+            "⚠️ Название канала — до 128 символов. Введите короче:",
+            reply_markup=kb.as_markup())
+        return
+    await state.update_data(edit_value=value)
+
+    # Предпросмотр считается по РЕАЛЬНОМУ списку каналов, а не по числу
+    # аккаунтов: переименование идёт парами «канал + аккаунт», и подтверждение
+    # владельца тоже считается по этому списку.
+    try:
+        pairs = await _be_targets(pool, message.from_user.id,
+                                  data.get("be_acc_ids") or [])
+    except Exception:
+        log_exc_swallow(log, "bulk_edit: не удалось собрать список каналов")
+        pairs = []
+    if not pairs:
+        await state.clear()
+        await message.answer(
+            "⚠️ Нет каналов с доступными аккаунтами — менять нечего.\n"
+            "Проверьте, что аккаунт активен и его сессия жива.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    token = ""
+    if field == "title":
+        # Массовое переименование необратимо для владельца: старые названия
+        # нигде не хранятся. Поэтому исполнитель принимает его только с
+        # подтверждением, выданным на ЭТОТ список и это значение.
+        from services import channel_change_approval
+        try:
+            token = channel_change_approval.issue(
+                message.from_user.id, value, pairs)
+        except channel_change_approval.ApprovalError as exc:
+            await state.clear()
+            await message.answer(
+                f"⚠️ {html.escape(str(exc))}",
+                parse_mode="HTML",
+                reply_markup=_back_menu_kb().as_markup(),
+            )
+            return
+    await state.update_data(be_token=token)
+    await state.set_state(EditChannelBulkFSM.previewing)
+
     field_label = "название" if field == "title" else "описание"
-    scope_label = "все каналы" if scope == "all" else "каналы выбранного аккаунта"
+    scope_label = ("все каналы" if data.get("be_scope") == "all"
+                   else "каналы выбранного аккаунта")
+    sample = "\n".join(
+        f"• {html.escape(str(item.get('title') or '—'))} → "
+        f"{html.escape(value)}" for item in pairs[:_BE_SAMPLE])
+    more = (f"\n… и ещё {len(pairs) - _BE_SAMPLE}"
+            if len(pairs) > _BE_SAMPLE else "")
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Применить", callback_data=ChanFactCb(action="be_confirm"))
     kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
@@ -1182,12 +1237,12 @@ async def fsm_be_value(message: Message, state: FSMContext) -> None:
         f"🔍 <b>Предпросмотр изменения</b>\n\n"
         f"Поле: <b>{field_label}</b>\n"
         f"Охват: <b>{scope_label}</b>\n"
-        f"Новое значение: <b>{html.escape(value)}</b>\n\n"
+        f"Каналов: <b>{len(pairs)}</b>\n\n"
+        f"{sample}{more}\n\n"
         "Применить изменения?",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "be_confirm"))
@@ -1200,33 +1255,27 @@ async def cb_chanf_be_confirm(
 
     field = data.get("edit_field", "title")
     value = data.get("edit_value", "")
-    acc_ids: list[int] = data.get("be_acc_ids", [])
-
-    if not acc_ids:
+    if not value:
         await callback.message.edit_text(
-            "⚠️ Нет аккаунтов для операции.",
+            "⚠️ Новое значение потерялось — начните заново.",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
 
+    # Список собирается заново: между предпросмотром и подтверждением канал мог
+    # уехать, а аккаунт — умереть. Для переименования расхождение ловит само
+    # подтверждение — оно выдано на конкретный список.
     try:
-        # Одна дверь: выбранные аккаунты через флуд-осознанный select_all_active
-        # (фильтр cooldown/мёртвых статусов + полный транспорт с cf_relay_url).
-        from services import resource_selector as _rsel
-        accounts = await _rsel.select_all_active(
-            pool, callback.from_user.id,
-            include_ids=[int(_i) for _i in acc_ids], min_trust_score=0.0)
+        pairs = await _be_targets(pool, callback.from_user.id,
+                                  data.get("be_acc_ids") or [])
     except Exception:
-        log_exc_swallow(log, "bulk_edit fetch accounts failed")
-        accounts = []
-
-    if field != "about":
-        # Сюда можно попасть только со старым состоянием FSM: название требует
-        # подтверждения состава (см. cb_chanf_be_field).
+        log_exc_swallow(log, "bulk_edit: не удалось собрать список каналов")
+        pairs = []
+    if not pairs:
         await callback.message.edit_text(
-            "✏️ Название сразу у нескольких каналов меняется только после "
-            "подтверждения состава — этот шаг есть в мини-аппе, на экране каналов.",
+            "⚠️ У выбранных аккаунтов нет каналов с живой сессией.\n\n"
+            "Сначала загрузите их: <b>🔎 Мои каналы → Загрузить из Telegram</b>.",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -1234,45 +1283,52 @@ async def cb_chanf_be_confirm(
 
     # Исполнитель работает по ПАРАМ «канал ↔ аккаунт», а не по списку аккаунтов:
     # один текст на весь флот — это и есть то изменение, которое отключили.
+    params: dict = {
+        "op": "chan_title" if field == "title" else "chan_about",
+        "value": value,
+        "base_uname": value if field == "title" else "",
+        "channel_acc_pairs": [
+            {"channel_id": item["channel_id"], "acc_id": item["acc_id"],
+             "title": item.get("title")}
+            for item in pairs
+        ],
+    }
+    if field == "title":
+        from services import channel_change_approval
+        try:
+            channel_change_approval.verify(
+                str(data.get("be_token") or ""),
+                callback.from_user.id, value, params["channel_acc_pairs"])
+        except channel_change_approval.ApprovalError as exc:
+            await callback.message.edit_text(
+                f"⚠️ {html.escape(str(exc))}\n\n"
+                "Откройте редактирование заново — список покажется ещё раз.",
+                parse_mode="HTML",
+                reply_markup=_back_menu_kb().as_markup(),
+            )
+            return
+        params["approval_token"] = str(data.get("be_token") or "")
+
+    from services import operation_bus
+
+    field_label = "названий" if field == "title" else "описаний"
     try:
-        channels = await pool.fetch(
-            "SELECT channel_id, title, acc_id FROM managed_channels "
-            " WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
-            " ORDER BY acc_id, title",
-            callback.from_user.id,
-            [int(a["id"]) for a in accounts],
+        op_id = await operation_bus.submit(
+            pool, callback.from_user.id, "bulk_chan_exec", params,
+            total_items=len(pairs),
+            label=f"Массовая смена {field_label}: {len(pairs)} каналов",
         )
-    except Exception:
-        log_exc_swallow(log, "bulk_edit fetch channels failed")
-        channels = []
-    if not channels:
+    except PermissionError as exc:
         await callback.message.edit_text(
-            "⚠️ У выбранных аккаунтов нет каналов в базе.\n\n"
-            "Сначала загрузите их: <b>🔎 Мои каналы → Загрузить из Telegram</b>.",
+            f"🔒 {html.escape(str(exc) or 'Требуется подписка')}",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
-
-    from services import operation_bus
-
-    op_id = await operation_bus.submit(
-        pool, callback.from_user.id, "bulk_chan_exec",
-        {
-            "channel_acc_pairs": [
-                {"channel_id": ch["channel_id"], "acc_id": ch["acc_id"],
-                 "title": ch["title"]}
-                for ch in channels
-            ],
-            "op": "chan_about",
-            "base_uname": "",
-            "value": value,
-        },
-        total_items=len(channels),
-    )
     await callback.message.edit_text(
-        f"✅ <b>Описание каналов обновляется</b>\n\n"
-        f"Каналов: <b>{len(channels)}</b> · Аккаунтов: <b>{len(accounts)}</b>\n"
+        f"✅ <b>Редактирование каналов запущено</b>\n\n"
+        f"Поле: <b>{'название' if field == 'title' else 'описание'}</b> · "
+        f"Каналов: <b>{len(pairs)}</b>\n"
         f"📋 Операция <code>#{op_id}</code> в очереди\n"
         f"💡 Статус: /ops",
         parse_mode="HTML",
