@@ -4637,6 +4637,22 @@ async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
 _notify_cooldown: dict[tuple[int, str, str | None], float] = {}
 _NOTIFY_COOLDOWN_SECONDS = 60  # minimum interval between same-type notifications per user
 _NOTIFY_CACHE_MAX = 10000  # prevent unbounded memory growth
+# Паузы перед повторными попытками доставки. Уведомление об итоге операции —
+# единственный отчёт, который владелец получает о работе, сделанной его
+# аккаунтами; одна попытка «как получится» для такого отчёта мало.
+_NOTIFY_RETRY_DELAYS = (1.0, 4.0)
+# Отказы, которые повторять бессмысленно: владелец не нажал /start, заблокировал
+# бота, удалил аккаунт. Повтор тут только жжёт лимиты Telegram.
+_NOTIFY_PERMANENT_MARKS = (
+    "bot was blocked", "user is deactivated", "chat not found",
+    "bot can't initiate conversation", "forbidden", "user not found",
+)
+
+
+def _notify_failure_is_permanent(exc: Exception) -> bool:
+    """Повторять такую доставку бессмысленно — причина не во временном сбое."""
+    text = str(exc).lower()
+    return any(mark in text for mark in _NOTIFY_PERMANENT_MARKS)
 
 
 def _cleanup_notify_cooldown() -> None:
@@ -4699,30 +4715,67 @@ async def notify_if_enabled(
     слот, и при потоке новых подписчиков большинство уведомлений терялось.
     Для таких событий передавайте уникальный ключ (например, id нового юзера).
     """
+    key = (user_id, pref, dedup_key)
     try:
         # Rate-limit check (in-memory, process-scoped)
         _cleanup_notify_cooldown()
         now = time.monotonic()
-        key = (user_id, pref, dedup_key)
         last_sent = _notify_cooldown.get(key, 0.0)
         if now - last_sent < _NOTIFY_COOLDOWN_SECONDS:
             return
+        # Слот занимаем ДО отправки — иначе два события одного типа, пришедшие
+        # одновременно, оба прошли бы проверку. Но при неудаче слот возвращаем
+        # (см. ниже): раньше сбой сети сжигал окно на минуту, повторять было
+        # некому, и отчёт об операции владелец не получал вообще.
         _notify_cooldown[key] = now
 
         settings = await get_notification_settings(pool, user_id)
         if not settings.get(pref, True):
             return
-        await bot.send_message(
-            user_id, text, parse_mode="HTML", reply_markup=reply_markup
-        )
+        _last_exc: "Exception | None" = None
+        for _attempt in range(1 + len(_NOTIFY_RETRY_DELAYS)):
+            try:
+                await bot.send_message(
+                    user_id, text, parse_mode="HTML", reply_markup=reply_markup
+                )
+                return
+            except Exception as exc:
+                _last_exc = exc
+                if _notify_failure_is_permanent(exc):
+                    break
+                if _attempt >= len(_NOTIFY_RETRY_DELAYS):
+                    break
+                # Telegram сам говорит, сколько ждать — уважаем его цифру.
+                _wait = getattr(exc, "retry_after", None)
+                try:
+                    _wait = float(_wait) if _wait else _NOTIFY_RETRY_DELAYS[_attempt]
+                except (TypeError, ValueError):
+                    _wait = _NOTIFY_RETRY_DELAYS[_attempt]
+                log.warning(
+                    "notify_if_enabled: попытка %d не удалась user=%s pref=%s "
+                    "(%s), повтор через %.0fс",
+                    _attempt + 1, user_id, pref, str(exc)[:120], _wait)
+                await asyncio.sleep(min(_wait, 30.0))
+        raise _last_exc if _last_exc else RuntimeError("доставка не удалась")
     except Exception as exc:
-        # Доставка уведомлений — критичный путь: сбой логируем на WARNING, а не
-        # глушим в DEBUG. Частые причины: владелец не нажал /start у основного
-        # бота (403) или заблокировал его — иначе это полностью невидимо в проде.
-        log.warning(
-            "notify_if_enabled: не доставлено user=%s pref=%s: %s",
+        # Слот освобождаем: причина сбоя могла быть временной, и следующий
+        # обоснованный повод сообщить владельцу не должен молча пропасть из-за
+        # нашей же защиты от спама.
+        _notify_cooldown.pop(key, None)
+        # Доставка уведомлений — критичный путь. Уведомление об итоге операции
+        # вообще единственный отчёт о работе, сделанной аккаунтами владельца,
+        # поэтому недоставку видно не только в логе, но и в метриках.
+        log.error(
+            "notify_if_enabled: НЕ ДОСТАВЛЕНО user=%s pref=%s: %s",
             user_id, pref, str(exc)[:200],
         )
+        try:
+            from services import metrics as _m
+
+            _m.inc("infragram_notifications_undelivered_total",
+                   {"pref": str(pref)[:40]})
+        except Exception:
+            pass
 
 
 # ── Global Presence Factory ────────────────────────────────────────────────
