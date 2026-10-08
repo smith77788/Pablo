@@ -4098,7 +4098,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             res = await pool.execute(
                 "DELETE FROM operation_queue oq "
-                "WHERE oq.owner_id=$1 AND oq.status IN ('done','failed','cancelled') "
+                # Все ТЕРМИНАЛЬНЫЕ (done/partial/failed/cancelled) — чтобы «Частично»
+                # тоже чистилось. Раньше partial не входил, и частичные операции
+                # нельзя было убрать из списка, только перезапустить (жалоба
+                # владельца). Единый источник статусов — op_status.
+                f"WHERE oq.owner_id=$1 AND oq.status IN {op_status.sql_terminal_list()} "
                 "  AND NOT EXISTS (SELECT 1 FROM operation_queue r "
                 "                   WHERE r.owner_id = oq.owner_id "
                 f"                    AND r.status IN {op_status.sql_in_flight_list()} "

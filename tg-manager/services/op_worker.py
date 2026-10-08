@@ -4032,10 +4032,19 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 # обратного: Telegram нас пускает. Открыв цепь на партиалах, мы
                 # бы глушили ровно те массовые операции, которым по их природе
                 # положено терять часть целей (инвайт, DM).
-                await _circuit_breaker_record(owner_id, op_status.is_productive(_final_status))
+                # Телеметрия предохранителя — ПОБОЧКА: её сбой не должен ронять
+                # УЖЕ ИСПОЛНЕННУЮ операцию в «оборвалась» (работа сделана, статус
+                # пишется ниже). Рядом pacing_engine обёрнут по той же причине.
+                try:
+                    await _circuit_breaker_record(owner_id, op_status.is_productive(_final_status))
+                except Exception as _cbe:
+                    log_exc_swallow(log, f"op_worker: circuit breaker record op={op_id}: {_cbe}")
             # Adaptive pacing: record result for learning
             _productive = op_status.is_productive(_final_status)
-            session_simulator.record_success(op_type, 0, elapsed) if _productive else session_simulator.record_failure(op_type, 0, elapsed)
+            try:
+                session_simulator.record_success(op_type, 0, elapsed) if _productive else session_simulator.record_failure(op_type, 0, elapsed)
+            except Exception as _sse:
+                log_exc_swallow(log, f"op_worker: session_simulator record op={op_id}: {_sse}")
             # ML pacing engine: feed success/failure so get_multiplier() learns
             try:
                 get_pacing_engine().record_result(
@@ -10746,7 +10755,11 @@ async def _exec_bulk_post_to_channel(
                     "summary": f"Отменено. Опубликовано: {len(ok_list)}, ошибок: {len(err_list)}",
                 }
 
-            label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+            # str() ОБЯЗАТЕЛЕН: phone (а иногда и first_name) может прийти из БД
+            # ЧИСЛОМ, и html.escape(int) роняет «'int' object has no attribute
+            # 'replace'» — операция «оборвалась» на втором же аккаунте, хотя посты
+            # уже уходили (жалоба владельца: публикация/«Каналы (about)» падали).
+            label = _html.escape(str(acc.get("first_name") or acc.get("phone") or acc["id"]))
             _key = str(acc["id"])
             if _key in _already:
                 ok_list.append(f"✅ {label}: опубликовано ранее")
@@ -10949,7 +10962,11 @@ async def _exec_bulk_update_profile(
                     "summary": f"Отменено. Обновлено: {len(ok_list)}, ошибок: {len(err_list)}",
                 }
 
-            label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+            # str() ОБЯЗАТЕЛЕН: phone (а иногда и first_name) может прийти из БД
+            # ЧИСЛОМ, и html.escape(int) роняет «'int' object has no attribute
+            # 'replace'» — операция «оборвалась» на втором же аккаунте, хотя посты
+            # уже уходили (жалоба владельца: публикация/«Каналы (about)» падали).
+            label = _html.escape(str(acc.get("first_name") or acc.get("phone") or acc["id"]))
             actual_value = f"{value}{i + 1}" if field == "username" else value
 
             try:
