@@ -74,13 +74,14 @@ def redact_secrets(text: str | None, limit: int = 2000) -> str:
 #   * `proxy_url` — прокси владельца возвращается его же приложению, и оно
 #     отправляет URL назад, когда проверяет сессию через этот прокси; замена
 #     пароля на «***» сломала бы проверку.
-_SECRET_KEYS = frozenset({
+SENSITIVE_FIELD_NAMES = frozenset({
     "session_str", "session_string", "string_session",
     "api_hash", "app_hash",
     "password", "passwd", "twofa_password", "two_fa_password",
-    "password_2fa", "cloud_password",
+    "password_2fa", "cloud_password", "new_password", "current_password",
     "bot_token", "token_plain", "secret", "admin_secret",
 })
+_SECRET_KEYS = SENSITIVE_FIELD_NAMES
 
 # Минимальная длина строки, в которой вообще может уместиться секрет по форме:
 # 6 цифр + двоеточие + 30 символов. Короче — не проверяем, и это делает проход

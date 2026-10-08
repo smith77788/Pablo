@@ -3735,6 +3735,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         if isinstance(row["params"], dict)
         else json.loads(row["params"] or "{}")
     )
+    from services.operation_secrets import unseal_operation_params
+
+    params = unseal_operation_params(params)
 
     # Skip operations waiting for user approval
     if row.get("requires_approval") and row.get("status") == "waiting_approval":

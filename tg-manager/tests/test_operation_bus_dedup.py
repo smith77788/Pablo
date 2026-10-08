@@ -7,6 +7,8 @@ submit() — единый choke point (десятки вызовов), поэт�
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from services import operation_bus as ob
@@ -34,6 +36,9 @@ class FakeConn:
         self.inserted = False
         self.fetchval_called = False
         self.advisory_locked = False
+        self.fetchval_query = ""
+        self.fetchval_args = ()
+        self.insert_args = ()
 
     def transaction(self):
         return _ACtx(None)
@@ -44,10 +49,13 @@ class FakeConn:
 
     async def fetchval(self, q, *a):
         self.fetchval_called = True
+        self.fetchval_query = q
+        self.fetchval_args = a
         return self.existing
 
     async def fetchrow(self, q, *a):
         self.inserted = True
+        self.insert_args = a
         return {"id": self.new_id}
 
 
@@ -102,3 +110,32 @@ async def test_unknown_op_type_rejected():
 
 def test_default_window_is_sane():
     assert 1 <= ob.DEFAULT_DEDUP_WINDOW_SEC <= 120
+
+
+@pytest.mark.asyncio
+async def test_sensitive_submit_encrypts_jsonb_and_keeps_stable_dedup(monkeypatch):
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "operation-bus-secret-test-key")
+    params = {
+        "op": "2fa",
+        "account_ids": [7],
+        "new_password": "private-new-password",
+        "current_password": "private-old-password",
+    }
+
+    first = FakeConn(existing=None, new_id=101)
+    assert await ob.submit(
+        FakePool(first), 42, "profile_setter", params, bypass_plan_check=True
+    ) == 101
+    stored = json.loads(first.insert_args[2])
+    fingerprint = stored["_sealed_params_fp"]
+    assert stored["new_password"].startswith("ENC:")
+    assert "private-new-password" not in repr(first.insert_args)
+    assert "private-old-password" not in repr(first.insert_args)
+
+    duplicate = FakeConn(existing=101, new_id=999)
+    assert await ob.submit(
+        FakePool(duplicate), 42, "profile_setter", params, bypass_plan_check=True
+    ) == 101
+    assert "params->>'_sealed_params_fp'" in duplicate.fetchval_query
+    assert duplicate.fetchval_args[2] == fingerprint
+    assert duplicate.inserted is False

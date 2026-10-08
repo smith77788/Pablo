@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import logging
 import os
 import time
@@ -83,16 +84,25 @@ def _key() -> bytes:
     return hashlib.sha256(raw.encode()).digest()
 
 
-def encrypt_token(token: str) -> str:
-    """Encrypt *token*; returns 'ENC:<base64>' string safe for text column."""
-    if not token or token.startswith(_MARKER):
-        return token  # empty or already encrypted — pass through
+def _encrypt_plaintext(token: str) -> str:
     from Crypto.Cipher import AES as _AES
 
     nonce = os.urandom(12)
     cipher = _AES.new(_key(), _AES.MODE_GCM, nonce=nonce)
     ct, tag = cipher.encrypt_and_digest(token.encode())
     return _MARKER + base64.b64encode(nonce + tag + ct).decode()
+
+
+def encrypt_token(token: str) -> str:
+    """Encrypt *token*; returns 'ENC:<base64>' string safe for text column."""
+    if not token or token.startswith(_MARKER):
+        return token  # empty or already encrypted — pass through
+    return _encrypt_plaintext(token)
+
+
+def encrypt_plaintext_token(token: str) -> str:
+    """Зашифровать заведомый plaintext, даже если он начинается с ``ENC:``."""
+    return _encrypt_plaintext(token) if token else token
 
 
 def decrypt_token(enc: str) -> str:
@@ -157,3 +167,14 @@ def proxy_fingerprint(proxy_url: str) -> str:
     ключ (UNIQUE user_proxies, PK infra_memory_proxies), а шифр недетерминирован,
     поэтому дедуп/ON CONFLICT переводятся на этот fp."""
     return session_fingerprint(proxy_url)
+
+
+def keyed_fingerprint(value: str, *, namespace: str) -> str:
+    """Стабильный HMAC для дедупа секретных данных без offline-перебора.
+
+    Обычный sha256 подходит для высокоэнтропийных session/proxy значений, но
+    пароль пользователя часто короткий. HMAC не позволяет проверить догадку о
+    пароле без серверного ключа шифрования.
+    """
+    payload = f"{namespace}\0{value}".encode()
+    return hmac.new(_key(), payload, hashlib.sha256).hexdigest()

@@ -760,7 +760,10 @@ async def submit(
     retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
     op_label = label or meta.get("description") or op_type
 
-    params_json = json.dumps(params, ensure_ascii=False)
+    from services.operation_secrets import seal_operation_params
+
+    stored_params, sensitive_params_fp = seal_operation_params(params)
+    params_json = json.dumps(stored_params, ensure_ascii=False)
     sched = _coerce_scheduled_for(scheduled_for)
 
     # Идемпотентность постановки. Двойной тап кнопки или retry клиента после
@@ -775,20 +778,34 @@ async def submit(
     async with pool.acquire() as conn:
         async with conn.transaction():
             if dedup_window_sec and dedup_window_sec > 0:
+                dedup_identity = sensitive_params_fp or params_json
                 await conn.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                    f"opbus|{owner_id}|{op_type}|{params_json}|{sched}",
+                    f"opbus|{owner_id}|{op_type}|{dedup_identity}|{sched}",
                 )
-                existing = await conn.fetchval(
-                    """SELECT id FROM operation_queue
-                       WHERE owner_id = $1 AND op_type = $2
-                         AND status IN ('pending', 'running')
-                         AND params = $3::jsonb
-                         AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
-                         AND created_at > NOW() - make_interval(secs => $5)
-                       ORDER BY id DESC LIMIT 1""",
-                    owner_id, op_type, params_json, sched, dedup_window_sec,
-                )
+                if sensitive_params_fp:
+                    existing = await conn.fetchval(
+                        """SELECT id FROM operation_queue
+                           WHERE owner_id = $1 AND op_type = $2
+                             AND status IN ('pending', 'running')
+                             AND params->>'_sealed_params_fp' = $3
+                             AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
+                             AND created_at > NOW() - make_interval(secs => $5)
+                           ORDER BY id DESC LIMIT 1""",
+                        owner_id, op_type, sensitive_params_fp, sched,
+                        dedup_window_sec,
+                    )
+                else:
+                    existing = await conn.fetchval(
+                        """SELECT id FROM operation_queue
+                           WHERE owner_id = $1 AND op_type = $2
+                             AND status IN ('pending', 'running')
+                             AND params = $3::jsonb
+                             AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
+                             AND created_at > NOW() - make_interval(secs => $5)
+                           ORDER BY id DESC LIMIT 1""",
+                        owner_id, op_type, params_json, sched, dedup_window_sec,
+                    )
                 if existing is not None:
                     op_id = int(existing)
                     reused = True
