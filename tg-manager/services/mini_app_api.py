@@ -84,6 +84,11 @@ OPERATION_STATUSES = frozenset(op_status.IN_FLIGHT | op_status.TERMINAL)
 
 _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL = 30  # секунд
+try:
+    _DASHBOARD_QUERY_TIMEOUT = float(os.getenv("MINIAPP_DASHBOARD_QUERY_TIMEOUT", "8"))
+except (TypeError, ValueError):
+    _DASHBOARD_QUERY_TIMEOUT = 8.0
+_DASHBOARD_QUERY_TIMEOUT = min(max(_DASHBOARD_QUERY_TIMEOUT, 1.0), 25.0)
 # Потолок числа записей кэша ответов: ключ включает user id и query string,
 # так что без потолка словарь растёт с каждым новым пользователем/набором
 # параметров и держит тела ответов в памяти до перезапуска процесса.
@@ -1438,6 +1443,19 @@ async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args):
         return None
 
 
+async def _dashboard_query(name: str, awaitable, *, timeout: float | None = None):
+    """Изолировать метрику: одна зависшая выборка не задерживает весь dashboard."""
+    deadline = _DASHBOARD_QUERY_TIMEOUT if timeout is None else timeout
+    try:
+        return await asyncio.wait_for(awaitable, timeout=deadline)
+    except asyncio.TimeoutError:
+        log.warning("Mini App dashboard query timed out: %s after %.1fs", name, deadline)
+        return None
+    except Exception:
+        log.exception("Mini App dashboard query failed: %s", name)
+        return None
+
+
 def _dna_to_dict(dna: Any) -> dict:
     """Serialize an AudienceDNA dataclass instance to a JSON-friendly dict."""
     return {
@@ -2186,7 +2204,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='failed' AND created_at > NOW() - INTERVAL '24 hours'", uid),
         }
         _keys = list(_q.keys())
-        _res = await asyncio.gather(*_q.values(), return_exceptions=True)
+        _res = await asyncio.gather(
+            *(_dashboard_query(name, query) for name, query in _q.items()),
+            return_exceptions=True,
+        )
         r = {k: (None if isinstance(v, Exception) else v) for k, v in zip(_keys, _res)}
 
         stats = r["stats"] or {"bots": 0, "channels": 0, "subscribers": 0,
@@ -2285,7 +2306,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""", uid),
         }
         _keys = list(_q.keys())
-        _res = await asyncio.gather(*_q.values(), return_exceptions=True)
+        _res = await asyncio.gather(
+            *(_dashboard_query(name, query) for name, query in _q.items()),
+            return_exceptions=True,
+        )
         r = {k: (None if isinstance(v, Exception) else v) for k, v in zip(_keys, _res)}
         prx = r.get("proxies") or {}
         opn = r.get("ops_now") or {}

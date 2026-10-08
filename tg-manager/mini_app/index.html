@@ -7660,7 +7660,9 @@ function hidePairingOverlay(){ const ov=document.getElementById('pairOverlay'); 
       catch(err) { toast('⚠️ Не удалось открыть раздел из ссылки: ' + errRu(err, 'ошибка')); }
     }, 100);
   } catch(e) {
-    document.getElementById('kpiScroll').innerHTML = errHtml(errRu(e));
+    const errorHtml = errHtml(errRu(e), 'location.reload()');
+    document.getElementById('kpiScroll').innerHTML = errorHtml;
+    document.getElementById('actList').innerHTML = errorHtml;
   }
 })();
 
@@ -8657,7 +8659,11 @@ async function loadHome() {
     renderCards(d);
     renderAct(d.recent_activity||[]);
   } catch(e) {
-    if (!cached) document.getElementById('kpiScroll').innerHTML = errHtml(errRu(e));
+    if (!cached) {
+      const errorHtml = errHtml(errRu(e), 'loadHome()');
+      document.getElementById('kpiScroll').innerHTML = errorHtml;
+      document.getElementById('actList').innerHTML = errorHtml;
+    }
   }
   loadOnboarding();
   loadOrganismPulse();
