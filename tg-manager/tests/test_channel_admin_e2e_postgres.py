@@ -103,8 +103,14 @@ def pool():
         pytest.skip(f"Postgres недоступен: {str(exc)[:120]}")
 
     async def _seed():
+        # va_reference_channels тоже чистим: тест ждёт РОВНО один канал-образец
+        # (`[ref] = d["references"]`), и строка, оставшаяся от прошлого прогона,
+        # валила его на здоровом коде. В CI база каждый раз новая, а живой
+        # прогон локально (его требует CLAUDE.md для критичных цепочек) идёт по
+        # одной и той же базе.
         for t in ("va_channel_admin", "va_admin_drafts", "va_admin_plan", "va_admin_events",
                   "va_channel_stats", "va_channel_brain", "va_channel_posts",
+                  "va_reference_channels",
                   "operation_queue", "managed_channels"):
             await p.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWNER)
         await p.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER)
