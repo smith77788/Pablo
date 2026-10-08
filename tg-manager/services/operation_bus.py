@@ -730,10 +730,11 @@ async def submit(
                      не теряла label, который они писали (см. Волна S/1A).
       dedup_window_sec — окно идемпотентности постановки (сек). Повторный сабмит
                      идентичной операции (owner+op_type+params+scheduled_for),
-                     пока прежняя ещё pending/running и не старше окна, вернёт её
-                     op_id вместо создания дубля. Защищает от двойного тапа и
-                     retry после таймаута. 0 = отключить (для намеренных серий
-                     идентичных операций).
+                     пока прежняя ещё в работе либо только что успешно
+                     завершилась, вернёт её op_id вместо создания дубля.
+                     Защищает от двойного тапа и retry после таймаута, включая
+                     гонку «первый запрос уже успел завершиться». 0 = отключить
+                     (для намеренных серий идентичных операций).
 
     Raises:
       ValueError — если op_type не зарегистрирован в OP_REGISTRY
@@ -787,7 +788,10 @@ async def submit(
                     existing = await conn.fetchval(
                         """SELECT id FROM operation_queue
                            WHERE owner_id = $1 AND op_type = $2
-                             AND status IN ('pending', 'running')
+                             AND status IN (
+                                 'pending', 'running', 'paused', 'scheduled',
+                                 'waiting_approval', 'done'
+                             )
                              AND params->>'_sealed_params_fp' = $3
                              AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
                              AND created_at > NOW() - make_interval(secs => $5)
@@ -799,7 +803,10 @@ async def submit(
                     existing = await conn.fetchval(
                         """SELECT id FROM operation_queue
                            WHERE owner_id = $1 AND op_type = $2
-                             AND status IN ('pending', 'running')
+                             AND status IN (
+                                 'pending', 'running', 'paused', 'scheduled',
+                                 'waiting_approval', 'done'
+                             )
                              AND params = $3::jsonb
                              AND scheduled_for IS NOT DISTINCT FROM $4::timestamptz
                              AND created_at > NOW() - make_interval(secs => $5)

@@ -113,6 +113,18 @@ def test_default_window_is_sane():
 
 
 @pytest.mark.asyncio
+async def test_dedup_covers_waiting_and_just_completed_success():
+    conn = FakeConn(existing=555)
+    await ob.submit(FakePool(conn), 42, OP, {"channel": "@x"}, bypass_plan_check=True)
+
+    query = conn.fetchval_query
+    for status in ("pending", "running", "paused", "scheduled", "waiting_approval", "done"):
+        assert f"'{status}'" in query
+    for retryable in ("partial", "failed", "cancelled"):
+        assert f"'{retryable}'" not in query
+
+
+@pytest.mark.asyncio
 async def test_sensitive_submit_encrypts_jsonb_and_keeps_stable_dedup(monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "operation-bus-secret-test-key")
     params = {
