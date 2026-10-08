@@ -101,6 +101,41 @@ jobs:
       - name: Run tests
         # Схему по базе раскатывают сами тесты (все schema*.sql по возрастанию
         # версии) — отдельного шага миграций не нужно.
+        #
+        # `-rf` добавляет в конец вывода список FAILED одной строкой на тест —
+        # его забирает следующий шаг.
         env:
           INFRAGRAM_TEST_DSN: postgresql://postgres:postgres@127.0.0.1:5432/infra
-        run: python -m pytest tests/ -q
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -q -rf | tee /tmp/pytest-out.txt
+
+      # Какие тесты упали — в отчёт прогона.
+      #
+      # ЗАЧЕМ. Узнать это из логов нельзя: архив логов отдаётся редиректом на
+      # blob.core.windows.net, а туда агенту исходящий трафик закрыт; tail
+      # джоба же занят логом контейнера postgres (он печатает каждый ERROR
+      # схемы, сотни строк), и сводка pytest в него не попадает. На разбор
+      # красного прогона уходил повторный полный прогон локально — восемь минут
+      # и больше. Сводка шага возвращается обычным API (`check-runs/<id>`),
+      # поэтому список падений читается одним запросом.
+      - name: Сводка падений
+        if: failure()
+        run: |
+          if [ ! -f /tmp/pytest-out.txt ]; then
+            echo 'Прогон тестов не стартовал: упал предыдущий шаг (ruff, установка, сбор).' \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo '## Упавшие тесты'
+            echo '```'
+            { grep -E '^(FAILED|ERROR) ' /tmp/pytest-out.txt \
+                || echo 'строк FAILED нет — падение не в самих тестах (сбор или ошибка импорта)'; } \
+              | head -80
+            echo '```'
+            echo '## Итог'
+            echo '```'
+            tail -n 3 /tmp/pytest-out.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
