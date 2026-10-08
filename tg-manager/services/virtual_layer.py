@@ -75,7 +75,15 @@ VALUE_LABEL = {
     "qualified": "Квалифицирован", "ready": "Готов купить",
     "purchased": "Купил", LOST: "Потерян",
 }
-TEMPERATURE_LABEL = {"hot": "🔥 Горячий", "warm": "🌤 Тёплый"}
+# Температуры каскада. COLD нужен как ЗАПИСЫВАЕМОЕ значение: без него вердикт
+# «уже не горячо» было нечем выразить, каскад просто возвращал None и оставлял
+# в базе прежний «🔥 Горячий». Бот, остывший месяц назад, навсегда оставался
+# самым горячим — и подсказка мозга «направьте оффер сюда» тоже навсегда.
+HOT, WARM, COLD = "hot", "warm", "cold"
+TEMPERATURE_LABEL = {HOT: "🔥 Горячий", WARM: "🌤 Тёплый", COLD: "🧊 Остыл"}
+# Значения, которые ставит каскад (а не лестница воронки). Снимать «горячо»
+# можно только с них: родителя, которого каскад ещё не трогал, не выдумываем.
+CASCADE_VALUES = (HOT, WARM, COLD)
 EVENT_LABEL = {
     "user_became_active": "🌱 Ожил",
     "user_showed_interest": "👀 Проявил интерес",
@@ -193,10 +201,29 @@ def _expiry(value: str, now: datetime) -> datetime | None:
 # ── Распад (чистая функция) ────────────────────────────────────────────────
 
 def decay(current: dict, *, now: datetime | None = None) -> dict | None:
-    """Просроченное состояние → на рунг ниже, либо None если распад не нужен.
+    """Просроченное состояние → вниз по лестнице, либо None если распад не нужен.
 
-    Внизу лестницы (new) распадаться некуда → None. Терминальные не распадаются.
-    Уверенность при остывании падает.
+    Внизу лестницы (new) распадаться некуда. Терминальные не распадаются.
+    Уверенность при остывании падает на каждом рунге.
+
+    Опускаемся на СТОЛЬКО рунгов, сколько молчания накопилось, и каждый
+    следующий срок считаем от ПРЕДЫДУЩЕГО срока, а не от `now`. Раньше было
+    иначе: один рунг за проход и новый срок от момента прохода. Это значит,
+    что о человеке, молчащем месяц, слой говорил «интерес» — проход опускал
+    его с «готов» на «квалифицирован» и выдавал свежие 72 часа жизни, потом с
+    «квалифицирован» на «интерес» ещё на 96 часов, и так дальше. Полный остыв
+    занимал две недели календаря ПОСЛЕ месяца тишины, причём только если
+    проходы шли подряд: `run_decay` берёт 500 строк за редкий проход на всех
+    владельцев сразу. Ровно то, в чём слой упрекает тег («интерес, о котором
+    сутки ничего не слышно, — уже не интерес»), он делал сам.
+
+    Дойдя до дна (`new`), срок СНИМАЕМ (`expires_at=None`). Иначе строка
+    навсегда оставалась в окне выборки `run_decay` («просрочено и не NULL»),
+    распадаться ей было уже некуда, и такие строки копились, занимая лимит
+    прохода: распад переставал доходить до тех, кому он нужен. Это тот же
+    случай, когда значение не меняется, а срок снять надо, — его отдаём с
+    `value_changed=False`, чтобы вызывающий не писал историю и не шумел
+    событием о переходе, которого не было.
     """
     now = _now(now)
     val = current.get("value")
@@ -205,13 +232,47 @@ def decay(current: dict, *, now: datetime | None = None) -> dict | None:
     exp = _aware(current.get("expires_at"))
     if exp is None or exp > now:
         return None                          # ещё не пора
-    r = rank(val)
-    if r <= 0:
-        return None                          # ниже new не опускаем
-    lower = LADDER[r - 1]
-    conf = max(0.2, float(current.get("confidence") or 0.5) * 0.6)
-    return {"value": lower, "confidence": round(conf, 3),
-            "expires_at": _expiry(lower, now), "reason": "decay"}
+    conf = float(current.get("confidence") or 0.5)
+    rungs = 0
+    while exp is not None and exp <= now:
+        r = rank(val)
+        if r <= 0:
+            exp = None                       # дно: ниже не опускаем, срок снимаем
+            break
+        val = LADDER[r - 1]
+        conf = max(0.2, conf * 0.6)
+        rungs += 1
+        if rank(val) <= 0:
+            exp = None                       # пришли на дно: срок тут не нужен
+            break
+        ttl = ttl_for(val)
+        exp = (exp + ttl) if ttl else None
+    if rungs == 0 and exp is not None:
+        return None                          # ниже new не опускаем и срок цел
+    return {"value": val, "confidence": round(conf, 3),
+            "expires_at": exp, "reason": "decay", "value_changed": rungs > 0}
+
+
+def effective(state: dict | None, *, now: datetime | None = None) -> dict | None:
+    """Состояние, каким оно ЕСТЬ сейчас: с применённым распадом, но без записи.
+
+    Запись состояния — это значение на момент записи плюс срок, до которого
+    оно верно. Все читатели слоя брали значение и срок игнорировали, а распад
+    применяет отдельный редкий проход, поэтому между проходами слой показывал
+    и СЧИТАЛ устаревшее: «готов купить» у человека, пропавшего три недели
+    назад, шёл в каскад наравне со свежим. Каскад — место, где из этого
+    получается решение («кампания горячая»), поэтому он обязан читать через
+    эту функцию, а не сырое значение.
+    """
+    if not state:
+        return None
+    out = dict(state)
+    change = decay(out, now=now)
+    if change is not None:
+        out.update({"value": change["value"],
+                    "confidence": change["confidence"],
+                    "expires_at": change["expires_at"]})
+    return out
 
 
 # ── Каскад (чистая функция) ────────────────────────────────────────────────
@@ -267,7 +328,10 @@ async def get_state(pool, owner_id: int, entity_type: str, entity_id,
 
 async def _write(pool, owner_id: int, entity_type: str, entity_id: str,
                  state_key: str, new: dict, source: str | None,
-                 from_value: str | None) -> None:
+                 from_value: str | None, *, history: bool = True) -> None:
+    """history=False — записать только состояние. Нужно там, где значение не
+    меняется, а поправить надо срок: строка «перехода из X в X» в истории
+    испортила бы `temporal_pattern` (он считает рисунок по переходам)."""
     await pool.execute(
         """INSERT INTO virtual_states
              (owner_id, entity_type, entity_id, state_key, value, confidence,
@@ -279,6 +343,8 @@ async def _write(pool, owner_id: int, entity_type: str, entity_id: str,
              updated_at=now()""",
         owner_id, entity_type, entity_id, state_key, new["value"],
         float(new["confidence"]), source, new.get("expires_at"))
+    if not history:
+        return
     await pool.execute(
         """INSERT INTO virtual_state_history
              (owner_id, entity_type, entity_id, state_key, from_value, to_value,
@@ -371,15 +437,26 @@ async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
     if owner_id is not None:
         where += " AND owner_id=$1"
         args.append(owner_id)
+    # ORDER BY expires_at — кто просрочен дольше, тот остывает первым. Без
+    # порядка лимит прохода доставался случайным строкам, и давно остывшие
+    # могли не попасть в него никогда.
     rows = await pool.fetch(
         f"SELECT owner_id, entity_type, entity_id, state_key, value, confidence, "
-        f"expires_at, source FROM virtual_states WHERE {where} LIMIT {int(limit)}",
+        f"expires_at, source FROM virtual_states WHERE {where} "
+        f"ORDER BY expires_at LIMIT {int(limit)}",
         *args)
     n = 0
     for r in rows:
         cur = dict(r)
         new = decay(cur, now=now)
         if new is None:
+            continue
+        if new.get("value_changed") is False:
+            # Дно лестницы: значение то же, снимаем только срок, чтобы строка
+            # ушла из окна выборки и не занимала лимит следующих проходов.
+            await _write(pool, cur["owner_id"], cur["entity_type"],
+                         cur["entity_id"], cur["state_key"], new,
+                         cur.get("source"), cur["value"], history=False)
             continue
         await _write(pool, cur["owner_id"], cur["entity_type"], cur["entity_id"],
                      cur["state_key"], new, cur.get("source"), cur["value"])
@@ -418,21 +495,48 @@ async def _apply_cascade_verdict(pool, owner_id: int, parent_type: str, parent_i
     return verdict
 
 
+async def _cool_down(pool, owner_id: int, parent_type: str, parent_id,
+                     state_key: str) -> str | None:
+    """Снять с родителя прежнее «горячо/тепло», когда детей для него уже нет.
+
+    Вердикта нет — это не «ничего не делать»: в базе лежит прошлый вердикт, и
+    его читают экран сводки, подсказки мозга и `world._vlayer` («самый горячий
+    бот»). Раньше каскад в этом случае просто выходил, и значение жило вечно:
+    бот, у которого горячие контакты остыли полгода назад, оставался самым
+    горячим, а мозг продолжал советовать направить оффер именно туда.
+
+    Родителя, которого каскад ещё не трогал, не выдумываем: пишем только
+    поверх своих же значений (CASCADE_VALUES).
+    """
+    current = await get_state(pool, owner_id, parent_type, str(parent_id), state_key)
+    value = (current or {}).get("value")
+    if value not in (HOT, WARM):
+        return None
+    return await _apply_cascade_verdict(pool, owner_id, parent_type, parent_id,
+                                        state_key, COLD)
+
+
 async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
                             child_type: str, *, state_key: str = "funnel",
-                            **kw) -> str | None:
+                            now: datetime | None = None, **kw) -> str | None:
     """Пересчитать состояние родителя из состояний детей и записать его.
 
     Детьми считаются все сущности `child_type` этого владельца с состоянием по
-    `state_key`. Родитель получает hot/warm по правилу `cascade`. Возвращает
-    новое состояние родителя или None.
+    `state_key`. Родитель получает hot/warm по правилу `cascade`, а на остывшей
+    аудитории — COLD. Возвращает новое состояние родителя или None.
+
+    Состояния детей читаем через `effective`: просроченный рунг — это уже не
+    тот рунг, а распад применяет отдельный редкий проход. Без этого «горячая
+    кампания» держалась на людях, пропавших недели назад.
     """
     rows = await pool.fetch(
-        "SELECT value FROM virtual_states WHERE owner_id=$1 AND entity_type=$2 "
+        "SELECT value, confidence, expires_at FROM virtual_states "
+        "WHERE owner_id=$1 AND entity_type=$2 "
         "AND state_key=$3", owner_id, child_type, state_key)
-    verdict = cascade([r["value"] for r in rows], **kw)
+    values = [(effective(dict(r), now=now) or {}).get("value") for r in rows]
+    verdict = cascade(values, **kw)
     if verdict is None:
-        return None
+        return await _cool_down(pool, owner_id, parent_type, parent_id, state_key)
     return await _apply_cascade_verdict(pool, owner_id, parent_type, parent_id,
                                         state_key, verdict)
 
@@ -445,6 +549,7 @@ _BOT_SOURCE = re.compile(r"^bot_(\d+)$")
 
 async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel",
                                 min_count: int = 5, min_share: float = 0.1,
+                                now: datetime | None = None,
                                 **kw) -> dict[str, str]:
     """Свернуть состояния людей в состояние БОТА, через которого они пришли.
 
@@ -455,7 +560,7 @@ async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel
     Возвращает {bot_id: вердикт} только по ботам, где вердикт есть.
     """
     rows = await pool.fetch(
-        "SELECT source, value FROM virtual_states "
+        "SELECT source, value, confidence, expires_at FROM virtual_states "
         "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
         "AND source IS NOT NULL",
         owner_id, USER, state_key)
@@ -464,12 +569,19 @@ async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel
     for r in rows:
         m = _BOT_SOURCE.match(r["source"] or "")
         if m:
-            by_bot.setdefault(m.group(1), []).append(r["value"])
+            # Через effective, как и каскад аудитории: просроченный «готов» —
+            # уже не «готов», и греть им бота нельзя.
+            by_bot.setdefault(m.group(1), []).append(
+                (effective(dict(r), now=now) or {}).get("value"))
 
     out: dict[str, str] = {}
     for bot_id, values in by_bot.items():
         verdict = cascade(values, min_count=min_count, min_share=min_share, **kw)
         if verdict is None:
+            # Бот, у которого аудитория остыла, обязан остыть вместе с ней.
+            cooled = await _cool_down(pool, owner_id, BOT, bot_id, state_key)
+            if cooled:
+                out[bot_id] = cooled
             continue
         out[bot_id] = await _apply_cascade_verdict(
             pool, owner_id, BOT, bot_id, state_key, verdict)
@@ -750,9 +862,15 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     # «Горячие» сущности верхних рунгов — кого дожимать в первую очередь.
     try:
         hot_rows = await pool.fetch(
+            # Срок не декоративный: просроченный «готов» — это уже не «готов»,
+            # а распад применяет отдельный редкий проход. Список называется
+            # «кого дожимать первыми», и человек, пропавший три недели назад,
+            # стоял в нём первым — работать по такому списку нельзя.
             "SELECT entity_type, entity_id, value, confidence, updated_at "
             "FROM virtual_states WHERE owner_id=$1 AND state_key=$2 "
-            "AND value = ANY($3::text[]) ORDER BY confidence DESC, updated_at DESC "
+            "AND value = ANY($3::text[]) "
+            "AND (expires_at IS NULL OR expires_at > now()) "
+            "ORDER BY confidence DESC, updated_at DESC "
             "LIMIT 50", owner_id, state_key, ["ready", "qualified"])
         out["hot"] = [
             {"entity_type": r["entity_type"], "entity_id": r["entity_id"],

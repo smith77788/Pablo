@@ -88,10 +88,10 @@ async def _tick(pool, bot) -> int:
             # только что она греется вообще.
             try:
                 from services import virtual_layer as _vl2
-                hot_bots = await _vl2.recompute_bot_cascade(pool, oid)
-                if hot_bots:
+                bot_temp = await _vl2.recompute_bot_cascade(pool, oid)
+                if bot_temp:
                     log.info("organism.runner: температура ботов owner=%s: %s",
-                             oid, hot_bots)
+                             oid, bot_temp)
             except Exception:
                 log.debug("organism.runner: bot cascade failed owner=%s", oid,
                           exc_info=True)

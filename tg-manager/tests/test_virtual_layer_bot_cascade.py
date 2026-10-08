@@ -132,7 +132,11 @@ def test_overview_returns_bot_temperatures():
 
 
 def test_temperature_labels_are_russian():
-    assert set(vl.TEMPERATURE_LABEL) == {"hot", "warm"}
+    """У КАЖДОЙ температуры каскада есть русская подпись — владелец не читает
+    по-английски. Набор не морозим: COLD добавлен, чтобы снимать прежнее
+    «горячо», и следующая температура тоже обязана прийти с подписью."""
+    assert set(vl.TEMPERATURE_LABEL) == set(vl.CASCADE_VALUES)
+    assert {"hot", "warm"} <= set(vl.TEMPERATURE_LABEL)
     for label in vl.TEMPERATURE_LABEL.values():
         assert not any("a" <= c.lower() <= "z" for c in label), label
 

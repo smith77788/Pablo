@@ -22407,12 +22407,21 @@ async function openVLayer() {
     // Воронка: полоски по рунгам.
     const max = Math.max(...funnel.map(f => f.count), 1);
     if (d.audience) {
-      const t = d.audience === 'hot'
-        ? {e:'🔥', l:'Аудитория горячая', c:'var(--red)'}
-        : {e:'🌡', l:'Аудитория тёплая', c:'var(--orange)'};
+      // Третье значение — 'cold': каскад снимает прежнее «горячо», когда
+      // готовых больше не набирается. Без этой ветки остывшая аудитория
+      // показывалась «тёплой», то есть ровно наоборот.
+      const T = {
+        hot:  {e:'🔥', l:'Аудитория горячая', c:'var(--red)',
+               h:'Готовых и квалифицированных набралось достаточно — момент для рассылки/оффера.'},
+        warm: {e:'🌡', l:'Аудитория тёплая', c:'var(--orange)',
+               h:'Готовых и квалифицированных набралось достаточно — момент для рассылки/оффера.'},
+        cold: {e:'🧊', l:'Аудитория остыла', c:'var(--hint)',
+               h:'Готовых почти не осталось: прежний интерес распался по времени. Оффер сейчас уйдёт в пустоту — сначала разогрев.'},
+      };
+      const t = T[d.audience] || T.warm;
       html += `<div class="card" style="border-left:3px solid ${t.c};margin-bottom:8px">
         <div style="font-weight:600;font-size:14px">${t.e} ${t.l}</div>
-        <div style="font-size:12px;color:var(--hint);margin-top:2px">Готовых и квалифицированных набралось достаточно — момент для рассылки/оффера.</div>
+        <div style="font-size:12px;color:var(--hint);margin-top:2px">${t.h}</div>
       </div>`;
     }
     // Температура по каждому боту: где именно греется аудитория.
@@ -22420,10 +22429,12 @@ async function openVLayer() {
     if (bots.length) {
       html += '<div class="sec">Температура ботов</div><div class="lst">';
       html += bots.slice(0, 20).map(b => {
-        const c = b.value === 'hot' ? 'var(--red)' : 'var(--orange)';
+        const c = b.value === 'hot' ? 'var(--red)'
+                : b.value === 'cold' ? 'var(--hint)' : 'var(--orange)';
+        const ico = b.value === 'hot' ? '🔥' : b.value === 'cold' ? '🧊' : '🌤';
         const nm = b.name && b.name[0] === '@' ? b.name : '@' + b.name;
         return `<div class="row" onclick="openVLayerEntity('bot','${esc(String(b.bot_id))}')" style="cursor:pointer">
-          <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">${b.value === 'hot' ? '🔥' : '🌤'}</div>
+          <div class="row-ico" style="background:var(--bg-orange-16,rgba(251,191,36,.16))">${ico}</div>
           <div class="row-body"><div class="row-name">${esc(nm)}</div>
             <div class="row-val" style="color:${c}">${esc(b.label)} · уверенность ${Math.round((b.confidence||0)*100)}%</div></div>
         </div>`;

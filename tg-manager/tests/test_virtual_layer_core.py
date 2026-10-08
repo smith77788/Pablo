@@ -81,7 +81,13 @@ def test_fresh_state_does_not_decay():
 
 
 def test_bottom_rung_has_nowhere_to_decay():
-    assert V.decay(_st("new", exp_h=-1), now=T0) is None
+    """Ниже «new» не опускаем. Но просроченный срок на дне снимаем: иначе
+    строка навсегда остаётся в окне выборки run_decay и занимает лимит
+    прохода (подробно — test_virtual_layer_decay_catches_up)."""
+    ch = V.decay(_st("new", exp_h=-1), now=T0)
+    assert ch["value"] == "new" and ch["value_changed"] is False
+    assert ch["expires_at"] is None
+    assert V.decay(_st("new"), now=T0) is None
 
 
 def test_curious_decays_down_to_new():
