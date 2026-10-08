@@ -102,9 +102,17 @@ def test_skip_uses_the_key_that_is_written(ow, name, key):
     assert m, f"{name}: пропуска по журналу нет"
     assert m.group(1) == key, f"{name}: пропускаем по {m.group(1)}, а пишем {key}"
 
+    # Запись успеха в журнал идёт через дверь `_journal_done` (повтор попытки,
+    # log.error и метрика при потере строки — см. цикл «потерянная строка успеха
+    # ведёт к повторному действию»), а запись провала — сырым INSERT. Считаем
+    # оба вида: ищем мы не текст запроса, а КЛЮЧ, под которым цель попадает в
+    # журнал, и он обязан совпадать с ключом пропуска в любой из форм.
     writes = re.findall(
         r"INSERT INTO operation_log\(op_id, step_num, target[^)]*\)"
         r"(?:.*?\n)*?\s*op_id,\s*idx,\s*([^,\n]+),",
+        body,
+    ) + re.findall(
+        r"_journal_done\(\s*pool,\s*op_id,\s*idx,\s*([^,\n)]+)",
         body,
     )
     assert writes, f"{name}: записи в журнал не найдены"
