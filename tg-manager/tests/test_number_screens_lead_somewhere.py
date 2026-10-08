@@ -62,10 +62,21 @@ def test_health_does_not_fake_filters_it_cannot_do():
     for slice_name in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
         assert f'"{slice_name}"' in known, (
             f"срез {slice_name} исчез с сервера — проверку ниже надо пересмотреть")
+    # Проверка была слепой: она искала `healthGoAccounts('low_trust')`, а экран
+    # зовёт её через локальный помощник — `go(срез, число, подпись)` сам
+    # подставляет срез в onclick, и дословной строки в разметке НЕТ ни для
+    # одного среза. То есть запретить она не могла ничего. Берём срезы из
+    # вызовов `go(` и сверяем с набором сервера целиком: ловится любой
+    # выдуманный срез, а не три перечисленных.
+    import re as _re
     body = _js_func("openHealth")
-    for fake in ("'low_trust'", "'flood'", "'warmup'"):
-        assert f"healthGoAccounts({fake})" not in body, (
-            f"экран обещает срез {fake}, которого сервер не умеет")
+    promised = set(_re.findall(r"\bgo\(\s*'([a-z_]+)'", body))
+    assert promised, "экран здоровья перестал предлагать переходы по срезам"
+    unknown = sorted(s for s in promised if f'"{s}"' not in known)
+    assert not unknown, (
+        f"экран обещает срезы, которых сервер не умеет: {unknown} — запрос с "
+        "таким фильтром молча подменится на «все», и «применить ко всему срезу» "
+        "уедет по всему флоту")
 
 
 def test_flood_event_opens_the_account():
