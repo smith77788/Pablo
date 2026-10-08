@@ -36,6 +36,8 @@ import re
 
 import pytest
 
+from tests import op_journal_probe
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Исполнитель → как выглядит ключ цели в журнале.
@@ -102,22 +104,19 @@ def test_skip_uses_the_key_that_is_written(ow, name, key):
     assert m, f"{name}: пропуска по журналу нет"
     assert m.group(1) == key, f"{name}: пропускаем по {m.group(1)}, а пишем {key}"
 
-    # Запись успеха в журнал идёт через дверь `_journal_done` (повтор попытки,
-    # log.error и метрика при потере строки — см. цикл «потерянная строка успеха
-    # ведёт к повторному действию»), а запись провала — сырым INSERT. Считаем
-    # оба вида: ищем мы не текст запроса, а КЛЮЧ, под которым цель попадает в
-    # журнал, и он обязан совпадать с ключом пропуска в любой из форм.
-    writes = re.findall(
-        r"INSERT INTO operation_log\(op_id, step_num, target[^)]*\)"
-        r"(?:.*?\n)*?\s*op_id,\s*idx,\s*([^,\n]+),",
-        body,
-    ) + re.findall(
-        r"_journal_done\(\s*pool,\s*op_id,\s*idx,\s*([^,\n)]+)",
-        body,
+    # Ищем не текст запроса, а КЛЮЧ, под которым цель попадает в журнал: он
+    # обязан совпадать с ключом пропуска в любой из форм записи. Записи
+    # читаются по дереву разбора (tests/op_journal_probe.py), а не регуляркой
+    # по тексту: успех пишется через дверь `_journal_done`, провал — сырым
+    # INSERT, и привязка к расстановке переносов выключала бы проверку молча.
+    journal = op_journal_probe.writes(name)
+    assert journal, f"{name}: записи в журнал не найдены"
+    targets = {w.target for w in journal}
+    assert targets == {key}, (
+        f"{name}: в журнал пишутся разные ключи {targets} — сопоставить нечем"
     )
-    assert writes, f"{name}: записи в журнал не найдены"
-    assert {w.strip() for w in writes} == {key}, (
-        f"{name}: в журнал пишутся разные ключи {set(writes)} — сопоставить нечем"
+    assert {w.status for w in journal} >= {"ok", "error"}, (
+        f"{name}: в журнал попадает не всякий исход — пропуск увидит не всю работу"
     )
 
 
@@ -210,6 +209,13 @@ def test_known_good_executor_passes_the_same_check(ow):
     """
     body = _fn(ow, "_exec_mass_publish")
     assert "await completed_targets(pool, op_id)" in body
+    # И сам читатель журнала обязан что-то находить на здоровом исполнителе:
+    # пробник, который видит ноль записей, зеленит любую поломку.
+    journal = op_journal_probe.writes("_exec_mass_publish")
+    assert journal, "читатель журнала ничего не находит на здоровом исполнителе"
+    assert {w.status for w in journal} >= {"ok", "error"}
+    assert op_journal_probe.UNKNOWN not in {w.target for w in journal}, (
+        "запись в журнал не разобрана — проверка ключей ничего не проверяет")
 
 
 def test_helper_reads_the_whole_retry_chain(ow):

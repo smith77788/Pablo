@@ -29,6 +29,8 @@ import re
 
 import pytest
 
+from tests import op_journal_probe
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FACTORIES = ("_exec_bot_factory", "_exec_bot_factory_multi")
@@ -67,14 +69,14 @@ def test_skip_key_matches_the_key_written_to_the_journal(ow, name):
     assert m, f"{name}: пропуска по журналу нет"
     skip_key = m.group(1)
 
-    writes = re.findall(
-        r"INSERT INTO operation_log\(op_id, step_num[^)]*\)"
-        r"(?:.*?\n)*?\s*op_id,\s*\n?\s*(\w+),",
-        body,
-    )
-    assert writes, f"{name}: записи в журнал не найдены"
-    assert set(writes) == {skip_key}, (
-        f"{name}: пропускаем по {skip_key}, а пишем {set(writes)}")
+    # Записи читаются по дереву разбора (tests/op_journal_probe.py): успех
+    # пишется через дверь `_journal_done`, и поиск литерала
+    # `INSERT INTO operation_log` его не видит.
+    journal = op_journal_probe.writes(name)
+    assert journal, f"{name}: записи в журнал не найдены"
+    steps = {w.step for w in journal}
+    assert steps == {skip_key}, (
+        f"{name}: пропускаем по {skip_key}, а пишем {steps}")
 
 
 @pytest.mark.parametrize("name", FACTORIES)
@@ -106,10 +108,13 @@ def test_skipped_step_still_counts_as_created(ow, name):
 
 def test_multi_factory_writes_a_per_bot_journal(ow):
     """Раньше не писала ни строки: «📋 Лог» пустой, опереться пропуску не на что."""
-    body = _fn(ow, "_exec_bot_factory_multi")
-    assert body.count("INSERT INTO operation_log") >= 3, (
-        "нужны записи и об успехе, и об обеих ветках неудачи")
-    assert "'ok'" in body and "'error'" in body
+    journal = op_journal_probe.writes("_exec_bot_factory_multi")
+    assert len(journal) >= 3, (
+        f"нужны записи и об успехе, и об обеих ветках неудачи, а их {len(journal)}")
+    statuses = {w.status for w in journal}
+    assert statuses >= {"ok", "error"}, f"в журнал попадает не всякий исход: {statuses}"
+    assert op_journal_probe.UNKNOWN not in {w.target for w in journal}, (
+        "запись в журнал не разобрана — проверка ничего не проверяет")
 
 
 def test_created_bot_is_never_logged_as_a_step_to_redo(ow):
@@ -121,8 +126,10 @@ def test_created_bot_is_never_logged_as_a_step_to_redo(ow):
     body = _fn(ow, "_exec_bot_factory_multi")
     seg = body[body.index("if not bot_id:"):]
     seg = seg[:seg.index("continue")]
-    assert "'ok'" in seg, (
-        "шаг с уже созданным ботом помечен как ошибка — повтор создаст второго")
+    # Статус 'ok' даёт сама дверь журнала, поэтому ищем вызов двери, а не
+    # литерал: литерал тут нашёлся бы и в соседнем комментарии.
+    assert f"await {op_journal_probe.JOURNAL_DOOR}(" in seg, (
+        "шаг с уже созданным ботом не закрыт успехом — повтор создаст второго")
     assert "getMe" in seg, "причина обязана быть видна владельцу в логе операции"
 
 
