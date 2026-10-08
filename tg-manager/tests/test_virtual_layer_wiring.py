@@ -141,9 +141,17 @@ def test_intent_sensor_feeds_the_layer():
     его CRM-стадией."""
     i = SENSOR.find("virtual_layer.signal")
     assert i != -1, "intent_sensor не подаёт сигнал в virtual_layer"
-    # маппинг стадий → сигналов присутствует
-    assert '"negotiation": "asked_how_to_pay"' in SENSOR
-    assert '"lost": "refused"' in SENSOR
+    # Маппинг «стадия → сигнал» живёт в слое: стадию меняют ДВЕ двери (сенсор
+    # и экран контакта в мини-аппе), и свой список у каждой уже разъехался —
+    # у сенсора не было "won", то есть о выигранной сделке слой не узнавал.
+    assert "virtual_layer.STAGE_SIGNAL" in SENSOR, (
+        "сенсор снова выписывает маппинг стадий сам — он разъедется с ручной сменой")
+    from services import virtual_layer as _vl
+    assert _vl.STAGE_SIGNAL["negotiation"] == "asked_how_to_pay"
+    assert _vl.STAGE_SIGNAL["lost"] == "refused"
+    assert _vl.STAGE_SIGNAL["won"] == "paid", (
+        "выигранная сделка не доходит до слоя: человек остаётся «Готов купить» "
+        "и попадает в список «кого дожимать»")
 
 
 def test_intent_feed_is_fail_open():

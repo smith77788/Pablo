@@ -81,6 +81,8 @@ async def upsert_crm(pool, owner_id: int, contact_id: str, data: dict) -> dict:
             await pool.execute(
                 f'UPDATE contact_crm SET {", ".join(sets)} WHERE owner_id=${idx} AND contact_id=${idx+1}',
                 *params)
+        await _signal_virtual_layer(pool, owner_id, contact_id,
+                                    data.get('stage'), existing.get('stage'))
     else:
         await pool.execute(
             '''INSERT INTO contact_crm (owner_id, contact_id, stage, deal_value, currency,
@@ -93,7 +95,39 @@ async def upsert_crm(pool, owner_id: int, contact_id: str, data: dict) -> dict:
             data.get('next_reminder_at'),
             data.get('next_reminder_text'),
             json.dumps(data.get('custom_fields', {})))
+        await _signal_virtual_layer(pool, owner_id, contact_id,
+                                    data.get('stage', 'lead'), None)
     return await get_crm_data(pool, owner_id, contact_id)
+
+
+async def _signal_virtual_layer(pool, owner_id: int, contact_id: str,
+                                new_stage, old_stage) -> None:
+    """Сообщить виртуальному слою о РУЧНОЙ смене стадии контакта.
+
+    Стадию меняют две двери: сенсор намерений по тексту сообщения и эта —
+    экран контакта в мини-аппе. Слою сообщала только первая, поэтому владелец
+    перетаскивал человека в «Выиграно», а слой продолжал считать его «Готов
+    купить», потом распадом сводил в «Интерес», и человек попадал в список
+    «кого дожимать первыми»: дожимать предлагалось того, кто уже заплатил.
+
+    Маппинг один для обеих дверей — `virtual_layer.STAGE_SIGNAL`, иначе
+    списки разъедутся, как уже разъехались.
+
+    Fail-open: сбой слоя не ломает сохранение стадии, оно уже применено.
+    """
+    if not new_stage or new_stage == old_stage:
+        return
+    try:
+        from services import virtual_layer
+        sig = virtual_layer.STAGE_SIGNAL.get(str(new_stage))
+        if not sig:
+            return
+        await virtual_layer.signal(
+            pool, owner_id, virtual_layer.USER, contact_id, sig,
+            confidence=0.8, source="crm_manual")
+    except Exception:
+        log.debug("crm_engine: virtual_layer signal failed owner=%s stage=%s",
+                  owner_id, new_stage, exc_info=True)
 
 
 async def log_crm_activity(pool, owner_id: int, contact_id: str,

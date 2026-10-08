@@ -445,16 +445,18 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
     # НАДСТРОЙКА над стадией: у состояния есть уверенность и распад, которых у
     # тега нет. Fail-open — сбой слоя не ломает обработку сообщения.
     if stage_changed:
-        _sig = {"proposal": "asked_price", "negotiation": "asked_how_to_pay",
-                "lead": "replied", "lost": "refused"}.get(target_stage)
-        if _sig:
-            try:
-                from services import virtual_layer
+        try:
+            from services import virtual_layer
+            # Маппинг живёт в слое (virtual_layer.STAGE_SIGNAL) — его читает и
+            # ручная смена стадии в contacts_hub.crm_engine. Свой список здесь
+            # не включал "won", и о выигранной сделке слой не узнавал.
+            _sig = virtual_layer.STAGE_SIGNAL.get(target_stage)
+            if _sig:
                 await virtual_layer.signal(
                     pool, owner_id, virtual_layer.USER, contact_id, _sig,
                     confidence=0.7, source="intent_sensor")
-            except Exception:
-                log.debug("intent_sensor: virtual_layer signal failed owner=%s", owner_id)
+        except Exception:
+            log.debug("intent_sensor: virtual_layer signal failed owner=%s", owner_id)
 
     return {"matched": len(matched), "stage": target_stage if stage_changed else None,
             "tags": added_tags, "notified": notified, "contact_id": contact_id}
