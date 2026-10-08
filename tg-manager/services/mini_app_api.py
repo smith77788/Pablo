@@ -749,6 +749,86 @@ def _err(msg: str, status: int = 400) -> web.Response:
     return _json_resp(body, status)
 
 
+# ── Потолок времени на один запрос API ───────────────────────────────────────
+# У aiohttp НЕТ таймаута на обработчик, и у продукта его не было ни в одном
+# слое: запрос, зависший внутри (половинчатый прокси, который принял TCP и
+# молчит; блокировка в базе; внешний сервис без ответа), висел БЕСКОНЕЧНО.
+# Для владельца это вечный спиннер в мини-аппе, а для сервера — накопление
+# живых соединений и занятых корутин: достаточно десятка таких запросов, чтобы
+# API перестал отвечать всем остальным. Поштучные `asyncio.wait_for` на вызовы
+# Telegram это не закрывают: они стоят там, где кто-то про них вспомнил.
+_REQUEST_TIMEOUT_DEFAULT = 90.0
+
+# Чего потолок НЕ касается:
+#   /api/miniapp/events — SSE-поток живёт минутами ПО ЗАМЫСЛУ;
+#   /miniapp, /.well-known — статику отдаёт сам aiohttp;
+#   скачивание файла из облака — обработчик собирает куски ИЗ TELEGRAM, и для
+#   крупного файла это законно дольше потолка (экспорт в CSV/JSON, наоборот,
+#   идёт только из базы и под потолок попадает);
+#   multipart — загрузка файла с мобильной сети честно идёт долго, её
+#   ограничивает лимит размера, а не секунды.
+#
+# Отдача ТЕЛА ответа потолком не ограничена в любом случае: aiohttp отправляет
+# его после возврата из цепочки middleware, поэтому большой `Response`/
+# `FileResponse` на медленном канале не обрывается.
+_NO_TIMEOUT_PREFIXES = ("/api/miniapp/events", "/miniapp", "/.well-known")
+_NO_TIMEOUT_SUFFIXES = ("/download",)
+
+
+def request_timeout_seconds() -> float:
+    """Потолок в секундах: `MINIAPP_REQUEST_TIMEOUT`, иначе 90.
+
+    Значение вне 5…600 — почти наверняка опечатка (0.5 положил бы весь API,
+    86400 равносилен отсутствию потолка), поэтому берём умолчание и говорим
+    об этом в лог, а не молча подчиняемся.
+    """
+    raw = (os.getenv("MINIAPP_REQUEST_TIMEOUT") or "").strip()
+    if not raw:
+        return _REQUEST_TIMEOUT_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        log.warning("MINIAPP_REQUEST_TIMEOUT=%r не число — беру %.0f с",
+                    raw, _REQUEST_TIMEOUT_DEFAULT)
+        return _REQUEST_TIMEOUT_DEFAULT
+    if not 5.0 <= value <= 600.0:
+        log.warning("MINIAPP_REQUEST_TIMEOUT=%s вне диапазона 5…600 — беру %.0f с",
+                    raw, _REQUEST_TIMEOUT_DEFAULT)
+        return _REQUEST_TIMEOUT_DEFAULT
+    return value
+
+
+def make_request_timeout_middleware(timeout: float):
+    """Middleware, прерывающая запрос, который идёт дольше `timeout`.
+
+    Ставится САМОЙ ВНЕШНЕЙ: иначе зависнуть успеет то, что лежит снаружи
+    (сжатие, гейт тарифа, сторож частоты), и потолок ничего не закроет.
+
+    Отдаём 504 и говорим владельцу по-русски, что запрос прерван, а не
+    оставляем спиннер. Отмена обработчика — не новое для продукта поведение:
+    aiohttp отменяет обработчик и при обрыве соединения клиентом, то есть код
+    и так обязан переживать отмену на любом шаге.
+    """
+
+    @web.middleware
+    async def request_timeout_middleware(request: web.Request, handler):
+        path = request.rel_url.path
+        if path.startswith(_NO_TIMEOUT_PREFIXES) or path.endswith(_NO_TIMEOUT_SUFFIXES):
+            return await handler(request)
+        if (request.content_type or "").startswith("multipart/"):
+            return await handler(request)
+        try:
+            return await asyncio.wait_for(handler(request), timeout=timeout)
+        except asyncio.TimeoutError:
+            log.warning("API: %s %s прерван по потолку %.0f с",
+                        request.method, path, timeout)
+            return _err(
+                "Запрос выполнялся слишком долго и был прерван. "
+                "Повторите попытку позже.", 504)
+
+    return request_timeout_middleware
+
+
 # Единый нормализатор номера (мини-апп + бот) — принять «+7 932 726 5344» и т.п.
 from services.phone_utils import normalize_phone  # noqa: E402
 
@@ -1826,6 +1906,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # Самым внешним: статус, который реально увидел человек, складывается уже
     # после plan_gate (он превращает отказ по подписке в 403).
+    # Потолок времени — САМЫМ ВНЕШНИМ слоем (aiohttp строит цепочку так, что
+    # первый в списке оказывается снаружи): он должен накрывать и остальные
+    # middleware, а не только обработчик.
+    app.middlewares.append(make_request_timeout_middleware(request_timeout_seconds()))
     app.middlewares.append(cache_invalidate_middleware)
     app.middlewares.append(compress_middleware)
     app.middlewares.append(plan_gate_middleware)
