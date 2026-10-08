@@ -79,8 +79,12 @@ def test_estimates_passes_from_daily_budget():
 
 def test_respects_quarantine():
     body = _preflight_body()
-    assert "is_account_quarantined" in body, (
+    assert "quarantined_accounts(" in body, (
         "карантинные аккаунты не должны считаться пригодными"
+    )
+    assert "is_account_quarantined" not in body, (
+        "карантин всего флота спрашивается одним запросом, а не по запросу на "
+        "аккаунт: экран ёмкости ждал сотни round-trip подряд"
     )
 
 

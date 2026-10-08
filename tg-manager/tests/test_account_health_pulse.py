@@ -13,7 +13,11 @@ from __future__ import annotations
 import asyncio
 import os
 
-from services.infra_memory import is_account_quarantined, get_account_health
+from services.infra_memory import (
+    get_account_health,
+    is_account_quarantined,
+    quarantined_accounts,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -28,13 +32,16 @@ class _FakePool:
         self._rows = rows or []
         self._val = val
         self._raise = raise_
+        self.queries: list[str] = []
 
     async def fetch(self, q, *a):
+        self.queries.append(q)
         if self._raise:
             raise RuntimeError("boom")
         return self._rows
 
     async def fetchval(self, q, *a):
+        self.queries.append(q)
         if self._raise:
             raise RuntimeError("boom")
         return self._val
@@ -45,10 +52,68 @@ def test_quarantine_is_fail_open():
         # нет пула / ошибка БД / нет сигнала → НЕ карантин (fail-open)
         assert await is_account_quarantined(None, 1) is False
         assert await is_account_quarantined(_FakePool(raise_=True), 1) is False
-        assert await is_account_quarantined(_FakePool(val=0), 1) is False
+        assert await is_account_quarantined(_FakePool(rows=[]), 1) is False
         # подтверждённое серьёзное ограничение → карантин
-        assert await is_account_quarantined(_FakePool(val=2), 1) is True
+        assert await is_account_quarantined(
+            _FakePool(rows=[{"account_id": 1}]), 1) is True
     asyncio.run(_run())
+
+
+def test_quarantine_is_asked_once_for_the_whole_list():
+    """Гейт стоит перед КАЖДОЙ массовой операцией и на экране флота, то есть
+    спрашивают его про список, а не про аккаунт.
+
+    ЧТО БЫЛО: по запросу на аккаунт. На флоте в 200 аккаунтов — 200 round-trip
+    подряд перед действием, а через asyncio.gather — 200 одновременных запросов
+    в пул из 20 соединений. И гейт живёт под fail-open: свой же запрос,
+    упёршийся в таймаут, читается как «аккаунт чист», то есть предохранитель
+    отключал себя ровно на том флоте, где нужнее всего.
+
+    ЧТО ТЕПЕРЬ: один запрос на весь список; одиночная проверка — его частный
+    случай, поэтому условие карантина у них общее и разъехаться не может.
+    """
+    async def _run():
+        pool = _FakePool(rows=[{"account_id": 12}, {"account_id": 14}])
+        got = await quarantined_accounts(pool, [11, 12, 13, 14])
+        assert got == {12, 14}
+        assert len(pool.queries) == 1, (
+            f"на список ушло {len(pool.queries)} запросов вместо одного")
+        assert "= ANY(" in pool.queries[0], "список обязан уходить массивом"
+
+        # Fail-open сохранён и в пакетной проверке.
+        assert await quarantined_accounts(None, [1]) == set()
+        assert await quarantined_accounts(_FakePool(raise_=True), [1]) == set()
+        # Пустой список — вообще без запроса.
+        empty = _FakePool(rows=[{"account_id": 1}])
+        assert await quarantined_accounts(empty, []) == set()
+        assert not empty.queries
+
+        # Одиночная проверка ходит той же дверью: один запрос, не два.
+        single = _FakePool(rows=[{"account_id": 5}])
+        assert await is_account_quarantined(single, 5) is True
+        assert len(single.queries) == 1
+
+    asyncio.run(_run())
+
+
+def test_the_quarantine_condition_lives_in_one_place():
+    """Два запроса с переписанным от руки условием однажды разъедутся, и тогда
+    продукт возьмёт в работу аккаунт с подтверждённым ограничением."""
+    import inspect
+
+    from services import infra_memory
+
+    where = infra_memory._QUARANTINE_WHERE
+    assert "risk_cleared_at" in where, (
+        "ручной сброс риска обязан учитываться — иначе «кулдаун не сбрасывается»")
+    assert "%ban%" in where and "severity='critical'" in where
+    batch = inspect.getsource(infra_memory.quarantined_accounts)
+    assert "_QUARANTINE_WHERE" in batch
+    single = inspect.getsource(infra_memory.is_account_quarantined)
+    assert "quarantined_accounts(" in single, (
+        "одиночная проверка обязана быть частным случаем пакетной")
+    assert "restriction_events" not in single, (
+        "у одиночной проверки снова свой запрос — условия разъедутся")
 
 
 def test_health_scoring_and_summary():

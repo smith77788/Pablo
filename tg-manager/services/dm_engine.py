@@ -1058,10 +1058,11 @@ async def run_campaign(
     # Отсеиваем карантинные; если фильтр опустошает — НЕ обнуляем (лучше рискнуть).
     try:
         from services import infra_memory as _im
-        _kept = []
-        for _a in acc_cycle:
-            if not await _im.is_account_quarantined(pool, _a["id"]):
-                _kept.append(_a)
+        # ОДИН запрос на весь список: поштучно это был round-trip на аккаунт
+        # перед кампанией, а под fail-open запрос, упёршийся в таймаут,
+        # читался как «аккаунт чист» — гейт отключал себя на большом флоте.
+        _quar = await _im.quarantined_accounts(pool, [_a["id"] for _a in acc_cycle])
+        _kept = [_a for _a in acc_cycle if int(_a["id"]) not in _quar]
         if _kept and len(_kept) != len(acc_cycle):
             log.info("dm_engine campaign=%s: пропущено %d аккаунтов в карантине",
                      campaign_id, len(acc_cycle) - len(_kept))

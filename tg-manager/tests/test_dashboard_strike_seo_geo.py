@@ -23,7 +23,7 @@ def test_strike_respects_quarantine_fail_open():
     se = _read("services/strike_engine.py")
     seg = se[se.index("viable_accounts = preflight_accounts"):]
     seg = seg[:2000]
-    assert "is_account_quarantined" in seg
+    assert "quarantined_accounts(" in seg
     assert "if _healthy:" in seg  # пустой фильтр → оставляем исходный список
     assert "except Exception:" in seg  # fail-open
 

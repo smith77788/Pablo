@@ -736,34 +736,83 @@ async def record_account_restriction(
         return True
 
 
+# Условие карантина — ОДИН текст на оба входа (одиночный и пакетный). Разъехаться
+# они не могут: пакетный запрос подставляет его как есть, одиночный зовёт пакетный.
+#
+# risk_cleared_at — владелец вручную снял риск («взять в работу»): считаем только
+# ограничения ПОЗЖЕ этой отметки, иначе ручной сброс не работал бы (кнопка чистит
+# кулдаун, а карантин по старым событиям держал аккаунт вне операций — жалоба
+# «кулдаун не сбрасывается»). Событие свежее сброса снова уводит аккаунт в
+# карантин — это правильно.
+_QUARANTINE_WHERE = (
+    "re.created_at > NOW() - make_interval(days => $2) "
+    "AND (a.risk_cleared_at IS NULL OR re.created_at > a.risk_cleared_at) "
+    "AND (re.severity='critical' OR re.event_type ILIKE '%ban%' "
+    "OR re.event_type ILIKE '%block%' OR re.event_type ILIKE '%restrict%')"
+)
+
+
+async def quarantined_accounts(pool, account_ids, *, days: int = 3) -> set[int]:
+    """Кто из `account_ids` под карантином — ОДНИМ запросом.
+
+    ЗАЧЕМ ПАКЕТНЫЙ ВХОД. Гейт стоит перед КАЖДОЙ массовой операцией и на экране
+    флота, то есть проверяется не аккаунт, а весь список сразу. Поштучная
+    проверка давала по round-trip на аккаунт: на флоте в 200 аккаунтов это 200
+    запросов подряд перед действием (и столько же на каждую отрисовку экрана).
+
+    И дело не только в ожидании. Поштучная проверка живёт под `except: False`,
+    то есть любой сбой читается как «аккаунт чист». Пул — 20 соединений с
+    command_timeout 30 с: двести одновременных проверок (а именно так их звали
+    через `asyncio.gather`) выедают пул целиком, свои же запросы начинают
+    упираться в таймаут — и гейт отвечает «все чисты» ровно на том флоте, где
+    он нужнее всего. То есть предохранитель отключал себя под нагрузкой, молча.
+
+    Fail-open сохранён и здесь: ошибка → пустое множество (никого не держим).
+    Anti-detection ядро не должно вставать из-за отсутствия данных пульса.
+    """
+    if not pool or not account_ids:
+        return set()
+    try:
+        ids = sorted({int(a) for a in account_ids if a})
+    except (TypeError, ValueError):
+        return set()
+    if not ids:
+        return set()
+    try:
+        rows = await pool.fetch(
+            "SELECT DISTINCT re.account_id FROM restriction_events re "
+            "JOIN tg_accounts a ON a.id = re.account_id "
+            "WHERE re.account_id = ANY($1::bigint[]) AND " + _QUARANTINE_WHERE,
+            ids, int(days))
+    except Exception:
+        log.debug("infra_memory: пакетная проверка карантина не удалась", exc_info=True)
+        return set()
+    out: set[int] = set()
+    for r in rows or ():
+        try:
+            out.add(int(r["account_id"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out
+
+
 async def is_account_quarantined(pool, account_id: int, *, days: int = 3) -> bool:
     """Fail-open: True только при недавнем СЕРЬЁЗНОМ ограничении (critical severity
     или event_type про ban/block/restrict) за последние `days` суток.
 
+    Один аккаунт — частный случай пакетной проверки выше, и условие у них общее:
+    два отдельных запроса однажды разъехались бы, а от этого условия зависит,
+    возьмёт ли продукт в работу аккаунт с подтверждённым ограничением.
+
     Fail-open — принципиально: любая ошибка/отсутствие сигнала → False (НЕ блокируем).
-    Anti-detection ядро не должно вставать из-за отсутствия данных пульса —
-    карантин только при явно подтверждённом ограничении.
     """
     if not pool or not account_id:
         return False
     try:
-        # risk_cleared_at — владелец вручную снял риск («взять в работу»): считаем
-        # только ограничения ПОЗЖЕ этой отметки, иначе ручной сброс не работал бы
-        # (кнопка чистит кулдаун, а карантин по старым событиям держал аккаунт вне
-        # операций — жалоба «кулдаун не сбрасывается»). Событие new-severity
-        # свежее сброса снова уводит аккаунт в карантин — это правильно.
-        n = await pool.fetchval(
-            "SELECT COUNT(*) FROM restriction_events re "
-            "JOIN tg_accounts a ON a.id = re.account_id "
-            "WHERE re.account_id=$1 "
-            "AND re.created_at > NOW() - make_interval(days => $2) "
-            "AND (a.risk_cleared_at IS NULL OR re.created_at > a.risk_cleared_at) "
-            "AND (re.severity='critical' OR re.event_type ILIKE '%ban%' "
-            "OR re.event_type ILIKE '%block%' OR re.event_type ILIKE '%restrict%')",
-            account_id, days)
-        return bool(n and n > 0)
-    except Exception:
+        acc = int(account_id)
+    except (TypeError, ValueError):
         return False
+    return acc in await quarantined_accounts(pool, [acc], days=days)
 
 
 async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:

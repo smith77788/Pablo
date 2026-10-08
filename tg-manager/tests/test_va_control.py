@@ -70,8 +70,13 @@ async def test_network_actions_do_not_demand_calendar_plan_from_newsrooms():
 async def test_eligible_accounts_excludes_shared_health_quarantine(monkeypatch):
     pool = AsyncMock()
     pool.fetch.return_value = [{"id": 11}, {"id": 12}]
-    monkeypatch.setattr(infra_memory, "is_account_quarantined", AsyncMock(side_effect=[False, True]))
+    # Карантин спрашивается про весь список одним запросом: раньше здесь был
+    # asyncio.gather по запросу на аккаунт, и на большом канале он выедал пул.
+    quar = AsyncMock(return_value={12})
+    monkeypatch.setattr(infra_memory, "quarantined_accounts", quar)
     assert await va_control.eligible_accounts(pool, 7, 8) == [11]
+    assert quar.await_count == 1, "карантин обязан спрашиваться одним запросом"
+    assert list(quar.await_args.args[1]) == [11, 12]
     sql, owner, channel = pool.fetch.call_args.args
     assert "a.owner_id=mc.owner_id" in sql and "a.is_active=TRUE" in sql
     assert (owner, channel) == (7, 8)

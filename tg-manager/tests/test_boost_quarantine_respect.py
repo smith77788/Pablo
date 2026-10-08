@@ -4,6 +4,11 @@ Boost-действия — тоже массовые операции по ре�
 (подписка = join, /start = send) флагуют аккаунт при лимитах/координации; аккаунт под
 недавним серьёзным ограничением при этом идёт в бан. Общий гейт
 `_filter_quarantined_accounts` (fail-open) + честный показ пропуска в итоге.
+
+Гейт спрашивает карантин про ВЕСЬ список одним запросом (`quarantined_accounts`),
+а не по запросу на аккаунт: поштучно это был round-trip на аккаунт перед каждой
+массовой операцией, а под fail-open упёршийся в таймаут запрос читался как
+«аккаунт чист».
 """
 from __future__ import annotations
 
@@ -24,9 +29,9 @@ def _run(coro):
 def test_helper_fail_open_and_counts(monkeypatch):
     accounts = [{"id": 1}, {"id": 2}, {"id": 3}]
 
-    async def _quar(pool, aid):
-        return aid == 2
-    monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _quar)
+    async def _quar(pool, ids, **kw):
+        return {int(i) for i in ids if int(i) == 2}
+    monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _quar)
 
     kept, skipped = _run(op_worker._filter_quarantined_accounts(None, 1, accounts))
     assert skipped == 1 and [a["id"] for a in kept] == [1, 3]
@@ -35,9 +40,9 @@ def test_helper_fail_open_and_counts(monkeypatch):
 def test_helper_fail_open_when_all_quarantined(monkeypatch):
     accounts = [{"id": 1}, {"id": 2}]
 
-    async def _all(pool, aid):
-        return True
-    monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _all)
+    async def _all(pool, ids, **kw):
+        return {int(i) for i in ids}
+    monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _all)
 
     kept, skipped = _run(op_worker._filter_quarantined_accounts(None, 1, accounts))
     # все в карантине → НЕ обнуляем (лучше рискнуть, чем сорвать операцию)
@@ -47,9 +52,9 @@ def test_helper_fail_open_when_all_quarantined(monkeypatch):
 def test_helper_fail_open_on_error(monkeypatch):
     accounts = [{"id": 1}, {"id": 2}]
 
-    async def _boom(pool, aid):
+    async def _boom(pool, ids, **kw):
         raise RuntimeError("db down")
-    monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _boom)
+    monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _boom)
 
     kept, skipped = _run(op_worker._filter_quarantined_accounts(None, 1, accounts))
     assert skipped == 0 and len(kept) == 2, "ошибка проверки не должна блокировать ядро"

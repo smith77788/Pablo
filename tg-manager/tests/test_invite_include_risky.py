@@ -4,7 +4,8 @@
 из 52 аккаунтов работают ~20». Рисковые (недавнее ограничение → карантин
 риск-пульса) и на кулдауне по умолчанию отсеиваются ДВУМЯ гейтами:
   * select_all_active(respect_cooldown=True) — режет cooldown_until в будущем;
-  * is_account_quarantined — режет недавно ограниченные.
+  * карантин риск-пульса (`quarantined_accounts` — один запрос на весь
+    список) — режет недавно ограниченные.
 Оба автоматические, без ручки. include_risky=True в параметрах операции снимает
 ОБА мягких гейта (жёсткие banned/spamblock остаются) — осознанный выбор владельца.
 
@@ -105,9 +106,12 @@ def stand(monkeypatch):
         return ACCOUNTS if "LEFT JOIN user_proxies" in q else []
     monkeypatch.setattr(op_worker, "_safe_fetch", _accounts)
 
-    async def _quar(pool, acc_id, **k):
-        return int(acc_id) in state["quarantined"]
-    monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _quar)
+    # Карантин спрашивается про весь список одним запросом: инвайт — самая
+    # баноопасная операция, и гейт перед ним раньше делал round-trip на каждый
+    # аккаунт флота.
+    async def _quar(pool, ids, **k):
+        return {int(i) for i in ids if int(i) in state["quarantined"]}
+    monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _quar)
 
     return state, calls
 

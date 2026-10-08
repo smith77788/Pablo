@@ -4516,11 +4516,13 @@ async def mass_report(
     # фильтра никого не осталось — НЕ обнуляем операцию (лучше рискнуть, чем no-op).
     try:
         from services import infra_memory as _im
-        _healthy = []
-        for _a in viable_accounts:
-            if _a.get("id") and await _im.is_account_quarantined(pool, _a["id"]):
-                continue
-            _healthy.append(_a)
+        # ОДИН запрос на весь список: поштучно это был round-trip на аккаунт
+        # перед волной, а гейт живёт под fail-open — упёршийся в таймаут
+        # запрос читается как «аккаунт чист».
+        _quar = await _im.quarantined_accounts(
+            pool, [_a.get("id") for _a in viable_accounts if _a.get("id")])
+        _healthy = [_a for _a in viable_accounts
+                    if not (_a.get("id") and int(_a["id"]) in _quar)]
         if _healthy:
             viable_accounts = _healthy
     except Exception:

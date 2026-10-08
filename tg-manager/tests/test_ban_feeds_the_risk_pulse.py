@@ -92,7 +92,9 @@ async def test_nothing_is_written_without_an_account():
 
 def test_quarantine_gate_matches_the_event_type_the_hook_writes():
     """Иначе запись есть, а гейт её не узнаёт — и это снова два мира."""
-    gate = inspect.getsource(infra_memory.is_account_quarantined)
+    # Условие гейта с тех пор переехало в единственное место — его читают оба
+    # входа (проверка одного аккаунта и проверка списка одним запросом).
+    gate = infra_memory._QUARANTINE_WHERE
     hook = inspect.getsource(op_worker._on_account_banned)
     assert 'event_type: str = "ban_detected"' in hook
     assert "severity='critical'" in gate or "%ban%" in gate

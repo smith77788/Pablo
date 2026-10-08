@@ -34,10 +34,13 @@ async def eligible_accounts(pool, owner_id: int, channel_id: int) -> list[int]:
         "AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())", int(owner_id), int(channel_id),
     )
     account_ids = [int(row["id"]) for row in rows]
-    quarantined = await asyncio.gather(*(
-        infra_memory.is_account_quarantined(pool, account_id) for account_id in account_ids
-    ))
-    return [account_id for account_id, blocked in zip(account_ids, quarantined) if not blocked]
+    # Карантин — ОДНИМ запросом на весь список. Раньше здесь был
+    # asyncio.gather по запросу на аккаунт: на большом канале это десятки
+    # одновременных запросов в пул из 20 соединений, а гейт карантина живёт
+    # под fail-open — свои же запросы, упёршиеся в таймаут, читались как
+    # «аккаунт чист», то есть предохранитель отключал себя под нагрузкой.
+    quarantined = await infra_memory.quarantined_accounts(pool, account_ids)
+    return [account_id for account_id in account_ids if account_id not in quarantined]
 
 
 def knowledge(profile: dict, strategy: dict) -> list[dict]:

@@ -4934,10 +4934,10 @@ async def _exec_mass_publish(
     # сигнал помимо account_health.health_score. Публикация с флагнутого аккаунта
     # = быстрый бан. Пустой результат НЕ обнуляет операцию (лучше рискнуть).
     try:
-        _kept = []
-        for _acc in accounts_rows:
-            if not await _infra_mem.is_account_quarantined(pool, _acc["id"]):
-                _kept.append(_acc)
+        # ОДИН запрос на весь список вместо запроса на аккаунт.
+        _quar = await _infra_mem.quarantined_accounts(
+            pool, [_acc["id"] for _acc in accounts_rows])
+        _kept = [_acc for _acc in accounts_rows if int(_acc["id"]) not in _quar]
         if _kept and len(_kept) != len(accounts_rows):
             log.info("_exec_mass_publish op=%d: пропущено %d аккаунтов в карантине",
                      op_id, len(accounts_rows) - len(_kept))
@@ -6638,11 +6638,15 @@ async def _exec_global_presence_channel(
                     _quarantined,
                 )
                 # Альтернатива: приемлемый trust И не под карантином.
+                # Карантин всего списка — одним запросом: перебор с запросом на
+                # кандидата упирался в round-trip на каждом шаге поиска.
                 alt_acc = None
+                _alt_quar = await _infra_mem.quarantined_accounts(
+                    pool, [a["id"] for a in accounts_rows])
                 for a in accounts_rows:
                     if a["id"] == acc_id or (a.get("trust_score") or 0.5) < 0.5:
                         continue
-                    if await _infra_mem.is_account_quarantined(pool, a["id"]):
+                    if int(a["id"]) in _alt_quar:
                         continue
                     alt_acc = dict(a)
                     log.info(
@@ -10357,8 +10361,9 @@ async def _exec_bulk_dm_adhoc(
     # карантине — работаем всеми (лучше рискнуть, чем обнулить операцию).
     _skipped_quar = 0
     try:
-        _kept = [a for a in active_accounts
-                 if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+        _quar = await _infra_mem.quarantined_accounts(
+            pool, [a["id"] for a in active_accounts])
+        _kept = [a for a in active_accounts if int(a["id"]) not in _quar]
         if _kept and len(_kept) != len(active_accounts):
             _skipped_quar = len(active_accounts) - len(_kept)
             log.info("bulk_dm_adhoc op=%d: пропущено %d аккаунтов в карантине",
@@ -10692,8 +10697,9 @@ async def _exec_bulk_post_to_channel(
     # Все в карантине → работаем всеми (лучше рискнуть, чем обнулить).
     _skipped_quar = 0
     try:
-        _kept = [a for a in accounts
-                 if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+        _quar = await _infra_mem.quarantined_accounts(
+            pool, [a["id"] for a in accounts])
+        _kept = [a for a in accounts if int(a["id"]) not in _quar]
         if _kept and len(_kept) != len(accounts):
             _skipped_quar = len(accounts) - len(_kept)
             log.info("bulk_post_to_channel op=%d: пропущено %d аккаунтов в карантине",
@@ -12001,14 +12007,13 @@ async def _exec_check_owned_restrictions(
 
     # Карантинные аккаунты не используем как наблюдателей (fail-open: пульс мог не
     # ответить — тогда аккаунт остаётся кандидатом, это осознанный fail-open).
-    healthy: list[dict] = []
-    for acc in observers:
-        try:
-            if await _infra_mem.is_account_quarantined(pool, acc["id"]):
-                continue
-        except Exception:
-            pass
-        healthy.append(acc)
+    try:
+        _obs_quar = await _infra_mem.quarantined_accounts(
+            pool, [acc["id"] for acc in observers])
+    except Exception:
+        _obs_quar = set()
+    healthy: list[dict] = [acc for acc in observers
+                           if int(acc["id"]) not in _obs_quar]
     if not healthy:
         return {"status": "requeue",
                 "summary": "⏳ Свободные аккаунты сейчас в карантине — попробуйте позже"}
@@ -13939,8 +13944,12 @@ async def _filter_quarantined_accounts(
     аккаунтам — действие с флагнутого аккаунта = быстрый бан.
     """
     try:
-        kept = [a for a in accounts
-                if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+        # ОДИН запрос на весь список, а не по запросу на аккаунт: гейт стоит
+        # перед каждой массовой операцией, и на флоте в 200 аккаунтов поштучная
+        # проверка давала 200 round-trip подряд ПЕРЕД действием.
+        quarantined = await _infra_mem.quarantined_accounts(
+            pool, [a["id"] for a in accounts])
+        kept = [a for a in accounts if int(a["id"]) not in quarantined]
     except Exception:
         log_exc_swallow(log, f"quarantine filter failed op={op_id}")
         return accounts, 0
@@ -15154,22 +15163,28 @@ async def _exec_mass_invite(
     # бан. Отсеиваем карантинные; пустой результат НЕ обнуляет операцию.
     # include_risky (владелец форсит рисковых) отключает этот отсев осознанно.
     _risky_forced = 0
+    # Карантин всего флота — ОДИН запрос на обе ветки ниже. Инвайт — самая
+    # баноопасная операция продукта, и гейт перед ним раньше делал round-trip
+    # на каждый аккаунт: на флоте в 200 аккаунтов двести запросов подряд ПЕРЕД
+    # первым инвайтом. Хуже ожидания то, что проверка живёт под fail-open:
+    # сбой читается как «аккаунт чист», и чем больше флот, тем вероятнее, что
+    # гейт пропустит аккаунт с подтверждённым ограничением.
+    try:
+        _quar_ids = await _infra_mem.quarantined_accounts(
+            pool, [a["id"] for a in accounts])
+    except Exception:
+        log_exc_swallow(log, f"mass_invite op={op_id}: quarantine check failed")
+        _quar_ids = set()
     if _include_risky:
         # Считаем, сколько форсированных было бы отсеяно — для честного итога.
-        try:
-            for a in accounts:
-                if await _infra_mem.is_account_quarantined(pool, a["id"]):
-                    _risky_forced += 1
-        except Exception:
-            log_exc_swallow(log, f"mass_invite op={op_id}: risky count failed")
+        _risky_forced = sum(1 for a in accounts if int(a["id"]) in _quar_ids)
         if _risky_forced:
             log.info("mass_invite op=%d: включены ПРИНУДИТЕЛЬНО %d рисковых аккаунтов "
                      "(include_risky) — карантин и кулдаун сняты владельцем",
                      op_id, _risky_forced)
     else:
         try:
-            _kept = [a for a in accounts
-                     if not await _infra_mem.is_account_quarantined(pool, a["id"])]
+            _kept = [a for a in accounts if int(a["id"]) not in _quar_ids]
             if _kept and len(_kept) != len(accounts):
                 _quarantined_n = len(accounts) - len(_kept)
                 log.info("mass_invite op=%d: пропущено %d аккаунтов в карантине",

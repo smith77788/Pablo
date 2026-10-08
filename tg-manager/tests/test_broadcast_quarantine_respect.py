@@ -77,7 +77,11 @@ def test_single_account_proceeds_when_not_quarantined(monkeypatch):
 def test_multi_account_filters_quarantined():
     for fn in (op_worker._exec_bulk_dm_adhoc, op_worker._exec_bulk_post_to_channel):
         src = inspect.getsource(fn)
-        assert "is_account_quarantined" in src, f"{fn.__name__} должен уважать карантин"
+        # Гейт спрашивает карантин про весь список одним запросом; одиночная
+        # дверь осталась для путей с одним аккаунтом. Признаём любую.
+        assert ("quarantined_accounts(" in src
+                or "is_account_quarantined" in src), (
+            f"{fn.__name__} должен уважать карантин")
         # fail-open: фильтр применяется только если что-то осталось (_kept)
         assert "_kept" in src and "if _kept and len(_kept)" in src, \
             f"{fn.__name__} должен быть fail-open (пустой результат не обнуляет)"
@@ -93,8 +97,8 @@ def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
         ]
     async def _exec(*a, **k):
         return None
-    async def _quar(pool, aid):
-        return aid == 2  # второй в карантине
+    async def _quar(pool, ids, **kw):
+        return {int(i) for i in ids if int(i) == 2}  # второй в карантине
     async def _not_cancelled(*a, **k):
         return False
     # Выбор аккаунтов теперь идёт через флуд-осознанный resource_selector
@@ -102,7 +106,7 @@ def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
     monkeypatch.setattr(op_worker.resource_selector, "select_all_active", _fetch)
     monkeypatch.setattr(op_worker, "_safe_fetch", _fetch)
     monkeypatch.setattr(op_worker, "_safe_execute", _exec)
-    monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _quar)
+    monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _quar)
     monkeypatch.setattr(op_worker, "_is_cancelled", _not_cancelled)
 
     used = []

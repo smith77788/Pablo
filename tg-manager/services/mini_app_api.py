@@ -8390,19 +8390,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             from services.flood_engine import recommended_daily_limit, _INVITE_LIMIT_CEILING
             from services import infra_memory as _im
 
-            # Карантин и остаток лимита — это запросы в БД на КАЖДЫЙ аккаунт.
-            # Последовательно на флоте в 200 аккаунтов это сотни round-trip
-            # подряд, и экран ёмкости ждал их все. Считаем управляемо
-            # параллельно: пул asyncpg рассчитан на одновременные запросы, а
-            # число одновременных держим заметно ниже его размера, чтобы
-            # оценка не выедала соединения у остальных запросов.
+            # Карантин всего флота — ОДНИМ запросом до оценки: он читает одну
+            # таблицу по списку id, и дробить его на запрос на аккаунт было
+            # нечем оправдать. Остаток лимита посчитать так нельзя (на аккаунт
+            # он свой), поэтому он остаётся запросом на аккаунт — управляемо
+            # параллельно, числом одновременных заметно ниже размера пула,
+            # чтобы оценка не выедала соединения у остальных запросов.
+            _quarantined_ids = await _im.quarantined_accounts(
+                pool, [r["id"] for r in usable_rows[:200]])
             _preflight_sem = asyncio.Semaphore(_PREFLIGHT_CONCURRENCY)
 
             async def _capacity(r) -> tuple[int, int]:
                 """(вклад в ёмкость, 1 если аккаунт в карантине)."""
                 async with _preflight_sem:
                     try:
-                        if await _im.is_account_quarantined(pool, r["id"]):
+                        if int(r["id"]) in _quarantined_ids:
                             return 0, 1
                         if one_pass:
                             # ёмкость одного прохода = потолок на аккаунт

@@ -69,6 +69,17 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
     except Exception:
         rehab = {}
 
+    # Карантин всего флота — ОДНИМ запросом до цикла. Раньше запрос уходил
+    # внутри цикла по каждому аккаунту: экран флота на 200 аккаунтах ждал
+    # двести round-trip подряд, и каждая его отрисовка занимала пул.
+    quarantined: set[int] = set()
+    if _im is not None:
+        try:
+            quarantined = await _im.quarantined_accounts(
+                pool, [int(r["id"]) for r in rows])
+        except Exception:
+            log_exc_swallow(log, "fleet_pulse quarantine check")
+
     import time as _t
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
@@ -98,19 +109,13 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
             risk = float(fe.get_account_state(acc_id).risk_score)
         except Exception:
             risk = 0.0
-        quarantined = False
-        if _im is not None:
-            try:
-                quarantined = bool(await _im.is_account_quarantined(pool, acc_id))
-            except Exception:
-                log_exc_swallow(log, "fleet_pulse quarantine check")
 
         # Классификация состояния и человеческая причина.
         if status in ("banned", "deactivated", "session_expired", "spamblock"):
             state, reason, ready_in = "dead", _dead_reason(status), None
             if status == "spamblock" and acc_id in rehab:
                 reason = _rehab_reason(rehab[acc_id], now)
-        elif quarantined:
+        elif acc_id in quarantined:
             state = "quarantine"
             reason = "снят риск-пульсом (недавние ограничения) — вернётся сам"
             ready_in = cooling if cooling > 0 else None
