@@ -35,10 +35,33 @@ def _allowed_map() -> dict[str, set[str]]:
     return out
 
 
-def test_all_three_ops_wired():
+def _kind_to_op_type() -> dict[str, str]:
+    """Вид экрана → тип операции, который реально ставится.
+
+    Раньше тест искал имена типов в тексте обработчика. Обработчик стал общим
+    (`_bulk_edit_op(request, kind)`), типы переехали в отдельную карту, и
+    заодно каналы сменили тип: `bulk_edit_channels` (один текст на весь флот)
+    выключен, работает `bulk_chan_exec` — по парам «канал ↔ аккаунт». Поэтому
+    проверяем не текст, а то, что важно: у каждого вида есть тип операции и у
+    этого типа есть кому исполнять.
+    """
     h = _handler()
-    for op in ("bulk_edit_channels", "bulk_bot_edit", "bulk_update_profile"):
-        assert op in h, f"{op} не подключён"
+    m = re.search(r"op_type = \{(.*?)\}\[kind\]", h, re.DOTALL)
+    assert m, "карта «вид экрана → тип операции» не найдена"
+    return dict(re.findall(r'"(\w+)":\s*"(\w+)"', m.group(1)))
+
+
+def test_all_three_ops_wired():
+    kinds = _kind_to_op_type()
+    assert set(kinds) == set(_allowed_map()), (
+        f"виды экрана и карта типов разошлись: {sorted(kinds)} против "
+        f"{sorted(_allowed_map())} — вид без типа операции уйдёт в KeyError")
+
+    worker = WORKER.read_text(encoding="utf-8")
+    for kind, op_type in sorted(kinds.items()):
+        assert f'"{op_type}": _exec_' in worker, (
+            f"{kind}: тип операции «{op_type}» не объявлен в таблице исполнителей "
+            "op_worker — операция повиснет в очереди навсегда")
 
 
 def test_routes_registered():

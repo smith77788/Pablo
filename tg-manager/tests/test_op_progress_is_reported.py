@@ -218,6 +218,32 @@ def test_dispatch_and_submit_sites_are_found():
         "счётчик в dm_engine.run_campaign (делегирование в движок по op_id)")
 
 
+def _refuses_without_working(name: str) -> bool:
+    """Исполнитель отказывает, не начав работу: это выключенная операция.
+
+    У такой полосы прогресса не бывает по определению — она падает отказом на
+    первом же круге. Требовать от неё `done_items` значит получить находку в
+    здоровом коде, а детектор с ложной находкой перестаёт защищать (CLAUDE.md).
+    Что ни один экран такую операцию не ставит, держит отдельный храповик —
+    tests/test_no_surface_queues_a_refusing_operation.py.
+    """
+    src, _, tree = _op_worker()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        if node.name != name:
+            continue
+        if any(isinstance(x, ast.Await) for x in ast.walk(node)):
+            return False
+        rets = [x for x in ast.walk(node) if isinstance(x, ast.Return)]
+        if len(rets) != 1 or not isinstance(rets[0].value, ast.Dict):
+            return False
+        pairs = {getattr(k, "value", None): getattr(v, "value", None)
+                 for k, v in zip(rets[0].value.keys, rets[0].value.values)}
+        return pairs.get("status") in ("failed", "error")
+    return False
+
+
 def test_mass_operations_report_progress():
     """У операции с несколькими единицами работы полоса обязана двигаться."""
     broken: list[str] = []
@@ -227,6 +253,8 @@ def test_mass_operations_report_progress():
         if totals <= {"1"}:
             continue
         fn = _dispatch()[op_type]
+        if _refuses_without_working(fn):
+            continue
         if not _reports_progress(fn):
             broken.append(f"{op_type} ({fn}): total_items={sorted(totals)}, "
                           f"но done_items никто не пишет")

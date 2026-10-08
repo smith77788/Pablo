@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 
 import pytest
 
@@ -73,16 +74,47 @@ def test_no_caller_disables_the_window():
     )
 
 
-def test_the_window_only_matches_live_operations():
-    """Обоснование фикса: завершённая операция под дедуп не попадает."""
+def _dedup_statuses(src: str) -> set[str]:
+    """Статусы, по которым дедуп ищет «уже поставленную» операцию."""
+    out: set[str] = set()
+    for block in re.findall(r"AND status IN \(([^)]*)\)", src):
+        out |= set(re.findall(r"'([a-z_]+)'", block))
+    return out
+
+
+def test_the_window_never_swallows_a_retry_of_a_failed_operation():
+    """Повтор неудачной операции обязан пройти, а не слиться с ней.
+
+    Окно дедупа умышленно шире, чем «только живые»: в него входят и `done` —
+    иначе быстрая операция, успевшая закончиться между двумя тапами, ставилась
+    бы второй раз. Безопасно это ровно потому, что повтор несёт ссылку на
+    предка, то есть params у него другие (test_retry_params_differ_from_the_source).
+
+    А вот `failed` и `cancelled` в окне быть НЕ ДОЛЖНО: повтор с теми же
+    params — обычный путь («попробовать ещё раз» по той же цели), и слияние с
+    упавшей операцией означало бы, что кнопка повтора молча ничего не делает.
+    """
     from services import operation_bus
 
     src = inspect.getsource(operation_bus.submit)
+    statuses = _dedup_statuses(src)
+    assert statuses, "окно дедупа перестало ограничиваться статусами"
+    assert "pending" in statuses and "running" in statuses, (
+        "дедуп перестал видеть операции в полёте — двойной тап снова поставит две")
+    assert not (statuses & {"failed", "cancelled", "error"}), (
+        "в окне дедупа появился терминальный неуспех: повтор с теми же params "
+        f"сольётся с упавшей операцией и кнопка перестанет работать — {sorted(statuses)}")
+    assert "created_at > NOW() - make_interval" in src, (
+        "окно дедупа перестало быть ограниченным по времени — операция месячной "
+        "давности начнёт глушить новую постановку")
 
-    assert "status IN ('pending', 'running')" in src, (
-        "дедуп начал смотреть и на завершённые операции — тогда повтор "
-        "действительно слился бы с исходной, и его пришлось бы исключать"
-    )
+
+def test_the_dedup_status_detector_bites():
+    """Самопроверка: на заведомо больном списке статусов проверка обязана упасть."""
+    sick = "AND status IN ('pending', 'running', 'failed')"
+    assert _dedup_statuses(sick) & {"failed"}
+    healthy = "AND status IN ('pending', 'running', 'done')"
+    assert not (_dedup_statuses(healthy) & {"failed", "cancelled", "error"})
 
 
 def test_retry_params_differ_from_the_source():

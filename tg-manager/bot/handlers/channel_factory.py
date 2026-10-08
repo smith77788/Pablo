@@ -1050,6 +1050,28 @@ async def cb_chanf_be_field(
 ) -> None:
     await safe_answer(callback)
     field = "title" if callback_data.action == "be_field_title" else "about"
+    if field == "title":
+        # Массовое переименование каналов исполняется ТОЛЬКО с подтверждённым
+        # составом: владелец видит список «было → станет» и подтверждает его
+        # токеном (services/channel_change_approval). В боте такого шага нет,
+        # поэтому экран больше не ставит операцию, которую некому исполнить:
+        # раньше он отвечал «✅ запущено», а операция сразу падала отказом
+        # «Массовая смена названий отключена», и владелец узнавал об этом в /ops.
+        await state.clear()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📄 Описание", callback_data=ChanFactCb(action="be_field_about"))
+        kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "✏️ <b>Название сразу у нескольких каналов</b>\n\n"
+            "Такое изменение применяется только после подтверждения состава: "
+            "нужно увидеть список «было → станет» по каждому каналу и подтвердить "
+            "его. Этот шаг есть в мини-аппе, на экране каналов.\n\n"
+            "Здесь можно изменить <b>описание</b> — оно подтверждения не требует.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     await state.update_data(edit_field=field)
     await state.set_state(EditChannelBulkFSM.choosing_scope)
     kb = InlineKeyboardBuilder()
@@ -1199,20 +1221,58 @@ async def cb_chanf_be_confirm(
         log_exc_swallow(log, "bulk_edit fetch accounts failed")
         accounts = []
 
+    if field != "about":
+        # Сюда можно попасть только со старым состоянием FSM: название требует
+        # подтверждения состава (см. cb_chanf_be_field).
+        await callback.message.edit_text(
+            "✏️ Название сразу у нескольких каналов меняется только после "
+            "подтверждения состава — этот шаг есть в мини-аппе, на экране каналов.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    # Исполнитель работает по ПАРАМ «канал ↔ аккаунт», а не по списку аккаунтов:
+    # один текст на весь флот — это и есть то изменение, которое отключили.
+    try:
+        channels = await pool.fetch(
+            "SELECT channel_id, title, acc_id FROM managed_channels "
+            " WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
+            " ORDER BY acc_id, title",
+            callback.from_user.id,
+            [int(a["id"]) for a in accounts],
+        )
+    except Exception:
+        log_exc_swallow(log, "bulk_edit fetch channels failed")
+        channels = []
+    if not channels:
+        await callback.message.edit_text(
+            "⚠️ У выбранных аккаунтов нет каналов в базе.\n\n"
+            "Сначала загрузите их: <b>🔎 Мои каналы → Загрузить из Telegram</b>.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
     from services import operation_bus
 
     op_id = await operation_bus.submit(
-        pool, callback.from_user.id, "bulk_edit_channels",
+        pool, callback.from_user.id, "bulk_chan_exec",
         {
-            "account_ids": [int(a["id"]) for a in accounts],
-            "field": field,
+            "channel_acc_pairs": [
+                {"channel_id": ch["channel_id"], "acc_id": ch["acc_id"],
+                 "title": ch["title"]}
+                for ch in channels
+            ],
+            "op": "chan_about",
+            "base_uname": "",
             "value": value,
         },
-        total_items=len(accounts),
+        total_items=len(channels),
     )
     await callback.message.edit_text(
-        f"✅ <b>Редактирование каналов запущено</b>\n\n"
-        f"Поле: <b>{field}</b> · Аккаунтов: <b>{len(accounts)}</b>\n"
+        f"✅ <b>Описание каналов обновляется</b>\n\n"
+        f"Каналов: <b>{len(channels)}</b> · Аккаунтов: <b>{len(accounts)}</b>\n"
         f"📋 Операция <code>#{op_id}</code> в очереди\n"
         f"💡 Статус: /ops",
         parse_mode="HTML",

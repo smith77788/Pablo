@@ -164,7 +164,7 @@ def _channels_pool():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("op", ["title", "about", "username"])
+@pytest.mark.parametrize("op", ["about", "username"])
 async def test_channels_mass_edit_enqueues(as_user, submitted, op):
     """Редактирование каналов использовало _obus из ветки `promote`."""
     pool = _channels_pool()
@@ -175,6 +175,38 @@ async def test_channels_mass_edit_enqueues(as_user, submitted, op):
     assert data.get("ok") is True, data
     assert submitted and submitted[0]["op_type"] == "bulk_chan_exec"
     assert data["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_channel_title_edit_enqueues_for_one_chosen_channel(as_user, submitted):
+    """Название — отдельное правило: только один явно выбранный канал.
+
+    Массовое переименование применяется лишь с подтверждённым составом
+    (services/channel_change_approval), поэтому запрос на два канала обязан
+    получить внятный отказ, а не 500 и не молча поставленную операцию. Ветка
+    при этом всё равно должна ДОХОДИТЬ до очереди, когда канал один: ровно это
+    и защищает тест (UnboundLocalError на `_obus` вне ветки `promote`).
+    """
+    one = _FakePool(rows=[
+        {"channel_id": -100_1, "title": "A", "acc_id": 5,
+         "access_hash": 1, "username": "a"},
+    ])
+    handler = _handler(one, "POST", "/api/miniapp/channels/mass")
+    resp = await handler(_Req({"op": "title", "channel_ids": [-1001],
+                               "value": "Новое значение"}))
+    data = _payload(resp)
+    assert data.get("ok") is True, data
+    assert submitted and submitted[0]["op_type"] == "bulk_chan_exec"
+    assert data["count"] == 1
+
+    submitted.clear()
+    handler = _handler(_channels_pool(), "POST", "/api/miniapp/channels/mass")
+    resp = await handler(_Req({"op": "title", "channel_ids": [-1001, -1002],
+                               "value": "Новое значение"}))
+    assert resp.status in (400, 403, 409), resp.status
+    assert not submitted, "переименование без подтверждения состава не ставится"
+    assert "канал" in str(_payload(resp).get("error") or "").lower(), (
+        "отказ обязан объяснять владельцу, что делать")
 
 
 @pytest.mark.asyncio
