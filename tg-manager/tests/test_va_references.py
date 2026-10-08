@@ -178,3 +178,81 @@ def test_row_public_parses_json_strings():
            "stats": json.dumps({"posts": 5}), "lessons": "{}", "analyzed_at": None}
     pub = vr._row_public(row)
     assert pub["stats"] == {"posts": 5} and pub["kind_label"] == "мой успешный канал"
+
+
+# ── Закрытые каналы по приглашению (владелец 02.10.2026) ─────────────────────
+
+@pytest.mark.parametrize("raw, want", [
+    ("https://t.me/+AbCdEf12345", "+AbCdEf12345"), ("t.me/joinchat/AbCdEf12345", "+AbCdEf12345"),
+    ("+AbCd_Ef-123", "+AbCd_Ef-123"), ("t.me/+abc", ""),
+])
+def test_parse_private_invite(raw, want):
+    assert vr.parse_ref(raw) == want
+
+
+def test_private_label_uses_title_not_hash():
+    assert vr.ref_label({"username": "+AbCdEf12345"}) == "закрытый канал"
+    assert vr.ref_label({"username": "+AbCdEf12345", "stats": {"title": "Клуб"}}) == "«Клуб»"
+    assert vr.ref_label({"username": "rival"}) == "@rival"
+    refs = [{"username": "+AbCdEf12345", "kind": "competitor", "status": "ready",
+             "stats": {"title": "Закрытый конкурент"}, "lessons": {"summary": "x"}}]
+    assert vr.competitor_titles(refs) == ["Закрытый конкурент"]
+    assert "+AbCdEf12345" not in "\n".join(vr.prompt_lines(refs))
+
+
+class _Pool:
+    def __init__(self, peer=None):
+        self.peer, self.saved = peer, None
+
+    async def fetchrow(self, q, *a):
+        return {"peer_id": self.peer[0], "peer_hash": self.peer[1]} if self.peer else {"peer_id": None, "peer_hash": None}
+
+    async def execute(self, q, *a):
+        self.saved = a[3:5]
+
+
+def _am(monkeypatch, *, check, join=None):
+    from services import account_manager as am
+    calls = []
+
+    async def _check(sess, h, _acc=None):
+        calls.append(("check", h))
+        return check
+
+    async def _join(sess, ref, _acc=None):
+        calls.append(("join", ref))
+        return join or {}
+
+    monkeypatch.setattr(am, "resolve_invite_peer", _check)
+    monkeypatch.setattr(am, "join_channel", _join)
+    return calls
+
+
+def test_private_peer_joins_once_then_reads_by_address(monkeypatch):
+    import asyncio
+    calls = _am(monkeypatch, check={"member": False},
+                join={"channel_id": 777, "access_hash": 99, "title": "Клуб"})
+    pool = _Pool()
+    got = asyncio.run(vr._private_peer(pool, 1, 5, "+AbCdEf12345", {"session_str": "s"}))
+    assert got == (777, 99) and pool.saved == (777, 99)
+    assert calls == [("check", "AbCdEf12345"), ("join", "+AbCdEf12345")]
+    calls.clear()
+    assert asyncio.run(vr._private_peer(_Pool((777, 99)), 1, 5, "+AbCdEf12345", {"session_str": "s"})) == (777, 99)
+    assert calls == [], "по сохранённому адресу к ссылке не обращаемся"
+
+
+def test_private_peer_member_does_not_join(monkeypatch):
+    import asyncio
+    calls = _am(monkeypatch, check={"member": True, "channel_id": 5, "access_hash": 6})
+    assert asyncio.run(vr._private_peer(_Pool(), 1, 5, "+AbCdEf12345", {"session_str": "s"})) == (5, 6)
+    assert [c[0] for c in calls] == ["check"]
+
+
+def test_private_peer_request_sent_is_reported(monkeypatch):
+    import asyncio
+    _am(monkeypatch, check={"member": False},
+        join={"error": "Заявка на вступление подана — ждём одобрения администратора чата.",
+              "request_sent": True})
+    with pytest.raises(vr.ReferenceError_) as e:
+        asyncio.run(vr._private_peer(_Pool(), 1, 5, "+AbCdEf12345", {"session_str": "s"}))
+    assert "Заявка" in str(e.value)

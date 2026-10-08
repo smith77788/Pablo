@@ -59,9 +59,34 @@ class ReferenceError_(Exception):
     """Ошибка для владельца — текст уже по-русски."""
 
 
+_INVITE_RE = re.compile(
+    r"^(?:(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/(?:\+|joinchat/)|\+)([A-Za-z0-9_-]{8,64})/?$",
+    re.IGNORECASE)
+
+
+def is_private(ref: str) -> bool:
+    """Закрытый канал хранится хэшем приглашения с «+»: +AbCdEf123."""
+    return str(ref or "").startswith("+")
+
+
+def ref_label(r: dict) -> str:
+    """Как назвать образец человеку и в промпте: @имя или название закрытого канала."""
+    name = r.get("username") or r.get("ref_username") or ""
+    if not is_private(name):
+        return "@" + name
+    title = ((r.get("stats") or {}).get("title") or "").strip() if isinstance(r.get("stats"), dict) else ""
+    return f"«{title}»" if title else "закрытый канал"
+
+
 def parse_ref(raw: Any) -> str:
-    """@name, name или ссылка t.me → username без «@». Пусто — не распознано."""
+    """@name, name, ссылка t.me → username без «@»; приглашение t.me/+… → «+хэш».
+
+    Пусто — не распознано.
+    """
     s = str(raw or "").strip()
+    inv = _INVITE_RE.match(s)
+    if inv:
+        return "+" + inv.group(1)
     m = _LINK_RE.match(s)
     if m:
         s = m.group(1)
@@ -181,6 +206,8 @@ def _row_public(r: dict) -> dict:
     return {
         "id": int(r["id"]),
         "username": r["ref_username"],
+        "private": is_private(r["ref_username"]),
+        "label": ref_label({"username": r["ref_username"], "stats": _j(r.get("stats"))}),
         "kind": r["kind"],
         "kind_label": KINDS.get(r["kind"], ""),
         "focus": r.get("focus") or "",
@@ -209,8 +236,8 @@ async def add_ref(pool, owner_id: int, channel_id: int, raw: Any, kind: Any = "c
         raise ReferenceError_("Сначала установите администратора на этот канал")
     uname = parse_ref(raw)
     if not uname:
-        raise ReferenceError_("Укажите публичный канал: @имя или ссылку t.me/имя. "
-                              "Закрытые каналы по приглашению прочитать нельзя.")
+        raise ReferenceError_("Укажите канал: @имя, ссылку t.me/имя или, для закрытого "
+                              "канала, ссылку-приглашение t.me/+…")
     kind = str(kind or "competitor")
     if kind not in KINDS:
         raise ReferenceError_("Неизвестный тип образца")
@@ -228,7 +255,8 @@ async def add_ref(pool, owner_id: int, channel_id: int, raw: Any, kind: Any = "c
         "RETURNING id", int(owner_id), int(channel_id), uname, kind, focus)
     if not rid:
         raise ReferenceError_("Этот канал уже есть среди образцов")
-    await ca.log_event(pool, owner_id, channel_id, "reference", f"Добавлен образец @{uname}")
+    await ca.log_event(pool, owner_id, channel_id, "reference",
+                       f"Добавлен образец {ref_label({'username': uname})}")
     return {"id": int(rid), "username": uname}
 
 
@@ -238,12 +266,42 @@ async def delete_ref(pool, owner_id: int, ref_id: int) -> bool:
     return str(r).endswith(" 1")
 
 
+async def _private_peer(pool, owner_id: int, channel_id: int, ref: str, acc: dict) -> tuple[int, int]:
+    """Закрытый канал по приглашению → (id, access_hash) для чтения.
+
+    Уже вступивший аккаунт читает по сохранённому адресу без запросов к ссылке.
+    Иначе аккаунт канала вступает по приглашению — одно вступление на образец,
+    дальше канал перечитывается по адресу. Канал с заявками сначала одобряет
+    заявку, и только потом его можно прочитать.
+    """
+    from services import account_manager
+    row = await pool.fetchrow(
+        "SELECT peer_id, peer_hash FROM va_reference_channels WHERE owner_id=$1 AND channel_id=$2 "
+        "AND ref_username=$3", int(owner_id), int(channel_id), ref)
+    if row and row["peer_id"]:
+        return int(row["peer_id"]), int(row["peer_hash"] or 0)
+    res = await account_manager.resolve_invite_peer(acc["session_str"], ref[1:], _acc=acc)
+    if res.get("member") is False:
+        res = await account_manager.join_channel(acc["session_str"], "+" + ref[1:], _acc=acc)
+    if res.get("error") or not res.get("channel_id"):
+        raise ReferenceError_(res.get("error") or "Не удалось открыть закрытый канал по приглашению")
+    await pool.execute(
+        "UPDATE va_reference_channels SET peer_id=$4, peer_hash=$5 WHERE owner_id=$1 AND channel_id=$2 "
+        "AND ref_username=$3", int(owner_id), int(channel_id), ref,
+        int(res["channel_id"]), int(res.get("access_hash") or 0))
+    return int(res["channel_id"]), int(res.get("access_hash") or 0)
+
+
 async def _read(pool, owner_id: int, channel_id: int, uname: str, *,
                 recent_limit: int = _READ_POSTS) -> Optional[dict]:
     from services import account_manager, channel_admin as ca
     acc = await ca.channel_account(pool, owner_id, channel_id)
     if not acc:
         raise ReferenceError_("Нет рабочего аккаунта у вашего канала — образец читать нечем")
+    if is_private(uname):
+        peer_id, peer_hash = await _private_peer(pool, owner_id, channel_id, uname, acc)
+        return await account_manager.read_channel_snapshot(
+            acc["session_str"], peer_id, _acc=acc, access_hash=peer_hash, recent_limit=recent_limit)
     return await account_manager.read_channel_snapshot(
         acc["session_str"], 0, _acc=acc, username=uname, recent_limit=recent_limit)
 
@@ -445,7 +503,8 @@ async def analyze(pool, owner_id: int, ref_id: int, *, complete: Optional[Comple
             "lessons=$3::jsonb, analyzed_at=now() WHERE id=$1", int(ref_id),
             json.dumps(stats, ensure_ascii=False), json.dumps(lessons, ensure_ascii=False))
         await ca.log_event(pool, owner_id, cid, "reference",
-                           f"Изучен образец @{row['ref_username']}: {stats['posts']} постов")
+                           f"Изучен образец {ref_label({'username': row['ref_username'], 'stats': stats})}: "
+                           f"{stats['posts']} постов")
     except ReferenceError_ as e:
         await pool.execute("UPDATE va_reference_channels SET status='error', error=$2 WHERE id=$1",
                            int(ref_id), str(e)[:300])
@@ -485,7 +544,7 @@ def prompt_lines(refs: list[dict], *, include_news: bool = False) -> list[str]:
            "Выбирай только приёмы, подходящие нашей аудитории:"]
     for r in ready[:MAX_REFS]:
         st, le = r.get("stats") or {}, r.get("lessons") or {}
-        head = f"— @{r['username']} ({KINDS.get(r.get('kind'), '')})"
+        head = f"— {ref_label(r)} ({KINDS.get(r.get('kind'), '')})"
         if r.get("kind") == "own":
             head += ": это успешный канал владельца, держи его голос"
         parts = [head]
@@ -523,7 +582,7 @@ def prompt_lines(refs: list[dict], *, include_news: bool = False) -> list[str]:
                 except (TypeError, ValueError):
                     continue
                 if text:
-                    candidates.append((at.astimezone(timezone.utc), ref.get("username") or "источник", text))
+                    candidates.append((at.astimezone(timezone.utc), ref_label(ref) if ref.get("username") else "источник", text))
         candidates.sort(key=lambda item: item[0], reverse=True)
         signals, seen_terms = [], []
         for at, source, text in candidates:
@@ -531,7 +590,7 @@ def prompt_lines(refs: list[dict], *, include_news: bool = False) -> list[str]:
             if terms and any(len(terms & old) / len(terms | old) >= 0.6 for old in seen_terms if old):
                 continue
             seen_terms.append(terms)
-            signals.append(f"[{at.isoformat()} · @{source}] {text}")
+            signals.append(f"[{at.isoformat()} · {source}] {text}")
             if len(signals) >= 6:
                 break
         if signals:
@@ -550,7 +609,8 @@ def competitor_titles(refs: list[dict]) -> list[str]:
     for r in refs or []:
         if r.get("kind") != "competitor":
             continue
-        names.append("@" + r["username"])
+        if not is_private(r["username"]):
+            names.append("@" + r["username"])
         title = ((r.get("stats") or {}).get("title") or "").strip()
         if len(title) >= 4:
             names.append(title)

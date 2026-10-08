@@ -328,6 +328,29 @@ def test_miniapp_routes_over_real_db(pool, stubs, monkeypatch):
         assert st == 200 and d["references"] == []
         st, _ = await call("DELETE", f"/api/miniapp/va/references/{ref['id']}")
         assert st == 404
+
+        # Закрытый образец по приглашению: вступление один раз, адрес — в базе.
+        from services import account_manager as am
+        joins = []
+
+        async def _check(sess, h, _acc=None):
+            return {"member": False}
+
+        async def _join(sess, r_, _acc=None):
+            joins.append(r_)
+            return {"channel_id": 4242, "access_hash": 77, "title": "Клуб"}
+
+        monkeypatch.setattr(am, "resolve_invite_peer", _check)
+        monkeypatch.setattr(am, "join_channel", _join)
+        st, d = await call("POST", f"/api/miniapp/va/channel/{CID}/references",
+                           {"ref": "https://t.me/+AbCdEf12345", "kind": "own"})
+        assert st == 200, d
+        priv = [r for r in d["references"] if r["private"]][0]
+        assert priv["username"] == "+AbCdEf12345" and priv["label"].startswith("«")
+        acc = {"session_str": "s"}
+        assert await vr._private_peer(pool, OWNER, CID, "+AbCdEf12345", acc) == (4242, 77)
+        assert await vr._private_peer(pool, OWNER, CID, "+AbCdEf12345", acc) == (4242, 77)
+        assert joins == ["+AbCdEf12345"]
         st, d = await call("PUT", f"/api/miniapp/va/channel/{CID}",
                            {"window_start": 20, "window_end": 10})
         assert st == 400

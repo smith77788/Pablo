@@ -4029,6 +4029,47 @@ def _msg_reactions_total(msg) -> int:
         return 0
 
 
+async def resolve_invite_peer(session_string: str, invite_hash: str, *,
+                              _acc: dict | None = None) -> dict:
+    """Приглашение в закрытый канал → {member, channel_id, access_hash, title} или {error}.
+
+    Только CheckChatInvite — ничего не вступает. member=True: аккаунт уже в
+    канале и адрес известен; member=False: нужно вступить (join_channel).
+    """
+    if not session_string:
+        return {"error": "session_str отсутствует — сессия недоступна"}
+    from telethon.tl.functions.messages import CheckChatInviteRequest
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        inv = await asyncio.wait_for(client(CheckChatInviteRequest(hash=invite_hash)),
+                                     timeout=_OP_TIMEOUT)
+        chat = getattr(inv, "chat", None)
+        if type(inv).__name__ == "ChatInviteAlready" and chat is not None:
+            return {"member": True, "channel_id": int(chat.id),
+                    "access_hash": int(getattr(chat, "access_hash", 0) or 0),
+                    "title": getattr(chat, "title", "") or ""}
+        return {"member": False, "title": getattr(inv, "title", "") or "",
+                "request_needed": bool(getattr(inv, "request_needed", False))}
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "join")
+        return {"error": "Telegram не ответил вовремя — прокси аккаунта недоступен"}
+    except Exception as e:
+        _name = type(e).__name__
+        if _name in ("InviteHashExpiredError", "InviteHashInvalidError", "InviteHashEmptyError"):
+            return {"error": "Ссылка-приглашение недействительна или истекла — пришлите новую"}
+        if "flood" in _name.lower():
+            return {"error": "Telegram просит паузу — попробую позже"}
+        log.debug("resolve_invite_peer error: %s", e)
+        return {"error": "Не удалось проверить приглашение — попробую позже"}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в resolve_invite_peer")
+
+
 async def read_channel_snapshot(
     session_string: str,
     channel_id: int | str,

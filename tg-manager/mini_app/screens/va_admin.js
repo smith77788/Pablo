@@ -698,7 +698,7 @@ function _vaRefHtml(r) {
   }
   return '<div class="lst" style="padding:12px 14px;font-size:13px;line-height:1.55">' +
     '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px">' +
-      '<b>@' + esc(r.username) + '</b><span style="font-size:12px;color:var(--hint)">' + esc(r.kind_label) + '</span></div>' +
+      '<b>' + esc(r.label || ('@' + r.username)) + (r.private ? ' 🔒' : '') + '</b><span style="font-size:12px;color:var(--hint)">' + esc(r.kind_label) + '</span></div>' +
     (r.focus ? '<div style="margin-bottom:8px;color:var(--hint)">Ваш ориентир: ' + esc(r.focus) + '</div>' : '') + body +
     '<div style="display:flex;gap:8px;margin-top:10px">' +
       '<button class="btn btn-s" style="flex:1;padding:6px" onclick="vaRefAct(' + r.id + ',\'refresh\')">🔄 Изучить заново</button>' +
@@ -711,7 +711,8 @@ function _vaRefsHtml(refs) {
     '<div class="field-note" style="margin:0 0 8px">Добавьте публичные каналы, за которыми следить. Администратор изучит их подачу; для новостного канала будет проверять свежие публикации перед подготовкой черновика. Тексты он не копирует.</div>' +
     refs.map(_vaRefHtml).join('') +
     (refs.length < 5 ? '<div class="lst" style="padding:12px 14px">' +
-      '<div class="field"><label>Публичный канал</label><input id="vaRefName" maxlength="80" placeholder="@channel или t.me/channel"></div>' +
+      '<div class="field"><label>Канал</label><input id="vaRefName" maxlength="120" placeholder="@channel, t.me/channel или t.me/+приглашение">' +
+        '<div class="field-note">Закрытый канал — по ссылке-приглашению: аккаунт вашего канала вступит в него, чтобы читать посты.</div></div>' +
       '<div class="field"><label>Это</label><select id="vaRefKind">' +
         _VA_REF_KINDS.map(function (k) { return _vaOpt(k[0], 'competitor', k[1]); }).join('') + '</select></div>' +
       _vaArea('vaRefFocus', 'Что нравится и что не перенимать', '', 600, 'Например: короткие разборы и спокойный тон, но без их рекламных приёмов') +
