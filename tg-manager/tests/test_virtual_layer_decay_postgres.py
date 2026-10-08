@@ -172,3 +172,37 @@ async def test_overview_hot_list_leaves_out_expired_rungs():
     finally:
         await _clean(pool)
         await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_one_pass_drains_the_whole_window():
+    """Распад берёт пачками, пока окно не опустеет, а не одну пачку за проход.
+
+    Раньше была ровно одна пачка на 500 строк, и звалась она раз в шесть часов
+    на ВСЕХ владельцев: 2000 состояний в сутки на всю платформу. У владельца с
+    пятью тысячами живых контактов просрочивается больше, и очередь росла
+    безвозвратно — «остыл» переставало случаться вовсе.
+    """
+    from services import virtual_layer as V
+
+    pool = await _pool()
+    try:
+        await _clean(pool)
+        # 1200 просроченных «готов купить» — больше прежней единственной пачки.
+        await pool.execute(
+            "INSERT INTO virtual_states(owner_id, entity_type, entity_id, "
+            "state_key, value, confidence, expires_at) "
+            "SELECT $1, 'user', 'bulk-' || g, 'funnel', 'ready', 0.7, "
+            "       now() - INTERVAL '2 hours' "
+            "FROM generate_series(1, 1200) g", OWNER)
+
+        cooled = await V.run_decay(pool, OWNER)
+        assert cooled == 1200, (
+            f"остыло {cooled} из 1200: распад берёт одну пачку за проход")
+        left = await pool.fetchval(
+            "SELECT COUNT(*) FROM virtual_states WHERE owner_id=$1 "
+            "AND expires_at IS NOT NULL AND expires_at <= now()", OWNER)
+        assert left == 0, f"в окне распада осталось {left} строк"
+    finally:
+        await _clean(pool)
+        await pool.close()

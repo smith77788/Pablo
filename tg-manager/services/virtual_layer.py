@@ -452,16 +452,14 @@ async def signal_for_telegram_user(pool, owner_id: int, tg_user_id,
         return None
 
 
-async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
-                    now: datetime | None = None) -> int:
-    """Остудить просроченные состояния (на рунг ниже). Возвращает число
-    остывших. Каждый распад в LOST-переход тоже рождает виртуальное событие."""
-    now = _now(now)
-    where = "expires_at IS NOT NULL AND expires_at <= now()"
-    args: list = []
-    if owner_id is not None:
-        where += " AND owner_id=$1"
-        args.append(owner_id)
+async def _decay_batch(pool, where: str, args: list, limit: int,
+                       now: datetime) -> tuple[int, int]:
+    """Одна пачка распада. Возвращает (остыло, прочитано строк).
+
+    Прочитано нужно отдельно от остывших: пачка может целиком состоять из
+    строк на дне лестницы, у которых снимается только срок. Остывших в ней
+    ноль, а работа сделана, и следующую пачку брать надо.
+    """
     # ORDER BY expires_at — кто просрочен дольше, тот остывает первым. Без
     # порядка лимит прохода доставался случайным строкам, и давно остывшие
     # могли не попасть в него никогда.
@@ -496,7 +494,41 @@ async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
                     "to": new["value"], "reason": "decay"})
             except Exception:
                 log.debug("virtual_layer: decay emit failed", exc_info=True)
-    return n
+    return n, len(rows)
+
+
+async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
+                    batches: int = 20, now: datetime | None = None) -> int:
+    """Остудить просроченные состояния. Возвращает число остывших.
+    Каждый распад в LOST-переход тоже рождает виртуальное событие.
+
+    Берём пачками по `limit`, пока окно не опустеет или не кончится `batches`.
+    Раньше была ровно одна пачка на 500 строк, и звалась она редким проходом
+    организма — раз в шесть часов, на ВСЕХ владельцев сразу. То есть распад
+    обрабатывал 2000 состояний в сутки на всю платформу. У одного владельца с
+    пятью тысячами живых контактов просрочивается больше, и очередь росла
+    безвозвратно: «остыл» переставало случаться, вместе с ним не рождалось
+    событие user_lost_interest, на которое подписаны автоматизации, а
+    распределение воронки на экране считалось по значениям, которые давно
+    неверны. Механика, вокруг которой построен слой («тишина остужает»), на
+    масштабе продукта не работала.
+
+    Потолок `batches` оставлен намеренно: проход организма не должен висеть на
+    разовом всплеске неограниченно — остаток догонит следующее сердцебиение.
+    """
+    now = _now(now)
+    where = "expires_at IS NOT NULL AND expires_at <= now()"
+    args: list = []
+    if owner_id is not None:
+        where += " AND owner_id=$1"
+        args.append(owner_id)
+    total = 0
+    for _ in range(max(1, int(batches))):
+        cooled, fetched = await _decay_batch(pool, where, args, limit, now)
+        total += cooled
+        if fetched < limit:
+            break                            # окно опустело
+    return total
 
 
 async def _apply_cascade_verdict(pool, owner_id: int, parent_type: str, parent_id,

@@ -50,16 +50,19 @@ async def _tick(pool, bot) -> int:
             await spine.prune_events(pool, days=30)
         except Exception:
             pass
-        # Распад виртуальных состояний: интерес без подтверждения остывает сам.
-        # Тем же редким проходом — это не горячий путь, а гигиена: просроченные
-        # состояния деградируют на рунг ниже и рождают USER_LOST_INTEREST.
-        try:
-            from services import virtual_layer
-            cooled = await virtual_layer.run_decay(pool)
-            if cooled:
-                log.info("organism.runner: остыло состояний %d", cooled)
-        except Exception:
-            log.debug("organism.runner: virtual_layer decay failed", exc_info=True)
+    # Распад виртуальных состояний: интерес без подтверждения остывает сам.
+    # На КАЖДОМ сердцебиении, а не на шестичасовом проходе: «готов купить»
+    # живёт сутки, и шести часов задержки хватало, чтобы экран и каскад
+    # считали по состояниям, которые уже неверны. Выборка идёт по частичному
+    # индексу (только просроченные) и в спокойном состоянии не находит ничего.
+    try:
+        from services import virtual_layer
+        cooled = await virtual_layer.run_decay(pool)
+        if cooled:
+            log.info("organism.runner: остыло состояний %d", cooled)
+    except Exception:
+        log.debug("organism.runner: virtual_layer decay failed", exc_info=True)
+
     sent = 0
     _do_cascade = now - _last_prune < 1      # тот же редкий проход, что прунинг
     for oid in await _active_owners(pool):
