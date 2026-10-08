@@ -196,6 +196,19 @@ def _allowed(rel: str, sql: str) -> bool:
     return any(rel == f and marker in sql for f, marker in _ALLOWED)
 
 
+def _param_gap(sql: str) -> set[int]:
+    """Пропущенные номера параметров: {2} для запроса с $1 и $3, иначе пусто.
+
+    asyncpg отдаёт аргументы позиционно, поэтому пропуск номера — всегда
+    поломка: неупомянутый $N негде типизировать, и Postgres отказывает на
+    подготовке запроса, то есть при каждом вызове.
+    """
+    nums = {int(x) for x in re.findall(r"\$(\d+)", sql)}
+    if not nums:
+        return set()
+    return set(range(1, max(nums) + 1)) - nums
+
+
 def broken_queries(conn) -> list[tuple[str, str, str]]:
     """[(где, ошибка, начало запроса)] — запросы, которые Postgres не принял."""
     async def _check():
@@ -210,8 +223,12 @@ def broken_queries(conn) -> list[tuple[str, str, str]]:
                 await conn.execute(f"DEALLOCATE _sqlcheck_{i}")
             except Exception as exc:
                 # Тип параметра, который Postgres не может вывести из текста,
-                # — не про схему: драйвер получает его от asyncpg.
-                if type(exc).__name__ == "IndeterminateDatatypeError":
+                # — не про схему: драйвер получает его от asyncpg. НО та же
+                # ошибка приходит и на дырявую нумерацию ($2 есть, $1 нет), а
+                # это не «не выводится тип», это запрос, который падает каждый
+                # раз в проде. Такой пропускать нельзя — см. _param_gap.
+                if (type(exc).__name__ == "IndeterminateDatatypeError"
+                        and not _param_gap(sql)):
                     continue
                 bad.append((f"{rel}:{lineno}",
                             str(exc).split("\n")[0][:120],

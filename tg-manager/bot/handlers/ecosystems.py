@@ -452,6 +452,11 @@ async def cb_eco_health(
     if health.active_proxies:
         text += f"🌐 Прокси: {health.healthy_proxies}/{health.active_proxies} активны\n"
     text += f"\n📋 Успешность операций: {health.recent_op_success_rate:.0%}"
+    if health.partial:
+        # Умолчания у показателей — 1.0; без этой строки прерванный расчёт
+        # читался бы как «всё отлично».
+        text += ("\n\n⚠️ Расчёт прервался: часть показателей выше показана "
+                 "по умолчанию, а не измерена. Нажмите «Обновить».")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=EcoCb(action="health", eco_id=eco_id))

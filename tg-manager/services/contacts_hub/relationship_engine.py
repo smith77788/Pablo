@@ -127,13 +127,16 @@ async def compute_relationships(pool, owner_id: int, contact_id: str = None) -> 
 
 
 async def get_relationships(pool, owner_id: int, contact_id: str) -> list:
+    # Нумерация параметров была дырявой: текст упоминал $1 и $3, но не $2, и
+    # Postgres не мог вывести тип $2 — запрос падал КАЖДЫЙ раз, а список связей
+    # контакта всегда приходил пустым. Контакт передаётся один раз, значит $2.
     rows = await pool.fetch(
         '''SELECT r.*, uc.first_name, uc.last_name, uc.username, uc.is_premium
            FROM contact_relationships r
-           JOIN unified_contacts uc ON (uc.id = r.contact_b_id OR uc.id = r.contact_a_id) AND uc.id != $3
-           WHERE r.owner_id = $1 AND (r.contact_a_id = $3 OR r.contact_b_id = $3)
+           JOIN unified_contacts uc ON (uc.id = r.contact_b_id OR uc.id = r.contact_a_id) AND uc.id != $2
+           WHERE r.owner_id = $1 AND (r.contact_a_id = $2 OR r.contact_b_id = $2)
            ORDER BY r.strength DESC LIMIT 50''',
-        owner_id, contact_id, contact_id)
+        owner_id, contact_id)
     result = []
     for r in rows:
         d = dict(r)

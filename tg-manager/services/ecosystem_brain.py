@@ -47,6 +47,13 @@ class EcosystemHealth:
     healthy_proxies: int = 0
     recent_op_success_rate: float = 1.0
     restrictions_count: int = 0
+    # Умолчания здесь — 1.0, то есть «всё отлично». Пока сбой расчёта гасился
+    # молча, это читалось как здоровая экосистема: один упавший запрос — и
+    # владельцу показывали 100% стабильности при мёртвых аккаунтах. Флаг
+    # поднимается в `compute_health`, если расчёт прервался, и экран обязан
+    # сказать, что часть показателей не посчитана, а не выдавать умолчания за
+    # измерение.
+    partial: bool = False
 
     @property
     def overall(self) -> float:
@@ -444,16 +451,22 @@ async def compute_health(
         else:
             proxy_ratio = 1.0  # no proxies = not counted as risk
 
-        # Operations: recent success rate (7 days)
+        # Успешность операций за 7 дней. Запрос считает операции ВЛАДЕЛЬЦА, а не
+        # экосистемы: в operation_queue нет ecosystem_id, привязать операцию к
+        # экосистеме нечем. Раньше здесь стоял `owner_id=$2` при двух
+        # аргументах — $1 не упоминался, Postgres не мог вывести его тип, и
+        # запрос падал КАЖДЫЙ раз. Падение гасил общий `except` ниже, поэтому
+        # всё, что считается после этой строки (надёжность, восстановление,
+        # рост, стабильность), оставалось на умолчаниях 1.0 — экран показывал
+        # владельцу 100% здоровья у любой экосистемы.
         op_row = await pool.fetchrow(
             """SELECT
                    COUNT(*) FILTER (WHERE status='done') AS done,
                    COUNT(*) AS total
                FROM operation_queue
-               WHERE owner_id=$2
+               WHERE owner_id=$1
                  AND created_at > NOW() - INTERVAL '7 days'
                  AND status IN ('done', 'failed')""",
-            ecosystem_id,
             owner_id,
         )
         if op_row and (op_row["total"] or 0) > 0:
@@ -514,7 +527,10 @@ async def compute_health(
         h.growth_score = round(min(new_members / max(total_members, 1), 1.0), 3)
 
     except Exception as e:
-        log.debug("compute_health eco=%d: %s", ecosystem_id, e)
+        # Не debug: сбой здесь означает, что часть показателей осталась на
+        # умолчаниях 1.0, и экран без этого флага врёт владельцу.
+        h.partial = True
+        log.warning("compute_health eco=%d прерван: %s", ecosystem_id, e)
 
     return h
 
@@ -941,7 +957,7 @@ async def get_snapshot(
     if isinstance(health, asyncio.CancelledError):
         raise health
     if isinstance(health, BaseException):
-        health = EcosystemHealth()
+        health = EcosystemHealth(partial=True)
     if isinstance(pressure, asyncio.CancelledError):
         raise pressure
     if isinstance(pressure, BaseException):
@@ -1454,7 +1470,7 @@ async def sync_ecosystem_scores(
     if isinstance(health, asyncio.CancelledError):
         raise health
     if isinstance(health, BaseException):
-        health = EcosystemHealth()
+        health = EcosystemHealth(partial=True)
     if isinstance(pressure, asyncio.CancelledError):
         raise pressure
     if isinstance(pressure, BaseException):
@@ -1741,7 +1757,7 @@ async def generate_recommendations(
         if isinstance(health, asyncio.CancelledError):
             raise health
         if isinstance(health, BaseException):
-            health = EcosystemHealth()
+            health = EcosystemHealth(partial=True)
         if isinstance(pressure, asyncio.CancelledError):
             raise pressure
         if isinstance(pressure, BaseException):
