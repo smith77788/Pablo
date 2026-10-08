@@ -40,16 +40,19 @@ READS_FLOOD = re.compile(r'''\.get\(\s*["']flood_wait["']|\[["']flood_wait["']\]
 
 # Любой способ ЗАПИСАТЬ паузу аккаунту.
 #
-# `cooldown_until` в списке намеренно: bulk_dm_adhoc пишет паузу своим UPDATE
-# по tg_accounts, а не через flood_engine. Это второй способ записи того же
-# факта, и сводить их в один стоит отдельной задачи — но пауза там НЕ теряется,
-# а храповик защищает именно от потери.
+# `apply_cooldown` — та самая «одна дверь на запись паузы» в flood_engine:
+# продлевает и не срезает длинную паузу короткой, шумит в метрику при потере.
+# bulk_dm_adhoc раньше писал паузу своим UPDATE по tg_accounts, поэтому в
+# списке был и литерал `cooldown_until`; теперь он зовёт apply_cooldown, то
+# есть способов записи стало меньше, а не больше. Литерал оставлен: прямой
+# UPDATE остаётся законной записью, а храповик защищает от ПОТЕРИ паузы.
 RECORDERS = (
     "_note_flood_penalty",
     "record_flood",
     "record_peer_flood",
     "note_flood",
     "_rest_invite_account",
+    "apply_cooldown",
     "cooldown_until",
 )
 

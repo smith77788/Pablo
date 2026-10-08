@@ -38,13 +38,20 @@ def test_clear_operations_endpoint_deletes_terminal_scoped():
     body = m.group(1)
     assert "DELETE FROM operation_queue" in body, "должен реально удалять, а не cancel"
     assert "owner_id=$1" in body, "скоуп по владельцу обязателен"
-    assert "'done'" in body and "'failed'" in body and "'cancelled'" in body, (
-        "удаляем терминальные состояния"
-    )
-    # активные операции не трогаем: в SQL-условии их нет
-    assert "status IN ('done','failed','cancelled')" in body, (
-        "DELETE только терминальных; pending/running не в условии"
-    )
+    # Список терминальных статусов больше не выписан в хендлере руками: он
+    # берётся из единственного источника op_status (раньше рукописный список
+    # не включал partial, и частичные операции нельзя было убрать из списка —
+    # жалоба владельца). Проверяем и обращение к источнику, и сам набор.
+    assert "op_status.sql_terminal_list()" in body, (
+        "список терминальных статусов снова выписан руками — он разъедется")
+    from services import op_status
+    terminal = op_status.sql_terminal_list()
+    for st in ("done", "failed", "cancelled", "partial"):
+        assert f"'{st}'" in terminal, f"{st} не считается терминальным — не вычистится"
+    # Активные операции не трогаем: их в наборе терминальных быть не должно.
+    for st in ("pending", "running"):
+        assert f"'{st}'" not in terminal, (
+            f"{st} попал в терминальные — «Очистить» снесёт работающую операцию")
     assert "deleted" in body, "возвращаем реальное число удалённых"
     assert "if not uid" in body and "401" in body
 

@@ -23,7 +23,16 @@ API = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
 
 
 def _handlers() -> list[tuple[str, str, int]]:
-    """(имя, тело, номер строки) для каждого async-хендлера мини-аппа."""
+    """(имя, тело, номер строки) для каждого async-хендлера мини-аппа.
+
+    Тело режем до СЛЕДУЮЩЕГО хендлера ИЛИ до первой строки уровня модуля
+    (отступ меньше четырёх). Без второго условия тело последнего хендлера
+    перед модульным кодом вбирало в себя сотни посторонних строк, и храповик
+    ловил `submit(` из них: так в список попал `request_timeout_middleware` —
+    он операций не ставит и ставить не может, а гейт тарифа к нему отношения
+    не имеет. Детектор с одной находкой в зрелом коде почти всегда сломан
+    (CLAUDE.md), и сломан был именно он.
+    """
     lines = API.read_text(encoding="utf-8").split("\n")
     marks = []
     for i, l in enumerate(lines):
@@ -31,8 +40,17 @@ def _handlers() -> list[tuple[str, str, int]]:
         if m:
             marks.append((i, m.group(1)))
     marks.append((len(lines), "__end__"))
-    return [(name, "\n".join(lines[s:e]), s + 1)
-            for (s, name), (e, _) in zip(marks, marks[1:])]
+
+    out = []
+    for (start, name), (nxt, _) in zip(marks, marks[1:]):
+        end = nxt
+        for j in range(start + 1, nxt):
+            line = lines[j]
+            if line.strip() and not line.startswith("    "):
+                end = j
+                break
+        out.append((name, "\n".join(lines[start:end]), start + 1))
+    return out
 
 
 def test_every_submitting_handler_surfaces_plan_refusal():

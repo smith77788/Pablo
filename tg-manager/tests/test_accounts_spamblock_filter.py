@@ -30,10 +30,21 @@ def test_backend_has_spamblock_filter_and_active_excludes_it():
 
 
 def test_filter_whitelists_include_spamblock():
+    """Оба места валидации (список + select_all_filtered) берут ОДИН список.
+
+    Раньше литерал был выписан в обоих местах, и тест считал его вхождения.
+    ded9c360 вынес его в `ACCOUNT_FILTERS` — это ровно то, чего тест и хотел
+    (списки не могут разъехаться, потому что список один), поэтому проверяем
+    сам набор и то, что оба места сверяются с ним, а не форму литерала.
+    """
     api = _read("services/mini_app_api.py")
-    # оба места валидации фильтра (список + select_all_filtered); "dead" добавлен
-    # для массового удаления невоскрешаемых.
-    assert api.count('("all", "active", "cooldown", "banned", "spamblock", "dead")') == 2
+    i = api.index("ACCOUNT_FILTERS = (")
+    decl = api[i:api.index(")", i) + 1]
+    for slice_name in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
+        assert f'"{slice_name}"' in decl, f"срез {slice_name} исчез из набора"
+    assert api.count("not in ACCOUNT_FILTERS") == 2, (
+        "валидация среза сверяется с набором не в двух местах — один из них "
+        "снова молча подменит срез на «все»")
 
 
 def test_stats_counts_spamblock_separately():

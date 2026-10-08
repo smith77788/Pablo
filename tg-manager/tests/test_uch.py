@@ -548,7 +548,10 @@ class TestCRMEngine:
         result = await get_crm_reminders(pool, 123)
         assert len(result) == 2
         assert result[0]["contact_name"] == "Ivan Ivanov"
-        assert result[1]["contact_name"] == "petr"
+        # Имени нет — показываем username с собакой: так он читается как
+        # username и по нему можно написать прямо из напоминания. Раньше
+        # username выбрасывался всегда, когда имя непустое.
+        assert result[1]["contact_name"] == "@petr"
 
 
 # ── Smart Tags Engine tests ───────────────────────────────────────────────────

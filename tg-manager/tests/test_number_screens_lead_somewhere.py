@@ -57,8 +57,11 @@ def test_health_numbers_open_the_accounts():
 def test_health_does_not_fake_filters_it_cannot_do():
     """Сервер знает all/active/cooldown/banned/spamblock/dead — и только их."""
     src = open(API, encoding="utf-8").read()
-    assert '("all", "active", "cooldown", "banned", "spamblock", "dead")' in src, (
-        "набор срезов на сервере изменился — проверку ниже надо пересмотреть")
+    i = src.index("ACCOUNT_FILTERS = (")
+    known = src[i:src.index(")", i) + 1]
+    for slice_name in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
+        assert f'"{slice_name}"' in known, (
+            f"срез {slice_name} исчез с сервера — проверку ниже надо пересмотреть")
     body = _js_func("openHealth")
     for fake in ("'low_trust'", "'flood'", "'warmup'"):
         assert f"healthGoAccounts({fake})" not in body, (

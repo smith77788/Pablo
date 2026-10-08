@@ -221,7 +221,9 @@ def test_pulse_suggestion_when_chats_quiet():
     assert any(s["id"] == "cw_stalled" for s in brain.build_suggestions(snap2))
     # world отдаёт блок chat_warmup
     world = open(os.path.join(ROOT, "services", "organism", "world.py"), encoding="utf-8").read()
-    assert "async def _chat_warmup" in world and '"chat_warmup":' in world
+    # Секции снимка собираются параллельно таблицей (name, fn), а не построчным
+    # await — проводку проверяем по этой таблице (cf554b2b).
+    assert "async def _chat_warmup" in world and '("chat_warmup", _chat_warmup)' in world
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
     assert "if (k==='chatwarmup') return openChatWarmup();" in html
 
