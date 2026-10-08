@@ -4208,8 +4208,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
 
       <div class="field" style="margin-bottom:6px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="lnkQr" style="width:auto"> 📱 Сгенерировать QR-код
+        <label class="chk-row" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="lnkQr"> 📱 Сгенерировать QR-код
         </label>
       </div>
 
@@ -14177,21 +14177,20 @@ function lnkRenderList(items) {
     if(it.tags) html+='<div style="font-size:11px;opacity:.6;margin-top:2px">🏷 '+_lnkEsc(it.tags)+'</div>';
     const c=_lnkEsc(it.code).replace(/'/g,"\\'");
     html+='<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">';
-    html+='<button class="btn btn-s" onclick="lnkCopy(\''+_lnkEsc(su).replace(/'/g,"\\'")+'\')">📋</button>';
+    html+='<button class="btn btn-s" onclick="lnkCopy(\''+_lnkEsc(su).replace(/'/g,"\\'")+'\')" title="Копировать">📋</button>';
     html+='<button class="btn btn-s" onclick="lnkShowQr(\''+c+'\')">📱 QR</button>';
     html+='<button class="btn btn-s" onclick="lnkToggle(\''+c+'\','+(it.disabled?'false':'true')+')">'+(it.disabled?'▶ Вкл':'⏸ Выкл')+'</button>';
-    html+='<button class="btn btn-s" onclick="lnkDelete(\''+c+'\')">🗑</button>';
+    html+='<button class="btn btn-s" onclick="lnkDelete(\''+c+'\')" title="Удалить">🗑</button>';
     html+='</div></div>';
   }
   list.innerHTML=html;
 }
 
 async function lnkCopy(text) {
-  try { await navigator.clipboard.writeText(text); toast('📋 Скопировано'); }
-  catch(_) {
-    try { const t=document.createElement('textarea'); t.value=text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('📋 Скопировано'); }
-    catch(e){ toast('Не удалось скопировать'); }
-  }
+  // Единый источник правды для буфера — хелпер copyToClipboard (честная подпись
+  // об успехе и запасной путь для незащищённого контекста). Прямой вызов
+  // navigator.clipboard здесь обманывал подписью при отказе.
+  await copyToClipboard(text, '📋 Скопировано');
 }
 
 async function lnkShowQr(code) {
@@ -20065,7 +20064,7 @@ function remRow(r, i, late) {
     ? (late ? ('просрочено ' + ago(r.next_reminder_at))
             : new Date(r.next_reminder_at).toLocaleString('ru-RU'))
     : 'без даты';
-  const uname = r.username ? `<span class="row-right" onclick="event.stopPropagation();remWrite(${i})" role="button" tabindex="0" title="Написать в Telegram">✉️</span>` : '';
+  const uname = r.username ? `<span class="row-right icon-tap" onclick="event.stopPropagation();remWrite(${i})" role="button" tabindex="0" title="Написать в Telegram">✉️</span>` : '';
   return `<div class="li" style="margin:0 16px 8px;display:block">
     <div class="li tap" style="padding:0" onclick="remOpen(${i})" role="button" tabindex="0">
       <div class="li-body">

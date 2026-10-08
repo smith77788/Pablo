@@ -196,6 +196,7 @@ GET /api/miniapp/invite/retention
 GET /api/miniapp/invite/rights_check
 GET /api/miniapp/invite/segment_options
 GET /api/miniapp/keywords
+GET /api/miniapp/links
 GET /api/miniapp/mass_ops
 GET /api/miniapp/mass_publish/targets
 GET /api/miniapp/mass_targets
@@ -337,6 +338,8 @@ GET /api/miniapp/workspaces
 GET /metrics
 GET /miniapp
 GET /miniapp/
+GET /s/{code}
+GET /{code}
 HEAD /.well-known/assetlinks.json
 HEAD /api/miniapp/ab/results
 HEAD /api/miniapp/account/{acc_id}
@@ -480,6 +483,7 @@ HEAD /api/miniapp/invite/retention
 HEAD /api/miniapp/invite/rights_check
 HEAD /api/miniapp/invite/segment_options
 HEAD /api/miniapp/keywords
+HEAD /api/miniapp/links
 HEAD /api/miniapp/mass_ops
 HEAD /api/miniapp/mass_publish/targets
 HEAD /api/miniapp/mass_targets
@@ -621,6 +625,8 @@ HEAD /api/miniapp/workspaces
 HEAD /metrics
 HEAD /miniapp
 HEAD /miniapp/
+HEAD /s/{code}
+HEAD /{code}
 OPTIONS /api/miniapp/{path}
 PATCH /api/miniapp/dm_campaign/{campaign_id}
 PATCH /api/miniapp/flood/{bot_id}
@@ -793,6 +799,10 @@ POST /api/miniapp/invite/join_all
 POST /api/miniapp/invite/parse_file
 POST /api/miniapp/invite/parse_list
 POST /api/miniapp/keyword
+POST /api/miniapp/links/create
+POST /api/miniapp/links/delete
+POST /api/miniapp/links/qr
+POST /api/miniapp/links/toggle
 POST /api/miniapp/mass_invite
 POST /api/miniapp/mass_publish
 POST /api/miniapp/mass_report
