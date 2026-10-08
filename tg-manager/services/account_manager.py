@@ -5800,10 +5800,41 @@ async def promote_to_admin_ex(
         )
         return True, ""
     except UserNotParticipantError:
-        log.warning(
-            "promote_to_admin: user %s not yet a member of %s", user_id, channel_id
-        )
-        return False, "not_participant"
+        # Аккаунт ещё не в канале. Вместо отказа промоутер САМ добавляет его
+        # (InviteToChannel) и повторяет выдачу прав — операция «назначить всех
+        # админами» становится самодостаточной и не требует отдельного вступления
+        # флотом. Главная причина «9 из 51» у владельца: 42 аккаунта не были
+        # участниками. Приватность/лимит обрабатываем честно ниже.
+        try:
+            from telethon.tl.functions.channels import InviteToChannelRequest
+            await asyncio.wait_for(
+                client(InviteToChannelRequest(channel=channel, users=[input_user])),
+                timeout=_OP_TIMEOUT)
+            await asyncio.sleep(1.5)  # дать вступлению зарегистрироваться
+            await asyncio.wait_for(client(
+                EditAdminRequest(channel=channel, user_id=input_user,
+                                 admin_rights=rights, rank="")), timeout=_OP_TIMEOUT)
+            log.info("promote_to_admin: user %s добавлен промоутером и повышен в %s",
+                     user_id, channel_id)
+            return True, ""
+        except UserNotParticipantError:
+            return False, "not_participant"
+        except ChatAdminRequiredError:
+            return False, "no_add_admins"
+        except Exception as _ie:
+            _in = type(_ie).__name__
+            if "AdminsTooMuch" in _in:
+                return False, "admins_too_much"
+            if "Flood" in _in or "Wait" in _in:
+                try:
+                    from services import flood_engine as _fe
+                    await _fe.note_flood(pool, (_acc or {}).get("id"), _ie, "promote")
+                except Exception:
+                    log_exc_swallow(log, "promote_to_admin: flood record (invite) failed")
+                return False, "flood"
+            log.warning("promote_to_admin: авто-вступление не удалось user=%s chan=%s: %s",
+                        user_id, channel_id, _ie)
+            return False, "not_participant"
     except ChatAdminRequiredError:
         log.warning(
             "promote_to_admin: calling account lacks add_admins right in %s", channel_id
