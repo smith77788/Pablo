@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -23,34 +24,51 @@ API = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
 
 
 def _handlers() -> list[tuple[str, str, int]]:
-    """(имя, тело, номер строки) для каждого async-хендлера мини-аппа.
+    """(имя, тело, номер строки) для каждого async-обработчика мини-аппа.
 
-    Тело режем до СЛЕДУЮЩЕГО хендлера ИЛИ до первой строки уровня модуля
-    (отступ меньше четырёх). Без второго условия тело последнего хендлера
-    перед модульным кодом вбирало в себя сотни посторонних строк, и храповик
-    ловил `submit(` из них: так в список попал `request_timeout_middleware` —
-    он операций не ставит и ставить не может, а гейт тарифа к нему отношения
-    не имеет. Детектор с одной находкой в зрелом коде почти всегда сломан
-    (CLAUDE.md), и сломан был именно он.
+    Границы берём из AST. Раньше тело резалось по тексту — от одной строки
+    `    async def имя(request` до следующей такой же, — и любая async-функция
+    с первым аргументом `request`, которая НЕ хендлер, склеивала в своё «тело»
+    весь код до следующего хендлера. Так и вышло: внешняя middleware с потолком
+    времени запроса утянула в себя чужой `submit(`, и храповик показал отказ по
+    тарифу там, где его нет. Детектор, дающий находку в здоровом коде, сломан
+    сам — правило из CLAUDE.md.
+
+    Текстовая починка границ (резать до первой строки уровня модуля) ту
+    находку тоже убирала, но обработчики искала по отступу ровно в четыре
+    пробела — вложенные глубже в детектор не попадали вовсе. AST видит все.
     """
-    lines = API.read_text(encoding="utf-8").split("\n")
-    marks = []
-    for i, l in enumerate(lines):
-        m = re.match(r"    async def ([a-z_0-9]+)\(request", l)
-        if m:
-            marks.append((i, m.group(1)))
-    marks.append((len(lines), "__end__"))
-
+    src = API.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    # Границы — по номерам строк узла. `ast.get_source_segment` здесь нельзя:
+    # он режет весь исходник на строки на КАЖДЫЙ вызов, а файл больше мегабайта
+    # и обработчиков почти семь сотен — один прогон храповика занимал 80 секунд.
+    lines = src.splitlines(keepends=True)
     out = []
-    for (start, name), (nxt, _) in zip(marks, marks[1:]):
-        end = nxt
-        for j in range(start + 1, nxt):
-            line = lines[j]
-            if line.strip() and not line.startswith("    "):
-                end = j
-                break
-        out.append((name, "\n".join(lines[start:end]), start + 1))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef):
+            continue
+        args = node.args.args
+        if not args or args[0].arg != "request":
+            continue
+        start = node.lineno - 1
+        end = node.end_lineno or node.lineno
+        body = "".join(lines[start:end])
+        out.append((node.name, body, node.lineno))
     return out
+
+
+def test_the_detector_sees_the_handlers_and_their_real_bodies():
+    """Самопроверка измерителя до того, как верить его пустому списку."""
+    found = _handlers()
+    assert len(found) > 30, f"хендлеры мини-аппа потерялись: {len(found)}"
+    names = {n for n, _, _ in found}
+    assert "retry_operation" in names and "cancel_operation" in names
+    # тело каждого обработчика — только его собственный код
+    for name, body, _ln in found:
+        assert body.lstrip().startswith("async def "), name
+        assert body.count("\nasync def ") == 0, (
+            f"{name}: в тело попал код соседней функции — находки будут ложными")
 
 
 def test_every_submitting_handler_surfaces_plan_refusal():
