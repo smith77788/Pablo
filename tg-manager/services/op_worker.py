@@ -7009,16 +7009,14 @@ async def _exec_global_presence_channel(
             except Exception as e:
                 log_exc_swallow(log, f"gp_channel ecosystem add_member to plan {plan_id} failed: {e}")
 
-            await _safe_execute(
-                    pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+            await _journal_done(
+                pool,
                 op_id,
                 created_count + failed_count,
                 f"{target.get('city', '?')} → {title}",
                 f"channel_id={channel_id}"
                 + (f" | username_err={username_error}" if username_error else "")
-                + (" | va_install_failed" if va_installed is False else ""),
-            )
+                + (" | va_install_failed" if va_installed is False else ""))
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -7761,14 +7759,12 @@ async def _exec_global_presence_bot(
             except Exception as e:
                 log_exc_swallow(log, f"gp_bot ecosystem add_member to plan {plan_id} failed: {e}")
 
-            await _safe_execute(
-                    pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+            await _journal_done(
+                pool,
                 op_id,
                 created_count + failed_count + 1,
                 f"{target.get('city', '?')} → @{actual_username}",
-                f"bot created: @{actual_username}",
-            )
+                f"bot created: @{actual_username}")
             await _safe_execute(
                     pool,
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -8433,14 +8429,12 @@ async def _exec_bulk_create_channels(
                                 "op_worker bulk_channels: all username variants failed, channel created without username"
                             )
 
-                await _safe_execute(
-                        pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+                await _journal_done(
+                    pool,
                     op_id,
                     num,
                     f"{title}",
-                    f"channel_id={ch_id}" + (f" @{username}" if username else ""),
-                )
+                    f"channel_id={ch_id}" + (f" @{username}" if username else ""))
                 created_count += 1
             else:
                 err_msg = result if isinstance(result, str) else str(result)
@@ -8676,13 +8670,12 @@ async def _exec_bot_factory_multi(
                     # для идемпотентности — закрытый шаг: повторить его значит
                     # создать ВТОРОГО бота и сжечь ещё одно место из двадцати.
                     # Сам токен не потерян, он уходит в created_tokens.
-                    await _safe_execute(
+                    await _journal_done(
                         pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                        "VALUES($1,$2,$3,'ok',$4)",
-                        op_id, _step, display_name,
-                        "бот создан, но getMe не ответил — токен не сохранён в списке ботов",
-                    )
+                        op_id,
+                        _step,
+                        display_name,
+                        "бот создан, но getMe не ответил — токен не сохранён в списке ботов")
                     await _safe_execute(
                         pool,
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -8706,12 +8699,12 @@ async def _exec_bot_factory_multi(
                 # строки — владелец видел только «Создано: N» и не мог узнать,
                 # какие именно боты завелись и на чём споткнулись остальные.
                 # На него же опирается пропуск при возобновлении.
-                await _safe_execute(
+                await _journal_done(
                     pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'ok',$4)",
-                    op_id, _step, display_name, f"@{actual_uname}",
-                )
+                    op_id,
+                    _step,
+                    display_name,
+                    f"@{actual_uname}")
             else:
                 failed_count += 1
                 await _safe_execute(
@@ -8904,15 +8897,12 @@ async def _exec_bot_factory(
                 except Exception:
                     log_exc_swallow(log, "_exec_bot_factory: managed_bots upsert failed")
 
-                await _safe_execute(
-                        pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'ok',$4)",
+                await _journal_done(
+                    pool,
                     op_id,
                     num,
                     display_name,
-                    f"@{actual_uname}",
-                )
+                    f"@{actual_uname}")
                 created_count += 1
                 log.info(
                     "_exec_bot_factory op=%d: created @%s (bot_id=%s)",
@@ -8956,11 +8946,12 @@ async def _exec_bot_factory(
                             except Exception as e:
                                 log_exc_swallow(log, f"bot_factory retry managed_bots upsert failed: {e}")
                             created_count += 1
-                            await _safe_execute(
-                                    pool,
-                                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-                                op_id, num, display_name, f"@{actual_uname} (retry ok)",
-                            )
+                            await _journal_done(
+                                pool,
+                                op_id,
+                                num,
+                                display_name,
+                                f"@{actual_uname} (retry ok)")
                             await _safe_execute(
                                     pool,
                                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -9788,12 +9779,11 @@ async def _exec_seed_presence_pack(
                 # ронять операцию из-за сбоя записи в журнал нельзя. Цена —
                 # возможный повтор в этот канал при возобновлении; это дешевле
                 # сорванной операции.
-                await _safe_execute(
+                await _journal_done(
                     pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status) "
-                    "VALUES($1,$2,$3,'ok')",
-                    op_id, idx, _ch_key,
-                )
+                    op_id,
+                    idx,
+                    _ch_key)
             else:
                 fail += 1
                 fail_names.append(chan_name)
@@ -9946,10 +9936,8 @@ async def _exec_bulk_seo_apply(
         if res.get("ok"):
             ok_count += 1
             applied = ", ".join((res.get("applied") or {}).keys()) or "без изменений"
-            await _safe_execute(pool,
-                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                "VALUES($1,$2,$3,'ok',$4)",
-                op_id, idx, f"ch#{chan_id}", ("SEO: " + applied)[:200])
+            await _journal_done(
+                pool, op_id, idx, f"ch#{chan_id}", ("SEO: " + applied)[:200])
         else:
             fail_count += 1
             await _safe_execute(pool,
@@ -13500,9 +13488,12 @@ async def _exec_promote_all_admins(
                 ok, _why = False, "error"
             if ok:
                 ok_count += 1
-                await _safe_execute(
-                    pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'ok',$4)", op_id, idx + 1, _target, "права выданы")
+                await _journal_done(
+                    pool,
+                    op_id,
+                    idx + 1,
+                    _target,
+                    "права выданы")
             else:
                 fail_count += 1
                 _txt = _why_ru.get(_why, "не удалось выдать права")
@@ -13637,11 +13628,11 @@ async def _exec_boost_views(
             )
             if res["ok"]:
                 ok_count += 1
-                await _safe_execute(
+                await _journal_done(
                     pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, _acc_key,
-                )
+                    op_id,
+                    idx,
+                    _acc_key)
                 await _audit(pool, owner_id, "view", "ok",
                              operation_id=op_id, account_id=acc["id"], target=str(channel)[:120])
             else:
@@ -13771,11 +13762,11 @@ async def _exec_boost_reactions(
             )
             if res["ok"]:
                 ok_count += 1
-                await _safe_execute(
+                await _journal_done(
                     pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, _acc_key,
-                )
+                    op_id,
+                    idx,
+                    _acc_key)
                 await _audit(pool, owner_id, "reaction", "ok",
                              operation_id=op_id, account_id=acc["id"], target=str(channel)[:120])
             else:
@@ -13879,11 +13870,11 @@ async def _exec_boost_stories(
             if res["ok"]:
                 ok_count += 1
                 stories_seen = max(stories_seen, res.get("stories_count", 0))
-                await _safe_execute(
+                await _journal_done(
                     pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, _acc_key,
-                )
+                    op_id,
+                    idx,
+                    _acc_key)
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
@@ -14296,11 +14287,11 @@ async def _exec_boost_subscribers(
                     )
                 else:
                     ok_count += 1
-                    await _safe_execute(
+                    await _journal_done(
                         pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                        op_id, idx, _acc_key,
-                    )
+                        op_id,
+                        idx,
+                        _acc_key)
                     # Учёт в суточный бюджет: вступление — риск-действие. Без этой
                     # записи накрутка невидима для лимита, и один аккаунт вступал
                     # бы в неограниченно много каналов за день.
@@ -14424,11 +14415,11 @@ async def _exec_boost_bot_starts(
                     )
                 else:
                     ok_count += 1
-                    await _safe_execute(
+                    await _journal_done(
                         pool,
-                        "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                        op_id, idx, _acc_key,
-                    )
+                        op_id,
+                        idx,
+                        _acc_key)
             except Exception as exc:
                 log.warning("boost_bot_starts op=%d acc=%s: %s", op_id, acc.get("id"), exc)
                 fail_count += 1
@@ -14484,6 +14475,50 @@ async def _load_invited_targets(pool, owner_id: int, group_key: str) -> set:
     except Exception:
         log_exc_swallow(log, "invite dedup: load failed")
         return set()
+
+
+async def _journal_done(pool, op_id: int, step_num: int, target,
+                        message: "str | None" = None) -> bool:
+    """Записать УСПЕШНО обработанную цель в журнал операции.
+
+    Журнал целей — не отчёт, а основание идемпотентности: полтора десятка
+    исполнителей читают его перед работой (`completed_targets`,
+    `completed_steps`, `settled_targets`) и пропускают цели, которые там уже
+    закрыты. Повтор операции видит и журнал предка (`journal_op_ids`).
+
+    Поэтому ПОТЕРЯННАЯ строка успеха — это не «неполный отчёт», а повторное
+    РЕАЛЬНОЕ действие на следующей попытке: второй пост в канал, который его уже
+    получил, второе одинаковое сообщение живому человеку, второй комплект
+    созданных каналов. А записывалась она через `_safe_execute`, который сбой
+    глотает и возвращает 'ERROR': двадцать с лишним мест теряли такую строку
+    молча, и узнать об этом было негде.
+
+    Одна повторная попытка на месте (типовая причина мгновенная: занятый пул,
+    блокировка), затем log.error и счётчик. Операцию не роняем — цель уже
+    обработана, падать поздно; но потеря обязана быть видна снаружи.
+    """
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'ok',$4)",
+                int(op_id), int(step_num), (None if target is None else str(target)),
+                message,
+            )
+            return True
+        except Exception as exc:
+            if _attempt == 1:
+                log.warning(
+                    "журнал op=%s: строка успеха для %r не записана (%s), повторяю",
+                    op_id, target, str(exc)[:120])
+                await asyncio.sleep(0.3)
+                continue
+            log.error(
+                "журнал op=%s: СТРОКА УСПЕХА ПОТЕРЯНА для %r — следующая "
+                "попытка сделает эту цель второй раз", op_id, target)
+            _reliability_metric("infragram_journal_write_failures_total")
+            return False
+    return False
 
 
 async def _record_invited_targets(pool, owner_id: int, group_key: str, op_id: int, targets) -> bool:
@@ -17631,11 +17666,11 @@ async def _exec_mass_report(
                 # ронять операцию из-за сбоя записи в журнал нельзя. Ценой
                 # служит возможный повтор с этого аккаунта при возобновлении —
                 # это дешевле сорванной операции.
-                await _safe_execute(
+                await _journal_done(
                     pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, idx, _acc_key,
-                )
+                    op_id,
+                    idx,
+                    _acc_key)
             else:
                 fail_count += 1
                 await _safe_execute(
@@ -17911,11 +17946,12 @@ async def _exec_ai_comment(
                 # и ронять операцию из-за сбоя записи в журнал нельзя. Ценой
                 # служит возможный повтор по этому каналу при возобновлении —
                 # это дешевле сорванной операции.
-                await _safe_execute(
+                await _journal_done(
                     pool,
-                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
-                    "VALUES($1,$2,$3,'ok',$4)",
-                    op_id, idx, ref, (res.get("comment") or "")[:200])
+                    op_id,
+                    idx,
+                    ref,
+                    (res.get("comment") or "")[:200])
             else:
                 fail_count += 1
                 err = (res.get("error") or "")

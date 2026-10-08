@@ -46,6 +46,8 @@ _HELP = {
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
     "infragram_op_fleet_starved_total":
         "Операции, закрытые из-за того, что свободных аккаунтов так и не стало",
+    "infragram_journal_write_failures_total":
+        "Потерянные строки успеха в журнале целей (повтор сделает цель второй раз)",
     "infragram_account_cooldown_write_failures_total":
         "Потерянные записи паузы аккаунта (аккаунт останется доступным сразу после флуда)",
     "infragram_invite_dedup_write_failures_total":

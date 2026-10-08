@@ -527,3 +527,27 @@ def test_account_pause_is_scoped_to_the_owner(pool):
             "SELECT cooldown_until FROM tg_accounts WHERE id=$1", acc_id)
 
     assert _run(_go()) is None, "пауза легла на аккаунт чужого владельца"
+
+
+def test_journal_success_row_lands_on_real_sql(pool):
+    """Дверь журнала: NULL в message и настоящие типы параметров.
+
+    Заглушка пула принимает любые типы, поэтому именно здесь видно, что
+    `message=None` ложится в jsonb-свободную колонку как NULL, а step_num и
+    op_id приведены к int.
+    """
+    from services import op_worker
+
+    async def _go():
+        op_id = await _new_op(pool, status="running", total_items=2)
+        assert await op_worker._journal_done(pool, op_id, 1, "ch#5") is True
+        assert await op_worker._journal_done(
+            pool, op_id, 2, "ch#6", "опубликовано") is True
+        return await pool.fetch(
+            "SELECT target, status, message FROM operation_log "
+            " WHERE op_id=$1 ORDER BY step_num", op_id)
+
+    rows = _run(_go())
+    assert [r["status"] for r in rows] == ["ok", "ok"]
+    assert [r["target"] for r in rows] == ["ch#5", "ch#6"]
+    assert rows[0]["message"] is None and rows[1]["message"] == "опубликовано"

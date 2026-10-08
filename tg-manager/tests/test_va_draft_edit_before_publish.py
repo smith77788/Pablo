@@ -22,7 +22,16 @@ from services import channel_admin as ca
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Своим циклом, а не asyncio.get_event_loop(): любой сосед по прогону,
+    # вызвавший asyncio.run(), оставляет поток без текущего цикла, и файл падал
+    # пятью «There is no current event loop» — на здоровом коде, только из-за
+    # порядка тестов. В одиночном прогоне это не видно, а CI гоняет всё вместе.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 class _Pool:
