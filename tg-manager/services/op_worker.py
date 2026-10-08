@@ -10507,13 +10507,14 @@ async def _exec_bulk_dm_adhoc(
                     fw = int(result.get("flood_wait") or 0)
                     flood_wait_total += fw
                     err_count += 1
-                    await _safe_execute(
-                        pool,
-                        "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
-                        "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
-                        "WHERE id=$2",
-                        min(max(fw, 60), 3600), acc["id"],
-                    )
+                    # Одна дверь на запись паузы: только продлевает (минутный
+                    # флуд не срезает суточную паузу за PeerFlood) и шумит в
+                    # метрику, если запись потеряна.
+                    from services import flood_engine as _fe_cd
+
+                    await _fe_cd.apply_cooldown(
+                        pool, acc["id"], min(max(fw, 60), 3600),
+                        reason="bulk_dm flood_wait", bump_flood_count=True)
                     if len(active_accounts) > 1:
                         active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
                     await _log_step(i + 1, username, "error", f"FloodWait {fw}с · акк {acc['id']}")
@@ -10522,13 +10523,11 @@ async def _exec_bulk_dm_adhoc(
                     # Аккаунт помечен Telegram за спам ВООБЩЕ. Продолжать им —
                     # гарантированная потеря аккаунта: длинный кулдаун и из ротации.
                     err_count += 1
-                    await _safe_execute(
-                        pool,
-                        "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
-                        "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
-                        "WHERE id=$2",
-                        _PEER_FLOOD_COOLDOWN_S, acc["id"],
-                    )
+                    from services import flood_engine as _fe_cd2
+
+                    await _fe_cd2.apply_cooldown(
+                        pool, acc["id"], _PEER_FLOOD_COOLDOWN_S,
+                        reason="bulk_dm peer_flood", bump_flood_count=True)
                     active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
                     await _log_step(i + 1, username, "error", f"PeerFlood · акк {acc['id']} выведен")
                     log.warning("bulk_dm_adhoc: PeerFlood acc=%s — аккаунт выведен из рассылки", acc["id"])

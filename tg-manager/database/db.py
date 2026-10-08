@@ -4592,7 +4592,12 @@ async def record_flood_event(
         """UPDATE tg_accounts
            SET flood_count_7d = flood_count_7d + 1,
                last_flood_at  = NOW(),
-               cooldown_until = NOW() + ($1 * INTERVAL '1 hour')
+               -- Только продление: короткая пауза за флуд не должна срезать
+               -- более длинную, уже стоящую на аккаунте (суточную за PeerFlood).
+               cooldown_until = GREATEST(
+                   COALESCE(cooldown_until, NOW()),
+                   NOW() + ($1 * INTERVAL '1 hour')
+               )
            WHERE id = $2""",
         cooldown_hours,
         account_id,

@@ -234,7 +234,9 @@ async def apply_shield_decision(
             await pool.execute(
                 """UPDATE tg_accounts
                    SET is_active = FALSE,
-                       cooldown_until = $2,
+                       -- Только продлеваем: пауза Щита не должна срезать более
+                       -- длинную, уже стоящую на аккаунте.
+                       cooldown_until = GREATEST(COALESCE(cooldown_until, NOW()), $2),
                        status_reason = $3
                    WHERE id = $1""",
                 decision.account_id,

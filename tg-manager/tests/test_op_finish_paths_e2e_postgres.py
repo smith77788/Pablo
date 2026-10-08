@@ -465,3 +465,65 @@ def test_a_run_finished_after_the_row_was_closed_reports_nothing(pool):
     assert not done_marks, (
         "исход доложен вторым, успешным: на графике одна операция даёт два "
         f"разных исхода — {done_marks}")
+
+
+# ── Пауза аккаунта: запрос с семью параметрами и приведениями типов ──────────
+#
+# Заглушка пула принимает любые типы и любые имена колонок, поэтому ошибку
+# СВЯЗЫВАНИЯ ($6::bool, $7::bigint, GREATEST над timestamptz) не видит в
+# принципе. Здесь — настоящая база.
+
+def test_account_pause_extends_but_never_shortens(pool):
+    from services import flood_engine
+
+    async def _go():
+        acc_id = await _new_acc(pool)
+        # сутки за PeerFlood
+        assert await flood_engine.apply_cooldown(
+            pool, acc_id, 24 * 3600, reason="peer_flood",
+            bump_flood_count=True) is True
+        long_until = await pool.fetchval(
+            "SELECT cooldown_until FROM tg_accounts WHERE id=$1", acc_id)
+        # минутный флуд той же операции, у которой аккаунт был взят заранее
+        assert await flood_engine.apply_cooldown(
+            pool, acc_id, 60, reason="flood_wait", bump_flood_count=True) is True
+        row = await pool.fetchrow(
+            "SELECT cooldown_until, acc_status, flood_count_7d, last_flood_at, "
+            "       status_reason FROM tg_accounts WHERE id=$1", acc_id)
+        return acc_id, long_until, row
+
+    acc_id, long_until, row = _run(_go())
+    assert row["cooldown_until"] == long_until, (
+        "минутный флуд срезал суточную паузу за PeerFlood: аккаунт уйдёт в "
+        f"работу помеченным за спам ({row['cooldown_until']} вместо {long_until})")
+    assert row["acc_status"] == "cooldown"
+    assert int(row["flood_count_7d"] or 0) == 2
+    assert row["last_flood_at"] is not None
+    assert "flood_wait" in (row["status_reason"] or "")
+
+
+def test_account_pause_keeps_a_terminal_status(pool):
+    """Спамблок и бан пауза не перезаписывает — это не «отдыхает»."""
+    async def _go():
+        from services import flood_engine
+
+        acc_id = await _new_acc(pool, acc_status="spamblock")
+        await flood_engine.apply_cooldown(pool, acc_id, 60, reason="flood_wait")
+        return await pool.fetchval(
+            "SELECT acc_status FROM tg_accounts WHERE id=$1", acc_id)
+
+    assert _run(_go()) == "spamblock"
+
+
+def test_account_pause_is_scoped_to_the_owner(pool):
+    """Аккаунт чужого владельца нельзя тронуть даже паузой."""
+    async def _go():
+        from services import flood_engine
+
+        acc_id = await _new_acc(pool)
+        await flood_engine.apply_cooldown(
+            pool, acc_id, 3600, reason="flood_wait", owner_id=OWNER + 1)
+        return await pool.fetchval(
+            "SELECT cooldown_until FROM tg_accounts WHERE id=$1", acc_id)
+
+    assert _run(_go()) is None, "пауза легла на аккаунт чужого владельца"

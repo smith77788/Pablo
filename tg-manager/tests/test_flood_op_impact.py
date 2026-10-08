@@ -38,14 +38,23 @@ def test_record_flood_persists_operation_id():
 
 
 def test_cooldown_update_independent_of_log_insert():
-    """Кулдаун применяется своим execute — не в одном try с лог-INSERT."""
+    """Кулдаун применяется отдельно от лог-INSERT и ПЕРЕД ним.
+
+    Смысл проверки прежний: сбой записи в аналитический лог не должен утопить
+    паузу (иначе аккаунт продолжит работать во флуд → риск бана). Сама запись
+    паузы с тех пор вынесена в общую дверь `apply_cooldown` — у неё свой разбор
+    ошибок, повторная попытка и GREATEST, так что разделение стало прочнее, чем
+    два разных `except` в одном теле.
+    """
     src = inspect.getsource(flood_engine.record_flood)
-    # UPDATE cooldown идёт ПЕРЕД INSERT в лог (критичное — первым)
-    i_upd = src.index("UPDATE tg_accounts")
+    i_cd = src.index("apply_cooldown(")
     i_ins = src.index("INSERT INTO account_flood_log")
-    assert i_upd < i_ins, "кулдаун-UPDATE должен идти перед лог-INSERT"
-    # у них разные except-обработчики (не общий try)
-    assert src.count("except Exception") >= 2
+    assert i_cd < i_ins, "паузу надо ставить до записи в аналитический лог"
+    door = inspect.getsource(flood_engine.apply_cooldown)
+    assert "GREATEST" in door, "дверь перестала продлевать паузу"
+    assert "except Exception" in door, (
+        "у двери нет своего разбора ошибок — сбой записи паузы снова станет "
+        "невидимым")
 
 
 def test_operation_status_returns_account_impact_scoped():

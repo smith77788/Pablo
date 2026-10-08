@@ -21,6 +21,7 @@ from aiogram import Bot
 
 from services.logger import log_exc_swallow
 from services import infra_memory
+from services import flood_engine as _flood_engine
 
 log = logging.getLogger(__name__)
 
@@ -1206,18 +1207,12 @@ async def run_campaign(
                 campaign_id,
             )
             # Установить cooldown_until для аккаунта
-            try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
-                    "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
-                    "WHERE id=$2",
-                    min(wait, 3600),
-                    acc["id"],
-                )
-            except Exception:
-                log_exc_swallow(
-                    log, "dm_engine: failed to set cooldown_until for acc=%d", acc["id"]
-                )
+            # Одна дверь на запись паузы: только продлевает (короткий флуд не
+            # срезает суточную паузу за PeerFlood), повторяет попытку и шумит в
+            # метрику, если запись всё же потеряна.
+            await _flood_engine.apply_cooldown(
+                pool, acc["id"], min(wait, 3600),
+                reason="dm flood_wait", bump_flood_count=True)
             # Убрать аккаунт из цикла временно и подождать
             if wait <= 60:
                 await asyncio.sleep(min(wait, 60))
@@ -1271,18 +1266,9 @@ async def run_campaign(
                 if status == "peer_flood":
                     # Длинный cooldown, чтобы СЛЕДУЮЩАЯ операция не добила флагнутый
                     # аккаунт (per-campaign удаления мало — флаг живёт на аккаунте).
-                    try:
-                        await pool.execute(
-                            "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
-                            "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
-                            "WHERE id=$2",
-                            _PEER_FLOOD_COOLDOWN,
-                            acc["id"],
-                        )
-                    except Exception:
-                        log_exc_swallow(
-                            log, "dm_engine: peer_flood cooldown failed acc=%d", acc["id"]
-                        )
+                    await _flood_engine.apply_cooldown(
+                        pool, acc["id"], _PEER_FLOOD_COOLDOWN,
+                        reason="dm peer_flood", bump_flood_count=True)
                 acc_cycle = [a for a in acc_cycle if a["id"] != acc["id"]]
                 if not acc_cycle:
                     log.error(

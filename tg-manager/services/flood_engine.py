@@ -757,7 +757,10 @@ async def record_flood(
     # Exponential backoff: base wait + consecutive penalty
     penalty = min(state.consecutive_floods * 30, 300)  # up to +5 min penalty
     actual_wait = wait_seconds + penalty
-    state.cooldown_until = now + actual_wait
+    # Только продлеваем: короткий флуд не должен срезать длинную паузу,
+    # уже поставленную за PeerFlood или прошлый флуд (так же, как в
+    # apply_post_action_cooldown).
+    state.cooldown_until = max(state.cooldown_until, now + actual_wait)
 
     # Update risk score (increases with floods, decays over time)
     state.risk_score = min(1.0, state.risk_score + 0.2 * state.consecutive_floods)
@@ -781,24 +784,9 @@ async def record_flood(
         # Критично: кулдаун применяем ПЕРВЫМ и отдельно — он не должен пропасть
         # из-за сбоя записи в аналитический лог (иначе аккаунт продолжит работать
         # во флуд → риск бана). Раньше INSERT в лог и этот UPDATE были в одном try.
-        try:
-            await pool.execute(
-                """UPDATE tg_accounts
-                   SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'),
-                       last_flood_at = NOW(),
-                       acc_status = CASE
-                           WHEN COALESCE(acc_status, 'active') IN ('spamblock', 'banned', 'deactivated')
-                               THEN acc_status
-                           ELSE 'cooldown'
-                       END,
-                       status_reason = $3
-                   WHERE id = $2""",
-                actual_wait,
-                account_id,
-                f"{action_type} cooldown after FloodWait ({wait_seconds}s)",
-            )
-        except Exception as e:
-            log.warning("flood_engine cooldown update failed: %s", e)
+        await apply_cooldown(
+            pool, account_id, actual_wait,
+            reason=f"{action_type} cooldown after FloodWait ({wait_seconds}s)")
         # Аналитический лог С ПРИВЯЗКОЙ К ОПЕРАЦИИ. operation_id раньше принимался
         # функцией, но НЕ писался — из-за этого нельзя было показать «что операция
         # сделала с аккаунтами». Фолбэк без v41-колонок, чтобы не падать на
@@ -832,6 +820,86 @@ async def record_flood(
             log_exc_swallow(log, "record_flood: import")
 
     return actual_wait
+
+
+async def apply_cooldown(
+    pool: Optional[asyncpg.Pool],
+    account_id: int,
+    seconds: float,
+    *,
+    reason: str = "",
+    bump_flood_count: bool = False,
+    set_status: bool = True,
+    flood: bool = True,
+    owner_id: Optional[int] = None,
+) -> bool:
+    """Поставить аккаунту паузу в базе. Единственная дверь для этой записи.
+
+    Два правила, которые раньше соблюдались не везде.
+
+    ПАУЗУ ТОЛЬКО ПРОДЛЕВАЕМ. Записи вида `cooldown_until = NOW() + интервал`
+    затирали уже стоящую паузу более короткой. Это не теория: операции получают
+    список аккаунтов при постановке (`params["account_ids"]`), поэтому операция,
+    начатая до того, как аккаунту выписали суточную паузу за PeerFlood, всё
+    равно им работает, получает минутный FloodWait — и суточная защита
+    превращается в минутную. Следующая операция берёт аккаунт, помеченный
+    Telegram за спам, и теряет его.
+
+    ПОТЕРЮ ЗАПИСИ НЕ ГЛОТАЕМ. Раньше сбой записи уходил в лог, и наружу это
+    выглядело как поставленная пауза: аккаунт оставался доступным сразу после
+    флуда — то есть продукт сам добивал его. Одна повторная попытка на месте
+    (типовая причина мгновенная), затем log.error и счётчик; вызывающий по False
+    знает, что защита в базе не легла, и выводит аккаунт из ротации сам.
+
+    `owner_id` — для вызовов, у которых есть владелец: запись скоупится по нему,
+    как того требует общее правило про скоуп (аккаунт чужого владельца трогать
+    нельзя даже паузой).
+    """
+    if pool is None:
+        return True
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                """UPDATE tg_accounts
+                   SET cooldown_until = GREATEST(
+                           COALESCE(cooldown_until, NOW()),
+                           NOW() + ($1 * INTERVAL '1 second')
+                       ),
+                       last_flood_at = CASE WHEN $6::bool THEN NOW() ELSE last_flood_at END,
+                       flood_count_7d = COALESCE(flood_count_7d, 0) + $3::int,
+                       acc_status = CASE
+                           WHEN COALESCE(acc_status, 'active')
+                               IN ('spamblock', 'banned', 'deactivated') THEN acc_status
+                           WHEN $4::bool THEN 'cooldown'
+                           ELSE acc_status
+                       END,
+                       status_reason = COALESCE($5, status_reason)
+                   WHERE id = $2
+                     AND ($7::bigint IS NULL OR owner_id = $7::bigint)""",
+                float(seconds), int(account_id), 1 if bump_flood_count else 0,
+                bool(set_status), (reason or None), bool(flood),
+                (int(owner_id) if owner_id is not None else None),
+            )
+            return True
+        except Exception as exc:
+            if _attempt == 1:
+                log.warning(
+                    "flood_engine: пауза аккаунта acc=%s не записана (%s), повторяю",
+                    account_id, str(exc)[:120])
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "flood_engine: ПАУЗА НЕ ЗАПИСАНА acc=%s на %.0fс — аккаунт "
+                "останется доступным следующей операции сразу после флуда",
+                account_id, float(seconds))
+            try:
+                from services import metrics as _m
+                _m.inc("infragram_account_cooldown_write_failures_total",
+                       {"reason": str(reason or "flood")[:40]})
+            except Exception:
+                pass
+            return False
+    return False
 
 
 async def apply_post_action_cooldown(

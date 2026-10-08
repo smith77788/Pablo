@@ -1809,7 +1809,11 @@ async def cb_set_cooldown_confirm(
 
     try:
         await pool.execute(
-            "UPDATE tg_accounts SET cooldown_until=$1 WHERE id=$2 AND owner_id=$3",
+            # Только продление: «поставить на паузу» не значит «срезать более
+            # длинную паузу», которую аккаунту выписали за флуд или PeerFlood.
+            "UPDATE tg_accounts "
+            "   SET cooldown_until=GREATEST(COALESCE(cooldown_until, NOW()), $1) "
+            " WHERE id=$2 AND owner_id=$3",
             cd_until,
             acc_id,
             user_id,

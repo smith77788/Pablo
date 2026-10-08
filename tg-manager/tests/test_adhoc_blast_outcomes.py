@@ -100,8 +100,11 @@ def test_adhoc_no_longer_checks_nonexistent_banned_key():
 def test_adhoc_handles_peer_flood_and_flood_with_cooldown():
     src = _adhoc_source()
     assert "peer_flood" in src, "PeerFlood обязан обрабатываться отдельно"
-    assert src.count("cooldown_until") >= 2, (
-        "и flood, и peer_flood обязаны ставить аккаунту кулдаун"
+    # Запись паузы ушла в общую дверь flood_engine.apply_cooldown (она одна
+    # умеет продлевать паузу, а не срезать, повторять попытку и шуметь в
+    # метрику при потере). Проверяем по ней, а не по имени колонки.
+    assert src.count("apply_cooldown(") >= 2, (
+        "и flood, и peer_flood обязаны ставить аккаунту паузу"
     )
 
 

@@ -148,16 +148,18 @@ async def _account_recovery(
                 continue
 
             cooldown_hours = _COOLDOWN_RECOVERY_HOURS
-            try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET cooldown_until=NOW()+($1 * INTERVAL '1 hour') "
-                    "WHERE id=$2 AND owner_id=$3",
-                    cooldown_hours,
-                    acc_id,
-                    owner_id,
-                )
-            except Exception as e:
-                log.debug("recovery: cooldown update failed acc=%d: %s", acc_id, e)
+            # Через общую дверь: пауза только продлевается. Запись «NOW() + N
+            # часов» затирала более длинную паузу — например суточную за
+            # PeerFlood, — и восстановление само возвращало в работу аккаунт,
+            # который Telegram отметил за спам.
+            from services import flood_engine as _fe_cd
+
+            # Запись не легла — поведение прежнее: действие восстановления не
+            # объявляем, иначе владелец прочитал бы про паузу, которой нет.
+            if not await _fe_cd.apply_cooldown(
+                    pool, acc_id, cooldown_hours * 3600,
+                    reason="recovery cooldown", flood=False, set_status=False,
+                    owner_id=owner_id):
                 continue
 
             _last_account_recovery.setdefault(owner_id, {})[acc_id] = now
