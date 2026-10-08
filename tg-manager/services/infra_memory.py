@@ -14,6 +14,7 @@ Infrastructure Memory — системная память о производи�
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -633,6 +634,64 @@ def format_account_report(account_ids: list[int], action_type: str) -> str:
 # в один «пульс», который читают нервная (op_worker) и кровеносная (account_manager)
 # системы ПЕРЕД действием. Продюсеры не меняются — агрегируем на чтении поверх
 # уже существующих таблиц. Всё DB-based (в отличие от in-memory кэша выше).
+
+async def record_account_restriction(
+        pool, owner_id: int, account_id: int, event_type: str, *,
+        severity: str = "critical", details: dict | None = None,
+        dedup_minutes: int = 60) -> bool:
+    """Записать ограничение аккаунта в `restriction_events` — ЕДИНЫЙ вход сигнала.
+
+    ЗАЧЕМ ОТДЕЛЬНАЯ ФУНКЦИЯ, И ПОЧЕМУ ЗДЕСЬ. Эту таблицу читают четыре
+    предохранителя продукта: гейт операций `is_account_quarantined` (ниже),
+    риск-пульс `get_account_health` (ниже), `anti_storm` (волна банов →
+    глубокий сон флота) и мониторинг. А писали в неё только два детектора:
+    `shadowban_monitor` (падение позиции бота и высокий флуд) и
+    `drift_detector` (переименование канала). СОБСТВЕННЫЕ находки бана
+    продукта — `acc_status='banned'` от исполнителя операций и от прогрева —
+    в таблицу не попадали вообще.
+
+    Что из этого следовало. `anti_storm` объявляет шторм по числу РАЗНЫХ
+    аккаунтов с критическим ограничением за 30 минут, считая их по этой
+    таблице, и зовётся ровно из хука бана. Telegram выкашивал двадцать
+    аккаунтов за десять минут, хук срабатывал двадцать раз — и каждый раз
+    видел ноль: предохранитель против волны банов не мог сработать на бане
+    никогда. Гейт операций по той же причине не знал о банах, найденных самим
+    продуктом, и аккаунт не брался в работу только потому, что его отсеивали
+    отдельные фильтры `acc_status` в запросах выборки.
+
+    Производитель сигнала живёт рядом с его читателями, чтобы следующий
+    детектор бана писал туда же, а не в свою таблицу.
+
+    `dedup_minutes` — не писать второе такое же событие по тому же аккаунту
+    внутри окна: хук бана дёргается на каждой операции, которая налетела на
+    этот аккаунт, а шторм считает РАЗНЫЕ аккаунты, так что на его решение
+    дедуп не влияет. 0 — писать всегда.
+
+    Fail-open: вернуть False, но не ронять вызывающего. Сигнал важен, но
+    операция, которая уже наткнулась на бан, не должна падать из-за записи.
+    """
+    if not pool or not owner_id or not account_id or not event_type:
+        return False
+    try:
+        res = await pool.execute(
+            "INSERT INTO restriction_events"
+            "(owner_id, account_id, event_type, severity, details) "
+            "SELECT $1, $2, $3, $4, $5::jsonb WHERE NOT EXISTS ("
+            "  SELECT 1 FROM restriction_events WHERE account_id=$2 "
+            "   AND event_type=$3 "
+            "   AND created_at > now() - make_interval(mins => $6))",
+            int(owner_id), int(account_id), event_type, severity,
+            json.dumps(details or {}, ensure_ascii=False),
+            int(max(0, dedup_minutes)))
+    except Exception:
+        log.warning("infra_memory: ограничение не записано owner=%s acc=%s type=%s",
+                    owner_id, account_id, event_type, exc_info=True)
+        return False
+    try:
+        return int(str(res).rsplit(" ", 1)[-1]) > 0
+    except ValueError:
+        return True
+
 
 async def is_account_quarantined(pool, account_id: int, *, days: int = 3) -> bool:
     """Fail-open: True только при недавнем СЕРЬЁЗНОМ ограничении (critical severity

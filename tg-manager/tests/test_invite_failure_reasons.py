@@ -27,7 +27,11 @@ def _named(name, text=""):
     ("UserPrivacyRestrictedError", mie.FAIL_PRIVACY),
     ("UserNotMutualContactError", mie.FAIL_NOT_MUTUAL),
     ("UserChannelsTooMuchError", mie.FAIL_TOO_MANY_CHATS),
-    ("UserBannedInChannelError", mie.FAIL_BANNED),
+    # «Вы забанены в этом канале» — про САМ инвайтер-аккаунт, не про цель
+    # (44644d7a). Цель тут ни при чём: она возвращается в очередь, а аккаунт
+    # выводится из круга. Пока это читалось как вина цели, человек списывался
+    # и дедупился навсегда — жалоба владельца «больше не дозваться».
+    ("UserBannedInChannelError", mie.FAIL_SELF_BAN),
     ("UserKickedError", mie.FAIL_BANNED),
     ("UserBlockedError", mie.FAIL_BLOCKED),
     ("InputUserDeactivatedError", mie.FAIL_DEAD),

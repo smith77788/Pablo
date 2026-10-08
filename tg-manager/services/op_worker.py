@@ -1485,13 +1485,33 @@ async def _governed_sleep(pool, owner_id: int, base: float) -> None:
 
 
 async def _on_account_banned(pool, owner_id: int, acc_id: int, where: str,
-                             *, bot=None) -> None:
+                             *, bot=None, event_type: str = "ban_detected",
+                             severity: str = "critical") -> None:
     """Реакция на бан: мгновенно сбросить кэш губернатора (чтобы темп упал СЕЙЧАС,
-    а не через 45с), записать событие в память организма и проверить, не идёт ли
-    ВОЛНА банов (Anti-Storm). Fail-open."""
+    а не через 45с), записать риск-сигнал и событие в память организма и
+    проверить, не идёт ли ВОЛНА банов (Anti-Storm). Fail-open.
+
+    `event_type`/`severity` — чем именно кончился аккаунт. По умолчанию бан
+    Telegram: критический сигнал, который считает Anti-Storm и видит гейт
+    операций. Мёртвая сессия приходит сюда же (губернатор и память организма
+    нужны и ей), но критическим сигналом НЕ становится: волна отозванных
+    сессий — не чистка Telegram, и усыплять из-за неё флот нечего.
+    """
     try:
         from services import fleet_governor
         fleet_governor.invalidate(owner_id)
+    except Exception:
+        pass
+    # Риск-сигнал в restriction_events. ДО Anti-Storm: он считает окно по этой
+    # же таблице, и бан, из-за которого его позвали, обязан попасть в счёт.
+    # Без этой записи предохранитель против волны банов видел ноль всегда —
+    # писали в таблицу только shadowban_monitor и drift_detector, а находки
+    # бана самим продуктом не попадали в неё вообще.
+    try:
+        from services import infra_memory as _im_rec
+        await _im_rec.record_account_restriction(
+            pool, owner_id, acc_id, event_type,
+            severity=severity, details={"where": where})
     except Exception:
         pass
     try:
@@ -10523,7 +10543,12 @@ async def _exec_bulk_dm_adhoc(
                     # Мёртвая сессия. Прежний код искал ключ 'banned', которого
                     # send_dm никогда не возвращает, — то есть не ловил это вообще.
                     await _db.deactivate_account(pool, acc["id"], "dead session in bulk_dm_adhoc")
-                    await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc", bot=bot)
+                    # Отозванная сессия — не бан Telegram: губернатор и память
+                    # организма нужны, а критический сигнал нет, иначе волна
+                    # своих же мёртвых сессий усыпила бы флот как чистка.
+                    await _on_account_banned(
+                        pool, owner_id, acc["id"], "bulk_dm_adhoc", bot=bot,
+                        event_type="session_dead", severity="warning")
                     active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
                     err_count += 1
                     await _log_step(i + 1, username, "error", f"сессия мертва · акк {acc['id']}")
