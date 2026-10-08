@@ -434,6 +434,10 @@ async def compute_health(
             h.health_score = round(
                 avg_trust * 0.4 + avg_health * 0.35 + ready_ratio * 0.25, 3
             )
+            # Аккаунты, не готовые к работе: кулдаун или >3 флудвейтов
+            # за неделю. Имя поля историческое, журнал ограничений
+            # (restriction_events) здесь не читается — экран обязан
+            # называть это тем, что посчитано.
             h.restrictions_count = len(acc_rows) - healthy
 
         # Proxies: ratio active/total

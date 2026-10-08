@@ -448,7 +448,11 @@ async def cb_eco_health(
         f"📱 Аккаунты: {health.healthy_accounts}/{health.account_count} готовы\n"
     )
     if health.restrictions_count:
-        text += f"⛔ Ограничений: {health.restrictions_count}\n"
+        # Это не число ограничений: считаются аккаунты в кулдауне или с более
+        # чем тремя флудвейтами за неделю. Подпись «Ограничений» обещала
+        # журнал ограничений, которого здесь нет.
+        text += (f"⛔ На паузе или под флудвейтом: "
+                 f"{health.restrictions_count}\n")
     if health.active_proxies:
         text += f"🌐 Прокси: {health.healthy_proxies}/{health.active_proxies} активны\n"
     text += f"\n📋 Успешность операций: {health.recent_op_success_rate:.0%}"

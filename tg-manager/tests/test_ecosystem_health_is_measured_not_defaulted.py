@@ -102,6 +102,16 @@ def test_the_screen_shows_the_warning():
     assert "по умолчанию, а не измерена" in src
 
 
+def test_the_screen_names_what_it_counts():
+    """«Ограничений: N» обещало журнал ограничений, а считались аккаунты."""
+    src = (_ROOT / "bot" / "handlers" / "ecosystems.py").read_text(
+        encoding="utf-8")
+    assert "⛔ Ограничений" not in src, (
+        "подпись обещает журнал ограничений, а restrictions_count — это "
+        "аккаунты в кулдауне или под флудвейтом")
+    assert "На паузе или под флудвейтом" in src
+
+
 def test_fallbacks_do_not_fake_perfect_health():
     """Там, где упавший расчёт подменяют пустым объектом, он тоже частичный."""
     src = (_ROOT / "services" / "ecosystem_brain.py").read_text(
