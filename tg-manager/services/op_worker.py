@@ -25,6 +25,7 @@ from services import operation_bus as _obus_reg
 from services import infra_memory as _infra_mem
 from services import session_simulator
 from services import geo_tempo
+from services import replica_guard as _rguard
 from services.pacing_engine import get_pacing_engine
 from services.secret_masking import mask_bot_token, redact_secrets
 
@@ -2725,14 +2726,55 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
 
 
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py."""
+    """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py.
+
+    ОЧЕРЕДЬ РАЗБИРАЕТ ОДИН ПРОЦЕСС, и это держится арендой исполнителя
+    (`replica_guard.acquire_executor_lease`), а не договорённостью. Почему так:
+    лимиты флуда, потолки параллельности на владельца и троттлы восстановления
+    живут в ПАМЯТИ процесса, поэтому две реплики с ролью worker разгоняют темп
+    по флоту вдвое — прямой риск бана, самая дорогая поломка продукта. Одной
+    опечатки в переменных окружения Railway для этого достаточно, а до сих пор
+    это только писалось в лог, которого никто не читает.
+
+    Второй процесс при этом живёт и отдаёт мини-апп и бота — он лишь не берёт
+    операции и не водит сторожей. Сторожа без аренды особенно опасны:
+    `_reset_stale_running` и `_watchdog_stale` возвращают в очередь всё, что
+    висит в 'running', то есть ЖИВЫЕ операции чужого процесса — тот бы пошёл
+    выполнять их второй раз, а бюджет живучести списался бы впустую.
+
+    Сбой самого запроса аренды — fail-open: разбираем очередь, как раньше. Без
+    БД процесс всё равно ничего не сделает, а остановка исполнителя из-за
+    сетевого блипа останавливает ВСЕ операции продукта.
+    """
     log.info("Operation worker started (parallel mode, max=%d)", _MAX_PARALLEL)
-    await _reset_stale_running(pool, bot)
+    _role = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
+    _did_startup_reset = False
+    _lease_denied_log_at = 0.0
     _watchdog_tick = 0
     while True:
         # Счётчик двигается ДО работы: иначе сбой в разборе очереди заодно
         # останавливал бы и сторожей, которые в этот момент нужнее всего.
         _watchdog_tick += 1
+        if not await _rguard.acquire_executor_lease(pool, _WORKER_ID, _role):
+            _reliability_metric("infragram_executor_lease_denied_total")
+            _now = time.monotonic()
+            if _now - _lease_denied_log_at > 60:
+                _lease_denied_log_at = _now
+                log.warning(
+                    "op_worker: очередь разбирает другой процесс (аренда "
+                    "исполнителя у %s), этот ждёт и операций не берёт. Так "
+                    "лимиты флуда не разъезжаются по репликам; если держатель "
+                    "умрёт, аренда освободится сама.",
+                    await _rguard.executor_lease_holder(pool) or "неизвестно")
+            await asyncio.sleep(_POLL_INTERVAL)
+            continue
+        if not _did_startup_reset:
+            # Уборка после падения — только у держателя аренды и только один
+            # раз за жизнь процесса. Флаг ставится ПОСЛЕ успешного прохода:
+            # если уборка упала, исключение уводит `run`, присмотр зовёт её
+            # заново, и уборка повторится — как было до аренды.
+            await _reset_stale_running(pool, bot)
+            _did_startup_reset = True
         try:
             await _process_pending(pool, bot)
         except asyncio.CancelledError:
@@ -2860,6 +2902,11 @@ async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:
         _operation_account_locks.clear()
     if held:
         await _db_release(held)
+
+    # Отпустить аренду исполнителя: следующий процесс берёт очередь сразу, а не
+    # через полторы минуты. Railway шлёт SIGTERM на каждом деплое, и ожидание
+    # TTL означало бы паузу очереди на каждом выпуске.
+    await _rguard.release_executor_lease(pool, _WORKER_ID)
 
     log.warning(
         "op_worker shutdown: %d операций возвращено в очередь, %d аккаунтов освобождено",

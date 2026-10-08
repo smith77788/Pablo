@@ -55,16 +55,32 @@ def test_counts_and_warns_on_multiple_replicas(monkeypatch, caplog):
                 await rg.check_single_replica(conn)
             assert not [r for r in caplog.records if r.levelno >= logging.CRITICAL]
 
-            # вторая реплика → предупреждение
-            await rg.beat(conn, "hostB:2:bbb", "web")
+            # ВТОРАЯ РЕПЛИКА С РОЛЬЮ web — это НЕ второй исполнитель.
+            # Под `INFRAGRAM_ROLE=web` фоновые циклы не запускаются вовсе
+            # (main.py), процесс отдаёт мини-апп и бота, лимитов флуда в его
+            # памяти нет. Раскладка web+worker документирована в CLAUDE.md как
+            # безопасная, а страж кричал на неё «прямой риск бана» каждые
+            # тридцать секунд. Ложная тревога дороже молчания: на неё перестают
+            # смотреть, и настоящий случай двух worker-ов проходит незамеченным.
+            await rg.beat(conn, "hostB:2:web", "web")
+            assert await rg.active_process_count(conn) == 2
+            assert await rg.active_replica_count(conn) == 1
+            with caplog.at_level(logging.CRITICAL):
+                caplog.clear()
+                await rg.check_single_replica(conn)
+            assert not [r for r in caplog.records if r.levelno >= logging.CRITICAL], (
+                "раскладка web+worker безопасна — предупреждать не должно")
+
+            # а вот ВТОРОЙ ИСПОЛНИТЕЛЬ → предупреждение
+            await rg.beat(conn, "hostB:2:bbb", "worker")
             assert await rg.active_replica_count(conn) == 2
             with caplog.at_level(logging.CRITICAL):
                 caplog.clear()
                 n = await rg.check_single_replica(conn)
             assert n == 2
             crit = [r for r in caplog.records if r.levelno >= logging.CRITICAL]
-            assert crit, "две реплики — а предупреждения нет"
-            assert "РЕПЛИК" in crit[0].getMessage()
+            assert crit, "два исполнителя — а предупреждения нет"
+            assert "ИСПОЛНИТЕЛЕЙ" in crit[0].getMessage()
 
             # тот же режим, но явно разрешён → молчит
             monkeypatch.setenv("INFRAGRAM_ALLOW_MULTI_REPLICA", "1")

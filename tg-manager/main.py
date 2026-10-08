@@ -758,6 +758,15 @@ async def main() -> None:
         "worker_id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'all', "
         "started_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
         "last_seen TIMESTAMPTZ NOT NULL DEFAULT now())",
+        # Аренда исполнителя (schema_v246) — от неё зависит, разбирает ли процесс
+        # очередь вообще. При лаге миграции запрос аренды падает, и правило «один
+        # исполнитель» держится только fail-open'ом, то есть не держится.
+        "CREATE TABLE IF NOT EXISTS executor_lease ("
+        "id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1), "
+        "worker_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'all', "
+        "acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "renewed_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+        "expires_at TIMESTAMPTZ NOT NULL)",
         # Состояние безопасного инвайтинга по чату (schema_v187) — governor пишет
         # сюда темп/паузы/исходы; без таблицы safe-режим молча не работал бы.
         "CREATE TABLE IF NOT EXISTS chat_invite_state ("

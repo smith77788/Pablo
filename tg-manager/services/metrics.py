@@ -46,6 +46,10 @@ _HELP = {
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
     "infragram_op_fleet_starved_total":
         "Операции, закрытые из-за того, что свободных аккаунтов так и не стало",
+    "infragram_executor_lease_errors_total":
+        "Сбоев запроса аренды исполнителя (пауза очереди не включена, fail-open)",
+    "infragram_executor_lease_denied_total":
+        "Кругов цикла, на которых процесс НЕ разбирал очередь: аренда у другого",
     "infragram_notifications_undelivered_total":
         "Недоставленные уведомления владельцу (отчёт об операции до него не дошёл)",
     "infragram_journal_write_failures_total":
