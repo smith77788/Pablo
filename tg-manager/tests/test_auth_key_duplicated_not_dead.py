@@ -17,6 +17,8 @@ under two different IP addresses simultaneously») возникает, когд�
 """
 from __future__ import annotations
 
+import asyncio
+
 from services import op_worker
 from services.contacts_hub.sync_service import classify_session_error
 
@@ -67,3 +69,26 @@ def test_contact_sync_does_not_deactivate_on_conflict():
     # а настоящая смерть — по-прежнему dead
     _f2, s2 = classify_session_error("USER_DEACTIVATED account deactivated")
     assert s2 == "dead"
+
+
+def test_outer_failure_never_deactivates_temporary_conflict():
+    class Pool:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, *args):
+            self.calls.append(args)
+            return "UPDATE 1"
+
+    conflict_pool = Pool()
+    asyncio.run(op_worker._deactivate_dead_session(
+        conflict_pool, RuntimeError(_DUP2), {"account_ids": [7]},
+    ))
+    assert conflict_pool.calls == []
+
+    revoked_pool = Pool()
+    asyncio.run(op_worker._deactivate_dead_session(
+        revoked_pool, RuntimeError("SESSION_REVOKED"), {"account_ids": [7]},
+    ))
+    assert len(revoked_pool.calls) == 1
+    assert "is_active    = FALSE" in revoked_pool.calls[0][0]

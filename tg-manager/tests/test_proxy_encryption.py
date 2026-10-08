@@ -65,8 +65,8 @@ def test_extract_ip_decrypts_before_regex():
     assert extract_ip_from_proxy(PROXY) == "203.0.113.7"
 
 
-def test_infra_memory_key_normalized_to_plaintext():
-    """record(зашифр) и get(зашифр) должны попадать в один plaintext-ключ."""
+def test_infra_memory_key_is_non_reversible_fingerprint():
+    """Разные шифротексты одного прокси попадают в fingerprint без credentials."""
     from services import infra_memory
     from services.token_vault import encrypt_token
 
@@ -77,9 +77,11 @@ def test_infra_memory_key_normalized_to_plaintext():
     assert enc1 != enc2  # недетерминирован
     for _ in range(10):
         infra_memory.record_proxy_op(enc1, "join", success=True)
-    # ключ в памяти — plaintext (один), не два шифротекста
+    # Ключ в памяти один, но ни plaintext, ни оба шифротекста не сохраняются.
     keys = [k for k in infra_memory._proxy_memory if k[1] == "join"]
-    assert keys == [(PROXY, "join")], keys
+    assert len(keys) == 1 and keys[0][0] == infra_memory._proxy_identity(PROXY)
+    assert PROXY not in repr(infra_memory._proxy_memory)
+    assert "user:pass" not in repr(infra_memory._proxy_memory)
     # get по другому шифротексту находит ту же запись
     score_enc = infra_memory.get_proxy_score(enc2, "join")
     score_plain = infra_memory.get_proxy_score(PROXY, "join")
@@ -109,7 +111,9 @@ def test_db_maintenance_no_sql_equality_join_on_encrypted():
     assert "proxy_url = infra_memory_proxies.proxy_url" not in src, (
         "db_maintenance всё ещё сравнивает зашифрованный proxy_url через SQL-equality"
     )
-    assert "decrypt_token" in src, "db_maintenance должен расшифровывать user-прокси перед сверкой"
+    assert "proxy_fingerprint" in src, (
+        "db_maintenance должен сверять прокси по fingerprint без plaintext credentials"
+    )
 
 
 # ── 2026-07-09: доп. листья потребления, найденные при повторном аудите ──────

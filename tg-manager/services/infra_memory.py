@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -106,6 +107,19 @@ _dirty_proxy_keys: set[tuple[str, str]] = set()
 # Фоновая задача для записи в БД
 _flush_task: Optional[asyncio.Task] = None
 _FLUSH_INTERVAL = 60  # секунд между записью в БД
+_PROXY_FP_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _proxy_identity(proxy_url: str) -> str:
+    """Необратимый стабильный ключ прокси без credentials в памяти и БД."""
+    value = str(proxy_url or "").strip()
+    if not value:
+        return ""
+    if _PROXY_FP_RE.fullmatch(value):
+        return value
+    from services.token_vault import proxy_fingerprint
+
+    return proxy_fingerprint(value)
 
 
 # ── Запись событий ────────────────────────────────────────────────────────────
@@ -160,18 +174,16 @@ def record_proxy_op(
 ) -> None:
     """Записать результат операции для прокси (in-memory, non-blocking).
 
-    Ключ нормализуется к PLAINTEXT: proxy_url может прийти зашифрованным из
-    user_proxies (недетерминированный шифр) — без нормализации ключи бы «поплыли»
-    (разный шифротекст для одного прокси) и PK infra_memory_proxies размножился бы.
+    Ключ нормализуется к необратимому fingerprint: proxy_url может прийти
+    зашифрованным из user_proxies, но credentials не должны попадать в
+    process-global память и таблицу статистики.
     """
     if not proxy_url:
         return
-    from services.token_vault import decrypt_token
-
-    proxy_url = decrypt_token(proxy_url)
-    key = (proxy_url, action_type)
+    proxy_ref = _proxy_identity(proxy_url)
+    key = (proxy_ref, action_type)
     if key not in _proxy_memory:
-        _proxy_memory[key] = _ProxyRecord(proxy_url=proxy_url, action_type=action_type)
+        _proxy_memory[key] = _ProxyRecord(proxy_url=proxy_ref, action_type=action_type)
     rec = _proxy_memory[key]
     now = time.time()
 
@@ -210,14 +222,11 @@ def get_account_score(account_id: int, action_type: str) -> float:
 def get_proxy_score(proxy_url: str, action_type: str) -> float:
     """Получить success_rate прокси для данного типа действия.
 
-    Ключ нормализуется к plaintext (симметрично record_proxy_op): на вход может
-    прийти зашифрованный proxy_url из user_proxies — иначе lookup промахнётся.
+    Ключ нормализуется к fingerprint (симметрично record_proxy_op).
     """
     if not proxy_url:
         return 0.5
-    from services.token_vault import decrypt_token
-
-    key = (decrypt_token(proxy_url), action_type)
+    key = (_proxy_identity(proxy_url), action_type)
     if key not in _proxy_memory:
         return 0.5
     return _proxy_memory[key].success_rate
@@ -230,15 +239,12 @@ def get_proxy_summary(proxy_url: str) -> Optional[dict]:
     или None, если по прокси ещё нет наблюдений. Используется админ-панелью,
     чтобы показывать РЕАЛЬНОЕ качество прокси, а не только результаты test_proxy.
 
-    Ключ нормализуется к plaintext (симметрично record_proxy_op/get_proxy_score):
-    на вход может прийти зашифрованный proxy_url из user_proxies.
+    Ключ нормализуется к fingerprint (симметрично record_proxy_op/get_proxy_score).
     """
     if not proxy_url:
         return None
-    from services.token_vault import decrypt_token
-
-    proxy_url = decrypt_token(proxy_url)
-    recs = [r for (url, _), r in _proxy_memory.items() if url == proxy_url]
+    proxy_ref = _proxy_identity(proxy_url)
+    recs = [r for (ref, _), r in _proxy_memory.items() if ref == proxy_ref]
     if not recs:
         return None
     success = sum(r.successes for r in recs)
@@ -432,7 +438,10 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
             rec.flushed_successes = rec.successes      # см. account-ветку выше
             rec.flushed_failures = rec.failures
         except Exception as e:
-            log.warning("infra_memory flush proxy %s/%s: %s", key[0], key[1], e)
+            log.warning(
+                "infra_memory flush proxy fingerprint=%s action=%s: %s",
+                key[0][:12], key[1], type(e).__name__,
+            )
             _dirty_proxy_keys.add(key)
 
     if dirty_accounts or dirty_proxies:
@@ -547,7 +556,7 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
 
     # --- прокси ---
     try:
-        proxy_rows = await pool.fetch(
+        proxy_query = (
             """SELECT proxy_url, action_type,
                       successes, failures,
                       avg_latency_ms,
@@ -556,13 +565,47 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
                FROM infra_memory_proxies
                WHERE successes + failures > 0"""
         )
+        proxy_rows = await pool.fetch(proxy_query)
+        legacy_rows = [row for row in proxy_rows
+                       if not _PROXY_FP_RE.fullmatch(str(row["proxy_url"] or ""))]
+        for row in legacy_rows:
+            # Один SQL атомарно переносит старую plaintext-строку в fingerprint,
+            # сливая её с уже существующей статистикой при повторном запуске.
+            await pool.execute(
+                """WITH moved AS (
+                       DELETE FROM infra_memory_proxies
+                       WHERE proxy_url=$1 AND action_type=$2
+                       RETURNING action_type,successes,failures,avg_latency_ms,
+                                 last_success_at,last_failure_at,updated_at
+                   )
+                   INSERT INTO infra_memory_proxies
+                       (proxy_url,action_type,successes,failures,avg_latency_ms,
+                        last_success_at,last_failure_at,updated_at)
+                   SELECT $3,action_type,successes,failures,avg_latency_ms,
+                          last_success_at,last_failure_at,updated_at FROM moved
+                   ON CONFLICT(proxy_url,action_type) DO UPDATE SET
+                       successes=infra_memory_proxies.successes+EXCLUDED.successes,
+                       failures=infra_memory_proxies.failures+EXCLUDED.failures,
+                       avg_latency_ms=GREATEST(infra_memory_proxies.avg_latency_ms,
+                                              EXCLUDED.avg_latency_ms),
+                       last_success_at=GREATEST(infra_memory_proxies.last_success_at,
+                                                EXCLUDED.last_success_at),
+                       last_failure_at=GREATEST(infra_memory_proxies.last_failure_at,
+                                                EXCLUDED.last_failure_at),
+                       updated_at=GREATEST(infra_memory_proxies.updated_at,
+                                           EXCLUDED.updated_at)""",
+                row["proxy_url"], row["action_type"], _proxy_identity(row["proxy_url"]),
+            )
+        if legacy_rows:
+            proxy_rows = await pool.fetch(proxy_query)
         loaded_proxies = 0
         for row in proxy_rows:
-            key = (row["proxy_url"], row["action_type"])
+            proxy_ref = _proxy_identity(row["proxy_url"])
+            key = (proxy_ref, row["action_type"])
             if key in _proxy_memory:
                 continue  # не перетирать свежие in-memory данные
             rec = _ProxyRecord(
-                proxy_url=row["proxy_url"],
+                proxy_url=proxy_ref,
                 action_type=row["action_type"],
                 successes=row["successes"] or 0,
                 failures=row["failures"] or 0,

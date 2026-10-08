@@ -1689,7 +1689,10 @@ async def _deactivate_dead_session(
     """
     msg = str(exc)
     name = type(exc).__name__
-    if not (name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg):
+    # Решение о смерти сессии принимает единый классификатор. Проверка по
+    # подстроке AUTH_KEY ошибочно выключала аккаунт при AUTH_KEY_DUPLICATED —
+    # временном конфликте двух IP, который должен остыть и повториться.
+    if not _is_dead_session_error(f"{name}: {msg}"):
         return
     account_ids = params.get("account_ids") or []
     if not account_ids:

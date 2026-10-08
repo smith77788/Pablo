@@ -218,19 +218,26 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         )
 
     try:
-        # user_proxies.proxy_url зашифрован → SQL-equality join с infra_memory_proxies
-        # (plaintext-ключи) невозможен. Считаем «сирот» в Python: decrypt активных
-        # user-прокси, затем удаляем строки памяти, которых нет среди них, ИЛИ старые.
-        from services.token_vault import decrypt_token
+        # Таблица памяти хранит только необратимые fingerprints: credentials не
+        # дублируются в статистике и не попадают в диагностические запросы.
+        from services.token_vault import proxy_fingerprint
 
         _user_rows = await pool.fetch("SELECT proxy_url FROM user_proxies")
         _active = {
-            decrypt_token(r["proxy_url"]) for r in _user_rows if r["proxy_url"]
+            proxy_fingerprint(r["proxy_url"]) for r in _user_rows if r["proxy_url"]
         }
         _im_urls = await pool.fetch("SELECT DISTINCT proxy_url FROM infra_memory_proxies")
-        _orphans = [r["proxy_url"] for r in _im_urls if r["proxy_url"] not in _active]
+        _orphans = [
+            r["proxy_url"]
+            for r in _im_urls
+            if r["proxy_url"] not in _active
+            and proxy_fingerprint(r["proxy_url"]) not in _active
+        ]
     except Exception as e:
-        log.warning("db_maintenance: failed to prune infra_memory_proxies: %s", e)
+        log.warning(
+            "db_maintenance: failed to prune infra_memory_proxies: %s",
+            type(e).__name__,
+        )
         results["infra_memory_proxies(orphan)"] = -1
     else:
         deleted, err = await _prune_batched(
