@@ -62,3 +62,36 @@ def source_of(function_name: str) -> str:
         if pat.search(text):
             return text
     raise AssertionError(f"функция {function_name} не найдена ни в одном файле мини-аппа")
+
+
+# ── Серверная сторона: API-слой тоже перестал быть одним файлом ──────────────
+#
+# Тот же урок, что и выше, но про сервер. `services/mini_app_api.py` разросся до
+# 25 тысяч строк и пилится на `services/mini_app_*.py`. Ратчет, который читает
+# ТОЛЬКО mini_app_api.py, после каждого выноса краснеет не потому, что ручка
+# пропала, а потому, что она переехала — так за один вынос прокси упали три
+# проверки, ни одна из которых не про прокси. Реестр маршрутов и «есть ли в API
+# такая ручка» берите отсюда.
+
+SERVICES = ROOT / "services"
+
+
+@functools.lru_cache(maxsize=1)
+def api_files() -> tuple[pathlib.Path, ...]:
+    """Все файлы API-слоя мини-аппа: главный плюс вынесенные модули."""
+    return tuple(sorted(SERVICES.glob("mini_app_*.py")))
+
+
+@functools.lru_cache(maxsize=1)
+def api_source() -> str:
+    """Весь API-слой одной строкой."""
+    return "\n".join(p.read_text(encoding="utf-8") for p in api_files())
+
+
+@functools.lru_cache(maxsize=1)
+def api_routes() -> frozenset[str]:
+    """Пути, зарегистрированные где-либо в API-слое мини-аппа."""
+    import re
+
+    return frozenset(re.findall(
+        r'app\.router\.add_(?:get|post|put|delete|patch)\("([^"]+)"', api_source()))

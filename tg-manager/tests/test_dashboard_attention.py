@@ -20,6 +20,8 @@ import ast
 import pathlib
 import re
 
+from tests.miniapp_source import api_routes
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
 DASH = (ROOT / "mini_app" / "screens" / "dashboard.js").read_text(encoding="utf-8")
@@ -34,8 +36,10 @@ def _attention_source() -> str:
     raise AssertionError("обработчик dashboard_attention не найден")
 
 
-def _registered_routes() -> set[str]:
-    return set(re.findall(r'app\.router\.add_(?:get|post|put|delete|patch)\("([^"]+)"', API))
+def _registered_routes() -> frozenset[str]:
+    # Реестр — весь API-слой: часть ручек вынесена из 25-тысячестрочного
+    # mini_app_api.py в соседние модули, и кнопки дашборда ведут в них же.
+    return api_routes()
 
 
 def test_endpoint_is_registered():

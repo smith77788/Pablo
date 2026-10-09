@@ -231,10 +231,30 @@ def test_the_screen_keeps_no_proxy_address():
         "выпадашка снова прячет полный адрес прокси в разметке страницы")
 
 
+def _js_function(html: str, signature: str) -> str:
+    """Тело JS-функции по балансу скобок.
+
+    Окно фиксированной длины здесь нельзя: внутри стоит ОТРИЦАТЕЛЬНАЯ проверка
+    («dataset» не должно быть), и стоит коду сдвинуться — окно промахнётся мимо
+    функции, «искомого нет» станет правдой, и защита выключится молча. Это и
+    стережёт tests/test_no_silently_disabled_guards.py.
+    """
+    i = html.index(signature)
+    j = html.index("{", i)
+    depth = 0
+    for k in range(j, len(html)):
+        if html[k] == "{":
+            depth += 1
+        elif html[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return html[i:k + 1]
+    raise AssertionError(f"не нашёл конец функции {signature}")
+
+
 def test_the_screen_sends_only_the_id_for_a_saved_proxy():
     html = INDEX.read_text(encoding="utf-8")
-    i = html.index("async function submitAccImport()")
-    body = html[i:i + 1500]
+    body = _js_function(html, "async function submitAccImport()")
     assert "dataset" not in body, (
         "адрес выбранного прокси снова уходит на сервер из разметки")
     assert re.search(r"if\(!proxyId && newProxy\)\{ proxyUrl=newProxy; \}", body), (

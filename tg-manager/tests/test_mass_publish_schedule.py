@@ -12,6 +12,7 @@ fromisoformat (tz-aware) → воркер <= now() → показ обратно
 """
 from __future__ import annotations
 
+import ast
 import inspect
 import re
 
@@ -20,14 +21,23 @@ from services import mini_app_api
 SRC = inspect.getsource(mini_app_api)
 
 
-def _fn(name, after):
-    m = re.search(r"async def " + name + r"\(.*?\n(.*?)\n    async def " + after, SRC, re.DOTALL)
-    assert m, f"{name} не найден"
-    return m.group(1)
+def _fn(name, after=None):
+    """Тело обработчика по границам из AST.
+
+    Раньше срез шёл «от `name` до `async def <after>`», и соседний хендлер был
+    частью контракта теста: когда `proxies` уехал в services/mini_app_proxies.py,
+    регулярка перестала совпадать и тест упал на ВЕРНОМ коде («mass_publish не
+    найден»). Границы функции знает только парсер — спрашиваем его.
+    """
+    tree = ast.parse(SRC)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return ast.get_source_segment(SRC, node) or ""
+    raise AssertionError(f"{name} не найден")
 
 
 def test_mass_publish_accepts_and_validates_schedule():
-    body = _fn("mass_publish", "proxies")
+    body = _fn("mass_publish")
     assert 'body.get("scheduled_for")' in body, "должен принимать scheduled_for"
     # разбор ISO с учётом Z и tz-aware сравнение
     assert "fromisoformat" in body and 'replace("Z", "+00:00")' in body
@@ -41,7 +51,7 @@ def test_operations_list_returns_scheduled_for():
 
 
 def test_operation_status_returns_scheduled_for():
-    body = _fn("operation_status", "operation_log")
+    body = _fn("operation_status")
     assert "scheduled_for" in body
     # ISO-конвертация тоже покрывает scheduled_for
     assert '("created_at", "finished_at", "scheduled_for")' in body
