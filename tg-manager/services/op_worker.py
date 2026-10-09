@@ -2923,6 +2923,9 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "строка успеха в журнале — повтор операции сделает действие второй раз",
     "infragram_account_cooldown_write_failures_total":
         "пауза аккаунта — флуд-пауза могла не лечь, это риск бана",
+    "infragram_budget_write_failures_total":
+        "суточный счёт действий аккаунта — лимит недосчитает сделанное, и "
+        "следующая операция может взять аккаунт сверх него",
     "infragram_notifications_undelivered_total":
         "отчёт об операции не доехал до владельца",
     "infragram_recurring_reschedule_failures_total":

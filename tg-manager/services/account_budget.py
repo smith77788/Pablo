@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Iterable
 
@@ -144,16 +145,48 @@ async def record_actions(
 
     Для исполнителей, которые раньше писали только итоговую строку операции:
     без построчной записи суточные лимиты их не видели. Никогда не бросает.
+
+    ЭТО ЗАЩИТНАЯ ЗАПИСЬ, И ЕЁ ПОТЕРЯ НЕ МОЛЧИТ. Суточный бюджет считается по
+    этим самым строкам, поэтому непрошедшая запись означает, что
+    `filter_within_budget` видит у аккаунта меньше действий, чем он сделал, и
+    следующая операция спокойно берёт его СВЕРХ суточного лимита — ровно тот
+    риск спам-фильтра, от которого бюджет и придуман. Раньше сбой уходил в
+    `log.debug`, то есть узнать о нём было негде.
+
+    Одна повторная попытка здесь же: типовая причина мгновенная (занятый пул,
+    блокировка на DDL, рестарт базы на деплое), и она проходит сама. Если и
+    вторая не удалась — log.error и счётчик, рост которого сторож воркера
+    доносит до владельца словами (op_worker._PROTECTIVE_FAILURE_COUNTERS).
     """
     if (not account_id or n <= 0
             or action not in _COUNTED_ACTIONS + _OWN_LIMIT_ACTIONS):
         return
-    try:
-        await pool.execute(
-            """INSERT INTO operation_audit(owner_id, operation_id, account_id,
-                                           action, result)
-               SELECT $1, $2, $3, $4, $5 FROM generate_series(1, $6)""",
-            int(owner_id), operation_id, int(account_id), action, result, int(n),
-        )
-    except Exception:
-        log.debug("record_actions failed acc=%s", account_id, exc_info=True)
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                """INSERT INTO operation_audit(owner_id, operation_id, account_id,
+                                               action, result)
+                   SELECT $1, $2, $3, $4, $5 FROM generate_series(1, $6)""",
+                int(owner_id), operation_id, int(account_id), action, result,
+                int(n),
+            )
+            return
+        except Exception:
+            if _attempt == 1:
+                log.warning(
+                    "бюджет: запись %d действий '%s' acc=%s не удалась, повторяю",
+                    int(n), action, account_id)
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "бюджет: ЗАПИСЬ ПОТЕРЯНА acc=%s action=%s n=%d op=%s — суточный "
+                "лимит недосчитает эти действия, и следующая операция может "
+                "взять аккаунт сверх него",
+                account_id, action, int(n), operation_id, exc_info=True)
+            try:
+                from services import metrics as _m
+
+                _m.inc("infragram_budget_write_failures_total",
+                       {"action": str(action)[:32]})
+            except Exception:
+                log.debug("бюджет: счётчик потери не записан", exc_info=True)
