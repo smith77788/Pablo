@@ -229,6 +229,23 @@ async def _ensure_revive_column(pool: "asyncpg.Pool") -> None:
         log_exc_swallow(log, f"op_worker: ensure revive_count column failed: {e}")
 
 
+async def _ensure_pause_requested_column(pool: "asyncpg.Pool") -> None:
+    """Досоздать operation_queue.pause_requested, если миграция ещё не доехала.
+
+    Та же причина, что у двух соседей, но цена выше: колонку читает условие
+    отбора в поллере, а `_safe_fetch` при ошибке запроса отдаёт пустой список.
+    Без колонки это выглядело бы не как сбой, а как пустая очередь — встала бы
+    ВСЯ работа продукта и молча.
+    """
+    try:
+        await pool.execute(
+            "ALTER TABLE operation_queue "
+            "ADD COLUMN IF NOT EXISTS pause_requested BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: ensure pause_requested column failed: {e}")
+
+
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
@@ -2420,6 +2437,7 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
     """
     await _ensure_revive_column(pool)
     await _ensure_acct_wait_column(pool)
+    await _ensure_pause_requested_column(pool)
     # Сначала — исчерпавшие бюджет: честный терминальный статус вместо ещё
     # одного круга. Порядок важен: иначе тот же UPDATE ниже снова поднял бы их.
     # RETURNING: гашение атомарно одним UPDATE, но закрыть операцию до конца
@@ -3561,6 +3579,20 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         available_slots * (_MAX_PARALLEL_PER_OWNER + 1), available_slots
     )
 
+    # ПАУЗА ВЛАДЕЛЬЦА ПЕРЕЖИВАЕТ РЕСТАРТ. «Пауза» переводит pending → paused, а
+    # идущую операцию сознательно не трогает (прервать её без чекпоинта — это
+    # пере-прогон и дубли реальных действий). Но текущий проход заканчивается
+    # сам: деплой Railway, сброс зависшей, отсрочка по флуд-паузе — и все эти
+    # пути возвращают операцию со status='pending'. Дальше поллер запускал её
+    # ЗАНОВО, то есть аварийный тормоз отпускался ровно там, где операцию
+    # наконец можно было остановить безопасно. Намерение владельца живёт в
+    # pause_requested, и здесь оно наконец применяется.
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status='paused', acct_wait_since=NULL "
+        "WHERE status='pending' AND pause_requested",
+        log_ctx="[apply_pause_requested]")
+
     # Атомарно захватить задачи с учетом реальной per-owner параллельности.
     # Иначе лишние задачи одного владельца получают status='running', но фактически
     # стоят внутри semaphore и выглядят для пользователя как зависшие.
@@ -3623,6 +3655,9 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
                WHERE oq.status = 'pending'
                  AND (oq.scheduled_for IS NULL OR oq.scheduled_for <= now())
                  AND (oq.requires_approval IS NOT TRUE)
+                 -- Заказанную паузу применяет запрос выше; это условие
+                 -- закрывает гонку между ним и отбором.
+                 AND (oq.pause_requested IS NOT TRUE)
                  -- Операция, которую ЭТОТ процесс ещё доигрывает, не кандидат,
                  -- даже если в БД она уже 'pending'. См. комментарий ниже: без
                  -- этого условия поллер запускал её второй раз, пока первая

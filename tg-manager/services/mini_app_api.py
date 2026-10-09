@@ -4077,8 +4077,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 if cur is None:
                     return _err("Операция не найдена", 404)
                 if cur == "running":
-                    return _err(
-                        "Операция уже выполняется — её можно только отменить", 409)
+                    # ТЕКУЩИЙ ПРОХОД НЕ РВЁМ, НАМЕРЕНИЕ ЗАПОМИНАЕМ. Прервать
+                    # идущую операцию без чекпоинта означало бы пере-прогон и
+                    # дубли реальных действий. Но проход заканчивается сам
+                    # (деплой, сброс зависшей, отсрочка по флуд-паузе), и
+                    # раньше операция после этого запускалась ЗАНОВО, хотя
+                    # владелец нажал паузу. Теперь на следующем входе в работу
+                    # поллер переведёт её в 'paused'. Выбор «только отменить»
+                    # стоил владельцу уже сделанной работы.
+                    await pool.execute(
+                        "UPDATE operation_queue SET pause_requested=TRUE "
+                        "WHERE id=$1 AND owner_id=$2 AND status NOT IN "
+                        f"{op_status.sql_terminal_list()}", op_id, uid)
+                    return _json_resp({
+                        "ok": True, "status": "running", "pause_requested": True,
+                        "message": "Операция уже идёт. Текущий проход доиграет, "
+                                   "и дальше она встанет на паузу, а не начнётся "
+                                   "заново.",
+                    })
                 return _err(f"Операцию нельзя приостановить в статусе «{cur}»", 409)
             return _json_resp({"ok": True, "status": "paused"})
         except Exception as e:
@@ -4121,7 +4137,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 # acct_wait_since=NULL — и на возобновлении тоже: отметку могла
                 # поставить пауза, сделанная до этой правки, а провалить
                 # возобновлённую операцию за «ждёт слишком долго» нельзя.
-                """UPDATE operation_queue SET status='pending', acct_wait_since=NULL
+                # pause_requested=FALSE — намерение снято явным «Старт».
+                # Иначе возобновлённая операция снова встала бы на паузу на
+                # первом же тике поллера: флаг у неё мог остаться с паузы,
+                # нажатой пока она ещё шла.
+                """UPDATE operation_queue
+                      SET status='pending', acct_wait_since=NULL,
+                          pause_requested=FALSE
                    WHERE id=$1 AND owner_id=$2 AND status='paused'
                    RETURNING id""", op_id, uid)
             if not row:
@@ -4130,6 +4152,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           "WHERE id=$1 AND owner_id=$2", op_id, uid)
                 if cur is None:
                     return _err("Операция не найдена", 404)
+                # Идущая операция с заказанной паузой: «Старт» означает «не
+                # надо, пусть работает дальше» — снимаем намерение.
+                if cur == "running":
+                    _unmarked = await pool.fetchval(
+                        "UPDATE operation_queue SET pause_requested=FALSE "
+                        "WHERE id=$1 AND owner_id=$2 AND pause_requested "
+                        "RETURNING id", op_id, uid)
+                    if _unmarked:
+                        return _json_resp({
+                            "ok": True, "status": "running",
+                            "pause_requested": False,
+                            "message": "Пауза отменена — операция продолжит "
+                                       "работу.",
+                        })
                 return _err(f"Операция не приостановлена (статус «{cur}»)", 409)
             return _json_resp({"ok": True, "status": "pending"})
         except Exception as e:
@@ -4235,7 +4271,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "WHERE owner_id=$1 AND status='pending'", uid)
             tail = str(res).rsplit(" ", 1)[-1]
             paused = int(tail) if tail.isdigit() else 0
-            return _json_resp({"ok": True, "paused": paused})
+            # Идущие доигрывают текущий проход — и дальше встают на паузу, а не
+            # начинаются заново. Без этой отметки «Пауза» отпускалась на
+            # первом же деплое или сбросе зависшей (см. schema_v249).
+            marked = 0
+            try:
+                _m = await pool.execute(
+                    "UPDATE operation_queue SET pause_requested=TRUE "
+                    f"WHERE owner_id=$1 AND status IN {op_status.sql_in_flight_list()} "
+                    "AND NOT pause_requested", uid)
+                _mt = str(_m).rsplit(" ", 1)[-1]
+                marked = int(_mt) if _mt.isdigit() else 0
+            except Exception as _me:
+                log.warning("pause_operations mark uid=%d: %s", uid, _me)
+            return _json_resp({"ok": True, "paused": paused,
+                               "pause_requested": marked})
         except Exception as e:
             log.warning("pause_operations uid=%d: %s", uid, e)
             return _err("Не удалось приостановить", 500)
@@ -4251,10 +4301,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             res = await pool.execute(
-                "UPDATE operation_queue SET status='pending', acct_wait_since=NULL "
+                "UPDATE operation_queue SET status='pending', acct_wait_since=NULL, "
+                "pause_requested=FALSE "
                 "WHERE owner_id=$1 AND status='paused'", uid)
             tail = str(res).rsplit(" ", 1)[-1]
             resumed = int(tail) if tail.isdigit() else 0
+            # Снять намерение и с тех, кто всё это время шёл: «Старт» значит
+            # «работаем дальше», иначе они встали бы на паузу на следующем
+            # тике поллера — уже после того, как владелец её отменил.
+            try:
+                await pool.execute(
+                    "UPDATE operation_queue SET pause_requested=FALSE "
+                    "WHERE owner_id=$1 AND pause_requested", uid)
+            except Exception as _ue:
+                log.warning("resume_operations unmark uid=%d: %s", uid, _ue)
             return _json_resp({"ok": True, "resumed": resumed})
         except Exception as e:
             log.warning("resume_operations uid=%d: %s", uid, e)

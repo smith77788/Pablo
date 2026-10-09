@@ -194,14 +194,31 @@ async def test_pause_single_operation(as_user):
 
 
 @pytest.mark.asyncio
-async def test_pause_running_is_refused_with_reason(as_user):
-    """Запущенную не паузим: без чекпоинта пере-прогон продублировал бы работу."""
+async def test_pause_running_remembers_the_intent(as_user):
+    """Запущенную не рвём на полпути — но пауза больше и не теряется.
+
+    Прежний контракт был «нельзя, только отменить» (409): владельцу
+    предлагалось потерять уже сделанную работу, а само намерение нигде не
+    оставалось — и когда текущий проход заканчивался сам (деплой, сброс
+    зависшей, отсрочка по флуд-паузе), операция запускалась ЗАНОВО, хотя
+    владелец нажал паузу.
+
+    Инвариант прежний и проверяется здесь же: статус не меняется, прогон не
+    прерывается. Новое — намерение записано, и поллер применит его на
+    следующем входе операции в работу (schema_v249, pause_requested).
+    """
     pool = _Pool(status="running")
     handler = _handler(pool, "POST", "/api/miniapp/operation/{op_id}/pause")
     resp = await handler(_Req({"op_id": "1"}))
-    assert resp.status == 409
-    assert pool.status == "running", "операция не должна менять статус"
-    assert "отменить" in resp.body.decode("utf-8").lower()
+    assert resp.status == 200
+    assert pool.status == "running", (
+        "идущую операцию рвать нельзя: пере-прогон продублировал бы действия")
+    assert any("pause_requested=TRUE" in q for q in pool.queries), (
+        "намерение не записано — пауза снова отпустится на первом же деплое")
+    body = _body(resp)
+    assert body.get("pause_requested") is True
+    assert "паузу" in str(body.get("message", "")).lower(), (
+        "владельцу надо сказать словами, что будет дальше")
 
 
 @pytest.mark.asyncio
