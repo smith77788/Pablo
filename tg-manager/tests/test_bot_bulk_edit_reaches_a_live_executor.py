@@ -52,13 +52,37 @@ def test_bot_does_not_queue_the_disabled_operation():
 
 
 def test_the_disabled_executor_really_refuses():
-    """Сторож самой проверки: если отказ убрали, тест выше нужно переписать."""
+    """Сторож самой проверки: если отказ убрали, тест выше нужно переписать.
+
+    Тело функции берётся разбором, а не срезом фиксированной длины. Срез
+    `ow[start:start + 600]` уже сломался: в docstring исполнителя добавили
+    объяснение, зачем функция осталась, и `"status": "failed"` вышел за
+    600 символов — проверка покраснела на верном коде. Срез фиксированной
+    длины вокруг проверки тут вообще не к месту: сдвинулся код — сдвинулось и
+    то, что видит тест (ровно это запрещает `test_no_silently_disabled_guards`).
+    """
+    import ast
+
     ow = _read("services/op_worker.py")
-    start = ow.index("async def _exec_bulk_edit_channels(")
-    body = ow[start:start + 600]
-    assert '"status": "failed"' in body, (
-        "исполнитель bulk_edit_channels больше не отказывает — проверьте, "
-        "не вернули ли ему работу")
+    for node in ast.walk(ast.parse(ow)):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "_exec_bulk_edit_channels"):
+            body = [st for st in node.body
+                    if not (isinstance(st, ast.Expr)
+                            and isinstance(st.value, ast.Constant)
+                            and isinstance(st.value.value, str))]
+            assert len(body) == 1 and isinstance(body[0], ast.Return), (
+                "исполнитель bulk_edit_channels снова что-то делает, а не "
+                "отказывает — проверьте, не вернули ли ему работу")
+            ret = body[0].value
+            statuses = {v.value for k, v in zip(ret.keys, ret.values)
+                        if isinstance(k, ast.Constant) and k.value == "status"
+                        and isinstance(v, ast.Constant)}
+            assert statuses == {"failed"}, (
+                f"исполнитель bulk_edit_channels возвращает {statuses or '—'} "
+                "вместо отказа")
+            return
+    raise AssertionError("_exec_bulk_edit_channels не найден в op_worker")
 
 
 def test_title_change_is_submitted_only_with_an_approval():
