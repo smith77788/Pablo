@@ -15527,7 +15527,7 @@ async def _exec_mass_invite(
                 pool,
             "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
             "AND session_str IS NOT NULL "
-            "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')",
+            "AND " + _acc_status.sql_not_dead(),
             owner_id,
         )
         account_ids = [r["id"] for r in acc_rows]

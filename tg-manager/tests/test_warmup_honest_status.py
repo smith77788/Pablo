@@ -358,9 +358,20 @@ def test_creating_a_plan_checks_the_account_on_the_server():
 
 def test_bulk_warmup_does_not_revive_plans_the_engine_stopped():
     """«Прогреть все подходящие» шло в обход защиты: ON CONFLICT возвращал в
-    active план, который движок остановил из-за спам-блока."""
+    active план, который движок остановил из-за спам-блока.
+
+    Защита на месте, но набор мёртвых статусов больше не выписан здесь
+    литералом: выборка собирает условие общей дверью (`sql_not_dead`), и
+    `spamblock` входит в её словарь. Пробник на дословное `'spamblock'`
+    краснел бы на усилении защиты, поэтому проверяем смысл.
+    """
+    from services import account_status
+
     src = _func_src(_API_SRC, "_warmup_bulk_core")
-    assert "'spamblock'" in src
+    assert "sql_not_dead" in src, (
+        "выборка аккаунтов для прогрева перестала брать общее условие — "
+        "спам-блокнутый аккаунт снова попадёт под нагрузку")
+    assert "spamblock" in account_status.DEAD_STATUSES
     # И снимает старую жалобу, чтобы перезапущенный план не показывал её.
     assert "pause_reason=NULL" in src
 

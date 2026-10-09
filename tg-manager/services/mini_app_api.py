@@ -1571,8 +1571,7 @@ async def _warmup_bulk_core(
     rows = await _safe_fetch(pool,
         """SELECT a.id FROM tg_accounts a
            WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
-             AND COALESCE(a.acc_status,'active')
-                 NOT IN ('banned','deactivated','session_expired','spamblock')
+             AND """ + _acc_status.sql_not_dead("a.acc_status") + """
              AND NOT EXISTS (
                  SELECT 1 FROM account_warmup_plans wp
                  WHERE wp.account_id=a.id AND wp.status='active')
@@ -8396,8 +8395,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM tg_accounts a
                    LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
                    WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
-                     AND COALESCE(a.acc_status,'active')
-                         NOT IN ('banned','deactivated','session_expired')""",
+                     AND """ + _acc_status.sql_not_dead("a.acc_status") + """""",
                 uid) or []
             total = len(rows)
             with_proxy = sum(1 for r in rows if r["has_proxy"])
@@ -8535,7 +8533,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
                 "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
                 "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
-                "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
                 "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
                 # Сначала аккаунты, к которым канал привязан в «Моих каналах»:
                 # создатель канала — и есть промоутер. Раньше брались первые
@@ -8745,7 +8743,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         rows = await _safe_fetch(pool,
             "SELECT id, phone, first_name, username FROM tg_accounts "
             "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
-            "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+            "AND " + _acc_status.sql_not_dead() + " "
             "ORDER BY trust_score DESC NULLS LAST, added_at LIMIT 200", uid)
         accs = [{"id": r["id"],
                  "label": (r["username"] or r["first_name"] or r["phone"] or f"#{r['id']}")}
@@ -8939,7 +8937,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
                 "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
                 "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
-                "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
                 "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
                 # Владелец канала из «Моих каналов» — первым (см. rights_check).
                 "ORDER BY (a.id = ANY($2::bigint[])) DESC, a.id LIMIT 8",
@@ -9256,8 +9254,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             total = await _safe_count(pool,
                 """SELECT COUNT(*) FROM tg_accounts a
                    WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
-                     AND COALESCE(a.acc_status,'active')
-                         NOT IN ('banned','deactivated','session_expired','spamblock')
+                     AND """ + _acc_status.sql_not_dead("a.acc_status") + """
                      AND NOT EXISTS (
                          SELECT 1 FROM account_warmup_plans wp
                          WHERE wp.account_id=a.id AND wp.status='active')""", uid)
@@ -13947,7 +13944,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             accs = await pool.fetch(
                 """SELECT id FROM tg_accounts
                    WHERE owner_id=$1 AND is_active=true
-                     AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')
+                     AND """ + _acc_status.sql_not_dead() + """
                    LIMIT $2""",
                 uid, acc_limit,
             )
@@ -18235,7 +18232,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_rows = await _safe_fetch(pool,
                 "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
                 "AND session_str IS NOT NULL "
-                "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+                "AND " + _acc_status.sql_not_dead() + " "
                 "ORDER BY last_used DESC NULLS LAST LIMIT 1", uid)
             account_ids = [r["id"] for r in acc_rows]
         if not account_ids:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -301,8 +302,8 @@ async def _fleet(pool, owner_id: int) -> dict:
     try:
         r = await pool.fetchrow(
             "SELECT COUNT(*) AS total, "
-            "COUNT(*) FILTER (WHERE is_active AND COALESCE(acc_status,'ok') "
-            "  NOT IN ('banned','spamblock','deactivated','session_expired')) AS active, "
+            "COUNT(*) FILTER (WHERE is_active AND "
+            + _acc_status.sql_not_dead(default="ok") + ") AS active, "
             "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') "
             "  IN ('banned','deactivated','session_expired')) AS dead, "
             "COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') = 'spamblock') AS restricted "

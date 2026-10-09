@@ -15,6 +15,7 @@ import asyncpg
 
 from database import db
 from services import account_manager
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ async def _fallback_account(pool: asyncpg.Pool, owner_id: int) -> asyncpg.Record
         return await pool.fetchrow(
             """SELECT * FROM tg_accounts
                 WHERE owner_id=$1 AND is_active=true AND session_str IS NOT NULL
-                  AND COALESCE(acc_status,'active') NOT IN ('banned','spamblock','deactivated')
+                  AND """ + _acc_status.sql_not_dead() + """
                 ORDER BY COALESCE(trust_score,0) DESC, id
                 LIMIT 1""",
             owner_id,

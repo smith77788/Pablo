@@ -5,6 +5,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from services import channel_admin as ca
+from services import account_status as _acc_status
 from services import (
     content_memory,
     infra_memory,
@@ -30,7 +31,8 @@ async def eligible_accounts(pool, owner_id: int, channel_id: int) -> list[int]:
         "SELECT DISTINCT a.id FROM managed_channels mc JOIN tg_accounts a "
         "ON a.id=mc.acc_id AND a.owner_id=mc.owner_id "
         "WHERE mc.owner_id=$1 AND mc.channel_id=$2 AND a.is_active=TRUE "
-        "AND COALESCE(a.acc_status,'active') NOT IN ('banned','session_expired','deleted','restricted','flood','warming') "
+        "AND " + _acc_status.sql_not_dead(
+            "a.acc_status", extra=("restricted", "flood", "warming")) + " "
         "AND (a.cooldown_until IS NULL OR a.cooldown_until <= now())", int(owner_id), int(channel_id),
     )
     account_ids = [int(row["id"]) for row in rows]

@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 import asyncpg
 from services.logger import log_exc_swallow
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -250,12 +251,12 @@ async def get_readiness_warning(pool: asyncpg.Pool, owner_id: int) -> str | None
             """SELECT
                    COUNT(*) FILTER (
                        WHERE is_active
-                         AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock','deactivated')
+                         AND """ + _acc_status.sql_not_dead(default="ok") + """
                          AND (cooldown_until IS NULL OR cooldown_until <= now())
                    ) AS available,
                    COUNT(*) FILTER (
                        WHERE is_active
-                         AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock','deactivated')
+                         AND """ + _acc_status.sql_not_dead(default="ok") + """
                          AND (cooldown_until IS NULL OR cooldown_until <= now())
                          AND last_used IS NULL
                          AND added_at > now() - ($2 * INTERVAL '1 day')
@@ -304,8 +305,8 @@ async def get_dead_proxy_warning(pool: asyncpg.Pool, owner_id: int) -> str | Non
                  FROM tg_accounts a
                  LEFT JOIN user_proxies p ON p.id = a.proxy_id
                 WHERE a.owner_id=$1 AND a.is_active
-                  AND COALESCE(a.acc_status,'ok')
-                      NOT IN ('banned','spamblock','deactivated','session_expired')""",
+                  AND """ + _acc_status.sql_not_dead(
+                      "a.acc_status", default="ok") + """""",
             owner_id, PROXY_DEAD_STREAK)
     except Exception as e:
         log.debug("get_dead_proxy_warning failed owner=%s: %s", owner_id, e)

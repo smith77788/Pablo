@@ -42,13 +42,36 @@ def is_dead(acc_status: Optional[str]) -> bool:
     return str(acc_status or "active").strip().lower() in DEAD_STATUSES
 
 
-def sql_dead_list() -> str:
+def sql_dead_list(*extra: str) -> str:
     """Готовый список для SQL: `NOT IN (sql_dead_list())`.
 
     Подставляется в текст запроса, поэтому значения — только из набора выше
     (литералы в коде, не пользовательский ввод).
+
+    `extra` — дополнительные статусы, которые СТРОЖЕ набора: например, экран
+    виртуального админа не трогает ещё и греющийся аккаунт (`warming`). Это
+    всегда расширение набора, не замена: ослабить защиту так нельзя.
     """
-    return ", ".join(f"'{status}'" for status in sorted(DEAD_STATUSES))
+    bad = {str(s).strip().lower() for s in extra if str(s).strip()}
+    return ", ".join(f"'{status}'" for status in sorted(DEAD_STATUSES | bad))
+
+
+def sql_not_dead(column: str = "acc_status", *, default: str = "active",
+                 extra: tuple[str, ...] = ()) -> str:
+    """Готовое условие «статус аккаунта не мёртвый» для текста запроса.
+
+    Одна дверь на все выборки аккаунтов под действие. Раньше это условие
+    выписывал каждый вызов сам, и в репозитории жило больше двадцати копий
+    набора из трёх-четырёх статусов. Из-за этого массовая дверь аккаунт уже не
+    брала, а одиночная операция брала и работала мёртвой сессией; `spamblock`
+    и вовсе числился рабочим в большинстве копий.
+
+    `column` — имя колонки с алиасом таблицы (`a.acc_status`), `default` —
+    значение для NULL (для проверки неважно: и 'active', и 'ok' не мёртвые),
+    `extra` — статусы строже набора (см. sql_dead_list).
+    """
+    return (f"COALESCE({column}, '{default}') NOT IN ("
+            + sql_dead_list(*extra) + ")")
 
 
 async def set_status(

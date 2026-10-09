@@ -31,6 +31,7 @@ import logging
 import os
 import random
 import re
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -481,7 +482,7 @@ async def _process_session(pool, session: dict) -> None:
         "a.lang_code, a.system_lang_code, a.proxy_id, p.geo_country "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
         "WHERE a.id=$1 AND a.is_active AND a.session_str IS NOT NULL "
-        "AND COALESCE(a.acc_status,'active') NOT IN ('banned','deactivated','session_expired') "
+        "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
         # Аккаунт на паузе Telegram трогать нельзя: прогрев — такое же живое
         # действие, как операция, и ход под действующим ограничением приближает
         # спамблок вместо того, чтобы его отдалить.

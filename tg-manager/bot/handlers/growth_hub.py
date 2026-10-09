@@ -23,6 +23,7 @@ from bot.callbacks import BmCb, GrowthCb
 from bot.states import GrowthAgentFSM
 from services import operation_bus
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -224,7 +225,7 @@ async def _get_acc_count(pool: asyncpg.Pool, owner_id: int) -> int:
         return await pool.fetchval(
             "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
             "AND session_str IS NOT NULL "
-            "AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired')",
+            "AND " + _acc_status.sql_not_dead(),
             owner_id,
         ) or 0
     except Exception:

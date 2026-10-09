@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import PersonaCb, BmCb
 from bot.states import PersonaCreateFSM
 from bot.utils.op_helpers import safe_answer
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -178,7 +179,7 @@ async def cb_persona_create(callback: CallbackQuery, state: FSMContext, pool: as
     await safe_answer(callback)
     accounts = await pool.fetch(
         "SELECT id, phone, username, first_name FROM tg_accounts "
-        "WHERE owner_id = $1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') ORDER BY id",
+        "WHERE owner_id = $1 AND " + _acc_status.sql_not_dead() + " ORDER BY id",
         callback.from_user.id,
     )
     if not accounts:
@@ -548,7 +549,8 @@ async def cb_persona_do_create(
         )
     }
     accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id = $1 AND COALESCE(acc_status,'active') NOT IN ('banned','deactivated','session_expired') ORDER BY id",
+        "SELECT id FROM tg_accounts WHERE owner_id = $1 AND "
+        + _acc_status.sql_not_dead() + " ORDER BY id",
         owner_id,
     )
     available = [a for a in accounts if a["id"] not in used_accounts]

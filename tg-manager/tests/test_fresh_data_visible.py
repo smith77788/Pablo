@@ -103,7 +103,15 @@ def test_fallback_account_belongs_to_the_same_owner():
     body = _func_body(_read("services/drift_detector.py"), "_fallback_account")
     assert "owner_id=$1" in body
     assert "is_active=true" in body and "session_str IS NOT NULL" in body
-    assert "'banned'" in body, "запасным может оказаться забаненный аккаунт"
+    # Мёртвый аккаунт запасным быть не может. Набор статусов больше не выписан
+    # здесь литералом: условие собирает общая дверь, и в её словаре `banned`
+    # есть вместе с остальными пятью. Пробник на дословное `'banned'` краснел
+    # бы на усилении защиты.
+    from services import account_status
+
+    assert "sql_not_dead" in body, (
+        "выбор запасного аккаунта судит о смерти сам — он разъедется с дверью")
+    assert "banned" in account_status.DEAD_STATUSES
 
 
 @pytest.mark.asyncio
