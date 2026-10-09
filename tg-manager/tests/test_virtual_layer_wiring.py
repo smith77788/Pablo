@@ -155,10 +155,41 @@ def test_intent_sensor_feeds_the_layer():
 
 
 def test_intent_feed_is_fail_open():
-    """Сбой слоя не должен ронять обработку входящего сообщения."""
-    seg = SENSOR[SENSOR.find("virtual_layer.signal") - 300:
-                 SENSOR.find("virtual_layer.signal") + 200]
-    assert "try:" in seg and "except Exception" in seg
+    """Сбой слоя не должен ронять обработку входящего сообщения.
+
+    Проверка идёт по дереву разбора, а не по окну в 300 символов вокруг вызова:
+    окно ловило try/except лишь пока рядом был короткий комментарий, а
+    дописанный абзац объяснения выключал проверку молча — тот самый класс,
+    против которого стоит test_no_silently_disabled_guards.
+    """
+    tree = ast.parse(SENSOR)
+    guarded, bare = 0, []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        if not any(isinstance(h, ast.ExceptHandler) for h in node.handlers):
+            continue
+        for inner in ast.walk(node):
+            if _is_layer_signal(inner):
+                guarded += 1
+    for node in ast.walk(tree):
+        if _is_layer_signal(node):
+            bare.append(node.lineno)
+    assert guarded, "вызовов слоя в сенсоре не найдено — проверять нечего"
+    assert guarded == len(bare), (
+        f"вызов слоя вне try/except (строки {bare}): сбой слоя уронит "
+        "обработку входящего сообщения")
+
+
+def _is_layer_signal(node) -> bool:
+    """Вызов `virtual_layer.signal…` — любой из входов слоя."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (isinstance(func, ast.Attribute)
+            and func.attr.startswith("signal")
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "virtual_layer")
 
 
 # ── Границы, зафиксированные в коде (честность концепции) ───────────────────

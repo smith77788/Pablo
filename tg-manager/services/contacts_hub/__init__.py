@@ -1,5 +1,6 @@
 from .repository import (
     get_contacts, get_contact, upsert_contact, update_contact, delete_contact,
+    ensure_contact_by_telegram_id,
     get_contact_groups, add_contact_to_group, remove_contact_from_group,
     get_contact_stats, log_contact_history, log_sync,
 )

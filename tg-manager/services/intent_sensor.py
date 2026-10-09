@@ -236,18 +236,13 @@ async def _ensure_contact(pool: asyncpg.Pool, owner_id: int, peer: dict) -> str 
     pid = peer.get("peer_user_id")
     if not pid:
         return None
-    row = await pool.fetchrow(
-        "SELECT id FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2",
-        owner_id, pid)
-    if row:
-        return row["id"]
-    # upsert_contact теперь возвращает РЕАЛЬНЫЙ id (RETURNING id) — доверяем ему.
-    from services.contacts_hub.repository import upsert_contact
-    return await upsert_contact(pool, owner_id, {
-        "telegram_user_id": pid, "username": peer.get("peer_username"),
-        "first_name": peer.get("peer_name"), "display_name": peer.get("peer_name"),
-        "discovered_at": dt.datetime.now(dt.timezone.utc),
-    })
+    # Одна дверь на все источники: тот же поиск-или-создание зовёт слой, когда
+    # сигнал приходит от бота. Два своих запроса здесь однажды разошлись бы.
+    from services.contacts_hub.repository import ensure_contact_by_telegram_id
+    return await ensure_contact_by_telegram_id(
+        pool, owner_id, pid, username=peer.get("peer_username"),
+        first_name=peer.get("peer_name"),
+        display_name=peer.get("peer_name"))
 
 
 # Частицы отрицания перед фразой. Подстрочное совпадение без этой проверки
@@ -339,9 +334,16 @@ async def scan_incoming(pool: asyncpg.Pool, bot, owner_id: int, peer: dict,
     # того, кого нет в контактах: слой надстроен над контактом.
     try:
         from services import virtual_layer
+        # Кто написал — передаём слою: контакта может ещё не быть, а он
+        # ключуется по контакту. Раньше сигнал о ПЕРВОМ ответе пропадал
+        # всегда (контакт заводился ниже и только при совпадении правила), то
+        # есть самое важное подтверждение — «человек ответил» — слой не видел,
+        # а у владельца без настроенных правил не видел вообще ничего.
         await virtual_layer.signal_for_telegram_user(
             pool, owner_id, peer.get("peer_user_id"), "replied",
-            confidence=0.6, source="vault")
+            confidence=0.6, source="vault",
+            identity={"username": peer.get("peer_username"),
+                      "first_name": peer.get("peer_name")})
     except Exception:
         log.debug("intent_sensor: virtual_layer replied failed owner=%s", owner_id)
 

@@ -111,9 +111,29 @@ def test_button_tap_is_stronger_than_a_plain_message():
            vl.rank(vl.SIGNAL_TARGET["opened"])
 
 
+def _nested_function(src: str, name: str) -> str:
+    """Текст вложенной функции по ОТСТУПУ, а не по окну фиксированной длины.
+
+    Окно в 900 символов ловило защиту только пока у функции был короткий
+    комментарий: дописанный абзац объяснения выключал проверку молча — ровно
+    тот класс, против которого стоит test_no_silently_disabled_guards.
+    """
+    i = src.index(f"async def {name}(")
+    head = src.rindex("\n", 0, i) + 1
+    indent = len(src[head:i]) - len(src[head:i].lstrip())
+    lines = src[head:].split("\n")
+    out = [lines[0]]
+    for line in lines[1:]:
+        if line.strip() and (len(line) - len(line.lstrip())) <= indent:
+            break
+        out.append(line)
+    return "\n".join(out)
+
+
 def test_signal_failure_is_isolated_in_auto_responder():
     src = _auto_responder_source()
-    i = src.index("async def _vl_signal(")
-    seg = src[i:i + 900]
+    seg = _nested_function(src, "_vl_signal")
     assert "try:" in seg and "except Exception" in seg, (
         "сбой виртуального слоя снова может уронить обработку сообщения")
+    assert "signal_for_telegram_user(" in seg, (
+        "границы функции определены неверно — проверять нечего")

@@ -413,9 +413,32 @@ async def signal(pool, owner_id: int, entity_type: str, entity_id,
     return change
 
 
+# Сигналы, по которым человека ЗАВОДЯТ в контакты, если его там ещё нет.
+#
+# Состояния слоя ключуются по `unified_contacts.id`, а подписчики бота живут в
+# `bot_users` и в контакты не попадают НИКОГДА: их туда никто не переносит, а
+# контакты наполняет только синхронизация адресных книг аккаунтов. Поэтому
+# сигналы от главного входящего канала продукта — бота — пропадали молча все
+# до единого: тап по кнопке, ответ в переписке, отказ. Лестница, распад и
+# каскад работали только по тем, кто уже был в адресной книге владельца, то
+# есть почти ни по кому. Ровно поэтому «готов купить» в продукте почти не
+# случалось: подтверждать его было нечем.
+#
+# Заводим не на всякий сигнал. «Открыл бота» (/start) и «отписался» — слабое
+# свидетельство, а подписчиков у бота бывают десятки тысяч, и превращать их
+# всех в контакты значило бы утопить CRM. Создаём на ДЕЙСТВИИ: написал,
+# спросил, тапнул, оставил контакт, заплатил — то есть на том, что двигает
+# лестницу выше дна.
+_SIGNALS_WORTH_A_CONTACT = frozenset({
+    "replied", "asked_question", "asked_price", "clicked_offer",
+    "left_contact", "added_to_cart", "asked_how_to_pay", "paid",
+})
+
+
 async def signal_for_telegram_user(pool, owner_id: int, tg_user_id,
                                    signal_name: str, *, confidence: float = 0.6,
-                                   source: str | None = None) -> dict | None:
+                                   source: str | None = None,
+                                   identity: dict | None = None) -> dict | None:
     """Сигнал по Telegram-id человека, а не по id контакта.
 
     Источники сигналов живут там, где приходят обновления Telegram, и знают
@@ -424,9 +447,11 @@ async def signal_for_telegram_user(pool, owner_id: int, tg_user_id,
     два пространства идентификаторов нельзя: один и тот же человек получил бы
     два независимых состояния, и оба были бы неполными.
 
-    Человека, которого у владельца нет в контактах, пропускаем молча: слой —
-    надстройка над CRM-контактом, и заводить контакт по чужому сообщению здесь
-    не его дело.
+    `identity` — что источник знает о человеке (username, first_name,
+    last_name). Если контакта ещё нет, а сигнал означает ДЕЙСТВИЕ (см.
+    `_SIGNALS_WORTH_A_CONTACT`), контакт заводится через единственную дверь
+    контактов. Без `identity` ничего не создаём: заводить контакт без имени и
+    юзернейма значит плодить безымянные строки.
 
     Fail-open: сбой слоя не ломает обработку сообщения.
     """
@@ -441,6 +466,20 @@ async def signal_for_telegram_user(pool, owner_id: int, tg_user_id,
         log.debug("virtual_layer: contact lookup failed owner=%s tg=%s",
                   owner_id, tg_user_id, exc_info=True)
         return None
+    if not contact_id and identity and signal_name in _SIGNALS_WORTH_A_CONTACT:
+        try:
+            from services.contacts_hub.repository import (
+                ensure_contact_by_telegram_id,
+            )
+            contact_id = await ensure_contact_by_telegram_id(
+                pool, int(owner_id), int(tg_user_id),
+                username=identity.get("username"),
+                first_name=identity.get("first_name"),
+                last_name=identity.get("last_name"))
+        except Exception:
+            log.debug("virtual_layer: contact create failed owner=%s tg=%s",
+                      owner_id, tg_user_id, exc_info=True)
+            return None
     if not contact_id:
         return None
     try:

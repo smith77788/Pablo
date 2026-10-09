@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 import asyncpg
@@ -267,6 +268,48 @@ async def upsert_contact(pool, owner_id, data: dict) -> str:
         phones, data.get('is_premium', False),
         data.get('discovered_at'), data.get('last_synced_at'))
     return row['id'] if row else contact_id
+
+
+async def ensure_contact_by_telegram_id(
+        pool, owner_id: int, tg_user_id, *, username=None, first_name=None,
+        last_name=None, display_name=None) -> str | None:
+    """Найти контакт владельца по Telegram-id или создать. Одна дверь на всех.
+
+    Контакт по tg-id искали и заводили в каждом источнике по-своему, а
+    виртуальный слой ключует состояния по `unified_contacts.id`: не нашёл
+    контакт — сигнал пропадал молча. Поэтому поиск и создание живут здесь, у
+    самих контактов, и зовутся из источников (сенсор намерений, автоответчик).
+
+    Возвращает id контакта или None, если создать не удалось (вызывающий
+    обязан быть fail-open: сигнал важен, но обработку сообщения не ломает).
+    """
+    if not pool or not owner_id or not tg_user_id:
+        return None
+    try:
+        tg_id = int(tg_user_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        row = await pool.fetchrow(
+            'SELECT id FROM unified_contacts '
+            'WHERE owner_id=$1 AND telegram_user_id=$2',
+            int(owner_id), tg_id)
+        if row:
+            return row['id']
+        name = display_name or ' '.join(
+            part for part in (first_name, last_name) if part).strip() or None
+        return await upsert_contact(pool, int(owner_id), {
+            'telegram_user_id': tg_id,
+            'username': username or None,
+            'first_name': first_name or None,
+            'last_name': last_name or None,
+            'display_name': name,
+            'discovered_at': datetime.now(timezone.utc),
+        })
+    except Exception:
+        log.debug('ensure_contact_by_telegram_id failed owner=%s tg=%s',
+                  owner_id, tg_user_id, exc_info=True)
+        return None
 
 
 async def update_contact(pool, contact_id, owner_id, updates: dict) -> bool:

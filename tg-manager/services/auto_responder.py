@@ -528,15 +528,24 @@ async def _process_bot(
         # намерений, то есть один источник из всех, какие у продукта есть.
         _vl_owner = bot_row.get("added_by") if bot_row else None
 
-        async def _vl_signal(tg_user_id, signal_name: str, confidence: float):
-            """Fail-open: сбой слоя не должен ломать обработку сообщения."""
+        async def _vl_signal(tg_user_id, signal_name: str, confidence: float,
+                             who: dict | None = None):
+            """Fail-open: сбой слоя не должен ломать обработку сообщения.
+
+            `who` — то, что Telegram сказал о человеке в этом же обновлении.
+            Состояния слоя ключуются по контакту, а подписчик бота в контактах
+            не числится: без имени и юзернейма слой не может его туда занести,
+            и сигнал пропадает молча — как пропадали ВСЕ сигналы бота до сих
+            пор. Поэтому передаём то, что знаем, на каждом вызове.
+            """
             if not _vl_owner or not tg_user_id:
                 return
             try:
                 from services import virtual_layer
                 await virtual_layer.signal_for_telegram_user(
                     pool, _vl_owner, tg_user_id, signal_name,
-                    confidence=confidence, source=f"bot_{bot_id}")
+                    confidence=confidence, source=f"bot_{bot_id}",
+                    identity=who)
             except Exception:
                 log.debug("auto_responder: virtual_layer signal=%s bot=%s",
                           signal_name, bot_id, exc_info=True)
@@ -574,8 +583,9 @@ async def _process_bot(
                     except Exception as e:
                         log_exc_swallow(log, "_process_bot: answer_callback")
                 # Тап по кнопке — осознанное действие, а не просмотр.
-                await _vl_signal((cbq.get("from") or {}).get("id"),
-                                 "clicked_offer", 0.7)
+                _cb_from = cbq.get("from") or {}
+                await _vl_signal(_cb_from.get("id"), "clicked_offer", 0.7,
+                                 _cb_from)
                 continue
 
             # Человек заблокировал бота или вернулся. Telegram шлёт это сам,
@@ -656,7 +666,7 @@ async def _process_bot(
             # у давно квалифицированного контакта ничего не испортит: он лишь
             # обновит уверенность и отодвинет распад.
             await _vl_signal(chat_id, "opened" if is_start else "replied",
-                             0.5 if is_start else 0.6)
+                             0.5 if is_start else 0.6, from_user)
 
             # Track user activity — returns True for first-ever message (new user)
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
