@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 log = logging.getLogger(__name__)
@@ -71,11 +72,35 @@ async def filter_new(pool, owner_id: int, keys: list[str], refs: list) -> tuple[
     """
     from services import contact_opt_out as coo
 
-    try:
-        already = await invited_keys(pool, owner_id, keys)
-    except Exception:
-        log.warning("invite_dedup: журнал приглашений не прочитан", exc_info=True)
-        already = set()
+    already: set = set()
+    for _attempt in (1, 2):
+        try:
+            already = await invited_keys(pool, owner_id, keys)
+            break
+        except Exception:
+            if _attempt == 1:
+                # Одна попытка про запас: пустой журнал читается как «никого не
+                # приглашали», то есть операция позовёт всех ЗАНОВО. Это самый
+                # дорогой исход продукта (повторные приглашения тем же людям —
+                # прямой путь к PEER_FLOOD и бану), а сетевой блип до базы —
+                # самая частая причина сбоя чтения.
+                log.warning("invite_dedup: журнал приглашений не прочитан, "
+                            "повторяю (owner=%s)", owner_id)
+                await asyncio.sleep(0.5)
+                continue
+            # Остаёмся fail-open (сорвать приглашение дороже, чем не
+            # пригласить никого — см. докстринг), но молчать об этом нельзя:
+            # счётчик доносит сбой до владельца словами.
+            log.error("invite_dedup: журнал приглашений НЕ ПРОЧИТАН (owner=%s) "
+                      "— дедуп на этом прогоне не действует, людей могут "
+                      "позвать второй раз", owner_id, exc_info=True)
+            try:
+                from services import metrics as _m
+
+                _m.inc("infragram_invite_dedup_read_failures_total")
+            except Exception:
+                log.debug("invite_dedup: счётчик сбоя чтения недоступен")
+            already = set()
     try:
         opted = {coo.compare_key(t) for t in await coo.load_opted_out(pool, owner_id)}
     except Exception:

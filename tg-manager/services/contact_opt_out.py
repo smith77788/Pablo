@@ -113,19 +113,42 @@ async def load_opted_out(pool, owner_id: int) -> set[str]:
     """Полный набор opted-out target'ов владельца (для фильтрации батча).
 
     Fail-open: при сбое — пустой набор (лучше не отфильтровать, чем сорвать
-    инвайт целиком; тот же принцип, что у op_worker._load_invited_targets)."""
-    from services.logger import log_exc_swallow
+    инвайт целиком; тот же принцип, что у op_worker._load_invited_targets).
+    Беззвучным он быть не имеет права: подробности ниже, у обработчика."""
+    import asyncio
     import logging
 
-    try:
-        await pool.execute(_DDL)
-        rows = await pool.fetch(
-            "SELECT target FROM contact_opt_out WHERE owner_id=$1", owner_id
-        )
-        return {r["target"] for r in (rows or [])}
-    except Exception:
-        log_exc_swallow(logging.getLogger(__name__), "contact_opt_out: load failed")
-        return set()
+    log = logging.getLogger(__name__)
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(_DDL)
+            rows = await pool.fetch(
+                "SELECT target FROM contact_opt_out WHERE owner_id=$1", owner_id
+            )
+            return {r["target"] for r in (rows or [])}
+        except Exception:
+            if _attempt == 1:
+                # Одна попытка про запас: пустой набор здесь означает, что
+                # реестр «не писать» на этот прогон перестал существовать, а
+                # сетевой блип до базы — самая частая причина сбоя.
+                log.warning("реестр «не писать» не прочитался (owner=%s), повторяю",
+                            owner_id)
+                await asyncio.sleep(0.5)
+                continue
+            # ЗДЕСЬ ЛОМАЕТСЯ НЕ УЧЁТ, А ОБЕЩАНИЕ ЧЕЛОВЕКУ. Пустой набор
+            # читается как «никто не отказывался», и сообщение уходит тем, кто
+            # прямо просил больше не писать. Fail-open оставлен сознательно
+            # (сбой реестра не срывает операцию целиком), но раньше он был
+            # ещё и беззвучным: log_exc_swallow, то есть никто.
+            log.error("реестр «не писать» НЕ ПРОЧИТАН (owner=%s) — фильтр на "
+                      "этом прогоне не действует", owner_id, exc_info=True)
+            try:
+                from services import metrics as _m
+
+                _m.inc("infragram_opt_out_read_failures_total")
+            except Exception:
+                log.debug("contact_opt_out: счётчик сбоя чтения недоступен")
+    return set()
 
 
 def compare_key(value: str) -> str:
