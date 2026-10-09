@@ -19,14 +19,66 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 # Порядок состояний для сортировки и сводки — от «требует внимания» к «в норме».
-STATE_ORDER = ("dead", "quarantine", "cooling", "ready")
+#
+# `blocked` — не пауза и не смерть: аккаунт цел, но работать им нельзя, пока
+# владелец что-то не сделает руками (залить сессию, заменить прокси). Ждать
+# бесполезно, поэтому и «пауза» тут соврала бы, и «готов» — тем более.
+STATE_ORDER = ("dead", "blocked", "quarantine", "cooling", "ready")
 
 _STATE_LABEL = {
     "dead": "⛔️ выбыл",
+    "blocked": "🔧 нужна починка",
     "quarantine": "🚑 карантин",
     "cooling": "⏳ пауза",
     "ready": "✅ готов",
 }
+
+
+def _proxy_is_dead(row) -> bool:
+    """Заведомо ли мёртв прокси аккаунта — предикат ОДИН на весь продукт.
+
+    Своего здесь не держим: дверь выбора аккаунтов судит по
+    `resource_selector._proxy_is_dead`, и разойтись им нельзя — иначе экран
+    снова начнёт звать готовым то, чего операции не берут.
+    """
+    try:
+        from services.resource_selector import _proxy_is_dead as _door
+    except Exception:
+        return False          # нет двери — не выдумываем свою оценку
+    try:
+        return bool(_door(row))
+    except Exception:
+        return False
+
+
+def _until_utc_midnight(now) -> float:
+    """Сколько секунд до обнуления суточного лимита действий."""
+    from datetime import timedelta
+    tomorrow = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    return max(0.0, (tomorrow - now).total_seconds())
+
+
+# Порог доверия, ниже которого аккаунт не берут главные операции продукта
+# (инвайты, рассылки, сообщения). Берём у двери, а не вписываем числом: порог
+# живёт в flood_engine._ACTION_MIN_TRUST и однажды уже разъезжался с экранами.
+def _trust_hint(trust_score) -> str | None:
+    """Чем доверие помешает аккаунту, который в остальном готов.
+
+    Это не пауза: аккаунт рабочий, и часть операций его возьмёт. Но инвайт и
+    рассылка — нет, и экран обязан сказать это раньше, чем владелец запустит
+    операцию и увидит «обработано 0».
+    """
+    from services import flood_engine as fe
+    try:
+        score = fe.normalize_trust_score(trust_score)
+    except Exception:
+        return None
+    need = fe.min_trust_for_action("invite")
+    if score >= need:
+        return None
+    return (f"доверие {score:.2f} ниже {need:.2f} — инвайты и рассылки "
+            "этот аккаунт не возьмут")
 
 
 def _human_left(seconds: float) -> str:
@@ -44,7 +96,17 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
     """Состояние каждого активного аккаунта владельца.
 
     Возвращает список словарей: id, phone, name, state (dead|quarantine|cooling|
-    ready), reason (человеку), ready_in_sec, ready_in (строка), risk (0..1).
+    ready), reason (человеку), ready_in_sec, ready_in (строка), risk (0..1),
+    hint (чем аккаунт ограничен, хотя и готов) — либо None.
+
+    Состояние считается по ВСЕМУ, из-за чего операция аккаунт не возьмёт, а не
+    только по статусу и кулдауну. Раньше экран знал про статус, кулдаун и
+    карантин, а дверь выбора отсеивала ещё по четырём причинам — отсутствию
+    сессии, мёртвому прокси, дневному лимиту и доверию. Про такой аккаунт экран
+    писал «✅ готов», а сводка — «🎉 весь флот готов к действиям», после чего
+    операция честно обрабатывала ноль целей. Это и есть вопрос владельца «из 52
+    аккаунтов работают 20, а почему непонятно»: отвечать на него сделан ровно
+    этот экран.
     """
     from services import flood_engine as fe
     try:
@@ -52,12 +114,20 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
     except Exception:
         _im = None
 
+    # Поля сессии и прокси — те же, что читает дверь выбора аккаунтов: экран
+    # обязан знать ВСЁ, из-за чего операция аккаунт не возьмёт, иначе он пишет
+    # «готов» про того, кого не берут (см. docstring модуля).
     rows = await pool.fetch(
-        "SELECT id, phone, first_name, username, "
-        "COALESCE(acc_status,'active') AS acc_status, cooldown_until, "
-        "COALESCE(trust_score, 0.5) AS trust_score "
-        "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "ORDER BY id",
+        "SELECT a.id, a.phone, a.first_name, a.username, "
+        "COALESCE(a.acc_status,'active') AS acc_status, a.cooldown_until, "
+        "COALESCE(a.trust_score, 0.5) AS trust_score, "
+        "(a.session_str IS NOT NULL) AS has_session, "
+        "p.is_alive AS proxy_alive, "
+        "COALESCE(p.consecutive_failures, 0) AS proxy_fail_streak "
+        "FROM tg_accounts a "
+        "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
+        "ORDER BY a.id",
         owner_id)
 
     # Живая фаза авто-реабилитации по спам-блокам (если таблица есть).
@@ -80,6 +150,18 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
                 pool, [int(r["id"]) for r in rows])
         except Exception:
             log_exc_swallow(log, "fleet_pulse quarantine check")
+
+    # Дневной лимит действий — ОДНИМ запросом на весь флот. Исчерпавший лимит
+    # аккаунт дверь выбора не отдаёт (respect_daily_budget), а экран называл его
+    # готовым: владелец запускал операцию и получал «ничего не произошло».
+    over_budget: set[int] = set()
+    try:
+        from services import account_budget as _ab
+        _, _over = await _ab.filter_within_budget(
+            pool, [int(r["id"]) for r in rows])
+        over_budget = {int(i) for i in _over}
+    except Exception:
+        log_exc_swallow(log, "fleet_pulse daily budget check")
 
     import time as _t
     from datetime import datetime, timezone
@@ -116,6 +198,19 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
             state, reason, ready_in = "dead", _dead_reason(status), None
             if status == "spamblock" and acc_id in rehab:
                 reason = _rehab_reason(rehab[acc_id], now)
+        elif not r["has_session"]:
+            # Без сессии аккаунт не берёт НИ ОДНА операция (условие двери:
+            # session_str IS NOT NULL). Ждать нечего — нужна переимпортация.
+            state = "blocked"
+            reason = "нет сессии — переимпортируйте аккаунт"
+            ready_in = None
+        elif _proxy_is_dead(r):
+            # Прокси не отвечает подряд: сети до Telegram у аккаунта нет, и
+            # каждая попытка — гарантированная сетевая ошибка. Чинится заменой
+            # прокси (дешёвое), а выглядит как «аккаунты сломались» (дорогое).
+            state = "blocked"
+            reason = "прокси не отвечает — замените прокси аккаунта"
+            ready_in = None
         elif acc_id in quarantined:
             state = "quarantine"
             reason = "снят риск-пульсом (недавние ограничения) — вернётся сам"
@@ -124,6 +219,11 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
             state = "cooling"
             reason = "пауза после флуда/ограничения — бережём аккаунт"
             ready_in = cooling
+        elif acc_id in over_budget:
+            # Это именно пауза: лимит суточный и сам отпустит в полночь UTC.
+            state = "cooling"
+            reason = "дневной лимит действий исчерпан — бережём аккаунт"
+            ready_in = _until_utc_midnight(now)
         else:
             state, reason, ready_in = "ready", "готов к действиям", 0.0
 
@@ -138,6 +238,7 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
             "ready_in": None if ready_in is None else _human_left(ready_in),
             "risk": round(risk, 2),
             "trust": round(float(r["trust_score"]), 2),
+            "hint": _trust_hint(r["trust_score"]) if state == "ready" else None,
         })
 
     out.sort(key=lambda a: (STATE_ORDER.index(a["state"]),

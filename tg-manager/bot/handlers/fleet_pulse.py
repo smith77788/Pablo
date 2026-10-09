@@ -32,20 +32,35 @@ def _render(states: list[dict]) -> str:
     head = (
         "💓 <b>Пульс флота</b>\n\n"
         f"✅ готовы: <b>{s['ready']}</b>   ⏳ пауза: <b>{s['cooling']}</b>   "
-        f"🚑 карантин: <b>{s['quarantine']}</b>   ⛔️ выбыли: <b>{s['dead']}</b>\n"
+        f"🚑 карантин: <b>{s['quarantine']}</b>\n"
+        f"🔧 нужна починка: <b>{s['blocked']}</b>   ⛔️ выбыли: <b>{s['dead']}</b>\n"
         f"<i>всего активных: {s['total']}</i>"
     )
-    # Показываем НЕ готовых (им и нужен экран); если все готовы — так и говорим.
+    # Показываем НЕ готовых (им и нужен экран) и тех, кто готов с оговоркой:
+    # аккаунт с доверием ниже порога операции не возьмут, и промолчать об этом
+    # значит снова сказать «весь флот готов» перед тем, как операция обработает
+    # ноль целей.
     busy = [a for a in states if a["state"] != "ready"]
-    if not busy:
+    limited = [a for a in states if a["state"] == "ready" and a.get("hint")]
+    if not busy and not limited:
         return head + "\n\n🎉 Весь флот готов к действиям — пауз нет."
-    lines = ["", "<b>Кому нужна пауза</b>"]
-    for a in busy[:_MAX_LISTED]:
-        name = html.escape(str(a["name"])[:24])
-        tail = f" · через {a['ready_in']}" if a.get("ready_in") else ""
-        lines.append(f"{a['state_label']} <b>{name}</b>{tail}\n   <i>{a['reason']}</i>")
-    if len(busy) > _MAX_LISTED:
-        lines.append(f"\n… и ещё {len(busy) - _MAX_LISTED}")
+    lines = []
+    if busy:
+        lines += ["", "<b>Кому нужна пауза или починка</b>"]
+        for a in busy[:_MAX_LISTED]:
+            name = html.escape(str(a["name"])[:24])
+            tail = f" · через {a['ready_in']}" if a.get("ready_in") else ""
+            lines.append(
+                f"{a['state_label']} <b>{name}</b>{tail}\n   <i>{a['reason']}</i>")
+        if len(busy) > _MAX_LISTED:
+            lines.append(f"\n… и ещё {len(busy) - _MAX_LISTED}")
+    if limited:
+        lines += ["", "<b>Готовы, но не для всего</b>"]
+        for a in limited[:_MAX_LISTED]:
+            name = html.escape(str(a["name"])[:24])
+            lines.append(f"⚠️ <b>{name}</b>\n   <i>{a['hint']}</i>")
+        if len(limited) > _MAX_LISTED:
+            lines.append(f"\n… и ещё {len(limited) - _MAX_LISTED}")
     return head + "\n".join(lines)
 
 
