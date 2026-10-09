@@ -2992,6 +2992,10 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
                     "лимиты флуда не разъезжаются по репликам; если держатель "
                     "умрёт, аренда освободится сама.",
                     await _rguard.executor_lease_holder(pool) or "неизвестно")
+            # Пропустить круг недостаточно: операции, запущенные здесь до
+            # потери аренды, идут своими задачами и про аренду не знают, а
+            # новый держатель уже перезапускает их как жертв падения.
+            await _stand_down_after_lease_loss(pool)
             await asyncio.sleep(_POLL_INTERVAL)
             continue
         if not _did_startup_reset:
@@ -3052,6 +3056,87 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         except Exception as e:
             log.exception("op_worker watchdog cycle error: %s", e)
         await asyncio.sleep(_POLL_INTERVAL)
+
+
+async def _stand_down_after_lease_loss(
+    pool: asyncpg.Pool, grace_s: float = 5.0,
+) -> dict:
+    """Отпустить работу, когда аренду исполнителя забрал другой процесс.
+
+    ПОЧЕМУ ПРОПУСТИТЬ КРУГ НЕДОСТАТОЧНО. Гейт аренды в `run` закрывает НОВУЮ
+    работу. Операции, уже запущенные здесь, живут своими asyncio-задачами и про
+    аренду не знают — а новый держатель первым делом зовёт
+    `_reset_stale_running`, для которого наши живые операции выглядят жертвами
+    падения: он возвращает их в очередь и запускает заново, пока наши задачи
+    ещё идут. Те же приглашения тем же людям, второй пост, второе сообщение.
+
+    Хуже того, продление аренды АККАУНТОВ (`renew_leases`) стоит в цикле после
+    гейта. Процесс, потерявший аренду исполнителя, перестаёт продлевать и
+    аренды сессий — через TTL новый держатель законно забирает аккаунты, с
+    которыми наши задачи работают прямо сейчас. Это AUTH_KEY_DUPLICATED, ровно
+    та поломка, от которой аренда и защищает.
+
+    ПОЧЕМУ НЕ ВОЗВРАЩАЕМ ОПЕРАЦИИ В ОЧЕРЕДЬ. Очередь с этой секунды чужая:
+    UPDATE `WHERE status='running'` попал бы по строке, которую новый держатель
+    уже перезапустил, и сбросил бы ЕГО живую операцию. Делаем только своё —
+    гасим свои задачи и отпускаем свои аренды. Вернуть операции в очередь —
+    дело держателя, у него для этого есть оба сторожа.
+
+    ПОРЯДОК. Сначала гасим задачи, ПОТОМ отпускаем аренды аккаунтов: пока
+    задача не свернулась, она ещё работает сессией, и отпустить аренду раньше
+    значит отдать живую сессию новому держателю. В отличие от `shutdown`
+    времени «дать закончиться самим» не даём — новый держатель уже
+    перезапускает эти операции, и трёхчасовая рассылка докрутиться не может.
+
+    `_shutting_down` НЕ ставим: аренду можно получить назад (держатель умрёт),
+    и процесс обязан уметь продолжить. Идемпотентна — гейт срабатывает каждые
+    `_POLL_INTERVAL` секунд, и на пустом процессе стоит ноль запросов.
+    Никогда не бросает: исключение здесь остановило бы весь исполнитель.
+
+    Возвращает {"stopped": N, "released": M} — для лога и тестов.
+    """
+    stopped = 0
+    released = 0
+    try:
+        async with _active_lock:
+            tasks = [t for t in _active_op_tasks if not t.done()]
+            op_ids = sorted(_active_op_ids)
+        async with _accounts_lock:
+            have_accounts = bool(_accounts_in_use)
+        if not tasks and not op_ids and not have_accounts:
+            return {"stopped": 0, "released": 0}
+
+        log.error(
+            "op_worker: аренду исполнителя забрал другой процесс, а здесь ещё "
+            "идут операции %s — гашу их и отпускаю аренды аккаунтов. Иначе "
+            "новый держатель запустит те же операции поверх идущих (повторные "
+            "реальные действия), а через TTL заберёт наши сессии "
+            "(AUTH_KEY_DUPLICATED).", op_ids)
+
+        if tasks:
+            for t in tasks:
+                t.cancel()
+            try:
+                await asyncio.wait(tasks, timeout=max(0.0, float(grace_s)))
+            except Exception as e:
+                log_exc_swallow(log, f"op_worker: сворачивание задач при сдаче аренды: {e}")
+            stopped = sum(1 for t in tasks if t.done())
+
+        async with _accounts_lock:
+            held = [int(a) for a in _accounts_in_use]
+            _accounts_in_use.clear()
+            _operation_account_locks.clear()
+        if held:
+            try:
+                await _db_release(held)
+                released = len(held)
+            except Exception as e:
+                log_exc_swallow(log, f"op_worker: снятие аренд при сдаче: {e}")
+
+        _reliability_metric("infragram_executor_standdowns_total")
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: сдача аренды исполнителя: {e}")
+    return {"stopped": stopped, "released": released}
 
 
 async def shutdown(pool: asyncpg.Pool, grace_s: float = 10.0) -> dict:

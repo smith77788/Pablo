@@ -32,6 +32,9 @@ GUARDED_CALLS = (
     "_reset_stale_running",
     "_watchdog_stale",
     "_reconcile_in_operation",
+    # Уборщик брошенных отмен дописывает итог в очередь — тот же класс: без
+    # аренды он закрыл бы операцию, которую прямо сейчас ведёт держатель.
+    "_watchdog_cancelled_orphans",
 )
 
 
