@@ -2725,6 +2725,119 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
             log_exc_swallow(log, f"op_worker alert send to {aid} failed")
 
 
+# Защитные записи, сбой которых владелец обязан УВИДЕТЬ. Значение — что именно
+# перестало защищать, его словами.
+#
+# ПОЧЕМУ ЭТО НУЖНО. У каждой такой записи есть повторная попытка, log.error и
+# счётчик (цикл «молчаливый сбой защитной записи»). Но логи владелец не читает,
+# а счётчики живут в памяти процесса и отдаются только на /metrics — сборщика
+# метрик в проде нет, и при рестарте они обнуляются. То есть сбой защиты
+# по-прежнему происходил МОЛЧА: следующая попытка делала реальное действие
+# второй раз (повторные приглашения, второй пост, второе сообщение человеку),
+# а узнать об этом было негде.
+_PROTECTIVE_FAILURE_COUNTERS = {
+    "infragram_invite_dedup_write_failures_total":
+        "дедуп инвайта — возможны повторные приглашения тем же людям",
+    "infragram_journal_write_failures_total":
+        "строка успеха в журнале — повтор операции сделает действие второй раз",
+    "infragram_account_cooldown_write_failures_total":
+        "пауза аккаунта — флуд-пауза могла не лечь, это риск бана",
+    "infragram_notifications_undelivered_total":
+        "отчёт об операции не доехал до владельца",
+    "infragram_recurring_reschedule_failures_total":
+        "следующий запуск повторяющейся операции не поставлен — она остановилась",
+    "infragram_executor_lease_errors_total":
+        "аренда исполнителя — правило «очередь разбирает один процесс» не проверено",
+}
+
+# Повтор про ОДИН вид сбоя одному админу — не чаще этого окна (переживает
+# рестарт, как и окно алертов о застрявших операциях).
+_PROTECTIVE_ALERT_REPEAT_S = 3 * 3600
+
+
+def _counter_total(counters: dict, name: str) -> float:
+    """Сумма счётчика по всем меткам: в срезе имена идут как name{label="..."}."""
+    return float(sum(
+        v for k, v in counters.items()
+        if k == name or k.startswith(name + "{")))
+
+
+async def _watchdog_protective_failures(
+    pool: asyncpg.Pool, bot: Bot, seen: dict,
+) -> None:
+    """Сбой защитной записи уходит админу словами, а не только в лог.
+
+    `seen` — база отсчёта, живёт в `run` (не в модуле): счётчики метрик тоже
+    живут в памяти процесса, так что переживать рестарт тут нечему.
+
+    Порядок важен: база отсчёта двигается ТОЛЬКО после успешной отправки.
+    Иначе пустой список админов или сбой доставки теряли бы сообщение навсегда
+    — ровно та ошибка, которую уже разбирали на алертах о застрявших операциях.
+    """
+    try:
+        from services import metrics as _m
+
+        counters = (_m.snapshot() or {}).get("counters") or {}
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker protective snapshot error: {e}")
+        return
+
+    grown = []
+    for name, what in _PROTECTIVE_FAILURE_COUNTERS.items():
+        total = _counter_total(counters, name)
+        delta = total - float(seen.get(name) or 0.0)
+        if delta > 0:
+            grown.append((name, what, delta, total))
+    if not grown:
+        return
+
+    log.error("op_worker: защитные записи не легли: %s",
+              [(n, int(d)) for n, _w, d, _t in grown])
+
+    try:
+        from bot.utils.subscription import _admin_ids
+
+        admin_ids = _admin_ids()
+    except Exception:
+        log.debug("admin_ids fallback: returning empty set")
+        admin_ids = set()
+    if not admin_ids:
+        # Никому не ушло — база отсчёта не двигается, сообщение вернётся.
+        return
+
+    delivered: set = set()
+    for aid in admin_ids:
+        fresh = []
+        for name, what, delta, total in grown:
+            try:
+                if await db.notify_dedup_ok(
+                        pool, int(aid), f"protective:{name}",
+                        _PROTECTIVE_ALERT_REPEAT_S):
+                    fresh.append((name, what, delta))
+            except Exception:
+                # Fail-open: сбой анти-спама не повод молчать о сбое защиты.
+                fresh.append((name, what, delta))
+        if not fresh:
+            continue
+        lines = ["⚠️ <b>Защита не записалась</b>\n"]
+        for _name, what, delta in fresh:
+            lines.append(f"• {what} — {int(delta)} раз(а)")
+        lines.append(
+            "\n<i>Запись, которая не даёт сделать действие второй раз, не легла "
+            "в базу (скорее всего, Postgres был недоступен). Повтор таких "
+            "операций может сделать реальное действие дважды — проверьте базу, "
+            "прежде чем повторять.</i>")
+        try:
+            await bot.send_message(aid, "\n".join(lines), parse_mode="HTML")
+            delivered.update(n for n, _w, _d in fresh)
+        except Exception:
+            log_exc_swallow(log, f"op_worker protective alert send to {aid} failed")
+
+    for name, _what, _delta, total in grown:
+        if name in delivered:
+            seen[name] = total
+
+
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py.
 
@@ -2750,6 +2863,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     _role = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
     _did_startup_reset = False
     _lease_denied_log_at = 0.0
+    # База отсчёта для счётчиков защитных записей — локальная, не модульная.
+    _protective_seen: dict = {}
     _watchdog_tick = 0
     while True:
         # Счётчик двигается ДО работы: иначе сбой в разборе очереди заодно
@@ -2812,6 +2927,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # Alert admins about stuck operations every ~5 minutes (30 cycles)
             if _watchdog_tick % 30 == 0:
                 await _watchdog_alerts(pool, bot)
+                # Там же — сбой защитных записей: он опаснее застрявшей
+                # операции (повторное РЕАЛЬНОЕ действие), а виден был только
+                # в логах и во внутреннем счётчике.
+                await _watchdog_protective_failures(
+                    pool, bot, _protective_seen)
         except asyncio.CancelledError:
             raise
         except Exception as e:
