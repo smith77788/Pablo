@@ -13097,15 +13097,21 @@ async function cancelOp(id, confirm) {
 
 async function pauseOp(id) {
   try {
-    await api('/api/miniapp/operation/'+id+'/pause', {method:'POST'});
-    toast('⏸ Операция приостановлена — воркер её не возьмёт'); loadOps();
+    // Идущую операцию сервер не рвёт (пере-прогон = дубли реальных действий):
+    // он запоминает намерение и говорит словами, что будет дальше. Свой текст
+    // в этом случае соврал бы «приостановлена», пока она ещё работает.
+    const d = await api('/api/miniapp/operation/'+id+'/pause', {method:'POST'});
+    toast(d && d.message ? ('⏸ '+d.message)
+                         : '⏸ Операция приостановлена — воркер её не возьмёт');
+    loadOps();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
 
 async function resumeOp(id) {
   try {
-    await api('/api/miniapp/operation/'+id+'/resume', {method:'POST'});
-    toast('▶ Операция возвращена в очередь'); loadOps();
+    const d = await api('/api/miniapp/operation/'+id+'/resume', {method:'POST'});
+    toast(d && d.message ? ('▶ '+d.message) : '▶ Операция возвращена в очередь');
+    loadOps();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
 
@@ -13170,8 +13176,15 @@ async function pauseAllOps() {
   // доигрывают — паузить их без чекпоинта нельзя (пере-прогон = дубли/палево).
   try {
     const d = await api('/api/miniapp/operations/pause', {method:'POST'});
-    const n = d.paused||0;
-    toast(n ? ('⏸ Приостановлено в очереди: '+n+' (запущенные доигрывают)') : 'Нет ожидающих операций в очереди');
+    const n = d.paused||0, m = d.pause_requested||0;
+    // m — идущие: их не рвём, но пауза теперь переживает и деплой, то есть
+    // заново они не начнутся (schema_v249, pause_requested).
+    let t;
+    if (n && m) t = '⏸ Приостановлено: '+n+'; идущие ('+m+') встанут после текущего прохода';
+    else if (n) t = '⏸ Приостановлено в очереди: '+n;
+    else if (m) t = '⏸ Идущие операции ('+m+') встанут на паузу после текущего прохода';
+    else t = 'Нет операций, которые можно приостановить';
+    toast(t);
     loadOps();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
@@ -13180,8 +13193,13 @@ async function resumeAllOps() {
   // Возобновляем ИМЕННО приостановленные: paused → pending (паритет с «Пауза»).
   try {
     const d = await api('/api/miniapp/operations/resume', {method:'POST'});
-    const n = d.resumed||0;
-    toast(n ? ('▶️ Возобновлено: '+n) : 'Нет приостановленных операций');
+    const n = d.resumed||0, m = d.unmarked||0;
+    let t;
+    if (n && m) t = '▶️ Возобновлено: '+n+'; с идущих ('+m+') снята заказанная пауза';
+    else if (n) t = '▶️ Возобновлено: '+n;
+    else if (m) t = '▶️ С идущих операций ('+m+') снята заказанная пауза';
+    else t = 'Нет приостановленных операций';
+    toast(t);
     loadOps();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }

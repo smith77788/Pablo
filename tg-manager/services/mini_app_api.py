@@ -4323,13 +4323,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Снять намерение и с тех, кто всё это время шёл: «Старт» значит
             # «работаем дальше», иначе они встали бы на паузу на следующем
             # тике поллера — уже после того, как владелец её отменил.
+            unmarked = 0
             try:
-                await pool.execute(
+                _u = await pool.execute(
                     "UPDATE operation_queue SET pause_requested=FALSE "
                     "WHERE owner_id=$1 AND pause_requested", uid)
+                _ut = str(_u).rsplit(" ", 1)[-1]
+                unmarked = int(_ut) if _ut.isdigit() else 0
             except Exception as _ue:
                 log.warning("resume_operations unmark uid=%d: %s", uid, _ue)
-            return _json_resp({"ok": True, "resumed": resumed})
+            # unmarked — сколько идущих операций перестали ждать паузы: без
+            # этого числа интерфейс говорил «нет приостановленных», хотя
+            # тормоз с идущих он только что снял.
+            return _json_resp({"ok": True, "resumed": resumed,
+                               "unmarked": unmarked})
         except Exception as e:
             log.warning("resume_operations uid=%d: %s", uid, e)
             return _err("Не удалось возобновить", 500)

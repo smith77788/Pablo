@@ -266,6 +266,40 @@ async def test_single_op_controls_are_owner_scoped(as_user, path):
 
 # ── Интерфейс ────────────────────────────────────────────────────────────────
 
+def test_the_pause_toast_does_not_claim_more_than_happened():
+    """Текст в интерфейсе обязан совпасть с тем, что сделал сервер.
+
+    Пауза идущей операции теперь не отказ, а запомненное намерение: сервер
+    отвечает 200 и объясняет словами, что текущий проход доиграет. Свой
+    собственный текст «Операция приостановлена» в этом случае был бы прямой
+    ложью — владелец читает «приостановлена» и видит, что она работает.
+    """
+    html = _index_html()
+    m = re.search(r"async function pauseOp\(id\) \{(.*?)\n\}", html, re.S)
+    assert m, "pauseOp не найдена"
+    body = m.group(1)
+    assert "d.message" in body, (
+        "pauseOp показывает свой текст вместо ответа сервера: для идущей "
+        "операции это обещание паузы, которой ещё нет")
+
+    m2 = re.search(r"async function pauseAllOps\(\) \{(.*?)\n\}", html, re.S)
+    assert m2, "pauseAllOps не найдена"
+    body2 = m2.group(1)
+    assert "pause_requested" in body2, (
+        "пауза очереди не говорит про идущие операции, хотя помечает и их")
+    assert "Нет операций, которые можно приостановить" in body2, (
+        "старый текст «нет ожидающих» врал, когда идущие были помечены")
+
+
+def test_the_resume_toast_mentions_the_running_ones():
+    html = _index_html()
+    m = re.search(r"async function resumeAllOps\(\) \{(.*?)\n\}", html, re.S)
+    assert m, "resumeAllOps не найдена"
+    assert "unmarked" in m.group(1), (
+        "«Старт» снимает заказанную паузу и с идущих — об этом надо сказать, "
+        "иначе интерфейс говорит «нет приостановленных» после реального действия")
+
+
 def test_detail_pause_button_does_not_cancel():
     """Кнопка «Приостановить» обязана звать pauseOp, а не cancelOp."""
     html = _index_html()
