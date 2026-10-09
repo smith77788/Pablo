@@ -118,6 +118,7 @@ async def create_workflow(
     description: str = "",
     steps: list[dict] | None = None,
     is_active: bool = False,
+    bot_id: int | None = None,
 ) -> dict:
     """Создать определение сценария.
 
@@ -129,13 +130,20 @@ async def create_workflow(
     Шаги пишутся КАК ДАНЫ: проверка — `validate_steps`, её зовут обработчики
     (см. services/mini_app_workflows.py). Разделение намеренное: эту функцию
     зовут и тесты движка, и служебный код, где шаги уже проверены.
+
+    `bot_id` — бот, которому сценарий принадлежит. Экран его присылал с самого
+    начала (в модалке создания есть выбор «Бот»), а читать его было некуда:
+    колонки не существовало, и выбор владельца исчезал без следа. Проверять,
+    что бот ЕГО, обязан обработчик — здесь владелец бота не известен.
     """
     try:
         row = await pool.fetchrow(
-            '''INSERT INTO workflow_definitions (owner_id, name, description, steps, is_active)
-               VALUES ($1, $2, $3, $4::jsonb, $5)
+            '''INSERT INTO workflow_definitions
+                   (owner_id, name, description, steps, is_active, bot_id)
+               VALUES ($1, $2, $3, $4::jsonb, $5, $6)
                RETURNING id''',
-            owner_id, name, description, json.dumps(steps or []), bool(is_active))
+            owner_id, name, description, json.dumps(steps or []), bool(is_active),
+            bot_id)
         return {"ok": True, "id": row["id"]}
     except Exception as e:
         log.warning("create_workflow error: %s", e)

@@ -53,14 +53,27 @@ def pool():
             await setup.close()
         p = await asyncpg.create_pool(DSN, min_size=1, max_size=4,
                                       server_settings={"search_path": "wftest"})
-        # Ровно та миграция, что уезжает в прод. Комментарии стоят ПЕРЕД первым
-        # ';', поэтому чанк целиком отбрасывать нельзя — чистим построчно.
-        with open(os.path.join(ROOT, "schema_v183.sql"), encoding="utf-8") as f:
-            for chunk in f.read().split(";"):
-                body = "\n".join(ln for ln in chunk.split("\n")
-                                 if not ln.strip().startswith("--")).strip()
-                if body:
-                    await p.execute(body)
+        # Ровно те миграции, что уезжают в прод. Файл с именем версии тут не
+        # зашит: колонка сценария, добавленная следующей миграцией, иначе
+        # просто не появилась бы в тестовой схеме, и падал бы ВЕРНЫЙ код
+        # (так и вышло с bot_id). Берём все миграции, которые трогают таблицы
+        # сценариев, в порядке версий.
+        import glob
+        import re as _re
+        files = sorted(
+            (f for f in glob.glob(os.path.join(ROOT, "schema_v*.sql"))
+             if "workflow_definitions" in open(f, encoding="utf-8").read()),
+            key=lambda f: int(_re.search(r"schema_v(\d+)", f).group(1)))
+        assert files, "миграции таблиц сценариев не найдены"
+        # Комментарии стоят ПЕРЕД первым ';', поэтому чанк целиком отбрасывать
+        # нельзя — чистим построчно.
+        for path in files:
+            with open(path, encoding="utf-8") as f:
+                for chunk in f.read().split(";"):
+                    body = "\n".join(ln for ln in chunk.split("\n")
+                                     if not ln.strip().startswith("--")).strip()
+                    if body:
+                        await p.execute(body)
         return p
 
     p = _run(_mk())
@@ -77,9 +90,18 @@ def _clean(pool):
     yield
 
 
-def _mk(pool, name="wf", steps=None, owner=OWNER):
+def _mk(pool, name="wf", steps=None, owner=OWNER, is_active=True):
+    """Готовый сценарий. По умолчанию ВКЛЮЧЁННЫЙ — чтобы паузе было что гасить.
+
+    Сам `create_workflow` заводит сценарий выключенным: включать то, что ещё
+    никто не исполняет, значит обещать владельцу работу, которой не будет
+    (экран так и делал у себя в обработчике). Тестам пауза/возобновление нужен
+    обратный исходный флаг, и они его просят явно.
+    """
     from services import workflow_engine as we
-    res = _run(we.create_workflow(pool, owner, name, "описание", steps or [{"action": "a"}]))
+    res = _run(we.create_workflow(pool, owner, name, "описание",
+                                  steps or [{"action": "a"}],
+                                  is_active=is_active))
     assert res.get("ok"), res
     return int(res["id"])
 

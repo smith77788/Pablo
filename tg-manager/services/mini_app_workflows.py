@@ -12,9 +12,14 @@
   * Удаление. Экран зовёт `DELETE /workflows/{id}` — там стоял голый
     `DELETE FROM workflow_definitions` с безусловным `{"ok": true}`. Удаление
     чужого или уже удалённого сценария отвечало «🗑 Удалён», после чего список
-    перезагружался и показывал сценарий на месте. Хуже: `workflow_runs.workflow_id`
-    ссылается на определение внешним ключом БЕЗ `ON DELETE`, так что у сценария
-    с прогонами этот запрос падает ошибкой БД. Готовый `delete_workflow` в
+    перезагружался и показывал сценарий на месте. А прогоны оставались:
+    `workflow_runs.workflow_id` в развёрнутой схеме (schema_v183.sql) стоит с
+    `ON DELETE SET NULL`, так что незавершённый прогон не падал ошибкой, а
+    навсегда оставался в состоянии `running` и терял имя сценария — найти и
+    закрыть его после этого нечем. (Утверждение «запрос падает ошибкой БД» из
+    сообщения коммита 5b32f71 неверно: без `ON DELETE` объявлена только копия
+    схемы в мёртвой `init_workflow_tables`, которую никто не вызывает.)
+    Готовый `delete_workflow` в
     движке именно это и разбирает: отменяет незавершённые прогоны, отвязывает
     остальные, возвращает False, если у владельца такого сценария нет. Его
     звал только `DELETE /workflow/{id}` — маршрут, которого нет во фронте.
@@ -91,13 +96,21 @@ def setup_routes(app: web.Application, pool) -> None:
                           CASE WHEN COALESCE(wd.is_active,FALSE) THEN 'active' ELSE 'paused' END AS status,
                           COALESCE(jsonb_array_length(wd.steps), 0) AS step_count,
                           (SELECT MAX(r.started_at) FROM workflow_runs r
-                           WHERE r.workflow_id = wd.id) AS last_run
+                           WHERE r.workflow_id = wd.id) AS last_run,
+                          (SELECT r.status FROM workflow_runs r
+                            WHERE r.workflow_id = wd.id
+                            ORDER BY r.id DESC LIMIT 1) AS run_status
                    FROM workflow_definitions wd
                    WHERE wd.owner_id=$1 ORDER BY wd.name""", uid)
             workflows = [{
                 "id": r["id"], "name": r["name"], "status": r["status"],
                 "step_count": int(r["step_count"] or 0),
                 "last_run": r["last_run"].isoformat() if r["last_run"] else None,
+                # Состояние ПРОГОНА отдельно от состояния определения. Экран
+                # считал плитки «Выполняется» и «Ошибки» по `status`, а там
+                # бывает только active/paused из is_active — обе плитки
+                # показывали ноль при любых данных.
+                "run_status": r["run_status"],
             } for r in (rows or [])]
             return _json_resp({"workflows": workflows})
         except Exception:
@@ -117,6 +130,23 @@ def setup_routes(app: web.Application, pool) -> None:
         if not name:
             return _err("Укажите название воркфлоу", 400)
         desc = validate_string(body.get("description"), max_len=500) or None
+        # Бот. Экран присылает bot_id с самого начала, обработчик его не читал,
+        # и выбор владельца исчезал без следа. Пустая строка из селекта
+        # («Не привязан») — это отсутствие бота, а не ноль.
+        raw_bot = body.get("bot_id")
+        bot_id = None
+        if raw_bot not in (None, "", 0, "0"):
+            try:
+                bot_id = int(raw_bot)
+            except (TypeError, ValueError):
+                return _err("Неверный идентификатор бота", 400)
+            # Чужой бот привязать нельзя: иначе по номеру бота можно повесить
+            # свой сценарий на бота соседа.
+            own = await _safe_fetchrow(pool,
+                "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                bot_id, uid)
+            if not own:
+                return _err("Бот не найден", 404)
         from services import workflow_engine as _wf
         # Шаблон экран присылал с самого начала («Создать воркфлоу по шаблону
         # "💧 Дрип-серия"?» → «✅ создан»), а обработчик его не читал: сценарий
@@ -137,11 +167,12 @@ def setup_routes(app: web.Application, pool) -> None:
         # значит обещать работу, которой не будет.
         res = await _wf.create_workflow(pool, uid, name,
                                         description=desc or "", steps=steps,
-                                        is_active=False)
+                                        is_active=False, bot_id=bot_id)
         if not res.get("ok"):
             log.warning("workflow_create_plural uid=%s: %s", uid, res.get("error"))
             return _err(_INTERNAL_ERROR, 500)
-        out = {"ok": True, "id": res["id"], "steps": len(steps)}
+        out = {"ok": True, "id": res["id"], "steps": len(steps),
+               "bot_id": bot_id}
         if tpl:
             out.update(template=tpl["key"], template_label=tpl["label"])
         return _json_resp(out)
@@ -191,8 +222,13 @@ def setup_routes(app: web.Application, pool) -> None:
         if wid is None:
             return _err("Неверный идентификатор", 400)
         row = await _safe_fetchrow(pool,
-            "SELECT id, name, description, steps, COALESCE(is_active,FALSE) AS is_active "
-            "FROM workflow_definitions WHERE id=$1 AND owner_id=$2", wid, uid)
+            "SELECT wd.id, wd.name, wd.description, wd.steps, wd.bot_id, "
+            "       COALESCE(wd.is_active,FALSE) AS is_active, "
+            "       b.username AS bot_username "
+            "  FROM workflow_definitions wd "
+            "  LEFT JOIN managed_bots b ON b.bot_id = wd.bot_id "
+            "       AND b.added_by = wd.owner_id "
+            " WHERE wd.id=$1 AND wd.owner_id=$2", wid, uid)
         if not row:
             return _err("Воркфлоу не найден", 404)
         from services import workflow_engine as _wf
@@ -206,6 +242,8 @@ def setup_routes(app: web.Application, pool) -> None:
         return _json_resp({"id": row["id"], "name": row["name"],
                            "description": row["description"] or "",
                            "active": bool(row["is_active"]),
+                           "bot_id": row["bot_id"],
+                           "bot_username": row["bot_username"],
                            "steps": _steps_of(row), "runs": runs})
 
     async def workflow_add_step(request: web.Request) -> web.Response:
@@ -280,8 +318,8 @@ def setup_routes(app: web.Application, pool) -> None:
         """Удалить сценарий. Один путь на оба маршрута — через движок.
 
         Движок отменяет незавершённые прогоны и отвязывает остальные: без
-        этого внешний ключ workflow_runs.workflow_id ронял удаление, а
-        «выполняющиеся» прогоны остались бы висеть на несуществующем сценарии.
+        этого прогон в состоянии `running` оставался бы таким навсегда, а по
+        `ON DELETE SET NULL` терял бы ещё и имя сценария.
         """
         uid = _get_uid(request)
         if not uid:

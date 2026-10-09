@@ -343,6 +343,9 @@ INLINE_MIGRATIONS: list[str] = [
     # токеном выглядел «активным», молча не отвечал подписчикам, и знал об
     # этом только серверный лог.
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_error TEXT",
+    # Сценарий и бот: модалка создания показывает выбор бота и присылает
+    # bot_id, а колонки под него не было — выбор выбрасывался молча.
+    "ALTER TABLE workflow_definitions ADD COLUMN IF NOT EXISTS bot_id BIGINT",
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ",
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS fail_streak INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE managed_bots ADD COLUMN IF NOT EXISTS last_ok_at TIMESTAMPTZ",

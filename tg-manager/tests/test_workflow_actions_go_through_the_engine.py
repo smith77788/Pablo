@@ -7,11 +7,12 @@
   * Удаление. Экран зовёт `DELETE /workflows/{id}` — там стоял голый
     `DELETE FROM workflow_definitions` и безусловный `{"ok": true}`. Удаление
     чужого или уже удалённого сценария отвечало «🗑 Удалён», список
-    перезагружался и показывал сценарий на месте. Хуже:
-    `workflow_runs.workflow_id` ссылается на определение внешним ключом БЕЗ
-    `ON DELETE`, так что у сценария с прогонами этот запрос падает ошибкой БД.
-    Готовый `delete_workflow` в движке именно это и разбирает — и звал его
-    только маршрут `DELETE /workflow/{id}`, которого нет во фронте.
+    перезагружался и показывал сценарий на месте. А прогоны оставались: в
+    развёрнутой схеме (schema_v183.sql) `workflow_runs.workflow_id` стоит с
+    `ON DELETE SET NULL`, так что незавершённый прогон не падал ошибкой, а
+    навсегда оставался в состоянии `running` и терял имя сценария. Готовый
+    `delete_workflow` в движке именно это и разбирает — и звал его только
+    маршрут `DELETE /workflow/{id}`, которого нет во фронте.
   * Пауза и активация переписывали тот же UPDATE, что `_set_active`.
 
 ЧТО ЛОМАЛОСЬ В ЯЗЫКЕ ШАГОВ. Экран рисует шаг `{"type": ...}` и только его.
@@ -84,8 +85,12 @@ _MISSING = object()
 class _Pool:
     """Пул, который считает запросы и умеет отдать «ничего не затронуто»."""
 
+    # Поля перечислены ровно те, что выбирает запрос деталей: обращение к
+    # строке идёт по ключу, и заглушка, отставшая от запроса, даёт KeyError на
+    # ВЕРНОМ коде. Именно так однажды покраснела ветка на колонке postponed.
     _DEFAULT_ROW = {"id": 7, "name": "Сценарий", "description": "",
-                    "steps": [], "is_active": False}
+                    "steps": [], "is_active": False,
+                    "bot_id": None, "bot_username": None}
 
     def __init__(self, *, row=_MISSING, rows=None, affected=1, deleted=1):
         self.calls: list[tuple[str, tuple]] = []
@@ -183,8 +188,8 @@ def test_deleting_clears_the_run_history_first():
         f"workflow_runs.workflow_id уронит запрос. Запросы: {queries}")
     assert max(updates) < min(deletes), "прогоны разбираются после удаления"
     assert any("cancelled" in q for q in queries), (
-        "незавершённые прогоны не отменены — останутся «выполняющимися» у "
-        "несуществующего сценария")
+        "незавершённые прогоны не отменены — по ON DELETE SET NULL они "
+        "останутся «выполняющимися» и без имени сценария навсегда")
 
 
 def test_both_delete_routes_lead_to_the_same_handler():
@@ -473,3 +478,95 @@ def test_the_screen_names_a_cancelled_run_cancelled():
         assert status in names, (
             f"прогон в состоянии {status} попадёт в ветку «иначе» и покажется "
             "как «🔵 В работе»")
+
+
+# ── Бот сценария ─────────────────────────────────────────────────────────────
+
+def test_the_chosen_bot_is_saved():
+    """Модалка создания присылает bot_id — раньше он выбрасывался молча."""
+    pool = _Pool()
+    resp = _call(pool, "POST", "/api/miniapp/workflows",
+                 _Req({"name": "Сценарий", "bot_id": 999}))
+    assert resp.status == 200, _body(resp)
+    inserts = [a for q, a in pool.calls if "INSERT INTO workflow_definitions" in q]
+    assert inserts, "сценарий не создан"
+    assert 999 in inserts[0], (
+        f"выбранный бот не доехал до INSERT: {inserts[0]} — владелец выбирал "
+        "бота, получал «✅ создан», и выбор исчезал без следа")
+
+
+def test_an_unbound_workflow_is_allowed():
+    """Селект предлагает «Не привязан» — пустая строка это не ноль и не ошибка."""
+    pool = _Pool()
+    resp = _call(pool, "POST", "/api/miniapp/workflows",
+                 _Req({"name": "Сценарий", "bot_id": ""}))
+    assert resp.status == 200, _body(resp)
+    assert _body(resp)["bot_id"] is None
+
+
+def test_someone_elses_bot_cannot_be_bound():
+    """Иначе по номеру бота можно повесить свой сценарий на бота соседа."""
+    pool = _Pool(row=None)
+    resp = _call(pool, "POST", "/api/miniapp/workflows",
+                 _Req({"name": "Сценарий", "bot_id": 999}))
+    assert resp.status == 404, (
+        f"чужой бот привязан без проверки владельца (ответ {resp.status})")
+    assert not any("INSERT INTO workflow_definitions" in q for q, _ in pool.calls)
+
+
+def test_the_bot_check_is_scoped_to_the_owner():
+    pool = _Pool()
+    _call(pool, "POST", "/api/miniapp/workflows",
+          _Req({"name": "Сценарий", "bot_id": 999}))
+    checks = [q for q, _ in pool.calls if "managed_bots" in q]
+    assert checks, "владелец бота не проверяется вовсе"
+    assert any("added_by=$2" in q for q in checks), (
+        f"проверка бота без владельца: {checks}")
+
+
+def test_a_bad_bot_id_is_refused():
+    pool = _Pool()
+    resp = _call(pool, "POST", "/api/miniapp/workflows",
+                 _Req({"name": "Сценарий", "bot_id": "не-число"}))
+    assert resp.status == 400
+
+
+def test_the_detail_screen_shows_which_bot_it_is():
+    pool = _Pool(row={"id": 7, "name": "Сценарий", "description": "",
+                      "steps": [], "is_active": False, "bot_id": 999,
+                      "bot_username": "my_bot"})
+    data = _body(_call(pool, "GET", "/api/miniapp/workflows/{wf_id}",
+                       _Req(wf_id=7)))
+    assert data["bot_id"] == 999 and data["bot_username"] == "my_bot", data
+
+
+def test_the_screen_prints_the_bound_bot():
+    html = INDEX.read_text(encoding="utf-8")
+    assert "d.bot_username" in html, (
+        "экран деталей не показывает бота — выбор владельца снова некуда "
+        "посмотреть")
+
+
+# ── Плитки «Выполняется» и «Ошибки» ──────────────────────────────────────────
+
+def test_the_list_reports_the_state_of_the_last_run():
+    pool = _Pool(rows=[{"id": 7, "name": "Сценарий", "status": "paused",
+                        "step_count": 2, "last_run": None,
+                        "run_status": "failed"}])
+    data = _body(_call(pool, "GET", "/api/miniapp/workflows", _Req()))
+    wf = data["workflows"][0]
+    assert wf["run_status"] == "failed", wf
+    assert wf["status"] == "paused", (
+        "состояние определения и состояние прогона — разные вещи, в одном "
+        "поле они и слиплись")
+
+
+def test_the_tiles_count_runs_and_not_the_definition():
+    html = INDEX.read_text(encoding="utf-8")
+    i = html.index("document.getElementById('wf-running')")
+    seg = html[i:i + 400]
+    assert "run_status === 'running'" in seg, (
+        "плитка «Выполняется» считалась по w.status, где бывает только "
+        "active/paused — она показывала ноль при любых данных")
+    assert "run_status === 'failed'" in html[i:i + 600], (
+        "плитка «Ошибки» считалась по тому же полю и так же всегда нулевая")

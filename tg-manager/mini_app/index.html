@@ -29266,8 +29266,11 @@ async function loadWorkflows() {
     const wfs = d.workflows || [];
     document.getElementById('wf-total').textContent = wfs.length;
     document.getElementById('wf-active').textContent = wfs.filter(w => w.status === 'active').length;
-    document.getElementById('wf-running').textContent = wfs.filter(w => w.status === 'running').length;
-    const wfFail = wfs.filter(w => w.status === 'failed').length;
+    // Плитки «Выполняется» и «Ошибки» считались по w.status, а там бывает
+    // только active/paused (из is_active) — обе показывали ноль при любых
+    // данных. Состояние ПРОГОНА приходит отдельным полем run_status.
+    document.getElementById('wf-running').textContent = wfs.filter(w => w.run_status === 'running').length;
+    const wfFail = wfs.filter(w => w.run_status === 'failed').length;
     const wfFailEl = document.getElementById('wf-failed');
     wfFailEl.textContent = wfFail;
     wfFailEl.style.color = wfFail ? 'var(--red)' : '';
@@ -29349,6 +29352,9 @@ async function openWorkflowDetail(wfId, wfName) {
     const steps = d.steps || [];
     let html = '';
 
+    if (d.bot_id) {
+      html += `<div class="hint" style="margin:0 14px 8px">🤖 Бот: ${d.bot_username ? '@' + esc(d.bot_username) : '#' + d.bot_id}</div>`;
+    }
     html += `<div style="display:flex;gap:8px;padding:4px 16px 8px">
       <button class="btn btn-p" onclick="toggleWorkflow(${wfId},${d.active ? 'false' : 'true'})" style="flex:1 1 auto;font-size:13px;padding:8px">${d.active ? '⏸ Пауза' : '▶️ Активировать'}</button>
       <button class="btn btn-r" onclick="deleteWorkflow(${wfId}, this)" style="flex:0 0 auto;padding:8px 14px;font-size:13px" aria-label="Удалить">🗑</button>
