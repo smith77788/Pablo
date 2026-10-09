@@ -22,6 +22,7 @@ from aiogram import Bot
 from services.logger import log_exc_swallow
 from services import infra_memory
 from services import flood_engine as _flood_engine
+from services import op_status
 
 log = logging.getLogger(__name__)
 
@@ -1102,9 +1103,14 @@ async def run_campaign(
             op_row = await pool.fetchrow(
                 "SELECT status FROM operation_queue WHERE id=$1", op_id
             )
-            if op_row and op_row["status"] == "cancelled":
+            # Общая дверь: ОТСУТСТВИЕ строки — тоже «стоп». Условие
+            # `op_row and ...` удалённую операцию не замечало, и кампания
+            # продолжала писать РЕАЛЬНЫМ людям по операции, которой уже нет —
+            # ровно то, что строкой выше уже учтено для удалённой кампании.
+            if op_status.stop_requested(op_row):
                 log.info(
-                    "dm_engine: operation %s отменена → останавливаю кампанию %d",
+                    "dm_engine: operation %s отменена или удалена → "
+                    "останавливаю кампанию %d",
                     op_id, campaign_id,
                 )
                 await pool.execute(
@@ -1129,14 +1135,16 @@ async def run_campaign(
                 _slept += 60
                 _cur = await pool.fetchrow(
                     "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id)
-                if _cur and _cur["status"] == "paused":
-                    log.info("dm_engine: campaign %d paused во время ночного ожидания",
-                             campaign_id)
+                # Кампанию могли удалить прямо во время ночного ожидания —
+                # это такое же «стоп», как пауза (см. проверку в начале цикла).
+                if _cur is None or _cur["status"] == "paused":
+                    log.info("dm_engine: campaign %d остановлена во время "
+                             "ночного ожидания", campaign_id)
                     return
                 if op_id:
                     _oq = await pool.fetchrow(
                         "SELECT status FROM operation_queue WHERE id=$1", op_id)
-                    if _oq and _oq["status"] == "cancelled":
+                    if op_status.stop_requested(_oq):
                         await pool.execute(
                             "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id)
                         return

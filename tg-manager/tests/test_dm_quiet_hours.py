@@ -87,7 +87,12 @@ def test_night_wait_stays_cancellable():
     night = src[src.index("accounts_awake(acc_cycle)"):]
     night = night[:2500]
     assert "asyncio.sleep(60)" in night, "ожидание обязано дробиться, а не спать до утра одним куском"
-    assert "paused" in night and "cancelled" in night
+    assert "paused" in night, "пауза кампании обязана срабатывать и ночью"
+    assert "cancelled" in night or "stop_requested" in night, (
+        "отмена операции обязана срабатывать и ночью. Слово 'cancelled' здесь "
+        "больше не обязательно: решение читает общая дверь "
+        "op_status.stop_requested, которая вдобавок считает стопом УДАЛЁННУЮ "
+        "операцию (см. tests/test_a_deleted_operation_stops_the_work.py)")
 
 
 def test_night_wait_has_safety_cap():

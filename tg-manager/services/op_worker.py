@@ -3539,8 +3539,10 @@ async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
         return cached[0] if cached is not None else False
     # Строки НЕТ = операция удалена владельцем → задача обязана остановиться.
     # Раньше row=None давал False, и удалённая операция доигрывала до конца
-    # (жалоба: «исполняются давно удалённые/отменённые операции»).
-    result = (row is None) or (row["status"] == "cancelled")
+    # (жалоба: «исполняются давно удалённые/отменённые операции»). Решение — в
+    # op_status.stop_requested: одна дверь на всех читателей отмены, потому что
+    # strike_engine и dm_engine повторяли здесь же починенную ошибку.
+    result = op_status.stop_requested(row)
     _cancel_cache[op_id] = (result, now)
     return result
 

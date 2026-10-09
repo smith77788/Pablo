@@ -34,6 +34,7 @@ from typing import Any
 import aiohttp
 
 from services.account_manager import normalize_telegram_join_ref
+from services import op_status
 from services.logger import log_exc_swallow
 from services import account_status as _acc_status
 
@@ -1818,16 +1819,25 @@ async def staggered_strike(
     sem = asyncio.Semaphore(_CONCURRENCY)
 
     async def _op_cancelled() -> bool:
+        """Пора ли прекратить бить цель.
+
+        Решение отдаём общей двери (`op_status.stop_requested`): здесь оно
+        читалось как `row and row["status"] == 'cancelled'`, то есть удалённую
+        операцию проверка НЕ замечала и волны уходили дальше — жалобами с
+        живых аккаунтов по цели, которую владелец уже убрал из списка.
+        """
         if not (op_id and pool):
             return False
         try:
             row = await pool.fetchrow(
                 "SELECT status FROM operation_queue WHERE id=$1", op_id
             )
-            return bool(row and row["status"] == "cancelled")
         except Exception as e:
+            # Сбой БД стопом не считаем: рвать волну из-за сетевого блипа
+            # дороже, чем переспросить на следующем чекпоинте.
             log.warning('is_strike_cancelled query failed: %s', e)
             return False
+        return op_status.stop_requested(row)
 
     # Claim every account for the whole strike so warmup/op_worker/ghost won't
     # drive the same sessions in parallel (concurrent clients on one auth_key =
