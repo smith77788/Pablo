@@ -2762,6 +2762,118 @@ async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
     return closed
 
 
+# Окно, в котором сторож берётся продолжать оборвавшуюся цепочку расписания.
+# Снизу — чтобы не обгонять нормальный путь (продление идёт сразу после записи
+# статуса); сверху — размером с перерыв: цепочку, оборвавшуюся сутки назад,
+# продолжать вслепую уже нельзя, владелец мог давно всё поменять.
+_RECURRING_REPAIR_MIN_AGE_MIN = 5
+_RECURRING_REPAIR_MAX_AGE_H = 6
+_RECURRING_REPAIR_BATCH = 20
+
+
+async def _watchdog_recurring_chain(pool: asyncpg.Pool, bot: Bot) -> int:
+    """Продолжить расписание, оборвавшееся на закрытии круга. Возвращает число.
+
+    ПОЧЕМУ ОБРЫВ ВОЗМОЖЕН. Порядок на пути завершения такой: сперва
+    терминальный статус круга, потом объявление исхода, и только потом
+    продление (`_reschedule_recurring`). Порядок правильный — продление идёт
+    через шину, то есть через предохранитель и гейт тарифа, и делать это до
+    закрытия круга нельзя. Но между двумя записями есть зазор, а SIGTERM на
+    Railway приходит когда угодно: круг закрыт, следующий не поставлен, и
+    закрытую операцию больше никто не смотрит. Расписание умирало НАВСЕГДА, и
+    владелец узнавал об этом по тишине в канале — тот же исход, про который
+    докстринг `_reschedule_recurring` говорит «хуже всего, что владелец об
+    этом не узнавал», только причина другая и не закрытая.
+
+    КАК ОТЛИЧИТЬ ОБРЫВ ОТ ЗДОРОВОЙ ЦЕПОЧКИ. Продление ставит на закрытом круге
+    отметку `recurring_next_op`. Нет отметки — продления не было. Этого мало:
+    круги, закрытые ДО появления отметки, её тоже не имеют, а продолжены были.
+    Поэтому второе условие: у владельца не должно остаться ни одного живого
+    круга этой же цепочки (сверяем по метке, с которой расписание и живёт).
+    Сомнение всегда трактуется в пользу «не трогать»: лишний круг автопостинга
+    — это второй пост в канал, то есть именно то, чего избегаем.
+
+    Продолжаем ЧЕРЕЗ `_reschedule_recurring`, а не своим INSERT: все защиты
+    (allowlist типов, repeat_count, счётчик неудач подряд, предохранитель,
+    тариф) остаются на месте. Если продление не состоялось и после этого
+    (тип не из списка, повторы исчерпаны, предохранитель), ставим отметку 0 —
+    иначе сторож брался бы за один и тот же круг каждые пять минут.
+    """
+    repaired = 0
+    try:
+        rows = await _safe_fetch(
+            pool,
+            f"""SELECT id, owner_id, op_type, params, status,
+                      regexp_replace(COALESCE(label, ''), ' ↻$', '') AS base_label
+                 FROM operation_queue
+                WHERE status IN {op_status.sql_terminal_list()}
+                  AND status <> 'cancelled'
+                  AND finished_at IS NOT NULL
+                  AND finished_at < now() - make_interval(mins => $1::int)
+                  AND finished_at > now() - make_interval(hours => $2::int)
+                  AND COALESCE((params->>'repeat_interval_min')::int, 0) > 0
+                  AND params->>'recurring_next_op' IS NULL
+                ORDER BY finished_at
+                LIMIT $3::int""",
+            _RECURRING_REPAIR_MIN_AGE_MIN,
+            _RECURRING_REPAIR_MAX_AGE_H,
+            _RECURRING_REPAIR_BATCH,
+            log_ctx="[watchdog_recurring_chain]",
+        )
+        for row in rows:
+            op_id = int(row["id"])
+            params = row["params"]
+            if isinstance(params, str):
+                try:
+                    params = json.loads(params)
+                except (ValueError, TypeError):
+                    params = None
+            if not isinstance(params, dict):
+                continue
+            # Живой круг этой же цепочки = расписание не оборвано.
+            alive = await _safe_fetchval(
+                pool,
+                f"""SELECT 1 FROM operation_queue
+                     WHERE owner_id = $1 AND op_type = $2
+                       AND status NOT IN {op_status.sql_terminal_list()}
+                       AND regexp_replace(COALESCE(label, ''), ' ↻$', '') = $3
+                     LIMIT 1""",
+                int(row["owner_id"]), str(row["op_type"]), row["base_label"],
+                log_ctx=f"[recurring_chain_alive op={op_id}]")
+            if alive:
+                continue
+            log.warning(
+                "op_worker: расписание op=%d оборвалось на закрытии круга "
+                "(следующий круг не поставлен) — продолжаю", op_id)
+            await _reschedule_recurring(
+                pool, bot, op_id, int(row["owner_id"]), str(row["op_type"]),
+                params,
+                productive=op_status.is_productive(str(row["status"])),
+                why="перерыв в работе воркера на закрытии круга",
+            )
+            placed = await _safe_fetchval(
+                pool,
+                "SELECT params->>'recurring_next_op' FROM operation_queue WHERE id=$1",
+                op_id, log_ctx=f"[recurring_chain_check op={op_id}]")
+            if placed:
+                repaired += 1
+            else:
+                # Продления не будет (тип, повторы, предохранитель, тариф) —
+                # помечаем, чтобы не возвращаться к этому кругу каждые 5 минут.
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue "
+                    "   SET params = jsonb_set(COALESCE(params, '{}'::jsonb), "
+                    "                          '{recurring_next_op}', to_jsonb(0)) "
+                    " WHERE id = $1",
+                    op_id, log_ctx=f"[recurring_chain_giveup op={op_id}]")
+        if repaired:
+            _reliability_metric("infragram_recurring_chains_repaired_total", repaired)
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker recurring-chain watchdog error: {e}")
+    return repaired
+
+
 async def _reconcile_in_operation(pool: asyncpg.Pool) -> None:
     """Снять залипший in_operation=TRUE с аккаунтов, которые НЕ держит ни одна
     живая операция (in-memory _accounts_in_use — источник истины).
@@ -3204,6 +3316,11 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # Alert admins about stuck operations every ~5 minutes (30 cycles)
             if _watchdog_tick % 30 == 0:
                 await _watchdog_alerts(pool, bot)
+                # Там же — расписания, оборвавшиеся на закрытии круга: круг
+                # закрыт, следующий не поставлен, и закрытую операцию больше
+                # никто не смотрит. Без этого автопостинг умирал от одного
+                # неудачно совпавшего деплоя — молча и навсегда.
+                await _watchdog_recurring_chain(pool, bot)
                 # Там же — сбой защитных записей: он опаснее застрявшей
                 # операции (повторное РЕАЛЬНОЕ действие), а виден был только
                 # в логах и во внутреннем счётчике.
@@ -4062,6 +4179,22 @@ async def _reschedule_recurring(
             "autopost v2: op=%d → следующий круг op=%d через %d мин (неудач подряд: %d)",
             op_id, _next_id, _rmin, streak,
         )
+        # ОТМЕТКА «ЦЕПОЧКА ПРОДОЛЖЕНА» на закрываемом круге. Нужна не для
+        # красоты: продление идёт ПОСЛЕ записи терминального статуса, и
+        # процесс, умерший в этом зазоре (деплой Railway приходит когда
+        # угодно), оставлял расписание мёртвым НАВСЕГДА — следующий круг не
+        # поставлен, а закрытую операцию больше никто не смотрит. Владелец
+        # узнавал об этом по тишине в канале через неделю. По отсутствию
+        # отметки сторож `_watchdog_recurring_chain` такую цепочку находит и
+        # продолжает.
+        await _safe_execute(
+            pool,
+            "UPDATE operation_queue "
+            "   SET params = jsonb_set(COALESCE(params, '{}'::jsonb), "
+            "                          '{recurring_next_op}', to_jsonb($2::bigint)) "
+            " WHERE id = $1",
+            op_id, int(_next_id),
+            log_ctx=f"[recurring_mark op={op_id}]")
     except _obus_r.ImmunityBlockedError as _ie:
         # Не сбой: предохранитель намеренно не пускает этот тип операции. Круг
         # пропущен, расписание оборвано — владелец должен узнать об этом, а не

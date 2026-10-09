@@ -44,6 +44,8 @@ _HELP = {
     "infragram_op_poisoned_total": "Операции, остановленные по исчерпании бюджета живучести",
     "infragram_op_flood_defers_total": "Операции, отложенные до конца длинной флуд-паузы",
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
+    "infragram_recurring_chains_repaired_total":
+        "Продолженные расписания, оборвавшиеся на закрытии круга",
     "infragram_invite_dedup_read_failures_total":
         "Сбои чтения журнала приглашений (дедуп на прогоне не действует)",
     "infragram_opt_out_read_failures_total":
