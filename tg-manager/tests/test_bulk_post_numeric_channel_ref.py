@@ -71,7 +71,9 @@ def _harness(monkeypatch, posted):
     async def _no_completed(pool, op_id):
         return set()
 
-    async def _no_flood_sleep(seconds, where=""):
+    async def _no_flood_sleep(seconds, where="", **kw):
+        # **kw — у паузы появились pool/op_id: она дробится и опрашивает
+        # отмену владельца (tests/test_cancel_does_not_wait_out_the_flood_pause).
         return 0.0
 
     async def _instant(*a, **kw):

@@ -603,6 +603,11 @@ async def _requeue_op_no_accounts(
 # и съедает его целиком, обрывая всю операцию.
 _FLOOD_INLINE_MAX_S = _int_env("OP_FLOOD_INLINE_MAX_SEC", 15 * 60, 30, 6 * 3600)
 
+# Шаг, которым дробится пауза внутри прогона, чтобы отмена владельца не
+# ждала её конца. Пятнадцать секунд — это три запроса в минуту на спящую
+# операцию, да и те снимает кэш `_is_cancelled` (5с).
+_CANCEL_PAUSE_STEP_S = 15.0
+
 # Запас между разрешённой паузой и окном застоя: шаг опроса сторожа плюс
 # джиттер, который пути флуда добавляют к паузе (до минуты).
 _STALL_PAUSE_GRACE_S = 5 * 60
@@ -667,7 +672,9 @@ def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
         pass
 
 
-async def bounded_flood_sleep(seconds: float, where: str = "") -> float:
+async def bounded_flood_sleep(
+    seconds: float, where: str = "", *, pool=None, op_id: int | None = None,
+) -> float:
     """Переждать флуд-паузу ВНУТРИ прогона, но не дольше _FLOOD_INLINE_MAX_S.
 
     Зачем предел. Пауза назначается ОДНОМУ аккаунту за ОДНО действие, а этот сон
@@ -696,8 +703,53 @@ async def bounded_flood_sleep(seconds: float, where: str = "") -> float:
         )
         _reliability_metric("infragram_flood_sleep_truncated_total", where=where or "unknown")
     if actual > 0:
+        if pool is not None and op_id:
+            return await _pause_watching_for_cancel(pool, int(op_id), actual, where)
         await asyncio.sleep(actual)
     return actual
+
+
+async def _pause_watching_for_cancel(
+    pool: "asyncpg.Pool", op_id: int, seconds: float, where: str = "",
+) -> float:
+    """Переждать паузу, НЕ пропустив отмену владельца. Возвращает проспанное.
+
+    РАЗРЫВ, который это закрывает. Отмена доходит до исполнителя опросом: все
+    исполнители спрашивают `_is_cancelled` на каждой цели. А пауза Telegram
+    пересиживается одним `asyncio.sleep` длиной до `_FLOOD_INLINE_MAX_S` (по
+    умолчанию четверть часа) — и всё это время отмена не замечается. Владелец
+    нажал «Отменить», операция ещё четверть часа показана работающей и держит
+    арендованные аккаунты. Ровно то поведение, из-за которого владелец
+    «начинает отменять и запускать заново, добирая новых ограничений» — так
+    про молчание в паузе и написано у `_defer_op_for_flood`.
+
+    Выйти из паузы раньше безопасно НЕ везде: у вызывающего следом может идти
+    повтор реального действия. Поэтому дробление включается параметрами
+    (`pool`, `op_id`) у тех вызовов, где после паузы идёт либо следующий виток
+    цикла (а он начинается с проверки отмены), либо явная проверка на месте.
+
+    Паузу Telegram это не укорачивает: штраф аккаунту уже записан в
+    flood_engine, и держат его пейсинг с карантином. Короче становится только
+    простой флота по отменённой операции.
+    """
+    step = max(0.05, float(_CANCEL_PAUSE_STEP_S))
+    waited = 0.0
+    while waited < seconds:
+        chunk = min(step, seconds - waited)
+        await asyncio.sleep(chunk)
+        waited += chunk
+        if waited >= seconds:
+            break
+        if await _is_cancelled(pool, op_id):
+            log.info(
+                "op_worker%s: op=%d отменена во время паузы — выходим через "
+                "%.0fс вместо %.0fс, аккаунты освобождаются",
+                f" {where}" if where else "", op_id, waited, seconds,
+            )
+            _reliability_metric("infragram_flood_pause_cut_by_cancel_total",
+                                where=where or "unknown")
+            break
+    return waited
 
 
 async def _note_flood_penalty(
@@ -5894,7 +5946,8 @@ async def _exec_mass_publish(
                 # но и не даём ей остановить весь прогон на часы: следующая цель
                 # идёт через другой канал и часто через другой аккаунт.
                 await bounded_flood_sleep(
-                    max(delay, float(flood_wait) + 5), "mass_publish")
+                    max(delay, float(flood_wait) + 5), "mass_publish",
+                    pool=pool, op_id=op_id)
             else:
                 # Базовый темп — под глобальным губернатором (давление флота).
                 # Для публикаций со ссылкой добавляем джиттер: РОВНЫЙ шаг (каждые
@@ -8153,7 +8206,18 @@ async def _exec_global_presence_bot(
                 )
                 # Лимит BotFather считается на аккаунт, а ретрай идёт уже с
                 # ДРУГОГО аккаунта — держать весь прогон всю паузу незачем.
-                await bounded_flood_sleep(wait_s, "gp_bot")
+                await bounded_flood_sleep(wait_s, "gp_bot",
+                                          pool=pool, op_id=op_id)
+                # Следом идёт ПОВТОР реального действия (создание бота через
+                # BotFather), поэтому здесь проверка отмены обязательна на
+                # месте: выход из дроблёной паузы сам по себе ничего не
+                # останавливает, а витка цикла с проверкой тут нет.
+                if await _is_cancelled(pool, op_id):
+                    return {
+                        "status": "cancelled",
+                        "summary": ("⏹ Остановлено владельцем во время "
+                                    "флуд-паузы BotFather"),
+                    }
                 # Switch to next account for retry (use round-robin index over accounts_list)
                 acc_rr_idx += 1
                 acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
@@ -8660,7 +8724,8 @@ async def _exec_bulk_create_channels_multi(
                     delay = random.uniform(*preset["item_delay"])
                 chaos = session_simulator.chaos_factor()
                 await bounded_flood_sleep(
-                    max(delay * chaos, flood_wait), "bulk_create_channels")
+                    max(delay * chaos, flood_wait), "bulk_create_channels",
+                    pool=pool, op_id=op_id)
     finally:
         await release_accounts(claimed_ids)
 
@@ -11307,7 +11372,8 @@ async def _exec_bulk_post_to_channel(
             # только СВОЁ слагаемое: flood_wait в час проходил через max() целиком
             # и останавливал прогон на час вместе со слотом и всем флотом.
             slept = await bounded_flood_sleep(
-                result.get("flood_wait", 0) or 0, "bulk_post")
+                result.get("flood_wait", 0) or 0, "bulk_post",
+                pool=pool, op_id=op_id)
             await asyncio.sleep(max(0.0, backoff(attempt) - slept))
 
         # channel_ref по контракту бывает ЧИСЛОВЫМ (mini-app шлёт int channel_id,
@@ -11914,7 +11980,8 @@ async def _exec_bulk_post_chans(
                 pool, acc_id, last_result.get("flood_wait") or 0, "publish", op_id)
             # Тот же класс, что в bulk_post: max() не ограничивал flood_wait.
             slept = await bounded_flood_sleep(
-                last_result.get("flood_wait", 0) or 0, "bulk_publish")
+                last_result.get("flood_wait", 0) or 0, "bulk_publish",
+                pool=pool, op_id=op_id)
             _pace = backoff(attempt, base=2.0, cap=30.0)
             if _has_channel_link:
                 # Ссылку нельзя лить залпом — поднимаем разнос до безопасного
@@ -18325,7 +18392,8 @@ async def _exec_content_clone(
                         "defer_s": _fw,
                         "reason": f"content_clone: FloodWait {_fw}s на {idx}/{total}",
                     }
-                await bounded_flood_sleep(_fw, "content_clone")
+                await bounded_flood_sleep(_fw, "content_clone",
+                                          pool=pool, op_id=op_id)
         except Exception as exc:
             log.warning("content_clone op=%d target=%s: %s", op_id, target_ref, exc)
             fail_count += 1

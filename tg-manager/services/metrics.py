@@ -44,6 +44,8 @@ _HELP = {
     "infragram_op_poisoned_total": "Операции, остановленные по исчерпании бюджета живучести",
     "infragram_op_flood_defers_total": "Операции, отложенные до конца длинной флуд-паузы",
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
+    "infragram_flood_pause_cut_by_cancel_total":
+        "Флуд-паузы, прерванные отменой владельца (флот освободился раньше)",
     "infragram_op_fleet_starved_total":
         "Операции, закрытые из-за того, что свободных аккаунтов так и не стало",
     "infragram_executor_lease_errors_total":
