@@ -35,9 +35,11 @@ _ОБЯЗАНЫ = {
         "accounts_mass",              # массовое удаление аккаунтов
         "channel_remove",
         "leave_workspace",            # выход участника и удаление пространства
-        "proxy_cleanup_dead",         # массовое удаление прокси
         "presence_pack_delete",
         "ecosystem_delete",
+    ],
+    "services/mini_app_proxies.py": [
+        "proxy_cleanup_dead",         # массовое удаление прокси
     ],
     "services/account_reset.py": [
         "reset_account",              # снятие риска = выключение карантина

@@ -122,8 +122,9 @@ def test_missing_is_backup_column_graceful():
 
 def test_route_and_engine_wired():
     import inspect
-    from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
+    # ручки прокси вынесены из mini_app_api.py в mini_app_proxies.py
+    from services import mini_app_proxies
+    src = inspect.getsource(mini_app_proxies)
     assert 'app.router.add_post("/api/miniapp/proxy/failover", proxy_failover)' in src
     assert 'app.router.add_post("/api/miniapp/proxy/{proxy_id}/backup", proxy_toggle_backup)' in src
     assert hasattr(ps, "failover_dead_proxies")

@@ -20,7 +20,14 @@ import pathlib
 import re
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Обработчики прокси вынесены из 25-тысячестрочного services/mini_app_api.py
+# в services/mini_app_proxies.py: контракт API от переноса не менялся, поэтому
+# читаем оба файла как один слой — ратчет не должен зависеть от того, в каком
+# файле лежит ручка.
+_API = "\n".join(
+    (_ROOT / "services" / _n).read_text(encoding="utf-8")
+    for _n in ("mini_app_api.py", "mini_app_proxies.py")
+)
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 

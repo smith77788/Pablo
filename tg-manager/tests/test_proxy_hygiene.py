@@ -15,6 +15,10 @@ from services.proxy_hygiene import (
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+# Обработчики прокси вынесены из 25-тысячестрочного services/mini_app_api.py
+# в services/mini_app_proxies.py: контракт API от переноса не менялся, поэтому
+# читаем оба файла как один слой — ратчет не должен зависеть от того, в каком
+# файле лежит ручка.
 def _read(rel: str) -> str:
     with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
         return f.read()
@@ -56,7 +60,7 @@ def test_mask_hides_credentials_keeps_host():
 
 
 def test_endpoints_routes_and_ui_wired():
-    api = _read("services/mini_app_api.py")
+    api = _read("services/mini_app_proxies.py")
     # delete_proxy теперь с guard'ом изоляции (проверка назначения + 409)
     seg = api[api.index("async def delete_proxy"):api.index("async def proxy_cleanup_dead")]
     assert "proxy_hygiene.delete_proxy_safely" in seg, (
@@ -78,8 +82,9 @@ def test_endpoints_routes_and_ui_wired():
 
 
 def test_proxy_stats_masks_and_enriches():
-    api = _read("services/mini_app_api.py")
-    seg = api[api.index("async def proxy_stats"):api.index("async def ecosystem_recommendations")]
+    api = _read("services/mini_app_proxies.py")
+    # proxy_stats — последняя ручка модуля, дальше только блок маршрутов
+    seg = api[api.index("async def proxy_stats"):]
     # НЕ отдаём сырой ENC:-шифротекст в UI: расшифровка + маскировка
     assert "decrypt_token" in seg and "proxy_hygiene.mask_proxy_url" in seg
     assert 'r["proxy_url"][:30]' not in seg  # старый баг (показ шифротекста) устранён

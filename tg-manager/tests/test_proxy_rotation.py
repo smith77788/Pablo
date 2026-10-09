@@ -118,7 +118,8 @@ def test_endpoint_transaction_guard_route_and_ui_wired():
     # резолвер не трогаем — правим только proxy_id
     assert "UPDATE tg_accounts SET proxy_id=" in seg
     # эндпоинт mini-app вызывает общую реализацию + маршрут + UI на месте
-    api = _read("services/mini_app_api.py")
+    # ручка ротации уехала в mini_app_proxies.py вместе с остальными прокси
+    api = _read("services/mini_app_proxies.py")
     assert "proxy_rotation.apply_rotation(pool, uid" in api
     assert 'add_post("/api/miniapp/proxy/rotate", rotate_proxies)' in api
     ui = _read("mini_app/index.html")

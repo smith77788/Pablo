@@ -25,12 +25,17 @@ import re
 
 from tests.miniapp_source import miniapp_html
 
-API = "services/mini_app_api.py"
+# Обработчики прокси вынесены из 25-тысячестрочного services/mini_app_api.py
+# в services/mini_app_proxies.py: контракт API от переноса не менялся, поэтому
+# читаем оба файла как один слой — ратчет не должен зависеть от того, в каком
+# файле лежит ручка.
+API = ("services/mini_app_api.py", "services/mini_app_proxies.py")
 
 
 def _api_src() -> str:
     import pathlib
-    return (pathlib.Path(__file__).resolve().parents[1] / API).read_text(encoding="utf-8")
+    root = pathlib.Path(__file__).resolve().parents[1]
+    return "\n".join((root / rel).read_text(encoding="utf-8") for rel in API)
 
 
 def _fn(src: str, name: str) -> str:

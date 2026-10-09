@@ -93,7 +93,8 @@ def test_write_paths_encrypt_and_use_proxy_fp():
     import os
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for rel in ("services/mini_app_api.py", "bot/handlers/proxy_manager.py"):
+    # mini_app_api.py больше не пишет прокси — запись живёт в mini_app_proxies.py
+    for rel in ("services/mini_app_proxies.py", "bot/handlers/proxy_manager.py"):
         with open(os.path.join(root, rel), encoding="utf-8") as f:
             src = f.read()
         assert "encrypt_token(proxy_url)" in src, f"{rel}: proxy_url пишется без шифрования"

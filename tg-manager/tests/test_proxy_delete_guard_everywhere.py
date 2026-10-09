@@ -89,7 +89,8 @@ def _func(path: str, name: str):
 @pytest.mark.parametrize(
     "path,name",
     [("bot/handlers/proxy_manager.py", "cb_proxy_delete"),
-     ("services/mini_app_api.py", "delete_proxy")],
+     # ручка Mini App уехала из mini_app_api.py в mini_app_proxies.py
+     ("services/mini_app_proxies.py", "delete_proxy")],
 )
 def test_both_doors_go_through_the_shared_guard(path, name):
     fn = _func(path, name)

@@ -175,3 +175,51 @@ def test_cache_prune_drops_expired_and_caps_size():
         m._cache[f"k{i}"] = (now + i, snap)
     m._cache_prune(now + m._CACHE_MAX_ENTRIES + 100, max_ttl=10 ** 9)
     assert len(m._cache) <= m._CACHE_MAX_ENTRIES
+
+
+def test_a_cached_handler_is_not_put_on_a_route_with_a_path_parameter():
+    """Ключ кэша — «имя:uid:строка_запроса», и параметра ПУТИ в нём нет.
+
+    Пока все три кэшируемых обработчика висят на путях без параметров, это
+    безвредно. Повесить такой обработчик на `/api/miniapp/channel/{id}` —
+    значит отдать владельцу под одним ключом ответы про РАЗНЫЕ объекты: он
+    открыл бы второй канал и увидел данные первого. Это не утечка между
+    владельцами (uid в ключе есть), а подмена объекта внутри своих же данных,
+    и заметить её по экрану почти нельзя.
+
+    Проверка на уровне маршрутов, а не текста: обёртка `functools.wraps`
+    сохраняет имя, поэтому кэшируемый обработчик узнаётся по наличию
+    `__wrapped__` и по тому, что он объявлен кэшируемым.
+    """
+    import re
+    from pathlib import Path
+
+    from aiohttp import web as _web
+
+    from services import mini_app_api as _M
+
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    # Имена обработчиков, помеченных декоратором кэша.
+    cached = set(re.findall(r"@_cached_user\(\)\s*\n\s*async def (\w+)", src))
+    assert cached, "декоратор кэша перестал находиться — проверка измеряет не то"
+
+    class _P:
+        async def fetch(self, q, *a): return []
+        async def fetchrow(self, q, *a): return None
+        async def fetchval(self, q, *a): return None
+        async def execute(self, q, *a): return "OK"
+
+    app = _web.Application()
+    _M.setup_routes(app, _P())
+    offenders = []
+    for route in app.router.routes():
+        info = route.resource.get_info() if route.resource else {}
+        path = info.get("path") or info.get("formatter") or ""
+        name = getattr(route.handler, "__name__", "")
+        if name in cached and "{" in path:
+            offenders.append(f"{route.method} {path} → {name}")
+    assert not offenders, (
+        "кэшируемый обработчик стоит на пути с параметром, а параметра пути в "
+        "ключе кэша нет — ответы про разные объекты лягут под один ключ:\n  "
+        + "\n  ".join(offenders))

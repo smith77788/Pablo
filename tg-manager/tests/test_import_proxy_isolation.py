@@ -26,6 +26,9 @@ from services.proxy_balancer import (
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _IMPORTER = (_ROOT / "services" / "session_importer.py").read_text(encoding="utf-8")
 _API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Обработчики прокси вынесены из 25-тысячестрочного mini_app_api.py в
+# services/mini_app_proxies.py; логин аккаунта (_persist_login) остался там.
+_PROXIES = (_ROOT / "services" / "mini_app_proxies.py").read_text(encoding="utf-8")
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 
@@ -195,14 +198,14 @@ def test_without_live_proxies_accounts_stay_and_are_reported():
 
 
 def test_evacuation_endpoint_targets_only_confirmed_dead_proxies():
-    src = _func_src(_API, "proxy_evacuate")
+    src = _func_src(_PROXIES, "proxy_evacuate")
     assert "is_alive IS FALSE" in src
     assert "PROXY_DEAD_STREAK" in src   # одна неудача — не смерть
     assert "owner_id=$1" in src
 
 
 def test_evacuation_tells_the_truth_about_isolation():
-    src = _func_src(_API, "proxy_evacuate")
+    src = _func_src(_PROXIES, "proxy_evacuate")
     assert "isolation_note" in src
     assert "evacuateDeadProxies" in _UI
-    assert 'app.router.add_post("/api/miniapp/proxy/evacuate"' in _API
+    assert 'app.router.add_post("/api/miniapp/proxy/evacuate"' in _PROXIES

@@ -50,7 +50,8 @@ def test_all_unique_ips_valid():
 def test_audit_endpoint_wired():
     # раньше validate_ip_diversity была мёртвой — guard, что теперь подключена
     import inspect
-    from services import proxy_selector, mini_app_api
+    # ручка аудита уехала в mini_app_proxies.py вместе с остальными прокси
+    from services import proxy_selector, mini_app_proxies
 
     assert "validate_ip_diversity" in inspect.getsource(proxy_selector.audit_proxy_isolation)
-    assert "isolation_check" in inspect.getsource(mini_app_api)
+    assert "isolation_check" in inspect.getsource(mini_app_proxies)
