@@ -540,7 +540,8 @@ async def signal_for_telegram_user(pool, owner_id: int, tg_user_id,
 
 
 async def _decay_batch(pool, where: str, args: list, limit: int,
-                       now: datetime) -> tuple[int, int]:
+                       now: datetime,
+                       owners_out: set[int] | None = None) -> tuple[int, int]:
     """Одна пачка распада. Возвращает (остыло, прочитано строк).
 
     Прочитано нужно отдельно от остывших: пачка может целиком состоять из
@@ -571,6 +572,8 @@ async def _decay_batch(pool, where: str, args: list, limit: int,
         await _write(pool, cur["owner_id"], cur["entity_type"], cur["entity_id"],
                      cur["state_key"], new, cur.get("source"), cur["value"])
         n += 1
+        if owners_out is not None and cur["owner_id"] is not None:
+            owners_out.add(int(cur["owner_id"]))
         ev = virtual_event_for(cur["value"], new["value"])
         if ev:
             try:
@@ -585,7 +588,8 @@ async def _decay_batch(pool, where: str, args: list, limit: int,
 
 
 async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
-                    batches: int = 20, now: datetime | None = None) -> int:
+                    batches: int = 20, now: datetime | None = None,
+                    owners_out: set[int] | None = None) -> int:
     """Остудить просроченные состояния. Возвращает число остывших.
     Каждый распад в LOST-переход тоже рождает виртуальное событие.
 
@@ -602,6 +606,14 @@ async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
 
     Потолок `batches` оставлен намеренно: проход организма не должен висеть на
     разовом всплеске неограниченно — остаток догонит следующее сердцебиение.
+
+    `owners_out` — у КОГО реально остыло. Нужен вызывающему, чтобы тут же
+    пересчитать каскад: распад только что изменил факты, а вердикт каскада
+    («аудитория горячая», «бот горячий») лежит записанным в базе и читается
+    экраном сводки, подсказками мозга и `world._vlayer`. Пересчитывался он
+    редким проходом раз в шесть часов — то есть владелец до шести часов видел
+    «горячо» про аудиторию, которая уже остыла, ровно там, где по этому
+    вердикту и принимают решение.
     """
     now = _now(now)
     where = "expires_at IS NOT NULL AND expires_at <= now()"
@@ -611,7 +623,8 @@ async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
         args.append(owner_id)
     total = 0
     for _ in range(max(1, int(batches))):
-        cooled, fetched = await _decay_batch(pool, where, args, limit, now)
+        cooled, fetched = await _decay_batch(pool, where, args, limit, now,
+                                             owners_out)
         total += cooled
         if fetched < limit:
             break                            # окно опустело

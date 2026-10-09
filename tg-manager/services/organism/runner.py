@@ -33,10 +33,38 @@ async def run(pool, bot) -> None:
         await asyncio.sleep(INTERVAL)
 
 
+_OWNERS_SQL = (
+    "SELECT owner_id FROM tg_accounts WHERE is_active AND owner_id IS NOT NULL "
+    "UNION SELECT added_by AS owner_id FROM managed_bots "
+    "WHERE is_active AND added_by IS NOT NULL "
+    "UNION SELECT owner_id FROM virtual_states WHERE owner_id IS NOT NULL"
+)
+_OWNERS_SQL_FALLBACK = (
+    "SELECT DISTINCT owner_id FROM tg_accounts "
+    "WHERE is_active AND owner_id IS NOT NULL"
+)
+
+
 async def _active_owners(pool) -> list[int]:
-    rows = await pool.fetch(
-        "SELECT DISTINCT owner_id FROM tg_accounts WHERE is_active AND owner_id IS NOT NULL")
-    return [int(r["owner_id"]) for r in rows]
+    """Кого обслуживает сердцебиение.
+
+    Список брался ровно из `tg_accounts`, а такт делает три разные работы:
+    нуджи мозга, каскады виртуального слоя и дозор роста. Владелец, который
+    работает только ботами и контактами (TG-аккаунтов не импортировал), в
+    список не попадал ВООБЩЕ: его воронка не остывала каскадом, «ходят по
+    кругу» не находилось, аномалии роста не замечались, и нудж не приходил
+    никогда — организм для него просто не жил. Берём объединение тех
+    источников, которые такт и обслуживает.
+    """
+    try:
+        rows = await pool.fetch(_OWNERS_SQL)
+    except Exception:
+        # Старая схема без одной из таблиц не должна останавливать пульс
+        # целиком: падаем до прежнего списка, а не до пустого.
+        log.debug("organism.runner: объединение владельцев не удалось",
+                  exc_info=True)
+        rows = await pool.fetch(_OWNERS_SQL_FALLBACK)
+    return [int(r["owner_id"]) for r in rows if r["owner_id"] is not None]
 
 
 async def _tick(pool, bot) -> int:
@@ -55,11 +83,13 @@ async def _tick(pool, bot) -> int:
     # живёт сутки, и шести часов задержки хватало, чтобы экран и каскад
     # считали по состояниям, которые уже неверны. Выборка идёт по частичному
     # индексу (только просроченные) и в спокойном состоянии не находит ничего.
+    cooled_owners: set[int] = set()
     try:
         from services import virtual_layer
-        cooled = await virtual_layer.run_decay(pool)
+        cooled = await virtual_layer.run_decay(pool, owners_out=cooled_owners)
         if cooled:
-            log.info("organism.runner: остыло состояний %d", cooled)
+            log.info("organism.runner: остыло состояний %d у %d владельцев",
+                     cooled, len(cooled_owners))
     except Exception:
         log.debug("organism.runner: virtual_layer decay failed", exc_info=True)
 
@@ -75,8 +105,15 @@ async def _tick(pool, bot) -> int:
         # «температуру» (много «горячих» → аудитория горячая). Чистого маппинга
         # контакт→бот нет, поэтому катим на уровень аудитории — это и есть
         # пример «147 горячих → кампания горячая». Тихо: пишет только на смену
-        # вердикта. Реже нуджей (по флагу редкого прохода) — это не горячий путь.
-        if _do_cascade:
+        # вердикта.
+        #
+        # Считаем редким проходом — это не горячий путь — НО обязательно ещё и
+        # тогда, когда у этого владельца только что остыли состояния: распад
+        # изменил факты, на которых стоит записанный вердикт. Раньше условие
+        # было только по редкому проходу, и «аудитория горячая» жила в базе до
+        # шести часов после того, как греть стало некого, — а читают этот
+        # вердикт экран сводки, подсказки мозга и выбор «самого горячего».
+        if _do_cascade or oid in cooled_owners:
             try:
                 from services import virtual_layer as _vl
                 await _vl.recompute_cascade(
@@ -98,6 +135,7 @@ async def _tick(pool, bot) -> int:
             except Exception:
                 log.debug("organism.runner: bot cascade failed owner=%s", oid,
                           exc_info=True)
+        if _do_cascade:
             # Невидимый триггер «заходил и уходил». Telegram такого события не
             # шлёт и прислать не может: он знает отдельные сообщения, а не то,
             # что человек третий раз подходит к покупке и отходит. Считается по
