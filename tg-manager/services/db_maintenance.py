@@ -35,7 +35,8 @@ log = logging.getLogger(__name__)
 _RETENTION: list[tuple[str, str, str]] = [
     # (table, timestamp_column, interval)
     ("behavioral_events", "occurred_at", "90 days"),
-    ("operation_log", "created_at", "30 days"),
+    # operation_log в этом списке НЕТ намеренно: по одному возрасту его чистить
+    # нельзя, см. _prune_operation_log (на журнале стоит идемпотентность повтора).
     ("restriction_events", "created_at", "90 days"),
     ("account_flood_log", "created_at", "30 days"),
     ("search_rankings", "checked_at", "90 days"),
@@ -80,6 +81,11 @@ _BROADCAST_DONE_STATUSES = ("done", "completed", "failed", "cancelled", "partial
 _BROADCAST_BATCH = 200
 
 _OPERATION_QUEUE_RETENTION = "30 days"
+# Журнал целей операции. Срок тот же, что был у общего списка, но решает не он
+# один: см. _prune_operation_log.
+_OPERATION_LOG_RETENTION = "30 days"
+# Сколько операций закрываем за проход — как у журнала рассылок.
+_OPERATION_LOG_BATCH = 200
 # "partial" — такой же терминальный статус, как done/failed
 # (services/op_status.py). Без него частично выполненные операции НИКОГДА не
 # вычищались: их строки копились в operation_queue бессрочно.
@@ -187,6 +193,62 @@ async def _prune_broadcast_delivery_log(pool: asyncpg.Pool) -> tuple[int, Except
     )
 
 
+async def _prune_operation_log(pool: asyncpg.Pool) -> tuple[int, Exception | None]:
+    """Журнал целей операций: чистим, но так, чтобы повтор не сделал всё заново.
+
+    ЧТО СТОИТ НА ЭТОМ ЖУРНАЛЕ. `op_worker.completed_targets` и
+    `completed_steps` считают сделанным ровно то, что есть в `operation_log` —
+    это и есть идемпотентность повтора. Пустой журнал означает «ничего не
+    сделано», то есть повтор проходит ВСЕ цели заново: те же приглашения тем же
+    людям (риск бана), второй пост в канал, второе сообщение человеку.
+
+    Раньше журнал стоял в общем списке уборки и чистился по одному возрасту,
+    без оглядки на статус операции. Недоведённая операция (`failed`/`partial`)
+    остаётся в списке «повторить» у владельца и через месяц — и повтор делал
+    работу заново. Тот же разрыв уже разобран у рассылок
+    (`_prune_broadcast_delivery_log`), и решение здесь такое же:
+
+      1. журнал операции, которая ЕЩЁ НЕ ЗАВЕРШЕНА, не трогаем ни в каком
+         возрасте: по нему идёт возобновление прямо сейчас;
+      2. завершённой операции сначала ставим отметку `journal_pruned`, и только
+         потом удаляем её строки. Прерваться между отметкой и удалением
+         безопасно: повтор будет запрещён по операции, журнал которой ещё цел.
+         Обратный порядок означал бы дубли реальных действий;
+    Строк-сирот тут не бывает: `operation_log.op_id` ссылается на
+    `operation_queue` с ON DELETE CASCADE, то есть удаление операции уносит её
+    журнал само. Отдельного прохода по сиротам поэтому нет — он был бы мёртвым
+    кодом. А `operation_queue` чистится только когда журнала уже нет, поэтому
+    этот уборщик идёт раньше.
+    """
+    from services import op_status
+
+    try:
+        ids = [r["id"] for r in await pool.fetch(
+            f"""SELECT q.id FROM operation_queue q
+                 WHERE q.journal_pruned = FALSE
+                   AND q.status IN {op_status.sql_terminal_list()}
+                   AND COALESCE(q.finished_at, q.created_at)
+                       < NOW() - INTERVAL '{_OPERATION_LOG_RETENTION}'
+                   AND EXISTS (SELECT 1 FROM operation_log ol WHERE ol.op_id = q.id)
+                 ORDER BY q.id
+                 LIMIT {_OPERATION_LOG_BATCH}""",
+        )]
+    except Exception as e:  # noqa: BLE001 — причину отдаём вызывающему
+        return 0, e
+    if not ids:
+        return 0, None
+    try:
+        await pool.execute(
+            "UPDATE operation_queue SET journal_pruned = TRUE WHERE id = ANY($1::bigint[])",
+            ids,
+        )
+    except Exception as e:  # noqa: BLE001
+        return 0, e
+    return await _prune_batched(
+        pool, "operation_log", "op_id = ANY($1::bigint[])", ids,
+    )
+
+
 async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
     """Execute one maintenance pass. Returns {table: rows_deleted}."""
     results: dict[str, int] = {}
@@ -274,6 +336,18 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         _record(results, f"{_tbl}(orphan)", deleted, err)
         if deleted:
             log.info("db_maintenance: pruned %d orphaned rows from %s", deleted, _tbl)
+
+    # Журнал целей операций: с отметкой «убран», иначе повтор сделает все цели
+    # заново (подробности в _prune_operation_log). Идёт ДО уборки
+    # operation_queue: та удаляет строку только когда журнала уже нет.
+    deleted, err = await _prune_operation_log(pool)
+    _record(results, "operation_log", deleted, err)
+    if deleted:
+        log.info(
+            "db_maintenance: pruned %d rows from operation_log (>%s, только у "
+            "завершённых операций и сироты)",
+            deleted, _OPERATION_LOG_RETENTION,
+        )
 
     # Журнал доставки рассылок: с отметкой «закрыта», иначе повторная отправка
     # уйдёт всем подписчикам заново (подробности в _prune_broadcast_delivery_log).

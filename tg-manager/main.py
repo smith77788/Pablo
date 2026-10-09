@@ -758,6 +758,10 @@ async def main() -> None:
         "worker_id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'all', "
         "started_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
         "last_seen TIMESTAMPTZ NOT NULL DEFAULT now())",
+        # Отметка «журнал целей убран» (schema_v247) — без неё повтор по
+        # операции, журнал которой уборка уже удалила, сделает все цели заново.
+        "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS "
+        "journal_pruned BOOLEAN NOT NULL DEFAULT FALSE",
         # Аренда исполнителя (schema_v246) — от неё зависит, разбирает ли процесс
         # очередь вообще. При лаге миграции запрос аренды падает, и правило «один
         # исполнитель» держится только fail-open'ом, то есть не держится.

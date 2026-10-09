@@ -1465,6 +1465,11 @@ async def resubmit_unfinished(
         f"""SELECT id, op_type, params, label, total_items FROM operation_queue
            WHERE owner_id=$1 AND status IN {_ost.sql_unfinished_list()}
              AND created_at > NOW() - ($2 * INTERVAL '1 hour')
+             -- Операции с убранным журналом целей не предлагаем вообще:
+             -- повтор по ним сделал бы всю работу заново (см. resubmit_one).
+             -- Окно здесь в часах, так что в норме таких тут и не бывает;
+             -- условие стоит затем, что окно задаёт вызывающий.
+             AND COALESCE(journal_pruned, FALSE) = FALSE
            ORDER BY created_at DESC LIMIT {int(limit)}""",
         owner_id, hours)
     retried, skipped, dropped, plan_blocked = 0, 0, 0, 0
@@ -1555,6 +1560,36 @@ async def resubmit_one(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
     if not _can:
         return {"ok": False, "op_id": None, "count": 0, "code": 409,
                 "reason": f"Повтор невозможен: {_why}"}
+
+    # Журнал целей убран уборкой — повторять НЕЛЬЗЯ. Идемпотентность
+    # исполнителя стоит на `operation_log`: пустой журнал означает «ничего не
+    # сделано», и повтор прошёл бы ВСЕ цели заново — те же приглашения тем же
+    # людям (риск бана), второй пост в канал, второе сообщение человеку.
+    # Отметку ставит уборка (db_maintenance._prune_operation_log) и только у
+    # завершённых операций старше срока хранения. Проверяем всю семью повторов:
+    # у свежего повтора журнал свой, но идемпотентность он берёт из журнала
+    # ПРЕДКА — если убран он, молчаливый дубль даёт ровно тот же результат.
+    # То же решение, что у рассылок: `broadcasts.delivery_log_pruned` плюс
+    # отказ в «отправить недоставленным».
+    try:
+        _pruned = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue "
+            " WHERE id = ANY($1::bigint[]) AND journal_pruned",
+            await retry_family_ids(pool, op_id))
+    except Exception:
+        # Fail-open, как и остальные чтения тут: не прочитали отметку — ведём
+        # себя как раньше. Иначе сбой БД запрещал бы повтор всему продукту.
+        log.warning("resubmit_one: не прочитана отметка journal_pruned op=%s", op_id)
+        _pruned = 0
+    if int(_pruned or 0):
+        return {
+            "ok": False, "op_id": None, "count": 0, "code": 409,
+            "reason": (
+                "Журнал целей этой операции уже убран (ей больше месяца), "
+                "поэтому повтор сделал бы всю работу заново — те же "
+                "приглашения, посты и сообщения второй раз. Поставьте новую "
+                "операцию с нужными целями."),
+        }
 
     params = info.get("params")
     if isinstance(params, str):
