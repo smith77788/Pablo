@@ -11541,7 +11541,12 @@ async def _exec_bulk_post_to_channel(
             slept = await bounded_flood_sleep(
                 result.get("flood_wait", 0) or 0, "bulk_post",
                 pool=pool, op_id=op_id)
-            await asyncio.sleep(max(0.0, backoff(attempt) - slept))
+            # Остаток темпа — тоже через дроблёную паузу: иначе отмена, уже
+            # прервавшая флуд-паузу, упиралась бы в этот сон и ждала его
+            # целиком (до минут). Длительность не меняется, меняется только
+            # реакция на отмену.
+            await _pause_watching_for_cancel(
+                pool, op_id, max(0.0, backoff(attempt) - slept), "bulk_post_pace")
 
         # channel_ref по контракту бывает ЧИСЛОВЫМ (mini-app шлёт int channel_id,
         # см. submit в mini_app_api). html.escape внутри делает s.replace(...) и
@@ -12154,7 +12159,10 @@ async def _exec_bulk_post_chans(
                 # Ссылку нельзя лить залпом — поднимаем разнос до безопасного
                 # минимума с рваным джиттером (см. _exec_mass_publish).
                 _pace = max(_pace, _LINK_SAFE_MIN_DELAY_S * random.uniform(0.7, 1.6))
-            await asyncio.sleep(max(0.0, _pace - slept))
+            # Тот же случай, что в bulk_post: пауза ссылочного режима доходит
+            # до полутора минут, и отмена не должна её пересиживать.
+            await _pause_watching_for_cancel(
+                pool, op_id, max(0.0, _pace - slept), "bulk_publish_pace")
 
         _summary = f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}"
         if _has_channel_link and ok_count > 0:

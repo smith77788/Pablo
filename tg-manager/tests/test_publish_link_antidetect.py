@@ -93,6 +93,15 @@ def _harness(monkeypatch, sent, slept):
     monkeypatch.setattr(op_worker, "_flood_cooldown_left", lambda a: 0.0)
     monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _false)
     monkeypatch.setattr(asyncio, "sleep", _sleep)
+    # Межканальная пауза идёт через дроблёную паузу (она опрашивает отмену
+    # владельца, иначе та ждала бы конца разноса). В `slept` при этом попадают
+    # КУСКИ по 15с, и по ним длину разноса не измерить — поэтому записываем
+    # ЗАПРОШЕННУЮ длительность целиком, как её видит исполнитель.
+    async def _paced(pool, op_id, secs, where=""):
+        slept.append(float(secs))
+        return float(secs)
+
+    monkeypatch.setattr(op_worker, "_pause_watching_for_cancel", _paced)
 
 
 _CHANNELS = [{"id": i, "channel_id": 1000 + i, "access_hash": 0, "username": ""}
