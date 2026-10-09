@@ -2786,7 +2786,12 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
     """
     try:
         rows = await pool.fetch(
-            f"""SELECT id, op_type, status, owner_id, last_error,
+            f"""SELECT id, op_type, status, owner_id,
+                      -- Причина — общим выражением по ОБЕИМ колонкам:
+                      -- `last_error` в одиночку делал алерт слепым на
+                      -- терминальную причину из `error_msg` (стережёт
+                      -- tests/test_operation_reason_is_shown_everywhere).
+                      {op_status.sql_error_reason()} AS reason,
                       (scheduled_for IS NOT NULL AND scheduled_for > now())
                           AS postponed,
                       EXTRACT(EPOCH FROM (now() - COALESCE(started_at, created_at)))/60 AS age_min
@@ -2804,7 +2809,10 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
                   OR (status NOT IN {op_status.sql_terminal_list()}
                         AND created_at < now() - make_interval(hours => $3)
                         AND scheduled_for > now()
-                        AND last_error IS NOT NULL)
+                        -- Та же причина, что и в выборке: по одной колонке
+                        -- третий класс пропускал операции, у которых причина
+                        -- легла в error_msg.
+                        AND {op_status.sql_error_reason()} IS NOT NULL)
                ORDER BY age_min DESC
                LIMIT 20""",
             _STUCK_PENDING_MIN, _LONG_RUNNING_MIN, _POSTPONED_TOO_LONG_H,
@@ -2876,8 +2884,8 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
             # Причина — только у откладываемых: без неё «застряла» читается
             # как повод отменить и запустить заново, а повторный запуск по
             # флуд-паузе только добирает ограничений.
-            if r["postponed"] and r["last_error"]:
-                lines.append(f"    <i>{str(r['last_error'])[:150]}</i>")
+            if r["postponed"] and r["reason"]:
+                lines.append(f"    <i>{str(r['reason'])[:150]}</i>")
         lines.append(
             "\n<i>«ожидает» не разбирается → проверьте воркер и тип операции; "
             f"«выполняется» зависло → будет авто-сброшено (не более "

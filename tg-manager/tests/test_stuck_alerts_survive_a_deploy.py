@@ -79,8 +79,11 @@ class _Bot:
 
 
 def _row(op_id=7, status="pending", age=25.0):
+    # `postponed` и `reason` выбирает сам запрос вотчдога, и читаются они по
+    # ключу: без них заглушка даёт KeyError на верном коде.
     return {"id": op_id, "op_type": "mass_publish", "status": status,
-            "owner_id": 42, "age_min": age}
+            "owner_id": 42, "age_min": age,
+            "postponed": False, "reason": None}
 
 
 def _fire(pool, bot, monkeypatch, admins=(1,)):

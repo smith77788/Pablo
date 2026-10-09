@@ -42,9 +42,15 @@ class _FakePool:
         return None
 
 
-def _row(op_id, status, owner_id, age_min, op_type="mass_invite"):
+def _row(op_id, status, owner_id, age_min, op_type="mass_invite",
+         postponed=False, reason=None):
+    # `postponed` и `reason` выбирает сам запрос вотчдога, и обращение к ним
+    # идёт по ключу: строка без них давала KeyError на ВЕРНОМ коде — именно так
+    # эти заглушки отстали от запроса и покрасили ветку. Третий класс алерта
+    # («срок переносим мы, уже сутками») проверяется ниже отдельно.
     return {"id": op_id, "op_type": op_type, "status": status,
-            "owner_id": owner_id, "age_min": age_min}
+            "owner_id": owner_id, "age_min": age_min,
+            "postponed": postponed, "reason": reason}
 
 
 def _run(coro):
@@ -102,3 +108,26 @@ def test_mixed_only_active_running_filtered(monkeypatch):
     text = _fire(pool, monkeypatch, active_ids={14})
     assert "#14" not in text
     assert "#15" in text and "#20" in text
+
+
+def test_a_postponed_operation_is_announced_with_its_reason(monkeypatch):
+    """Отложенная сутками операция объявляется и обязана нести причину.
+
+    Без причины «застряла» читается как повод отменить и запустить заново, а
+    повторный запуск по флуд-паузе только добирает ограничений — поэтому у
+    этого класса причина обязательна, а иконка отличается от просто ожидающей.
+    """
+    pool = _FakePool([_row(31, "pending", 777, 4000, postponed=True,
+                           reason="FloodWait: ждём 36 часов")])
+    text = _fire(pool, monkeypatch, active_ids=set())
+    assert "#31" in text, "откладываемая сутками операция не объявлена"
+    assert "FloodWait: ждём 36 часов" in text, (
+        "причина не показана — админ отменит операцию и доберёт ограничений")
+    assert "🔁" in text, "откладываемая операция помечена как просто ожидающая"
+
+
+def test_a_postponed_operation_without_a_reason_still_shows_up(monkeypatch):
+    """Причины нет — объявить всё равно: молчание дороже сообщения."""
+    pool = _FakePool([_row(32, "pending", 777, 4000, postponed=True)])
+    text = _fire(pool, monkeypatch, active_ids=set())
+    assert "#32" in text
