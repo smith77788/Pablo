@@ -870,8 +870,13 @@ async def apply_cooldown(
                        last_flood_at = CASE WHEN $6::bool THEN NOW() ELSE last_flood_at END,
                        flood_count_7d = COALESCE(flood_count_7d, 0) + $3::int,
                        acc_status = CASE
+                           -- Терминальный статус не затираем паузой: иначе
+                           -- мёртвый аккаунт выглядит «просто на паузе» и
+                           -- после неё снова пойдёт в работу. Набор — из
+                           -- словаря: литерал из трёх статусов пропускал
+                           -- session_expired, deleted и frozen.
                            WHEN COALESCE(acc_status, 'active')
-                               IN ('spamblock', 'banned', 'deactivated') THEN acc_status
+                               IN (""" + _acc_status.sql_dead_list() + """) THEN acc_status
                            WHEN $4::bool THEN 'cooldown'
                            ELSE acc_status
                        END,
@@ -930,8 +935,9 @@ async def apply_post_action_cooldown(
                            NOW() + ($1 * INTERVAL '1 second')
                        ),
                        acc_status = CASE
+                           -- См. выше: терминальный статус паузой не затираем.
                            WHEN COALESCE(acc_status, 'active')
-                               IN ('spamblock', 'banned', 'deactivated') THEN acc_status
+                               IN (""" + _acc_status.sql_dead_list() + """) THEN acc_status
                            ELSE 'cooldown'
                        END,
                        status_reason = $3

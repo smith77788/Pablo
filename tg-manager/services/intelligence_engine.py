@@ -27,6 +27,8 @@ import asyncpg
 from services.account_manager import effective_account_status
 from services.logger import log_exc_swallow
 
+from services import account_status as _acc_status
+
 log = logging.getLogger(__name__)
 
 # ── Константы времён операций (секунд на 1 элемент, нижняя/верхняя) ──────────
@@ -681,7 +683,11 @@ async def _assess_risk_impl(
                    AND (cooldown_until IS NULL OR cooldown_until < NOW())
                    AND session_str IS NOT NULL
                    AND session_str <> ''
-                   AND COALESCE(acc_status, 'active') NOT IN ('spamblock', 'banned', 'deactivated')
+                   -- Набор мёртвых статусов — из словаря: литерал из трёх
+                   -- пропускал session_expired, deleted и frozen, и счётчик
+                   -- «доступно» обещал владельцу аккаунты, которых нет.
+                   AND COALESCE(acc_status, 'active') NOT IN ("""
+               + _acc_status.sql_dead_list() + """)
                ) AS available,
                COUNT(*) FILTER (WHERE is_active AND COALESCE(trust_score,1.0) < 0.4) AS low_trust,
                AVG(COALESCE(trust_score,1.0)) FILTER (WHERE is_active) AS avg_trust,
