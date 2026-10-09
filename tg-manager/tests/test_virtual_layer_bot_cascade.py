@@ -57,10 +57,13 @@ async def test_hot_bot_is_detected(monkeypatch):
         return None
 
     monkeypatch.setattr(vl, "_write", _noop)
-    # У бота 10 — шесть «готовых» из десяти; у бота 20 — один из десяти.
+    # У бота 10 — шесть «горячих» из десяти; у бота 20 — один из десяти.
+    # Рунг берём достижимый для бота (vl.BOT_HOT_AT): на `ready` с источником
+    # `bot_<id>` строк в проде не бывает — бот такого сигнала не наблюдает, и
+    # тест на них был зелёным при пороге, который не включался никогда.
     rows = _people(
-        [("bot_10", "ready")] * 6 + [("bot_10", "curious")] * 4
-        + [("bot_20", "ready")] + [("bot_20", "curious")] * 9)
+        [("bot_10", vl.BOT_HOT_AT)] * 6 + [("bot_10", "curious")] * 4
+        + [("bot_20", vl.BOT_HOT_AT)] + [("bot_20", "curious")] * 9)
     out = await vl.recompute_bot_cascade(_Pool(rows), 1)
     assert out.get("10") == "hot", out
     assert out.get("20") != "hot", out
@@ -71,9 +74,11 @@ async def test_thresholds_are_lower_than_for_the_whole_audience():
     src = inspect.getsource(vl.recompute_bot_cascade)
     assert "min_count: int = 5" in src and "min_share: float = 0.1" in src
     # Те же данные: по порогам бота — «горячо», по порогам всей аудитории — нет.
-    values = ["ready"] * 6 + ["curious"] * 4
-    assert vl.cascade(values, min_count=5, min_share=0.1) == "hot"
-    assert vl.cascade(values, min_count=20, min_share=0.15) != "hot"
+    values = [vl.BOT_HOT_AT] * 6 + ["curious"] * 4
+    assert vl.cascade(values, hot_at=vl.BOT_HOT_AT,
+                      min_count=5, min_share=0.1) == "hot"
+    assert vl.cascade(values, hot_at=vl.BOT_HOT_AT,
+                      min_count=20, min_share=0.15) != "hot"
 
 
 async def test_states_without_a_bot_source_are_ignored(monkeypatch):
@@ -93,7 +98,8 @@ async def test_unchanged_verdict_is_not_rewritten(monkeypatch):
         written.append(eid)
 
     monkeypatch.setattr(vl, "_write", _spy)
-    rows = _people([("bot_10", "ready")] * 6 + [("bot_10", "curious")] * 4)
+    rows = _people([("bot_10", vl.BOT_HOT_AT)] * 6
+                   + [("bot_10", "curious")] * 4)
     pool = _Pool(rows, existing={"10": {"value": "hot"}})
 
     async def _state(pool_, owner, etype, eid, skey):

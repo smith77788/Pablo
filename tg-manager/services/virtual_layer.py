@@ -303,7 +303,8 @@ def effective(state: dict | None, *, now: datetime | None = None) -> dict | None
 # ── Каскад (чистая функция) ────────────────────────────────────────────────
 
 def cascade_from_counts(counts: dict[str, int], *, hot_at: str = "ready",
-                        min_count: int = 20, min_share: float = 0.15) -> str | None:
+                        min_count: int = 20, min_share: float = 0.15,
+                        live: dict[str, int] | None = None) -> str | None:
     """То же решение, но по СЧЁТЧИКАМ значений, а не по списку детей.
 
     Каскаду нужны только два числа: сколько детей всего и сколько из них
@@ -312,6 +313,14 @@ def cascade_from_counts(counts: dict[str, int], *, hot_at: str = "ready",
     на каждом сердцебиении, и дважды: на каскад аудитории и на каскад ботов).
     С подписчиками бота в слое это растёт вместе с аудиторией без потолка,
     поэтому запрос теперь агрегирующий, а решение считается здесь.
+
+    `live` — те же счётчики, но только по НЕ просроченным строкам. Греть
+    родителя может лишь живое состояние: просроченный рунг — это рунг, чьё
+    окно уверенности прошло, распад его снимет на ближайшем проходе, и
+    принимать его за «горячо сейчас» нельзя. В знаменатель просроченные при
+    этом входят: человек из аудитории не исчез, он остыл, и доля горячих
+    обязана это чувствовать. Не передали — считаем все строки живыми (так
+    ведёт себя чистая `cascade`, которой срок не известен).
     """
     total = sum(int(c) for v, c in counts.items() if v and c > 0)
     if total == 0:
@@ -319,7 +328,8 @@ def cascade_from_counts(counts: dict[str, int], *, hot_at: str = "ready",
     threshold = rank(hot_at)
     if threshold < 0:
         return None
-    hot = sum(int(c) for v, c in counts.items()
+    hot_src = counts if live is None else live
+    hot = sum(int(c) for v, c in hot_src.items()
               if v and c > 0 and rank(v) >= threshold)
     share = hot / total
     if hot >= min_count and share >= min_share:
@@ -675,10 +685,14 @@ async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
         "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
         "GROUP BY value, expired", owner_id, child_type, state_key, now)
     counts: dict[str, int] = {}
+    live: dict[str, int] = {}
     for r in rows:
-        val = effective_value(r["value"], bool(r["expired"]))
+        expired = bool(r["expired"])
+        val = effective_value(r["value"], expired)
         counts[val] = counts.get(val, 0) + int(r["c"])
-    verdict = cascade_from_counts(counts, **kw)
+        if not expired:
+            live[val] = live.get(val, 0) + int(r["c"])
+    verdict = cascade_from_counts(counts, live=live, **kw)
     if verdict is None:
         return await _cool_down(pool, owner_id, parent_type, parent_id, state_key)
     return await _apply_cascade_verdict(pool, owner_id, parent_type, parent_id,
@@ -690,8 +704,25 @@ async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
 # которой каскад до сих пор катился только на уровень всей аудитории владельца.
 _BOT_SOURCE = re.compile(r"^bot_(\d+)$")
 
+# Рунг, с которого человек считается «горячим» ДЛЯ КАСКАДА БОТА.
+#
+# Он обязан быть достижим сигналами, которые бот в принципе наблюдает. Бот
+# видит тап, ответ, /start, «стоп» и блокировку — то есть сигналы до
+# `clicked_offer` включительно, а он целит в `qualified`. Рунги выше
+# (`added_to_cart`, `asked_how_to_pay`, `paid`) ставятся только из Хранилища и
+# CRM, и строку они пишут со своим источником, не `bot_<id>`.
+#
+# Пока здесь стоял общий порог `ready`, каскад бота не мог вернуть ни «горячо»,
+# ни «тепло» НИКОГДА: он складывал ровно те строки, которые до этого рунга не
+# доходят по устройству. Владелец получал пустую температуру ботов на каждом
+# проходе, «самый горячий бот» в сводке не появлялся, а единственным действием
+# каскада оставалось остужение. Порог = верхний достижимый рунг канала, иначе
+# замер устроен так, что всегда отвечает «нет».
+BOT_HOT_AT = "qualified"
+
 
 async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel",
+                                hot_at: str = BOT_HOT_AT,
                                 min_count: int = 5, min_share: float = 0.1,
                                 now: datetime | None = None,
                                 **kw) -> dict[str, str]:
@@ -699,7 +730,8 @@ async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel
 
     Пороги ниже, чем у каскада на всю аудиторию: у отдельного бота аудитория
     меньше на порядок, и порог «20 горячих» для него недостижим — каскад просто
-    никогда не срабатывал бы. Пять горячих из полусотни — уже разговор.
+    никогда не срабатывал бы. Пять горячих из полусотни — уже разговор. Рунг
+    «горячего» — тоже свой, см. BOT_HOT_AT.
 
     Возвращает {bot_id: вердикт} только по ботам, где вердикт есть.
     """
@@ -716,18 +748,25 @@ async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel
         owner_id, USER, state_key, now)
 
     by_bot: dict[str, dict[str, int]] = {}
+    live_by_bot: dict[str, dict[str, int]] = {}
     for r in rows:
         m = _BOT_SOURCE.match(r["source"] or "")
         if m:
-            # Просроченный «готов» — уже не «готов», и греть им бота нельзя.
-            val = effective_value(r["value"], bool(r["expired"]))
+            # Просроченный «готов» — уже не «готов»: значение едет на рунг вниз,
+            # и греть бота им нельзя вовсе (см. `live` в cascade_from_counts).
+            expired = bool(r["expired"])
+            val = effective_value(r["value"], expired)
             counts = by_bot.setdefault(m.group(1), {})
             counts[val] = counts.get(val, 0) + int(r["c"])
+            if not expired:
+                live = live_by_bot.setdefault(m.group(1), {})
+                live[val] = live.get(val, 0) + int(r["c"])
 
     out: dict[str, str] = {}
     for bot_id, counts in by_bot.items():
         verdict = cascade_from_counts(
-            counts, min_count=min_count, min_share=min_share, **kw)
+            counts, hot_at=hot_at, min_count=min_count, min_share=min_share,
+            live=live_by_bot.get(bot_id, {}), **kw)
         if verdict is None:
             # Бот, у которого аудитория остыла, обязан остыть вместе с ней.
             cooled = await _cool_down(pool, owner_id, BOT, bot_id, state_key)
