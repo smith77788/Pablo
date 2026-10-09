@@ -413,7 +413,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         text="⚠️ Кулдаун вручную", callback_data=HealthCb(action="set_cooldown_menu")
     )
     kb.button(
-        text="🔓 Сбросить кулдауны",
+        text="🔓 Снять паузы и карантин",
         callback_data=HealthCb(action="reset_cooldown_menu"),
     )
     kb.button(text="🔄 Обновить", callback_data=HealthCb(action="menu"))
@@ -1894,16 +1894,16 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
 
     if not rows:
         text = (
-            "🔓 <b>Сбросить кулдауны</b>\n\n"
-            "✅ Нет активных кулдаунов — все аккаунты доступны."
+            "🔓 <b>Снять паузы и карантин</b>\n\n"
+            "✅ Ни пауз, ни карантина — все аккаунты доступны операциям."
         )
         kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
         await safe_edit(callback, text, reply_markup=kb.as_markup())
         return
 
     lines = [
-        "🔓 <b>Сбросить кулдауны</b>\n",
-        f"На паузе: <b>{len(rows)}</b> аккаунт(ов)\n",
+        "🔓 <b>Снять паузы и карантин</b>\n",
+        f"Не берутся в работу: <b>{len(rows)}</b> аккаунт(ов)\n",
     ]
     for acc in rows:
         name = (
@@ -1912,32 +1912,38 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
             or acc.get("phone")
             or f"id{acc['id']}"
         )
-        # cooldown_until пуст, когда аккаунт остывает ТОЛЬКО в памяти процесса —
-        # тогда остаток берём у flood_engine, иначе экран падал бы на None.
+        # cooldown_until пуст в двух случаях: аккаунт остывает ТОЛЬКО в памяти
+        # процесса (остаток берём у flood_engine) либо окна паузы нет вовсе, а
+        # держит аккаунт карантин риск-пульса по ограничениям. Раньше во втором
+        # случае экран писал «ещё скоро» — время, которого не существует.
         cd_until = acc["cooldown_until"]
         if cd_until is not None:
             cd_aware = (
                 cd_until if cd_until.tzinfo else cd_until.replace(tzinfo=timezone.utc)
             )
-            human_cd = _human_cooldown(cd_aware, now)
+            lines.append(
+                f"⏸ <b>{html.escape(name)}</b> — ещё {_human_cooldown(cd_aware, now)}")
         else:
-            human_cd = "скоро"
+            left = 0
             try:
                 from services.flood_engine import seconds_until_ready
                 left = int(seconds_until_ready(acc["id"]))
-                if left > 0:
-                    human_cd = _human_cooldown(
-                        now + timedelta(seconds=left), now)
             except Exception:
                 log_exc_swallow(log, f"reset_cooldown_menu: остаток acc={acc['id']}")
-        lines.append(f"⏸ <b>{html.escape(name)}</b> — ещё {human_cd}")
+            if left > 0:
+                human_cd = _human_cooldown(now + timedelta(seconds=left), now)
+                lines.append(f"⏸ <b>{html.escape(name)}</b> — ещё {human_cd}")
+            else:
+                lines.append(
+                    f"🛑 <b>{html.escape(name)}</b> — карантин по недавним "
+                    "ограничениям")
         kb.button(
             text=f"🔓 {name[:22]}",
             callback_data=HealthCb(action="reset_cooldown_one", page=acc["id"]),
         )
 
     kb.button(
-        text="🔓 Сбросить ВСЕ кулдауны",
+        text="🔓 Освободить ВСЕ",
         callback_data=HealthCb(action="reset_cooldown_all"),
     )
     kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
@@ -1981,15 +1987,16 @@ async def cb_reset_cooldown_one(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🔓 Сбросить ещё", callback_data=HealthCb(action="reset_cooldown_menu")
+        text="🔓 Освободить ещё", callback_data=HealthCb(action="reset_cooldown_menu")
     )
     kb.button(text="◀️ К дашборду", callback_data=HealthCb(action="menu"))
     kb.adjust(1)
 
     await safe_edit(
         callback,
-        f"✅ <b>Кулдаун снят</b>\n\n"
-        f"Аккаунт <b>{html.escape(name)}</b> снова доступен для операций.",
+        f"✅ <b>Аккаунт освобождён</b>\n\n"
+        f"Снята пауза и карантин по недавним ограничениям: "
+        f"<b>{html.escape(name)}</b> снова доступен для операций.",
         reply_markup=kb.as_markup(),
     )
 
@@ -2018,8 +2025,9 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
 
     await safe_edit(
         callback,
-        f"✅ <b>Все кулдауны сброшены</b>\n\n"
+        f"✅ <b>Паузы и карантин сняты</b>\n\n"
         f"Освобождено аккаунтов: <b>{count}</b>\n\n"
-        "<i>Все активные аккаунты снова доступны для операций.</i>",
+        "<i>Аккаунты, выбывшие по статусу (бан, спам-блок, протухшая сессия), "
+        "сюда не входят: снятие риска их не возвращает — смотрите пульс флота.</i>",
         reply_markup=kb.as_markup(),
     )

@@ -131,19 +131,34 @@ async def reset_account(pool, acc_id: int, owner_id: int) -> bool:
 async def cooled_account_ids(pool, owner_id: int) -> list[int]:
     """Аккаунты владельца, реально стоящие на паузе, — ОДИН список на всех.
 
-    Пауза бывает двух видов, и второй не виден в базе: `cooldown_until` в
-    `tg_accounts` (переживает перезапуск) и кулдаун flood_engine в памяти
-    процесса (его читают strike_engine.preflight и экран страйка в боте).
-    Меню «Сбросить кулдауны» смотрело только в базу и на аккаунте, остывающем
-    в памяти, писало «✅ Нет активных кулдаунов — все аккаунты доступны», пока
-    страйк отвечал «аккаунт на остывании, попробуйте позже». Считаем оба вида
-    здесь, чтобы список на экране и набор массового сброса не разъезжались.
+    Пауза бывает ТРЁХ видов, и два из них в `tg_accounts` не видны:
+
+      1. `cooldown_until` в `tg_accounts` — переживает перезапуск;
+      2. кулдаун flood_engine в памяти процесса — его читают
+         `strike_engine.preflight` и экран страйка в боте. Меню «Сбросить
+         кулдауны» смотрело только в базу и на таком аккаунте писало «✅ Нет
+         активных кулдаунов — все аккаунты доступны», пока страйк отвечал
+         «аккаунт на остывании»;
+      3. карантин риск-пульса по `restriction_events` — его читает гейт всех
+         операций `is_account_quarantined`. Окна кулдауна у такого аккаунта
+         нет вовсе, поэтому на экране сброса он не появлялся НИКОГДА: пульс
+         считал его в «Карантин», операции обходили, а единственная кнопка,
+         которая его освобождает (`risk_cleared_at`), показывала владельцу
+         «все аккаунты доступны». Та же жалоба «кулдаун не сбрасывается»,
+         только у неё не было даже кнопки.
+
+    Мёртвый по статусу аккаунт (`account_status.is_dead`) в список НЕ идёт:
+    снятие риска его не воскрешает (`banned` остаётся `banned`, и дверь
+    выбора его всё равно не возьмёт), а кнопка, которая ничего не меняет, —
+    это третий способ получить ту же жалобу. Про такой аккаунт честно
+    говорит экран флота: «забанен — не восстановить».
     """
     if not pool or not owner_id:
         return []
     try:
         rows = await pool.fetch(
-            "SELECT id, (cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS cd_db "
+            "SELECT id, COALESCE(acc_status,'active') AS acc_status, "
+            "(cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS cd_db "
             "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
             owner_id)
     except Exception:
@@ -155,10 +170,28 @@ async def cooled_account_ids(pool, owner_id: int) -> list[int]:
     except Exception:
         is_account_cooling = None  # нет сигнала памяти → считаем только базу
 
+    # Третий вид паузы — карантин риск-пульса. Спрашиваем ОДНИМ запросом на
+    # весь флот (та же дверь, что у гейта операций), и только про аккаунты,
+    # которые снятие риска реально вернёт в строй.
+    from services import account_status as _acc_status
+
+    revivable = [int(r["id"]) for r in rows
+                 if not _acc_status.is_dead(r.get("acc_status"))]
+    quarantined: set[int] = set()
+    try:
+        from services.infra_memory import quarantined_accounts
+        quarantined = await quarantined_accounts(pool, revivable)
+    except Exception:
+        # Обогащение не критично: без него экран покажет хотя бы кулдауны,
+        # как показывал раньше. Ронять из-за него единственный ручной путь
+        # вернуть аккаунт в строй нельзя.
+        log.warning("account_reset: карантин риск-пульса не получен owner=%s",
+                    owner_id, exc_info=True)
+
     cooled: list[int] = []
     for r in rows:
         acc_id = int(r["id"])
-        if r["cd_db"]:
+        if r["cd_db"] or acc_id in quarantined:
             cooled.append(acc_id)
             continue
         if is_account_cooling is None:
