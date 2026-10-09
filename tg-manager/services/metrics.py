@@ -50,6 +50,11 @@ _HELP = {
         "Сбоев запроса аренды исполнителя (пауза очереди не включена, fail-open)",
     "infragram_executor_lease_denied_total":
         "Кругов цикла, на которых процесс НЕ разбирал очередь: аренда у другого",
+    "infragram_executor_standdowns_total":
+        "Сдач аренды на ходу: процесс гасил идущие операции и отпускал аккаунты",
+    "infragram_op_cancel_orphans_closed_total":
+        "Отменённых операций, итог которым дописал сторож (воркер умер между "
+        "отменой и сворачиванием)",
     "infragram_notifications_undelivered_total":
         "Недоставленные уведомления владельцу (отчёт об операции до него не дошёл)",
     "infragram_journal_write_failures_total":
