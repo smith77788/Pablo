@@ -238,3 +238,68 @@ async def test_pulse_fleet_and_selection_agree_on_a_real_account():
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM tg_accounts WHERE owner_id=$1", owner)
         await pool.close()
+
+
+# ── Мини-апп: тот же словарь на клиенте ────────────────────────────────────
+
+def test_mini_app_knows_the_same_dead_statuses():
+    """Экран на клиенте считает «готовых» сам — набор обязан совпадать.
+
+    Запасной подсчёт в мини-аппе (когда серверный счётчик не пришёл) исключал
+    только 'banned' и 'spamblock': аккаунт с отозванной сессией показывался
+    владельцу готовым, хотя его не берёт ни одна операция.
+    """
+    import re
+
+    from tests.miniapp_source import miniapp_source
+
+    ui = miniapp_source()
+    m = re.search(r"const ACC_DEAD_STATUSES = \[(.*?)\];", ui)
+    assert m, "набор мёртвых статусов пропал из мини-аппа"
+    js = {part.strip().strip("'\"") for part in m.group(1).split(",")}
+    assert js == set(acc_status.DEAD_STATUSES), (
+        f"клиент и сервер разошлись: {js ^ set(acc_status.DEAD_STATUSES)}")
+
+
+def test_mini_app_ready_counter_requires_a_session():
+    """Аккаунт без сессии не берёт ни одна операция — готовым он не считается."""
+    from tests.miniapp_source import miniapp_source
+
+    ui = miniapp_source()
+    i = ui.index("const active = (stats && stats.active")
+    line = ui[i:ui.index("\n", i)]
+    assert "has_session" in line, line
+    assert "ACC_DEAD_STATUSES" in line, line
+
+
+def test_server_ready_counter_matches_the_selection_door():
+    """Серверный счётчик «готовых» — по тем же условиям, что дверь выбора."""
+    src = open("services/mini_app_api.py", encoding="utf-8").read()
+    assert "_ACTIVE_ACC_SQL = (" in src, (
+        "общего условия «готов к работе» в мини-апп-API нет — счётчик снова "
+        "считает по своему списку")
+    i = src.index("_ACTIVE_ACC_SQL = (")
+    block = src[i:src.index(")\n", i)]
+    assert "session_str IS NOT NULL" in block
+    assert "sql_dead_list()" in block
+    assert "cooldown_until" in block
+    assert src.count("AS active") >= 2, "счётчик остался только в одной ветке"
+
+
+def test_purge_filter_stays_narrower_on_purpose():
+    """Фильтр массового УДАЛЕНИЯ шире делать нельзя: спам-блок лечится, а не удаляется.
+
+    Утверждаем положительно — ровно тот набор, который считается
+    невоскрешаемым, — а не «в окне исходника нет такого слова»: окно
+    фиксированной длины сдвигается от любой правки рядом, и защита выключается
+    молча (`test_no_silently_disabled_guards` ловит именно это).
+    """
+    src = open("services/mini_app_api.py", encoding="utf-8").read()
+    clause = "COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')"
+    assert clause in src, (
+        "набор «невоскрешаемых» для массового удаления изменился — проверьте, "
+        "не попал ли в него спам-блок (его снимает реабилитация, не удаление)")
+    purge = {"banned", "deactivated", "session_expired"}
+    assert purge < set(acc_status.DEAD_STATUSES), (
+        "набор на удаление обязан быть СТРОГО уже словаря мёртвых статусов")
+    assert "spamblock" not in purge

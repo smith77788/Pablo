@@ -17,6 +17,7 @@ from typing import Any
 import asyncpg
 from aiohttp import web
 
+from services import account_status as _acc_status
 from services import operation_bus as _obus
 from services import op_status
 from services.mini_app_auth import (validate_init_data, make_token, parse_token,
@@ -3089,6 +3090,22 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Accounts ─────────────────────────────────────────────────────────────
 
+    # Условие «аккаунт реально может пойти в работу» — ОДНО на срез списка
+    # «Активные», на счётчик готовых и на масс-операции по этому срезу.
+    #
+    # Оно обязано совпадать с тем, кого берёт дверь выбора
+    # аккаунтов (`resource_selector.select_all_active`): иначе экран обещает
+    # флот, которого нет. Раньше он исключал только 'banned' и 'spamblock',
+    # поэтому `deactivated`, `session_expired`, `deleted`, `frozen` и аккаунты
+    # БЕЗ СЕССИИ считались готовыми — это и есть жалоба владельца «количество
+    # аккаунтов и готовых не верное»: операции такой аккаунт не берут ни одна.
+    # Набор мёртвых статусов — из единственного места (account_status).
+    _ACTIVE_ACC_SQL = (
+        "is_active AND session_str IS NOT NULL "
+        "AND COALESCE(acc_status,'ok') NOT IN ("
+        + _acc_status.sql_dead_list() + ") "
+        "AND (cooldown_until IS NULL OR cooldown_until <= now())")
+
     def _accounts_where(uid: int, flt: str, stage: str, q: str, admin: bool = False,
                         acc_pool: str = "", geo: str = "") -> tuple[str, list]:
         """Собрать WHERE + args для списка аккаунтов из фильтра здоровья, CRM-статуса
@@ -3102,11 +3119,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             clauses = ["owner_id=$1"]
             args = [uid]
         if flt == "active":
-            # Честный «активный» = рабочий и без ограничений: исключаем не только
-            # banned, но и spamblock — спамблокнутый аккаунт НЕ активен, иначе он
-            # протекал бы в папку «Активные» и в масс-операции по фильтру active.
-            clauses.append("is_active AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock') "
-                           "AND (cooldown_until IS NULL OR cooldown_until <= now())")
+            # Честный «активный» = тот, кого реально возьмёт операция. Список и
+            # счётчик обязаны показывать ОДИН набор: клик по чипу «Активные N»
+            # открывает ровно тех, кого обещал счётчик, и масс-операция по этому
+            # срезу идёт ровно по ним. Условие — общее (_ACTIVE_ACC_SQL).
+            clauses.append(_ACTIVE_ACC_SQL)
         elif flt == "cooldown":
             clauses.append("cooldown_until IS NOT NULL AND cooldown_until > now()")
         elif flt == "banned":
@@ -3196,6 +3213,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                       ROUND(COALESCE(trust_score, 1.0) * 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
                       cooldown_until, cluster, stage,
+                      -- Без сессии аккаунт не берёт ни одна операция (условие
+                      -- двери выбора). Строке это тоже нужно: иначе экран
+                      -- показывает «Активен» там, где работать нечем.
+                      (session_str IS NOT NULL) AS has_session,
                       -- Живость прокси СКАЛЯРНЫМ подзапросом, а не JOIN: у
                       -- tg_accounts и user_proxies совпадают id/owner_id/
                       -- is_active, и после JOIN условия из _accounts_where
@@ -3255,11 +3276,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='spamblock') AS spamblock,
                           COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')) AS dead,
-                          COUNT(*) FILTER (
-                              WHERE is_active
-                                AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
-                                AND (cooldown_until IS NULL OR cooldown_until <= now())
-                          ) AS active
+                          COUNT(*) FILTER (WHERE """ + _ACTIVE_ACC_SQL + """) AS active
                    FROM tg_accounts""")
         else:
             st = await _safe_fetchrow(pool,
@@ -3268,11 +3285,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok')='spamblock') AS spamblock,
                           COUNT(*) FILTER (WHERE cooldown_until IS NOT NULL AND cooldown_until > now()) AS cooldown,
                           COUNT(*) FILTER (WHERE COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')) AS dead,
-                          COUNT(*) FILTER (
-                              WHERE is_active
-                                AND COALESCE(acc_status,'ok') NOT IN ('banned','spamblock')
-                                AND (cooldown_until IS NULL OR cooldown_until <= now())
-                          ) AS active,
+                          COUNT(*) FILTER (WHERE """ + _ACTIVE_ACC_SQL + """) AS active,
                           -- Простаивают из-за прокси: аккаунт цел, чинить надо
                           -- прокси. Строго IS FALSE — непроверенный не считаем.
                           COUNT(*) FILTER (

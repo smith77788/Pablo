@@ -10814,6 +10814,12 @@ function renderChPreview(list, total) {
     : '');
 }
 
+// Мёртвые статусы аккаунта — ровно набор account_status.DEAD_STATUSES на
+// сервере. Разъехаться им нельзя: однажды `spamblock` уже считался здесь
+// рабочим, пока операции аккаунт не брали. Связь держит тест
+// test_dead_status_is_one_vocabulary.
+const ACC_DEAD_STATUSES = ['banned','deactivated','deleted','frozen','session_expired','spamblock'];
+
 function isOnCooldown(a) {
   return a.cooldown_until && new Date(a.cooldown_until) > new Date();
 }
@@ -10957,11 +10963,18 @@ function renderStageChips(byStage) {
 function updateAccKpi(list, stats) {
   // Предпочитаем серверную агрегацию (по всем аккаунтам); список ограничен LIMIT 100.
   const all    = (stats && stats.total!=null)    ? stats.total    : list.length;
-  // Честный «активный» — без спамблока и бана (спамблок считаем отдельно).
-  const active = (stats && stats.active!=null)   ? stats.active   : list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned'&&a.acc_status!=='spamblock').length;
+  // Честный «активный» — ровно тот, кого берёт дверь выбора аккаунтов на
+  // сервере: есть сессия, статус не из мёртвых, кулдаун не идёт. Раньше здесь
+  // исключались только 'banned' и 'spamblock', и запасной подсчёт считал
+  // готовыми аккаунты без сессии и с отозванной сессией — те, которых не
+  // берёт ни одна операция.
+  const active = (stats && stats.active!=null)   ? stats.active   : list.filter(a=>a.is_active&&a.has_session!==false&&!isOnCooldown(a)&&!ACC_DEAD_STATUSES.includes(a.acc_status)).length;
   const cd     = (stats && stats.cooldown!=null) ? stats.cooldown : list.filter(a=>isOnCooldown(a)).length;
   const spam   = (stats && stats.spamblock!=null)? stats.spamblock: list.filter(a=>a.acc_status==='spamblock').length;
   const banned = (stats && stats.banned!=null)   ? stats.banned   : list.filter(a=>a.acc_status==='banned').length;
+  // ВНИМАНИЕ: это НЕ набор мёртвых статусов (ACC_DEAD_STATUSES), а более узкий
+  // набор «невоскрешаемых»: счётчик ведёт на массовое УДАЛЕНИЕ, и спам-блок
+  // сюда не входит — его снимает реабилитация, а не удаление аккаунта.
   const dead   = (stats && stats.dead!=null)     ? stats.dead     : list.filter(a=>['banned','deactivated','session_expired'].includes(a.acc_status)).length;
   // Простаивают из-за прокси. Запасной подсчёт по загруженной странице —
   // строго proxy_alive === false: непроверенный прокси мёртвым не считаем.
