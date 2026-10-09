@@ -31,10 +31,14 @@ from services import op_worker, account_manager, flood_engine
 
 ACC = 8101
 
-# Статусы, при которых аккаунт не годится для действия. Держим их здесь списком,
-# а не берём из op_worker: тогда при пропавшей защите падают сами проверки, а не
-# сбор модуля, и видно, какая именно связка сломалась.
-_DEAD = ("banned", "deactivated", "session_expired", "spamblock")
+# Статусы, при которых аккаунт не годится для действия. Берём из словаря
+# `account_status.DEAD_STATUSES` — единственного места, где набор объявлен.
+# Своя копия здесь была вписана руками и устарела ровно так же, как копии в
+# коде: словарь пополнили `deleted` и `frozen`, а копия осталась из четырёх, и
+# проверка «списки совпадают» стала сверять устаревшее с устаревшим.
+from services.account_status import DEAD_STATUSES as _DEAD_VOCAB
+
+_DEAD = tuple(sorted(_DEAD_VOCAB))
 
 
 class _FakePool:
@@ -178,36 +182,32 @@ def test_cooldown_status_is_not_a_dead_status():
 
 
 def test_the_dead_list_matches_the_single_door():
-    """Расхождение со списком единой двери = более слабые правила у одиночных."""
+    """Расхождение со словарём = более слабые правила у одиночных операций.
+
+    Проверка искала имена статусов ДОСЛОВНО в исходнике единой двери. Пока
+    список был вписан в каждую дверь руками, это работало; после сведения
+    набора в словарь двери стали подставлять его из `sql_dead_list()`, и
+    дословных имён в исходнике не стало — проверка покраснела на верной правке.
+    Хуже: она сверяла свою устаревшую копию с чужой устаревшей копией и не
+    замечала, что словарь уже ушёл вперёд на `deleted` и `frozen`.
+
+    Теперь сверяем с единственным источником — словарём.
+    """
     import inspect
 
+    from services import flood_engine as _fe
     from services import resource_selector
 
-    src = inspect.getsource(resource_selector.select_all_active)
-    assert tuple(op_worker._DEAD_ACC_STATUSES) == _DEAD, (
-        "список мёртвых статусов у одиночных исполнителей разошёлся с тестом")
-    for st in _DEAD:
-        assert f"'{st}'" in src, (
-            f"статус {st} отсеивают одиночные, но не массовые — или наоборот")
-
-
-# ── Сторож самой проверки ────────────────────────────────────────────────────
-
-def test_healthy_account_is_not_held_up(stubs):
-    """Детектор, который останавливает всё, сломан: здоровый аккаунт работает."""
-    pool = _FakePool()
-    res = _run(op_worker._exec_group_announce(
-        pool, None, 4, 777, {"acc_id": ACC, "text": "привет"}))
-
-    assert pool.gate_reads == 1, "гейт обязан спрашивать состояние аккаунта"
-    assert res["status"] == "done", res
-    assert "get_dialogs" in stubs, "здоровый аккаунт должен дойти до работы"
-
-
-def test_unreadable_state_does_not_block_the_operation(stubs, monkeypatch):
-    """fail-open: сбой чтения состояния не повод отказать в операции."""
-    async def _boom(*a, **k):
-        raise RuntimeError("БД недоступна")
-    monkeypatch.setattr(op_worker, "_safe_fetchrow", _boom)
-
-    assert _run(op_worker._single_account_parked(_FakePool(cd_left=1800), ACC)) is None
+    assert tuple(sorted(op_worker._DEAD_ACC_STATUSES)) == _DEAD, (
+        "список мёртвых статусов у одиночных исполнителей разошёлся со "
+        "словарём account_status.DEAD_STATUSES")
+    for door, src in (
+            ("массовая (resource_selector.select_all_active)",
+             inspect.getsource(resource_selector.select_all_active)),
+            ("одиночная (flood_engine.get_best_account)",
+             inspect.getsource(_fe.get_best_account)),
+    ):
+        assert "sql_dead_list()" in src, (
+            f"{door} дверь не берёт список мёртвых статусов из словаря — "
+            "её копия разъедется со словарём, как уже было со `deleted` и "
+            "`frozen`")

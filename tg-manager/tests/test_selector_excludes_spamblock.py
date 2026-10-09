@@ -13,17 +13,39 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _statuses_excluded(src: str) -> bool:
-    needle = ("COALESCE(a.acc_status, 'active') NOT IN "
-              "('banned', 'deactivated', 'session_expired', 'spamblock')")
-    return needle in src
+# Проверка искала в исходнике дословную строку
+# `NOT IN ('banned', 'deactivated', 'session_expired', 'spamblock')`. Пока список
+# был вписан в каждую дверь руками, это работало; потом набор свели в один
+# словарь `account_status.DEAD_STATUSES`, двери стали брать список оттуда — и
+# дословной строки не стало ни в одной. Проверка покраснела на ВЕРНОЙ правке, а
+# заодно перестала бы замечать настоящее: словарь пополнился `deleted` и
+# `frozen`, и дверь с вписанным вручную списком тихо пускала такие аккаунты.
+#
+# Поэтому сверяем не текст, а то, что обе двери берут набор из словаря.
+
+
+def _takes_the_list_from_the_vocabulary(src: str) -> bool:
+    return "sql_dead_list()" in src
+
+
+def test_the_vocabulary_calls_spamblock_dead():
+    """Сам словарь обязан считать spamblock непригодным для работы."""
+    from services.account_status import DEAD_STATUSES
+
+    assert "spamblock" in DEAD_STATUSES, (
+        "spamblock выпал из словаря мёртвых статусов — ограниченный Telegram "
+        "аккаунт снова пойдёт в работу и доведёт дело до бана")
 
 
 def test_bulk_door_excludes_spamblock():
     src = (ROOT / "services" / "resource_selector.py").read_text(encoding="utf-8")
-    assert _statuses_excluded(src), "select_all_active не исключает spamblock"
+    assert _takes_the_list_from_the_vocabulary(src), (
+        "select_all_active не берёт список мёртвых статусов из словаря — "
+        "своя копия разъедется со словарём, как уже было")
 
 
 def test_single_door_excludes_spamblock():
     src = (ROOT / "services" / "flood_engine.py").read_text(encoding="utf-8")
-    assert _statuses_excluded(src), "get_best_account не исключает spamblock"
+    assert _takes_the_list_from_the_vocabulary(src), (
+        "get_best_account не берёт список мёртвых статусов из словаря — "
+        "одиночные операции будут работать по более слабым правилам")

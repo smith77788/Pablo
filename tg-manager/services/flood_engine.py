@@ -29,6 +29,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from services import account_status as _acc_status
+
 import asyncpg
 from services.logger import log_exc_swallow
 
@@ -1018,7 +1020,14 @@ async def get_best_account(
         # этот фильтр каждый у себя (NOT IN banned/deactivated/session_expired);
         # переносим его в умный слой, чтобы «одна дверь» была строго безопаснее
         # сырого выбора, а не мягче.
-        "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired', 'spamblock')",
+        #
+        # Список — из словаря `account_status.DEAD_STATUSES`, а не литералом.
+        # Литерал уже разъехался: в словарь добавили `deleted` и `frozen`,
+        # массовая дверь (resource_selector) их отсекала, а здесь они проходили
+        # — то есть одиночные операции брали аккаунт, который массовые считают
+        # мёртвым.
+        "COALESCE(a.acc_status, 'active') NOT IN ("
+        + _acc_status.sql_dead_list() + ")",
         "a.id != ALL($2::bigint[])",
     ]
     params: list = [owner_id, exclude]

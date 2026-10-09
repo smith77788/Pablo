@@ -69,7 +69,13 @@ def test_selector_filters_cooldown_and_dead_status():
     аккаунт в кулдауне или мёртвый по статусу (иначе миграция ослабила бы защиту)."""
     body = _select_all_active_body()
     assert "cooldown_until" in body
-    assert "banned" in body and "session_expired" in body
+    # Статусы искались в теле дословно ('banned', 'session_expired'). Набор
+    # свели в словарь `account_status.DEAD_STATUSES`, дверь берёт список
+    # оттуда — дословных имён в теле больше нет, и проверка краснела на верном
+    # коде. Сверяем происхождение списка: своя копия здесь и означала бы
+    # ослабление защиты при следующем пополнении словаря.
+    assert "sql_dead_list()" in body, (
+        "единая дверь не берёт список мёртвых статусов из словаря")
 
 
 def test_client_actually_reads_these_fields():

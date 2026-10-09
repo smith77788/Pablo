@@ -23,6 +23,7 @@ from bot.utils.op_helpers import extract_flood_wait
 from services import resource_selector
 from services import operation_bus as _obus_reg
 from services import infra_memory as _infra_mem
+from services import account_status as _acc_status
 from services import session_simulator
 from services import geo_tempo
 from services import replica_guard as _rguard
@@ -723,10 +724,12 @@ def _flood_cooldown_left(acc_id: int) -> float:
         return 0.0
 
 
-# Статусы, с которыми аккаунт не годится для действия. Тот же список, что в
-# единой двери resource_selector.select_all_active: расхождение здесь означало
-# бы, что одиночные исполнители работают по более слабым правилам, чем массовые.
-_DEAD_ACC_STATUSES = ("banned", "deactivated", "session_expired", "spamblock")
+# Статусы, с которыми аккаунт не годится для действия. Берутся из словаря
+# `account_status.DEAD_STATUSES` — единственного места, где этот набор живёт.
+# Своя копия здесь уже разъезжалась: в словарь добавили `deleted` и `frozen`,
+# а копия осталась из четырёх статусов, и одиночный исполнитель считал такой
+# аккаунт живым, тогда как массовая дверь его отсекала.
+_DEAD_ACC_STATUSES = tuple(sorted(_acc_status.DEAD_STATUSES))
 
 
 async def _single_account_parked(
