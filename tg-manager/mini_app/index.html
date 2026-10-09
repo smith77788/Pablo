@@ -20406,8 +20406,14 @@ async function openBotFactory() {
   try {
     const ecos = await api('/api/miniapp/ecosystems');
     const sel = document.getElementById('bfEcosystem');
+    // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
+    // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
+    // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
+    // оставалось одно «Не привязывать». То есть привязать к экосистеме было
+    // нельзя, сколько бы их владелец ни создал.
+    const ecoList = Array.isArray(ecos) ? ecos : [];
     sel.innerHTML = '<option value="">Не привязывать</option>' +
-      (ecos.ecosystems||[]).map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
+      ecoList.map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
   } catch(e) {
     const sel = document.getElementById('bfEcosystem');
     if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
@@ -25325,8 +25331,14 @@ async function openGpCreateModal() {
   try {
     const ecos = await api('/api/miniapp/ecosystems');
     const sel = document.getElementById('gpEcosystem');
+    // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
+    // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
+    // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
+    // оставалось одно «Не привязывать». То есть привязать к экосистеме было
+    // нельзя, сколько бы их владелец ни создал.
+    const ecoList = Array.isArray(ecos) ? ecos : [];
     sel.innerHTML = '<option value="">Не привязывать</option>' +
-      (ecos.ecosystems||[]).map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
+      ecoList.map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
   } catch(e) {
     const sel = document.getElementById('gpEcosystem');
     if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
