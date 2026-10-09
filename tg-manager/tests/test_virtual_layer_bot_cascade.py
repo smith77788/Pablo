@@ -38,8 +38,18 @@ class _Pool:
         self.writes.append(args)
 
 
-def _people(pairs):
-    return [{"source": src, "value": val} for src, val in pairs]
+def _people(pairs, expired=False):
+    """Сгруппировать людей так, как это делает агрегирующий запрос каскада.
+
+    Каскад читает «источник + значение + просрочено ли + сколько», а не строку
+    на человека: иначе запрос растёт вместе с аудиторией бота. Тесты остаются
+    написанными в терминах людей, группировку делает заглушка — как база.
+    """
+    groups: dict[tuple, int] = {}
+    for src, val in pairs:
+        groups[(src, val)] = groups.get((src, val), 0) + 1
+    return [{"source": src, "value": val, "expired": expired, "c": c}
+            for (src, val), c in groups.items()]
 
 
 async def test_hot_bot_is_detected(monkeypatch):

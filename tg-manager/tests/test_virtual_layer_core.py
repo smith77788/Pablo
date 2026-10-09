@@ -166,3 +166,49 @@ def test_naive_datetime_does_not_crash_decay():
     naive = {"value": "ready", "confidence": 0.8,
              "expires_at": (T0 - timedelta(hours=1)).replace(tzinfo=None)}
     assert V.decay(naive, now=T0)["value"] == "qualified"
+
+
+# ── Каскад по счётчикам ──────────────────────────────────────────────────────
+
+def test_cascade_by_counts_decides_the_same_as_by_values():
+    """Каскад перестал тащить строку на человека — решение не должно поехать.
+
+    Запрос стал агрегирующим (значение + просрочено ли + сколько), и решение
+    считается по счётчикам. Любое расхождение с прежним путём означало бы, что
+    «кампания горячая» теперь определяется иначе, чем вчера.
+    """
+    cases = (
+        ["ready"] * 30 + ["new"] * 70,
+        ["ready"] * 2 + ["new"] * 98,
+        ["ready"] * 10 + ["qualified"] * 10 + ["interested"] * 80,
+        ["purchased"] * 25 + ["curious"] * 75,
+        ["new"] * 100,
+        [],
+        ["ready"] * 20,
+    )
+    for values in cases:
+        counts: dict[str, int] = {}
+        for v in values:
+            counts[v] = counts.get(v, 0) + 1
+        assert V.cascade(values) == V.cascade_from_counts(counts), values
+        # И с порогами бота — тоже.
+        assert V.cascade(values, min_count=5, min_share=0.1) == \
+            V.cascade_from_counts(counts, min_count=5, min_share=0.1), values
+
+
+def test_counts_ignore_empty_and_nonpositive():
+    assert V.cascade_from_counts({"ready": 0, "": 50}) is None
+    assert V.cascade_from_counts({"ready": 30, "new": 70}) == "hot"
+
+
+def test_an_expired_rung_counts_one_step_lower():
+    """Срок истёк — значение уже другое, и агрегат обязан это учитывать."""
+    assert V.effective_value("ready", False) == "ready"
+    assert V.effective_value("ready", True) == "qualified"
+    assert V.effective_value("curious", True) == "new"
+    # Дно лестницы ниже не опускается.
+    assert V.effective_value("new", True) == "new"
+    # Терминальные значения срока не имеют и просроченными не бывают, но и на
+    # них функция не должна ломаться.
+    assert V.effective_value(V.LOST, False) == V.LOST
+    assert V.effective_value("purchased", False) == "purchased"

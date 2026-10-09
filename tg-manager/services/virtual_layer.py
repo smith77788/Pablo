@@ -302,6 +302,33 @@ def effective(state: dict | None, *, now: datetime | None = None) -> dict | None
 
 # ── Каскад (чистая функция) ────────────────────────────────────────────────
 
+def cascade_from_counts(counts: dict[str, int], *, hot_at: str = "ready",
+                        min_count: int = 20, min_share: float = 0.15) -> str | None:
+    """То же решение, но по СЧЁТЧИКАМ значений, а не по списку детей.
+
+    Каскаду нужны только два числа: сколько детей всего и сколько из них
+    горячих. Список самих значений он не использует — а именно список и
+    приходилось тащить из базы целиком (строка на каждого человека владельца,
+    на каждом сердцебиении, и дважды: на каскад аудитории и на каскад ботов).
+    С подписчиками бота в слое это растёт вместе с аудиторией без потолка,
+    поэтому запрос теперь агрегирующий, а решение считается здесь.
+    """
+    total = sum(int(c) for v, c in counts.items() if v and c > 0)
+    if total == 0:
+        return None
+    threshold = rank(hot_at)
+    if threshold < 0:
+        return None
+    hot = sum(int(c) for v, c in counts.items()
+              if v and c > 0 and rank(v) >= threshold)
+    share = hot / total
+    if hot >= min_count and share >= min_share:
+        return "hot"
+    if hot >= max(1, min_count // 2) and share >= min_share / 2:
+        return "warm"
+    return None
+
+
 def cascade(child_values: list[str], *, hot_at: str = "ready",
             min_count: int = 20, min_share: float = 0.15) -> str | None:
     """Состояния детей → состояние родителя: hot | warm | None.
@@ -310,19 +337,30 @@ def cascade(child_values: list[str], *, hot_at: str = "ready",
     И по доле (min_share) — одно без другого лжёт: 3 из 5 это не тренд бота,
     а 20 из 100000 — не «горячая» кампания. «Тёплый» — половина порога.
     """
-    total = len([v for v in child_values if v])
-    if total == 0:
-        return None
-    threshold = rank(hot_at)
-    if threshold < 0:
-        return None
-    hot = sum(1 for v in child_values if rank(v) >= threshold)
-    share = hot / total
-    if hot >= min_count and share >= min_share:
-        return "hot"
-    if hot >= max(1, min_count // 2) and share >= min_share / 2:
-        return "warm"
-    return None
+    counts: dict[str, int] = {}
+    for v in child_values:
+        if v:
+            counts[v] = counts.get(v, 0) + 1
+    return cascade_from_counts(counts, hot_at=hot_at, min_count=min_count,
+                               min_share=min_share)
+
+
+def effective_value(value: str, expired: bool) -> str:
+    """Значение с применённым распадом, когда известна только просроченность.
+
+    Агрегирующий запрос отдаёт «значение + просрочено ли», без самого срока, а
+    распад-«нагонка» зависит от того, НАСКОЛЬКО давно срок истёк. Опускаем на
+    один рунг: распад идёт на каждом сердцебиении (15 минут), поэтому
+    просроченная строка просрочена не более чем на один шаг TTL, и один рунг —
+    это и есть её настоящее состояние. Терминальные значения срока не имеют и
+    сюда как просроченные не попадают.
+    """
+    if not expired:
+        return value
+    r = rank(value)
+    if r <= 0:
+        return value
+    return LADDER[r - 1]
 
 
 def virtual_event_for(from_value: str | None, to_value: str) -> str | None:
@@ -625,12 +663,22 @@ async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
     тот рунг, а распад применяет отдельный редкий проход. Без этого «горячая
     кампания» держалась на людях, пропавших недели назад.
     """
+    # Агрегат, а не строка на ребёнка: каскаду нужны только числа, а детей у
+    # владельца столько, сколько у него людей в слое (с подписчиками бота —
+    # без потолка). Группируем в базе по значению и признаку просрочки.
     rows = await pool.fetch(
-        "SELECT value, confidence, expires_at FROM virtual_states "
-        "WHERE owner_id=$1 AND entity_type=$2 "
-        "AND state_key=$3", owner_id, child_type, state_key)
-    values = [(effective(dict(r), now=now) or {}).get("value") for r in rows]
-    verdict = cascade(values, **kw)
+        # Момент сравнения передаём параметром: иначе `now` у этой функции стал
+        # бы декоративным, а на нём стоят проверки распада.
+        "SELECT value, (expires_at IS NOT NULL "
+        "               AND expires_at <= COALESCE($4::timestamptz, now())) AS expired, "
+        "COUNT(*) AS c FROM virtual_states "
+        "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+        "GROUP BY value, expired", owner_id, child_type, state_key, now)
+    counts: dict[str, int] = {}
+    for r in rows:
+        val = effective_value(r["value"], bool(r["expired"]))
+        counts[val] = counts.get(val, 0) + int(r["c"])
+    verdict = cascade_from_counts(counts, **kw)
     if verdict is None:
         return await _cool_down(pool, owner_id, parent_type, parent_id, state_key)
     return await _apply_cascade_verdict(pool, owner_id, parent_type, parent_id,
@@ -655,24 +703,31 @@ async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel
 
     Возвращает {bot_id: вердикт} только по ботам, где вердикт есть.
     """
+    # Агрегат по источнику: строк столько, сколько «бот × значение», а не
+    # сколько людей. Просрочка — признаком, срок в решение не входит.
     rows = await pool.fetch(
-        "SELECT source, value, confidence, expires_at FROM virtual_states "
+        "SELECT source, value, "
+        "       (expires_at IS NOT NULL "
+        "        AND expires_at <= COALESCE($4::timestamptz, now())) AS expired, "
+        "       COUNT(*) AS c FROM virtual_states "
         "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
-        "AND source IS NOT NULL",
-        owner_id, USER, state_key)
+        "AND source IS NOT NULL "
+        "GROUP BY source, value, expired",
+        owner_id, USER, state_key, now)
 
-    by_bot: dict[str, list[str]] = {}
+    by_bot: dict[str, dict[str, int]] = {}
     for r in rows:
         m = _BOT_SOURCE.match(r["source"] or "")
         if m:
-            # Через effective, как и каскад аудитории: просроченный «готов» —
-            # уже не «готов», и греть им бота нельзя.
-            by_bot.setdefault(m.group(1), []).append(
-                (effective(dict(r), now=now) or {}).get("value"))
+            # Просроченный «готов» — уже не «готов», и греть им бота нельзя.
+            val = effective_value(r["value"], bool(r["expired"]))
+            counts = by_bot.setdefault(m.group(1), {})
+            counts[val] = counts.get(val, 0) + int(r["c"])
 
     out: dict[str, str] = {}
-    for bot_id, values in by_bot.items():
-        verdict = cascade(values, min_count=min_count, min_share=min_share, **kw)
+    for bot_id, counts in by_bot.items():
+        verdict = cascade_from_counts(
+            counts, min_count=min_count, min_share=min_share, **kw)
         if verdict is None:
             # Бот, у которого аудитория остыла, обязан остыть вместе с ней.
             cooled = await _cool_down(pool, owner_id, BOT, bot_id, state_key)

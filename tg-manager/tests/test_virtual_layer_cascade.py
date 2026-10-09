@@ -20,15 +20,29 @@ UI = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 
 class _Pool:
-    """Заглушка: дети-контакты + одно состояние аудитории."""
-    def __init__(self, child_values, audience=None):
-        self._children = [{"value": v} for v in child_values]
+    """Заглушка: дети-контакты + одно состояние аудитории.
+
+    Выборку детей каскад делает АГРЕГАТОМ (строка на «значение + просрочено
+    ли», а не на человека: иначе запрос растёт вместе с аудиторией). Заглушка
+    поэтому группирует переданные значения так же, как это сделала бы база —
+    тест остаётся написанным в терминах детей.
+    """
+    def __init__(self, child_values, audience=None, expired_values=()):
+        self._groups: dict[tuple, int] = {}
+        for v in child_values:
+            self._groups[(v, False)] = self._groups.get((v, False), 0) + 1
+        for v in expired_values:
+            self._groups[(v, True)] = self._groups.get((v, True), 0) + 1
         self.audience = audience          # текущее состояние NETWORK/audience
         self.writes = []
+        self.rows_served = 0
 
     async def fetch(self, q, *a):
-        if "entity_type=$2 AND state_key=$3" in q and "COUNT" not in q:
-            return self._children         # выборка детей в recompute_cascade
+        if "entity_type=$2 AND state_key=$3" in q and "COUNT(*)" in q:
+            rows = [{"value": v, "expired": exp, "c": c}
+                    for (v, exp), c in self._groups.items()]
+            self.rows_served += len(rows)
+            return rows
         return []
 
     async def fetchrow(self, q, *a):
@@ -90,3 +104,31 @@ def test_cascade_runs_on_the_rare_pass_not_every_tick():
 def test_audience_temperature_surfaced_to_overview_and_screen():
     assert '"audience": ov.get("audience")' in API
     assert "d.audience" in UI
+
+
+def test_cascade_does_not_read_a_row_per_person():
+    """Строка на человека на каждом сердцебиении — счёт, растущий с аудиторией.
+
+    С подписчиками бота в слое детей у владельца столько, сколько у него
+    людей, а каскаду нужны только числа: сколько всего и сколько горячих.
+    """
+    pool = _Pool(["ready"] * 5000 + ["new"] * 5000)
+    v = asyncio.run(V.recompute_cascade(pool, 7, V.NETWORK, "audience", V.USER,
+                                        min_count=20, min_share=0.15))
+    assert v == "hot"
+    assert pool.rows_served <= 4, (
+        f"каскад прочитал {pool.rows_served} строк на 10000 детей — "
+        "запрос снова не агрегирующий")
+
+
+def test_an_expired_rung_does_not_heat_the_audience():
+    """Просроченный «готов» — уже не «готов»: один рунг вниз, и он не горячий."""
+    pool = _Pool([], expired_values=["ready"] * 30)
+    assert asyncio.run(V.recompute_cascade(
+        pool, 7, V.NETWORK, "audience", V.USER,
+        min_count=20, min_share=0.15)) is None
+    # А свежие ровно те же тридцать — греют.
+    pool2 = _Pool(["ready"] * 30)
+    assert asyncio.run(V.recompute_cascade(
+        pool2, 7, V.NETWORK, "audience", V.USER,
+        min_count=20, min_share=0.15)) == "hot"

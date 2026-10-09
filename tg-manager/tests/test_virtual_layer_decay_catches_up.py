@@ -169,7 +169,14 @@ def test_effective_of_nothing_is_nothing():
 # ── 4. Каскад считает по живым состояниям ──────────────────────────────────
 
 class _CascadePool:
-    """Дети-контакты (со сроками) + одно состояние родителя."""
+    """Дети-контакты (со сроками) + одно состояние родителя.
+
+    Каскад читает детей АГРЕГАТОМ: строка на «значение + просрочено ли», а не
+    на человека (иначе запрос растёт вместе с аудиторией). Момент сравнения
+    приходит параметром запроса — тестам нужно замороженное время. Заглушка
+    группирует так же, как это сделала бы база, поэтому тесты остаются
+    написанными в терминах детей со сроками.
+    """
 
     def __init__(self, children, parent=None):
         self.children = children
@@ -177,9 +184,24 @@ class _CascadePool:
         self.writes: list[str] = []
 
     async def fetch(self, sql, *args):
-        if "FROM virtual_states" in sql and "COUNT" not in sql:
-            return self.children
-        return []
+        if "FROM virtual_states" not in sql or "COUNT(*)" not in sql:
+            return []
+        moment = args[3] if len(args) > 3 and args[3] else datetime.now(timezone.utc)
+        by_source = "source," in sql
+        groups: dict[tuple, int] = {}
+        for child in self.children:
+            exp = child.get("expires_at")
+            expired = bool(exp is not None and exp <= moment)
+            key = (child.get("source") if by_source else None,
+                   child["value"], expired)
+            groups[key] = groups.get(key, 0) + 1
+        rows = []
+        for (src, value, expired), count in groups.items():
+            row = {"value": value, "expired": expired, "c": count}
+            if by_source:
+                row["source"] = src
+            rows.append(row)
+        return rows
 
     async def fetchrow(self, sql, *args):
         if "FROM virtual_states" in sql and self.parent:
