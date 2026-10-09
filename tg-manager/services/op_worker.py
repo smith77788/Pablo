@@ -2742,6 +2742,11 @@ _LONG_RUNNING_MIN = 45    # running дольше N минут = вероятно
 # внутри окна, переживает рестарт, а потерянный алерт вернётся, пока операция
 # ещё застрявшая.
 _STUCK_ALERT_REPEAT_S = 6 * 3600
+# Сколько часов операцию можно откладывать, прежде чем это перестанет быть
+# штатным ожиданием. Порог выше самой длинной штатной паузы Telegram (PeerFlood
+# откладывает на 48 часов), иначе вернулся бы ровно тот ложный алерт, от
+# которого уходило условие `scheduled_for <= now()` ниже.
+_POSTPONED_TOO_LONG_H = 72
 
 
 async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -2749,12 +2754,33 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
 
     - pending > _STUCK_PENDING_MIN: очередь не разбирается (перегруз/неизвестный op_type)
     - running > _LONG_RUNNING_MIN: вероятно завис (приближается к авто-reset)
+    - откладываемая > _POSTPONED_TOO_LONG_H: срок переносят, работа не идёт
     Повтор про одну операцию одному админу — не чаще
     _STUCK_ALERT_REPEAT_S, и это окно переживает рестарт процесса.
+
+    ТРЕТИЙ КЛАСС — ПРОБЕЛ ПЕРВЫХ ДВУХ. Отложенные операции исключены из
+    «ожидает» намеренно (условие `scheduled_for <= now()` ниже): ждать своего
+    срока — штатно. Но тем же полем пользуются ВСЕ пути откладывания —
+    флуд-пауза (`_defer_op_for_flood`, до 48 часов), повтор после ошибки,
+    пауза предохранителя, — и каждый переносит срок вперёд. Значит операция,
+    которую откладывают снова и снова, под критерий «застряла» не попадает
+    НИКОГДА: сколько бы суток она ни висела, её срок всегда в будущем.
+    Владельцу об этом говорят один раз, при первом откладывании; дальше
+    тишина, хотя работа не идёт.
+
+    Своё законное ожидание от нашего откладывания отличает причина: срок,
+    выбранный ВЛАДЕЛЬЦЕМ («запусти в пятницу»), ставится при постановке и
+    приходит без `last_error`; срок, который перенесли мы, всегда приходит с
+    причиной. Поэтому операция владельца, запланированная на месяц вперёд, не
+    объявляется, а наша, откладываемая четвёртые сутки, — объявляется, и
+    вместе с причиной: «застряла» без причины — это повод отменить и запустить
+    заново, то есть добрать ограничений.
     """
     try:
         rows = await pool.fetch(
-            """SELECT id, op_type, status, owner_id,
+            f"""SELECT id, op_type, status, owner_id, last_error,
+                      (scheduled_for IS NOT NULL AND scheduled_for > now())
+                          AS postponed,
                       EXTRACT(EPOCH FROM (now() - COALESCE(started_at, created_at)))/60 AS age_min
                FROM operation_queue
                WHERE (status='pending'
@@ -2766,9 +2792,14 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
                         -- ложным алертом «застряла» админам (с чужими owner_id).
                         AND (scheduled_for IS NULL OR scheduled_for <= now()))
                   OR (status='running'  AND started_at < now() - make_interval(mins => $2))
+                  -- Третий класс: срок переносим МЫ, и уже сутками (см. докстринг).
+                  OR (status NOT IN {op_status.sql_terminal_list()}
+                        AND created_at < now() - make_interval(hours => $3)
+                        AND scheduled_for > now()
+                        AND last_error IS NOT NULL)
                ORDER BY age_min DESC
                LIMIT 20""",
-            _STUCK_PENDING_MIN, _LONG_RUNNING_MIN,
+            _STUCK_PENDING_MIN, _LONG_RUNNING_MIN, _POSTPONED_TOO_LONG_H,
         )
     except Exception as e:
         log_exc_swallow(log, f"op_worker alerts query error: {e}")
@@ -2823,16 +2854,28 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
             continue
         lines = ["⚠️ <b>Застрявшие операции</b>\n"]
         for r in new_rows[:10]:
-            icon = "🕐" if r["status"] == "pending" else "⏳"
+            if r["postponed"]:
+                icon = "🔁"
+            elif r["status"] == "pending":
+                icon = "🕐"
+            else:
+                icon = "⏳"
             lines.append(
                 f"{icon} #{r['id']} <code>{r['op_type']}</code> — "
                 f"{op_status.label(r['status'])}, {int(r['age_min'])} мин "
                 f"(владелец {r['owner_id']})"
             )
+            # Причина — только у откладываемых: без неё «застряла» читается
+            # как повод отменить и запустить заново, а повторный запуск по
+            # флуд-паузе только добирает ограничений.
+            if r["postponed"] and r["last_error"]:
+                lines.append(f"    <i>{str(r['last_error'])[:150]}</i>")
         lines.append(
             "\n<i>«ожидает» не разбирается → проверьте воркер и тип операции; "
             f"«выполняется» зависло → будет авто-сброшено (не более "
-            f"{_MAX_REVIVES} раз, дальше операция помечается ошибкой).</i>")
+            f"{_MAX_REVIVES} раз, дальше операция помечается ошибкой); "
+            f"🔁 — срок переносим мы больше {_POSTPONED_TOO_LONG_H} ч, "
+            f"работа не идёт.</i>")
         try:
             await bot.send_message(aid, "\n".join(lines), parse_mode="HTML")
         except Exception:

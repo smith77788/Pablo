@@ -84,8 +84,11 @@ async def test_bulk_create_channels_multi_no_accounts():
 async def test_watchdog_alerts_dedup():
     """Алерт не спамит: повторный прогон с теми же op_id не шлёт заново."""
     from services import op_worker as w
+    # Поля запроса сторожа целиком: `postponed`/`last_error` отличают третий
+    # класс застрявших (срок переносим мы) от первых двух.
     rows = [{"id": 7, "op_type": "mass_publish", "status": "pending",
-             "owner_id": 42, "age_min": 20.0}]
+             "owner_id": 42, "age_min": 20.0, "postponed": False,
+             "last_error": None}]
     sent = []
 
     class _CountBot:
