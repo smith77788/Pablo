@@ -38,19 +38,30 @@ def test_network_plural_routes_registered():
 
 
 def test_workflow_plural_routes_and_list_fixed():
-    api = _read("services/mini_app_api.py")
+    # Обработчики сценариев переехали из mini_app_api.py в
+    # services/mini_app_workflows.py: тот файл — 25 тысяч строк в одной
+    # функции, и двенадцать маршрутов сценариев лежали в нём двумя кусками в
+    # двух тысячах строк друг от друга. Проверка переехала следом.
+    api = _read("services/mini_app_workflows.py")
     for line in [
         'add_post("/api/miniapp/workflows", workflow_create_plural)',
         'add_get("/api/miniapp/workflows/{wf_id}", workflow_detail_plural)',
         'add_patch("/api/miniapp/workflows/{wf_id}", workflow_toggle_plural)',
-        'add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_plural)',
         'add_post("/api/miniapp/workflows/{wf_id}/steps", workflow_add_step)',
     ]:
         assert line in api, f"нет маршрута: {line}"
+    # Удаление: один обработчик на оба маршрута — plural (его зовёт экран) и
+    # singular. Раньше это были две разные реализации, и экран нажимал ту,
+    # которая не отвязывала прогоны и отвечала успехом на чужой id.
+    assert 'add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_any)' in api
+    assert 'add_delete("/api/miniapp/workflow/{wf_id}", workflow_delete_any)' in api
     # workflow_list больше НЕ зовёт несуществующий list_workflows (был 500)
-    lst = api[api.index("async def workflow_list"):api.index("async def workflow_execute")]
-    assert "import list_workflows" not in lst and "await list_workflows" not in lst
+    lst = api[api.index("async def workflow_list"):
+              api.index("async def workflow_create_plural")]
+    assert "list_workflows" not in lst
     assert "jsonb_array_length" in lst and "'active'" in lst
     # add_step аппендит в inline jsonb steps
-    st = api[api.index("async def workflow_add_step"):api.index("async def operation_export")]
+    st = api[api.index("async def workflow_add_step"):api.index("async def _toggle")]
     assert "steps = COALESCE(steps,'[]'::jsonb) || $1::jsonb" in st
+    # И проверяет шаг словарём типов: шаг без type ронял весь экран деталей.
+    assert "validate_steps(" in st

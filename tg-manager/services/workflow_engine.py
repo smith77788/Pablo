@@ -117,14 +117,25 @@ async def create_workflow(
     name: str,
     description: str = "",
     steps: list[dict] | None = None,
+    is_active: bool = False,
 ) -> dict:
-    """Create a workflow definition."""
+    """Создать определение сценария.
+
+    `is_active=False` по умолчанию: сценарий ещё никто не исполняет, и
+    включённый по рождению он обещал бы владельцу работу, которой не будет.
+    Экран так и делал у себя в обработчике (`VALUES(..., FALSE)`) — условие
+    переехало сюда, чтобы оба пути создания означали одно.
+
+    Шаги пишутся КАК ДАНЫ: проверка — `validate_steps`, её зовут обработчики
+    (см. services/mini_app_workflows.py). Разделение намеренное: эту функцию
+    зовут и тесты движка, и служебный код, где шаги уже проверены.
+    """
     try:
         row = await pool.fetchrow(
-            '''INSERT INTO workflow_definitions (owner_id, name, description, steps)
-               VALUES ($1, $2, $3, $4::jsonb)
+            '''INSERT INTO workflow_definitions (owner_id, name, description, steps, is_active)
+               VALUES ($1, $2, $3, $4::jsonb, $5)
                RETURNING id''',
-            owner_id, name, description, json.dumps(steps or []))
+            owner_id, name, description, json.dumps(steps or []), bool(is_active))
         return {"ok": True, "id": row["id"]}
     except Exception as e:
         log.warning("create_workflow error: %s", e)
@@ -268,3 +279,155 @@ async def cancel_workflow(
     except Exception as e:
         log.warning("cancel_workflow error: %s", e)
         return {"ok": False, "error": str(e)}
+
+
+# ── Проверка шага ────────────────────────────────────────────────────────────
+# Сценарий складывался тремя разными языками шагов. Экран добавления шага и все
+# шаблоны говорят `{"type": ...}` — и экран деталей умеет рисовать только это:
+# `s.type.toUpperCase()`. Обработчик `POST /workflow/create` требовал вместо
+# этого ключ `action` и ничего не знал про `type`, а `POST /workflows/{id}/steps`
+# принимал ЛЮБОЙ непустой `type`. Словарь допустимых типов (WORKFLOW_STEP_TYPES)
+# лежал здесь же с комментарием «шаг неизвестного типа означал бы строку
+# ⚫ undefined в деталях сценария» — и не вызывался ниоткуда.
+#
+# Итог для владельца: шаг, сохранённый без `type`, ронял ВЕСЬ экран деталей
+# (TypeError на undefined.toUpperCase попадал в общий catch, и вместо сценария
+# показывалась ошибка), а шаг с опечаткой в типе превращался в безымянную
+# точку. Язык шагов теперь один, и проверяет его одна функция.
+
+# Предел текста шага — предел сообщения Telegram: писать в шаг больше, чем
+# можно отправить, значит заведомо хранить неотправимое.
+MAX_STEP_TEXT = 4096
+# Задержка между шагами. Экран предлагает вводить до суток (max=1440), но
+# шаблон «Дрип-серия» штатно ставит 2880 минут — двое суток, и это нормальная
+# дрип-серия, а не ошибка. Поэтому предел здесь шире экранного и означает
+# другое: 30 суток — верхняя граница осмысленного, за которой значение почти
+# наверняка опечатка (минуты вписали вместо дней, секунды вместо минут).
+MAX_STEP_DELAY_MIN = 30 * 24 * 60
+# Шагов на сценарий. Шаги лежат ОДНОЙ jsonb-колонкой и целиком читаются на
+# каждом открытии экрана: без предела один сценарий растёт без границ и
+# утягивает за собой время ответа всего списка.
+MAX_WORKFLOW_STEPS = 50
+
+
+def validate_step(step, index: int = 0) -> dict:
+    """Проверить и нормализовать один шаг сценария.
+
+    Возвращает НОВЫЙ словарь с полями, которые экран умеет показать. Непонятный
+    шаг — ValueError с русским текстом для владельца (обработчики отдают его
+    как 400), а не тихая запись в jsonb.
+
+    Валидация живёт рядом со словарём типов, а не внутри `create_workflow`:
+    `create_workflow` — тонкая запись в БД, её зовут и миграции, и тесты
+    движка. Вызывать проверку обязаны все пути записи из мини-аппа, и за это
+    есть храповик в tests/test_workflow_steps_speak_one_language.py.
+    """
+    where = f"Шаг {index + 1}"
+    if not isinstance(step, dict):
+        raise ValueError(f"{where}: ожидается объект с полем type")
+
+    stype = str(step.get("type") or "").strip().lower()
+    if not stype:
+        raise ValueError(
+            f"{where}: укажите type — один из {', '.join(sorted(WORKFLOW_STEP_TYPES))}")
+    if stype not in WORKFLOW_STEP_TYPES:
+        raise ValueError(
+            f"{where}: тип «{stype}» экран не умеет показать. Допустимые: "
+            + ", ".join(sorted(WORKFLOW_STEP_TYPES)))
+
+    out: dict[str, Any] = {"type": stype}
+
+    if stype == "message":
+        text = str(step.get("text") or "").strip()
+        if not text:
+            raise ValueError(f"{where}: сообщение без текста")
+        if len(text) > MAX_STEP_TEXT:
+            raise ValueError(
+                f"{where}: текст длиннее {MAX_STEP_TEXT} символов — "
+                "Telegram такое сообщение не примет")
+        out["text"] = text
+
+    elif stype == "delay":
+        try:
+            minutes = int(step.get("delay_minutes"))
+        except (TypeError, ValueError):
+            raise ValueError(f"{where}: задержка в минутах не указана")
+        if not 1 <= minutes <= MAX_STEP_DELAY_MIN:
+            raise ValueError(
+                f"{where}: задержка от 1 до {MAX_STEP_DELAY_MIN} минут "
+                f"({MAX_STEP_DELAY_MIN // 1440} суток)")
+        out["delay_minutes"] = minutes
+
+    elif stype == "condition":
+        cond = str(step.get("condition") or "").strip()
+        if not cond:
+            raise ValueError(f"{where}: условие не выбрано")
+        out["condition"] = cond[:120]
+        value = str(step.get("condition_value") or "").strip()
+        if value:
+            out["condition_value"] = value[:200]
+
+    elif stype == "webhook":
+        url = str(step.get("url") or "").strip()
+        if not url.startswith("https://"):
+            raise ValueError(
+                f"{where}: вебхук только по https — по http уйдёт открытым текстом")
+        if len(url) > 500:
+            raise ValueError(f"{where}: адрес вебхука длиннее 500 символов")
+        out["url"] = url
+
+    else:  # action
+        name = str(step.get("action") or step.get("text") or "").strip()
+        if not name:
+            raise ValueError(f"{where}: действие не указано")
+        out["action"] = name[:120]
+
+    return out
+
+
+def validate_steps(steps, already: int = 0) -> list[dict]:
+    """Проверить список шагов целиком с учётом уже сохранённых (`already`)."""
+    if not isinstance(steps, list):
+        raise ValueError("Шаги должны быть списком")
+    total = already + len(steps)
+    if total > MAX_WORKFLOW_STEPS:
+        raise ValueError(
+            f"В сценарии не больше {MAX_WORKFLOW_STEPS} шагов "
+            f"(уже {already}, добавляется {len(steps)})")
+    return [validate_step(s, i) for i, s in enumerate(steps)]
+
+
+async def latest_run(pool: asyncpg.Pool, owner_id: int, workflow_id: int) -> Optional[dict]:
+    """Последний прогон сценария — или None, если сценарий ни разу не запускали.
+
+    `GET /workflow/{wf_id}/status` звал `get_workflow_status(pool, uid, wf_id)`,
+    а третий аргумент там — id ПРОГОНА (`workflow_runs.id`), не сценария.
+    Совпадение id двух разных таблиц — обычное дело, так что эндпоинт отдавал
+    чужой прогон как состояние этого сценария; когда совпадения не было,
+    отдавалось тело `null` с кодом 200.
+    """
+    row = await pool.fetchrow(
+        """SELECT wr.*, wd.name AS workflow_name
+             FROM workflow_runs wr
+             LEFT JOIN workflow_definitions wd ON wd.id = wr.workflow_id
+            WHERE wr.workflow_id = $1 AND wr.owner_id = $2
+            ORDER BY wr.id DESC LIMIT 1""",
+        workflow_id, owner_id)
+    return dict(row) if row else None
+
+
+async def recent_runs(pool: asyncpg.Pool, owner_id: int, workflow_id: int,
+                      limit: int = 5) -> list[dict]:
+    """Последние прогоны для блока «📊 Последние запуски» на экране деталей.
+
+    Блок в мини-аппе был написан по полю `runs`, которого обработчик деталей не
+    отдавал вовсе: разметка существовала и не показывалась никогда.
+    """
+    rows = await pool.fetch(
+        """SELECT id, status, current_step, total_steps, started_at, finished_at,
+                  error_message
+             FROM workflow_runs
+            WHERE workflow_id = $1 AND owner_id = $2
+            ORDER BY id DESC LIMIT $3""",
+        workflow_id, owner_id, max(1, min(int(limit or 5), 20)))
+    return [dict(r) for r in rows]

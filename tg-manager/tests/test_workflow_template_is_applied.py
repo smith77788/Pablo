@@ -41,6 +41,10 @@ class _Pool:
 
     async def fetchrow(self, q, *a):
         self.calls.append((q, a))
+        # INSERT ... RETURNING id отдаёт строку — создание сценария переехало
+        # с fetchval на fetchrow вместе с переездом в workflow_engine.
+        if "RETURNING id" in q:
+            return {"id": 55}
         return None
 
     async def fetchval(self, q, *a):

@@ -207,14 +207,19 @@ def test_handler_passes_steps_by_keyword():
     """Храповик на ту самую позиционную ошибку в обработчике."""
     import ast
 
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"),
+    # Обработчики сценариев переехали из mini_app_api.py (25 тысяч строк в
+    # одной функции) в services/mini_app_workflows.py.
+    src = open(os.path.join(ROOT, "services", "mini_app_workflows.py"),
                encoding="utf-8").read()
     lines = src.split("\n")
-    body = None
+    bodies = []
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
-                and node.name == "workflow_create":
-            body = "\n".join(lines[node.lineno - 1:node.end_lineno])
-    assert body, "обработчик workflow_create не найден"
-    assert "steps=steps" in body, (
-        "steps снова уходит позиционно — попадёт в description, и шаги потеряются")
+                and node.name.startswith("workflow_create"):
+            bodies.append("\n".join(lines[node.lineno - 1:node.end_lineno]))
+    assert len(bodies) == 2, (
+        f"ожидались оба обработчика создания, найдено {len(bodies)}")
+    for body in bodies:
+        assert "create_workflow(" in body, "создание идёт мимо движка"
+        assert "steps=steps" in body, (
+            "steps снова уходит позиционно — попадёт в description, и шаги потеряются")

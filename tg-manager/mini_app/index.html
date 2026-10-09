@@ -29361,8 +29361,18 @@ async function openWorkflowDetail(wfId, wfName) {
       steps.forEach((s, i) => {
         const typeIcons = { message: '💬', delay: '⏳', condition: '🔀', action: '⚡', webhook: '🌐' };
         const typeColors = { message: 'var(--blue)', delay: 'var(--orange)', condition: 'var(--purple)', action: 'var(--green)', webhook: 'var(--teal)' };
-        const color = typeColors[s.type] || 'var(--hint)';
-        const icon = typeIcons[s.type] || '•';
+        const typeNames = { message: 'СООБЩЕНИЕ', delay: 'ЗАДЕРЖКА', condition: 'УСЛОВИЕ', action: 'ДЕЙСТВИЕ', webhook: 'ВЕБХУК' };
+        // Шаг без type ронял ВЕСЬ экран: undefined.toUpperCase() — TypeError,
+        // он уходил в общий catch, и вместо сценария показывалась ошибка. Такие
+        // шаги писал POST /workflow/create, требовавший ключ action вместо type.
+        // Бэкенд теперь один язык и проверяет, а экран всё равно не падает на
+        // данных, которые уже лежат в базе с тех времён.
+        const stype = typeof s.type === 'string' ? s.type : '';
+        const color = typeColors[stype] || 'var(--hint)';
+        const icon = typeIcons[stype] || '•';
+        const label = typeNames[stype] || (stype ? stype.toUpperCase() : 'ШАГ НЕИЗВЕСТНОГО ТИПА');
+        const body = s.text || s.condition || s.url || s.action
+          || (stype === 'delay' ? 'Пауза перед следующим шагом' : 'Нечего показать: шаг сохранён без параметров');
         const isLast = i === steps.length - 1;
         html += `<div class="ffstep">
           <div class="ffstep-line">
@@ -29370,8 +29380,8 @@ async function openWorkflowDetail(wfId, wfName) {
             ${!isLast ? '<div class="ffstep-tail"></div>' : ''}
           </div>
           <div class="ffstep-body" style="border-left:3px solid ${color}">
-            <div class="ffstep-delay" style="color:${color}">${s.type.toUpperCase()} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</div>
-            <div class="ffstep-text">${esc(s.text || s.condition || s.url || s.type)}</div>
+            <div class="ffstep-delay" style="color:${color}">${esc(label)} ${s.delay_minutes ? '· ' + s.delay_minutes + ' мин' : ''}</div>
+            <div class="ffstep-text">${esc(body)}</div>
           </div>
         </div>`;
       });
@@ -29380,12 +29390,20 @@ async function openWorkflowDetail(wfId, wfName) {
 
     if (d.runs && d.runs.length) {
       html += '<div class="sec" style="margin-top:12px">📊 Последние запуски</div>';
+      // Статусы прогона пишут движок и удаление сценария: pending, running,
+      // cancelled. 'completed' не писал никто, зато 'cancelled' попадал в
+      // ветку «иначе» и отменённый прогон показывался как «🔵 В работе».
+      const runNames = { done: '✅ Выполнен', completed: '✅ Выполнен', failed: '❌ Ошибка',
+                         cancelled: '🚫 Отменён', pending: '⏳ Ожидает', running: '🔵 В работе' };
+      const runColors = { done: 'var(--green)', completed: 'var(--green)', failed: 'var(--red)',
+                          cancelled: 'var(--hint)', pending: 'var(--orange)', running: 'var(--blue)' };
       html += '<div class="lst">' + d.runs.slice(0, 5).map(r => {
-        const sc = r.status === 'completed' ? 'var(--green)' : r.status === 'failed' ? 'var(--red)' : 'var(--blue)';
+        const st = (r.status || '').toLowerCase();
+        const sc = runColors[st] || 'var(--hint)';
         return `<div class="li">
           <div class="ava" style="background:${sc}15;color:${sc}">▶️</div>
           <div class="li-body">
-            <div class="li-name">${r.status === 'completed' ? '✅ Выполнен' : r.status === 'failed' ? '❌ Ошибка' : '🔵 В работе'}</div>
+            <div class="li-name">${runNames[st] || esc(st || 'неизвестно')}</div>
             <div class="li-sub">Шаг ${r.current_step || 0}/${r.total_steps || 0} · ${ago(r.started_at)}</div>
           </div>
         </div>`;
