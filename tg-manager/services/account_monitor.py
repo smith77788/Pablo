@@ -47,7 +47,7 @@ async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
             pool, owner_id, "low_accounts", _ALERT_COOLDOWN
         ):
             continue
-        await db.notify_if_enabled(
+        delivered = await db.notify_if_enabled(
             pool,
             bot,
             owner_id,
@@ -62,6 +62,15 @@ async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
             # сообщение, и наоборот.
             dedup_key="low_accounts",
         )
+        # Отметка анти-повтора занята ДО отправки (иначе два круга подряд
+        # объявили бы одно и то же), поэтому у неудачной доставки нужен путь
+        # назад: окно здесь сутки, и один сетевой блип сжигал его целиком —
+        # владелец не узнавал, что работать стало нечем, до следующего дня.
+        # False приходит РОВНО на временном сбое: заблокированный бот и
+        # отключённые уведомления возвращают True и отметку не снимают.
+        if delivered is False:
+            await db.notify_dedup_forget(pool, owner_id, "low_accounts")
+            continue
         log.info(
             "account_monitor: alerted owner=%s (active=%s)", owner_id, active_count
         )
@@ -174,7 +183,7 @@ async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
             continue
         label = acc["username"] or acc["first_name"] or acc["phone"] or str(acc["id"])
         reasons = "; ".join(pred.get("reasons", [])[:3]) or "аномальная активность"
-        await db.notify_if_enabled(
+        delivered = await db.notify_if_enabled(
             pool,
             bot,
             acc["owner_id"],
@@ -188,6 +197,13 @@ async def _check_ban_risk(pool: asyncpg.Pool, bot: Bot) -> None:
             f"ошибки (флуд/ограничения)».</i>",
             dedup_key=f"ban_risk:{acc['id']}",
         )
+        # Самое дорогое предупреждение продукта: владелец теряет сутки, за
+        # которые аккаунт успевает получить бан. Сетевой сбой не имеет права
+        # сжигать окно — возвращаем отметку, следующий круг попробует снова.
+        if delivered is False:
+            await db.notify_dedup_forget(
+                pool, acc["owner_id"], f"ban_risk:{acc['id']}")
+            continue
         log.warning(
             "account_monitor: ban risk CRITICAL acc=%d owner=%d score=%s",
             acc["id"], acc["owner_id"], pred.get("risk_score"),
@@ -521,7 +537,7 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
                 _SESSION_EXPIRED_COOLDOWN,
             ):
                 label = acc.get("username") or acc.get("first_name") or acc.get("phone") or str(acc["id"])
-                await db.notify_if_enabled(
+                delivered = await db.notify_if_enabled(
                     pool,
                     bot,
                     acc["owner_id"],
@@ -534,6 +550,12 @@ async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
                     "Переимпортируйте сессию в разделе <b>Аккаунты</b>.",
                     dedup_key=f"sess_expired:{acc['id']}",
                 )
+                # Аккаунт уже деактивирован автоматически: не узнав об этом,
+                # владелец сутки думает, что флот цел. Отметку при временном
+                # сбое доставки возвращаем.
+                if delivered is False:
+                    await db.notify_dedup_forget(
+                        pool, acc["owner_id"], f"sess_expired:{acc['id']}")
                 log.warning(
                     "account_monitor: dead session acc=%d owner=%d status=%s",
                     acc["id"],

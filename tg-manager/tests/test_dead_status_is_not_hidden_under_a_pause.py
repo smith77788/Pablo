@@ -67,6 +67,9 @@ def test_the_available_counter_counts_only_usable_accounts():
     start = src.rfind("COUNT(*) FILTER", 0, m.start())
     assert start > 0, "счётчик доступных больше не считается через FILTER"
     window = src[start:m.start()]
-    assert "sql_dead_list()" in window, (
+    # Годится любая из двух дверей словаря: `sql_not_dead()` — то же условие
+    # целиком, `sql_dead_list()` — только список значений. Важно, что набор
+    # приходит из словаря, а не выписан здесь руками.
+    assert ("sql_not_dead()" in window or "sql_dead_list()" in window), (
         "счётчик доступных аккаунтов отсеивает мёртвых по своему литералу — "
         "владельцу обещаны аккаунты, которых нет")
