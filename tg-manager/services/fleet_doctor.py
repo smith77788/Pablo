@@ -24,9 +24,8 @@ log = logging.getLogger(__name__)
 # этот модуль и написан. Список — из общего словаря.
 _DEAD = set(_acc_status.DEAD_STATUSES)
 # Подписи «чем болен» — владелец читает по-русски, а в базе лежит код статуса.
-_DEAD_RU = {"banned": "забанен", "spamblock": "спамблок",
-            "deactivated": "аккаунт удалён", "session_expired": "сессия отозвана",
-            "deleted": "аккаунт удалён в Telegram", "frozen": "аккаунт заморожен"}
+# Подписи тоже общие: иначе новый статус в словаре приходит на экран кодом.
+_DEAD_RU = dict(_acc_status.RU_LABEL)
 # Пороги trust (0..1) как в flood_engine._ACTION_MIN_TRUST — операции ниже режут.
 _TRUST_JOIN = 0.35
 _TRUST_INVITE = 0.50

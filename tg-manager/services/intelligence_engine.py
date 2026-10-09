@@ -552,7 +552,7 @@ async def _analyze_accounts_impl(
 
         # Решение — рекомендовать или нет
         skip_reason = ""
-        if acc_status in ("spamblock", "banned", "deactivated", "no_session"):
+        if _acc_status.is_effectively_dead(acc_status):
             skip_reason = f"статус: {acc_status}"
         elif is_cooling:
             skip_reason = f"кулдаун ещё {cooldown_minutes} мин"

@@ -38,6 +38,9 @@ from services.account_manager import (
     should_persist_account_status,
 )
 from services.logger import log_exc_swallow
+from services import account_status as _acc_status
+
+_ACC_NOT_DEAD = _acc_status.sql_not_dead("a.acc_status")
 
 log = logging.getLogger(__name__)
 
@@ -259,6 +262,15 @@ async def get_sorted_accounts(
            WHERE a.owner_id = $1
              AND a.is_active = TRUE
              AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())
+             AND a.session_str IS NOT NULL AND a.session_str != ''
+             -- Мёртвый статус отсекаем В ЗАПРОСЕ, а не после LIMIT. Раньше
+             -- запрос брал limit*2 лучших по доверию и выбрасывал мёртвых уже
+             -- в питоне: на флоте, где мёртвых больше половины, этого запаса
+             -- не хватало, и список «кем работать» приходил короче
+             -- запрошенного или пустым при живых аккаунтах ниже по доверию.
+             AND """
+        + _ACC_NOT_DEAD
+        + """
            ORDER BY a.trust_score DESC NULLS LAST
            LIMIT $2""",
         owner_id,
@@ -272,13 +284,10 @@ async def get_sorted_accounts(
             has_session=bool(row.get("has_session")),
             is_active=bool(row.get("is_active", True)),
         )
-        if effective_status in {
-            "archived",
-            "banned",
-            "deactivated",
-            "spamblock",
-            "no_session",
-        }:
+        # Набор — из общего словаря: свой список из пяти значений пропускал
+        # `deleted` и `frozen`, и отсортированный список «кем работать»
+        # предлагал аккаунты, которых операция уже не берёт.
+        if _acc_status.is_effectively_dead(effective_status):
             continue
         health = get_health(row["id"])
         # Проверяем пригодность для данного типа действия

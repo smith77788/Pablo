@@ -28,6 +28,7 @@ from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_
 from services import infra_pressure
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
+from services import account_status as _acc_status
 
 _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
     "accounts": ("📱 Аккаунты", AccCb(action="menu")),
@@ -1218,8 +1219,8 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         trust = float(acc.get("trust_score") or 0.0)
         has_session = bool(acc.get("session_str"))
 
-        # Аккаунты в плохом состоянии — пропускаем
-        if status in ("banned", "spamblock", "deactivated"):
+        # Аккаунты в плохом состоянии — пропускаем (набор из общего словаря)
+        if _acc_status.is_dead(status):
             skipped += 1
             continue
 

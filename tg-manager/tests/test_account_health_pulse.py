@@ -201,10 +201,21 @@ def test_operation_bus_supports_label():
 
 def test_warmer_skips_session_expired():
     """Волна I (иммунитет→метаболизм): разогрев пропускает session_expired —
-    дохлую сессию греть бессмысленно (коннект упадёт)."""
-    aw = _read("services/account_warmer.py")
-    seg = aw[aw.index('"banned",'):aw.index("пропуск разогрева")]
-    assert '"session_expired",' in seg
+    дохлую сессию греть бессмысленно (коннект упадёт).
+
+    Проверяем по СМЫСЛУ, а не по литералу в тексте модуля: набор мёртвых
+    статусов теперь один на продукт (`account_status.DEAD_STATUSES`), и
+    прежний вариант теста упал бы на любом сведении копий, ничего не сказав
+    о самом правиле.
+    """
+    import inspect
+
+    from services import account_status, account_warmer
+
+    assert "session_expired" in account_status.DEAD_STATUSES
+    for impl in (account_warmer._run_daily_warmup_impl,
+                 account_warmer._run_warmup_session_impl):
+        assert "_acc_status.is_dead(" in inspect.getsource(impl), impl.__name__
 
 
 def test_pulse_surfaced_in_api_and_ui():

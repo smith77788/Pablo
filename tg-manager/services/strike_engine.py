@@ -35,6 +35,7 @@ import aiohttp
 
 from services.account_manager import normalize_telegram_join_ref
 from services.logger import log_exc_swallow
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -1037,12 +1038,10 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
     for acc in accounts:
         if not acc.get("is_active", False):
             continue
-        # Забаненные/спамблок/деактивированные — никогда не в страйк
-        if (acc.get("acc_status") or "active") in (
-            "banned",
-            "spamblock",
-            "deactivated",
-        ):
+        # Мёртвый статус — никогда не в страйк. Набор из общего словаря:
+        # свой список из трёх значений пускал в страйк аккаунт с отозванной
+        # сессией, удалённый и замороженный.
+        if _acc_status.is_dead(acc.get("acc_status")):
             continue
         # Аккаунт занят другой операцией/разогревом → не трогаем (одна сессия = один клиент)
         if opw_available and acc.get("id") and _opw.is_account_in_use(acc["id"]):

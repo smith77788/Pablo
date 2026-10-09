@@ -42,6 +42,70 @@ def is_dead(acc_status: Optional[str]) -> bool:
     return str(acc_status or "active").strip().lower() in DEAD_STATUSES
 
 
+# Подмножества словаря по тому, ЧТО с аккаунтом делать. Владельцу нельзя
+# советовать «очистите их» одним списком: забаненный аккаунт потерян, а
+# спам-блок снимается и сессия переподключается — по общему совету он
+# выбрасывает рабочие аккаунты. Разбиение полное и без пересечений (стережёт
+# test_dead_status_is_one_vocabulary), поэтому седьмой статус в словаре
+# заставит решить, к какой группе он относится, а не тихо выпадет из советов.
+LOST_STATUSES = frozenset({"banned", "deactivated", "deleted"})
+RESTRICTED_STATUSES = frozenset({"spamblock", "frozen"})
+SESSION_STATUSES = frozenset({"session_expired"})
+
+# Эффективный статус (`account_manager.effective_account_status`) добавляет к
+# словарю два значения, которых в базе нет: `archived` — аккаунт выключен
+# владельцем, `no_session` — строки сессии нет. Гейты, судящие по ЭФФЕКТИВНОМУ
+# статусу, обязаны брать этот набор: свои копии из трёх значений пропускали
+# `deleted` и `frozen`, и самый баноопасный путь продукта (инвайт) брал такой
+# аккаунт в работу. `session_expired` эффективный статус отдаёт как `active`,
+# когда строка сессии на месте, — в наборе он остаётся, чтобы набор был
+# надмножеством словаря, а не отдельным третьим списком.
+EFFECTIVE_EXTRA_STATUSES = frozenset({"archived", "no_session"})
+EFFECTIVE_DEAD_STATUSES = frozenset(DEAD_STATUSES | EFFECTIVE_EXTRA_STATUSES)
+
+
+def is_effectively_dead(effective_status: Optional[str]) -> bool:
+    """То же, но для значения из `effective_account_status`."""
+    return (str(effective_status or "active").strip().lower()
+            in EFFECTIVE_DEAD_STATUSES)
+
+
+# Как статус читается владельцу. В базе лежит английский код, а владелец
+# английского не понимает: подписи писал каждый экран свои, а где не писал —
+# код попадал в текст как есть («Аккаунт в состоянии «banned»»). Подписи тоже
+# одни на продукт, и полнота проверяется тестом словаря.
+RU_LABEL = {
+    "banned": "забанен",
+    "deactivated": "аккаунт удалён",
+    "deleted": "аккаунт удалён в Telegram",
+    "frozen": "аккаунт заморожен",
+    "session_expired": "сессия отозвана",
+    "spamblock": "спам-блок",
+    "archived": "выключен владельцем",
+    "no_session": "нет сессии",
+}
+
+
+def ru_label(acc_status: Optional[str]) -> str:
+    """Человеческая подпись статуса; неизвестный код отдаём как есть."""
+    code = str(acc_status or "active").strip().lower()
+    return RU_LABEL.get(code, code)
+
+
+def sql_status_list(statuses) -> str:
+    """Готовый список значений для SQL из любого набора словаря.
+
+    Нужен там, где условие берёт не весь набор, а осознанное подмножество
+    (например, только безвозвратно потерянные: `sql_status_list(LOST_STATUSES)`).
+    Значения — литералы словаря, не пользовательский ввод.
+    """
+    values = {str(s).strip().lower() for s in statuses if str(s).strip()}
+    unknown = values - (DEAD_STATUSES | EFFECTIVE_EXTRA_STATUSES)
+    if unknown:
+        raise ValueError(f"нет в словаре статусов: {sorted(unknown)}")
+    return ", ".join(f"'{status}'" for status in sorted(values))
+
+
 def sql_dead_list(*extra: str) -> str:
     """Готовый список для SQL: `NOT IN (sql_dead_list())`.
 

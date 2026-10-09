@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 
 from services import account_manager
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -257,9 +258,8 @@ async def reserve_options(pool, owner_id: int, chain_key: str) -> list[dict]:
         cid = int(r["channel_id"])
         why = used.get(cid, "")
         if not why:
-            if r["is_active"] is False or not r["has_session"] or \
-                    str(r["acc_status"] or "active") in ("banned", "deactivated",
-                                                         "session_expired"):
+            if (r["is_active"] is False or not r["has_session"]
+                    or _acc_status.is_dead(r["acc_status"])):
                 why = "аккаунт-админ канала недоступен"
             elif r["is_admin"] is False and not r["is_creator"]:
                 why = "привязанный аккаунт не админ канала"

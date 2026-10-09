@@ -18,6 +18,7 @@ import logging
 import os
 
 from services import token_vault
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -396,12 +397,22 @@ async def mark_dead_for_banned_storekeepers(pool) -> int:
     АВТО-восстановления: пока локация числится stored, heal считает её живой;
     связав статус локации с реальным статусом аккаунта, узнаём о потере копии без
     ручного mark_account_dead на каждом бане. Возвращает число помеченных."""
+    # Набор — ровно БЕЗВОЗВРАТНО потерянные статусы из общего словаря
+    # (`LOST_STATUSES`): свой список из двух пропускал `deactivated`, и кусок,
+    # лежавший на удалённом аккаунте, продолжал числиться живой репликой —
+    # файл считал себя избыточным, не будучи им.
+    #
+    # Шире этого набора брать НЕЛЬЗЯ: спам-блок и заморозка снимаются, сессия
+    # переимпортируется, и такая копия ещё читается. Помеченная dead реплика
+    # для сборки файла не существует — отметив её, мы бы своими руками сделали
+    # файл невосстановимым там, где данные на месте.
     status = await pool.execute(
         """UPDATE tg_cloud_chunk_locs l SET status='dead'
              FROM tg_accounts a
             WHERE l.acc_id = a.id AND l.status='stored'
               AND (a.is_active = FALSE
-                   OR COALESCE(a.acc_status,'active') IN ('banned','deleted'))""")
+                   OR COALESCE(a.acc_status,'active') IN ("""
+        + _acc_status.sql_status_list(_acc_status.LOST_STATUSES) + """))""")
     try:
         return int(str(status).rsplit(" ", 1)[-1])
     except (ValueError, IndexError):

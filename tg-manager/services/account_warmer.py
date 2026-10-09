@@ -31,6 +31,7 @@ from database import db
 from services.logger import log_exc_swallow
 from services import infra_memory
 from services import warmup_actions as _wa
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -1806,15 +1807,12 @@ async def _run_daily_warmup_impl(
             log.info("warmup: acc=%d неактивен — пропуск", account_id)
             await _note_skip(pool, plan_id, "inactive")
             return _skip_result
-        if (acc_health["acc_status"] or "active") in (
-            "banned",
-            "spamblock",
-            "deactivated",
-            # session_expired — сессия мертва (напр. AuthKeyUnregistered при синке
-            # контактов): разогрев бессмыслен, коннект всё равно упадёт. Иммунный
-            # сигнал → метаболизм (Волна I): не жжём циклы на дохлую сессию.
-            "session_expired",
-        ):
+        # Набор — из общего словаря. session_expired здесь не случайность:
+        # сессия мертва (напр. AuthKeyUnregistered при синке контактов),
+        # разогрев бессмыслен, коннект всё равно упадёт. Иммунный сигнал →
+        # метаболизм (Волна I): не жжём циклы на дохлую сессию. Из своего
+        # списка выпадали `deleted` и `frozen`.
+        if _acc_status.is_dead(acc_health["acc_status"]):
             log.info(
                 "warmup: acc=%d статус=%s — пропуск разогрева",
                 account_id,
@@ -2400,10 +2398,12 @@ async def _run_warmup_session_impl(
                WHERE a.id=$1""",
             acc_id,
         )
+        # Тот же словарь, что и в дневном цикле выше. Свой список из трёх
+        # значений расходился даже с ним: дневной прогрев отозванную сессию
+        # пропускал, а сессионный — брал и жёг коннекты вслепую.
         if _acc_h and (
             _acc_h["is_active"] is False
-            or (_acc_h["acc_status"] or "active")
-            in ("banned", "spamblock", "deactivated")
+            or _acc_status.is_dead(_acc_h["acc_status"])
         ):
             log.info("warmup_session: acc=%d неактивен/забанен — пропуск", acc_id)
             if _claimed:

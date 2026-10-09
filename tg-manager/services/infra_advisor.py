@@ -138,11 +138,12 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
         # аккаунте с отозванной сессией или спамблоком — это предложение
         # выбросить рабочий аккаунт: сессия переподключается, спамблок снимается.
         gone = [r for r in restricted_rows
-                if r["acc_status"] in ("banned", "deactivated", "deleted")]
+                if r["acc_status"] in _acc_status.LOST_STATUSES]
         reauth = [r for r in restricted_rows
-                  if not r["has_session"] or r["acc_status"] == "session_expired"]
+                  if not r["has_session"]
+                  or r["acc_status"] in _acc_status.SESSION_STATUSES]
         waiting = [r for r in restricted_rows
-                   if r["acc_status"] in ("spamblock", "frozen")]
+                   if r["acc_status"] in _acc_status.RESTRICTED_STATUSES]
         parts = []
         if gone:
             parts.append(f"выбыли безвозвратно (бан или удаление) — {len(gone)}: "

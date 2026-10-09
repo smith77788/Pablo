@@ -22,6 +22,7 @@ import asyncpg
 
 from services.account_manager import effective_account_status
 from services.logger import log_exc_swallow
+from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 
@@ -53,11 +54,11 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
     """)
     history_batch = []
     for row in rows:
-        if effective_account_status(
+        if _acc_status.is_effectively_dead(effective_account_status(
             row.get("acc_status"),
             has_session=bool(row.get("has_session")),
             is_active=True,
-        ) in {"spamblock", "banned", "deactivated", "no_session", "archived"}:
+        )):
             continue
         age_bonus = min(
             _AGE_BONUS_CAP, float(row["age_days"] or 0) * _AGE_BONUS_PER_DAY
@@ -76,18 +77,29 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
 
     # Корректируем trust для ограниченных аккаунтов, которые могли быть пересчитаны ранее
     try:
+        # Наборы — из общего словаря, по тому, вернётся аккаунт или нет.
+        # Литералы здесь расходились со словарём: доверие удалённого
+        # (`deleted`) и замороженного аккаунта никто не опускал, и он оставался
+        # в верху рейтинга доверия — то есть первым кандидатом везде, где
+        # продукт выбирает «самых надёжных», и слагаемым в среднем доверии
+        # флота, которое владелец читает как состояние дела.
         await pool.execute(
             """UPDATE tg_accounts
                SET trust_score = LEAST(COALESCE(trust_score, 1.0), 0.3)
                WHERE is_active = TRUE
-                 AND acc_status = 'spamblock'
+                 AND acc_status IN ("""
+            + _acc_status.sql_status_list(
+                _acc_status.RESTRICTED_STATUSES | _acc_status.SESSION_STATUSES)
+            + """)
                  AND COALESCE(trust_score, 1.0) > 0.3"""
         )
         await pool.execute(
             """UPDATE tg_accounts
                SET trust_score = 0.0
                WHERE is_active = TRUE
-                 AND acc_status IN ('banned', 'deactivated')
+                 AND acc_status IN ("""
+            + _acc_status.sql_status_list(_acc_status.LOST_STATUSES)
+            + """)
                  AND COALESCE(trust_score, 1.0) > 0.1"""
         )
     except Exception as exc:

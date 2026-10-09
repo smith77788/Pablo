@@ -15061,9 +15061,10 @@ async def _exec_contacts_sync(
 # Явно небезопасные статусы аккаунта: инвайт с них = мгновенный бан или холостой
 # ход. НЕ включаем 'active'/'cooldown'/'warming' и т.п. — свежие рабочие аккаунты
 # отсевом НЕ трогаем (их бережёт cold-start дневного бюджета, а не блок).
-_INVITE_UNSAFE_STATUS = {
-    "spamblock", "banned", "deactivated", "archived", "session_expired", "no_session",
-}
+# Набор — из общего словаря эффективных статусов: свой список пропускал
+# `deleted` и `frozen`, то есть инвайт — самый баноопасный путь продукта — брал
+# в работу аккаунт, который все остальные двери уже не берут.
+_INVITE_UNSAFE_STATUS = _acc_status.EFFECTIVE_DEAD_STATUSES
 
 
 async def _filter_unready_for_invite(pool, op_id: int, accounts: list) -> list:
