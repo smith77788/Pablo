@@ -837,6 +837,11 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             """
             SELECT a.id, a.phone, COALESCE(a.acc_status,'active') AS acc_status,
               a.trust_score,
+              -- Без строки сессии аккаунт не подключается НИ к чему: его не
+              -- берёт ни одна дверь выбора. Пульс об этом не спрашивал и
+              -- показывал такой аккаунт здоровым — та же ложь, что была со
+              -- спам-блоком, только причина ещё проще.
+              (a.session_str IS NOT NULL AND a.session_str <> '') AS has_session,
               -- истёк ли кулдаун: acc_status='cooldown' с прошедшим окном НЕ риск
               -- (само-heal в account_monitor чистит статус, но здесь окно закрываем
               -- сразу, чтобы UI не держал «Под риском» до следующего цикла монитора)
@@ -910,7 +915,45 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             hscore = float(_ah.get_health(r["id"]).health_score)
         except Exception:
             hscore = 100.0
-        if severe or status_bad or hscore < 10.0:
+        no_session = not bool(r.get("has_session", True))
+        # Причину называем ЗДЕСЬ, рядом с решением, а не оставляем экрану
+        # догадываться. Экран аккаунта писал «иммунная система зафиксировала
+        # риск» всякий раз, когда причиной были статус, отсутствие сессии или
+        # счётчик здоровья: владелец читал «аккаунт на паузе» без причины и
+        # получал совет «дайте отлежаться 3+ дней», который для мёртвой сессии
+        # не делает ничего. Коды — для экрана, текст — для владельца.
+        codes: list[str] = []
+        reasons: list[str] = []
+        if no_session:
+            codes.append("no_session")
+            reasons.append("нет строки сессии — аккаунт не подключён")
+        if status_bad:
+            codes.append("acc_status")
+            reasons.append(_acc_status_mod.ru_label(acc_status))
+        if severe:
+            codes.append("severe")
+            reasons.append(f"серьёзных ограничений за {int(days)} дн.: {severe}")
+        if hscore < 10.0:
+            codes.append("failing")
+            reasons.append(f"действия подряд не проходят (здоровье {int(hscore)}/100)")
+        if restr and not severe:
+            codes.append("restrictions")
+            reasons.append(f"ограничений за {int(days)} дн.: {restr}")
+        if floods:
+            codes.append("floods")
+            reasons.append(f"FloodWait за {int(days)} дн.: {floods}")
+        if status_risk:
+            codes.append("status_risk")
+            reasons.append("идёт прогрев" if acc_status == "warming"
+                           else "активная пауза после ограничения")
+        if low_trust:
+            codes.append("low_trust")
+            reasons.append(f"низкое доверие: {int(trust * 100)}%")
+        if 10.0 <= hscore < 30.0:
+            codes.append("weak")
+            reasons.append(f"слабое здоровье: {int(hscore)}/100")
+
+        if severe or status_bad or no_session or hscore < 10.0:
             status, score = "quarantine", 0.2
             quarantine += 1
         elif restr or floods >= 3 or status_risk or low_trust or hscore < 30.0:
@@ -922,11 +965,20 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         else:
             status, score = "healthy", round(min(1.0, 0.7 + trust * 0.3), 3)
             healthy += 1
+        # Пройдёт ли это само. Отлежаться помогает ограничениям, флудам и паузе;
+        # мёртвый статус, отсутствие сессии и хронические отказы ждать
+        # бессмысленно — там нужно действие владельца, и совет обязан быть
+        # другим, иначе аккаунт стоит ровно столько, сколько владелец ждёт.
+        needs_owner = bool(no_session or status_bad or hscore < 10.0)
         accounts.append({
             "account_id": r["id"], "phone": r["phone"],
             "status": status, "score": score, "acc_status": acc_status,
             "trust_score": round(trust, 3),
             "restrictions": restr, "floods": floods,
+            "has_session": not no_session,
+            "reason_codes": codes,
+            "reason": "; ".join(reasons),
+            "needs_owner": needs_owner,
         })
     # худшие — вперёд (для приборного щитка)
     accounts.sort(key=lambda a: a["score"])

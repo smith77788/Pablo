@@ -3234,6 +3234,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         r["health_score"] = h["score"]
                         r["restrictions"] = h.get("restrictions", 0)
                         r["floods"] = h.get("floods", 0)
+                        # Причина — рядом со статусом: список показывал «🛑 На
+                        # паузе» без неё, и владелец шёл искать объяснение в
+                        # карточку аккаунта.
+                        r["health_reason"] = h.get("reason") or ""
+                        r["health_needs_owner"] = bool(h.get("needs_owner"))
             except Exception as _e:  # fail-soft: пульс не должен ронять список
                 log.debug("accounts health merge owner=%s: %s", uid, _e)
 

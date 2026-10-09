@@ -11048,6 +11048,11 @@ function renderAccounts(list) {
     const proxyNote = (a.has_proxy && a.proxy_alive === false)
       ? `<div class="acc-phone" style="color:var(--red)">🔌 прокси не отвечает${a.proxy_label?' · '+esc(a.proxy_label):''} — аккаунт цел, замените прокси</div>`
       : '';
+    // «🛑 На паузе» без причины отправляло человека искать объяснение в
+    // карточку аккаунта. Причину считает пульс — печатаем её здесь же.
+    const pulseNote = (a.health_reason && (a.health_status==='quarantine' || a.health_status==='at_risk'))
+      ? `<div class="acc-phone" style="color:var(--${a.health_status==='quarantine'?'red':'orange'})">${esc(a.health_reason)}</div>`
+      : '';
     const sel = ACC_SEL.has(a.id);
     const onclick = ACC_SEL_MODE ? `toggleAccSel(${a.id})` : `openAccount(${a.id})`;
     const checkbox = ACC_SEL_MODE ? `<div class="acc-check ${sel?'on':''}">${sel?'✓':''}</div>` : '';
@@ -11063,6 +11068,7 @@ function renderAccounts(list) {
         <div class="acc-name">${esc(name)} ${stageBadge(a.stage)}</div>
         <div class="acc-phone">${esc(phone)}</div>
         ${proxyNote}
+        ${pulseNote}
         <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
         ${ACC_SEL_MODE ? '' : _fixBtn(a.fix)}
       </div>
@@ -11542,16 +11548,22 @@ function buildAccDetail(d) {
   if (_h && (_h.status==='quarantine' || _h.status==='at_risk') && a.is_active
       && a.acc_status!=='banned' && a.acc_status!=='session_expired') {
     const q = _h.status==='quarantine';
+    // Причину считает пульс — он единственный знает, что именно сработало.
+    // Раньше экран пересказывал её своими двумя-тремя полями, а когда
+    // причиной были статус, отсутствие сессии или счётчик отказов, писал
+    // «иммунная система зафиксировала риск»: пауза без причины.
     const parts = [];
     if (_h.restrictions) parts.push(`ограничений за неделю: ${_h.restrictions}`);
     if (_h.floods) parts.push(`FloodWait: ${_h.floods}`);
     if (_h.trust_score!=null && _h.trust_score<0.4) parts.push(`низкий траст: ${Math.round(_h.trust_score*100)}%`);
-    const why = parts.length ? parts.join(' · ') : 'иммунная система зафиксировала риск';
+    const why = _h.reason || (parts.length ? parts.join(' · ') : 'иммунная система зафиксировала риск');
     healthBanner = `<div style="margin:8px 14px 0;padding:12px;border-radius:12px;background:${q?'rgba(248,113,113,.10)':'rgba(251,191,36,.10)'};font-size:13px;line-height:1.4;color:var(--hint)">
       ${q?'🛑 <b>Аккаунт на паузе</b>':'⚠️ <b>Аккаунт под риском</b>'} — массовые операции его ${q?'пропускают':'берегут'}, чтобы не поймать бан.<br>
       <span style="opacity:.8">Причина: ${esc(why)}.</span><br>
       ${reasonHuman?`<span style="opacity:.8">Последний сбой: ${esc(reasonHuman)}</span><br>`:''}
-      <span style="opacity:.8">${q?'Дайте аккаунту отлежаться (3+ дней без действий) или запустите щадящий прогрев — пульс снимет паузу автоматически.':'Снизьте нагрузку и запустите прогрев — риск спадёт сам.'}</span>
+      <span style="opacity:.8">${_h.needs_owner
+        ? 'Само это не пройдёт: пауза держится не из-за нагрузки. Переподключите сессию или замените аккаунт — «отлежаться» здесь не поможет.'
+        : (q?'Дайте аккаунту отлежаться (3+ дней без действий) или запустите щадящий прогрев — пульс снимет паузу автоматически.':'Снизьте нагрузку и запустите прогрев — риск спадёт сам.')}</span>
     </div>`;
   } else if (reasonHuman && a.acc_status!=='ok' && a.acc_status!=='active') {
     // Баннер риска не сработал (напр. активный кулдаун / session_expired), но есть
