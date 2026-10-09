@@ -3013,6 +3013,11 @@ async def _watchdog_protective_failures(
             delivered.update(n for n, _w, _d in fresh)
         except Exception:
             log_exc_swallow(log, f"op_worker protective alert send to {aid} failed")
+            # База отсчёта и так не двинется (см. ниже), но окно анти-повтора
+            # уже занято — без возврата сообщение о сбое защиты пришло бы на
+            # три часа позже, чем нужно. Тот же возврат, что у итога операции.
+            for _n, _w, _d in fresh:
+                await db.notify_dedup_forget(pool, int(aid), f"protective:{_n}")
 
     for name, _what, _delta, total in grown:
         if name in delivered:
