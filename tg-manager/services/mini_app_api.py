@@ -369,7 +369,7 @@ INLINE_MIGRATIONS: list[str] = [
     # создавались на каждом старте, и за всё время ни одна строка в них не
     # записывалась и не читалась: ни один запрос в проекте их не упоминает.
     # Живая модель сценариев другая — workflow_definitions и workflow_runs
-    # (schema_v183.sql, schema_v249_workflow_bot.sql,
+    # (schema_v183.sql, schema_v250_workflow_bot.sql,
     # services/workflow_engine.py). Мёртвый набор не просто занимал старт:
     # он ловил на себя следующего читателя, который ищет «workflow» и
     # пишет запрос к не той таблице. Уже существующие пустые таблицы не
