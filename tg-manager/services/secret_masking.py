@@ -71,9 +71,14 @@ def redact_secrets(text: str | None, limit: int = 2000) -> str:
 #     ловится ниже по форме значения;
 #   * `session` — под этим ключом владелец выгружает СВОЮ сессию (кнопка
 #     «экспорт сессии», owner-scoped) и должен получить её целиком;
-#   * `proxy_url` — прокси владельца возвращается его же приложению, и оно
-#     отправляет URL назад, когда проверяет сессию через этот прокси; замена
-#     пароля на «***» сломала бы проверку.
+#   * `proxy_url` — его нельзя гасить целиком: экран печатает ХОСТ прокси
+#     (`(p.proxy_url||'').split('@').pop()`), и «***» вместо значения оставил
+#     бы список прокси без имён. Поэтому он закрыт иначе — ниже, в
+#     URL_CRED_FIELD_NAMES: из значения вырезается только пароль.
+#     (Прежняя причина исключения — «приложение отправляет URL назад, когда
+#     проверяет сессию через этот прокси» — больше не действует: адрес
+#     выбранного прокси сервер берёт у себя по proxy_id, см.
+#     services/session_importer.py.)
 SENSITIVE_FIELD_NAMES = frozenset({
     "session_str", "session_string", "string_session",
     "api_hash", "app_hash",
@@ -82,6 +87,19 @@ SENSITIVE_FIELD_NAMES = frozenset({
     "bot_token", "token_plain", "secret", "admin_secret",
 })
 _SECRET_KEYS = SENSITIVE_FIELD_NAMES
+
+# Ключи, у которых наружу уходит САМО значение, но без пароля внутри: адрес
+# нужен читателю, доступ — нет. Гасить такой ключ целиком нельзя (экран
+# показывает хост), оставлять как есть — тоже: в `socks5://user:pass@host` к
+# клиенту уезжает рабочий доступ к чужой сети.
+#
+# Почему это не делается для ВСЕХ строк ответа подряд: владелец хранит в
+# сейфе свои сообщения, и в них бывают ссылки с логином и паролем, которые он
+# сохранил нарочно. Вычищать их — это уже не защита, а порча его собственных
+# данных. Поэтому правило привязано к именам полей, где значение заведомо
+# является адресом доступа.
+URL_CRED_FIELD_NAMES = frozenset({"proxy_url", "cf_relay_url", "webhook_url"})
+_URL_CRED_KEYS = URL_CRED_FIELD_NAMES
 
 # Минимальная длина строки, в которой вообще может уместиться секрет по форме:
 # 6 цифр + двоеточие + 30 символов. Короче — не проверяем, и это делает проход
@@ -129,6 +147,10 @@ def scrub_payload(data, _depth: int = 0):
         for key, val in data.items():
             if isinstance(key, str) and key.lower() in _SECRET_KEYS:
                 new = _MASK if val not in (None, "", b"") else val
+            elif (isinstance(key, str) and key.lower() in _URL_CRED_KEYS
+                    and isinstance(val, str) and "@" in val):
+                new = _URL_CRED_RE.sub(
+                    lambda m: f"{m.group(1)}{m.group(2)}:{_MASK}@", val)
             else:
                 new = scrub_payload(val, _depth + 1)
             if new is not val:

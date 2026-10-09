@@ -14768,8 +14768,9 @@ async function openAccImportModal() {
     (d.proxies||[]).forEach(p=>{
       const host=(p.proxy_url||'').split('@').pop();
       const o=document.createElement('option');
-      o.value=String(p.id);            // id — чтобы закрепить прокси за аккаунтом
-      o.dataset.url=p.proxy_url||'';    // url — чтобы проверить сессию через него
+      o.value=String(p.id);            // id — и только id: адрес прокси сервер
+      // возьмёт у себя по этому id. Раньше здесь лежал полный URL с логином и
+      // паролем, который экран отправлял назад на сервер при импорте.
       o.textContent=(p.label?p.label+' · ':'')+(host||('#'+p.id));
       sel.appendChild(o);
     });
@@ -15051,11 +15052,12 @@ async function accTdataUpload(){
 async function submitAccImport() {
   const raw=document.getElementById('accImportText').value.trim();
   const sel=document.getElementById('accImportProxy');
-  const opt=sel.options[sel.selectedIndex];
   let proxyId=sel.value||null;                         // закрепим за аккаунтом
-  let proxyUrl=(opt&&opt.dataset&&opt.dataset.url)||null;    // через него проверим
-  // Пользователь вставил новый прокси, но не нажал «Добавить» — не теряем его:
-  // отправляем сырой URL, import_sessions сам создаст user_proxy и закрепит.
+  // Адрес выбранного прокси не присылаем: сервер берёт его из хранилища по id
+  // и через него же проверяет сессию. Сырой URL уходит только в одном случае —
+  // пользователь вставил НОВЫЙ прокси и не нажал «Добавить»; тогда
+  // import_sessions сам создаст user_proxy и закрепит его.
+  let proxyUrl=null;
   const newProxy=(document.getElementById('accImportProxyNew').value||'').trim();
   if(!proxyId && newProxy){ proxyUrl=newProxy; }
   const err=document.getElementById('accImportErr'); err.style.display='none';

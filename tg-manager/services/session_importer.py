@@ -152,10 +152,26 @@ async def import_sessions(
     # доверяем только свой — сверяем принадлежность владельцу.
     if proxy_id is not None:
         try:
-            owns_proxy = await pool.fetchval(
-                "SELECT 1 FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, owner_id)
-            if not owns_proxy:
+            owned = await pool.fetchrow(
+                "SELECT proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2",
+                proxy_id, owner_id)
+            if not owned:
                 proxy_id = None  # чужой/несуществующий прокси не закрепляем
+            elif not proxy_url:
+                # Владелец выбрал СВОЙ сохранённый прокси и прислал только id.
+                # Адрес берём из своего хранилища, а не у клиента: раньше
+                # экран присылал расшифрованный URL с логином и паролем в
+                # теле запроса — только чтобы сервер отдал его обратно в
+                # Telethon. Если же адрес не взять здесь, проверка сессии
+                # пойдёт БЕЗ прокси, с общего IP сервера, — а это ровно тот
+                # признак когорты, из-за которого ниже партия раскладывается
+                # по разным выходам.
+                #
+                # Значение остаётся ЗАШИФРОВАННЫМ: account_manager._parse_proxy
+                # расшифровывает его сам (passthrough для старых строк в
+                # открытом виде), так что расшифровка тут была бы лишним
+                # появлением пароля в памяти процесса.
+                proxy_url = owned["proxy_url"] or None
         except Exception:
             proxy_id = None
     # Пользователь задал НОВЫЙ прокси прямо в форме (без выбора из сохранённых):

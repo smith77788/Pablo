@@ -75,11 +75,43 @@ def test_owner_can_still_export_own_session():
     assert scrub_payload({"ok": True, "session": sess})["session"] == sess
 
 
-def test_owner_proxy_url_is_not_touched():
-    """Приложение отправляет этот URL назад, когда проверяет сессию через
-    прокси: замена пароля на «***» сломала бы проверку."""
-    url = "socks5://user:pa55word@1.2.3.4:1080"
-    assert scrub_payload({"proxies": [{"proxy_url": url}]})["proxies"][0]["proxy_url"] == url
+def test_owner_proxy_url_loses_its_password_but_keeps_its_host():
+    """Адрес прокси уходит наружу, доступ к прокси — нет.
+
+    Раньше это поле не трогали, и у исключения была записана причина:
+    «приложение отправляет URL назад, когда проверяет сессию через прокси,
+    замена пароля на ***  сломала бы проверку». Причина перестала
+    действовать: экран присылает только proxy_id, а адрес выбранного прокси
+    сервер берёт из своего хранилища (services/session_importer.py). Значит
+    полный адрес с паролем клиенту больше не нужен ни на что.
+
+    Гасить поле ЦЕЛИКОМ всё равно нельзя: экран печатает хост
+    (`(p.proxy_url||'').split('@').pop()`), и «***» оставило бы список прокси
+    без имён. Поэтому вырезается ровно пароль.
+    """
+    out = scrub_payload({"proxies": [
+        {"proxy_url": "socks5://user:pa55word@1.2.3.4:1080"}]})
+    got = out["proxies"][0]["proxy_url"]
+    assert "pa55word" not in got, "пароль прокси уехал клиенту"
+    assert got == "socks5://user:***@1.2.3.4:1080", got
+    assert got.split("@").pop() == "1.2.3.4:1080", (
+        "экран берёт хост именно так — маскировка не должна его ломать")
+
+
+def test_a_proxy_without_a_password_is_left_alone():
+    url = "socks5://1.2.3.4:1080"
+    assert scrub_payload({"proxy_url": url})["proxy_url"] == url
+
+
+def test_a_link_the_owner_saved_himself_is_not_touched():
+    """Правило привязано к именам полей, а не ко всем строкам ответа.
+
+    В сейфе владельца лежат его собственные сообщения, и в них бывают ссылки
+    с логином и паролем, сохранённые нарочно. Вычищать их — это уже не защита,
+    а порча его данных.
+    """
+    text = "мой доступ: https://admin:hunter2@panel.example.com — не трогать"
+    assert scrub_payload({"text": text})["text"] == text
 
 
 def test_base64_image_survives_untouched():

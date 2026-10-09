@@ -16286,14 +16286,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM user_proxies WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT $2 OFFSET $3""", uid, limit, offset)
             rows = [dict(r, is_backup=False, acc_count=0, latency_ms=None) for r in rows]
-        # proxy_url хранится зашифрованным — расшифровываем для отображения (passthrough legacy)
+        # proxy_url хранится зашифрованным. Расшифровываем для показа — но
+        # МАСКИРУЕМ логин и пароль: экран печатает только хост (везде стоит
+        # `(p.proxy_url||'').split('@').pop()`), а полный адрес с паролем
+        # уходил клиенту просто потому, что так получилось. Выгрузка прокси
+        # (proxy_export) маскирует его с тем же обоснованием — «не выгружаем
+        # логин/пароль», — и docstring у _json_resp прямо обещает, что доступ
+        # к прокси наружу не уйдёт. Обещание теперь выполняется и здесь.
+        #
+        # Единственное место, которому был нужен полный адрес, — проверка
+        # сессии через выбранный прокси при импорте: экран брал URL из этого
+        # ответа и отправлял его назад на сервер. Теперь сервер берёт адрес из
+        # своего хранилища по proxy_id (см. services/session_importer.py).
+        from services.proxy_hygiene import mask_proxy_url
         from services.token_vault import decrypt_token
 
         out = []
         for r in rows:
             d = dict(r)
             if d.get("proxy_url"):
-                d["proxy_url"] = decrypt_token(d["proxy_url"])
+                d["proxy_url"] = mask_proxy_url(decrypt_token(d["proxy_url"]))
             out.append(d)
         # Счётчики — по ВСЕМУ парку, а не по странице: иначе плитки на экране
         # пула утверждали бы то, чего не проверяли.
@@ -22382,11 +22394,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             data = await request.json()
             raw = data.get("sessions", "")
-            proxy = data.get("proxy_url")
             try:
                 proxy_id = int(data["proxy_id"]) if data.get("proxy_id") else None
             except (TypeError, ValueError):
                 proxy_id = None
+            # Сырой адрес от клиента принимаем ТОЛЬКО когда прокси не выбран
+            # из сохранённых: это случай «вставил новый прокси в форму и не
+            # нажал Добавить». Если прокси выбран по id, адрес берётся из
+            # хранилища владельца — клиенту незачем ни получать, ни присылать
+            # логин с паролем, и подменить адрес у выбранного прокси нельзя.
+            proxy = None if proxy_id else data.get("proxy_url")
             from services.session_importer import import_sessions
             # proxy_id закрепляется за аккаунтом (изоляция), проверяется на владельца
             # внутри import_sessions.
