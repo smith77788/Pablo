@@ -75,12 +75,39 @@ async def actions_today_bulk(
     ids = [int(a) for a in account_ids]
     if not ids:
         return {}
-    try:
-        rows = await pool.fetch(_COUNT_SQL, ids, list(_COUNTED_ACTIONS))
-        counts = {int(r["account_id"]): int(r["n"]) for r in rows}
-    except Exception:
-        log.debug("actions_today_bulk: query failed", exc_info=True)
-        counts = {}
+    counts: dict[int, int] = {}
+    for _attempt in (1, 2):
+        try:
+            rows = await pool.fetch(_COUNT_SQL, ids, list(_COUNTED_ACTIONS))
+            counts = {int(r["account_id"]): int(r["n"]) for r in rows}
+            break
+        except Exception:
+            if _attempt == 1:
+                # Одна попытка про запас: сбой чтения здесь выключает суточный
+                # лимит целиком (ниже «сделано 0»), а сетевой блип до БД —
+                # самая частая его причина.
+                log.warning("бюджет: счёт действий за сутки не прочитался "
+                            "(%d аккаунтов), повторяю", len(ids))
+                await asyncio.sleep(0.5)
+                continue
+            # ЗДЕСЬ ЛОМАЕТСЯ ЗАЩИТА, А НЕ УЧЁТ. Пустой счёт читается как
+            # «сделано 0», то есть на этот прогон суточный лимит аккаунта
+            # перестаёт существовать: фильтр пропускает всех, остаток
+            # считается полным. Решение остаться fail-open — сознательное
+            # (сбой учёта не должен останавливать операцию), но молчать о нём
+            # нельзя: это риск перебора и бана. Поэтому log.warning и счётчик,
+            # который сторож защитных записей доносит до владельца словами.
+            log.error("бюджет: счёт действий за сутки НЕ ПРОЧИТАН (%d аккаунтов) "
+                      "— суточный лимит на этот прогон не сработает",
+                      len(ids), exc_info=True)
+            try:
+                from services import metrics as _m
+
+                _m.inc("infragram_daily_limit_read_failures_total",
+                       {"where": "budget"})
+            except Exception:
+                log.debug("бюджет: счётчик сбоя чтения недоступен")
+            counts = {}
     return {i: counts.get(i, 0) for i in ids}
 
 

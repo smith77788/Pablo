@@ -2993,6 +2993,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "строка успеха в журнале — повтор операции сделает действие второй раз",
     "infragram_account_cooldown_write_failures_total":
         "пауза аккаунта — флуд-пауза могла не лечь, это риск бана",
+    "infragram_daily_limit_read_failures_total":
+        "суточный лимит аккаунта — счёт сделанного за сутки не прочитался, и "
+        "на том прогоне лимит не действовал: аккаунт мог сделать дневную норму "
+        "второй раз",
     "infragram_budget_write_failures_total":
         "суточный счёт действий аккаунта — лимит недосчитает сделанное, и "
         "следующая операция может взять аккаунт сверх него",
@@ -6119,7 +6123,16 @@ async def _exec_bulk_join_inner(
                 acc["id"],
             )
         except Exception:
-            log.debug('joins_today query failed, defaulting to 0')
+            # Сбой чтения выключает суточный лимит на весь прогон: ниже
+            # «сделано 0», то есть аккаунт получает полную дневную норму
+            # заново. Остаёмся fail-open (сбой учёта не останавливает
+            # операцию), но молча это не делаем — счётчик доносит до
+            # владельца словами.
+            log.error('bulk_join: счёт join за сутки НЕ ПРОЧИТАН acc=%s — '
+                      'суточный лимит на этот прогон не сработает',
+                      acc.get('id'), exc_info=True)
+            _reliability_metric('infragram_daily_limit_read_failures_total',
+                                where='join')
             joins_today = 0
         if (joins_today or 0) >= day_limit:
             log.info(
@@ -6707,7 +6720,13 @@ async def _exec_bulk_leave(
                 acc["id"],
             )
         except Exception:
-            log.debug('leaves_today query failed, defaulting to 0')
+            # Тот же класс, что у bulk_join: «не прочитали» читается как
+            # «ничего не делали», и дневная норма начинается заново.
+            log.error('bulk_leave: счёт leave за сутки НЕ ПРОЧИТАН acc=%s — '
+                      'суточный лимит на этот прогон не сработает',
+                      acc.get('id'), exc_info=True)
+            _reliability_metric('infragram_daily_limit_read_failures_total',
+                                where='leave')
             leaves_today = 0
         if (leaves_today or 0) >= day_limit:
             log.info(
@@ -8854,6 +8873,15 @@ async def _exec_bulk_create_channels(
             acc["id"],
             owner_id,
         )
+        if created_today is None:
+            # COUNT(*) всегда отдаёт строку, значит None — это сбой запроса, а
+            # не «ноль каналов». Предупреждение о дневном потолке из-за него
+            # не появится вовсе, и владелец не узнает, что потолок не считали.
+            log.error("bulk_channels: счёт созданных за сутки НЕ ПРОЧИТАН "
+                      "acc=%s — предупреждение о дневном потолке не придёт",
+                      acc["id"])
+            _reliability_metric('infragram_daily_limit_read_failures_total',
+                                where='channels')
         if (created_today or 0) >= _MAX_CHANNELS_PER_DAY:
             log.warning(
                 "op_worker bulk_channels: daily cap reached acc=%s created_today=%s requested=%s",
