@@ -1864,7 +1864,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     and len(response.body) >= _COMPRESS_MIN_BYTES
                     and not response.headers.get("Content-Encoding")
                     and "gzip" in request.headers.get("Accept-Encoding", "").lower()):
-                response.enable_compression()
+                # ЯВНО gzip. `enable_compression()` без аргумента выбирает
+                # кодирование сам, и выбирает по порядку своего словаря —
+                # первым там стоит deflate. То есть условие выше пускало
+                # только клиентов, согласных на gzip, а ответ уходил deflate:
+                # клиенту, который объявил ровно `Accept-Encoding: gzip`,
+                # приходило тело в кодировании, на которое он не соглашался.
+                # Браузер такое переварит, а любой нормальный HTTP-клиент
+                # (скрипт владельца, мониторинг) — нет. Плюс сырой deflate в
+                # вебе реализован вразнобой, gzip — безопасный выбор.
+                response.enable_compression(web.ContentCoding.gzip)
                 response.headers["Vary"] = "Accept-Encoding"
         except Exception:
             log.debug("compress_middleware: сжатие пропущено", exc_info=True)

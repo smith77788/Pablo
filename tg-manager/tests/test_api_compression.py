@@ -92,6 +92,15 @@ def test_large_json_is_compressed():
 
     encoding, sent, decoded, vary = asyncio.run(_go())
     assert encoding, "крупный ответ должен уходить сжатым"
+    # Раньше здесь принималось ЛЮБОЕ сжатие, и под этим жило расхождение:
+    # условие в middleware пропускает ответ, только если клиент согласен на
+    # gzip, а кодирование выбирал aiohttp — по порядку своего словаря
+    # CONTENT_CODINGS, где первым стоит deflate. Браузер объявляет
+    # «gzip, deflate», так что каждый сжатый ответ API уходил ему как deflate,
+    # хотя код выше читается как «отдаём gzip». Вреда владельцу от этого не
+    # было (deflate браузеры понимают), но код не означал того, что написано,
+    # и сырой deflate в вебе реализован вразнобой.
+    assert encoding == "gzip", f"ответ ушёл как {encoding}, а не gzip"
     assert decoded == len(BIG.encode()), "тело после распаковки не должно меняться"
     assert sent < decoded / 4, f"сжатие почти ничего не дало: {sent} из {decoded}"
     assert vary == "Accept-Encoding", "иначе кэши перепутают сжатый и обычный ответ"
@@ -139,3 +148,4 @@ def test_event_stream_is_not_buffered_by_compression():
     encoding, body = asyncio.run(_go())
     assert encoding is None, "поток событий сжимать нельзя"
     assert b"data: hello" in body
+

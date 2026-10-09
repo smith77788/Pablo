@@ -179,12 +179,17 @@ def test_http_app_serves_miniapp_and_metrics(booted):
             assert r.status == 200, f"мини-апп не отдаётся: {r.status}"
             assert int(r.headers.get("Content-Length") or 0) > 1000
 
-            m = await cli.get("/metrics")
+            # auto_decompress=False стоит ради Content-Length выше, поэтому
+            # остальные запросы просят НЕ сжимать: иначе `.text()` разбирает
+            # сжатое тело и падает UnicodeDecodeError. Так и покраснела ветка,
+            # когда метрик стало больше порога сжатия (1 КиБ).
+            m = await cli.get("/metrics", headers={"Accept-Encoding": "identity"})
             assert m.status == 200
             assert "infragram_" in await m.text()
 
             # неавторизованный API отвечает 401, а не падает 500
-            a = await cli.get("/api/miniapp/accounts")
+            a = await cli.get("/api/miniapp/accounts",
+                              headers={"Accept-Encoding": "identity"})
             assert a.status in (401, 403), f"ожидал отказ авторизации, получил {a.status}"
         finally:
             await cli.close()

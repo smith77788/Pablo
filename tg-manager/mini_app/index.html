@@ -14935,7 +14935,12 @@ async function accPhoneResend(){
   const b=document.getElementById('accPhoneResendBtn'); const prev=b?b.textContent:'';
   if(b){ b.disabled=true; b.textContent='⏳ Запрашиваю…'; }
   try{
-    const r=await api('/api/miniapp/account/add/phone/resend',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,phone_code_hash:_accLoginHash,proxy_id:_accProxy().id})});
+    // proxy_id тут не нужен и не присылается: повторный запрос кода идёт тем
+    // же самым клиентом Telethon, что просил код в первый раз (он лежит в
+    // account_manager._pending по номеру), а значит и тем же прокси. Присылать
+    // ключ, который сервер не читает, — повод однажды решить, что прокси
+    // учтён, хотя учитывает его совсем другое место.
+    const r=await api('/api/miniapp/account/add/phone/resend',{method:'POST',body:JSON.stringify({phone:_accLoginPhone,phone_code_hash:_accLoginHash})});
     if(r&&r.ok===false&&r.flood){
       _accResendNote(r.hint||'Telegram попросил паузу — подождите и попробуйте снова.');
       toast('⏳ '+(r.hint||'Поймали флуд — подождите'));
