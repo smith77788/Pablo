@@ -145,3 +145,46 @@ def test_the_api_passes_the_cause_to_the_list():
            / "services" / "mini_app_api.py").read_text(encoding="utf-8")
     assert 'r["health_reason"]' in api
     assert 'r["health_needs_owner"]' in api
+
+
+# ── Совет приходит от пульса, а не выдумывается экраном ─────────────────────
+
+def test_every_paused_account_gets_an_actionable_advice():
+    cases = [{"severe": 2}, {"acc_status": "spamblock"}, {"acc_status": "banned"},
+             {"has_session": False}, {"floods": 4}, {"trust_score": 0.1}]
+    for kw in cases:
+        advice = _one(**kw)["advice"]
+        assert advice, f"пауза без совета: {kw}"
+        plain = advice.replace("FloodWait", "").replace("Telegram", "")
+        assert not any(c.isascii() and c.isalpha() for c in plain), advice
+
+
+def test_a_lost_account_is_not_told_to_wait():
+    advice = _one(acc_status="banned")["advice"]
+    assert "отлежаться" not in advice, advice
+    assert "безвозвратно" in advice, advice
+
+
+def test_a_restricted_account_is_not_told_to_delete_itself():
+    advice = _one(acc_status="spamblock")["advice"]
+    assert "Удалять аккаунт не нужно" in advice, advice
+
+
+def test_an_account_without_a_session_is_told_to_reconnect():
+    assert "Переподключите сессию" in _one(has_session=False)["advice"]
+
+
+def test_restrictions_are_told_they_pass_on_their_own():
+    assert "отлежаться" in _one(severe=3)["advice"]
+
+
+def test_a_healthy_account_gets_no_advice():
+    assert _one()["advice"] == ""
+
+
+def test_the_screen_prints_the_advice_the_pulse_computed():
+    from pathlib import Path
+
+    html = (Path(__file__).resolve().parents[1]
+            / "mini_app" / "index.html").read_text(encoding="utf-8")
+    assert "_h.advice" in html, "экран снова сам решает, что посоветовать"

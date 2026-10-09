@@ -86,6 +86,62 @@ def get_health(account_id: int) -> AccountHealth:
     return _health_cache[account_id]
 
 
+# Пороги health_score, по которым продукт ПЕРЕСТАЁТ брать аккаунт. Живут здесь,
+# рядом со счётчиком: раньше число 10 было выписано в риск-пульсе
+# (`infra_memory.get_account_health`), а экран снятия пауз о нём не знал вовсе —
+# аккаунт, которого держал только этот счётчик, в списке «кто на паузе» не
+# появлялся, и кнопка отвечала «нет активных кулдаунов».
+QUARANTINE_SCORE = 10.0   # ниже — пульс считает аккаунт выбывшим
+RISK_SCORE = 30.0         # ниже — под риском, но ещё в работе
+
+
+def local_block_reason(account_id: int) -> str | None:
+    """Чем аккаунт держит ПАМЯТЬ ПРОЦЕССА, а не база. None — ничем.
+
+    Два тормоза живут только в памяти воркера и переживают любую очистку БД:
+    упавший до нуля `health_score` (его ставит `update_after_failure` на бане
+    или спам-блоке) и снятые флаги `suitability`, из-за которых
+    `get_sorted_accounts` молча выбрасывает аккаунт из подбора под действие.
+    Оба снимает только ручной сброс (`account_reset`) или следующий цикл
+    `load_from_db`, поэтому экран «снять паузы» обязан их видеть — иначе он
+    говорит «все аккаунты доступны» о том, кого продукт не берёт.
+    """
+    if account_id not in _health_cache:
+        return None                      # о нём ничего не помним — не держим
+    health = _health_cache[account_id]
+    if health.health_score < QUARANTINE_SCORE:
+        return f"здоровье в памяти воркера {int(health.health_score)}/100"
+    blocked = sorted(k for k, ok in health.suitability.items() if not ok)
+    if blocked:
+        return "запрет действий в памяти воркера: " + ", ".join(blocked)
+    return None
+
+
+def clear_local_blocks(account_id: int) -> None:
+    """Забыть процесс-локальные тормоза аккаунта (ручной сброс риска).
+
+    Возвращаем счётчики к НЕЙТРАЛЬНОМУ значению, с которым работает свежий
+    воркер (100 — «ничего не знаем», именно так их читает риск-пульс), а не к
+    выдуманному хорошему: настоящую оценку заново считает `load_from_db` из
+    базы. История ограничений в БД при этом цела, и её фильтрует
+    `risk_cleared_at` — здесь снимается только память процесса.
+
+    Раньше сброс возвращал ровно два флага из пяти (`dm`, `invite`), а
+    `health_score` не трогал вовсе: после бана, который в памяти обнуляет и
+    счётчик, и ВСЕ флаги, аккаунт оставался выключенным для `create`, `post` и
+    `join`, а пульс продолжал светить «на паузе» — та же жалоба «кулдаун не
+    сбрасывается», только причину было не видно.
+    """
+    if account_id not in _health_cache:
+        return
+    health = _health_cache[account_id]
+    health.health_score = 100.0
+    health.load_score = 0.0
+    for key in list(health.suitability):
+        health.suitability[key] = True
+    health.last_updated = time.monotonic()
+
+
 def compute_health_score(
     trust_score: float,
     flood_count_7d: int,

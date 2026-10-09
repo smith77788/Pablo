@@ -170,8 +170,24 @@ def test_pulse_folds_all_five_signals():
     assert "account_flood_log" in seg
     assert "trust_score" in seg
     assert "account_health" in seg and "health_score" in seg
-    # health<10 → карантин, <30 → риск
-    assert "hscore < 10.0" in seg and "hscore < 30.0" in seg
+    # Пороги счётчика проверяем ПОВЕДЕНИЕМ, а не литералом в тексте: сами числа
+    # живут в account_health (QUARANTINE_SCORE / RISK_SCORE), чтобы экран снятия
+    # пауз и пульс не разъехались, и прежний вариант теста падал бы на любом
+    # вынесении константы, ничего не сказав о правиле.
+    from services import account_health as _ah
+
+    async def _verdict(score: float) -> str:
+        _ah._health_cache.pop(77, None)
+        _ah.get_health(77).health_score = score
+        rows = [{"id": 77, "phone": "x", "acc_status": "active",
+                 "trust_score": 1.0, "restrictions": 0, "severe": 0, "floods": 0}]
+        out = await get_account_health(_FakePool(rows=rows), 99)
+        _ah._health_cache.pop(77, None)
+        return out["accounts"][0]["status"]
+
+    assert asyncio.run(_verdict(_ah.QUARANTINE_SCORE - 1)) == "quarantine"
+    assert asyncio.run(_verdict(_ah.RISK_SCORE - 1)) == "at_risk"
+    assert asyncio.run(_verdict(100.0)) == "healthy"
 
 
 def test_reflex_wired_into_op_worker():

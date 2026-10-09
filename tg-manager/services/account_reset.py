@@ -17,9 +17,12 @@
     самолечение и проверка здоровья перебрасывают статус туда-сюда, и оператор
     не видит, что сессию надо перезалить);
   * ни бот, ни массовый сброс не снимали process-local запрет
-    `account_health.suitability` (dm/invite), из-за которого
-    `get_sorted_accounts` молча выкидывал аккаунт из подбора до следующего
-    часового цикла здоровья.
+    `account_health.suitability`, из-за которого `get_sorted_accounts` молча
+    выкидывал аккаунт из подбора до следующего часового цикла здоровья. Сам
+    сброс потом снимал два флага из пяти (`dm`, `invite`) и не трогал
+    `health_score`, хотя бан в памяти гасит и все пять флагов, и счётчик: для
+    `create`, `post` и `join` аккаунт оставался выключенным, а риск-пульс
+    продолжал считать его выбывшим.
 
 Полный сброс — это пять шагов, и пропуск любого возвращает жалобу владельца
 «кулдаун не сбрасывается». Держим их здесь, а кнопки только зовут эту функцию.
@@ -74,13 +77,14 @@ def _clear_in_memory(account_ids: list[int]) -> None:
     try:
         from services import account_health as _ah
         for acc_id in account_ids:
-            health = _ah.get_health(acc_id)
-            for key in ("dm", "invite"):
-                if key in health.suitability:
-                    health.suitability[key] = True
+            # Снимаем ВСЁ, что держит память процесса: и флаги suitability (все
+            # пять, а не два — бан в памяти гасит их все, и аккаунт оставался
+            # выключенным для create/post/join), и упавший до нуля health_score,
+            # по которому риск-пульс продолжал светить «на паузе».
+            _ah.clear_local_blocks(acc_id)
     except Exception:
-        log.warning("account_reset: запрет suitability не снят для %d аккаунтов",
-                    len(account_ids), exc_info=True)
+        log.warning("account_reset: процесс-локальные тормоза не сняты для %d "
+                    "аккаунтов", len(account_ids), exc_info=True)
 
 
 async def _записать_в_журнал(pool, owner_id: int, действие: str, цель: str) -> None:
@@ -145,7 +149,12 @@ async def cooled_account_ids(pool, owner_id: int) -> list[int]:
          считал его в «Карантин», операции обходили, а единственная кнопка,
          которая его освобождает (`risk_cleared_at`), показывала владельцу
          «все аккаунты доступны». Та же жалоба «кулдаун не сбрасывается»,
-         только у неё не было даже кнопки.
+         только у неё не было даже кнопки;
+      4. процесс-локальные тормоза `account_health` — обнулённый `health_score`
+         и снятые флаги `suitability`. Их не видно ни в базе, ни в кулдауне
+         flood_engine: риск-пульс по первому светит «на паузе», подбор под
+         действие по вторым молча выбрасывает аккаунт, а экран снятия пауз о
+         них не спрашивал. Четвёртый способ получить ту же жалобу.
 
     Мёртвый по статусу аккаунт (`account_status.is_dead`) в список НЕ идёт:
     снятие риска его не воскрешает (`banned` остаётся `banned`, и дверь
@@ -188,12 +197,27 @@ async def cooled_account_ids(pool, owner_id: int) -> list[int]:
         log.warning("account_reset: карантин риск-пульса не получен owner=%s",
                     owner_id, exc_info=True)
 
+    # Четвёртый вид паузы — память процесса (health_score/suitability). Порог
+    # и предикат живут в account_health, чтобы экран и пульс не разъехались.
+    try:
+        from services.account_health import local_block_reason
+    except Exception:
+        local_block_reason = None
+
     cooled: list[int] = []
     for r in rows:
         acc_id = int(r["id"])
         if r["cd_db"] or acc_id in quarantined:
             cooled.append(acc_id)
             continue
+        if local_block_reason is not None and acc_id in revivable:
+            try:
+                if local_block_reason(acc_id):
+                    cooled.append(acc_id)
+                    continue
+            except Exception:
+                log.debug("account_reset: локальный тормоз acc=%s не прочитан",
+                          acc_id, exc_info=True)
         if is_account_cooling is None:
             continue
         try:

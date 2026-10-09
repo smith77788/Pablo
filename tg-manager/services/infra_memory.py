@@ -910,9 +910,15 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         # (0..100, у неизвестных = 100). Сводим и его в единый пульс: <10 = мёртв
         # (карантин), <30 = риск. process-local (может быть пустым на свежем воркере
         # → 100 = нейтрально, никогда не флагает ложно).
+        # Пороги — из account_health: там же их читает экран снятия пауз, и
+        # разойтись им нельзя (иначе пульс держит аккаунт, а кнопка, которая
+        # его освобождает, его не показывает).
+        hscore, dead_score, weak_score = 100.0, 10.0, 30.0
         try:
             from services import account_health as _ah
             hscore = float(_ah.get_health(r["id"]).health_score)
+            dead_score = float(_ah.QUARANTINE_SCORE)
+            weak_score = float(_ah.RISK_SCORE)
         except Exception:
             hscore = 100.0
         no_session = not bool(r.get("has_session", True))
@@ -933,7 +939,7 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         if severe:
             codes.append("severe")
             reasons.append(f"серьёзных ограничений за {int(days)} дн.: {severe}")
-        if hscore < 10.0:
+        if hscore < dead_score:
             codes.append("failing")
             reasons.append(f"действия подряд не проходят (здоровье {int(hscore)}/100)")
         if restr and not severe:
@@ -949,14 +955,14 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         if low_trust:
             codes.append("low_trust")
             reasons.append(f"низкое доверие: {int(trust * 100)}%")
-        if 10.0 <= hscore < 30.0:
+        if dead_score <= hscore < weak_score:
             codes.append("weak")
             reasons.append(f"слабое здоровье: {int(hscore)}/100")
 
-        if severe or status_bad or no_session or hscore < 10.0:
+        if severe or status_bad or no_session or hscore < dead_score:
             status, score = "quarantine", 0.2
             quarantine += 1
-        elif restr or floods >= 3 or status_risk or low_trust or hscore < 30.0:
+        elif restr or floods >= 3 or status_risk or low_trust or hscore < weak_score:
             status, score = "at_risk", min(0.5, trust)
             at_risk += 1
         elif floods:
@@ -969,7 +975,30 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         # мёртвый статус, отсутствие сессии и хронические отказы ждать
         # бессмысленно — там нужно действие владельца, и совет обязан быть
         # другим, иначе аккаунт стоит ровно столько, сколько владелец ждёт.
-        needs_owner = bool(no_session or status_bad or hscore < 10.0)
+        needs_owner = bool(no_session or status_bad or hscore < dead_score)
+        # Что именно делать — говорим здесь же: экран не знает, какая из причин
+        # сработала, и раньше на любую печатал «дайте отлежаться 3+ дней».
+        if no_session:
+            advice = ("Переподключите сессию аккаунта — без неё он не работает "
+                      "нигде.")
+        elif status_bad and acc_status in _acc_status_mod.LOST_STATUSES:
+            advice = ("Аккаунт потерян безвозвратно — отключите его и работайте "
+                      "другими.")
+        elif status_bad and acc_status in _acc_status_mod.RESTRICTED_STATUSES:
+            advice = ("Ограничение снимается: дождитесь или займитесь "
+                      "реабилитацией. Удалять аккаунт не нужно.")
+        elif status_bad:
+            advice = "Переимпортируйте сессию аккаунта — текущая недействительна."
+        elif hscore < dead_score:
+            advice = ("Счётчик отказов живёт в памяти процесса: нажмите «Снять "
+                      "паузу» на этом аккаунте и запустите щадящий прогрев.")
+        elif status == "quarantine":
+            advice = ("Дайте аккаунту отлежаться (3+ дней без действий) или "
+                      "запустите щадящий прогрев — пульс снимет паузу сам.")
+        elif status == "at_risk":
+            advice = "Снизьте нагрузку и запустите прогрев — риск спадёт сам."
+        else:
+            advice = ""
         accounts.append({
             "account_id": r["id"], "phone": r["phone"],
             "status": status, "score": score, "acc_status": acc_status,
@@ -979,6 +1008,7 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             "reason_codes": codes,
             "reason": "; ".join(reasons),
             "needs_owner": needs_owner,
+            "advice": advice,
         })
     # худшие — вперёд (для приборного щитка)
     accounts.sort(key=lambda a: a["score"])

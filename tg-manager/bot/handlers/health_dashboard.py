@@ -1890,6 +1890,19 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
         except Exception:
             rows = []
 
+    # Кто под карантином риск-пульса по ограничениям — ОДНИМ запросом на весь
+    # список, той же дверью, что у гейта операций. Без этого экран писал
+    # «карантин по недавним ограничениям» любому аккаунту без окна паузы, в том
+    # числе тому, у кого ограничений нет вовсе и держит его память воркера.
+    quarantined: set[int] = set()
+    if rows:
+        try:
+            from services.infra_memory import quarantined_accounts
+            quarantined = await quarantined_accounts(
+                pool, [int(r["id"]) for r in rows])
+        except Exception:
+            log_exc_swallow(log, "reset_cooldown_menu: карантин не прочитан")
+
     kb = InlineKeyboardBuilder()
 
     if not rows:
@@ -1933,10 +1946,24 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
             if left > 0:
                 human_cd = _human_cooldown(now + timedelta(seconds=left), now)
                 lines.append(f"⏸ <b>{html.escape(name)}</b> — ещё {human_cd}")
-            else:
+            elif int(acc["id"]) in quarantined:
                 lines.append(
                     f"🛑 <b>{html.escape(name)}</b> — карантин по недавним "
                     "ограничениям")
+            else:
+                # Третий случай: держит только память воркера (обнулённое
+                # здоровье или снятый флаг действия). Ограничений у аккаунта
+                # может не быть вовсе, и писать про них — врать.
+                why = ""
+                try:
+                    from services.account_health import local_block_reason
+                    why = local_block_reason(int(acc["id"])) or ""
+                except Exception:
+                    log_exc_swallow(
+                        log, f"reset_cooldown_menu: причина acc={acc['id']}")
+                lines.append(
+                    f"🛑 <b>{html.escape(name)}</b> — "
+                    + (html.escape(why) if why else "не берётся в работу"))
         kb.button(
             text=f"🔓 {name[:22]}",
             callback_data=HealthCb(action="reset_cooldown_one", page=acc["id"]),
