@@ -4695,6 +4695,27 @@ async def notify_dedup_ok(pool, user_id: int, key: str, cooldown_s: int) -> bool
         return True
 
 
+async def notify_dedup_forget(pool, user_id: int, key: str) -> None:
+    """Снять персистентную отметку анти-повтора — доставка не состоялась.
+
+    Пара к `notify_dedup_ok`, которая отметку ЗАНИМАЕТ. Занимать до отправки
+    обязательно (иначе два одновременных события оба пройдут проверку), но
+    тогда у неудачной доставки должен быть путь назад: окно у важных событий
+    большое (у итога операции — 48 часов), и сгоревшее окно означает, что
+    владелец не узнает об операции вообще. Тот же возврат слота уже делает
+    внутрипроцессный кулдаун в `notify_if_enabled`.
+
+    Никогда не бросает: вызывается на пути обработки сбоя.
+    """
+    try:
+        await pool.execute(
+            "DELETE FROM notification_dedup WHERE user_id=$1 AND dedup_key=$2",
+            int(user_id), str(key),
+        )
+    except Exception as exc:
+        log.debug("notify_dedup_forget (%s): %s", key, exc)
+
+
 async def notify_if_enabled(
     pool: asyncpg.Pool,
     bot,
@@ -4704,8 +4725,19 @@ async def notify_if_enabled(
     reply_markup=None,
     *,
     dedup_key: str | None = None,
-) -> None:
+) -> bool:
     """Send a notification to user only if the given preference flag is True.
+
+    Возвращает False РОВНО на временном сбое доставки — то есть «стоит
+    попробовать снова». True — доставлено, отключено владельцем, придержано
+    анти-спамом или отказ, который повторять бессмысленно (заблокированный бот,
+    удалённый аккаунт: повтор только жжёт лимиты Telegram).
+
+    Раньше функция возвращала None на всех исходах, и вызывающий не мог
+    отличить доставленное от потерянного. Для итога операции это значило, что
+    персистентное окно анти-повтора на 48 часов сгорало на первом же сетевом
+    блипе, а отчёт о работе аккаунтов владелец не получал вообще
+    (op_worker._notify_owner_about_op теперь снимает отметку по False).
 
     Rate-limited: each (user_id, pref, dedup_key) triple can fire at most once
     per _NOTIFY_COOLDOWN_SECONDS to prevent spam when many events happen at once.
@@ -4722,7 +4754,7 @@ async def notify_if_enabled(
         now = time.monotonic()
         last_sent = _notify_cooldown.get(key, 0.0)
         if now - last_sent < _NOTIFY_COOLDOWN_SECONDS:
-            return
+            return True
         # Слот занимаем ДО отправки — иначе два события одного типа, пришедшие
         # одновременно, оба прошли бы проверку. Но при неудаче слот возвращаем
         # (см. ниже): раньше сбой сети сжигал окно на минуту, повторять было
@@ -4731,14 +4763,14 @@ async def notify_if_enabled(
 
         settings = await get_notification_settings(pool, user_id)
         if not settings.get(pref, True):
-            return
+            return True
         _last_exc: "Exception | None" = None
         for _attempt in range(1 + len(_NOTIFY_RETRY_DELAYS)):
             try:
                 await bot.send_message(
                     user_id, text, parse_mode="HTML", reply_markup=reply_markup
                 )
-                return
+                return True
             except Exception as exc:
                 _last_exc = exc
                 if _notify_failure_is_permanent(exc):
@@ -4776,6 +4808,11 @@ async def notify_if_enabled(
                    {"pref": str(pref)[:40]})
         except Exception:
             pass
+        # False означает «стоит попробовать снова», поэтому его возвращает
+        # ТОЛЬКО временный сбой. На заблокированном боте повтор каждый круг
+        # воркера жёг бы лимиты Telegram, ничего не доставляя, — там True.
+        _worth_retrying = not _notify_failure_is_permanent(exc)
+        return not _worth_retrying
 
 
 # ── Global Presence Factory ────────────────────────────────────────────────

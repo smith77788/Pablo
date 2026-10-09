@@ -508,10 +508,18 @@ async def _notify_owner_about_op(
             # Fail-open: сбой анти-спама не повод молчать о судьбе операции.
             log_exc_swallow(log, f"op_worker: анти-повтор {dedup_key} не сработал")
     try:
-        await db.notify_if_enabled(pool, bot, owner_id, "op_complete", text,
-                                   dedup_key=dedup_key)
+        _delivered = await db.notify_if_enabled(
+            pool, bot, owner_id, "op_complete", text, dedup_key=dedup_key)
     except Exception:
         log_exc_swallow(log, f"op_worker: уведомление владельцу {owner_id} не ушло")
+        _delivered = False
+    # Доставка не удалась по ВРЕМЕННОЙ причине — отметку снимаем, иначе окно
+    # (48 часов) сгорело бы на одном сетевом блипе, и единственный отчёт о
+    # работе аккаунтов владельца не дошёл бы вообще. Отказ, который повторять
+    # бессмысленно (заблокированный бот), сюда не попадает: notify_if_enabled
+    # отвечает на него True.
+    if dedup_key and _delivered is False:
+        await db.notify_dedup_forget(pool, owner_id, f"op:{dedup_key}")
 
 
 
@@ -2880,6 +2888,14 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
             await bot.send_message(aid, "\n".join(lines), parse_mode="HTML")
         except Exception:
             log_exc_swallow(log, f"op_worker alert send to {aid} failed")
+            # Отметки заняты ДО отправки (иначе два круга подряд объявили бы
+            # одно и то же), поэтому у неудачной доставки нужен путь назад:
+            # иначе алерт о застрявших операциях пропадал на всё окно, а
+            # докстринг окна обещает ровно обратное — «потерянный алерт
+            # вернётся, пока операция ещё застрявшая».
+            for r in new_rows:
+                await db.notify_dedup_forget(
+                    pool, aid, f"op-stuck-alert:{int(r['id'])}")
 
 
 # Защитные записи, сбой которых владелец обязан УВИДЕТЬ. Значение — что именно
