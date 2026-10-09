@@ -1048,14 +1048,28 @@ async def overview(pool, owner_id: int, *, entity_type: str = USER,
     """
     out = {"funnel": [], "hot": [], "total": 0, "audience": None, "bots": []}
     try:
+        # Просроченность спрашиваем вместе со значением: распределение
+        # воронки считалось по СЫРОМУ value, и на том же экране получалось
+        # два несогласных числа из одной таблицы — полоска «Готов купить: 12»
+        # и пустой список «кого дожимать первыми» под ней (он просроченные
+        # отбрасывает, и правильно). Человек, пропавший три недели назад,
+        # стоял в воронке как готовый к покупке: по такой воронке планируют
+        # работу. Распад доводит строки до правды, но он идёт пачками и раз в
+        # 15 минут — экран обязан показывать правду сейчас.
         rows = await pool.fetch(
-            "SELECT value, COUNT(*) AS c FROM virtual_states "
+            "SELECT value, (expires_at IS NOT NULL AND expires_at <= now()) "
+            "       AS expired, COUNT(*) AS c FROM virtual_states "
             "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
-            "GROUP BY value", owner_id, entity_type, state_key)
+            "GROUP BY value, expired", owner_id, entity_type, state_key)
     except Exception:
         log.debug("virtual_layer.overview funnel failed owner=%s", owner_id)
         return out
-    dist = {r["value"]: int(r["c"]) for r in rows}
+    # Складываем через ту же дверь, что и каскад (`effective_value`): иначе
+    # воронка на экране и температура под ней считают по разным правилам.
+    dist: dict[str, int] = {}
+    for r in rows:
+        value = effective_value(r["value"], bool(r["expired"]))
+        dist[value] = dist.get(value, 0) + int(r["c"])
     order = LADDER + [LOST]
     out["funnel"] = [
         {"value": v, "label": VALUE_LABEL.get(v, v), "count": dist.get(v, 0)}

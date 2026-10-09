@@ -33,7 +33,9 @@ class _Pool:
     async def fetch(self, q, *a):
         self.queries.append(q)
         if "GROUP BY value" in q:
-            return [{"value": "ready", "c": 1}]
+            # Воронка спрашивает и признак просроченности — складывается она
+            # через распад (см. test_the_funnel_and_the_hot_list_agree).
+            return [{"value": "ready", "expired": False, "c": 1}]
         if "FROM unified_contacts" in q:
             return self.contacts
         if "FROM managed_bots" in q:

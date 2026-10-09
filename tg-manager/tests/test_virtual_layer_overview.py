@@ -27,7 +27,12 @@ class _Pool:
 
     async def fetch(self, q, *a):
         if "GROUP BY value" in q:
-            return self._funnel
+            # Запрос воронки отдаёт ещё и признак просроченности: сводка
+            # складывает состояния через распад, иначе полоска «Готов купить»
+            # и список «кого дожимать» на одном экране не совпадают
+            # (tests/test_the_funnel_and_the_hot_list_agree.py). Здесь нас
+            # интересует порядок и подписи — строки живые.
+            return [{"expired": False, **row} for row in self._funnel]
         if "value = ANY" in q:
             return self._hot
         return []
