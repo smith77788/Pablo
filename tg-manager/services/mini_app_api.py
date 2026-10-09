@@ -363,41 +363,17 @@ INLINE_MIGRATIONS: list[str] = [
     "ALTER TABLE crm_deals DROP CONSTRAINT IF EXISTS crm_deals_stage_check",
     "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_stage_check "
     "CHECK (stage IN ('lead','contact','proposal','negotiation','won','lost'))",
-    # Automation Workflows
-    """CREATE TABLE IF NOT EXISTS automation_workflows (
-        id BIGSERIAL PRIMARY KEY,
-        owner_id BIGINT NOT NULL,
-        name TEXT NOT NULL,
-        steps JSONB NOT NULL DEFAULT '[]',
-        status TEXT DEFAULT 'created',
-        created_at TIMESTAMPTZ DEFAULT now(),
-        started_at TIMESTAMPTZ,
-        finished_at TIMESTAMPTZ,
-        updated_at TIMESTAMPTZ DEFAULT now()
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_wf_owner ON automation_workflows(owner_id, created_at DESC)",
-    """CREATE TABLE IF NOT EXISTS workflow_step_runs (
-        id BIGSERIAL PRIMARY KEY,
-        workflow_id BIGINT NOT NULL REFERENCES automation_workflows(id) ON DELETE CASCADE,
-        step_num INTEGER NOT NULL,
-        action TEXT NOT NULL DEFAULT '',
-        params JSONB DEFAULT '{}',
-        status TEXT DEFAULT 'pending',
-        label TEXT DEFAULT '',
-        started_at TIMESTAMPTZ,
-        finished_at TIMESTAMPTZ,
-        result_data JSONB DEFAULT '{}'
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_wf_steps_wf ON workflow_step_runs(workflow_id, step_num)",
-    """CREATE TABLE IF NOT EXISTS workflow_step_logs (
-        id BIGSERIAL PRIMARY KEY,
-        workflow_id BIGINT NOT NULL,
-        step_num INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT '',
-        message TEXT DEFAULT '',
-        created_at TIMESTAMPTZ DEFAULT now()
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_wf_logs_wf ON workflow_step_logs(workflow_id, created_at DESC)",
+    # Воркфлоу: automation_workflows, workflow_step_runs и
+    # workflow_step_logs здесь больше НЕ заводятся. Это был отдельный,
+    # более ранний набор таблиц под сценарии — три таблицы и три индекса
+    # создавались на каждом старте, и за всё время ни одна строка в них не
+    # записывалась и не читалась: ни один запрос в проекте их не упоминает.
+    # Живая модель сценариев другая — workflow_definitions и workflow_runs
+    # (schema_v183.sql, schema_v249_workflow_bot.sql,
+    # services/workflow_engine.py). Мёртвый набор не просто занимал старт:
+    # он ловил на себя следующего читателя, который ищет «workflow» и
+    # пишет запрос к не той таблице. Уже существующие пустые таблицы не
+    # удаляем: DROP необратим, а вреда от них теперь нет.
     # Сокращатель ссылок («bit.ly для себя»): код → целевой URL + счётчик кликов,
     # срок действия (expires_at) и теги (как у bit.ly).
     """CREATE TABLE IF NOT EXISTS short_links (

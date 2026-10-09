@@ -62,9 +62,6 @@ _SYSTEM_PREFIXES = ("pg_", "information_schema", "sqlite_")
 RUNTIME_CREATED: dict[str, str] = {
     "fsm_state": "pg_fsm_storage создаёт при инициализации хранилища FSM бота",
     "schema_migrations": "журнал самих миграций, создаётся до их накатывания",
-    "automation_workflows": "создаётся кодом database.db при старте",
-    "workflow_step_runs": "создаётся кодом database.db при старте",
-    "workflow_step_logs": "создаётся кодом database.db при старте",
     "sessions": "таблица ВНУТРИ .session-файла Telethon (SQLite), не наша схема",
 }
 
@@ -176,7 +173,10 @@ def test_detector_ignores_cte_and_extract():
 
 def test_runtime_created_list_stays_short():
     """«Создам сам при первом обращении» — тот самый приём, что убил «Воркфлоу»."""
-    assert len(RUNTIME_CREATED) <= 6, (
+    # Было 6. Три исключения ушли вместе с мёртвым набором таблиц сценариев
+    # (automation_workflows, workflow_step_runs, workflow_step_logs): их
+    # создавали на каждом старте, и ни один запрос в проекте их не упоминал.
+    assert len(RUNTIME_CREATED) <= 3, (
         f"таблиц, создаваемых в обход миграций, стало {len(RUNTIME_CREATED)}. "
         "Заводите таблицы миграцией: создатель, которого перестали вызывать, "
         "не оставляет следа — раздел просто перестаёт работать."
