@@ -182,6 +182,57 @@ def test_every_protective_failure_counter_is_surfaced():
         "в _PROTECTIVE_FAILURE_COUNTERS словами владельца:\n  " + "\n  ".join(missing))
 
 
+def _counters_actually_incremented() -> set[str]:
+    """Счётчики, которые код РЕАЛЬНО увеличивает, а не просто упоминает.
+
+    Отличие от `_counters_in_code` принципиально: там имя ищется где угодно, и
+    сама таблица `_PROTECTIVE_FAILURE_COUNTERS` живёт в `services/`, то есть
+    своё же объявление детектор и находит. Для обратного направления нужен
+    именно ВЫЗОВ увеличения.
+    """
+    import re
+
+    found = set()
+    for base in ("services", "database"):
+        for dirpath, _d, files in os.walk(os.path.join(ROOT, base)):
+            for f in files:
+                if not f.endswith(".py"):
+                    continue
+                with open(os.path.join(dirpath, f), encoding="utf-8") as fh:
+                    text = fh.read()
+                found |= set(re.findall(
+                    r'(?:\binc|_metric|_reliability_metric)\(\s*"(infragram_[a-z_]+)"',
+                    text))
+    return found
+
+
+def test_no_declared_counter_is_dead():
+    """Обратное направление: объявленный счётчик обязан кем-то увеличиваться.
+
+    Опечатка в названии внутри `_PROTECTIVE_FAILURE_COUNTERS` обещала бы
+    владельцу сообщение, которого не будет никогда: сторож сравнивает снимок
+    метрик по этому имени, а по нему никто ничего не пишет. Проверка выше
+    такого не ловит — она смотрит только в другую сторону.
+    """
+    dead = sorted(_declared_counters() - _counters_actually_incremented())
+    assert not dead, (
+        "эти счётчики объявлены владельцу, но код их не увеличивает — сбой "
+        "защиты по ним не придёт никогда (опечатка в имени или увеличение "
+        "потерялось):\n  " + "\n  ".join(dead))
+
+
+def test_the_increment_detector_bites():
+    """Самопроверка обратного детектора на заведомо больном и здоровом тексте."""
+    import re
+
+    pat = r'(?:\binc|_metric|_reliability_metric)\(\s*"(infragram_[a-z_]+)"'
+    assert re.findall(pat, '_reliability_metric("infragram_x_failures_total")') \
+        == ["infragram_x_failures_total"]
+    # Упоминание в словаре увеличением не считается — иначе мёртвый счётчик
+    # прошёл бы проверку сам по себе.
+    assert re.findall(pat, '{"infragram_x_failures_total": "словами"}') == []
+
+
 def test_the_counter_detector_bites():
     """Самопроверка: детектор обязан находить счётчик в заведомо больном тексте."""
     import re
