@@ -2570,6 +2570,117 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
         log_exc_swallow(log, f"op_worker watchdog error: {e}")
 
 
+# Сколько ждать, прежде чем считать отменённую операцию брошенной. Запас нужен
+# на одну гонку: поллер выбирает строку из очереди ДО того, как запишет op_id в
+# `_active_op_ids`, и отмена, попавшая ровно в эту щель, уборщику активной не
+# видна. Без запаса её итог объявился бы дважды — здесь и секундой позже самим
+# исполнителем.
+_CANCEL_ORPHAN_GRACE_MIN = 2
+# Потолок на круг: уборка — не главное дело цикла, а после долгого простоя
+# таких операций может накопиться сколько угодно.
+_CANCEL_ORPHAN_BATCH = 50
+
+
+async def _watchdog_cancelled_orphans(pool: asyncpg.Pool, bot=None) -> int:
+    """Дописать итог отменённым операциям, которых больше никто не закроет.
+
+    ПОЧЕМУ ТАКИЕ ВООБЩЕ ЕСТЬ. Отмена ходит одной дверью (`operation_bus.cancel`),
+    и дверь делит работу: ОЖИДАЮЩУЮ операцию закрывает сама, а ЗАПУЩЕННУЮ
+    сознательно оставляет исполнителю — тот увидит 'cancelled' и позовёт
+    `_finish_cancelled_op`. Допущение верное, но держится только пока процесс
+    жив. Railway шлёт SIGTERM на каждом деплое, а исполнитель может в этот
+    момент сидеть во флуд-паузе и до проверки отмены не дойти. Тогда операция
+    остаётся терминальной и ПУСТОЙ: `result IS NULL`.
+
+    Цена пустого итога — та же, что разбирает докстринг `_finish_cancelled_op`:
+    владелец видит «Отменено» без единой цифры, хотя часть целей отработана, и
+    именно по этой цифре решает, продолжать ли и с какого места; исхода нет на
+    графике; в подписанном аудит-трейле операции нет; память организма не
+    узнала об отмене. И починить это нечем: `_reset_stale_running` при старте и
+    сторож зависших трогают только 'running', то есть ни рестарт, ни время
+    такую операцию не чинят.
+
+    КОГО НЕ ТРОГАЕМ. Активные в этом процессе (`_active_op_ids`) — тот же
+    критерий, по которому их щадят оба сторожа зависших: их закроет сам
+    исполнитель. Отменённые только что — см. `_CANCEL_ORPHAN_GRACE_MIN`. Уже
+    имеющие `result` — иначе исход объявлялся бы заново на каждом круге.
+
+    Закрываем единственной дверью закрытия отмены (`_finish_cancelled_op`):
+    она пишет статус, результат, метрику, аудит и событие шины. Своего UPDATE
+    здесь нет намеренно — ровно на самодельных закрытиях и терялась половина
+    итога. Отдельного сообщения владельцу не посылаем: об отмене он уже знает,
+    он её и нажал.
+
+    Возвращает число закрытых операций. Никогда не бросает.
+    """
+    closed = 0
+    try:
+        async with _active_lock:
+            active_now: frozenset[int] = frozenset(_active_op_ids)
+        rows = await _safe_fetch(
+            pool,
+            """SELECT id, owner_id, op_type, params, started_at, finished_at
+                 FROM operation_queue
+                WHERE status = 'cancelled'
+                  AND result IS NULL
+                  AND finished_at < now() - make_interval(mins => $1::int)
+                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))
+                ORDER BY id
+                LIMIT $3::int""",
+            _CANCEL_ORPHAN_GRACE_MIN,
+            (list(active_now) or None),
+            _CANCEL_ORPHAN_BATCH,
+            log_ctx="[watchdog_cancel_orphans]",
+        )
+        for row in rows:
+            op_id = int(row["id"])
+            try:
+                params = row["params"]
+                if isinstance(params, str):
+                    try:
+                        params = json.loads(params)
+                    except (ValueError, TypeError):
+                        params = None
+                if not isinstance(params, dict):
+                    params = {}
+                ok_n, failed_n = await _journal_counters(pool, op_id)
+                # Длительность по отметкам очереди: своих счётчиков у брошенной
+                # операции нет вовсе — её исполнителя уже нет в живых.
+                started, finished = row["started_at"], row["finished_at"]
+                duration_s = 0.0
+                if started is not None and finished is not None:
+                    try:
+                        duration_s = max(
+                            0.0, (finished - started).total_seconds())
+                    except (TypeError, AttributeError):
+                        duration_s = 0.0
+                summary = (
+                    f"🚫 Отменена на ходу, успело {ok_n}" if ok_n
+                    else "🚫 Отменена на ходу, сделать ничего не успела")
+                await _finish_cancelled_op(
+                    pool, op_id, int(row["owner_id"] or 0),
+                    str(row["op_type"] or "unknown"), params,
+                    {"status": op_status.CANCELLED, "ok": ok_n,
+                     "failed": failed_n, "total": ok_n + failed_n,
+                     "summary": summary},
+                    duration_s,
+                )
+                closed += 1
+            except Exception:
+                log_exc_swallow(
+                    log, f"op_worker: итог брошенной отмены op={op_id}")
+        if closed:
+            log.warning(
+                "op_worker watchdog: дописан итог %d отменённым операциям, "
+                "закрыть которые было некому (воркер умер между отменой и "
+                "сворачиванием исполнителя)", closed)
+            _reliability_metric(
+                "infragram_op_cancel_orphans_closed_total", closed)
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker cancel-orphan watchdog error: {e}")
+    return closed
+
+
 async def _reconcile_in_operation(pool: asyncpg.Pool) -> None:
     """Снять залипший in_operation=TRUE с аккаунтов, которые НЕ держит ни одна
     живая операция (in-memory _accounts_in_use — источник истины).
@@ -2924,6 +3035,10 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
                 # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
                 # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
                 await _reconcile_in_operation(pool)
+                # Там же — отмены, закрыть которые было некому: сторож выше
+                # лечит только 'running', а отменённая на ходу операция
+                # терминальна и не чинится ни рестартом, ни временем.
+                await _watchdog_cancelled_orphans(pool, bot)
             # Alert admins about stuck operations every ~5 minutes (30 cycles)
             if _watchdog_tick % 30 == 0:
                 await _watchdog_alerts(pool, bot)
