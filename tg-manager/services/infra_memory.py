@@ -24,6 +24,8 @@ from typing import Optional
 import asyncpg
 from services.logger import log_exc_swallow
 
+from services import account_status as _acc_status_mod
+
 log = logging.getLogger(__name__)
 
 # ── In-memory хранилище ───────────────────────────────────────────────────────
@@ -878,9 +880,16 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         floods = int(r["floods"] or 0)
         acc_status = (r["acc_status"] or "active").lower()
         # acc_status тоже сигнал здоровья (его ставят warmer/recovery/op_worker):
-        # banned/session_expired → карантин; cooldown/warming → риск.
-        status_bad = acc_status in ("banned", "session_expired", "deleted")
-        status_risk = acc_status in ("warming", "restricted", "flood")
+        # мёртвый статус → карантин; cooldown/warming → риск.
+        #
+        # Набор мёртвых статусов берём из единственного места
+        # (`account_status.DEAD_STATUSES`): свой список здесь не включал
+        # `spamblock`, и аккаунт, получивший спам-блок после PEER_FLOOD,
+        # показывался на приборном щитке ЗДОРОВЫМ — при том что операции его
+        # уже не брали, а экран флота называл мёртвым. Первые семь дней его
+        # спасал счётчик флудов, потом он уезжал в «здоров» навсегда.
+        status_bad = _acc_status_mod.is_dead(acc_status)
+        status_risk = acc_status == "warming"
         # 'cooldown' — риск ТОЛЬКО пока окно кулдауна не истекло (иначе давний
         # FloodWait держал бы «Под риском» бесконечно до heal-цикла монитора).
         if acc_status == "cooldown" and r.get("cd_active"):

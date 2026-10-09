@@ -20,11 +20,15 @@ import json
 import logging
 from typing import Any, Optional
 
+from services import account_status as _acc_status
+
 log = logging.getLogger(__name__)
 
-DEATH_STATUSES = frozenset(
-    {"banned", "spamblock", "deactivated", "session_expired", "frozen"}
-)
+# Набор мёртвых статусов — из единственного места на весь продукт
+# (`account_status.DEAD_STATUSES`). Свой список здесь не включал `deleted`:
+# пока расходятся наборы, одно и то же состояние аккаунта в одном органе
+# считается смертью, а в другом — нет, и владелец видит противоречие.
+DEATH_STATUSES = _acc_status.DEAD_STATUSES
 
 _FEATURE_WINDOW_HOURS = 72
 

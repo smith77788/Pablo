@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from services import account_status as _acc_status
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -111,7 +112,7 @@ async def account_states(pool, owner_id: int) -> list[dict[str, Any]]:
             risk = 0.0
 
         # Классификация состояния и человеческая причина.
-        if status in ("banned", "deactivated", "session_expired", "spamblock"):
+        if _acc_status.is_dead(status):
             state, reason, ready_in = "dead", _dead_reason(status), None
             if status == "spamblock" and acc_id in rehab:
                 reason = _rehab_reason(rehab[acc_id], now)
@@ -172,6 +173,8 @@ def _dead_reason(status: str) -> str:
         "deactivated": "деактивирован — не восстановить",
         "session_expired": "сессия истекла — перезалейте аккаунт",
         "spamblock": "спам-блок — идёт реабилитация/нужна перезаливка",
+        "deleted": "аккаунт удалён в Telegram — не восстановить",
+        "frozen": "аккаунт заморожен Telegram — нужен разбор/перезаливка",
     }.get(status, status)
 
 

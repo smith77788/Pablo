@@ -25,6 +25,7 @@ from typing import Optional
 
 import asyncpg
 
+from services import account_status as _acc_status
 from services import flood_engine
 
 log = logging.getLogger(__name__)
@@ -200,7 +201,12 @@ async def select_all_active(
                   # исполнители несли этот фильтр каждый у себя; после переноса
                   # выбора в единую дверь он обязан быть здесь, иначе миграция
                   # молча ослабила бы защиту (взяли бы banned с is_active=TRUE).
-                  "COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired', 'spamblock')"]
+                  # Набор мёртвых статусов — из единственного места
+                  # (`account_status.DEAD_STATUSES`), иначе он разъезжается с
+                  # риск-пульсом и экраном флота: так `spamblock` однажды уже
+                  # считался «здоровым» на щитке.
+                  "COALESCE(a.acc_status, 'active') NOT IN ("
+                  + _acc_status.sql_dead_list() + ")"]
     params: list = [owner_id]
 
     if respect_cooldown:
