@@ -9,10 +9,29 @@ from __future__ import annotations
 import logging
 import asyncpg
 
-from services.account_manager import effective_account_status
+from services import account_status as _acc_status
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
+
+
+def _matched(rows) -> int:
+    """Сколько аккаунтов ПОДОШЛО под правило, а не сколько строк вернул LIMIT.
+
+    Каждая карточка здесь показывала владельцу `len(rows)` при `LIMIT 5`/`LIMIT 10`
+    в запросе: на флоте из двухсот аккаунтов «Низкое доверие: 5 аккаунт(ов)»
+    означало «минимум 5, а сколько на самом деле — неизвестно». Он читает это как
+    точное число и решает по нему, лечить флот или нет. Запросы теперь возвращают
+    настоящий счётчик окном COUNT(*) OVER (), и примеры по-прежнему обрезаны
+    лимитом — обрезан список, не число.
+    """
+    if not rows:
+        return 0
+    try:
+        total = rows[0]["match_cnt"]
+    except (KeyError, TypeError, IndexError):
+        return len(rows)
+    return len(rows) if total is None else int(total)
 
 
 async def get_recommendations(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
@@ -29,7 +48,8 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
     # 1. Accounts in cooldown for a long time (> 6h)
     cooling_long = await pool.fetch(
-        """SELECT id, phone, first_name, EXTRACT(EPOCH FROM (cooldown_until - NOW()))/3600 AS hours_left
+        """SELECT id, phone, first_name, EXTRACT(EPOCH FROM (cooldown_until - NOW()))/3600 AS hours_left,
+                  COUNT(*) OVER () AS match_cnt
            FROM tg_accounts
            WHERE owner_id=$1 AND is_active=TRUE
              AND cooldown_until > NOW() + INTERVAL '6 hours'
@@ -45,7 +65,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             {
                 "severity": "warning",
                 "icon": "⏳",
-                "title": f"Долгий кулдаун: {len(cooling_long)} аккаунт(ов)",
+                "title": f"Долгий кулдаун: {_matched(cooling_long)} аккаунт(ов)",
                 "text": f"Аккаунты {names} и другие заблокированы флудом на >6 часов. Снизьте интенсивность операций.",
                 "action": "accounts",
             }
@@ -53,7 +73,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
     # 2. Accounts with many flood events (last 7d > 10)
     flood_heavy = await pool.fetch(
-        """SELECT id, phone, first_name, flood_count_7d
+        """SELECT id, phone, first_name, flood_count_7d, COUNT(*) OVER () AS match_cnt
            FROM tg_accounts
            WHERE owner_id=$1 AND is_active=TRUE AND COALESCE(flood_count_7d,0) > 10
            ORDER BY flood_count_7d DESC LIMIT 5""",
@@ -66,7 +86,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             {
                 "severity": "warning",
                 "icon": "🌊",
-                "title": f"Высокая флуд-активность: {len(flood_heavy)} аккаунт(ов)",
+                "title": f"Высокая флуд-активность: {_matched(flood_heavy)} аккаунт(ов)",
                 "text": f"Аккаунт {name} получил {worst['flood_count_7d']} флудов за 7 дней. Аккаунт перегружен — дайте ему отдохнуть.",
                 "action": "accounts",
             }
@@ -74,7 +94,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
     # 3. Low trust accounts still in rotation
     low_trust = await pool.fetch(
-        """SELECT id, phone, first_name, trust_score
+        """SELECT id, phone, first_name, trust_score, COUNT(*) OVER () AS match_cnt
            FROM tg_accounts
            WHERE owner_id=$1 AND is_active=TRUE AND COALESCE(trust_score,1.0) < 0.3
            ORDER BY trust_score ASC LIMIT 5""",
@@ -89,7 +109,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             {
                 "severity": "critical",
                 "icon": "🚨",
-                "title": f"Низкое доверие: {len(low_trust)} аккаунт(ов)",
+                "title": f"Низкое доверие: {_matched(low_trust)} аккаунт(ов)",
                 "text": f"Аккаунты {names} имеют trust_score < 0.3. Используйте их для некритичных операций или разогрейте.",
                 "action": "warmup",
             }
@@ -97,31 +117,49 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
     # 4. Restricted/banned accounts not cleaned up
     restricted_rows = await pool.fetch(
-        """SELECT id, phone, first_name, acc_status,
-                  (session_str IS NOT NULL AND session_str <> '') AS has_session,
-                  is_active
+        # Отбор — ровно тот, по которому операции отказываются брать аккаунт:
+        # общий словарь мёртвых статусов плюс отсутствие сессии. Раньше здесь
+        # стоял свой список из трёх статусов и `LIMIT 10` на ВСЕХ активных
+        # аккаунтах: аккаунт с `deleted`, `frozen` или отозванной сессией в
+        # карточку не попадал, а на флоте больше десяти аккаунтов правило
+        # смотрело только на десять самых старых и молчало про остальных.
+        """SELECT id, phone, first_name, COALESCE(acc_status,'active') AS acc_status,
+                  (session_str IS NOT NULL AND session_str <> '') AS has_session
            FROM tg_accounts
            WHERE owner_id=$1 AND is_active=TRUE
-           ORDER BY added_at LIMIT 10""",
+             AND (session_str IS NULL OR session_str = ''
+                  OR COALESCE(acc_status,'active') IN ("""
+        + _acc_status.sql_dead_list() + """))
+           ORDER BY added_at""",
         owner_id,
     )
-    restricted = [
-        row
-        for row in restricted_rows
-        if effective_account_status(
-            row["acc_status"],
-            has_session=bool(row["has_session"]),
-            is_active=bool(row["is_active"]),
-        )
-        in {"spamblock", "banned", "deactivated"}
-    ]
-    if restricted:
+    if restricted_rows:
+        # Совет зависит от того, можно ли аккаунт вернуть. «Очистите их» на
+        # аккаунте с отозванной сессией или спамблоком — это предложение
+        # выбросить рабочий аккаунт: сессия переподключается, спамблок снимается.
+        gone = [r for r in restricted_rows
+                if r["acc_status"] in ("banned", "deactivated", "deleted")]
+        reauth = [r for r in restricted_rows
+                  if not r["has_session"] or r["acc_status"] == "session_expired"]
+        waiting = [r for r in restricted_rows
+                   if r["acc_status"] in ("spamblock", "frozen")]
+        parts = []
+        if gone:
+            parts.append(f"выбыли безвозвратно (бан или удаление) — {len(gone)}: "
+                         "их стоит отключить")
+        if reauth:
+            parts.append(f"потеряли сессию — {len(reauth)}: переподключите, "
+                         "аккаунт при этом не теряется")
+        if waiting:
+            parts.append(f"под ограничением (спамблок или заморозка) — {len(waiting)}: "
+                         "удалять не нужно, снимите ограничение или дайте отлежаться")
         recs.append(
             {
                 "severity": "critical",
                 "icon": "🚫",
-                "title": f"Проблемные аккаунты: {len(restricted)} шт",
-                "text": "Есть аккаунты со статусом spamblock/banned/deactivated, которые всё ещё числятся активными. Очистите их.",
+                "title": f"Проблемные аккаунты: {len(restricted_rows)} шт",
+                "text": ("Эти аккаунты числятся активными, но операции их не берут. "
+                         + "; ".join(parts) + "."),
                 "action": "cleaner",
             }
         )
@@ -162,7 +200,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             {
                 "severity": "warning",
                 "icon": "🌐",
-                "title": f"Нестабильные прокси: {len(proxy_stats)} шт",
+                "title": f"Нестабильные прокси: {len(proxy_stats)} шт",   # без LIMIT — len честен
                 "text": f"Прокси {names} имеют >30% ошибок за последние 7 дней. Замените или проверьте их.",
                 "action": "proxies",
             }
@@ -238,7 +276,8 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             """SELECT ima.account_id,
                       COALESCE(a.first_name, a.phone, 'id'||ima.account_id::text) AS label,
                       ima.successes, ima.failures,
-                      (ima.successes::float / NULLIF(ima.successes + ima.failures, 0)) AS success_rate
+                      (ima.successes::float / NULLIF(ima.successes + ima.failures, 0)) AS success_rate,
+                      COUNT(*) OVER () AS match_cnt
                FROM infra_memory_accounts ima
                JOIN tg_accounts a ON a.id = ima.account_id
                WHERE a.owner_id=$1 AND a.is_active=TRUE
@@ -254,7 +293,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                 {
                     "severity": "warning",
                     "icon": "📉",
-                    "title": f"Хроническая низкая эффективность: {len(poor_memory)} акк",
+                    "title": f"Хроническая низкая эффективность: {_matched(poor_memory)} акк",
                     "text": (
                         f"Аккаунты {names} успешно выполняют <{worst_rate}% операций на основе "
                         f"исторических данных. Рекомендуется разогрев или исключение из активных операций."

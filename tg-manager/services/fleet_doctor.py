@@ -13,12 +13,20 @@ from __future__ import annotations
 
 import logging
 
+from services import account_status as _acc_status
+
 log = logging.getLogger(__name__)
 
-_DEAD = {"banned", "spamblock", "deactivated", "session_expired"}
+# Воронка обязана повторять фильтры select_all_active слово в слово, иначе
+# доктор врёт: со своим коротким списком он держал аккаунт со статусом
+# deleted/frozen за живого, шаг «статус» показывал зелёным, а операция всё
+# равно получала ноль целей — ровно та невидимость обрыва, против которой
+# этот модуль и написан. Список — из общего словаря.
+_DEAD = set(_acc_status.DEAD_STATUSES)
 # Подписи «чем болен» — владелец читает по-русски, а в базе лежит код статуса.
 _DEAD_RU = {"banned": "забанен", "spamblock": "спамблок",
-            "deactivated": "аккаунт удалён", "session_expired": "сессия отозвана"}
+            "deactivated": "аккаунт удалён", "session_expired": "сессия отозвана",
+            "deleted": "аккаунт удалён в Telegram", "frozen": "аккаунт заморожен"}
 # Пороги trust (0..1) как в flood_engine._ACTION_MIN_TRUST — операции ниже режут.
 _TRUST_JOIN = 0.35
 _TRUST_INVITE = 0.50
