@@ -53,6 +53,18 @@ def _segment_where(owner_id, f: dict):
         conds.append('excluded = TRUE')
     elif not f.get('include_excluded'):
         conds.append('excluded = FALSE')
+    # Активность в Telegram. Жалоба владельца: «модули, которые используют
+    # контакты для работы, берут в работу тех, кто был в сети „давно“, хотя это
+    # значит, что аккаунт неактивен». Статус пишет парсер (account_manager.
+    # _classify_last_seen): online/recently/last_week/last_month — активные,
+    # берём. 'offline' с ТОЧНЫМ временем старше 30 дней — заходил давно, в
+    # РАБОЧИЙ срез (рассылки/инвайты) его не берём. Нет данных (NULL/unknown/
+    # offline без времени) — не отсекаем (fail-open: не выбрасываем контакт,
+    # про которого ничего не знаем). Просмотр списка передаёт include_inactive.
+    if not f.get('include_inactive'):
+        conds.append(
+            "NOT (last_seen_type = 'offline' AND last_seen_at IS NOT NULL "
+            "AND last_seen_at < now() - interval '30 days')")
     if f.get('search'):
         conds.append(
             f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
@@ -102,7 +114,11 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
                'multi_only': multi_only, 'mutual_only': mutual_only,
                'gender': gender, 'crm_stage': crm_stage, 'account_id': account_id,
                'excluded_only': excluded_only,
-               'include_excluded': not excluded_only}
+               'include_excluded': not excluded_only,
+               # Просмотр списка показывает ВСЕ контакты, в т.ч. давно
+               # неактивных — их надо видеть. Фильтр активности нужен только
+               # рабочему срезу (рассылки/инвайты через resolve_segment).
+               'include_inactive': True}
     where, params, idx = _segment_where(owner_id, filters)
     sort_map = {
         'name': 'first_name, last_name',
