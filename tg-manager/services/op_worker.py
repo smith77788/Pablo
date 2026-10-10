@@ -5379,6 +5379,39 @@ async def _exec_dm_campaign(
     return {"status": "done", "summary": f"📨 DM campaign #{campaign_id} completed"}
 
 
+async def _reference_media_bytes(pool, owner_id: int, refs, acc_ids) -> bytes | None:
+    """Фото из канала-референса для иллюстрации поста. Пробуем через доступный
+    аккаунт операции прочитать пару референсов и скачать фото. Fail-soft → None
+    (нет аккаунта/доступа/фото). FloodWait не копим на флот: ловим и переходим к
+    следующему источнику (в итоге — ИИ-генерация)."""
+    if not refs or not acc_ids:
+        return None
+    import random as _random
+    from database import db as _db
+    from services import account_manager as _am
+    acc = None
+    for aid in acc_ids[:3]:
+        try:
+            acc = await _db.get_account_for_telethon(pool, int(aid), owner_id)
+        except Exception:
+            acc = None
+        if acc and acc.get("session_str"):
+            break
+    if not acc or not acc.get("session_str"):
+        return None
+    _refs = [r for r in refs if r]
+    _random.shuffle(_refs)
+    for ref in _refs[:3]:
+        try:
+            data = await _am.fetch_channel_photo(acc["session_str"], ref, _acc=acc)
+            if data:
+                return data
+        except Exception:
+            # FloodWait/мёртвая сессия/недоступный референс — пробуем следующий.
+            continue
+    return None
+
+
 async def _exec_mass_publish(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -5482,10 +5515,25 @@ async def _exec_mass_publish(
             )
             media_bytes = None
 
-    # ИИ-иллюстрация вирт.администратора: в params пришёл ЛЁГКИЙ текстовый
-    # media_prompt (картинку в очередь не кладём — раздуло бы operation_queue).
-    # Генерируем байты здесь, один раз перед циклом каналов, и дальше
-    # переотправляем тем же путём, что и загруженное фото. Fail-open: нет
+    # Иллюстрация вирт.администратора. Приоритет владельца: если в канале-
+    # референсе есть фото — берём ЕГО, иначе генерируем своё (ИИ). И референс,
+    # и ИИ дают БАЙТЫ, которые дальше идут общим media-путём (Telethon-переотправка
+    # один раз скачанных байт). В очередь кладём только лёгкие подсказки
+    # (media_ref_from — список @референсов, media_prompt — текст для ИИ).
+    if media_bytes is None and params.get("media_ref_from"):
+        try:
+            media_bytes = await _reference_media_bytes(
+                pool, owner_id, params.get("media_ref_from"),
+                [int(a) for a in (params.get("account_ids") or [])])
+            if media_bytes:
+                media_type = media_type or "photo"
+                media_filename = "ref_image.jpg"
+                log.info("_exec_mass_publish op=%d: фото из референса (%d байт)",
+                         op_id, len(media_bytes))
+        except Exception:
+            log_exc_swallow(log, f"_exec_mass_publish op={op_id}: фото из референса")
+            media_bytes = None
+    # ИИ-генерация — fallback, когда в референсах фото нет. Fail-open: нет
     # провайдера/ключа или сбой — публикуем текстом, пост не теряем.
     if media_bytes is None and params.get("media_prompt"):
         try:

@@ -3127,6 +3127,60 @@ async def send_media_via_account(
             log_exc_swallow(log, "Сбой в send_media_via_account")
 
 
+async def fetch_channel_photo(session_string, peer, *, _acc=None, limit: int = 30):
+    """Скачать байты ФОТО из недавнего поста канала (для иллюстрации постов
+    виртуального администратора медиа из канала-референса).
+
+    Берём случайное из последних постов с фото, чтобы не повторять одну
+    картинку. Fail-soft → None (нет сессии/доступа/фото или сбой). FloodWait и
+    смерть сессии пробрасываем — вызывающий решает, что делать с аккаунтом.
+    """
+    if not session_string or not peer:
+        return None
+    import random as _random
+    from telethon.errors import (
+        FloodWaitError,
+        AuthKeyUnregisteredError,
+        SessionRevokedError,
+        UserDeactivatedBanError,
+        UserDeactivatedError,
+    )
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await asyncio.wait_for(client.get_entity(peer), timeout=30)
+        msgs = await asyncio.wait_for(
+            client.get_messages(entity, limit=max(5, min(int(limit), 50))),
+            timeout=45,
+        )
+        photos = [m for m in (msgs or []) if getattr(m, "photo", None)]
+        if not photos:
+            return None
+        chosen = _random.choice(photos)
+        data = await asyncio.wait_for(
+            client.download_media(chosen, file=bytes), timeout=90)
+        return bytes(data) if isinstance(data, (bytes, bytearray)) else None
+    except FloodWaitError:
+        raise
+    except (
+        AuthKeyUnregisteredError,
+        SessionRevokedError,
+        UserDeactivatedBanError,
+        UserDeactivatedError,
+    ):
+        raise
+    except Exception as e:
+        if is_dead_session_error(str(e)):
+            raise AuthKeyUnregisteredError(request=None) from e
+        log.debug("fetch_channel_photo peer=%s: %s", peer, str(e)[:120])
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в fetch_channel_photo")
+
+
 # Псевдоним для обратной совместимости с хендлером accounts.py
 send_message = send_message_via_account
 

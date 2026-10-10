@@ -1858,8 +1858,21 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
             need, img_prompt = await va_image.decide_illustration(text, pillar or "")
             if need and img_prompt:
                 media_params = {"media_prompt": img_prompt, "media_type": "photo"}
+                # Приоритет владельца: если в канале-референсе есть фото — берём
+                # его, ИИ только fallback. Передаём список @референсов; фото
+                # скачает op_worker (байты в очередь не кладём).
+                try:
+                    from services import va_references
+                    refs = await va_references.list_refs(pool, owner_id, channel_id)
+                    ref_names = [(r.get("username") or r.get("ref_username") or "").strip()
+                                 for r in (refs or [])]
+                    ref_names = [r for r in ref_names if r]
+                    if ref_names:
+                        media_params["media_ref_from"] = ref_names[:5]
+                except Exception:
+                    log.debug("publish: список референсов для медиа не получен", exc_info=True)
         except Exception:
-            log.debug("publish: решение об ИИ-иллюстрации не удалось", exc_info=True)
+            log.debug("publish: решение об иллюстрации не удалось", exc_info=True)
     try:
         op_id = await operation_bus.submit(
             pool, owner_id, "mass_publish",

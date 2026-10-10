@@ -121,6 +121,9 @@ async def test_publish_adds_media_prompt_when_illustration_needed(monkeypatch):
     async def fake_decide(text, pillar=""):
         return True, "nice photo prompt"
 
+    async def fake_list_refs(pool, owner_id, channel_id):
+        return [{"username": "@ref1"}, {"ref_username": "ref2"}]
+
     async def fake_submit(pool, owner_id, op_type, params, **k):
         captured["params"] = params
         return 555
@@ -133,6 +136,7 @@ async def test_publish_adds_media_prompt_when_illustration_needed(monkeypatch):
     monkeypatch.setattr("services.va_media.choose_photo", _VM.choose_photo)
     monkeypatch.setattr("services.va_media.caption_fits", _VM.caption_fits)
     monkeypatch.setattr("services.va_image.decide_illustration", fake_decide)
+    monkeypatch.setattr("services.va_references.list_refs", fake_list_refs)
     monkeypatch.setattr("services.operation_bus.submit", fake_submit)
 
     op_id = await ca.publish(None, 7, 8, "Достаточно длинный текст поста про кофе", "анонс")
@@ -141,3 +145,38 @@ async def test_publish_adds_media_prompt_when_illustration_needed(monkeypatch):
         "media_prompt не попал в операцию публикации"
     assert "require_media" not in captured["params"], \
         "ИИ-картинка не должна быть обязательной (сбой генерации → текстом)"
+    # приоритет: фото из референса, если есть; ИИ — fallback
+    assert captured["params"].get("media_ref_from") == ["@ref1", "ref2"], \
+        "референсы канала не переданы в операцию как первый источник медиа"
+
+
+@pytest.mark.asyncio
+async def test_reference_media_first_then_ai(monkeypatch):
+    """op_worker: сначала пробует фото из референса, ИИ — только если нет."""
+    from services import op_worker
+
+    async def fake_acc(pool, aid, owner_id):
+        return {"id": aid, "session_str": "sess"}
+
+    monkeypatch.setattr("database.db.get_account_for_telethon", fake_acc)
+
+    # референс отдаёт фото → его и берём
+    async def ref_ok(session, peer, *, _acc=None, limit=30):
+        return b"REFPHOTO"
+    monkeypatch.setattr("services.account_manager.fetch_channel_photo", ref_ok)
+    got = await op_worker._reference_media_bytes(None, 7, ["@ref1"], [1])
+    assert got == b"REFPHOTO"
+
+    # референс без фото → None (op_worker дальше уйдёт в ИИ-генерацию)
+    async def ref_none(session, peer, *, _acc=None, limit=30):
+        return None
+    monkeypatch.setattr("services.account_manager.fetch_channel_photo", ref_none)
+    assert await op_worker._reference_media_bytes(None, 7, ["@ref1"], [1]) is None
+
+
+def test_op_worker_tries_reference_before_ai():
+    from services import op_worker
+    src = inspect.getsource(op_worker._exec_mass_publish)
+    i_ref = src.index("media_ref_from")
+    i_ai = src.index("media_prompt")
+    assert i_ref < i_ai, "в op_worker ИИ-генерация должна быть ПОСЛЕ попытки референса"
