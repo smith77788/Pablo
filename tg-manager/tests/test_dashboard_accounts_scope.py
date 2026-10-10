@@ -64,15 +64,30 @@ def test_counts_total_not_only_active():
 
 
 def test_dashboard_acc_health_admin_aware():
-    """Здоровье аккаунтов на дашборде тоже admin-aware: для админа — по всей
-    платформе (без owner_id), иначе показывал бы 100% при 0 своих аккаунтов."""
+    """Здоровье аккаунтов на дашборде admin-aware И из единого пульса.
+
+    Owner-срез (жалоба владельца): здоровье берётся из ЕДИНОГО пульса
+    (infra_memory.get_account_health) — флуд/спам-блок/ограничения отражаются
+    мгновенно, а не ждут 30-мин цикла trust_engine (раньше дашборд усреднял
+    только trust_score и светил «100%» на флоте во флуде).
+
+    Платформенный срез админа пульс не покрывает (owner-scoped), поэтому там
+    health-aware SQL по всей платформе — и он учитывает НЕ только trust, а
+    мёртвый статус/кулдаун/флуд (durable-сигналы пульса)."""
     import re
     src = (Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py").read_text(encoding="utf-8")
     m = re.search(r"async def dashboard\(request.*?_res = await asyncio\.gather", src, re.DOTALL)
     assert m, "dashboard не найден"
     body = m.group(0)
-    # есть admin-ветка запроса здоровья без owner_id
+    # owner-срез читает единый пульс, а не усреднённый trust
+    assert "get_account_health" in body, "owner-здоровье не из единого пульса"
+    assert re.search(r'_q\["pulse"\]\s*=\s*_get_health\(pool, uid\)', body), \
+        "пульс не подключён к дашборду для owner-среза"
+    # admin-вариант — по всей платформе (WHERE is_active=true без owner_id)
     assert "_health_sql" in body
-    assert "_adm else" in body
-    # admin-вариант считает по всей платформе (WHERE is_active=true без owner_id)
+    assert re.search(r'if _adm:\s*\n\s*_q\["acc_health"\]', body), "нет admin-ветки здоровья"
     assert re.search(r"FROM tg_accounts WHERE is_active=true", body), "нет платформенного варианта здоровья"
+    # admin-здоровье health-aware, а не чистый trust: учитывает мёртвый статус,
+    # кулдаун и флуд (durable-сигналы пульса)
+    assert "flood_count_7d" in body and "cooldown_until" in body and "acc_status" in body, \
+        "платформенное здоровье считает только trust — флуд/спам-блок игнорируются"

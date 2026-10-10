@@ -2158,20 +2158,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # здоровье считаем по СВОИМ. Платформенный срез — только явным
         # ?scope=platform у админа. Иначе два админ-профиля видели одинаковые 25.
         _adm = _wants_platform_scope(request, uid)
+        # Здоровье флота — из ЕДИНОГО пульса (infra_memory.get_account_health).
+        # Пульс МГНОВЕННО сводит acc_status (бан/спам-блок/заморозка/сессия),
+        # активный кулдаун, свежие ограничения и флуды (restriction_events +
+        # account_flood_log) и доверие в один балл 0..1 на аккаунт — те же
+        # сигналы, по которым операции решают брать аккаунт или нет. Раньше
+        # дашборд усреднял ТОЛЬКО trust_score, а он пересчитывается раз в 30 мин
+        # (trust_engine): флот во флуде/спам-блоке светил «100%» до следующего
+        # цикла. Теперь здоровье = средний балл пульса — падает сразу.
+        #
+        # Платформенный срез админа (редкий ?scope=platform) пульс не покрывает
+        # (он owner-scoped), поэтому там health-aware SQL по всей платформе,
+        # считающий ТЕ ЖЕ durable-сигналы: мёртвый статус/нет сессии → 0,
+        # активный кулдаун → 35, иначе доверие минус штраф за флуды.
+        from services.infra_memory import get_account_health as _get_health
         _health_sql = (
             """SELECT ROUND(AVG(
-                    CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
-                         ELSE COALESCE(trust_score, 1.0)
+                    CASE
+                        WHEN COALESCE(acc_status,'ok') IN ("""
+            + _acc_status.sql_dead_list() + """) THEN 0
+                        WHEN session_str IS NULL OR session_str = '' THEN 0
+                        WHEN cooldown_until IS NOT NULL AND cooldown_until > now() THEN 35
+                        ELSE GREATEST(0, LEAST(100, COALESCE(trust_score, 1.0) * 100)
+                                       - 15 * LEAST(4, COALESCE(flood_count_7d, 0)))
                     END
-                ) * 100) FROM tg_accounts WHERE is_active=true"""
-            if _adm else
-            """SELECT ROUND(AVG(
-                    CASE WHEN COALESCE(trust_score, 1.0) < 0.1 THEN 0.5
-                         ELSE COALESCE(trust_score, 1.0)
-                    END
-                ) * 100) FROM tg_accounts WHERE owner_id=$1 AND is_active=true"""
+                ))::int FROM tg_accounts WHERE is_active=true"""
         )
-        _health_args = () if _adm else (uid,)
         _q = {
             "stats": _stats(pool, uid, _adm),
             "plan": _plan(),
@@ -2187,12 +2199,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           {op_status.sql_error_reason()} AS error_msg
                    FROM operation_queue WHERE owner_id=$1
                    ORDER BY created_at DESC LIMIT 10""", uid),
-            "acc_health": pool.fetchval(_health_sql, *_health_args),
             "queue_backlog": pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='pending'", uid),
             "ops_failed": pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='failed' AND created_at > NOW() - INTERVAL '24 hours'", uid),
         }
+        # Owner — из пульса (мгновенно), платформенный админ — health-aware SQL.
+        if _adm:
+            _q["acc_health"] = pool.fetchval(_health_sql)
+        else:
+            _q["pulse"] = _get_health(pool, uid)
         _keys = list(_q.keys())
         _res = await asyncio.gather(
             *(_dashboard_query(name, query) for name, query in _q.items()),
@@ -2244,7 +2260,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             ]
         except Exception:
             stats["recent_activity"] = []
-        stats["acc_health"] = int(r["acc_health"]) if r["acc_health"] is not None else 100
+        # Owner: средний балл единого пульса (0..1) → проценты. Платформенный
+        # админ: готовое число health-aware SQL. Нет аккаунтов / сбой запроса →
+        # 100 (нейтрально, как и было).
+        if _adm:
+            stats["acc_health"] = int(r["acc_health"]) if r.get("acc_health") is not None else 100
+        else:
+            _pulse = r.get("pulse") or {}
+            _paccs = _pulse.get("accounts") or []
+            if _paccs:
+                stats["acc_health"] = int(round(
+                    sum(float(a.get("score") or 0) for a in _paccs) / len(_paccs) * 100))
+            else:
+                stats["acc_health"] = 100
         stats["queue_backlog"] = int(r["queue_backlog"] or 0)
         stats["ops_failed"] = int(r["ops_failed"] or 0)
         return _json_resp(stats)
