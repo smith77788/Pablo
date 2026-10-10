@@ -1,0 +1,381 @@
+"""Фоновый цикл виртуального администратора каналов — «штат», который работает сам.
+
+Каждую минуту, по всем каналам, где администратор включён:
+  1. настройка: профиль, рубрики и контент-план для только что поставленных;
+  2. исход прошлой публикации: не прошла — самолечение (отступ, повтор, и только
+     на повторяющийся сбой — сообщение владельцу);
+  3. публикация по расписанию (services/channel_admin.tick_post);
+  4. контент-план достраивается наперёд, когда кончается;
+  5. статистика раз в 6 часов: просмотры своих постов и подписчики, по ним
+     подстраиваются доли рубрик;
+  6. раз в сутки — отчёт владельцу по всем его каналам.
+Черновики, которые владелец не разобрал за двое суток, снимаются.
+
+Каждый шаг отдельного канала изолирован: сбой одного канала не останавливает
+остальные, сбой такта не останавливает цикл.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime, timezone
+
+from services import channel_admin as ca
+
+log = logging.getLogger(__name__)
+
+_POLL_INTERVAL_S = 60.0
+_BATCH = 20  # каналов на шаг за такт: ИИ и Telegram медленные, не держим цикл
+_NEWS_SCAN_BATCH = 12
+_NEWS_SCAN_CONCURRENCY = 4
+# Каналов, которым за такт пишутся посты впрок (каждому — одно обращение к ИИ
+# на пачку из ca._PREWRITE_BATCH постов). Очередь — по срочности: первым идёт
+# канал, чей ближайший ненаписанный слот раньше всех.
+_PREWRITE_CHANNELS = 8
+
+
+async def _rows(pool, where: str, *args) -> list[dict]:
+    rows = await pool.fetch(
+        f"SELECT {ca._ADMIN_COLS} FROM va_channel_admin WHERE enabled AND {where} "
+        f"LIMIT {_BATCH}", *args)
+    return [dict(r) for r in rows or []]
+
+
+async def _safe(label: str, coro) -> None:
+    try:
+        await coro
+    except Exception:
+        log.exception("channel_admin_runner: %s упал", label)
+
+
+async def _draft_live_news(pool, bot, admin: dict) -> bool:
+    """Turn the newest unseen source event into one focused reviewed draft."""
+    owner_id, channel_id = int(admin["owner_id"]), int(admin["channel_id"])
+    pending = await pool.fetchval(
+        "SELECT count(*) FROM va_admin_drafts WHERE owner_id=$1 AND channel_id=$2 AND status='pending'",
+        owner_id, channel_id,
+    )
+    if pending:
+        return False
+    published = await pool.fetchval(
+        "SELECT count(*) FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2 "
+        "AND published_at > now() - interval '24 hours'", owner_id, str(channel_id),
+    )
+    if int(published or 0) >= int(admin.get("posts_per_day") or 1):
+        return False
+    events = await pool.fetch(
+        "WITH picked AS (SELECT id FROM va_news_inbox WHERE owner_id=$1 AND channel_id=$2 "
+        "AND attempts < 3 AND (status='pending' OR (status='drafting' AND "
+        "claimed_at < now() - interval '15 minutes')) ORDER BY published_at DESC, id DESC "
+        "FOR UPDATE SKIP LOCKED LIMIT 1) "
+        "UPDATE va_news_inbox n SET status='drafting', attempts=attempts+1, "
+        "claimed_at=now(), updated_at=now() FROM picked WHERE n.id=picked.id RETURNING "
+        "n.id, n.source_username, n.source_message_id, n.published_at, n.source_text",
+        owner_id, channel_id,
+    )
+    if not events:
+        return False
+    event_ids = [int(event["id"]) for event in events]
+    is_auto = str(admin.get("publish_mode")) == "auto"
+    try:
+        draft = await ca.write_post(pool, owner_id, channel_id,
+                                    news_events=list(events), autonomous=is_auto)
+        sources = sorted({
+            f"@{event['source_username']} · {event['published_at'].astimezone(timezone.utc).isoformat()}"
+            for event in events if event.get("source_username") and event.get("published_at")
+        })
+        # Автономный режим: владелец выбрал публикацию без подтверждения —
+        # уважаем и для новостей. Публикуем автоматически, если редактор чист
+        # (draft.ok). Источники уходят в журнал, а не блокируют публикацию.
+        # Раньше новостной поток ВСЕГДА делал черновик на проверку, из-за чего
+        # автономный режим на новостных каналах «лишь присылал на проверку».
+        if is_auto and draft.ok:
+            op_id = await ca.publish(pool, owner_id, channel_id, draft.text, draft.pillar)
+            await pool.execute(
+                "UPDATE va_news_inbox SET status='published', claimed_at=NULL, "
+                "updated_at=now() WHERE id=ANY($1::bigint[]) AND owner_id=$2 AND channel_id=$3",
+                event_ids, owner_id, channel_id,
+            )
+            src_note = (" · " + "; ".join(sources[:3])) if sources else ""
+            await ca.log_event(pool, owner_id, channel_id, "queued",
+                               f"Новостной пост из {len(events)} сигналов опубликован "
+                               f"автономно, операция №{op_id}{src_note}")
+            return True
+        if sources:
+            draft.reasons.append("Сигналы для проверки: " + "; ".join(sources[:3]))
+        # Draft and consumed inbox rows commit together: a crash cannot make the
+        # same event produce a second review item.
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                draft_id = await ca.save_draft(conn, owner_id, channel_id, draft)
+                await conn.execute(
+                    "UPDATE va_news_inbox SET status='drafted', draft_id=$2, claimed_at=NULL, "
+                    "updated_at=now() WHERE id=ANY($1::bigint[]) AND owner_id=$3 AND channel_id=$4",
+                    event_ids, draft_id, owner_id, channel_id,
+                )
+        await ca.notify_draft(pool, bot, owner_id, channel_id, draft_id, draft)
+        await ca.log_event(pool, owner_id, channel_id, "draft",
+                           f"Новостной черновик из {len(events)} новых сигналов отправлен владельцу")
+        return True
+    except Exception:
+        log.exception("channel_admin_runner: live news draft failed ch=%s", channel_id)
+        await pool.execute(
+            "UPDATE va_news_inbox SET status=CASE WHEN attempts >= 3 THEN 'expired' ELSE 'pending' END, "
+            "claimed_at=NULL, updated_at=now() WHERE id=ANY($1::bigint[]) AND status='drafting'",
+            event_ids,
+        )
+        return False
+
+
+async def _scan_live_news(pool, bot) -> dict:
+    """Poll a bounded batch of due newsrooms; posting slots never invent news."""
+    from services import va_references
+
+    await pool.execute(
+        "UPDATE va_news_inbox SET status='expired', updated_at=now() "
+        "WHERE status='pending' AND published_at < now() - interval '15 minutes'"
+    )
+    rows = await pool.fetch(
+        "SELECT a.*, m.title FROM va_channel_admin a "
+        "JOIN LATERAL (SELECT mc.title FROM managed_channels mc WHERE mc.owner_id=a.owner_id "
+        "AND mc.channel_id=a.channel_id AND mc.type='channel' LIMIT 1) m ON TRUE "
+        "WHERE a.enabled AND a.setup_done "
+        "AND lower(concat_ws(' ',m.title,a.topic,a.project_info,a.brief->>'niche',a.brief->>'offer')) "
+        "LIKE ANY(ARRAY['%новост%','%новин%','%news%','%сводк%','%происшеств%','%информационн%']) "
+        "AND EXISTS ("
+        "SELECT 1 FROM va_reference_channels r WHERE r.owner_id=a.owner_id "
+        "AND r.channel_id=a.channel_id AND r.kind='competitor' AND ("
+        "NULLIF(r.stats->>'feed_attempted_at','') IS NULL OR "
+        "(r.stats->>'feed_attempted_at')::timestamptz < now() - interval '5 minutes')) "
+        "ORDER BY (SELECT MIN(NULLIF(r.stats->>'feed_attempted_at','')::timestamptz) "
+        "FROM va_reference_channels r WHERE r.owner_id=a.owner_id "
+        "AND r.channel_id=a.channel_id AND r.kind='competitor') NULLS FIRST, "
+        "a.owner_id, a.channel_id "
+        f"LIMIT {_NEWS_SCAN_BATCH}"
+    )
+    if not rows:
+        return {"scanned": 0, "drafts": 0}
+
+    semaphore = asyncio.Semaphore(_NEWS_SCAN_CONCURRENCY)
+    owner_locks: dict[int, asyncio.Lock] = {}
+
+    async def scan(admin: dict) -> tuple[int, int]:
+        owner_id = int(admin["owner_id"])
+        owner_lock = owner_locks.setdefault(owner_id, asyncio.Lock())
+        async with semaphore, owner_lock:
+            try:
+                refs = await va_references.for_prompt(
+                    pool, admin["owner_id"], admin["channel_id"])
+                await va_references.refresh_news_signals(
+                    pool, admin["owner_id"], admin["channel_id"], refs,
+                    force=True, enqueue_events=True,
+                )
+                return 1, int(await _draft_live_news(pool, bot, admin))
+            except Exception:
+                log.exception("channel_admin_runner: news scan failed ch=%s", admin["channel_id"])
+                return 1, 0
+
+    outcomes = await asyncio.gather(*(scan(dict(row)) for row in rows))
+    return {"scanned": sum(item[0] for item in outcomes),
+            "drafts": sum(item[1] for item in outcomes)}
+
+
+async def _claim(pool, admin: dict, now: datetime) -> bool:
+    """Занять такт канала: сдвинуть next_post_at, только если его никто не сдвинул."""
+    row = await pool.fetchrow(
+        "UPDATE va_channel_admin SET next_post_at = now() + interval '20 minutes' "
+        "WHERE id=$1 AND next_post_at IS NOT DISTINCT FROM $2 RETURNING id",
+        admin["id"], admin["next_post_at"])
+    return bool(row)
+
+
+async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    stats = {"setup": 0, "posted": 0, "planned": 0, "stats": 0, "reports": 0,
+             "news_scanned": 0, "news_drafts": 0}
+    await _safe("expire drafts", pool.execute(
+        "UPDATE va_admin_drafts SET status='expired', decided_at=now() "
+        "WHERE status='pending' AND created_at < now() - make_interval(hours => $1)",
+        ca._DRAFT_TTL_H))
+
+    for a in await _rows(pool, "NOT setup_done AND (last_error IS NULL OR "
+                               "updated_at < now() - interval '30 minutes')"):
+        try:
+            await ca.setup_channel(pool, a["owner_id"], a["channel_id"])
+            stats["setup"] += 1
+        except ca.AiBusy as e:
+            # Лимит ИИ — не сбой канала: без счётчика неудач и тревоги владельцу,
+            # настройка повторится, когда отметка устареет (условие выше).
+            await _safe("setup ai wait", pool.execute(
+                "UPDATE va_channel_admin SET last_error=$2, updated_at=now() WHERE id=$1",
+                a["id"], f"{ca.AI_WAIT_PREFIX}: {e}"[:300]))
+        except Exception as e:
+            reason = str(e) if isinstance(e, ca.ChannelAdminError) else f"настройка не удалась: {e}"
+            await _safe("setup fail", ca._fail(pool, bot, a, reason[:300],
+                                               retry_in=_td(minutes=30)))
+
+    try:
+        news_stats = await _scan_live_news(pool, bot)
+        stats["news_scanned"] += news_stats["scanned"]
+        stats["news_drafts"] += news_stats["drafts"]
+    except Exception:
+        log.exception("channel_admin_runner: live news scan failed")
+
+    for a in await _rows(pool, "setup_done AND last_op_id IS NOT NULL"):
+        await _safe("check publish", ca.check_last_publish(pool, bot, a))
+
+    for a in await _rows(pool, "setup_done AND next_post_at IS NOT NULL AND next_post_at <= $1", now):
+        if not await _claim(pool, a, now):
+            continue
+        try:
+            res = await ca.tick_post(pool, bot, a, now=now)
+            if res in ("published", "draft"):
+                stats["posted"] += 1
+        except Exception:
+            log.exception("channel_admin_runner: такт канала %s упал", a["channel_id"])
+
+    for a in await _rows(
+            pool, "setup_done AND ("
+                  "NOT EXISTS (SELECT 1 FROM va_admin_plan p WHERE "
+                  "p.owner_id=va_channel_admin.owner_id AND p.channel_id=va_channel_admin.channel_id "
+                  "AND p.status='planned' AND p.slot_at > now() + make_interval(hours => $1)) OR "
+                  "EXISTS (SELECT 1 FROM va_admin_plan p WHERE "
+                  "p.owner_id=va_channel_admin.owner_id AND p.channel_id=va_channel_admin.channel_id "
+                  "AND p.status='planned' AND p.slot_at > now() + make_interval(days => $2)) OR "
+                  "(SELECT count(*) FROM va_admin_plan p WHERE "
+                  "p.owner_id=va_channel_admin.owner_id AND p.channel_id=va_channel_admin.channel_id "
+                  "AND p.status='planned' AND p.slot_at <= now() + make_interval(days => $2)) > "
+                  "LEAST(GREATEST(COALESCE(va_channel_admin.posts_per_day,1),1)*$2,$3))",
+            ca._PLAN_MIN_AHEAD_H, ca._PLAN_DAYS, ca._PLAN_MAX_SLOTS):
+        try:
+            stats["planned"] += await ca.ensure_plan(pool, a["owner_id"], a["channel_id"], now=now)
+        except Exception:
+            log.exception("channel_admin_runner: план канала %s", a["channel_id"])
+
+    stats["prewritten"] = await _prewrite_pass(pool, now)
+
+    for a in await _rows(pool, "setup_done AND (last_stats_at IS NULL OR "
+                               "last_stats_at < now() - interval '6 hours')"):
+        # Отметка ДО сбора: канал, который не читается, не долбим каждую минуту.
+        await pool.execute("UPDATE va_channel_admin SET last_stats_at=now() WHERE id=$1", a["id"])
+        try:
+            if await ca.collect_stats(pool, a["owner_id"], a["channel_id"]):
+                stats["stats"] += 1
+                if a.get("auto_tune"):
+                    await ca.autotune(pool, a["owner_id"], a["channel_id"])
+        except Exception:
+            log.exception("channel_admin_runner: статистика канала %s", a["channel_id"])
+
+    try:
+        from services import va_references
+        stats["references"] = await va_references.refresh_due(pool)
+    except Exception:
+        log.exception("channel_admin_runner: каналы-образцы")
+
+    stats["reports"] = await _daily_reports(pool, bot)
+    return stats
+
+
+async def _prewrite_pass(pool, now: datetime) -> int:
+    """Написать посты впрок для самых срочных каналов (см. ca.prewrite).
+
+    Так публикация не зависит от лимита ИИ в свою минуту, а квота бесплатных
+    моделей делится между каналами по срочности, а не «кто первый в цикле».
+    Все модели на паузе — проход останавливается до следующего такта.
+    """
+    from datetime import timedelta
+    rows = await pool.fetch(
+        "SELECT p.owner_id, p.channel_id, MIN(p.slot_at) AS first_slot "
+        "FROM va_admin_plan p JOIN va_channel_admin a "
+        "ON a.owner_id=p.owner_id AND a.channel_id=p.channel_id "
+        "WHERE a.enabled AND a.setup_done AND NOT a.intro_pending "
+        "AND p.status='planned' AND p.body IS NULL "
+        "AND p.pillar <> $1 AND p.write_attempts < $2 AND p.slot_at > $3 AND p.slot_at <= $4 "
+        "GROUP BY p.owner_id, p.channel_id ORDER BY first_slot LIMIT $5",
+        ca.INTRO_PILLAR, ca._PREWRITE_MAX_ATTEMPTS, now - timedelta(hours=ca._MISSED_SLOT_H),
+        now + timedelta(hours=ca._PREWRITE_AHEAD_H), _PREWRITE_CHANNELS)
+    written = 0
+    for r in rows or []:
+        try:
+            written += await ca.prewrite(pool, int(r["owner_id"]), int(r["channel_id"]), now=now)
+        except ca.AiBusy:
+            break
+        except Exception:
+            log.exception("channel_admin_runner: посты впрок для канала %s", r["channel_id"])
+    return written
+
+
+def _td(**kw):
+    from datetime import timedelta
+    return timedelta(**kw)
+
+
+async def _daily_reports(pool, bot) -> int:
+    """Раз в сутки — один отчёт владельцу по всем его каналам под администратором."""
+    if bot is None:
+        return 0
+    owners = await pool.fetch(
+        "SELECT DISTINCT owner_id FROM va_channel_admin WHERE enabled AND setup_done "
+        "AND last_post_at IS NOT NULL "
+        "AND (last_report_at IS NULL OR last_report_at < now() - interval '24 hours') LIMIT 20")
+    sent = 0
+    for o in owners or []:
+        owner_id = int(o["owner_id"])
+        rows = await pool.fetch(
+            "SELECT a.channel_id, a.last_error, "
+            "(SELECT MAX(title) FROM managed_channels mc WHERE mc.owner_id=a.owner_id "
+            " AND mc.channel_id=a.channel_id) AS title "
+            "FROM va_channel_admin a WHERE a.owner_id=$1 AND a.enabled AND a.setup_done",
+            owner_id)
+        items = []
+        for r in rows or []:
+            try:
+                rep = await ca.channel_report(pool, owner_id, int(r["channel_id"]))
+            except Exception:
+                log.debug("daily report item failed", exc_info=True)
+                continue
+            rep["last_error"] = r["last_error"] or ""
+            items.append((r["title"] or str(r["channel_id"]), rep))
+        if not items:
+            # Слать нечего — помечаем на сутки, чтобы не перебирать каждую минуту.
+            await _stamp_report(pool, owner_id, retry=False)
+            continue
+        try:
+            await bot.send_message(owner_id, ca.format_daily_report(items), parse_mode="HTML")
+            sent += 1
+            # Метку ставим ТОЛЬКО после успешной отправки — раньше она
+            # обновлялась ДО send_message, и при любом сбое доставки (владелец
+            # заблокировал бота, сеть, таймаут) отчёт молча терялся на сутки.
+            await _stamp_report(pool, owner_id, retry=False)
+        except Exception:
+            log.debug("channel_admin_runner: отчёт владельцу %s не ушёл", owner_id, exc_info=True)
+            # Не теряем отчёт на сутки: повторим примерно через час.
+            await _stamp_report(pool, owner_id, retry=True)
+    return sent
+
+
+async def _stamp_report(pool, owner_id: int, *, retry: bool) -> None:
+    """Отметить время суточного отчёта. retry=True → повтор через ~час (не сутки)."""
+    # retry сдвигает метку почти на сутки назад: гейт «last_report_at < now()-24h»
+    # снова разрешит отчёт примерно через час, а не через сутки, но и не каждую
+    # минуту цикла.
+    when = "now() - interval '23 hours'" if retry else "now()"
+    try:
+        await pool.execute(
+            f"UPDATE va_channel_admin SET last_report_at={when} "
+            "WHERE owner_id=$1 AND enabled",
+            owner_id)
+    except Exception:
+        log.debug("channel_admin_runner: метка отчёта не записана owner=%s", owner_id, exc_info=True)
+
+
+async def run(pool, bot) -> None:
+    from services import llm_gate
+    llm_gate.attach(pool)
+    log.info("channel_admin_runner: виртуальный администратор каналов запущен")
+    while True:
+        try:
+            await run_once(pool, bot)
+        except Exception:
+            log.exception("channel_admin_runner: цикл упал, продолжаем")
+        await asyncio.sleep(_POLL_INTERVAL_S)

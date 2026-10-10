@@ -1,0 +1,439 @@
+"""Тестовый каркас: стабы тяжёлых зависимостей + окружение.
+
+Позволяет тестировать чистую логику (настройки, классификаторы, хелперы) без
+реального Postgres/Telethon. Тяжёлые модули (telethon, Crypto опционально)
+подменяются лёгкими заглушками, чтобы импорт сервисов не падал.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import types
+
+# ── Окружение по умолчанию (не секреты) ──────────────────────────────────────
+os.environ.setdefault("MANAGER_BOT_TOKEN", "1:test")
+os.environ.setdefault("DATABASE_URL", "postgres://test")
+os.environ.setdefault("TG_API_ID", "1")
+os.environ.setdefault("TG_API_HASH", "x")
+os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "test-encryption-secret")
+
+
+def _stub(name: str) -> types.ModuleType:
+    mod = types.ModuleType(name)
+    mod.__path__ = []  # type: ignore[attr-defined]
+    return mod
+
+
+class _AnyMeta(type):
+    """Метакласс: атрибут, запрошенный на самом классе _Any (не на экземпляре),
+    тоже отдаёт заглушку — иначе `SomeStubbedClass.some_attr` (частый паттерн
+    monkey-patch / F.field / isinstance-констант в aiogram) падает с
+    AttributeError, потому что обычный __getattr__ класса не перехватывает
+    доступ к атрибутам самого класса."""
+
+    def __getattr__(cls, name):
+        # Дандеры (__signature__, __wrapped__, __mro_entries__, ...) обязаны
+        # реально отсутствовать — иначе inspect/functools/pickle получают
+        # мусорный объект вместо AttributeError и падают своей собственной
+        # TypeError глубоко внутри stdlib (см. inspect.signature()).
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return _Any()
+
+
+class _Any(metaclass=_AnyMeta):
+    """Заглушка любого telethon/aiogram-класса или функции."""
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __call__(self, *a, **k):
+        return self
+
+    def __getattr__(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return _Any()
+
+    def __or__(self, other):
+        return _Any()
+
+    def __ror__(self, other):
+        return _Any()
+
+    def __and__(self, other):
+        return _Any()
+
+    def __rand__(self, other):
+        return _Any()
+
+    def __invert__(self):
+        return _Any()
+
+    def __eq__(self, other):
+        return _Any()
+
+    def __ne__(self, other):
+        return _Any()
+
+    __hash__ = object.__hash__
+
+
+import importlib.abc
+import importlib.util
+
+
+# Имена telethon-ошибок должны быть НАСТОЯЩИМИ классами-исключениями, иначе
+# `except SomeTelethonError` под заглушкой падает с «catching classes that do not
+# inherit from BaseException». Кэшируем по имени, чтобы `except X` и `raise X`
+# ссылались на один класс.
+_stub_exc_cache: dict[str, type] = {}
+
+
+def _telethon_module_getattr(name: str):
+    if name.endswith("Error") or name.endswith("Exception"):
+        cls = _stub_exc_cache.get(name)
+        if cls is None:
+            cls = type(name, (Exception,), {})
+            _stub_exc_cache[name] = cls
+        return cls
+    return _Any()
+
+
+class _TelethonFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Meta-path finder (современный протокол find_spec/exec_module — работает на
+    Python 3.11 И 3.12+, где легаси find_module/load_module удалён).
+
+    Любой импорт telethon.* отдаёт лёгкую заглушку, поэтому тесты не зависят от
+    полного набора подмодулей telethon (network, tl.*, …).
+    """
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "telethon" or fullname.startswith("telethon."):
+            return importlib.util.spec_from_loader(fullname, self)
+        return None
+
+    def create_module(self, spec):
+        m = _stub(spec.name)
+        m.__getattr__ = _telethon_module_getattr  # type: ignore[attr-defined]
+        m.TelegramClient = _Any  # type: ignore[attr-defined]
+        m.StringSession = _Any  # type: ignore[attr-defined]
+        return m
+
+    def exec_module(self, module):
+        return None
+
+
+def _install_telethon_stubs() -> None:
+    if "telethon" in sys.modules:
+        return
+    sys.meta_path.insert(0, _TelethonFinder())
+
+
+_install_telethon_stubs()
+
+# asyncpg C extension (protocol.protocol) не компилируется на Python 3.13.
+# Стабим protocol-подмодуль чтобы import asyncpg проходил.
+try:
+    import asyncpg
+    import asyncpg.protocol  # noqa: F401
+except (ImportError, ModuleNotFoundError):
+    _asyncpg = types.ModuleType("asyncpg")
+    _asyncpg.__path__ = []
+    _asyncpg.__version__ = "0.0.0-stub"
+    _asyncpg.Pool = _Any
+    _asyncpg.Record = dict
+    _asyncpg.Connection = _Any
+    _asyncpg.create_pool = _Any
+    _asyncpg.connect = _Any
+    # Классы ошибок Postgres. Без них `except asyncpg.UniqueViolationError`
+    # в коде продукта падает AttributeError прямо в обработчике, и тест видит
+    # не поведение продукта, а дырку в заглушке. Наследуем от Exception, чтобы
+    # такой except работал и его можно было возбудить из теста.
+    for _exc_name in ("PostgresError", "UniqueViolationError",
+                      "ForeignKeyViolationError", "UndefinedColumnError",
+                      "UndefinedTableError"):
+        setattr(_asyncpg, _exc_name, type(_exc_name, (Exception,), {}))
+    sys.modules.setdefault("asyncpg", _asyncpg)
+    _asyncpg_proto = types.ModuleType("asyncpg.protocol")
+    _asyncpg_proto.__path__ = []
+    _asyncpg_proto.Protocol = _Any
+    _asyncpg_proto.NO_TIMEOUT = None
+    _asyncpg_proto.BUILTIN_TYPE_NAME_MAP = {}
+    sys.modules["asyncpg.protocol"] = _asyncpg_proto
+    _asyncpg_proto_mod = types.ModuleType("asyncpg.protocol.protocol")
+    _asyncpg_proto_mod.Protocol = _Any
+    _asyncpg_proto_mod.NO_TIMEOUT = None
+    _asyncpg_proto_mod.BUILTIN_TYPE_NAME_MAP = {}
+    sys.modules["asyncpg.protocol.protocol"] = _asyncpg_proto_mod
+
+# aiohttp / aiogram не установлены на Python 3.13 — стабим для импорта сервисов
+_STUB_MODULES = {
+    "aiohttp": {"ClientSession": _Any, "ClientTimeout": _Any, "TCPConnector": _Any, "ClientError": Exception},
+    "aiohttp.web": {"Response": _Any, "Request": _Any, "Application": _Any},
+    "aiohttp_socks": {},
+    "aiogram": {"Bot": _Any, "Dispatcher": _Any, "Router": _Any, "F": _Any(), "BaseMiddleware": _Any},
+    "aiogram.client": {"default": _Any},
+    "aiogram.client.default": {"DefaultBotProperties": _Any},
+    "aiogram.client.session": {},
+    "aiogram.client.session.aiohttp": {"AiohttpSession": _Any},
+    "aiogram.enums": {"ParseMode": _Any},
+    "aiogram.filters": {"Command": _Any, "CommandStart": _Any, "StateFilter": _Any},
+    "aiogram.filters.callback_data": {"CallbackData": type("CallbackData", (), {
+        "__init_subclass__": lambda cls, **kw: None,
+        "__init__": lambda self, **kw: self.__dict__.update(kw),
+        "pack": lambda self: "",
+        "unpack": classmethod(lambda cls, d: cls()),
+        "filter": classmethod(lambda cls, *a, **kw: lambda c: True),
+    })},
+    "aiogram.filters.state": {"State": _Any, "StatesGroup": _Any},
+    "aiogram.fsm.context": {"FSMContext": _Any},
+    "aiogram.fsm.state": {"State": _Any, "StatesGroup": _Any},
+    "aiogram.fsm.storage.base": {"BaseStorage": _Any, "StorageKey": _Any, "StateType": _Any},
+    "aiogram.fsm.storage.memory": {"MemoryStorage": _Any},
+    "aiogram.types": {
+        "Message": _Any, "CallbackQuery": _Any, "InlineKeyboardButton": _Any, "InlineKeyboardMarkup": _Any,
+        "KeyboardButton": _Any, "ReplyKeyboardMarkup": _Any, "BufferedInputFile": _Any, "ErrorEvent": _Any,
+        "WebAppInfo": _Any, "PhotoSize": _Any, "TelegramObject": _Any,
+        "MessageOriginChannel": _Any, "MessageOriginChat": _Any, "MessageOriginHiddenUser": _Any, "MessageOriginUser": _Any,
+        "BusinessConnection": _Any, "BusinessMessagesDeleted": _Any,
+    },
+    "aiogram.utils.keyboard": {"InlineKeyboardBuilder": _Any, "ReplyKeyboardBuilder": _Any},
+}
+
+for mod_name, attrs in _STUB_MODULES.items():
+    if mod_name not in sys.modules:
+        try:
+            __import__(mod_name)
+        except ImportError:
+            m = types.ModuleType(mod_name)
+            m.__path__ = []
+            for k, v in attrs.items():
+                setattr(m, k, v)
+            sys.modules[mod_name] = m
+            # Stub sub-modules
+            parts = mod_name.split(".")
+            for i in range(1, len(parts)):
+                parent = ".".join(parts[:i])
+                child = ".".join(parts[:i+1])
+                if parent in sys.modules and child not in sys.modules:
+                    cm = types.ModuleType(child)
+                    cm.__path__ = []
+                    sys.modules[child] = cm
+
+# Termux site-packages для Python 3.13 (пакеты установлены через pip в termux)
+_TERMUX_SITE = "/data/data/com.termux/files/usr/lib/python3.13/site-packages"
+if os.path.isdir(_TERMUX_SITE) and _TERMUX_SITE not in sys.path:
+    sys.path.insert(0, _TERMUX_SITE)
+
+# Проект-корень в path (tests/ лежит внутри tg-manager/)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+
+import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _live_schema():
+    """Один раз накатить схему на базу из INFRAGRAM_TEST_DSN.
+
+    Файлы tests/*_postgres.py пропускаются целиком без этой переменной, поэтому
+    в CI (где базы не было) они не выполнялись ни разу. Схему каждый из них
+    накатывал сам — но не все: четыре файла молча рассчитывали на уже готовую
+    базу и на свежей падали с UndefinedTableError. Делаем это здесь один раз на
+    сессию, чтобы CI не зависел от того, вспомнил ли конкретный файл про схему.
+
+    Без переменной фикстура не делает НИЧЕГО: обычный прогон без Postgres не
+    трогается. Ошибки отдельных файлов схемы глушим — они идемпотентны, а
+    частичный сбой не должен рушить весь прогон (так же поступают сами e2e).
+    """
+    dsn = os.getenv("INFRAGRAM_TEST_DSN")
+    if not dsn:
+        return
+    import asyncio
+    import glob
+    import re
+
+    async def _apply():
+        import asyncpg
+        conn = await asyncpg.connect(dsn)
+        try:
+            files = [os.path.join(_ROOT, "schema.sql")] + sorted(
+                glob.glob(os.path.join(_ROOT, "schema_v*.sql")),
+                key=lambda f: int(re.search(r"schema_v(\d+)", f).group(1)))
+            for f in files:
+                if not os.path.exists(f):
+                    continue
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        await conn.execute(fh.read())
+                except Exception:
+                    pass
+        finally:
+            await conn.close()
+
+    try:
+        asyncio.new_event_loop().run_until_complete(_apply())
+    except Exception:
+        # Нет сервера по DSN — пусть каждый e2e-файл сам честно скипнется со
+        # своим сообщением, а не падает здесь на всём прогоне.
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_mutex():
+    """Сброс процессного мьютекса сессий между тестами.
+
+    connect_client держит сессию до disconnect() возвращённого клиента (защита от
+    AUTH_KEY_DUPLICATED). Юнит-тесты часто получают мок-клиент и НЕ отключают его —
+    в реальном коде это делает finally вызывающего. Без сброса «зависший» захват из
+    одного теста заставил бы следующий ждать/падать SessionBusyError. Чистим до и
+    после каждого теста; account_manager импортируем лениво (может быть не нужен).
+    """
+    try:
+        from services import account_manager as _am
+        with _am._session_inuse_lock:
+            _am._session_inuse.clear()
+    except Exception:
+        pass
+    yield
+    try:
+        from services import account_manager as _am
+        with _am._session_inuse_lock:
+            _am._session_inuse.clear()
+    except Exception:
+        pass
+
+
+def _clear_op_worker_claims() -> None:
+    try:
+        from services import op_worker as _ow
+        _ow._accounts_in_use.clear()
+        _ow._operation_account_locks.clear()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_account_claims():
+    """Сброс реестра захваченных аккаунтов между тестами.
+
+    Ровно та же природа, что у мьютекса сессий выше. Захват аккаунта под живую
+    сессию (`try_claim_account` / `_claim_available_accounts`) освобождается
+    централизованно — в `finally` у `_run_op_task`. Юнит-тесты зовут исполнителя
+    НАПРЯМУЮ, минуя этот раннер, поэтому захват остаётся висеть и следующий тест
+    получает «⏳ аккаунт занят другой операцией» вместо работы.
+
+    В проде такого пути нет: исполнителей вызывает только таблица диспетча
+    внутри `_run_op_task`, где освобождение безусловное. Это изоляция тестов
+    друг от друга, а не обход защиты — саму защиту стережёт
+    `tests/test_executors_claim_sessions.py`.
+    """
+    _clear_op_worker_claims()
+    yield
+    _clear_op_worker_claims()
+
+
+@pytest.fixture(autouse=True)
+def _clear_invite_entity_cache():
+    """Кэш разрешённой сущности группы (mass_inviter_engine._ENTITY_CACHE) —
+    process-local и живёт между вызовами invite_batch НАМЕРЕННО (чтобы уже
+    вступивший аккаунт не дёргал CheckChatInviteRequest на каждый батч). В тестах
+    это межтестовое загрязнение: один и тот же (acc_id, group) во втором тесте
+    вернул бы сущность из первого. Чистим до и после каждого теста."""
+    import sys as _sys
+
+    def _clear():
+        m = _sys.modules.get("services.mass_inviter_engine")
+        if m is not None:
+            try:
+                m._ENTITY_CACHE.clear()
+            except Exception:
+                pass
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_llm_gate():
+    """Паузы моделей ИИ (services/llm_gate) — процессное состояние: тест, где
+    модель «упёрлась в лимит», иначе оставил бы её на паузе для всех следующих."""
+    try:
+        from services import llm_gate as _lg
+    except Exception:
+        yield
+        return
+    _lg._STATE.update(pool=None, cool={}, loaded_at=0.0)
+    yield
+    _lg._STATE.update(pool=None, cool={}, loaded_at=0.0)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """Лимитер частоты запросов (services/security) — процессное состояние,
+    общее на весь прогон. Ключ незалогиненного запроса — адрес клиента, а у
+    всех тестов, которые поднимают настоящий сервер мини-аппа, он один и тот
+    же: 127.0.0.1. Окно — минута, потолок — 120 запросов, и в полном прогоне
+    эти запросы складываются: тест, которому не повезло оказаться после
+    соседей, получал 429 вместо своего ответа.
+
+    Так трое суток держался красный CI: по отдельности и даже всей группой
+    tests/test_miniapp_*.py три теста (пустая загрузка в облако и два про
+    срок жизни токена живого потока) проходили, а в полном прогоне падали —
+    загрязнение видно только на объёме.
+
+    Лимитер при этом работает правильно и остаётся включённым: чистим ему
+    счётчики до и после каждого теста, чтобы тест мерил свой продукт, а не
+    остатки чужого трафика."""
+    import sys as _sys
+
+    def _clear():
+        m = _sys.modules.get("services.security")
+        if m is None:
+            return
+        try:
+            m._rate_limiter._requests.clear()
+            m._rate_limiter._last_sweep = 0.0
+        except Exception:
+            pass
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_worker_pools():
+    """Пул БД воркера операций и предохранителя — процессное состояние.
+
+    `op_worker.init_op_worker_pool(pool)` прокидывает пул и в
+    `op_circuit_breaker.set_pool(pool)`. Тесты зовут его с пулом-заглушкой, у
+    которой `fetchrow` отвечает одной и той же заготовленной строкой на ЛЮБОЙ
+    запрос. Свой `_db_pool` такие тесты за собой убирают, а пул предохранителя
+    остаётся висеть на весь прогон — и следующий тест, работающий с НАСТОЯЩЕЙ
+    базой, получает от предохранителя чужую строку вместо своей:
+
+        row = {'retry_count': 0, 'max_retries': 3}
+        KeyError: 'failures'   (op_circuit_breaker._cb_from_row)
+
+    Так падал `tests/test_contacts_sync_e2e_postgres.py` — зелёный по
+    отдельности, красный в полном прогоне, то есть ровно то загрязнение, которое
+    видно только на объёме. Предохранитель при этом исправен: чистим ему пул до
+    и после каждого теста, кто его задал — задаст снова.
+    """
+    import sys as _sys
+
+    def _clear():
+        for name, attr in (("services.op_worker", "_db_pool"),
+                           ("services.op_circuit_breaker", "_db_pool")):
+            m = _sys.modules.get(name)
+            if m is not None:
+                try:
+                    setattr(m, attr, None)
+                except Exception:
+                    pass
+    _clear()
+    yield
+    _clear()

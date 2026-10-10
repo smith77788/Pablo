@@ -8,3 +8,5 @@ data/
 *.db
 *.sqlite
 .DS_Store
+.claude/
+platform/apps/web/tsconfig.tsbuildinfo

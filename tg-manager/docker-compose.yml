@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tgmanager}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tgmanager123}
+      POSTGRES_DB: ${POSTGRES_DB:-tgmanager}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./schema_v2.sql:/docker-entrypoint-initdb.d/02_schema_v2.sql
+      - ./schema_v3.sql:/docker-entrypoint-initdb.d/03_schema_v3.sql
+      - ./schema_v4.sql:/docker-entrypoint-initdb.d/04_schema_v4.sql
+      - ./schema_v5.sql:/docker-entrypoint-initdb.d/05_schema_v5.sql
+      - ./schema_v6.sql:/docker-entrypoint-initdb.d/06_schema_v6.sql
+      - ./schema_v7.sql:/docker-entrypoint-initdb.d/07_schema_v7.sql
+      - ./schema_v8.sql:/docker-entrypoint-initdb.d/08_schema_v8.sql
+      - ./schema_v9.sql:/docker-entrypoint-initdb.d/09_schema_v9.sql
+      - ./schema_v10.sql:/docker-entrypoint-initdb.d/10_schema_v10.sql
+      - ./schema_v11.sql:/docker-entrypoint-initdb.d/11_schema_v11.sql
+      - ./schema_v12.sql:/docker-entrypoint-initdb.d/12_schema_v12.sql
+      - ./schema_v13.sql:/docker-entrypoint-initdb.d/13_schema_v13.sql
+      - ./schema_v14.sql:/docker-entrypoint-initdb.d/14_schema_v14.sql
+      - ./schema_v15.sql:/docker-entrypoint-initdb.d/15_schema_v15.sql
+      - ./schema_v16.sql:/docker-entrypoint-initdb.d/16_schema_v16.sql
+      - ./schema_v17.sql:/docker-entrypoint-initdb.d/17_schema_v17.sql
+      - ./schema_v18.sql:/docker-entrypoint-initdb.d/18_schema_v18.sql
+      - ./schema_v19.sql:/docker-entrypoint-initdb.d/19_schema_v19.sql
+      - ./schema_v20.sql:/docker-entrypoint-initdb.d/20_schema_v20.sql
+      - ./schema_v21.sql:/docker-entrypoint-initdb.d/21_schema_v21.sql
+      - ./schema_v22.sql:/docker-entrypoint-initdb.d/22_schema_v22.sql
+      - ./schema_v23.sql:/docker-entrypoint-initdb.d/23_schema_v23.sql
+      - ./schema_v24.sql:/docker-entrypoint-initdb.d/24_schema_v24.sql
+      - ./schema_v25.sql:/docker-entrypoint-initdb.d/25_schema_v25.sql
+      - ./schema_v26.sql:/docker-entrypoint-initdb.d/26_schema_v26.sql
+      - ./schema_v27.sql:/docker-entrypoint-initdb.d/27-schema_v27.sql
+      - ./schema_v28.sql:/docker-entrypoint-initdb.d/28-schema_v28.sql
+      - ./schema_v29.sql:/docker-entrypoint-initdb.d/29-schema_v29.sql
+      - ./schema_v30.sql:/docker-entrypoint-initdb.d/30-schema_v30.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tgmanager}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  bot:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MANAGER_BOT_TOKEN: ${MANAGER_BOT_TOKEN}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tgmanager}:${POSTGRES_PASSWORD:-tgmanager123}@db:5432/${POSTGRES_DB:-tgmanager}
+      ADMIN_IDS: ${ADMIN_IDS:-}
+      BROADCAST_DELAY: ${BROADCAST_DELAY:-0.05}
+      MAX_CONCURRENT: ${MAX_CONCURRENT:-20}
+    volumes:
+      - bot_logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python.*main.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  pgdata:
+  bot_logs:

@@ -1,0 +1,49 @@
+name: build-android-apk
+
+# Собирает Android-приложение Infragram (.apk) из проекта android/ (обёртка
+# WebView вокруг веб-приложения). Адрес сервера вводится в приложении при первом
+# запуске, поэтому домен при сборке НЕ нужен — один APK годится для любого
+# развёртывания.
+#
+# Запуск: вкладка Actions → build-android-apk → Run workflow. Готовый .apk —
+# в артефактах запуска (Artifacts → infragram-apk).
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/apk.yml"
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Собрать release APK (debug-подпись — для sideload)
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Переименовать APK
+        working-directory: android
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk out/Infragram.apk
+          ls -la out
+
+      - name: Выложить APK в артефакты
+        uses: actions/upload-artifact@v4
+        with:
+          name: infragram-apk
+          path: android/out/Infragram.apk
+          if-no-files-found: error
