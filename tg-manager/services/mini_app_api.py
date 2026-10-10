@@ -13183,14 +13183,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             warmup_active = await pool.fetchval(
                 "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1 AND status='active'", uid
             )
-            # Recent flood events
-            # account_id нужен экрану, чтобы со строки события можно было
-            # перейти в карточку аккаунта: раньше событие было тупиком.
+            # Recent flood events.
+            # Со строки флуд-события владелец идёт РАЗБИРАТЬ ПРИЧИНУ — а причина
+            # (что за операция флудила, её статус и ошибка) живёт в карточке
+            # ОПЕРАЦИИ, не аккаунта. Раньше строка вела в openAccount — тупик по
+            # сути жалобы («переводит в карточку аккаунта вместо операции с
+            # возможностью исправить причину ошибки»). Поэтому отдаём:
+            #   • operation_id + op_exists — чтобы фронт открыл карточку операции
+            #     (openOpDetail), а в аккаунт падал только когда операции уже нет
+            #     (retention вычистил operation_queue) или флуд писался без неё;
+            #   • человекочитаемое имя операции (label/op_type вместо сырого
+            #     action_type) и её статус — на экране было беднее некуда.
+            # LEFT JOIN скоупим по владельцу: чужую операцию показывать нельзя.
             events = await pool.fetch(
-                """SELECT ta.id AS account_id, afl.operation, afl.flood_seconds,
-                          afl.created_at, ta.phone, ta.first_name
+                """SELECT ta.id AS account_id, afl.operation_id,
+                          (oq.id IS NOT NULL) AS op_exists,
+                          COALESCE(oq.label, oq.op_type, afl.operation) AS operation,
+                          oq.status AS op_status,
+                          afl.flood_seconds, afl.created_at, ta.phone, ta.first_name
                    FROM account_flood_log afl
                    JOIN tg_accounts ta ON ta.id=afl.account_id
+                   LEFT JOIN operation_queue oq
+                          ON oq.id = afl.operation_id AND oq.owner_id = ta.owner_id
                    WHERE ta.owner_id=$1
                    ORDER BY afl.created_at DESC LIMIT 10""",
                 uid,

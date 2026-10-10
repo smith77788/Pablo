@@ -23472,15 +23472,25 @@ async function openHealth() {
     txt('m-health-val',`${d.banned||0} забанено · ${d.flood_7d||0} флуд`);
     const events = d.events||[];
     if (!events.length) { txt('healthEvents', empty('📋','Нет флуд-событий','Пока Telegram не просил ваши аккаунты подождать')); return; }
-    let html = events.map(ev=>`
-      <div class="row" ${ev.account_id?`onclick="openAccount(${Number(ev.account_id)})" role="button" tabindex="0"`:''}>
+    // Клик ВЕДЁТ В ОПЕРАЦИЮ — там причина флуда, статус и кнопки разбора
+    // (жалоба: событие уводило в карточку аккаунта, где причину не исправить).
+    // В аккаунт падаем только когда операции уже нет (retention вычистил
+    // очередь) или флуд записан без привязки к операции.
+    let html = events.map(ev=>{
+      const go = (ev.op_exists && ev.operation_id)
+          ? `openOpDetail(${Number(ev.operation_id)})`
+          : (ev.account_id ? `openAccount(${Number(ev.account_id)})` : '');
+      const opName = esc(ev.operation||'операция');
+      const st = ev.op_status ? ' · '+esc(OPS_STATUS_LABELS[ev.op_status]||ev.op_status) : '';
+      return `
+      <div class="row" ${go?`onclick="${go}" role="button" tabindex="0"`:''}>
         <div class="row-ico" style="background:var(--bg-red-16)">⚠️</div>
         <div class="row-body">
-          <div class="row-name">${esc(ev.first_name||ev.phone||'Аккаунт')} · ${esc(ev.operation||'операция')}</div>
-          <div class="row-val">Пауза ${ev.flood_seconds||0} с · ${ev.created_at?ago(ev.created_at):''}</div>
+          <div class="row-name">${esc(ev.first_name||ev.phone||'Аккаунт')} · ${opName}${st}</div>
+          <div class="row-val">Пауза ${humanDur(ev.flood_seconds)} · ${ev.created_at?ago(ev.created_at):''}</div>
         </div>
-        ${ev.account_id?'<div class="row-right"><span class="chev">›</span></div>':''}
-      </div>`).join('');
+        ${go?'<div class="row-right"><span class="chev">›</span></div>':''}
+      </div>`;}).join('');
     // «Последние 10» раньше выдавались за всю историю.
     const tot = Number(d.events_total||0);
     if (tot > events.length) {
