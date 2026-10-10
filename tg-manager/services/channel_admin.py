@@ -1846,6 +1846,20 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
         raise ChannelAdminError(str(exc)) from exc
     media_params = ({"media_file_id": photo["file_id"], "media_type": "photo", "require_media": True}
                     if photo else {})
+    # Готового фото нет — решаем, нужна ли посту ИИ-иллюстрация «по смыслу»
+    # (владелец: нужна по смыслу — добавляем, нет — пропускаем). Генерацию делает
+    # op_worker по лёгкому текстовому media_prompt. require_media НЕ ставим:
+    # картинка опциональна — сбой генерации не должен ронять пост (уйдёт текстом).
+    # Добавляем только если текст влезает в подпись к фото.
+    if (not photo and select_media and media_id is None
+            and va_media.caption_fits(text)):
+        try:
+            from services import va_image
+            need, img_prompt = await va_image.decide_illustration(text, pillar or "")
+            if need and img_prompt:
+                media_params = {"media_prompt": img_prompt, "media_type": "photo"}
+        except Exception:
+            log.debug("publish: решение об ИИ-иллюстрации не удалось", exc_info=True)
     try:
         op_id = await operation_bus.submit(
             pool, owner_id, "mass_publish",

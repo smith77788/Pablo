@@ -5482,6 +5482,24 @@ async def _exec_mass_publish(
             )
             media_bytes = None
 
+    # ИИ-иллюстрация вирт.администратора: в params пришёл ЛЁГКИЙ текстовый
+    # media_prompt (картинку в очередь не кладём — раздуло бы operation_queue).
+    # Генерируем байты здесь, один раз перед циклом каналов, и дальше
+    # переотправляем тем же путём, что и загруженное фото. Fail-open: нет
+    # провайдера/ключа или сбой — публикуем текстом, пост не теряем.
+    if media_bytes is None and params.get("media_prompt"):
+        try:
+            from services import va_image
+            media_bytes = await va_image.generate_image_bytes(str(params["media_prompt"]))
+            if media_bytes:
+                media_type = media_type or "photo"
+                media_filename = "ai_image.png"
+                log.info("_exec_mass_publish op=%d: сгенерирована ИИ-иллюстрация (%d байт)",
+                         op_id, len(media_bytes))
+        except Exception:
+            log_exc_swallow(log, f"_exec_mass_publish op={op_id}: генерация ИИ-картинки")
+            media_bytes = None
+
     from services.va_media import require_download
     media_failure = require_download(params, media_bytes)
     if media_failure:
