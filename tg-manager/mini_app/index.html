@@ -18044,9 +18044,24 @@ async function downloadVaultExport(fmt, chatId) {
   } catch(e) { toast('⚠️ '+errRu(e,'Не удалось')); }
 }
 
-function lastSeenLabel(t) {
-  return ({online:'🟢 в сети', recently:'недавно', last_week:'на этой неделе',
-    last_month:'в этом месяце', offline:'был давно'})[t] || '';
+function lastSeenLabel(t, at) {
+  const base = ({online:'🟢 в сети', recently:'недавно', last_week:'на этой неделе',
+    last_month:'в этом месяце'})[t];
+  if (base) return base;
+  // offline несёт точное время: показываем РЕАЛЬНУЮ давность, а не всегда
+  // «был давно». Согласовано с отбором аудитории (бэкенд не берёт в работу
+  // offline старше 30 дней — тут это видно: «был давно»).
+  if (t === 'offline') {
+    if (at) {
+      const days = Math.floor((Date.now() - new Date(at).getTime()) / 86400000);
+      if (days <= 0) return 'был сегодня';
+      if (days === 1) return 'был вчера';
+      if (days <= 30) return 'был ' + days + ' дн. назад';
+      return '⚠️ был давно (' + days + ' дн.)';
+    }
+    return 'был давно';
+  }
+  return '';
 }
 const CONTACT_PAGE = 200;
 let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
@@ -18082,7 +18097,7 @@ async function loadContacts(append=false) {
         c.registered_estimate ? '📅 ≈'+String(c.registered_estimate).slice(0,7) : '',
         c.is_verified ? '✅ verified' : '',
         c.is_mutual ? '↔ взаимный' : '',
-        lastSeenLabel(c.last_seen_type),
+        lastSeenLabel(c.last_seen_type, c.last_seen_at),
       ].filter(Boolean).join(' · ');
       const sel = CONTACT_SELECT_MODE ? `onclick="event.stopPropagation();toggleContactCheck('${esc(c.id)}',this)" style="border:2px solid transparent;border-radius:14px"` : '';
       return `<div class="li tap" ${sel} onclick="${CONTACT_SELECT_MODE?'':'openContactDetail(\''+esc(c.id)+'\')'}">
@@ -18232,7 +18247,7 @@ async function openContactDetail(id) {
       ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
       ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(String(c.registered_estimate))}</div></div></div>`:''}
-      ${lastSeenLabel(c.last_seen_type)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
+      ${lastSeenLabel(c.last_seen_type, c.last_seen_at)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type, c.last_seen_at))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
       ${c.is_verified?`<div class="row"><div class="row-body"><div class="row-name">Верификация</div><div class="row-val">✅ Подтверждён</div></div></div>`:''}
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${enr.activity&&enr.activity.level!=='unknown'?`<div class="row"><div class="row-body"><div class="row-name">Активность</div><div class="row-val">${enr.activity.level==='hot'?'🔥':enr.activity.level==='warm'?'🌤':'❄️'} ${esc(enr.activity.label)}</div></div></div>`:''}
