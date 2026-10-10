@@ -762,6 +762,33 @@ _NO_TIMEOUT_PREFIXES = ("/api/miniapp/events", "/miniapp", "/.well-known")
 _NO_TIMEOUT_SUFFIXES = ("/download",)
 
 
+def va_post_link(username, channel_id, msg_id) -> tuple[str | None, bool]:
+    """Ссылка на пост В КАНАЛЕ по данным канала. Возвращает (ссылка, приватный?).
+
+    Публичный канал (есть @username) → t.me/<username>/<msg_id>.
+    Приватный → t.me/c/<internal>/<msg_id> (откроется у участника); peer id
+    вида -100XXXXXXXXXX приводим к внутреннему XXXXXXXXXX. Нет msg_id (старый
+    пост до фикса bulk-публикации) → ссылки нет.
+    """
+    if not msg_id:
+        return None, False
+    try:
+        mid = int(msg_id)
+    except (TypeError, ValueError):
+        return None, False
+    if username:
+        return f"https://t.me/{username}/{mid}", False
+    if channel_id:
+        try:
+            s = str(abs(int(channel_id)))
+        except (TypeError, ValueError):
+            return None, True
+        if s.startswith("100") and len(s) > 3:
+            s = s[3:]
+        return f"https://t.me/c/{s}/{mid}", True
+    return None, True
+
+
 def request_timeout_seconds() -> float:
     """Потолок в секундах: `MINIAPP_REQUEST_TIMEOUT`, иначе 90.
 
@@ -16034,6 +16061,54 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось загрузить каналы", 500)
         return _json_resp({"ok": True, **items, "drafts": drafts, "network": network})
 
+    async def va_posts(request: web.Request) -> web.Response:
+        """История опубликованных постов виртуального администратора с переходом
+        к посту В КАНАЛЕ. Жалоба владельца: «не видно, что публиковал вирт.админ,
+        и нельзя нажать на пост и перейти к нему в канале».
+
+        Ссылку строим из managed_channels: публичный канал (есть @username) →
+        t.me/<username>/<msg_id>; приватный → t.me/c/<internal>/<msg_id>
+        (откроется у участника). Нет msg_id (старый пост до фикса) или канал не
+        сопоставлен — ссылки нет, строка это честно показывает."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT p.id, p.channel_key, p.msg_id, p.pillar, p.body,
+                          p.published_at, p.op_id,
+                          mc.title AS ch_title, mc.username AS ch_username,
+                          mc.channel_id AS ch_id
+                   FROM va_channel_posts p
+                   LEFT JOIN managed_channels mc
+                          ON mc.owner_id = p.owner_id
+                         AND (p.channel_key = mc.channel_id::text
+                              OR p.channel_key = mc.username
+                              OR p.channel_key = '@' || mc.username)
+                   WHERE p.owner_id = $1
+                   ORDER BY p.published_at DESC, p.id DESC
+                   LIMIT 50""", uid)
+        except Exception:
+            log.warning("va_posts failed uid=%s", uid, exc_info=True)
+            return _err("Не удалось загрузить посты", 500)
+
+        posts = []
+        for r in rows or []:
+            link, is_private = va_post_link(r["ch_username"], r["ch_id"], r["msg_id"])
+            posts.append({
+                "id": r["id"],
+                "pillar": r["pillar"],
+                "body": (r["body"] or "")[:280],
+                "published_at": r["published_at"].isoformat() if r["published_at"] else None,
+                "channel_title": r["ch_title"] or r["channel_key"],
+                "channel_username": r["ch_username"],
+                "msg_id": r["msg_id"],
+                "op_id": r["op_id"],
+                "link": link,
+                "is_private": is_private,
+            })
+        return _json_resp({"ok": True, "posts": posts})
+
     async def va_network_strategy_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -19724,6 +19799,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
     app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)
     app.router.add_get("/api/miniapp/va/channels", va_channels)
+    app.router.add_get("/api/miniapp/va/posts", va_posts)
     app.router.add_get("/api/miniapp/va/channel/{cid}", va_channel_get)
     app.router.add_put("/api/miniapp/va/channel/{cid}", va_channel_save)
     app.router.add_post("/api/miniapp/va/channel/{cid}/install", va_channel_install)

@@ -1632,6 +1632,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          администратора каналов в разделе «Каналы», не находил его вовсе. -->
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" onclick="openVaAdmin()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Свой администратор на каждый канал: сам изучает нишу, строит контент-план, пишет и публикует посты, следит за статистикой">🧠 Виртуальный администратор</button>
+      <button class="btn btn-s" onclick="openVaPosts()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Что реально опубликовал виртуальный администратор — с переходом к посту в канале">📝 Посты</button>
     </div>
     <!-- Поиск и срезы. Список рисовался целиком и без фильтров: после «Фабрики
          каналов» это сотни строк, а роль (владелец / админ / просто участник)
@@ -1673,6 +1674,19 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <textarea id="chmValue" rows="4" placeholder="" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
     <div id="chmErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
     <button class="btn btn-p" id="chmBtn" onclick="submitChMass()" style="width:100%;margin-top:8px">Применить</button>
+  </div>
+</div>
+
+<!-- ════════════════ ПОСТЫ ВИРТУАЛЬНОГО АДМИНИСТРАТОРА ════════════════ -->
+<div class="screen" id="s-va-posts">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">📝 Посты вирт.администратора</div>
+    <div class="hdr-meta"><div class="hdr-user" id="vaPostsCnt"></div></div>
+  </div>
+  <div class="sub-sb">
+    <div style="font-size:12px;color:var(--hint);padding:4px 0 8px">Что реально опубликовал виртуальный администратор. Нажмите на пост — откроется прямо в канале.</div>
+    <div id="vaPostsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -26458,6 +26472,57 @@ function openTgUser(uname) {
   const url = 'https://t.me/' + u;
   try { if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; } } catch(_) {}
   try { window.open(url, '_blank'); } catch(_) { copyToClipboard(url, 'Ссылка скопирована'); }
+}
+
+// Открыть ГОТОВУЮ t.me-ссылку (пост в канале, канал). Telegram открывает
+// openTelegramLink без выхода из приложения; вне Telegram — новое окно/копия.
+function openTgLink(url) {
+  url = String(url||'').trim();
+  if (!url) { toast('⚠️ Ссылки нет — приватный канал или старый пост'); return; }
+  try { if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; } } catch(_) {}
+  try { window.open(url, '_blank'); } catch(_) { copyToClipboard(url, 'Ссылка скопирована'); }
+}
+
+// Посты виртуального администратора: что реально опубликовано, с переходом к
+// посту в канале. Жалоба владельца: «не видно посты и нельзя перейти к ним».
+async function openVaPosts() {
+  push('s-va-posts');
+  txt('vaPostsCnt','');
+  txt('vaPostsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/va/posts');
+    const posts = (d && d.posts) || [];
+    txt('vaPostsCnt', posts.length ? posts.length+' постов' : '');
+    if (!posts.length) {
+      txt('vaPostsList', empty('📝','Пока нет постов','Виртуальный администратор ещё ничего не публиковал, или публикации были до обновления'));
+      return;
+    }
+    txt('vaPostsList', posts.map(p=>{
+      const body = esc((p.body||'').replace(/\s+/g,' ').trim()).slice(0,160) || '(без текста)';
+      const ch = esc(p.channel_title||'канал');
+      const when = p.published_at ? ago(p.published_at) : '';
+      const pillar = p.pillar ? ' · '+esc(p.pillar) : '';
+      // Клик по посту ведёт в канал к посту. Нет ссылки (приватный без данных
+      // или старый пост без msg_id) — честно показываем, строкой-тупиком не притворяемся.
+      const canOpen = !!p.link;
+      const onclick = canOpen ? `onclick="openTgLink('${p.link}')" role="button" tabindex="0"` : '';
+      const note = canOpen ? '' : (p.is_private
+        ? '<div class="acc-phone" style="color:var(--hint)">🔒 приватный канал — ссылки нет</div>'
+        : '<div class="acc-phone" style="color:var(--hint)">ссылка на пост недоступна</div>');
+      return `<div class="row" ${onclick}>
+        <div class="row-ico" style="background:var(--bg-blue-16)">📝</div>
+        <div class="row-body">
+          <div class="row-name">${ch}${pillar}</div>
+          <div class="row-val">${body}</div>
+          <div class="acc-phone" style="color:var(--hint)">${when}</div>
+          ${note}
+        </div>
+        ${canOpen?'<div class="row-right"><span class="chev">›</span></div>':''}
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('vaPostsList', empty('⚠️','Не удалось загрузить посты', errRu(e,'Повторите позже')));
+  }
 }
 async function openGraph() {
   push('s-graph');
