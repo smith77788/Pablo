@@ -2341,14 +2341,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                           COUNT(*) FILTER (WHERE status='pending') AS pending
                    FROM operation_queue WHERE owner_id=$1""", uid),
             "health": _safe_fetchrow(pool,
-                # trust_score хранится в 0..1 (schema/trust_engine). Показываем как
-                # проценты 0..100: без *100 все аккаунты давали avg≈1 и попадали в
-                # «bad» (<40) — отсюда «здоровье у всех одинаково ~1%».
-                """SELECT ROUND(AVG(COALESCE(trust_score,1.0)) * 100)::int AS avg,
-                          COUNT(*) FILTER (WHERE COALESCE(trust_score,1.0) >= 0.70) AS good,
-                          COUNT(*) FILTER (WHERE COALESCE(trust_score,1.0) BETWEEN 0.40 AND 0.699) AS warn,
-                          COUNT(*) FILTER (WHERE COALESCE(trust_score,1.0) < 0.40) AS bad
-                   FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""", uid),
+                # Здоровье командного центра — те же durable-сигналы, что и
+                # единый пульс (мёртвый статус/нет сессии → 0, активный кулдаун
+                # → 35, иначе доверие 0..100 минус штраф за флуд). Раньше брали
+                # ЧИСТЫЙ trust_score, и флот во флуде/спам-блоке попадал в
+                # «хорошие» (good ≥70), пока trust_engine не пересчитает — та же
+                # ложь, что чинилась на дашбордном «Здоровье».
+                """SELECT ROUND(AVG(h))::int AS avg,
+                          COUNT(*) FILTER (WHERE h >= 70) AS good,
+                          COUNT(*) FILTER (WHERE h BETWEEN 40 AND 69) AS warn,
+                          COUNT(*) FILTER (WHERE h < 40) AS bad
+                   FROM (
+                     SELECT CASE
+                         WHEN COALESCE(acc_status,'ok') IN ("""
+                + _acc_status.sql_dead_list() + """) THEN 0
+                         WHEN session_str IS NULL OR session_str = '' THEN 0
+                         WHEN cooldown_until IS NOT NULL AND cooldown_until > now() THEN 35
+                         ELSE GREATEST(0, LEAST(100, COALESCE(trust_score,1.0) * 100)
+                                        - 15 * LEAST(4, COALESCE(flood_count_7d,0)))
+                     END AS h
+                     FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE
+                   ) t""", uid),
         }
         _keys = list(_q.keys())
         _res = await asyncio.gather(

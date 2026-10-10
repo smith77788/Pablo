@@ -26,11 +26,15 @@ def test_display_endpoints_scale_trust_to_percent():
 
 def test_accounts_health_aggregate_uses_correct_scale():
     src = _api()
-    # avg здоровья = среднее 0..1 * 100; пороги хороший/риск/плохой — на 0..1
-    assert "ROUND(AVG(COALESCE(trust_score,1.0)) * 100)::int AS avg" in src
-    assert "COALESCE(trust_score,1.0) >= 0.70" in src
-    assert "COALESCE(trust_score,1.0) < 0.40" in src
-    # старые пороги 0..100 на 0..1-данных (всё уходило в «bad»)
+    # Здоровье командного центра теперь health-aware (durable-сигналы единого
+    # пульса), а не чистый trust: trust масштабируется *100 ВНУТРИ выражения,
+    # к нему добавлены мёртвый статус/нет сессии/кулдаун/флуд; пороги good/warn/
+    # bad на 0..100.
+    assert "ROUND(AVG(h))::int AS avg" in src
+    assert "LEAST(100, COALESCE(trust_score,1.0) * 100)" in src
+    assert "flood_count_7d" in src and "cooldown_until" in src and "acc_status" in src
+    assert "h >= 70" in src and "h < 40" in src
+    # старый баг 0..1 как проценты не вернулся
     assert "AVG(COALESCE(trust_score,50))" not in src
     assert "COALESCE(trust_score,50) >= 70" not in src
 
