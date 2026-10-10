@@ -954,6 +954,18 @@ async def main() -> None:
         except Exception:
             log.warning("startup self-heal DDL failed: %.90s", _ddl)
 
+    # Обобщённый доктор схемы — покрывает ВСЕ объекты автоматически, без ручного
+    # списка выше. Сверяет ожидаемую схему (из самих schema_v*.sql) с фактической
+    # БД и аддитивно до-создаёт недостающие таблицы/колонки (случай cf_relay_url:
+    # миграция не доехала из-за коллизии basename → колонки нет → падал весь путь,
+    # где она упомянута). Ручной блок оставлен belt-and-suspenders; доктор ловит и
+    # то, что в него забыли добавить. Fail-soft: сам не роняет старт.
+    try:
+        from database import schema_doctor
+        await schema_doctor.heal(pool)
+    except Exception:
+        log.warning("startup: доктор схемы не отработал", exc_info=True)
+
     # Init op_worker DB pool and reset stale in_operation flags from previous process
     op_worker.init_op_worker_pool(pool)
     # Тоже под try: разбор залипших флагов прошлого процесса полезен, но ради
