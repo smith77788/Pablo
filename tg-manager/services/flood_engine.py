@@ -786,9 +786,20 @@ async def record_flood(
         # Критично: кулдаун применяем ПЕРВЫМ и отдельно — он не должен пропасть
         # из-за сбоя записи в аналитический лог (иначе аккаунт продолжит работать
         # во флуд → риск бана). Раньше INSERT в лог и этот UPDATE были в одном try.
+        # bump_flood_count=True ОБЯЗАТЕЛЕН: это канонический регистратор FloodWait
+        # (его зовут strike/warmup/parser/chat_warmup через note_flood). Без него
+        # счётчик tg_accounts.flood_count_7d не рос, а именно его читает trust_engine
+        # (penalty = _FLOOD_PENALTY * flood_count_7d). Выходило расхождение двух
+        # органов пульса: account_flood_log событие получал (риск-пульс показывал
+        # «Под риском» / FloodWait), а flood_count_7d оставался 0 — доверие не
+        # падало, и приборный щиток светил «здоровье 100%» на флоте во флуде.
+        # Жалоба владельца: «аккаунты с флудом считаются здоровыми, здоровье сети
+        # 100%». Прямые вызовы apply_cooldown (dm_engine/op_worker) этот флаг уже
+        # ставят — канонический путь обязан делать то же.
         await apply_cooldown(
             pool, account_id, actual_wait,
-            reason=f"{action_type} cooldown after FloodWait ({wait_seconds}s)")
+            reason=f"{action_type} cooldown after FloodWait ({wait_seconds}s)",
+            bump_flood_count=True)
         # Аналитический лог С ПРИВЯЗКОЙ К ОПЕРАЦИИ. operation_id раньше принимался
         # функцией, но НЕ писался — из-за этого нельзя было показать «что операция
         # сделала с аккаунтами». Фолбэк без v41-колонок, чтобы не падать на
