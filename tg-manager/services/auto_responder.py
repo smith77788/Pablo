@@ -297,6 +297,54 @@ async def notify_broken_bots(pool: asyncpg.Pool, bot) -> int:
     return sent
 
 
+_HEALTH_PROBE_BATCH = 40
+
+
+async def probe_bot_health(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> dict:
+    """Периодический getMe по активным ботам — честная живость ДАЖЕ тех, кому
+    никто не пишет.
+
+    Жалоба владельца: «не видно, какие боты живы, а какие мёртвые». Статус
+    (fail_streak/last_ok_at/last_error) обновлялся только когда бота опрашивали
+    по входящим — а опрос берёт лишь ботов с активностью. Бот без трафика с
+    отозванным токеном вечно показывался «🟢 Работает». Теперь getMe проходит по
+    ВСЕМ активным ботам, батчами, старые по времени проверки первыми — за
+    несколько циклов обойдём весь флот (82 бота → пара циклов). Пишем тем же
+    путём, что и опрос входящих (_record_bot_ok/_record_bot_error), чтобы
+    источник здоровья был один.
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT bot_id, token FROM managed_bots "
+            "WHERE is_active=TRUE AND token IS NOT NULL AND token <> '' "
+            "ORDER BY COALESCE(last_ok_at, last_error_at) ASC NULLS FIRST "
+            "LIMIT $1", _HEALTH_PROBE_BATCH)
+    except Exception as e:
+        log.debug("probe_bot_health: выборка ботов не удалась: %s", e)
+        return {"checked": 0, "ok": 0, "err": 0}
+    ok = err = 0
+    for r in rows:
+        bot_id = int(r["bot_id"])
+        try:
+            data = await bot_api._call(http, r["token"], "getMe")
+        except Exception as e:
+            await _record_bot_error(pool, bot_id, str(e)[:200])
+            err += 1
+            continue
+        if data.get("ok"):
+            await _record_bot_ok(pool, bot_id)
+            ok += 1
+        else:
+            await _record_bot_error(pool, bot_id,
+                                    data.get("description", ""), data.get("error_code"))
+            err += 1
+        await asyncio.sleep(0.15)  # не долбим Bot API залпом
+    if rows:
+        log.info("probe_bot_health: проверено %d ботов (ok=%d, ошибок=%d)",
+                 len(rows), ok, err)
+    return {"checked": len(rows), "ok": ok, "err": err}
+
+
 async def _notify_operator(http, token, operator: dict, chat_id: int,
                            from_user: dict, text: str) -> None:
     """Уведомить живого оператора о переводе диалога (через того же бота).
@@ -1452,6 +1500,14 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                         log.info("auto_responder: профиль обновлён у ботов: %d", _upd)
                 except Exception:
                     log.debug("auto_responder: сверка профилей ботов не выполнена")
+            if _cycle % 30 == 1:
+                # Честная живость ВСЕХ ботов (getMe), а не только тех, кому пишут.
+                # Делаем ДО уведомлений, чтобы сломанный бот без трафика попал в
+                # сводку этим же циклом.
+                try:
+                    await probe_bot_health(pool, http)
+                except Exception:
+                    log.debug("auto_responder: проба живости ботов не выполнена")
             if main_bot is not None and _cycle % 30 == 1:
                 try:
                     await notify_broken_bots(pool, main_bot)
