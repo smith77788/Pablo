@@ -76,12 +76,31 @@ async def _draft_live_news(pool, bot, admin: dict) -> bool:
     if not events:
         return False
     event_ids = [int(event["id"]) for event in events]
+    is_auto = str(admin.get("publish_mode")) == "auto"
     try:
-        draft = await ca.write_post(pool, owner_id, channel_id, news_events=list(events))
+        draft = await ca.write_post(pool, owner_id, channel_id,
+                                    news_events=list(events), autonomous=is_auto)
         sources = sorted({
             f"@{event['source_username']} · {event['published_at'].astimezone(timezone.utc).isoformat()}"
             for event in events if event.get("source_username") and event.get("published_at")
         })
+        # Автономный режим: владелец выбрал публикацию без подтверждения —
+        # уважаем и для новостей. Публикуем автоматически, если редактор чист
+        # (draft.ok). Источники уходят в журнал, а не блокируют публикацию.
+        # Раньше новостной поток ВСЕГДА делал черновик на проверку, из-за чего
+        # автономный режим на новостных каналах «лишь присылал на проверку».
+        if is_auto and draft.ok:
+            op_id = await ca.publish(pool, owner_id, channel_id, draft.text, draft.pillar)
+            await pool.execute(
+                "UPDATE va_news_inbox SET status='published', claimed_at=NULL, "
+                "updated_at=now() WHERE id=ANY($1::bigint[]) AND owner_id=$2 AND channel_id=$3",
+                event_ids, owner_id, channel_id,
+            )
+            src_note = (" · " + "; ".join(sources[:3])) if sources else ""
+            await ca.log_event(pool, owner_id, channel_id, "queued",
+                               f"Новостной пост из {len(events)} сигналов опубликован "
+                               f"автономно, операция №{op_id}{src_note}")
+            return True
         if sources:
             draft.reasons.append("Сигналы для проверки: " + "; ".join(sources[:3]))
         # Draft and consumed inbox rows commit together: a crash cannot make the

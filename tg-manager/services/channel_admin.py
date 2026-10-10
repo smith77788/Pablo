@@ -1673,12 +1673,21 @@ async def review_text(pool, owner_id: int, channel_id: int, ctx: dict, text: str
 async def write_post(pool, owner_id: int, channel_id: int, *,
                      complete: Optional[Complete] = None,
                      plan_item: Optional[dict] = None,
-                     news_events: Optional[list[dict]] = None) -> Draft:
+                     news_events: Optional[list[dict]] = None,
+                     autonomous: bool = False) -> Draft:
     """Написать пост для канала и прогнать через редактора канала.
 
     До _MAX_ATTEMPTS попыток: замечания редактора возвращаются автору как
     правка. Draft.ok — пост чистый (можно публиковать без человека).
     Все модели на паузе по лимиту → AiBusy (перенести, а не считать сбоем).
+
+    autonomous=True — владелец выбрал публикацию без подтверждения
+    (publish_mode='auto'). Тогда НЕ форсим новостную метку на проверку
+    (_NEWS_REVIEW_REASON): новостной пост публикуется сам, как и обычный.
+    Жалоба владельца: «в автономном режиме вирт.админ лишь присылает на
+    проверку, хотя публикация без подтверждения включена» — так было именно
+    из-за принудительного фактчека новостных каналов. Редактор (review_text)
+    брак всё равно не пропускает — автопубликуется только чистый пост.
     """
     complete = complete or _default_complete()
     ctx = await _post_context(pool, owner_id, channel_id, plan_item=plan_item,
@@ -1703,9 +1712,10 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
             feedback = ["прошлый текст оборвался на полуслове — напиши пост целиком, "
                         "короче, и закончи последнюю мысль"]
             continue
-        if news_mode:
+        if news_mode and not autonomous:
             # A newsroom publishes from live signals, never from scheduled filler.
             # One LLM pass creates a review draft; a human checks source and facts.
+            # В автономном режиме владелец отказался от этой проверки осознанно.
             reasons.append(_NEWS_REVIEW_REASON)
             return Draft(pillar, text, reasons, is_intro, False,
                          plan_item.get("id") if plan_item else None)
@@ -1715,7 +1725,7 @@ async def write_post(pool, owner_id: int, channel_id: int, *,
         feedback = reasons
     if not text:
         raise ChannelAdminError("ИИ вернул пустой текст")
-    if news_mode and _NEWS_REVIEW_REASON not in reasons:
+    if news_mode and not autonomous and _NEWS_REVIEW_REASON not in reasons:
         reasons.append(_NEWS_REVIEW_REASON)
     return Draft(pillar, text, reasons, is_intro, False,
                  plan_item.get("id") if plan_item else None)
@@ -2192,7 +2202,8 @@ async def tick_post(pool, bot, admin: dict, *, complete: Optional[Complete] = No
         if d is None:
             d = await write_post(pool, owner_id, channel_id, complete=complete,
                                  plan_item={k: v for k, v in item.items() if k != "body"}
-                                 if item else None)
+                                 if item else None,
+                                 autonomous=(admin.get("publish_mode") == "auto"))
     except AiBusy as e:
         await _wait_ai(pool, admin, e.retry_at, now)
         return "ai_wait"
