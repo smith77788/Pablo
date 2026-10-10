@@ -11698,7 +11698,7 @@ function buildAccDetail(d) {
     <div class="profile-hdr">
       <div class="profile-ava ${avatarCls}">${initials}</div>
       <div class="profile-name">${esc(name)}</div>
-      ${a.username?`<div class="profile-sub">@${esc(a.username)}</div>`:''}
+      ${a.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${esc(String(a.username))}')" role="button" tabindex="0">@${esc(a.username)} ↗</div>`:''}
       <div class="profile-badges">${statusBadge}</div>
     </div>
     ${healthBanner}
@@ -12079,11 +12079,12 @@ function buildChDetail(d) {
     <div class="profile-hdr">
       <div class="profile-ava pava-purple">${initials}</div>
       <div class="profile-name">${esc(name)}</div>
-      ${c.username?`<div class="profile-sub">@${esc(c.username)}</div>`:''}
+      ${c.username?`<div class="profile-sub" style="cursor:pointer;color:var(--accent)" onclick="openTgUser('${esc(c.username)}')" role="button" tabindex="0">@${esc(c.username)} ↗</div>`:''}
       <div class="profile-badges"><span class="badge b-bl">${type}</span></div>
     </div>
 
     <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
+      ${c.username?`<button class="btn btn-s" onclick="openTgUser('${esc(c.username)}')" style="flex:1 1 auto;min-width:88px" title="Открыть канал в Telegram">↗ Открыть в Telegram</button>`:''}
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
       <button class="btn btn-s" onclick="pinLastPost(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>
       <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1 1 auto;min-width:88px">✏️ Изменить</button>
@@ -12102,8 +12103,9 @@ function buildChDetail(d) {
       <div class="row"><div class="row-ico" style="background:var(--bg-purple-16)">📝</div>
         <div class="row-body"><div class="row-name">Публикаций через нас</div><div class="row-val">${num(d.posts_published||0)}</div></div>
       </div>
-      ${c.username?`<div class="row"><div class="row-ico" style="background:var(--bg-green-16)">🔗</div>
-        <div class="row-body"><div class="row-name">Ссылка</div><div class="row-val">t.me/${esc(c.username)}</div></div>
+      ${c.username?`<div class="row">
+        <div class="row-ico" style="background:var(--bg-green-16)">🔗</div>
+        <div class="row-body" onclick="openTgUser('${esc(c.username)}')" style="cursor:pointer"><div class="row-name">Ссылка</div><div class="row-val" style="color:var(--accent)">t.me/${esc(c.username)} ↗</div></div>
         <div class="row-right" onclick="copyToClipboard('https://t.me/${esc(c.username)}')"><span style="font-size:20px;cursor:pointer">📋</span></div>
       </div>`:''}
       ${c.channel_id?`<div class="row"><div class="row-ico" style="background:rgba(113,113,122,.16)">🆔</div>
