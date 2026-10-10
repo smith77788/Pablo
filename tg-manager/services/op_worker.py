@@ -12113,8 +12113,15 @@ async def _exec_bulk_post_chans(
                     # незамеченным. Best-effort — не рушим публикацию.
                     try:
                         from services import content_memory
+                        # msg_id из результата публикации (post_to_channel →
+                        # {"msg_id": msg.id}). Без него пост виртуального
+                        # администратора нельзя открыть в канале и нельзя
+                        # спросить у Telegram его просмотры (schema_v228). Раньше
+                        # здесь msg_id не передавался — массовые публикации
+                        # теряли ссылку на сообщение, в отличие от mass_publish.
                         await content_memory.record_published(
                             pool, owner_id, _key, _body, op_id=op_id,
+                            msg_id=last_result.get("msg_id"),
                         )
                     except Exception:
                         log_exc_swallow(log, "bulk_post_chans: content_memory record failed")
