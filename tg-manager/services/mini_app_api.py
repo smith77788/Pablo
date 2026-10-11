@@ -22414,6 +22414,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         premium = request.query.get('premium') == '1'
         multi = request.query.get('multi') == '1'
         mutual = request.query.get('mutual') == '1'
+        # Плитки «📱 Телефон» и «С ником» показывали числа, которые ни во что не
+        # открывались: срез существовал только в счётчике.
+        with_phone = request.query.get('with_phone') == '1'
+        with_username = request.query.get('with_username') == '1'
         gender = request.query.get('gender') or None       # 'm' | 'f' | 'unknown'
         if gender not in ('m', 'f', 'unknown'):
             gender = None
@@ -22422,6 +22426,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Фильтр по группе контактов: репозиторий его умел, а список не читал,
         # поэтому группы было некуда открыть.
         group_id = validate_integer(request.query.get('group_id'), min_val=1)
+        # Фильтр «контакты этого аккаунта»: фронт его отправлял, репозиторий
+        # умел, а список не читал — экран обещал контакты одного аккаунта и
+        # показывал весь справочник (тот же класс, что срез «Прокси мёртв»).
+        account_id = validate_integer(request.query.get('account_id'), min_val=1)
         # Пагинация: без неё список молча обрезался дефолтным limit=100 — при 2.9к+
         # контактов пользователь видел «лишь десятки» и не мог долистать до
         # остальных. limit зажат, offset — для «Показать ещё».
@@ -22439,6 +22447,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                         tag=tag, premium_only=premium, multi_only=multi,
                                         mutual_only=mutual, gender=gender, crm_stage=crm_stage,
                                         excluded_only=excluded_only, group_id=group_id,
+                                        account_id=account_id,
+                                        with_phone_only=with_phone,
+                                        with_username_only=with_username,
                                         limit=limit, offset=offset)
             result['offset'] = offset
             result['limit'] = limit

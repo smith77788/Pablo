@@ -36,6 +36,15 @@ def _parse_json_fields(d: dict) -> dict:
     return d
 
 
+# Условие «есть адрес, по которому до человека достать» — ОДНО на два места:
+# на плитку-счётчик (get_contact_stats) и на срез списка (_segment_where).
+# Пока они были написаны по отдельности, плитка «📱 Телефон» показывала число,
+# которое ни во что не открывалось, а разойтись им ничто не мешало: счётчик
+# считал бы одно, а срез показывал другое, и это заметил бы только владелец.
+HAS_PHONE_SQL = "phones IS NOT NULL AND phones <> '[]'::jsonb"
+HAS_USERNAME_SQL = "username IS NOT NULL AND username <> ''"
+
+
 def _segment_where(owner_id, f: dict):
     """Единый конструктор WHERE для среза контактов — общий для списка
     (get_contacts) и резолвера сегмента (resolve_segment/count_segment), чтобы
@@ -80,6 +89,11 @@ def _segment_where(owner_id, f: dict):
         conds.append('is_mutual = TRUE')
     if f.get('multi_only'):
         conds.append('(SELECT COUNT(*) FROM contact_sources WHERE contact_id = unified_contacts.id) > 1')
+    # «С телефоном» / «С ником» — то же условие, что и у одноимённых плиток.
+    if f.get('with_phone_only'):
+        conds.append('(' + HAS_PHONE_SQL + ')')
+    if f.get('with_username_only'):
+        conds.append('(' + HAS_USERNAME_SQL + ')')
     if f.get('account_id'):
         conds.append(f'EXISTS (SELECT 1 FROM contact_sources WHERE contact_id = unified_contacts.id AND account_id = ${idx})')
         params.append(f['account_id']); idx += 1
@@ -106,6 +120,7 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
                        favorite_only=False, premium_only=False, multi_only=False,
                        mutual_only=False, gender=None, crm_stage=None,
                        account_id=None, excluded_only=False,
+                       with_phone_only=False, with_username_only=False,
                        sort_by='first_name', limit=100, offset=0) -> dict:
     # Просмотр списка показывает ВСЕ контакты (в т.ч. личные — их надо видеть и
     # уметь снять пометку); excluded_only — режим управления только личными.
@@ -114,6 +129,8 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
                'multi_only': multi_only, 'mutual_only': mutual_only,
                'gender': gender, 'crm_stage': crm_stage, 'account_id': account_id,
                'excluded_only': excluded_only,
+               'with_phone_only': with_phone_only,
+               'with_username_only': with_username_only,
                'include_excluded': not excluded_only,
                # Просмотр списка показывает ВСЕ контакты, в т.ч. давно
                # неактивных — их надо видеть. Фильтр активности нужен только
@@ -143,7 +160,8 @@ async def count_segment(pool, owner_id, filters: dict) -> int:
 
 
 _SEG_FILTER_KEYS = ("search", "tag", "group_id", "favorite_only", "premium_only",
-                    "multi_only", "mutual_only", "gender", "crm_stage", "account_id")
+                    "multi_only", "mutual_only", "gender", "crm_stage", "account_id",
+                    "with_phone_only", "with_username_only")
 
 
 def _clean_filters(filters: dict) -> dict:
@@ -377,8 +395,12 @@ async def remove_contact_from_group(pool, contact_id, group_id) -> bool:
 async def get_contact_stats(pool, owner_id) -> dict:
     total = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1', owner_id)
     premium = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_premium=TRUE', owner_id)
-    with_username = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND username IS NOT NULL', owner_id)
-    with_phone = await pool.fetchval("SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND phones != '[]'", owner_id)
+    # Счётчик и срез берут ОДНО условие (HAS_USERNAME_SQL/HAS_PHONE_SQL):
+    # плитка открывает ровно те контакты, которые посчитала.
+    with_username = await pool.fetchval(
+        f'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND ({HAS_USERNAME_SQL})', owner_id)
+    with_phone = await pool.fetchval(
+        f'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND ({HAS_PHONE_SQL})', owner_id)
     favorites = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_favorite=TRUE', owner_id)
     mutual = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_mutual=TRUE', owner_id)
     notes_count = await pool.fetchval("SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND notes != '' AND notes IS NOT NULL", owner_id)

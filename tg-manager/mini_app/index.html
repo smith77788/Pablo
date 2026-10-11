@@ -3839,11 +3839,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов…" oninput="searchContacts()" class="inp">
     </div>
     <div class="seg" id="contactFilterSeg">
-      <div class="seg-opt on" onclick="filterContacts(null,this)">Все</div>
-      <div class="seg-opt" onclick="filterContacts('favorite',this)">⭐ Избранные</div>
-      <div class="seg-opt" onclick="filterContacts('premium',this)">💎 Premium</div>
-      <div class="seg-opt" onclick="filterContacts('multi',this)">👥 Мульти-акк</div>
-      <div class="seg-opt" onclick="filterContacts('mutual',this)">↔ Взаимные</div>
+      <div class="seg-opt on" data-f="all" onclick="filterContacts(null,this)">Все</div>
+      <div class="seg-opt" data-f="favorite" onclick="filterContacts('favorite',this)">⭐ Избранные</div>
+      <div class="seg-opt" data-f="premium" onclick="filterContacts('premium',this)">💎 Premium</div>
+      <div class="seg-opt" data-f="multi" onclick="filterContacts('multi',this)">👥 Мульти-акк</div>
+      <div class="seg-opt" data-f="mutual" onclick="filterContacts('mutual',this)">↔ Взаимные</div>
+      <div class="seg-opt" data-f="phone" onclick="filterContacts('phone',this)">📱 С телефоном</div>
+      <div class="seg-opt" data-f="username" onclick="filterContacts('username',this)">С ником</div>
     </div>
     <!-- Доп. оси сегмента: пол и CRM-стадия (комбинируются с фильтром выше) -->
     <div style="display:flex;gap:6px;padding:4px 0 2px;overflow-x:auto;-webkit-overflow-scrolling:touch">
@@ -18077,6 +18079,8 @@ async function loadContacts(append=false) {
   if (CONTACT_FILTER === 'premium') params.set('premium', '1');
   if (CONTACT_FILTER === 'multi') params.set('multi', '1');
   if (CONTACT_FILTER === 'mutual') params.set('mutual', '1');
+  if (CONTACT_FILTER === 'phone') params.set('with_phone', '1');
+  if (CONTACT_FILTER === 'username') params.set('with_username', '1');
   if (CONTACT_GENDER) params.set('gender', CONTACT_GENDER);
   if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
   if (CONTACT_GROUP) params.set('group_id', CONTACT_GROUP.id);
@@ -18132,6 +18136,8 @@ async function searchContacts() { loadContacts(); }
 const CONTACT_FILTER_HINTS = {
   mutual: '↔ Взаимные — собеседник тоже добавил этот аккаунт в свои контакты (двусторонняя связь по флагу Telegram). Обычно их мало: люди редко сохраняют аккаунт в ответ.',
   multi: '👥 Мульти-акк — контакт есть сразу у нескольких ваших аккаунтов.',
+  phone: '📱 С телефоном — сохранён номер. Такого человека может пригласить ЛЮБОЙ аккаунт флота: движок сам добавит номер в книгу контактов, пригласит и уберёт обратно.',
+  username: 'С ником — есть @ник. Самый надёжный адрес и для сообщения, и для приглашения, работает с любого аккаунта.',
 };
 function filterContacts(filter, btn) {
   CONTACT_FILTER = filter;
@@ -18197,17 +18203,39 @@ async function bulkDeleteSelected() {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
+// Плитка-счётчик открывает ровно свой срез: тапнул «📱 Телефон · 812» — в
+// списке ниже эти 812. До этого шесть чисел были просто текстом, хотя срез под
+// каждым уже существовал на сервере.
+function contactsSlice(filter) {
+  const chip = document.querySelector('#contactFilterSeg .seg-opt[data-f="' + (filter || 'all') + '"]');
+  filterContacts(filter, chip);
+  chip?.scrollIntoView({behavior: 'smooth', block: 'nearest', inline: 'center'});
+}
+
+function contactsKpiCard(val, lbl, color, filter, hint) {
+  // Счётчик и срез считают по одному условию на сервере (HAS_PHONE_SQL и т.д.),
+  // поэтому число на плитке и длина открытого списка не разойдутся.
+  return `<div class="kpi-card tap-card" style="min-width:60px;text-align:center"`
+    + (hint ? ` title="${hint}"` : '')
+    + ` onclick="contactsSlice(${filter === null ? 'null' : "'" + filter + "'"})">`
+    + `<div class="kpi-val"${color ? ` style="color:var(--${color})"` : ''}>${num(val || 0)}</div>`
+    + `<div class="kpi-lbl">${lbl} ›</div></div>`;
+}
+
 async function loadContactStats() {
   try {
     const d = await api('/api/miniapp/uch/stats');
-    txt('contactsKpi', `
-      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.total||0)}</div><div class="kpi-lbl">Всего</div></div>
-      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--green)">${num(d.favorites||0)}</div><div class="kpi-lbl">⭐ Избр.</div></div>
-      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val" style="color:var(--purple)">${num(d.premium||0)}</div><div class="kpi-lbl">💎 Premium</div></div>
-      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_phone||0)}</div><div class="kpi-lbl">📱 Телефон</div></div>
-      <div class="kpi-card" style="min-width:60px;text-align:center"><div class="kpi-val">${num(d.with_username||0)}</div><div class="kpi-lbl">С ником</div></div>
-      <div class="kpi-card" style="min-width:60px;text-align:center" title="Двусторонняя связь: аккаунт и собеседник добавили друг друга в контакты"><div class="kpi-val">${num(d.mutual||0)}</div><div class="kpi-lbl">↔ Взаимные</div></div>
-    `);
+    txt('contactsKpi',
+      contactsKpiCard(d.total, 'Всего', null, null)
+      + contactsKpiCard(d.favorites, '⭐ Избр.', 'green', 'favorite')
+      + contactsKpiCard(d.premium, '💎 Premium', 'purple', 'premium')
+      + contactsKpiCard(d.with_phone, '📱 Телефон', null, 'phone',
+          'Сохранён номер: пригласить может любой аккаунт флота')
+      + contactsKpiCard(d.with_username, 'С ником', null, 'username',
+          'Есть @ник — самый надёжный адрес для сообщения и приглашения')
+      + contactsKpiCard(d.mutual, '↔ Взаимные', null, 'mutual',
+          'Двусторонняя связь: аккаунт и собеседник добавили друг друга в контакты')
+    );
   } catch(e) {
     // Нули вместо цифр — это утверждение, которого мы не проверяли. Пустая
     // полоса — тоже: непонятно, считается она или сломалась.
