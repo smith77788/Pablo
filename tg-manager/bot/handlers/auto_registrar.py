@@ -127,6 +127,11 @@ async def _save_account(
         await db.record_phone_link(pool, phone, owner_id)
     except Exception:
         log_exc_swallow(log, "_save_account: record_phone_link failed")
+    # Синхронизация контактов «как с устройства» — как у любого подключения
+    # (database.db.add_tg_account).
+    if acc_id:
+        from services.contacts_hub.device_sync import schedule_for_new_account
+        await schedule_for_new_account(pool, owner_id, int(acc_id))
     return acc_id
 
 

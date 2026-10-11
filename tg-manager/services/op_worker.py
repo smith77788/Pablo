@@ -3913,6 +3913,11 @@ async def _dispatch_contacts_sync(pool, bot, op_id, owner_id, params) -> dict:
     return await _exec_contacts_sync(pool, op_id, owner_id, params)
 
 
+async def _dispatch_contacts_push(pool, bot, op_id, owner_id, params) -> dict:
+    """Выгрузка хранилища контактов в книгу аккаунта — bot ей не нужен."""
+    return await _exec_contacts_push(pool, op_id, owner_id, params)
+
+
 async def _dispatch_global_presence_group(pool, bot, op_id, owner_id, params) -> dict:
     """asset_type форсируем: кривые params не должны молча создать канал вместо группы."""
     return await _exec_global_presence_channel(
@@ -4025,6 +4030,7 @@ def _build_dispatch() -> dict:
         "gift_transfer": _dispatch_gift_transfer,
         # ── Прочее ────────────────────────────────────────────────────────────
         "contacts_sync": _dispatch_contacts_sync,
+        "contacts_push": _dispatch_contacts_push,
         "create_channel": _dispatch_create_channel,
         "create_group": _dispatch_create_group,
     }
@@ -15366,6 +15372,77 @@ async def _invite_log_insert(pool, owner_id: int, group_key: str, op_id: int,
         "ON CONFLICT DO NOTHING",
         owner_id, group_key, sorted(uniq), op_id,
     )
+
+
+async def _exec_contacts_push(
+    pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Синхронизация с устройства: хранилище контактов → книга аккаунта.
+
+    Повтор безопасен: аккаунт сначала читает свою книгу и шлёт только
+    недостающих (services/contacts_hub/device_sync). После выгрузки книга
+    читается обратно в хранилище, чтобы оно знало, у кого какие контакты.
+    """
+    from database import db as _db
+    from services.contacts_hub import device_sync
+    from services.contacts_hub.sync_service import sync_account
+
+    acc_ids = [int(i) for i in (params.get("account_ids") or [])]
+    contacts = await device_sync.hub_contacts(pool, owner_id)
+    if not contacts:
+        return {"status": "done", "ok": 0, "failed": 0,
+                "summary": "📲 В хранилище нет контактов с номером — выгружать нечего."}
+    lines: list[str] = []
+    total_sent = total_imp = total_left = 0
+    failed = 0
+    for acc_id in acc_ids:
+        acc = await _db.get_account_for_telethon(pool, acc_id, owner_id)
+        label = (acc or {}).get("phone") or f"#{acc_id}"
+        if not acc or not acc.get("session_str"):
+            failed += 1
+            lines.append(f"• {label}: сессия недоступна")
+            continue
+        if await _infra_mem.is_account_quarantined(pool, acc_id):
+            lines.append(f"• {label}: аккаунт в карантине — синхронизация отложена")
+            continue
+        if not await try_claim_account(acc_id):
+            return {"status": "requeue",
+                    "summary": "⏳ Аккаунт занят другой операцией — синхронизация позже"}
+        try:
+            r = await device_sync.push_contacts(acc["session_str"], dict(acc), contacts)
+        finally:
+            await release_accounts([acc_id])
+        if r.get("flood_wait"):
+            try:
+                from services.flood_engine import record_flood
+                await record_flood(pool, acc_id, int(r["flood_wait"]), "contacts", op_id)
+            except Exception:
+                log_exc_swallow(log, f"contacts_push: пауза не записана acc={acc_id}")
+        if r.get("error"):
+            failed += 1
+            lines.append(f"• {label}: не удалось — {r['error'][:80]}")
+            continue
+        total_sent += r["sent"]
+        total_imp += r["imported"]
+        total_left += r["left"]
+        lines.append(
+            f"• {label}: добавлено {r['imported']} (отправлено {r['sent']}, "
+            f"уже было {r['already']})"
+            + (f", не дошла очередь {r['left']}" if r["left"] else "")
+            + (" — Telegram попросил паузу" if r.get("flood_wait") else ""))
+        try:
+            await asyncio.wait_for(sync_account(pool, owner_id, acc_id), timeout=600)
+        except Exception:
+            log_exc_swallow(log, f"contacts_push: обратное чтение книги acc={acc_id}")
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id)
+    summary = (f"📲 Синхронизация контактов с устройства: добавлено {total_imp} "
+               f"из {total_sent} отправленных\n" + "\n".join(lines[:20]))
+    if total_left:
+        summary += (f"\n⏸ Не дошла очередь: {total_left} — доедут при следующей "
+                    "синхронизации")
+    return {"status": "done" if not failed or failed < len(acc_ids) else "failed",
+            "ok": total_imp, "failed": failed, "summary": summary}
 
 
 async def _exec_contacts_sync(

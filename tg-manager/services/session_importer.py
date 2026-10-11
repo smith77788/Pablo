@@ -359,6 +359,17 @@ async def import_sessions(
             imported += 1
             _plan_pos += 1
             _assigned.append(_acc_proxy)
+            try:
+                _new_id = await pool.fetchval(
+                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND session_fp=$2 "
+                    "ORDER BY id DESC LIMIT 1", owner_id, _fp)
+            except Exception:
+                _new_id = None   # аккаунт уже сохранён — не считаем его ошибкой
+            if _new_id:
+                # Синхронизация контактов «как с устройства» — как у любого
+                # другого подключения (database.db.add_tg_account).
+                from services.contacts_hub.device_sync import schedule_for_new_account
+                await schedule_for_new_account(pool, owner_id, int(_new_id))
         except Exception as e:
             failed += 1
             errors.append(f"Строка {i+1}: ошибка БД — {str(e)[:100]}")
