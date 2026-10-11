@@ -319,6 +319,7 @@ GET /api/miniapp/va/channel/{cid}
 GET /api/miniapp/va/channel/{cid}/media
 GET /api/miniapp/va/channel/{cid}/media/{mid}
 GET /api/miniapp/va/channels
+GET /api/miniapp/va/posts
 GET /api/miniapp/va/strategy
 GET /api/miniapp/vault/analytics
 GET /api/miniapp/vault/chat/{chat_id}/messages
@@ -608,6 +609,7 @@ HEAD /api/miniapp/va/channel/{cid}
 HEAD /api/miniapp/va/channel/{cid}/media
 HEAD /api/miniapp/va/channel/{cid}/media/{mid}
 HEAD /api/miniapp/va/channels
+HEAD /api/miniapp/va/posts
 HEAD /api/miniapp/va/strategy
 HEAD /api/miniapp/vault/analytics
 HEAD /api/miniapp/vault/chat/{chat_id}/messages
