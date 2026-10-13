@@ -183,6 +183,46 @@ def test_clean_generated_removes_markup_and_spintax_braces():
     assert "\n\n\n" not in out
 
 
+def test_clean_generated_strips_ai_preamble_before_hr():
+    # Ровно случай из прода: преамбула модели + `---` + сам пост уходили в канал.
+    raw = ("Звісно, ось чернетка поста, який відповідає всім вимогам.\n\n"
+           "---\n\n"
+           "Знову Харків. Знову вечір. Під завалами знайшли тіла трьох людей.")
+    out = ca.clean_generated(raw)
+    assert out.startswith("Знову Харків")
+    assert "чернетка поста" not in out
+    assert "відповідає всім вимогам" not in out
+    assert "---" not in out
+
+
+def test_clean_generated_strips_colon_preamble():
+    raw = "Конечно, вот черновик поста:\n\nСегодня в Харькове снова обстрел."
+    out = ca.clean_generated(raw)
+    assert out == "Сегодня в Харькове снова обстрел."
+
+
+def test_clean_generated_keeps_legit_hr_divider():
+    # `---` как смысловой разделитель внутри длинного поста НЕ должен срезать
+    # начало: голова длинная и без мета-слов «вот пост/черновик».
+    body = ("Сегодня произошло важное событие в городе, о котором стоит "
+            "рассказать подробно и без лишних слов, потому что это касается всех.")
+    raw = body + "\n\n---\n\nПодробности и контакты редакции ниже."
+    out = ca.clean_generated(raw)
+    assert out.startswith("Сегодня произошло важное событие")
+    assert "Подробности и контакты" in out
+
+
+def test_clean_generated_plain_post_untouched():
+    raw = "Новая доставка уже в городе. Заказывайте сегодня."
+    assert ca.clean_generated(raw) == raw
+
+
+def test_clean_generated_preamble_without_body_not_dropped():
+    # Если «тела» после преамбулы нет — не выкидываем всё в пустоту.
+    raw = "Вот пост:"
+    assert ca.clean_generated(raw).strip() != ""
+
+
 def test_validate_settings_partial_and_errors():
     clean, errors = ca.validate_settings({"posts_per_day": "3", "publish_mode": "auto"})
     assert clean == {"posts_per_day": 3, "publish_mode": "auto"} and errors == []
