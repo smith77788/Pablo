@@ -2460,6 +2460,21 @@ async def import_tdata_accounts_from_zip_bytes(zip_bytes: bytes) -> dict:
     _MAX_UNCOMPRESSED = 400 * 1024 * 1024  # 400 MB — партия аккаунтов крупнее
     _MAX_FILES = 50_000
 
+    # RAR/7z распаковать нечем (на проде нет ни unrar, ни rarfile, ни py7zr), а
+    # zipfile на них даёт невнятное «повреждён ZIP». Определяем по сигнатуре и
+    # говорим прямо: перепакуйте в ZIP. RAR4 = "Rar!\x1a\x07\x00", RAR5 добавляет
+    # \x01, 7z = "7z\xbc\xaf\x27\x1c".
+    head = bytes(zip_bytes[:8])
+    if head.startswith(b"Rar!\x1a\x07"):
+        raise ValueError(
+            "Это RAR-архив — он пока не поддерживается. Распакуйте его и "
+            "перепакуйте папки tdata в ZIP (правый клик → «Отправить → "
+            "Сжатая ZIP-папка»).")
+    if head.startswith(b"7z\xbc\xaf\x27\x1c"):
+        raise ValueError(
+            "Это 7z-архив — он пока не поддерживается. Перепакуйте папки tdata "
+            "в ZIP.")
+
     tmp_dir = tempfile.mkdtemp(prefix="tdata_web_")
     zip_path = _os.path.join(tmp_dir, "tdata.zip")
     extract_dir = _os.path.join(tmp_dir, "extracted")

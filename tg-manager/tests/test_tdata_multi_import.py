@@ -124,3 +124,19 @@ def test_tdf_read_reports_corrupt_vs_missing(tmp_path):
     import pytest as _pt
     with _pt.raises(FileNotFoundError):
         tc._tdf_read(str(tmp_path / "empty"), "key_datas")
+
+
+@pytest.mark.asyncio
+async def test_rar_archive_gives_clear_message():
+    rar = b"Rar!\x1a\x07\x00" + b"\x00" * 50
+    with pytest.raises(ValueError) as ei:
+        await am.import_tdata_accounts_from_zip_bytes(rar)
+    assert "RAR" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_7z_archive_gives_clear_message():
+    sevenz = b"7z\xbc\xaf\x27\x1c" + b"\x00" * 50
+    with pytest.raises(ValueError) as ei:
+        await am.import_tdata_accounts_from_zip_bytes(sevenz)
+    assert "7z" in str(ei.value)
