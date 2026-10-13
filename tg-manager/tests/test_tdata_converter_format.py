@@ -49,4 +49,5 @@ def test_production_has_full_tdata_converter_dependency():
 
     assert "opentele-tg==1.15.3" in requirements
     assert '"opentele-tg==1.15.3' in workspace
+    assert "libglib2.0-0" in dockerfile
     assert "from opentele.td import TDesktop" in dockerfile

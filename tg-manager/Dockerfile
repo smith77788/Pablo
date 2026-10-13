@@ -7,7 +7,7 @@ WORKDIR /app
 # растровый шрифт — на аватаре 512×512 он нечитаем. DejaVu выбран за покрытие
 # кириллицы (инициалы городов).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libc6-dev libpq-dev curl procps \
+    gcc libc6-dev libpq-dev curl procps libglib2.0-0 \
     fonts-dejavu-core fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
