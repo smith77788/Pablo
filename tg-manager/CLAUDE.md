@@ -36,6 +36,14 @@
 
 ## Жёсткие гейты (нарушение = поломка)
 
+- **Workspace preflight до ЛЮБОЙ записи:**
+  `python deploy/scripts/agent_workspace_guard.py --bootstrap`. Он сверяет GitHub,
+  безопасно fast-forward'ит только чистую историю без локальных коммитов и
+  регистрирует точную базу. Ошибка = запрет `Edit/Write/Bash`, коммита и push до
+  устранения расхождения. Нельзя отключать `.claude/settings.json` или `.githooks`.
+- **После запуска каждого субагента** оркестратор немедленно проверяет его worktree:
+  `python deploy/scripts/agent_workspace_guard.py --audit-worktrees --expect-base
+  <SHA_текущего_HEAD>`. Задачу нельзя начинать, пока аудит не зелёный.
 - **Ветка-канон `claude/telegram-bot-services-xfAh6`.** Пуш только туда; цикл
   `fetch → rebase → push`; **без force-push** по общей истории. Коммить и пушь ЧАСТО
   (worktree-работа теряется при сбросе контейнера).

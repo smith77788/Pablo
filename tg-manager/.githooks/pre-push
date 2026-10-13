@@ -1,0 +1,3 @@
+#!/bin/sh
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$PROJECT_DIR/.githooks/run-workspace-guard.sh" --worktree "$PWD" --pre-push

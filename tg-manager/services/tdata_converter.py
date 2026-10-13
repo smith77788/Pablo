@@ -74,13 +74,17 @@ def _read_tdf_raw(path: str) -> bytes:
     with open(path, "rb") as f:
         raw = f.read()
     if len(raw) < 24 or raw[:4] != _TDF_MAGIC:
-        raise ValueError(f"Invalid TDF file: {path}")
+        raise ValueError(f"Invalid TDF file: {os.path.basename(path)}")
     ver_bytes = raw[4:8]
     content = raw[8:-16]
     md5_stored = raw[-16:]
-    md5_calc = hashlib.md5(_TDF_MAGIC + ver_bytes + content).digest()
+    # Telegram Desktop hashes payload + its little-endian size + version + magic.
+    # The previous implementation hashed the file prefix instead, rejecting every
+    # valid modern key_datas file as corrupt.
+    size_bytes = struct.pack("<I", len(content))
+    md5_calc = hashlib.md5(content + size_bytes + ver_bytes + _TDF_MAGIC).digest()
     if md5_calc != md5_stored:
-        raise ValueError(f"TDF checksum mismatch: {path}")
+        raise ValueError(f"TDF checksum mismatch: {os.path.basename(path)}")
     return content
 
 
@@ -88,26 +92,22 @@ def _tdf_read(base: str, name: str) -> bytes:
     """Read a TDF file with Telegram Desktop suffix fallback.
 
     Честная диагностика: если файл ЕСТЬ, но не читается (не TDF$, битая
-    контрольная сумма, обрезан при упаковке в ZIP, зашифрован локальным паролем
-    Telegram Desktop), поднимаем НАСТОЯЩУЮ причину, а не общее «not found».
+    контрольная сумма или обрезан при упаковке в ZIP), поднимаем НАСТОЯЩУЮ
+    причину, а не общее «not found».
     Прежде проглоченная ошибка превращалась в «key_datas not found», хотя файл
     был на месте, — и диагностика уходила не туда."""
-    last_err: Exception | None = None
-    existed = False
-    for suffix in ("", "1", "0"):
+    failures: list[str] = []
+    for suffix in ("", "0", "1", "s"):
         path = os.path.join(base, name + suffix)
         if os.path.exists(path):
-            existed = True
             try:
                 return _read_tdf_raw(path)
-            except Exception as e:
-                last_err = e
-                continue
-    if existed:
+            except (OSError, ValueError) as exc:
+                failures.append(f"{os.path.basename(path)}: {exc}")
+    if failures:
         raise ValueError(
-            f"Файл {name} найден, но не читается как TDF ({last_err}). "
-            f"Вероятно, папка tdata повреждена/обрезана при упаковке в ZIP "
-            f"или защищена локальным паролем Telegram Desktop.")
+            f"Файл {name} найден, но не читается как TDF: " + "; ".join(failures)
+        )
     raise FileNotFoundError(f"TDF file {name} not found in {base}")
 
 

@@ -32,16 +32,16 @@ def test_all_login_routes_registered():
 def test_file_upload_bounded_and_guarded():
     # multipart читается с жёстким лимитом; tdata распаковка — через vetted-хелпер
     assert "_read_upload" in API and "read_chunk" in API
-    assert "import_tdata_from_zip_bytes" in API
+    assert "import_tdata_accounts_from_zip_bytes" in API
     assert "import_from_session_file" in API
     from services import account_manager as am
     assert inspect.iscoroutinefunction(am.import_tdata_from_zip_bytes)
 
 
 def test_tdata_zip_helper_guards():
-    """import_tdata_from_zip_bytes защищает от zip-bomb и path-traversal."""
+    """Массовый tdata helper защищает от zip-bomb и path-traversal."""
     from services import account_manager as am
-    src = inspect.getsource(am.import_tdata_from_zip_bytes)
+    src = inspect.getsource(am.import_tdata_accounts_from_zip_bytes)
     assert "_MAX_UNCOMPRESSED" in src and "_MAX_FILES" in src
     assert "path traversal" in src.lower() or ".." in src
     assert "BadZipFile" in src

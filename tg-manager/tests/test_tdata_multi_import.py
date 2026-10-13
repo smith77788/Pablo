@@ -16,7 +16,6 @@ import os
 import zipfile
 
 import pytest
-
 from services import account_manager as am
 
 
@@ -40,23 +39,16 @@ def test_find_all_tdata_roots(tmp_path):
 
 
 def _patch_converter(monkeypatch):
-    import services.tdata_converter as tc
-    monkeypatch.setattr(tc, "check_pycryptodome", lambda: True)
-
-    def _fake_convert(root):
+    async def _fake_import(root):
         label = os.path.basename(os.path.dirname(root))
         if label.endswith("__broken"):
             raise ValueError("key_datas not found")
-        return [{"session_str": "SS_" + label}]
+        if label.endswith("__dead"):
+            raise ValueError("сессия не авторизована")
+        ss = "SS_" + label
+        return ss, {"tg_user_id": 1, "phone": "", "username": ss}
 
-    monkeypatch.setattr(tc, "convert_tdata", _fake_convert)
-
-    async def _fake_verify(ss):
-        if ss.endswith("__dead"):
-            return None, "сессия не авторизована"
-        return (ss, {"tg_user_id": 1, "phone": "", "username": ss}), ""
-
-    monkeypatch.setattr(am, "_verify_tdata_session", _fake_verify)
+    monkeypatch.setattr(am, "import_from_tdata", _fake_import)
 
 
 @pytest.mark.asyncio
@@ -75,11 +67,26 @@ async def test_one_bad_folder_does_not_sink_the_batch(monkeypatch):
     # Одна папка не парсится, одна сессия мёртвая — остальные должны пройти.
     zb = _zip_with(["79301__one", "79302__broken", "79303__dead", "79304__four"])
     res = await am.import_tdata_accounts_from_zip_bytes(zb)
-    assert res["found"] == 3, "битая папка должна выпасть из found, остальные — нет"
+    assert res["found"] == 4, "found считает все обнаруженные папки tdata"
     oks = {info["username"] for _, info in res["accounts"]}
     assert oks == {"SS_79301__one", "SS_79304__four"}
     assert any("broken" in e for e in res["errors"])
     assert any("dead" in e for e in res["errors"])
+
+
+@pytest.mark.asyncio
+async def test_batch_uses_full_converter_instead_of_native_fallback(monkeypatch):
+    calls = []
+
+    async def _full(root):
+        calls.append(root)
+        return "SS", {"tg_user_id": 1, "username": "full"}
+
+    monkeypatch.setattr(am, "import_from_tdata", _full)
+    res = await am.import_tdata_accounts_from_zip_bytes(_zip_with(["79301__one"]))
+
+    assert len(calls) == 1
+    assert res["accounts"][0][1]["username"] == "full"
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,8 @@ dependencies = [
     # pyproject локальная среда через uv остаётся без Crypto, и десятки
     # тестов падают с ModuleNotFoundError вместо настоящей причины.
     "pycryptodome>=3.19.0",
+    # Полноценный parser Telegram Desktop tdata для production и локальных тестов.
+    "opentele-tg==1.15.3; platform_system != 'Windows'",
 ]
 
 [tool.ruff]

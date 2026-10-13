@@ -2486,42 +2486,24 @@ async def import_tdata_accounts_from_zip_bytes(zip_bytes: bytes) -> dict:
         if not roots:
             raise ValueError("Папка tdata (с файлом key_datas) не найдена в архиве.")
 
-        from services.tdata_converter import convert_tdata, check_pycryptodome
-        if not check_pycryptodome():
-            raise ImportError(
-                "Конвертация tdata недоступна: не установлен pycryptodome.")
-
-        raw: list[tuple[str, str]] = []  # (session_str, человекочитаемая метка)
         errors: list[str] = []
-        for root in roots:
+        # Не вызываем здесь напрямую best-effort convert_tdata. Полный импортёр
+        # сначала использует opentele-tg для актуальной структуры Telegram
+        # Desktop и только затем переходит к встроенному fallback.
+        sem = asyncio.Semaphore(4)
+
+        async def _convert(root: str):
             label = _os.path.basename(_os.path.dirname(root)) or _os.path.basename(root)
-            try:
-                recs = convert_tdata(root)
-            except Exception as e:
-                errors.append(f"{label}: {str(e)[:120]}")
-                continue
-            if not recs:
-                errors.append(f"{label}: аккаунты в папке не найдены")
-                continue
-            for rec in recs:
-                ss = rec.get("session_str") if isinstance(rec, dict) else None
-                if ss:
-                    raw.append((ss, label))
-
-        # Проверяем все сессии ПАРАЛЛЕЛЬНО (с ограничением), иначе 20 коннектов
-        # подряд не уложатся в таймаут импорта.
-        sem = asyncio.Semaphore(8)
-
-        async def _check(ss: str, label: str):
             async with sem:
-                res, err = await _verify_tdata_session(ss)
-                if res is None:
-                    errors.append(f"{label}: {err}")
-                return res
+                try:
+                    return await import_from_tdata(root)
+                except Exception as exc:
+                    errors.append(f"{label}: {str(exc)[:180]}")
+                    return None
 
-        results = await asyncio.gather(*(_check(ss, lbl) for ss, lbl in raw))
+        results = await asyncio.gather(*(_convert(root) for root in roots))
         accounts = [r for r in results if r]
-        return {"accounts": accounts, "errors": errors, "found": len(raw)}
+        return {"accounts": accounts, "errors": errors, "found": len(roots)}
     finally:
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
