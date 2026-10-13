@@ -60,6 +60,25 @@ def _py_func(name: str) -> str:
     raise AssertionError(f"функция {name} не найдена")
 
 
+@functools.lru_cache(maxsize=1)
+def _api() -> str:
+    with open(API, encoding="utf-8") as f:
+        return f.read()
+
+
+def _api_func(name: str) -> str:
+    """Тело хендлера mini_app_api по ТОЧНЫМ границам функции (ast), а не по срезу
+    фиксированной длины: хендлер растёт, и окно `src[i:i+N]` рано или поздно
+    промахивается мимо нужной строки — защита тогда гаснет молча (ровно это и
+    случилось с проверкой group_id)."""
+    src = _api()
+    lines = src.split("\n")
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == name:
+            return "\n".join(lines[n.lineno - 1:n.end_lineno])
+    raise AssertionError(f"функция {name} не найдена в API")
+
+
 def test_there_is_a_way_into_groups():
     h = _html()
     assert 'onclick="openContactGroups()"' in h, "в группы нельзя войти ни с одного экрана"
@@ -79,12 +98,9 @@ def test_group_filter_reaches_the_list():
     """Открыть группу = увидеть её контакты. Иначе группа — пустая витрина."""
     body = _js_func("loadContacts")
     assert "group_id" in body, "список контактов не умеет фильтр по группе"
-    src = open(API, encoding="utf-8").read()
-    i = src.find("async def uch_contacts(")
-    assert i > 0
-    tail = src[i:i + 2500]
-    assert "group_id" in tail, "маршрут списка не читает group_id"
-    assert "group_id=group_id" in tail, "прочитал, но не передал в репозиторий"
+    fn = _api_func("uch_contacts")
+    assert "group_id" in fn, "маршрут списка не читает group_id"
+    assert "group_id=group_id" in fn, "прочитал, но не передал в репозиторий"
 
 
 def test_active_group_filter_is_visible():
