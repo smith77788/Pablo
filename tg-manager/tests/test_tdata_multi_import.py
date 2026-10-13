@@ -98,3 +98,22 @@ async def test_no_tdata_folder_raises(monkeypatch):
         z.writestr("readme.txt", b"no tdata here")
     with pytest.raises(ValueError):
         await am.import_tdata_accounts_from_zip_bytes(buf.getvalue())
+
+
+def test_tdf_read_reports_corrupt_vs_missing(tmp_path):
+    """key_datas есть, но битый → честная причина, а не «not found»."""
+    from services import tdata_converter as tc
+    # файл есть, но не TDF$ (битый/обрезан)
+    (tmp_path / "key_datas").write_bytes(b"not a tdf file at all")
+    try:
+        tc._tdf_read(str(tmp_path), "key_datas")
+        assert False, "должно было бросить"
+    except FileNotFoundError:
+        assert False, "битый файл не должен выглядеть как отсутствующий"
+    except ValueError as e:
+        assert "не читается" in str(e)
+
+    # файла нет вовсе → FileNotFoundError
+    import pytest as _pt
+    with _pt.raises(FileNotFoundError):
+        tc._tdf_read(str(tmp_path / "empty"), "key_datas")

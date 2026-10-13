@@ -85,14 +85,29 @@ def _read_tdf_raw(path: str) -> bytes:
 
 
 def _tdf_read(base: str, name: str) -> bytes:
-    """Read a TDF file with Telegram Desktop suffix fallback."""
+    """Read a TDF file with Telegram Desktop suffix fallback.
+
+    Честная диагностика: если файл ЕСТЬ, но не читается (не TDF$, битая
+    контрольная сумма, обрезан при упаковке в ZIP, зашифрован локальным паролем
+    Telegram Desktop), поднимаем НАСТОЯЩУЮ причину, а не общее «not found».
+    Прежде проглоченная ошибка превращалась в «key_datas not found», хотя файл
+    был на месте, — и диагностика уходила не туда."""
+    last_err: Exception | None = None
+    existed = False
     for suffix in ("", "1", "0"):
         path = os.path.join(base, name + suffix)
         if os.path.exists(path):
+            existed = True
             try:
                 return _read_tdf_raw(path)
-            except Exception:
+            except Exception as e:
+                last_err = e
                 continue
+    if existed:
+        raise ValueError(
+            f"Файл {name} найден, но не читается как TDF ({last_err}). "
+            f"Вероятно, папка tdata повреждена/обрезана при упаковке в ZIP "
+            f"или защищена локальным паролем Telegram Desktop.")
     raise FileNotFoundError(f"TDF file {name} not found in {base}")
 
 
