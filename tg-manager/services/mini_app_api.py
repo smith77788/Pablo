@@ -22341,11 +22341,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not filename.lower().endswith(".zip"):
                 return _err("Ожидается ZIP-архив папки tdata", 400)
             from services import account_manager as am
-            session_str, info = await asyncio.wait_for(
-                am.import_tdata_from_zip_bytes(file_bytes), timeout=120)
+            # Архив может нести ОДИН или МНОГО аккаунтов (по папке tdata на
+            # каждый). Импортируем ВСЕ: битая папка/сессия не рушит партию.
+            res = await asyncio.wait_for(
+                am.import_tdata_accounts_from_zip_bytes(file_bytes), timeout=240)
+            accounts = res.get("accounts") or []
+            conv_errors = res.get("errors") or []
+            if not accounts:
+                _why = "; ".join(conv_errors[:3]) or "аккаунты не найдены"
+                return _err(f"Не удалось импортировать ни одного аккаунта: {_why}", 400)
             pid, _ = await _resolve_proxy_url(uid, proxy_id)
-            acc_id = await _persist_login(uid, session_str, info, pid)
-            return _json_resp({"ok": True, "account_id": acc_id, "username": info.get("username")})
+            added: list[int] = []
+            add_errors: list[str] = []
+            for session_str, info in accounts:
+                try:
+                    # pid=None → _persist_login сам разложит по живым прокси
+                    # (один аккаунт на прокси) — это и есть «Авто» со скрина.
+                    acc_id = await _persist_login(uid, session_str, info, pid)
+                    added.append(acc_id)
+                except Exception as _pe:
+                    add_errors.append(f"{info.get('phone') or info.get('username') or '—'}: {str(_pe)[:80]}")
+            errors = (conv_errors + add_errors)[:8]
+            return _json_resp({
+                "ok": bool(added),
+                "added": len(added),
+                "found": res.get("found", len(accounts)),
+                "account_id": added[0] if added else None,
+                "errors": errors,
+            })
         except ValueError as ve:
             return _err(str(ve), 400)
         except ImportError:

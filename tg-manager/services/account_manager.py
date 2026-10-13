@@ -2383,29 +2383,82 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
 
 
 def _find_tdata_root(extract_dir: str) -> str | None:
-    """Найти корень tdata (папку с файлом key_datas) в распакованном архиве."""
+    """Найти ПЕРВЫЙ корень tdata (папку с key_datas). Для мультиаккаунта —
+    _find_all_tdata_roots."""
+    roots = _find_all_tdata_roots(extract_dir)
+    return roots[0] if roots else None
+
+
+def _find_all_tdata_roots(extract_dir: str) -> list[str]:
+    """Найти ВСЕ корни tdata (папки с файлом key_datas) в распакованном архиве.
+
+    Архив флота несёт десятки аккаунтов, по папке на каждый
+    (`<phone>__<hash>/tdata/key_datas`). Прежний поиск возвращал ОДНУ папку —
+    импортировался один аккаунт из двадцати, а если первая папка оказывалась
+    битой, падал весь импорт. Собираем все корни и глубже в найденный tdata не
+    спускаемся (его подпапки — не отдельные аккаунты)."""
     import os
+    roots: list[str] = []
     for root, dirs, files in os.walk(extract_dir):
-        if "key_datas" in files:
-            return root
-        depth = root[len(extract_dir):].count(os.sep)
-        if depth >= 3:
+        if any(f == "key_datas" or f.startswith("key_datas") for f in files):
+            roots.append(root)
             dirs.clear()
-    return None
+            continue
+        depth = root[len(extract_dir):].count(os.sep)
+        if depth >= 6:
+            dirs.clear()
+    return roots
 
 
-async def import_tdata_from_zip_bytes(zip_bytes: bytes) -> tuple[str, dict]:
-    """ZIP-архив папки tdata (в байтах) → Telethon StringSession + info.
+async def _verify_tdata_session(session_str: str) -> tuple[tuple[str, dict] | None, str]:
+    """Проверить одну сессию из tdata через Telegram → (session,info) или причина.
 
-    Инкапсулирует безопасную распаковку (защита от zip-bomb и path-traversal),
-    поиск корня tdata и конвертацию. Единая точка для веб-API и бота.
-    Бросает ValueError с человекочитаемой причиной.
+    Вынесено ради параллельной проверки десятков аккаунтов разом: последовательно
+    20 коннектов не уложились бы в таймаут импорта."""
+    device = generate_device_fingerprint()
+    client = _make_client(session_str, device)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
+        if me is None:
+            return None, "сессия не авторизована (аккаунт переавторизован или отозван)"
+        info = {
+            "tg_user_id": me.id,
+            "phone": getattr(me, "phone", "") or f"id:{me.id}",
+            "first_name": getattr(me, "first_name", "") or "",
+            "username": getattr(me, "username", "") or "",
+            **device,
+        }
+        return (client.session.save(), info), ""
+    except asyncio.TimeoutError:
+        return None, "таймаут подключения к Telegram"
+    except Exception as e:
+        err = str(e)
+        if "AUTH_KEY" in err or "SESSION_REVOKED" in err:
+            return None, "ключ сессии недействителен (переавторизован/отозван)"
+        return None, err[:120]
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "verify tdata session disconnect")
+
+
+async def import_tdata_accounts_from_zip_bytes(zip_bytes: bytes) -> dict:
+    """ZIP с ОДНОЙ или МНОГИМИ папками tdata → ВСЕ найденные аккаунты.
+
+    Возвращает {"accounts": [(session_str, info), ...], "errors": [str, ...],
+    "found": int}. Битая папка или мёртвая сессия НЕ рушит остальные — это
+    главное отличие от одиночного импорта: архив на 20 аккаунтов не должен
+    проваливаться целиком из-за одной плохой папки. Бросает ValueError только
+    на нечитаемом архиве или полном отсутствии папок tdata.
     """
+    import shutil
     import tempfile
     import zipfile
 
-    _MAX_UNCOMPRESSED = 200 * 1024 * 1024  # 200 MB
-    _MAX_FILES = 5_000
+    _MAX_UNCOMPRESSED = 400 * 1024 * 1024  # 400 MB — партия аккаунтов крупнее
+    _MAX_FILES = 50_000
 
     tmp_dir = tempfile.mkdtemp(prefix="tdata_web_")
     zip_path = _os.path.join(tmp_dir, "tdata.zip")
@@ -2420,7 +2473,7 @@ async def import_tdata_from_zip_bytes(zip_bytes: bytes) -> tuple[str, dict]:
                 if len(members) > _MAX_FILES:
                     raise ValueError(f"Слишком много файлов в архиве (>{_MAX_FILES}).")
                 if sum(i.file_size for i in members) > _MAX_UNCOMPRESSED:
-                    raise ValueError("Архив слишком большой в распакованном виде (>200 МБ).")
+                    raise ValueError("Архив слишком большой в распакованном виде (>400 МБ).")
                 for member in members:
                     fname = member.filename.replace("\\", "/")
                     if _os.path.isabs(fname) or ".." in fname.split("/"):
@@ -2429,16 +2482,65 @@ async def import_tdata_from_zip_bytes(zip_bytes: bytes) -> tuple[str, dict]:
         except zipfile.BadZipFile:
             raise ValueError("Файл повреждён или не является ZIP-архивом.")
 
-        tdata_path = _find_tdata_root(extract_dir)
-        if not tdata_path:
+        roots = _find_all_tdata_roots(extract_dir)
+        if not roots:
             raise ValueError("Папка tdata (с файлом key_datas) не найдена в архиве.")
-        return await import_from_tdata(tdata_path)
+
+        from services.tdata_converter import convert_tdata, check_pycryptodome
+        if not check_pycryptodome():
+            raise ImportError(
+                "Конвертация tdata недоступна: не установлен pycryptodome.")
+
+        raw: list[tuple[str, str]] = []  # (session_str, человекочитаемая метка)
+        errors: list[str] = []
+        for root in roots:
+            label = _os.path.basename(_os.path.dirname(root)) or _os.path.basename(root)
+            try:
+                recs = convert_tdata(root)
+            except Exception as e:
+                errors.append(f"{label}: {str(e)[:120]}")
+                continue
+            if not recs:
+                errors.append(f"{label}: аккаунты в папке не найдены")
+                continue
+            for rec in recs:
+                ss = rec.get("session_str") if isinstance(rec, dict) else None
+                if ss:
+                    raw.append((ss, label))
+
+        # Проверяем все сессии ПАРАЛЛЕЛЬНО (с ограничением), иначе 20 коннектов
+        # подряд не уложатся в таймаут импорта.
+        sem = asyncio.Semaphore(8)
+
+        async def _check(ss: str, label: str):
+            async with sem:
+                res, err = await _verify_tdata_session(ss)
+                if res is None:
+                    errors.append(f"{label}: {err}")
+                return res
+
+        results = await asyncio.gather(*(_check(ss, lbl) for ss, lbl in raw))
+        accounts = [r for r in results if r]
+        return {"accounts": accounts, "errors": errors, "found": len(raw)}
     finally:
-        import shutil
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
-            log_exc_swallow(log, "import_tdata_from_zip_bytes cleanup")
+            log_exc_swallow(log, "import_tdata_accounts_from_zip_bytes cleanup")
+
+
+async def import_tdata_from_zip_bytes(zip_bytes: bytes) -> tuple[str, dict]:
+    """Совместимость: ZIP папки tdata → ПЕРВЫЙ аккаунт (session_str, info).
+
+    Мультиаккаунтный путь — import_tdata_accounts_from_zip_bytes. Эта обёртка
+    оставлена для вызовов, которым нужен один аккаунт.
+    """
+    res = await import_tdata_accounts_from_zip_bytes(zip_bytes)
+    accounts = res.get("accounts") or []
+    if not accounts:
+        reason = "; ".join(res.get("errors", [])[:2]) or "аккаунты не найдены"
+        raise ValueError(f"Не удалось импортировать аккаунты из tdata: {reason}")
+    return accounts[0]
 
 
 async def get_client_info_and_session(phone: str) -> tuple[str, dict]:

@@ -14883,11 +14883,27 @@ function accSetLoginMethod(m){
 function _accDone(r){
   accStopQrPoll(); accPhoneAutoStop();
   const res=document.getElementById('accImportResult');
-  res.innerHTML='<div style="color:var(--green)">✅ Аккаунт добавлен'+(r&&r.username?(' @'+esc(r.username)):'')+'</div>';
+  const batch = r && typeof r.added === 'number';   // пакетный импорт (tdata-архив)
+  let html, toastMsg;
+  if (batch) {
+    const found = r.found || r.added;
+    html = '<div style="color:var(--green)">✅ Добавлено аккаунтов: <b>' + r.added + '</b>' +
+           (found && found !== r.added ? (' из ' + found) : '') + '</div>';
+    if (r.errors && r.errors.length) {
+      html += '<div style="color:var(--hint);font-size:12px;margin-top:6px;line-height:1.4">Не добавлены:<br>' +
+              r.errors.map(e=>'• '+esc(String(e))).join('<br>') + '</div>';
+    }
+    toastMsg = '✅ Добавлено: ' + r.added;
+  } else {
+    html = '<div style="color:var(--green)">✅ Аккаунт добавлен'+(r&&r.username?(' @'+esc(r.username)):'')+'</div>';
+    toastMsg = '✅ Аккаунт добавлен';
+  }
+  res.innerHTML = html;
   res.style.display='block';
-  tg.HapticFeedback?.notificationOccurred('success'); toast('✅ Аккаунт добавлен');
+  tg.HapticFeedback?.notificationOccurred('success'); toast(toastMsg);
   if (typeof loadAccounts==='function') loadAccounts(); else if (typeof loadTab==='function') loadTab('accounts');
-  setTimeout(closeAccImportModal, 1100);
+  // Если часть не прошла — даём время прочитать причины, иначе закрываем быстро.
+  setTimeout(closeAccImportModal, (batch && r.errors && r.errors.length) ? 5000 : 1100);
 }
 
 // Вход по номеру ───────────────────────────────────────
