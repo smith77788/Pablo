@@ -86,6 +86,57 @@ def test_pick_appeal_button_matches():
     assert am._pick_appeal_button(_Msg("x", buttons=None)) is None
 
 
+def test_confession_step_clicks_deny_not_yes_ru():
+    # Реальный шаг-ловушка @SpamBot (скрин владельца): «Да, такие случаи были»
+    # топит аккаунт навсегда. Жать можно только «Нет, никогда».
+    msg = _Msg(
+        "Подтвердите, что Вы никогда не отправляли незнакомым людям: Рекламу, "
+        "которую они не запрашивали, Материалы для продвижения, Шок-контент. "
+        "Вы отправляли что-нибудь подобное?",
+        buttons=[[_Btn("Да, такие случаи были")], [_Btn("Нет, никогда")]],
+    )
+    assert am._is_spambot_confession(msg) is True
+    assert am._pick_appeal_button(msg) == "Нет, никогда"
+
+
+def test_confession_step_clicks_deny_en():
+    msg = _Msg(
+        "Please confirm you never sent strangers unsolicited Advertising, "
+        "promotional materials, or shock content. Did you send anything like this?",
+        buttons=[[_Btn("Yes, I did")], [_Btn("No, never")]],
+    )
+    assert am._is_spambot_confession(msg) is True
+    assert am._pick_appeal_button(msg) == "No, never"
+
+
+def test_confession_without_deny_button_clicks_nothing():
+    # Нет кнопки отрицания — лучше оборвать аппеляцию, чем признать спам «Да».
+    msg = _Msg(
+        "Вы отправляли незнакомым рекламу или материалы для продвижения?",
+        buttons=[[_Btn("Да, такие случаи были")]],
+    )
+    assert am._is_spambot_confession(msg) is True
+    assert am._pick_appeal_button(msg) is None
+
+
+def test_ordinary_appeal_step_still_clicks_yes():
+    # Обычный шаг «Хотите отправить апелляцию?» — это НЕ ловушка (нет слов про
+    # рекламу/спам), и «Да» здесь жать нужно.
+    msg = _Msg(
+        "Хотите отправить апелляцию?",
+        buttons=[[_Btn("Да")], [_Btn("Нет")]],
+    )
+    assert am._is_spambot_confession(msg) is False
+    assert am._pick_appeal_button(msg) == "Да"
+
+
+def test_mistake_step_unaffected():
+    msg = _Msg("Your account is now limited.",
+               buttons=[[_Btn("This is a mistake")]])
+    assert am._is_spambot_confession(msg) is False
+    assert am._pick_appeal_button(msg) == "This is a mistake"
+
+
 def test_route_and_engine_wired():
     import inspect
     from services import mini_app_api

@@ -3470,17 +3470,67 @@ _SPAMBOT_APPEAL_BTN_PATTERNS = (
 )
 
 
+# ВОПРОС-ЛОВУШКА @SpamBot. Последний шаг аппеляции: бот просит подтвердить, что
+# аккаунт НИКОГДА не слал незнакомым рекламу/продвижение/шок-контент, и спрашивает
+# «вы отправляли что-нибудь подобное?» с кнопками «Да, такие случаи были» / «Нет,
+# никогда». Нажать «Да» = ПРИЗНАТЬ спам → отказ навсегда («снять ограничения
+# невозможно»). Именно это топило аккаунты: _SPAMBOT_APPEAL_BTN_PATTERNS содержит
+# «да/yes/confirm», и прежний код слепо жал первую совпавшую кнопку — то есть
+# «Да». На этом шаге жать можно ТОЛЬКО отрицание. Признак шага — упоминание
+# рекламы/спама/шок-контента И глагола «отправляли» (многоязычно).
+_SPAMBOT_CONFESSION_TOPIC_RE = re.compile(
+    r"(реклам|продвиж|промо|промоц|шок|спам|рассыл|нежелат|"
+    r"advertis|promot|shock|spam|unsolicited|"
+    r"реклам|просува|розсил|небажан)",
+    re.IGNORECASE,
+)
+_SPAMBOT_CONFESSION_VERB_RE = re.compile(
+    r"(отправля|надсыла|надсила|відправля|розсила|рассыла|"
+    r"did you (ever )?send|have you (ever )?sent|you send|you have sent|"
+    r"wysyła|gönder|envi|invia|envoy|gesend|enviast)",
+    re.IGNORECASE,
+)
+# Кнопки ОТРИЦАНИЯ («Нет, никогда»). Многоязычно, как и паттерны аппеляции.
+_SPAMBOT_DENY_BTN_PATTERNS = (
+    "нет", "никогда", "не отправля", "не рассыла", "не надсыла",
+    "ні", "ніколи", "не відправля", "не надсила",
+    "no", "never", "nope",
+    "nein",            # de
+    "non",             # fr / it
+    "jamais",          # fr
+    "mai",             # it
+    "nunca",           # es
+    "nie", "nigdy",    # pl
+    "hayır",           # tr
+)
+
+
+def _is_spambot_confession(message) -> bool:
+    """Шаг-ловушка: бот спрашивает, слал ли аккаунт спам/рекламу/шок-контент."""
+    text = (getattr(message, "text", "") or "")
+    return bool(_SPAMBOT_CONFESSION_TOPIC_RE.search(text)
+                and _SPAMBOT_CONFESSION_VERB_RE.search(text))
+
+
 def _pick_appeal_button(message) -> object | None:
     """Найти в reply_markup сообщения кнопку аппеляции. Возвращает текст кнопки
-    или None. Telethon: message.buttons — список рядов InlineKeyboardButton."""
+    или None. Telethon: message.buttons — список рядов InlineKeyboardButton.
+
+    На шаге-ловушке («вы отправляли спам?») жмём ТОЛЬКО кнопку отрицания; нет её
+    — не жмём ничего (лучше оборвать аппеляцию, чем признанием утопить аккаунт
+    навсегда). На остальных шагах — обычный путь «это ошибка» → «да»."""
     rows = getattr(message, "buttons", None)
     if not rows:
         return None
-    for row in rows:
-        for btn in row:
-            text = (getattr(btn, "text", "") or "").lower()
-            if any(p in text for p in _SPAMBOT_APPEAL_BTN_PATTERNS):
-                return getattr(btn, "text", None)
+    buttons = [getattr(btn, "text", None) for row in rows for btn in row]
+    if _is_spambot_confession(message):
+        for text in buttons:
+            if text and any(p in text.lower() for p in _SPAMBOT_DENY_BTN_PATTERNS):
+                return text
+        return None  # кнопки «Нет» нет — «Да» на этот вопрос жать НЕЛЬЗЯ
+    for text in buttons:
+        if text and any(p in text.lower() for p in _SPAMBOT_APPEAL_BTN_PATTERNS):
+            return text
     return None
 
 
