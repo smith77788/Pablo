@@ -2296,63 +2296,115 @@ async def convert_session_file_to_string(session_bytes: bytes) -> str:
     return "1" + base64.urlsafe_b64encode(packed).decode()
 
 
+def _extract_tdata_sessions_opentele(tdata_path: str) -> list[str] | None:
+    """ОФФЛАЙН-извлечение Telethon StringSession из tdata через opentele.
+
+    opentele (реальный код Telegram Desktop на Python) расшифровывает локальное
+    хранилище корректно для ВСЕХ версий — именно так это делают конкуренты. Но
+    его `ToTelethon` лезет в сеть и на новых telethon падает на `auth_session`.
+    Поэтому используем только оффлайн-часть: грузим tdata, берём у каждого
+    аккаунта готовый `authKey` (256 байт) и номер DC, и сами собираем
+    StringSession v1. Никакой сети здесь нет — подключение и проверка идут
+    отдельно, нашим клиентом.
+
+    Возвращает список session-строк (главный аккаунт первым) или None, если
+    opentele не установлен / tdata не грузится / аккаунтов нет.
+    """
+    try:
+        td_module = importlib.import_module("opentele.td")
+    except ImportError:
+        return None
+    except Exception as exc:  # поломка самого пакета — не роняем импорт
+        log.warning("opentele недоступен (%s) — оффлайн-извлечение пропущено", exc)
+        return None
+
+    from services.tdata_converter import _DC_IPS, _DC_PORT, _build_string_session
+
+    TDesktop = getattr(td_module, "TDesktop")
+    try:
+        td = TDesktop(tdata_path)
+    except Exception as exc:
+        log.warning("opentele не загрузил tdata (%s)", str(exc)[:160])
+        return None
+
+    try:
+        loaded = td.isLoaded() and (td.accountsCount or 0) > 0
+    except Exception:
+        loaded = False
+    if not loaded:
+        return None
+
+    sessions: list[str] = []
+    try:
+        accounts = list(td.accounts)
+    except Exception:
+        accounts = []
+    # Главный аккаунт — первым (его и возьмёт одиночный импорт).
+    try:
+        main = td.mainAccount
+        if main is not None and main in accounts:
+            accounts = [main] + [a for a in accounts if a is not main]
+    except Exception:
+        pass
+
+    for acc in accounts:
+        try:
+            auth = acc.authKey
+            key = bytes(auth.key) if auth is not None else b""
+            dc_id = int(acc.MainDcId)
+        except Exception as exc:
+            log.debug("opentele: пропуск аккаунта (%s)", str(exc)[:120])
+            continue
+        if len(key) != 256 or not (1 <= dc_id <= 5):
+            continue
+        # IP берём у opentele (актуальный эндпоинт), иначе — стабильный дефолт DC.
+        ip = ""
+        try:
+            eps = acc._local.config.endpoints(acc.MainDcId)
+            td_mtp = importlib.import_module("opentele.td")
+            addr = td_mtp.MTP.DcOptions.Address.IPv4
+            proto = td_mtp.MTP.DcOptions.Protocol.Tcp
+            ip = eps[addr][proto][0].ip
+        except Exception:
+            ip = _DC_IPS.get(dc_id, "")
+        if not ip:
+            ip = _DC_IPS.get(dc_id, _DC_IPS[2])
+        try:
+            sessions.append(_build_string_session(dc_id, ip, _DC_PORT, key))
+        except Exception as exc:
+            log.debug("opentele: не собрал session (%s)", str(exc)[:120])
+
+    return sessions or None
+
+
 async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     """Convert a TDesktop tdata directory to Telethon StringSession.
 
-    Пробует opentele (если установлен), иначе использует нативный конвертер.
+    Сначала opentele (оффлайн-извлечение authKey), затем нативный конвертер.
     """
-    # ── Попытка 1: opentele (если доступен) ──────────────────────────────────
-    try:
-        from telethon.sessions import StringSession as _SS
-
-        td_module = importlib.import_module("opentele.td")
-        api_module = importlib.import_module("opentele.api")
-        TDesktop = getattr(td_module, "TDesktop")
-        UseCurrentSession = getattr(api_module, "UseCurrentSession")
-
-        try:
-            td = TDesktop(tdata_path)
-        except Exception as e:
-            raise ValueError(f"Не удалось загрузить tdata через opentele: {e}")
-
-        if not td.isLoaded():
-            raise ValueError("tdata не загружены (opentele). Проверьте папку tdata.")
-
-        try:
-            client = await td.ToTelethon(session=_SS(), flag=UseCurrentSession)
-        except Exception as e:
-            raise ValueError(f"Ошибка конвертации tdata → Telethon (opentele): {e}")
-
-        try:
-            await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-            if not await client.is_user_authorized():
-                raise ValueError("Сессия из tdata (opentele) не авторизована.")
-            session_str = client.session.save()
-            me = await client.get_me()
-            info = {
-                "tg_user_id": me.id,
-                "phone": getattr(me, "phone", "") or f"id:{me.id}",
-                "first_name": getattr(me, "first_name", "") or "",
-                "username": getattr(me, "username", "") or "",
-            }
-            return session_str, info
-        finally:
-            try:
-                await safe_disconnect(client)
-            except Exception:
-                log_exc_swallow(log, "Сбой в import_from_tdata (opentele disconnect)")
-    except ImportError:
-        pass  # opentele не установлен — используем нативный конвертер
-    except Exception as _ot_exc:
-        # opentele УСТАНОВЛЕН, но сломался на этой структуре/версии. Известный
-        # случай — UnboundLocalError 'auth_session' в ToTelethon на новых
-        # telethon. Раньше эта ошибка оборачивалась в ValueError и улетала
-        # наружу, НЕ доходя до нативного конвертера, — и весь импорт tdata падал
-        # на opentele. Теперь любой сбой opentele = тихий откат на наш нативный
-        # конвертер ниже.
-        log.warning(
-            "import_from_tdata: opentele не справился (%s) — нативный fallback",
-            str(_ot_exc)[:200])
+    # ── Попытка 1: opentele, ОФФЛАЙН-извлечение ключа (без ToTelethon) ─────────
+    # Раньше тут звали `td.ToTelethon(session=StringSession(), UseCurrentSession)`,
+    # и на проде это падало с `UnboundLocalError: auth_session`: внутри opentele
+    # ветка UseCurrentSession присваивает auth_session ТОЛЬКО когда session — это
+    # str или None; мы же передавали объект StringSession(), и переменная
+    # оставалась неинициализированной. Любой tdata уходил в нативный fallback.
+    #
+    # Поэтому берём у opentele только то, что он делает НАДЁЖНО и ОФФЛАЙН:
+    # расшифровку локального хранилища и готовый authKey + номер DC по каждому
+    # аккаунту. StringSession собираем сами, а подключаемся своим клиентом (с
+    # прокси и device-fingerprint) — как во всех остальных способах импорта.
+    opentele_sessions = _extract_tdata_sessions_opentele(tdata_path)
+    if opentele_sessions:
+        last_err = ""
+        for session_str in opentele_sessions:
+            res, reason = await _verify_tdata_session(session_str)
+            if res is not None:
+                return res
+            last_err = reason or last_err
+        # opentele извлёк ключи, но ни один не подключился — не молчим, но и не
+        # обрываем: вдруг нативный путь договорится (иной device/endpoint).
+        log.warning("import_from_tdata: opentele-ключи не авторизовались (%s)",
+                    last_err[:160])
 
     # ── Попытка 2: нативный конвертер (pycryptodome) ──────────────────────────
     from services.tdata_converter import convert_tdata, check_pycryptodome

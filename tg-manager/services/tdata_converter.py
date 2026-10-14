@@ -23,8 +23,10 @@ def _xor(a: bytes, b: bytes) -> bytes:
 
 
 def _aes_cls():
-    crypto_cipher = importlib.import_module("Crypto.Cipher")
-    return cast(Any, getattr(crypto_cipher, "AES"))
+    # Импортируем САМ подмодуль Crypto.Cipher.AES, а не берём его атрибутом у
+    # пакета: `import_module("Crypto.Cipher")` не подгружает AES, и getattr упал
+    # бы, пока кто-то другой не импортировал AES раньше.
+    return cast(Any, importlib.import_module("Crypto.Cipher.AES"))
 
 
 def _aes_ige_decrypt(key: bytes, iv: bytes, data: bytes) -> bytes:
@@ -101,16 +103,15 @@ def _create_local_key_candidates(passphrase: bytes, salt: bytes) -> list[bytes]:
     - Легаси: key = PBKDF2-HMAC-SHA1(pass, salt, iters, 256);
       iters = 4 без пароля, 4000 с паролем.
     """
+    iters = 1 if not passphrase else 100_000
     candidates: list[bytes] = []
+    # Современная: ключ PBKDF2-HMAC-SHA512 от SHA512(salt‖pass‖salt).
     pre = hashlib.sha512(salt + passphrase + salt).digest()
-    iters_modern = 1 if not passphrase else 100_000
-    candidates.append(
-        hashlib.pbkdf2_hmac("sha512", pre, salt, iters_modern, dklen=256)
-    )
-    iters_legacy = 4 if not passphrase else 4000
-    candidates.append(
-        hashlib.pbkdf2_hmac("sha1", passphrase, salt, iters_legacy, dklen=256)
-    )
+    candidates.append(hashlib.pbkdf2_hmac("sha512", pre, salt, iters, dklen=256))
+    # Легаси (старый tdata): PBKDF2-HMAC-SHA512 напрямую от пароля. Совпадает с
+    # `CreateLegacyLocalKey` из эталонного кода TDesktop (opentele) — прежний
+    # вариант на sha1/4000 итераций не соответствовал ни одной версии клиента.
+    candidates.append(hashlib.pbkdf2_hmac("sha512", passphrase, salt, iters, dklen=256))
     return candidates
 
 
@@ -269,22 +270,32 @@ _LOCAL_KEY_SIZE = 256
 def _extract_local_key(decrypted: bytes) -> Optional[bytes]:
     """Из расшифрованного key_datas достать 256-байтный локальный ключ.
 
-    Полезная нагрузка — QByteArray(localkey) в BigEndian-потоке Qt. Payload из
-    EncryptedDescriptor — предпочтительный путь; дальше несколько терпимых
-    запасных смещений на случай мелких расхождений версий."""
+    КЛЮЧЕВОЙ момент формата: Telegram Desktop пишет локальный ключ СЫРЫМИ 256
+    байтами (`AuthKey::write` → `writeRawData`), БЕЗ QByteArray-префикса длины.
+    Расшифрованный блок = [LE uint32 dataLen] ‖ 256 сырых байт ключа ‖ паддинг,
+    где dataLen = 4 + 256 = 260. EncryptedDescriptor отдаёт нам payload =
+    decrypted[4:dataLen] — это и есть ровно 256 байт ключа.
+
+    Прежде ключ читался как QByteArray (`.ba()`), и на реальных файлах это
+    давало «локальный ключ не распознан» — проверено на key_datas, собранном
+    эталонным TDesktop-кодом (opentele). Сначала берём сырой payload=256; дальше
+    несколько терпимых запасных вариантов на случай нестандартных сборок."""
     payload = _parse_encrypted_descriptor(decrypted)
-    streams = [payload] if payload is not None else []
-    streams += [decrypted[skip:] for skip in (4, 0, 16, 20)]
-    for buf in streams:
-        if not buf:
-            continue
+    if payload is not None and len(payload) == _LOCAL_KEY_SIZE:
+        return payload  # реальный TDesktop: сырые 256 байт
+    if payload is not None:
+        # Очень старые/нестандартные сборки: вдруг QByteArray-обёртка.
         try:
-            local_key = _QS(buf).ba()
+            lk = _QS(payload).ba()
+            if len(lk) == _LOCAL_KEY_SIZE:
+                return lk
         except Exception:
-            continue
-        if len(local_key) == _LOCAL_KEY_SIZE:
-            return local_key
-    return None
+            pass
+        if len(payload) > _LOCAL_KEY_SIZE:
+            return payload[:_LOCAL_KEY_SIZE]
+    # Последний шанс: сырые байты сразу после 4-байтного поля длины.
+    raw = decrypted[4 : 4 + _LOCAL_KEY_SIZE]
+    return raw if len(raw) == _LOCAL_KEY_SIZE else None
 
 
 def _read_local_key(tdata_dir: str, passphrase: bytes = b"") -> bytes:
