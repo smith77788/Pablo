@@ -83,7 +83,7 @@ async def resolve_self_user_id(session_string: str, _acc: dict | None = None) ->
         return None
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "resolve_self_user_id: disconnect")
 
@@ -494,6 +494,32 @@ class _Timeboxed:
 def timeboxed(client: Any, timeout: float = _OP_TIMEOUT) -> Any:
     """Обернуть клиент потолком на запрос. См. `_Timeboxed`."""
     return client if isinstance(client, _Timeboxed) else _Timeboxed(client, timeout)
+
+
+async def safe_disconnect(client: Any, timeout: float = 10.0) -> None:
+    """Разорвать соединение клиента, НИКОГДА не зависая на этом.
+
+    ПОЧЕМУ. `disconnect()` Telethon на заклиненном сокете (мёртвый прокси,
+    сеть пропала посреди запроса) мог висеть БЕСКОНЕЧНО. А вызывается он почти
+    всегда в `finally` операции — после отправки, инвайта, удара. Один такой
+    зависший teardown морозил ВСЮ операцию: цикл по целям не двигался, слот и
+    арендованные аккаунты держались до стоп-гвардии застоя (90 минут), и
+    операция уходила в повтор, хотя сломалось только закрытие сокета. Это и есть
+    «операция зависла на ответе Telegram или прокси» со стороны владельца.
+
+    Отключение по определению best-effort: его результат никого не интересует,
+    поэтому и потолок, и глушение любых ошибок здесь безопасны и правильны.
+    `None`-клиент и синхронный `disconnect()` (в разных версиях Telethon он то
+    корутина, то нет) обрабатываются, чтобы helper подходил на все 76+ точек.
+    """
+    if client is None:
+        return
+    try:
+        res = client.disconnect()
+        if inspect.isawaitable(res):
+            await asyncio.wait_for(res, timeout=timeout)
+    except Exception:
+        log_exc_swallow(log, "safe_disconnect")
 
 # ── Уникальный IPv6 на аккаунт БЕЗ прокси ─────────────────────────────────────
 # Реальная (в отличие от CF-релея с общим edge-IP) изоляция: если хосту
@@ -1797,7 +1823,7 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             last_dup = e
             _transport = getattr(client, "_infragram_transport", None)
             try:
-                await client.disconnect()
+                await safe_disconnect(client)
             except Exception:
                 pass
             if _attempt < len(_backoff):
@@ -1826,7 +1852,7 @@ async def connect_client(session_string: str = "", device: dict | None = None,
             if not _direct_fallback_ok(transport, policy):
                 raise
             try:
-                await client.disconnect()
+                await safe_disconnect(client)
             except Exception:
                 pass
             log.warning(
@@ -1907,7 +1933,7 @@ async def start_login(
                 raise
             log.warning("start_login: IPv6 недоступен (%s) — логин с host-IP", str(e)[:80])
             try:
-                await client.disconnect()
+                await safe_disconnect(client)
             except Exception:
                 pass
             client = _make_client("", device, _force_direct=True)
@@ -1917,14 +1943,14 @@ async def start_login(
         )
     except FloodWaitError:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в start_login")
         raise
     except Exception as e:
         log.warning("start_login failed: %s", e)
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в start_login")
         raise
@@ -2091,7 +2117,7 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
         return session_string, info
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в import_from_session_string")
 
@@ -2312,7 +2338,7 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
             return session_str, info
         finally:
             try:
-                await client.disconnect()
+                await safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "Сбой в import_from_tdata (opentele disconnect)")
     except ImportError:
@@ -2387,7 +2413,7 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
         raise ValueError(f"Ошибка при подключении через tdata: {err[:200]}")
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой отключения в import_from_tdata")
 
@@ -2449,7 +2475,7 @@ async def _verify_tdata_session(session_str: str) -> tuple[tuple[str, dict] | No
         return None, err[:120]
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "verify tdata session disconnect")
 
@@ -2572,7 +2598,7 @@ async def cleanup_pending(phone: str) -> None:
     client = _pending.pop(phone, None)
     if client:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в cleanup_pending")
 
@@ -2609,7 +2635,7 @@ async def start_qr_login(user_id: int) -> bytes:
         img.save(buf, format="PNG")
     except BaseException:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "start_qr_login: disconnect после сбоя")
         raise
@@ -2696,7 +2722,7 @@ async def cleanup_qr_pending(user_id: int) -> None:
     if entry:
         client, *_ = entry
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в cleanup_qr_pending")
 
@@ -2714,7 +2740,7 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
         }
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_account_info")
 
@@ -2837,7 +2863,7 @@ async def get_dialogs(
         return []
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_dialogs")
 
@@ -2983,7 +3009,7 @@ async def create_shared_folder_link(
                 "filter_id": _created["filter_id"]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "create_shared_folder_link: disconnect")
 
@@ -3108,7 +3134,7 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
                 "truncated": True}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в _collect")
 
@@ -3158,7 +3184,7 @@ async def send_message_via_account(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в send_message_via_account")
 
@@ -3231,7 +3257,7 @@ async def send_media_via_account(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в send_media_via_account")
 
@@ -3285,7 +3311,7 @@ async def fetch_channel_photo(session_string, peer, *, _acc=None, limit: int = 3
         return None
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в fetch_channel_photo")
 
@@ -3344,7 +3370,7 @@ async def send_dm(
         return {"error": str(e)[:80]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в send_dm")
 
@@ -3431,7 +3457,7 @@ async def get_account_dialogs_stats(
         return {"total": 0, "channels": 0, "groups": 0, "personal": 0, "error": str(e)[:80]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_account_dialogs_stats")
 
@@ -3701,7 +3727,7 @@ async def appeal_spamblock(session_string: str, _acc: dict | None = None) -> dic
         return {"ok": False, "status": "error", "reply": str(exc)[:160], "steps": steps}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception as e:
             log.warning("appeal_spamblock: disconnect failed: %s", e)
 
@@ -3980,7 +4006,7 @@ async def check_account_status_full(
         # коннект и освобождаем мьютекс сессии.
         try:
             if client is not None and client.is_connected():
-                await client.disconnect()
+                await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "check_account_status_full: disconnect")
         _release_session(_skey, client)
@@ -4140,7 +4166,7 @@ async def get_channel_members_count(
         return -1
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_members_count")
 
@@ -4228,7 +4254,7 @@ async def get_full_channel_info(
         return None
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_full_channel_info")
 
@@ -4278,7 +4304,7 @@ async def resolve_invite_peer(session_string: str, invite_hash: str, *,
         return {"error": "Не удалось проверить приглашение — попробую позже"}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в resolve_invite_peer")
 
@@ -4369,7 +4395,7 @@ async def read_channel_snapshot(
         return None
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в read_channel_snapshot")
 
@@ -4493,7 +4519,7 @@ async def get_channels_full_info(
         return out
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_channels_full_info")
 
@@ -4531,7 +4557,7 @@ async def get_recent_messages(
         return []
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_recent_messages")
 
@@ -4572,7 +4598,7 @@ async def fetch_chat_messages(
         return []
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "fetch_chat_messages disconnect")
 
@@ -4627,7 +4653,7 @@ async def search_global_ranked(
 
         if isinstance(e, FloodWaitError):
             try:
-                await client.disconnect()
+                await safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "search_global_ranked flood disconnect")
             raise
@@ -4635,7 +4661,7 @@ async def search_global_ranked(
         return []
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "search_global_ranked disconnect")
 
@@ -4738,7 +4764,7 @@ async def create_channel(
         return {"error": str(e)[:200]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в create_channel")
 
@@ -4902,7 +4928,7 @@ async def join_channel(
     finally:
         if client is not None:
             try:
-                await client.disconnect()
+                await safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "Сбой в join_channel")
 
@@ -4933,7 +4959,7 @@ async def is_premium_account(session_string: str, _acc: dict | None = None) -> b
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в is_premium_account")
 
@@ -4995,7 +5021,7 @@ async def send_bot_start(
         return {"error": str(e)[:200]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в send_bot_start")
 
@@ -5049,7 +5075,7 @@ async def leave_channel(
         return {"ok": False, "error": str(e)}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в leave_channel")
 
@@ -5079,7 +5105,7 @@ async def edit_channel_title(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в edit_channel_title")
 
@@ -5106,7 +5132,7 @@ async def edit_channel_about(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в edit_channel_about")
 
@@ -5151,7 +5177,7 @@ async def set_channel_photo(
         return str(e)[:200]
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в set_channel_photo")
 
@@ -5179,7 +5205,7 @@ async def set_channel_username(
         return str(e)[:200]
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в set_channel_username")
 
@@ -5260,7 +5286,7 @@ async def upload_cloud_blob(session_string: str, channel_id: int, access_hash: i
         return int(msg.id)
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             pass
 
@@ -5281,7 +5307,7 @@ async def download_cloud_blob(session_string: str, channel_id: int, access_hash:
         return bytes(data or b"")
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             pass
 
@@ -5297,7 +5323,7 @@ async def delete_cloud_blob(session_string: str, channel_id: int, access_hash: i
             client.delete_messages(peer, [int(message_id)]), timeout=_OP_TIMEOUT)
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             pass
 
@@ -5323,7 +5349,7 @@ async def get_channel_invite_link(
         return ""
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_invite_link")
 
@@ -5413,7 +5439,7 @@ async def create_channel_invite_link(
         return {"ok": False, "link": "", "error": str(e)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в create_channel_invite_link")
 
@@ -5436,7 +5462,7 @@ async def delete_channel(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в delete_channel")
 
@@ -5481,7 +5507,7 @@ async def get_channel_members(
         return []
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_members")
 
@@ -5654,7 +5680,7 @@ async def invite_users_to_channel(
         return _result(error=str(e)[:150])
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception as e:
             log.debug("invite_users_to_channel: disconnect error: %s", e)
 
@@ -5726,7 +5752,7 @@ async def join_channel_by_id(
         return {"ok": False, "tg_user_id": 0, "error": str(e)[:100]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception as e:
             log.debug("join_channel_by_id: disconnect error: %s", e)
 
@@ -5743,7 +5769,7 @@ async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
         return 0
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception as e:
             log.debug("get_own_user_id: disconnect error: %s", e)
 
@@ -5828,7 +5854,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
         raise
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_contacts")
 
@@ -5903,7 +5929,7 @@ async def get_dialog_contacts(
         raise
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в get_dialog_contacts")
 
@@ -5941,7 +5967,7 @@ async def kick_from_channel(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в kick_from_channel")
 
@@ -6118,7 +6144,7 @@ async def promote_to_admin_ex(
         return False, "error"
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в promote_to_admin")
 
@@ -6172,7 +6198,7 @@ async def demote_from_admin(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в demote_from_admin")
 
@@ -6252,7 +6278,7 @@ async def demote_from_admin_batch(
         log.warning("demote_from_admin_batch connect error chan=%s: %s", channel_id, e)
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в demote_from_admin_batch")
     return out
@@ -6299,7 +6325,7 @@ async def set_discussion_group(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в set_discussion_group")
 
@@ -6331,7 +6357,7 @@ async def create_forum_supergroup(
         res["forum"] = False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в create_forum_supergroup")
     return res
@@ -6406,7 +6432,7 @@ async def forward_new_posts(
         return {"forwarded": forwarded, "last_msg_id": last_id, "error": str(e)[:160]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в forward_new_posts")
 
@@ -6481,7 +6507,7 @@ async def pin_last_channel_post(
         return {"error": str(e)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в pin_last_channel_post")
 
@@ -6629,7 +6655,7 @@ async def post_to_channel(
         return {"error": str(e)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в post_to_channel")
 
@@ -6663,7 +6689,7 @@ async def send_reaction(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в send_reaction")
 
@@ -6712,7 +6738,7 @@ async def report_peer(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer")
 
@@ -7148,7 +7174,7 @@ async def report_peer_deep(
         log.exception("report_peer_deep error: %s", e)
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer_deep")
     return result
@@ -8293,7 +8319,7 @@ async def report_peer_deep_v2(  # noqa: C901
         R["_fatal_error"] = str(e)[:200]
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception as e:
             log.debug("rpv2: disconnect error: %s", e)
     return R
@@ -8442,7 +8468,7 @@ async def strike_map_target(
         log.warning("strike_map_target error for %s: %s", peer_username, e)
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
     return intel
@@ -8487,7 +8513,7 @@ async def update_profile(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в update_profile")
 
@@ -8526,7 +8552,7 @@ async def check_username_available(
         return False
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception as e:
             log.debug("check_username_available: disconnect error: %s", e)
 
@@ -8551,7 +8577,7 @@ async def update_account_username(
         return str(e)[:200]
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в update_account_username")
 
@@ -8699,7 +8725,7 @@ async def fetch_bot_tokens_via_botfather(
         return {"tokens": tokens, "errors": {**errors, "_": why}}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "fetch_bot_tokens_via_botfather: disconnect")
 
@@ -8762,7 +8788,7 @@ async def scan_owned_bots(session_string: str, _acc: dict | None = None) -> dict
         return {"bots": [], "error": err[:200]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "scan_owned_bots: disconnect")
 
@@ -9018,7 +9044,7 @@ async def create_bot_via_botfather(
         return {"error": str(e)[:200]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в create_bot_via_botfather")
 
@@ -9094,7 +9120,7 @@ async def list_bots_via_botfather(
         return {"error": str(e)[:200]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в list_bots_via_botfather")
 
@@ -9215,7 +9241,7 @@ async def transfer_bot_via_botfather(
         return {"error": str(e)[:200]}
     finally:
         try:
-            await client.disconnect()
+            await safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "Сбой в transfer_bot_via_botfather")
 
