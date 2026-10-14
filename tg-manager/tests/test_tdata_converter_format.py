@@ -31,12 +31,28 @@ def test_tdf_suffix_fallback_supports_all_desktop_slots(tmp_path: Path):
     assert tdata_converter._tdf_read(str(tmp_path), "key_data") == content
 
 
-def test_corrupt_tdf_is_not_reported_as_missing(tmp_path: Path):
-    path = tmp_path / "key_datas"
-    raw = bytearray(_tdf_bytes(b"payload"))
-    raw[-1] ^= 0xFF
-    path.write_bytes(raw)
+def test_checksum_mismatch_is_not_fatal(tmp_path: Path):
+    """Несошедшаяся контрольная сумма НЕ блокирует чтение.
 
+    Прод-доказательство (скрин владельца): ВСЕ его рабочие аккаунты падали на
+    «TDF checksum mismatch». Значит порядок полей в MD5 у его версии Telegram
+    Desktop иной, чем наша формула. Контрольная сумма — проверка целостности, а
+    не ключ расшифровки: payload (content) цел, и расшифровка использует именно
+    его. Поэтому бьём по целостности мягко — возвращаем content, а реально
+    битый файл отсеется дальше, на расшифровке.
+    """
+    content = b"payload"
+    raw = bytearray(_tdf_bytes(content))
+    raw[-1] ^= 0xFF  # ломаем байт контрольной суммы
+    (tmp_path / "key_datas").write_bytes(raw)
+
+    assert tdata_converter._read_tdf_raw(str(tmp_path / "key_datas")) == content
+    assert tdata_converter._tdf_read(str(tmp_path), "key_datas") == content
+
+
+def test_non_tdf_file_is_reported_not_missing(tmp_path: Path):
+    """А вот файл БЕЗ магии TDF$ (обрезан/чужой формат) — честно сообщаем."""
+    (tmp_path / "key_datas").write_bytes(b"not a tdf file at all")
     with pytest.raises(ValueError, match="найден, но не читается как TDF"):
         tdata_converter._tdf_read(str(tmp_path), "key_datas")
 

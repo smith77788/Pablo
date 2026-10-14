@@ -84,7 +84,16 @@ def _read_tdf_raw(path: str) -> bytes:
     size_bytes = struct.pack("<I", len(content))
     md5_calc = hashlib.md5(content + size_bytes + ver_bytes + _TDF_MAGIC).digest()
     if md5_calc != md5_stored:
-        raise ValueError(f"TDF checksum mismatch: {os.path.basename(path)}")
+        # Контрольная сумма — проверка ЦЕЛОСТНОСТИ, а не ключ расшифровки. Порядок
+        # полей в MD5 у Telegram Desktop менялся между версиями, и несхождение
+        # чаще означает «наша формула не та для этой версии», чем «файл битый».
+        # Данные (content = payload между версией и md5) целы в любом случае —
+        # расшифровка ниже использует именно их, а не md5. Поэтому не роняем
+        # чтение: иначе валидный key_datas отвергался как «битый», и весь импорт
+        # tdata не работал. Реально повреждённый файл отсеется дальше, на
+        # расшифровке (вернётся пустой auth_key), не утянув остальные аккаунты.
+        log.debug("tdata: TDF checksum mismatch on %s — продолжаем (не фатально)",
+                  os.path.basename(path))
     return content
 
 

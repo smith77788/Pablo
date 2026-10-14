@@ -140,3 +140,48 @@ async def test_7z_archive_gives_clear_message():
     with pytest.raises(ValueError) as ei:
         await am.import_tdata_accounts_from_zip_bytes(sevenz)
     assert "7z" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_opentele_failure_falls_back_to_native(monkeypatch):
+    """Сбой opentele (UnboundLocalError auth_session на проде) НЕ роняет импорт —
+    управление доходит до нативного конвертера."""
+    import importlib as _il
+    import types as _types
+    import services.tdata_converter as tc
+
+    class _FakeTD:
+        def __init__(self, path):
+            pass
+
+        def isLoaded(self):
+            return True
+
+        async def ToTelethon(self, **kw):
+            raise UnboundLocalError(
+                "cannot access local variable 'auth_session'")
+
+    fake_td = _types.ModuleType("opentele.td")
+    fake_td.TDesktop = _FakeTD
+    fake_api = _types.ModuleType("opentele.api")
+    fake_api.UseCurrentSession = object()
+    real_import = _il.import_module
+
+    def _imp(name, *a, **k):
+        if name == "opentele.td":
+            return fake_td
+        if name == "opentele.api":
+            return fake_api
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(am.importlib, "import_module", _imp)
+    monkeypatch.setattr(tc, "check_pycryptodome", lambda: True)
+
+    def _native_marker(path, passphrase=""):
+        raise ValueError("__NATIVE_REACHED__")
+
+    monkeypatch.setattr(tc, "convert_tdata", _native_marker)
+
+    # Если бы откат не работал, упали бы на opentele-ошибке «auth_session».
+    with pytest.raises(ValueError, match="__NATIVE_REACHED__"):
+        await am.import_from_tdata("/fake/tdata")

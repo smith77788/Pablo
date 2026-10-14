@@ -2317,6 +2317,16 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
                 log_exc_swallow(log, "Сбой в import_from_tdata (opentele disconnect)")
     except ImportError:
         pass  # opentele не установлен — используем нативный конвертер
+    except Exception as _ot_exc:
+        # opentele УСТАНОВЛЕН, но сломался на этой структуре/версии. Известный
+        # случай — UnboundLocalError 'auth_session' в ToTelethon на новых
+        # telethon. Раньше эта ошибка оборачивалась в ValueError и улетала
+        # наружу, НЕ доходя до нативного конвертера, — и весь импорт tdata падал
+        # на opentele. Теперь любой сбой opentele = тихий откат на наш нативный
+        # конвертер ниже.
+        log.warning(
+            "import_from_tdata: opentele не справился (%s) — нативный fallback",
+            str(_ot_exc)[:200])
 
     # ── Попытка 2: нативный конвертер (pycryptodome) ──────────────────────────
     from services.tdata_converter import convert_tdata, check_pycryptodome
