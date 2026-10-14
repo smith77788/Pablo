@@ -3667,6 +3667,30 @@ async def add_tg_account(
 
     _enc_session = encrypt_token(session_str)
     _fp = session_fingerprint(session_str)
+
+    # Анти-дубль по ЛИЧНОСТИ Telegram (tg_user_id), а не только по телефону.
+    # Повторное добавление уже подключённого аккаунта — частый случай: архив
+    # tdata залили дважды, или тот же аккаунт добавили и по номеру, и из tdata.
+    # Телефон в качестве ключа тут не спасает: у tdata/.session Telegram часто
+    # отдаёт ПУСТОЙ номер, и он подставляется как "id:<uid>", тогда как при входе
+    # по номеру стоит реальный "+7…". Разные значения phone → ключ
+    # (owner_id, phone) НЕ срабатывает и создаётся второй аккаунт той же
+    # личности. Поэтому, если аккаунт с этим tg_user_id у владельца уже есть,
+    # приводим phone к его телефону — и ON CONFLICT ниже ОБНОВИТ существующую
+    # строку (освежит сессию), а не наплодит дубль. tg_user_id неизменен для
+    # аккаунта, так что это надёжный ключ тождества.
+    try:
+        _uid_val = int(tg_user_id) if tg_user_id is not None else 0
+    except (TypeError, ValueError):
+        _uid_val = 0
+    if _uid_val > 0:
+        _existing_phone = await pool.fetchval(
+            "SELECT phone FROM tg_accounts WHERE owner_id=$1 AND tg_user_id=$2 "
+            "ORDER BY id LIMIT 1",
+            owner_id, _uid_val)
+        if _existing_phone is not None and _existing_phone != phone:
+            phone = _existing_phone
+
     row = await pool.fetchrow(
         """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
                first_name, username, device_model, system_version, app_version,
