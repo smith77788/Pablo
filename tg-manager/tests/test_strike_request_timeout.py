@@ -165,8 +165,12 @@ UNBOXED_BY_DESIGN = {
     "confirm_code", "confirm_2fa", "confirm_qr_2fa",
     "start_qr_login", "wait_qr_login",
     "get_client_info_and_session", "get_account_info",
-    "import_from_tdata", "validate_session_import",
+    "validate_session_import",
 }
+# import_from_tdata убран из списка: переписанный импорт tdata больше НЕ делает
+# «голых» запросов к Telegram. opentele-ветка извлекает ключ оффлайн и проверяет
+# сессию через `_verify_tdata_session` (там свой asyncio.wait_for), нативная —
+# через `asyncio.wait_for(client.connect()/get_me(), ...)`. Потолок есть везде.
 
 
 def test_the_list_of_unbounded_functions_does_not_grow():
