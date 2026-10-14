@@ -803,7 +803,7 @@ async def invite_batch(
         # настоящей причины сбоя.
         if client is not None:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "invite_batch: disconnect")
 
@@ -875,7 +875,7 @@ async def channel_admin_status(session_string: str, _acc: dict | None,
         # AttributeError в лог поверх настоящей причины сбоя.
         if client is not None:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "channel_admin_status: disconnect")
 
@@ -933,7 +933,7 @@ async def check_membership_and_admin(session_string: str, _acc: dict | None,
         # AttributeError в лог поверх настоящей причины сбоя.
         if client is not None:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "check_membership_and_admin: disconnect")
 
@@ -1099,7 +1099,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
         # AttributeError в лог поверх настоящей причины сбоя.
         if client is not None:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "add_via_promote: disconnect")
 
@@ -1184,7 +1184,7 @@ async def revoke_promoted(session_string: str, _acc: dict | None, group_ref: str
     finally:
         if client is not None:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "revoke_promoted: disconnect")
     return {"revoked": revoked, "left": left}
@@ -1217,7 +1217,7 @@ async def export_group_invite_link(session_string: str, _acc: dict | None,
         # AttributeError в лог поверх настоящей причины сбоя.
         if client is not None:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "export_group_invite_link: disconnect")
 
@@ -1548,7 +1548,7 @@ async def invite_by_phones(
         # AttributeError в лог поверх настоящей причины сбоя.
         if client is not None:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception as e:
                 log_exc_swallow(log, "invite_by_phones: disconnect")
 
@@ -1761,3 +1761,10 @@ def split_invite_targets(raw: str) -> tuple[list[str], list[str]]:
     """
     r = classify_invite_list(raw)
     return r["user_refs"], r["phones"]
+
+
+async def _safe_disconnect(client):
+    """Закрытие сокета с потолком — зависший teardown не морозит операцию.
+    Делегирует account_manager.safe_disconnect (ленивый импорт: без цикла)."""
+    from services.account_manager import safe_disconnect
+    await safe_disconnect(client)

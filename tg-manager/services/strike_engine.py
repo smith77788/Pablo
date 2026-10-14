@@ -2613,7 +2613,7 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
         results["connect"] = f"err:{str(e)[:40]}"
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "_escalate_to_spambot")
     sent = sum(1 for v in results.values() if v == "sent")
@@ -2675,20 +2675,20 @@ async def verify_target_takedown(
             # Проверка на бан/ограничение
             if entity is None:
                 # CheckChatInvite returned no chat — link invalid/removed
-                await client.disconnect()
+                await _safe_disconnect(client)
                 return True
             if hasattr(entity, "restricted") and entity.restricted:
-                await client.disconnect()
+                await _safe_disconnect(client)
                 return True
             if hasattr(entity, "restriction_reason") and entity.restriction_reason:
-                await client.disconnect()
+                await _safe_disconnect(client)
                 return True
 
-            await client.disconnect()
+            await _safe_disconnect(client)
             # Канал всё ещё жив — ждём и пробуем снова
         except Exception as e:
             try:
-                await client.disconnect()
+                await _safe_disconnect(client)
             except Exception:
                 log_exc_swallow(log, "Сбой disconnect клиента в verify_target_takedown")
             err_str = str(e).lower()
@@ -5056,3 +5056,10 @@ async def get_appeal_status(
         "created_at": str(row["created_at"]) if row["created_at"] else None,
         "details": details,
     }
+
+
+async def _safe_disconnect(client):
+    """Закрытие сокета с потолком — зависший teardown не морозит операцию.
+    Делегирует account_manager.safe_disconnect (ленивый импорт: без цикла)."""
+    from services.account_manager import safe_disconnect
+    await safe_disconnect(client)

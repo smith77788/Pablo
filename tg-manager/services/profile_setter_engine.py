@@ -67,7 +67,7 @@ async def _connect(session_string: str, _acc: dict | None):
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
     except BaseException as exc:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "_connect: disconnect после сбоя коннекта")
         raise ConnectFailed(_connect_error_text(exc)) from exc
@@ -107,7 +107,7 @@ async def set_name_bio(
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "set_name_bio: disconnect")
 
@@ -157,7 +157,7 @@ async def set_avatar_from_url(
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "set_avatar_from_url: disconnect")
 
@@ -198,7 +198,7 @@ async def set_avatar_from_bytes(
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "set_avatar_from_bytes: disconnect")
 
@@ -227,7 +227,7 @@ async def set_username(
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "set_username: disconnect")
 
@@ -268,7 +268,7 @@ async def set_2fa_password(
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "set_2fa_password: disconnect")
 
@@ -292,7 +292,7 @@ async def close_other_sessions(session_string: str, _acc: dict | None) -> dict[s
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: close_other_sessions disconnect failed: %s', e)
 
@@ -335,7 +335,7 @@ async def set_privacy(session_string: str, _acc: dict | None, key: str, allow: b
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: set_privacy disconnect failed: %s', e)
 
@@ -373,7 +373,7 @@ async def get_login_code(session_string: str, _acc: dict | None) -> dict[str, An
         return {"ok": False, "code": None, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: get_login_code disconnect failed: %s', e)
 
@@ -398,7 +398,7 @@ async def clear_bio(session_string: str, _acc: dict | None) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: clear_bio disconnect failed: %s', e)
 
@@ -424,7 +424,7 @@ async def set_bio(session_string: str, _acc: dict | None, about: str) -> dict[st
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "set_bio: disconnect")
 
@@ -457,7 +457,7 @@ async def remove_avatar(session_string: str, _acc: dict | None) -> dict[str, Any
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: remove_avatar disconnect failed: %s', e)
 
@@ -485,7 +485,7 @@ async def reset_2fa(
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: reset_2fa disconnect failed: %s', e)
 
@@ -511,7 +511,7 @@ async def set_online(session_string: str, _acc: dict | None) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: set_online disconnect failed: %s', e)
 
@@ -551,7 +551,7 @@ async def check_restriction(session_string: str, _acc: dict | None) -> dict[str,
                 "deleted": False, "reason": None, "error": str(exc)[:150]}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log.warning('profile_setter: check_restriction disconnect failed: %s', e)
 
@@ -630,3 +630,10 @@ async def apply_op(session_string: str, acc: dict, op: str, params: dict) -> dic
     if op == "login_code":
         return await get_login_code(session_string, acc)
     return {"ok": False, "error": f"unknown op: {op}"}
+
+
+async def _safe_disconnect(client):
+    """Закрытие сокета с потолком — зависший teardown не морозит операцию.
+    Делегирует account_manager.safe_disconnect (ленивый импорт: без цикла)."""
+    from services.account_manager import safe_disconnect
+    await safe_disconnect(client)

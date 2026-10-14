@@ -2138,7 +2138,7 @@ async def _run_daily_warmup_impl(
             log.warning("warmup session error acc=%d: %s", account_id, e)
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception:
             log_exc_swallow(log, "сбой disconnect при разогреве аккаунта")
         # Найденные за прогон каналы — в личный список интересов. Пишем в
@@ -2935,3 +2935,10 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1, bot=None)
         except Exception as e:
             log.warning("warmup loop error: %s", e)
         await asyncio.sleep(interval_hours * 3600)
+
+
+async def _safe_disconnect(client):
+    """Закрытие сокета с потолком — зависший teardown не морозит операцию.
+    Делегирует account_manager.safe_disconnect (ленивый импорт: без цикла)."""
+    from services.account_manager import safe_disconnect
+    await safe_disconnect(client)

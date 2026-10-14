@@ -84,7 +84,7 @@ async def boost_views(
         return {"ok": False, "error": err}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "boost_stories: disconnect")
 
@@ -123,7 +123,7 @@ async def boost_reaction(
         return {"ok": False, "error": err}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "boost_reaction: disconnect")
 
@@ -161,7 +161,7 @@ async def boost_stories(
         return {"ok": False, "error": err}
     finally:
         try:
-            await client.disconnect()
+            await _safe_disconnect(client)
         except Exception as e:
             log_exc_swallow(log, "boost_views: disconnect")
 
@@ -172,3 +172,10 @@ def extract_flood_wait(exc: Exception, err_str: str) -> int:
     if m:
         return int(m.group(1))
     return 0
+
+
+async def _safe_disconnect(client):
+    """Закрытие сокета с потолком — зависший teardown не морозит операцию.
+    Делегирует account_manager.safe_disconnect (ленивый импорт: без цикла)."""
+    from services.account_manager import safe_disconnect
+    await safe_disconnect(client)

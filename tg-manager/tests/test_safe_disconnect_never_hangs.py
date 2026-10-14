@@ -67,13 +67,29 @@ async def test_safe_disconnect_handles_sync_disconnect():
     assert calls["n"] == 1
 
 
-def test_no_unbounded_disconnect_remains_in_account_manager():
-    """Храповик: ни одной голой `await client.disconnect()` — только через
-    safe_disconnect (или уже обёрнутый asyncio.wait_for). Иначе один зависший
-    teardown снова заморозит операцию, а точечный тест этого не поймает."""
-    src = (ROOT / "services" / "account_manager.py").read_text(encoding="utf-8")
-    bare = re.findall(r"await\s+\w+\.disconnect\(\)", src)
-    assert not bare, (
-        "в account_manager.py осталось небуферизованное закрытие сокета "
-        f"({len(bare)} шт.) — заверните в safe_disconnect: {bare[:3]}"
+def test_no_unbounded_disconnect_in_operation_hot_paths():
+    """Храповик: в чокпоинте клиентов и в движках массовых операций ни одной
+    голой `await client.disconnect()` — только через safe_disconnect (или уже
+    обёрнутый asyncio.wait_for). Иначе один зависший teardown снова заморозит
+    операцию, а точечный тест этого не поймает.
+
+    account_manager — общий путь send/media/connect; движки создают клиентов
+    сами в пер-аккаунтных циклах, где зависший disconnect так же опасен."""
+    files = [
+        "services/account_manager.py",
+        "services/strike_engine.py",
+        "services/mass_inviter_engine.py",
+        "services/profile_setter_engine.py",
+        "services/account_warmer.py",
+        "services/boost_engine.py",
+    ]
+    offenders = []
+    for rel in files:
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        for m in re.findall(r"await\s+\w+\.disconnect\(\)", src):
+            offenders.append(f"{rel}: {m}")
+    assert not offenders, (
+        "осталось небуферизованное закрытие сокета в горячем пути операций "
+        f"({len(offenders)} шт.) — заверните в safe_disconnect:\n  "
+        + "\n  ".join(offenders[:6])
     )
