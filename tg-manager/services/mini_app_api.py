@@ -19923,6 +19923,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/dm_campaign/{campaign_id}/log", dm_campaign_log_list)
     app.router.add_patch("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_update)
     app.router.add_delete("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_delete)
+
+    # ── Единый модуль рассылок (Кампании) ─────────────────────────────────────
+    # Один запуск по каналам/чатам/ботам/ДМ сразу: спек веером раздаётся
+    # существующим движкам под общим campaign_id (services/campaign_hub).
+    async def campaign_launch(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            spec = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        from services import campaign_hub
+        try:
+            res = await campaign_hub.launch_campaign(pool, uid, spec)
+        except campaign_hub.CampaignSpecError as exc:
+            return _err(str(exc), 400)
+        except PermissionError as exc:
+            return _err(str(exc) or "Требуется подписка", 403)
+        except Exception:
+            log.exception("campaign_launch uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        if not res.get("children"):
+            why = "; ".join(res.get("errors") or []) or "нет целей для запуска"
+            return _err(f"Кампания не запущена: {why}", 400)
+        return _json_resp({"ok": True, **res})
+
+    async def campaign_status_get(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            cid = int(request.match_info["campaign_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор кампании", 400)
+        from services import campaign_hub
+        try:
+            st = await campaign_hub.campaign_status(pool, uid, cid)
+        except Exception:
+            log.exception("campaign_status uid=%s cid=%s", uid, cid)
+            return _err(_INTERNAL_ERROR, 500)
+        if st is None:
+            return _err("Кампания не найдена", 404)
+        return _json_resp(st)
+
+    app.router.add_post("/api/miniapp/campaign/launch", campaign_launch)
+    app.router.add_get("/api/miniapp/campaign/{campaign_id}", campaign_status_get)
     # Account Warmup
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)

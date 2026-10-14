@@ -19,7 +19,11 @@ op_worker.dispatch_table(); здесь — только маппинг общи�
 """
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
 
 # Виды ресурсов, которые кампания умеет охватывать одним запуском.
 KIND_CHANNELS = "channels"
@@ -246,3 +250,135 @@ def plan_campaign(spec: dict) -> list[PlannedOp]:
     for kind in kinds:
         ops.extend(_PLANNERS[kind](spec, targets.get(kind) or {}))
     return ops
+
+
+# ── Слой постановки: один спек → веер операций под общим campaign_id ──────────
+async def _create_dm_row(pool, owner_id: int, dm: dict) -> int:
+    """Создать строку dm_campaigns для ДМ-ветки кампании и вернуть её id.
+
+    Переиспользует тот же контур, что и обычная DM-кампания: target_type + params
+    (cohort_type / import_list читает dm_engine). IDOR-защита: при таргете на бота
+    сверяем владение — иначе кампания ушла бы в чужую аудиторию."""
+    target_type = dm["target_type"]
+    target_id = dm.get("target_id")
+    if target_type in ("bot_users", "cohort") and target_id:
+        owns = await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            int(target_id), owner_id)
+        if not owns:
+            raise CampaignSpecError("Бот для ДМ не найден среди ваших")
+    params: dict[str, Any] = {}
+    if target_type == "cohort" and dm.get("cohort_type"):
+        params["cohort_type"] = str(dm["cohort_type"])
+    if target_type == "import_list":
+        from services.dm_engine import parse_import_list
+        recipients = parse_import_list(dm.get("import_list"))
+        if not recipients:
+            raise CampaignSpecError("Список получателей ДМ пуст или невалиден")
+        params["import_list"] = recipients
+    return await pool.fetchval(
+        """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type,
+                                    target_id, status, total_targets, params)
+           VALUES($1,$2,$3,$4,$5,'draft',0,$6::jsonb) RETURNING id""",
+        owner_id, dm.get("name") or "Кампания", dm["text"], target_type,
+        int(target_id) if target_id else None, json.dumps(params))
+
+
+async def launch_campaign(pool, owner_id: int, spec: dict) -> dict:
+    """Запустить единую кампанию: создать группу и веером поставить дочерние операции.
+
+    Возвращает {campaign_id, status, children:[{kind,op_id,op_type}], errors:[...]}.
+    Отказ отдельной ветки (тариф/иммунитет/валидация ДМ) НЕ валит всю кампанию —
+    остальные ресурсы запускаются, причина копится в errors (как в батч-импорте).
+    Бросает CampaignSpecError только на негодном спеке (до создания группы).
+    """
+    ops = plan_campaign(spec)  # валидация до любых записей
+    from services import operation_bus as obus
+
+    name = str(spec.get("name") or "Кампания")[:120]
+    scheduled_for = (spec.get("settings") or {}).get("scheduled_for")
+    campaign_id = await pool.fetchval(
+        """INSERT INTO broadcast_campaigns(owner_id, name, spec, status)
+           VALUES($1,$2,$3::jsonb,'running') RETURNING id""",
+        owner_id, name, json.dumps(spec))
+
+    children: list[dict] = []
+    errors: list[str] = []
+    for op in ops:
+        kind = op["kind"]
+        try:
+            params = dict(op["params"])
+            params["broadcast_campaign_id"] = int(campaign_id)
+            dm_row_id = None
+            if kind == KIND_DM:
+                dm_row_id = await _create_dm_row(pool, owner_id, op["dm_create"])
+                params["campaign_id"] = int(dm_row_id)  # dm_campaign читает ЭТОТ id
+            op_id = await obus.submit(
+                pool, owner_id, op["op_type"], params,
+                total_items=int(op.get("total_items") or 0),
+                scheduled_for=scheduled_for, label=op.get("label"))
+            await pool.execute(
+                "INSERT INTO broadcast_campaign_ops(campaign_id, op_id, kind) "
+                "VALUES($1,$2,$3)", campaign_id, op_id, kind)
+            if dm_row_id is not None:
+                await pool.execute(
+                    "UPDATE dm_campaigns SET status='running', started_at=now() "
+                    "WHERE id=$1 AND owner_id=$2", dm_row_id, owner_id)
+            children.append({"kind": kind, "op_id": int(op_id), "op_type": op["op_type"]})
+        except PermissionError as exc:
+            # Тариф (PlanRequiredError) или предохранитель Ban Weather — не сбой.
+            errors.append(f"{kind}: {str(exc) or 'требуется подписка'}")
+        except CampaignSpecError as exc:
+            errors.append(f"{kind}: {exc}")
+        except Exception as exc:
+            log.exception("launch_campaign owner=%s kind=%s", owner_id, kind)
+            errors.append(f"{kind}: {str(exc)[:140]}")
+
+    status = "running" if children else "failed"
+    if children and errors:
+        status = "partial"
+    await pool.execute(
+        "UPDATE broadcast_campaigns SET status=$2 WHERE id=$1", campaign_id, status)
+    return {"campaign_id": int(campaign_id), "status": status,
+            "children": children, "errors": errors}
+
+
+async def campaign_status(pool, owner_id: int, campaign_id: int) -> Optional[dict]:
+    """Единый прогресс кампании: сводка по всем дочерним операциям сразу.
+
+    None — кампания не найдена или чужая. Иначе {id, name, status, kinds:{...},
+    totals:{...}} с разбивкой по ресурсам и агрегатом — чтобы один экран показывал
+    всю кампанию, а не её куски по разделам."""
+    camp = await pool.fetchrow(
+        "SELECT id, name, status, created_at FROM broadcast_campaigns "
+        "WHERE id=$1 AND owner_id=$2", campaign_id, owner_id)
+    if not camp:
+        return None
+    rows = await pool.fetch(
+        """SELECT o.kind, q.status, COALESCE(q.done_items,0) AS done,
+                  COALESCE(q.total_items,0) AS total
+             FROM broadcast_campaign_ops o
+             JOIN operation_queue q ON q.id = o.op_id
+            WHERE o.campaign_id=$1""", campaign_id)
+    kinds: dict[str, dict] = {}
+    agg = {"ops": 0, "done": 0, "total": 0,
+           "running": 0, "finished": 0, "failed": 0}
+    for r in rows:
+        k = kinds.setdefault(r["kind"], {"ops": 0, "done": 0, "total": 0,
+                                          "running": 0, "finished": 0, "failed": 0})
+        for bucket in (k, agg):
+            bucket["ops"] += 1
+            bucket["done"] += int(r["done"] or 0)
+            bucket["total"] += int(r["total"] or 0)
+            st = r["status"]
+            if st in ("pending", "running"):
+                bucket["running"] += 1
+            elif st in ("done", "partial"):
+                bucket["finished"] += 1
+            elif st in ("failed", "cancelled"):
+                bucket["failed"] += 1
+    created = camp["created_at"]
+    return {"id": int(camp["id"]), "name": camp["name"],
+            "status": camp["status"],
+            "created_at": created.isoformat() if created else None,
+            "kinds": kinds, "totals": agg}
