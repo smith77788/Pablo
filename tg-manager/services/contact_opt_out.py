@@ -109,12 +109,26 @@ async def is_opted_out(pool, owner_id: int, raw_target: str) -> bool:
     return bool(row)
 
 
-async def load_opted_out(pool, owner_id: int) -> set[str]:
+class OptOutUnreadable(RuntimeError):
+    """Реестр «не писать» не прочитался — рассылать по этому списку нельзя."""
+
+
+async def load_opted_out(pool, owner_id: int, *, strict: bool = False) -> set[str]:
     """Полный набор opted-out target'ов владельца (для фильтрации батча).
 
-    Fail-open: при сбое — пустой набор (лучше не отфильтровать, чем сорвать
-    инвайт целиком; тот же принцип, что у op_worker._load_invited_targets).
-    Беззвучным он быть не имеет права: подробности ниже, у обработчика."""
+    `strict` выбирает цену ошибки, и выбор этот неодинаков для разных дверей.
+
+    strict=False (по умолчанию, экраны и пре-флайт): при сбое — пустой набор.
+    Экран показывает цифру без фильтра, и это терпимо: он ничего не отправляет.
+
+    strict=True (пути, которые РЕАЛЬНО пишут людям): исключение. Пустой набор
+    там означает «никто не отказывался», и сообщение уходит тому, кто прямо
+    просил больше не писать — обещание человеку, а не статистика. Вызывающий
+    (исполнитель операции) уходит на обычный повтор и отправит позже, уже с
+    фильтром. Отсрочка дешевле письма тому, кто просил его не присылать.
+
+    В обоих случаях сбой не беззвучный: log.error и счётчик (подробности
+    ниже, у обработчика)."""
     import asyncio
     import logging
 
@@ -148,6 +162,9 @@ async def load_opted_out(pool, owner_id: int) -> set[str]:
                 _m.inc("infragram_opt_out_read_failures_total")
             except Exception:
                 log.debug("contact_opt_out: счётчик сбоя чтения недоступен")
+            if strict:
+                raise OptOutUnreadable(
+                    "реестр «не писать» недоступен, отправка отложена до повтора")
     return set()
 
 

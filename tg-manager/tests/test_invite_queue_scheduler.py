@@ -530,7 +530,10 @@ def test_opted_out_never_invited_from_source(source_stand):
     import services.contact_opt_out as coo
     _orig = coo.load_opted_out
 
-    async def _loader(pool_, owner_id):
+    async def _loader(pool_, owner_id, **kw):
+        # **kw: чтение реестра в путях отправки идёт со strict=True (на сбое
+        # отказ, а не пустой набор — см.
+        # tests/test_a_silent_registry_does_not_write_to_people.py).
         return {"@banned1"}
     coo.load_opted_out = _loader
     try:

@@ -20,6 +20,7 @@ import asyncpg
 from aiogram import Bot
 
 from services.logger import log_exc_swallow
+from services import contact_opt_out as _coo_mod
 from services import infra_memory
 from services import flood_engine as _flood_engine
 from services import op_status
@@ -890,13 +891,15 @@ async def run_campaign(
         return
 
     # Реестр «не писать»: тот, кто явно просил больше не писать, не должен
-    # получить НИ ОДНУ следующую кампанию. Fail-open — сбой реестра не срывает
-    # рассылку (тот же принцип, что в масс-инвайте).
+    # получить НИ ОДНУ следующую кампанию. Читаем строго: пустой набор на сбое
+    # означал бы «никто не отказывался», и кампания ушла бы тем, кто прямо
+    # просил не писать. Отказ поднимается до исполнителя операции, тот ставит
+    # обычный повтор — кампания уйдёт позже и уже с фильтром.
     opt_out_removed = 0
     try:
         from services import contact_opt_out as _coo
 
-        _opted = await _coo.load_opted_out(pool, owner_id)
+        _opted = await _coo.load_opted_out(pool, owner_id, strict=True)
         if _opted:
             targets, opt_out_removed = filter_opted_out(targets, _opted)
             if opt_out_removed:
@@ -904,6 +907,8 @@ async def run_campaign(
                     "dm_engine campaign=%d: отфильтровано %d получателей из реестра «не писать»",
                     campaign_id, opt_out_removed,
                 )
+    except _coo_mod.OptOutUnreadable:
+        raise      # без реестра рассылать нельзя (см. выше)
     except Exception:
         log_exc_swallow(log, "dm_engine: opt-out filter failed")
 

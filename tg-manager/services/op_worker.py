@@ -504,6 +504,7 @@ async def renew_leases() -> int:
 # (распил монолита; там же общий межпроцессный расчёт через таблицу op_circuit_breaker).
 # Импортируем имена обратно, чтобы контракт op_worker._circuit_breaker_* / _cb_* /
 # circuit_breaker_status и т.п. не менялся. Пул задаётся в init_op_worker_pool ниже.
+from services import contact_opt_out as _coo_mod  # noqa: E402
 from services.op_circuit_breaker import (  # noqa: E402,F401
     _CIRCUIT_BREAKER_THRESHOLD,
     _CIRCUIT_BREAKER_COOLDOWN,
@@ -11221,19 +11222,26 @@ async def _exec_bulk_dm_adhoc(
         return {"status": "failed", "reason": "Не указаны аккаунты, получатели или текст/медиа"}
 
     # Реестр «не писать»: раньше применялся только в масс-инвайте, из-за чего
-    # человек, явно попросивший не писать, получал разовую рассылку. Fail-open —
-    # сбой реестра не срывает операцию.
+    # человек, явно попросивший не писать, получал разовую рассылку. Читаем
+    # строго (strict): пустой набор на сбое означал бы «никто не отказывался»,
+    # и сообщение ушло бы тому, кто прямо просил не писать. Отказ уводит
+    # операцию на обычный повтор — отправим позже и уже с фильтром.
     _opt_out_skipped = 0
     try:
         from services import contact_opt_out as _coo
         from services.dm_engine import filter_opted_out_refs as _filter_refs
 
-        _opted = await _coo.load_opted_out(pool, owner_id)
+        _opted = await _coo.load_opted_out(pool, owner_id, strict=True)
         if _opted:
             usernames, _opt_out_skipped = _filter_refs(usernames, _opted)
             if _opt_out_skipped:
                 log.info("bulk_dm_adhoc op=%d: пропущено %d по реестру «не писать»",
                          op_id, _opt_out_skipped)
+    except _coo_mod.OptOutUnreadable:
+        # Единственное исключение, которое здесь НЕ глотается: без реестра
+        # отправлять нельзя (см. выше). Остальное — поломка самого фильтра,
+        # из-за неё рассылку не срываем.
+        raise
     except Exception:
         log_exc_swallow(log, f"bulk_dm_adhoc op={op_id}: opt-out filter failed")
     if not usernames:
@@ -15967,7 +15975,9 @@ async def _exec_mass_invite(
     _skip_invited = bool(params.get("skip_invited", True))
     _already = await _load_invited_targets(pool, owner_id, _group_key) if _skip_invited else set()
     from services import contact_opt_out as _coo
-    _oo = await _coo.load_opted_out(pool, owner_id)
+    # strict: в инвайте реестр — тоже обещание человеку, и пустой набор на
+    # сбое позвал бы тех, кто просил его не звать.
+    _oo = await _coo.load_opted_out(pool, owner_id, strict=True)
     _oo_keys = {_coo.compare_key(t) for t in _oo}
     _deduped = 0
     _opted_out = 0

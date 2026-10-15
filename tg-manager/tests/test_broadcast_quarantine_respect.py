@@ -111,6 +111,13 @@ def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
     # уходит в настоящий пул, которого в этом тесте нет.
     monkeypatch.setattr(op_worker, "_journal_fetch", _fetch)
     monkeypatch.setattr(op_worker, "_journal_write", _exec)
+    # Реестр «не писать» в путях отправки читается строго: без БД он честно
+    # откажется работать, а этот тест про карантин и БД не поднимает.
+    from services import contact_opt_out as _coo_stub
+
+    async def _no_opt_out(_pool, _owner, **kw):
+        return set()
+    monkeypatch.setattr(_coo_stub, "load_opted_out", _no_opt_out)
     monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _quar)
     monkeypatch.setattr(op_worker, "_is_cancelled", _not_cancelled)
 
