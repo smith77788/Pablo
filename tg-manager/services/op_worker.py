@@ -1650,6 +1650,13 @@ async def _claim_available_accounts(
     return claimed
 
 
+# Как часто долгий исполнитель пересчитывает свою долю флота. Чаще не нужно:
+# каждый пересчёт — это COUNT(*) по очереди владельца, а доля меняется только
+# когда у него стартует или заканчивается другая операция. Число одно на всех
+# исполнителей: два независимых разошлись бы молча.
+_REBALANCE_EVERY_S = 20.0
+
+
 async def _rebalance_claim(op_id: int, owner_id: int, held: list) -> list:
     """Честный дележ НА ЛЕТУ: отдать часть уже захваченных аккаунтов, если
     после старта операции появились другие ПАРАЛЛЕЛЬНЫЕ (running) операции
@@ -11497,6 +11504,7 @@ async def _exec_bulk_dm_adhoc(
         flood_wait_total = 0.0
         acc_idx = 0
         sent_by_acc: dict[int, int] = {}
+        _last_rebalance = time.monotonic()
 
         # Повтор операции (автоматический после сетевого сбоя, сброс зависшей,
         # ручной) поднимает исполнителя заново с done_items=0 и ведёт его по
@@ -11549,6 +11557,30 @@ async def _exec_bulk_dm_adhoc(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
                 continue
+
+            # ЧЕСТНЫЙ ДЕЛЁЖ НА ЛЕТУ. Эта рассылка держит флот часами (темп
+            # между сообщениями — десятки секунд на аккаунт), а захватывает его
+            # целиком: `try_claim_accounts` берёт всё, что дали. Другая операция
+            # владельца, стартовавшая позже, не находит ни одного свободного
+            # аккаунта и через _ACCT_WAIT_MAX_MIN падает с «все аккаунты N минут
+            # были заняты другими операциями» — ровно та жалоба, из которой вырос
+            # `_rebalance_claim` («постепенно-параллельно, не падая из-за занятого
+            # флота»). Вызов стоял в одном исполнителе — массовом инвайте; здесь
+            # он нужен не меньше.
+            #
+            # Аккаунт при этом в любой момент держит РОВНО одна живая сессия:
+            # отдаём только те, которых больше нашей доли, и следующий получатель
+            # берётся уже из обновлённого списка (`_pick_acc` читает его заново).
+            if time.monotonic() - _last_rebalance >= _REBALANCE_EVERY_S:
+                _last_rebalance = time.monotonic()
+                _before_n = len(active_accounts)
+                active_accounts = await _rebalance_claim(
+                    op_id, owner_id, active_accounts)
+                if len(active_accounts) < _before_n:
+                    log.info(
+                        "bulk_dm_adhoc op=%d: отдал %d аккаунт(ов) другой операции "
+                        "владельца — обе идут параллельно",
+                        op_id, _before_n - len(active_accounts))
 
             if not active_accounts:
                 err_count += 1
@@ -17516,7 +17548,6 @@ async def _exec_mass_invite(
     step = 0
     _given_back_n = 0
     _last_rebalance = time.monotonic()
-    _REBALANCE_EVERY_S = 20.0  # не долбить БД COUNT(*) на каждый батч
     # Карантин (is_account_quarantined) проверяется здесь ЖИВЫМ пульсом, а не
     # только один раз на старте (_filter_quarantined_accounts выше). Прогон может
     # идти часами (паузы до 900с на флуде, ребаланс каждые 20с) — аккаунт, ушедший

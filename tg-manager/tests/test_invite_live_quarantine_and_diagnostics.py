@@ -124,10 +124,13 @@ def test_quarantine_is_rechecked_live_not_only_at_start():
     body = _exec_body()
     assert "_REQUARANTINE_EVERY_S" in body
     assert "_filter_quarantined_accounts(pool, op_id, accounts)" in body
-    # перепроверка обязана жить РЯДОМ с ребалансом (тот же цикл, та же кадансовость)
-    i = body.index("_REBALANCE_EVERY_S =")
+    # перепроверка обязана жить РЯДОМ с ребалансом (тот же цикл, та же
+    # кадансовость). Ориентир — ВЫЗОВ ребаланса, а не объявление его периода:
+    # период стал общим для всех долгих держателей флота (рассылка ЛС делится
+    # им тоже) и объявлен на уровне модуля, а не внутри инвайта.
+    i = body.index(">= _REBALANCE_EVERY_S")
     j = body.index("_REQUARANTINE_EVERY_S =")
-    assert j - i < 1000, "живой риск-пульс должен быть объявлен рядом с ребалансом"
+    assert j - i < 1000, "живой риск-пульс должен стоять рядом с ребалансом"
 
 
 def test_include_risky_operator_is_not_silently_overridden_by_recheck():
