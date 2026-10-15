@@ -73,6 +73,8 @@ _HELP = {
         "Недоставленные уведомления владельцу (отчёт об операции до него не дошёл)",
     "infragram_budget_write_failures_total":
         "Потерянные записи суточного счёта действий (аккаунт могут взять сверх лимита)",
+    "infragram_requeue_write_failures_total":
+        "Сбои записи решения о повторе операции (операция осталась закрытой, хотя ошибка была ретраевой)",
     "infragram_journal_write_failures_total":
         "Потерянные строки успеха в журнале целей (повтор сделает цель второй раз)",
     "infragram_account_cooldown_write_failures_total":

@@ -80,8 +80,10 @@ def test_maybe_requeue_actually_issues_reset(monkeypatch):
             captured["sql"] = sql
         return "UPDATE 1"
 
-    monkeypatch.setattr(op_worker, "_safe_fetchrow", _fake_fetchrow)
-    monkeypatch.setattr(op_worker, "_safe_execute", _fake_execute)
+    # Решения о судьбе операции идут через двери с повтором: один блип БД
+    # больше не подменяет автоматический повтор ручным запуском.
+    monkeypatch.setattr(op_worker, "_retrying_fetchrow", _fake_fetchrow)
+    monkeypatch.setattr(op_worker, "_retrying_execute", _fake_execute)
     # ретраевая (не fatal/skip) ошибка
     ok = _run(op_worker._maybe_requeue(None, 7, RuntimeError("temporary blip"), {}, "check_accounts_health"))
     assert ok is True, "временная ошибка должна ставиться на повтор"

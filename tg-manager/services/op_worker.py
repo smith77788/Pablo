@@ -112,18 +112,23 @@ async def _retrying_fetchrow(
 ) -> "asyncpg.Record | None":
     """Однострочное чтение с одним повтором. None — не прочитали и после него.
 
-    Нужно там, где по одному запросу собирается ИТОГ операции: сколько целей
-    закрыто за все попытки и сколько из них успешны. Такое чтение случается
-    один раз на закрытие операции, поэтому повтор ничего не стоит, а цена
-    промаха высокая: `done_items` обнуляется на каждой новой попытке, и без
-    покрытия из журнала доведённая со второй попытки операция объявляется
-    ЧАСТИЧНОЙ — владелец получает предложение повторить и эскалацию о работе,
-    которая на самом деле сделана (ровно тот класс, который разбирает
-    докстринг `_own_journal_coverage`).
+    Нужно там, где по ОДНОМУ запросу решается судьба операции. Такое чтение
+    случается один раз за прогон, поэтому повтор ничего не стоит, а цена
+    промаха высокая:
 
-    Запасной ответ вызывающих при неудаче не меняется: «частично» на
-    неизвестности безопаснее «выполнено». Повтор лишь делает эту
-    неизвестность редкой.
+    * итог операции (`_own_journal_coverage`, `_journal_counters`):
+      `done_items` обнуляется на каждой новой попытке, и без покрытия из
+      журнала доведённая со второй попытки операция объявляется ЧАСТИЧНОЙ —
+      владелец получает предложение повторить и эскалацию о работе, которая
+      на самом деле сделана;
+    * бюджет повторов (`_maybe_requeue`): не прочитали — и ретраевая ошибка
+      становится провалом, то есть автоматический повтор подменяется ручным;
+    * отмена на закрытии (`_run_op_task`): не прочитали — и отменённая
+      владельцем операция закрывается как «выполнена».
+
+    Запасные ответы вызывающих при неудаче не меняются: «частично» на
+    неизвестности безопаснее «выполнено», а не поставить повтор безопаснее,
+    чем поставить его вслепую. Повтор лишь делает эту неизвестность редкой.
     """
     last: Exception | None = None
     for attempt in (1, 2):
@@ -175,6 +180,39 @@ async def _journal_write(
         "прогон может сделать эту цель второй раз", log_ctx, last,
     )
     _reliability_metric("infragram_journal_write_failures_total", where=where or "journal")
+    return "ERROR"
+
+
+async def _retrying_execute(
+    pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
+) -> str:
+    """Записать РЕШЕНИЕ о судьбе операции: один повтор, затем громко.
+
+    Отличие от `_journal_write` — в том, что теряется. Там пропадает отметка
+    о сделанной цели (риск дубля на повторе), здесь пропадает сам повтор:
+    операция, которую ошибка только отложила, остаётся закрытой, и владелец
+    узнаёт о ней как о провале, хотя её должен был поднять автомат.
+
+    Падать нельзя: вызывающий уже решил, что делать, и исключение здесь
+    заменило бы «не поставили повтор» на «потеряли и исход». Поэтому повтор,
+    а дальше log.error и счётчик — чтобы потеря была видна на графике.
+    """
+    last: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            return await pool.execute(query, *args)
+        except Exception as e:
+            last = e
+            if attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    report_error(last, extra={"context": f"op_worker_decision_write{log_ctx}",
+                              "query": query[:100]})
+    log.error(
+        "op_worker: решение о судьбе операции не записалось%s (%s) — "
+        "автоматический повтор потерян", log_ctx, last,
+    )
+    _reliability_metric("infragram_requeue_write_failures_total",
+                        where=where or "requeue")
     return "ERROR"
 
 
@@ -1984,13 +2022,17 @@ async def _maybe_requeue(
     if kind in ("fatal", "skip"):
         return False
 
-    row = await _safe_fetchrow(
+    row = await _retrying_fetchrow(
         pool,
         "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1",
         op_id,
         log_ctx=f"[maybe_requeue op={op_id}]",
     )
     if not row:
+        # Не прочитали бюджет и со второго раза — повтор не ставим: ставить его
+        # вслепую значит крутить операцию без предела. Отказ честен (владелец
+        # увидит провал и сможет запустить сам), но он же и дорог, поэтому
+        # чтение идёт через дверь с повтором, а не через `_safe_fetchrow`.
         return False
     retry_count = (row["retry_count"] or 0) + 1
     # `or 3` здесь был дырой: ноль — это «НЕ повторять», и `or` превращал его в
@@ -2048,7 +2090,7 @@ async def _maybe_requeue(
             penalty_exc,
         )
 
-    res = await _safe_execute(
+    res = await _retrying_execute(
         pool,
         """UPDATE operation_queue
             SET status='pending',
@@ -2069,6 +2111,12 @@ async def _maybe_requeue(
         float(backoff),
         log_ctx=f"[maybe_requeue_update op={op_id}]",
     )
+    if str(res or "").strip() == "ERROR":
+        # Запись не прошла даже с повтором — в очередь операция НЕ вернулась.
+        # Ответить «поставлена» значило бы худшее из двух: повтора нет, и
+        # вызывающий, поверив, не доложит владельцу о провале — операция
+        # исчезает молча. Честно говорим «не поставлена».
+        return False
     # Ноль строк = операция уже терминальна. Практически всегда это ОТМЕНА
     # владельцем во время прогона: он нажал «Отменить», исполнитель оборвался
     # ошибкой, и повтор вернул бы операцию в очередь — отмена молча отменялась
@@ -3264,6 +3312,9 @@ async def _watchdog_alerts(pool: asyncpg.Pool, bot: Bot) -> None:
 # второй раз (повторные приглашения, второй пост, второе сообщение человеку),
 # а узнать об этом было негде.
 _PROTECTIVE_FAILURE_COUNTERS = {
+    "infragram_requeue_write_failures_total":
+        "повтор операции — не записался, и операцию, которую ошибка только "
+        "отложила, автомат не поднял: её придётся запустить заново вручную",
     "infragram_invite_dedup_write_failures_total":
         "дедуп инвайта — возможны повторные приглашения тем же людям",
     "infragram_journal_write_failures_total":
@@ -4815,7 +4866,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # кнопкой (в очереди уже 'cancelled') — оба случая один путь.
             _said_cancelled = result.get("status") == "cancelled"
             if not _said_cancelled:
-                current = await _safe_fetchrow(
+                current = await _retrying_fetchrow(
                     pool,
                     "SELECT status FROM operation_queue WHERE id=$1",
                     op_id,
