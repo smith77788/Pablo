@@ -6397,6 +6397,9 @@ async def _exec_bulk_join_inner(
     fail_count = 0
     step = 0
     skipped_by_limit = 0
+    # Аккаунты, у которых суточный счёт не прочитался. Считаем отдельно: для
+    # владельца это другая причина пропуска, и молчать о ней нельзя.
+    skipped_unknown_limit = 0
     _limit_cut = 0  # целей, не отработанных из-за дневного лимита
     failed_links: list[str] = []
     _JOIN_DAY_LIMITS = {"fast": 20, "normal": 15, "slow": 8, "smart": 12}
@@ -6461,6 +6464,7 @@ async def _exec_bulk_join_inner(
 
     async def _join_account_body(acc_idx: int, acc) -> None:
         nonlocal ok_count, fail_count, step, skipped_by_limit, _limit_cut
+        nonlocal skipped_unknown_limit
         if acc["id"] in isolated_accounts:
             return
         if proxy_mode == "relay":
@@ -6477,17 +6481,21 @@ async def _exec_bulk_join_inner(
                 acc["id"],
             )
         except Exception:
-            # Сбой чтения выключает суточный лимит на весь прогон: ниже
-            # «сделано 0», то есть аккаунт получает полную дневную норму
-            # заново. Остаёмся fail-open (сбой учёта не останавливает
-            # операцию), но молча это не делаем — счётчик доносит до
-            # владельца словами.
+            # НЕ ПРОЧИТАЛИ — значит не знаем, сколько аккаунт уже сделал за
+            # сутки. Раньше здесь стоял ноль, и это читалось как «ничего не
+            # делал»: аккаунт получал полную дневную норму заново, то есть
+            # лимит, который и существует против бана, на этот прогон
+            # выключался. Теперь неизвестный счёт считаем ИСЧЕРПАННЫМ и
+            # аккаунт на этом прогоне не трогаем: операция идёт остальными
+            # аккаунтами, а владелец видит причину в итоге. Пропустить сутки
+            # для одного аккаунта дешевле, чем удвоить его дневную норму.
             log.error('bulk_join: счёт join за сутки НЕ ПРОЧИТАН acc=%s — '
-                      'суточный лимит на этот прогон не сработает',
+                      'аккаунт пропущен, чтобы не выдать ему норму заново',
                       acc.get('id'), exc_info=True)
             _reliability_metric('infragram_daily_limit_read_failures_total',
                                 where='join')
-            joins_today = 0
+            skipped_unknown_limit += 1
+            return
         if (joins_today or 0) >= day_limit:
             log.info(
                 "bulk_join: аккаунт %s достиг дневного лимита join (%d), пропуск",
@@ -6778,13 +6786,16 @@ async def _exec_bulk_join_inner(
     parts = [f"Вступлено: {ok_count}", f"ошибок: {fail_count}"]
     if skipped_by_limit:
         parts.append(f"пропущено (лимит): {skipped_by_limit}")
+    if skipped_unknown_limit:
+        parts.append(
+            f"пропущено (счёт за сутки не прочитан): {skipped_unknown_limit}")
     if _limit_cut:
         parts.append(f"не выполнено из-за дневного лимита: {_limit_cut}")
     return {
         "status": "done",
         "ok": ok_count,
         "failed": fail_count,
-        "skipped_accounts": skipped_by_limit,
+        "skipped_accounts": skipped_by_limit + skipped_unknown_limit,
         "failed_links": failed_links[:50],
         "summary": ", ".join(parts),
     }
@@ -7027,6 +7038,9 @@ async def _exec_bulk_leave(
     fail_count = 0
     step = 0
     skipped_by_limit = 0
+    # Отдельно от лимита: аккаунты, чей суточный счёт не прочитался (другая
+    # причина пропуска, и владелец обязан её видеть).
+    skipped_unknown_limit = 0
     _limit_cut = 0  # целей, не отработанных из-за дневного лимита
     failed_channels: list[str] = []
     delay_mode = params.get("delay_mode", "smart")
@@ -7074,14 +7088,17 @@ async def _exec_bulk_leave(
                 acc["id"],
             )
         except Exception:
-            # Тот же класс, что у bulk_join: «не прочитали» читается как
-            # «ничего не делали», и дневная норма начинается заново.
+            # Тот же выбор, что у bulk_join: неизвестный счёт считаем
+            # исчерпанным. Ноль здесь читался как «ничего не делали», и
+            # дневная норма начиналась заново — то есть лимит, который и
+            # существует против бана, на прогон выключался.
             log.error('bulk_leave: счёт leave за сутки НЕ ПРОЧИТАН acc=%s — '
-                      'суточный лимит на этот прогон не сработает',
+                      'аккаунт пропущен, чтобы не выдать ему норму заново',
                       acc.get('id'), exc_info=True)
             _reliability_metric('infragram_daily_limit_read_failures_total',
                                 where='leave')
-            leaves_today = 0
+            skipped_unknown_limit += 1
+            continue
         if (leaves_today or 0) >= day_limit:
             log.info(
                 "bulk_leave: аккаунт %s достиг дневного лимита leave (%d), пропуск",
@@ -7281,13 +7298,16 @@ async def _exec_bulk_leave(
     parts = [f"Вышли: {ok_count}", f"ошибок: {fail_count}"]
     if skipped_by_limit:
         parts.append(f"пропущено (лимит): {skipped_by_limit}")
+    if skipped_unknown_limit:
+        parts.append(
+            f"пропущено (счёт за сутки не прочитан): {skipped_unknown_limit}")
     if _limit_cut:
         parts.append(f"не выполнено из-за дневного лимита: {_limit_cut}")
     return {
         "status": "done",
         "ok": ok_count,
         "failed": fail_count,
-        "skipped_accounts": skipped_by_limit,
+        "skipped_accounts": skipped_by_limit + skipped_unknown_limit,
         "failed_channels": failed_channels[:50],
         "summary": ", ".join(parts),
     }
