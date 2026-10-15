@@ -9,6 +9,7 @@ cooldown_until, обнулённый trust_score) → аккаунт молча 
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,7 +26,7 @@ def test_reimport_clears_operational_blockers():
 
 
 def test_revive_endpoint_and_route_exist():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def accounts_revive" in api
     assert '"/api/miniapp/accounts/revive"' in api
     i = api.index("async def accounts_revive")

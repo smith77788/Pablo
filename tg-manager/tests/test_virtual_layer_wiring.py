@@ -13,9 +13,10 @@ import pathlib
 
 from services import virtual_layer as V
 from services.organism import spine
+from tests.miniapp_source import api_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+API = api_source()
 RUNNER = (ROOT / "services" / "organism" / "runner.py").read_text(encoding="utf-8")
 SENSOR = (ROOT / "services" / "intent_sensor.py").read_text(encoding="utf-8")
 

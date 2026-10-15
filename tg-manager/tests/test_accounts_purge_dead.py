@@ -9,6 +9,7 @@ mini_app_api не импортируется в песочнице — пров�
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,7 +20,7 @@ def _read(rel: str) -> str:
 
 
 def test_backend_dead_filter_and_delete_op():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     where = api[api.index("def _accounts_where"):]
     where = where[:where.index("return ")]
     assert 'flt == "dead"' in where
@@ -30,7 +31,7 @@ def test_backend_dead_filter_and_delete_op():
 
 
 def test_backend_stats_has_dead():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "IN ('banned','deactivated','session_expired')) AS dead" in api
 
 
@@ -48,7 +49,7 @@ def test_frontend_has_dead_kpi_and_purge():
 def test_conflict_cooldown_not_in_dead():
     """Конфликтные (AUTH_KEY_DUPLICATED → cooldown) НЕ попадают в 'dead' —
     их лечит перезалив, а не удаление."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     # изолируем ИМЕННО SQL-условие фильтра dead (строку clauses.append),
     # комментарии не считаем.
     after = api[api.index('flt == "dead"'):]

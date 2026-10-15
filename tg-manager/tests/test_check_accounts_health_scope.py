@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 
 from services import op_worker
+from tests.miniapp_source import api_source
 
 
 def _run(coro):
@@ -81,7 +82,7 @@ def test_executor_scopes_explicit_ids_without_admin_flag():
 
 
 def test_submit_admin_checks_all_accounts_not_only_active():
-    src = (Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     m = re.search(r"async def accounts_check\(request.*?\n(.*?)\n    def _build_profile_params",
                   src, re.DOTALL)
     assert m, "accounts_check не найден"
@@ -93,7 +94,7 @@ def test_submit_admin_checks_all_accounts_not_only_active():
 
 def test_admin_door_marks_cross_owner():
     """Дверь обязана отметить платформенный срез, иначе админ снова получит 0/N."""
-    src = (Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     m = re.search(r"async def accounts_check\(request.*?\n(.*?)\n    def _build_profile_params",
                   src, re.DOTALL)
     assert m, "accounts_check не найден"

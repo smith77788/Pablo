@@ -18,11 +18,10 @@ import ast
 import functools
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
-
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
@@ -47,8 +46,7 @@ def _js_func(name: str) -> str:
 
 @functools.lru_cache(maxsize=1)
 def _referral_handler() -> str:
-    with open(API, encoding="utf-8") as f:
-        src = f.read()
+    src = api_source()
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) \
                 and node.name == "referral_overview_detail":

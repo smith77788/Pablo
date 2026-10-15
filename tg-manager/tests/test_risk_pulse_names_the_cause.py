@@ -25,6 +25,7 @@ import asyncio
 
 from services import account_status as acc
 from services.infra_memory import get_account_health
+from tests.miniapp_source import api_source
 
 
 class _Pool:
@@ -147,8 +148,7 @@ def test_the_account_screen_prints_the_cause_the_pulse_computed():
 def test_the_api_passes_the_cause_to_the_list():
     from pathlib import Path
 
-    api = (Path(__file__).resolve().parents[1]
-           / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert 'r["health_reason"]' in api
     assert 'r["health_needs_owner"]' in api
 

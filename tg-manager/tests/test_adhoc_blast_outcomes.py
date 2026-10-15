@@ -18,6 +18,7 @@ import ast
 import pathlib
 
 from services.dm_engine import classify_send_result
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _OP_WORKER = _ROOT / "services" / "op_worker.py"
@@ -138,7 +139,7 @@ def test_adhoc_reports_skipped_separately_from_errors():
 # ── Честное превью до запуска ─────────────────────────────────────────────────
 
 def _endpoint_source() -> str:
-    src = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     start = src.index("async def dm_adhoc_send")
     return src[start:start + 3500]
 

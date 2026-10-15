@@ -19,10 +19,11 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def _subscription_body() -> str:
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def subscription\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "subscription handler not found"
     return m.group(1)

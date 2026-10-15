@@ -13,6 +13,7 @@ import datetime as dt
 import pathlib
 
 from services.dm_engine import _QUIET_MAX_WAIT_S, accounts_awake
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -110,7 +111,7 @@ def test_ui_exposes_the_setting():
 
 def test_api_only_persists_explicit_opt_out():
     """Умолчание живёт в движке — API не должен его дублировать."""
-    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert 'body.get("quiet_hours") is False' in api
 
 

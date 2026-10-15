@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -21,7 +22,7 @@ def _read(rel: str) -> str:
 
 
 def test_backend_stage_whitelist_exact():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     m = re.search(r"ACCOUNT_STAGES\s*=\s*\{([^}]*)\}", src)
     assert m, "ACCOUNT_STAGES не найден"
     keys = set(re.findall(r'"([a-z_]+)"', m.group(1)))
@@ -37,7 +38,7 @@ def test_ui_stage_map_matches_backend():
 
 
 def test_set_stage_mass_scoped_write():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     assert 'op == "set_stage"' in src
     # запись должна быть скоупнута по owner_id и множеству id (не глобальный UPDATE)
     assert re.search(
@@ -46,13 +47,13 @@ def test_set_stage_mass_scoped_write():
 
 
 def test_meta_validates_stage():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     assert 'if "stage" in body' in src
     assert "not in ACCOUNT_STAGES" in src, "meta не валидирует stage по whitelist"
 
 
 def test_stage_stats_scoped_and_whitelisted():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     # разбивка by_stage должна считаться по owner_id и фильтроваться whitelist'ом
     assert '"by_stage"' in src, "нет разбивки by_stage в stats"
     # Скоуп по owner_id сохранён (нет межтенантной утечки разбивки стадий).
@@ -69,7 +70,7 @@ def test_stage_stats_cover_whole_fleet_not_just_staged():
     владелец читал это как «всего 7 аккаунтов». Разбивка обязана покрывать ВЕСЬ
     флот: аккаунты без стадии считаются 'new', а не выбрасываются условием
     stage IS NOT NULL."""
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     assert "stage IS NOT NULL GROUP BY stage" not in src, (
         "by_stage снова отбрасывает аккаунты без стадии — чип «Все» занизит флот")
     assert src.count("COALESCE(stage,'new')") >= 2, (

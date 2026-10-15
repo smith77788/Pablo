@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from services.parser import normalize_source_ref
+from tests.miniapp_source import api_source
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -50,7 +51,7 @@ def test_wired_into_miniapp_entry():
     а не сырой .lstrip('@') (иначе вставленная ссылка не резолвится)."""
     import inspect
     from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert "normalize_source_ref(str(body.get(\"source_ref\"" in src, (
         "parse-эндпойнт должен нормализовать source_ref общим хелпером"
     )

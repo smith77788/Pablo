@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -43,7 +44,7 @@ def _queries(src: str, pattern: str) -> list[str]:
 
 
 def test_pausing_stops_the_fleet_wait_clock():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     paused = _queries(src, "status='paused'")
     paused = [q for q in paused if "operation_queue" in q and "warmup" not in q]
     assert paused, "пауза операций не найдена — тест устарел"
@@ -56,7 +57,7 @@ def test_pausing_stops_the_fleet_wait_clock():
 
 
 def test_resuming_clears_a_stale_mark():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     resumed = [q for q in _queries(src, "status='pending'")
                if "status='paused'" in q]
     assert resumed, "возобновление приостановленных операций не найдено"
@@ -69,7 +70,7 @@ def test_resuming_clears_a_stale_mark():
 
 def test_both_scopes_are_covered():
     """Пауза есть и для одной операции, и для всей очереди — паритет обязателен."""
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     single = [q for q in _queries(src, "status='paused'") if "WHERE id=$1" in q]
     whole = [q for q in _queries(src, "status='paused'")
              if "WHERE owner_id=$1" in q]

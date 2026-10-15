@@ -11,7 +11,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_source
+API = api_source()
 HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 BOT_ACC = (ROOT / "bot" / "handlers" / "accounts.py").read_text(encoding="utf-8")
 

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import pathlib
 import re
+from tests.miniapp_source import api_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-API = ROOT / "services" / "mini_app_api.py"
 
 #: Каталоги, которые не считаются продуктом: тесты и окружение.
 _SKIP = ("/.git", "/node_modules", "/tests", "/.venv", "/__pycache__")
@@ -54,7 +54,7 @@ def _written_tables() -> set[str]:
 
 
 def _tables_read_by_miniapp() -> set[str]:
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     read = {m.lower() for m in re.findall(r"\bFROM\s+([a-z_][a-z0-9_]*)", src, re.I)}
     read |= {m.lower() for m in re.findall(r"\bJOIN\s+([a-z_][a-z0-9_]*)", src, re.I)}
     return read
@@ -84,7 +84,7 @@ def test_miniapp_reads_no_table_that_nobody_writes():
 
 def test_infra_health_reads_live_anomalies():
     """Экран здоровья берёт оповещения из живого источника, а не из пустоты."""
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     start = src.index("async def infra_health_overview")
     body = src[start : src.index("async def ", start + 10)]
     assert "get_active_anomalies" in body, (

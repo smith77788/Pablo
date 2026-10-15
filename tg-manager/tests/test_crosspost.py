@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from services import op_worker
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -71,7 +72,7 @@ def test_crosspost_run_op_and_dispatch():
 
 
 def test_endpoints_through_bus_and_routes():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def crosspost_run" in api
     assert "async def crosspost_links_list" in api
     assert '"/api/miniapp/crosspost/run"' in api

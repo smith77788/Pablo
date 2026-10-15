@@ -17,6 +17,7 @@ import threading
 import pytest
 
 from services import ipv6_egress as eg
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -119,7 +120,7 @@ def test_probe_ok_when_bind_and_connect_work(monkeypatch):
 
 
 def test_save_endpoint_probes_before_saving():
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     body = src[src.index("async def transport_ipv6_save("):]
     body = body[:body.index("app.router.add_get")]
     assert "probe_subnet" in body

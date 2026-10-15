@@ -28,6 +28,7 @@ import re
 import pytest
 
 from tests.miniapp_source import miniapp_source
+from tests.miniapp_source import api_source
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
 pytestmark_pg = pytest.mark.skipif(
@@ -56,12 +57,12 @@ def _read(rel: str) -> str:
 # ── статика: маршрут, обработчик, фронтенд ───────────────────────────────────
 
 def test_run_now_route_registered():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     assert 'app.router.add_post("/api/miniapp/operation/{op_id}/run_now", run_now_operation)' in src
 
 
 def test_run_now_handler_scoped_and_pending_only():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     i = src.index("async def run_now_operation")
     seg = src[i:src.index("\n    async def ", i + 10)]
     assert "SET scheduled_for=NULL" in seg
@@ -82,7 +83,7 @@ def test_resume_operation_does_not_touch_scheduled_for():
     пропускается без INFRAGRAM_TEST_DSN, поэтому противоречие с кодом никто не
     видел. Теперь он стережёт принятое решение.
     """
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     i = src.index("async def resume_operation")
     seg = src[i:src.index("\n    async def ", i + 10)]
     body = seg[seg.index("uid = _get_uid(request)"):]

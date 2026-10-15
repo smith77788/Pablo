@@ -452,7 +452,14 @@ def test_no_handler_writes_the_workflow_tables_by_hand():
 
 
 def test_the_old_handlers_are_gone_from_mini_app_api():
-    """Переезд должен быть переездом, а не копией."""
+    """Переезд должен быть переездом, а не копией.
+
+    ЕДИНСТВЕННОЕ место, где читать монолит ПО ПУТИ — правильно, а общий
+    `api_source()` — нет: утверждение здесь ОТРИЦАТЕЛЬНОЕ, «копии не осталось».
+    По всему слою оно ложно по определению — ручка живёт в
+    services/mini_app_workflows.py, туда её и переносили. Поэтому и проверка
+    `test_tests_do_not_pin_the_monolith` этот файл не считает долгом.
+    """
     src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
     for name in ("async def workflow_list", "async def workflow_create_plural",
                  "async def workflow_detail_plural", "async def workflow_execute"):

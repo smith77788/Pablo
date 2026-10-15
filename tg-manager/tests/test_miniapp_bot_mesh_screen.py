@@ -12,15 +12,16 @@ import ast
 import functools
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-API = os.path.join(ROOT, "services", "mini_app_api.py")
+
 HTML = os.path.join(ROOT, "mini_app", "index.html")
 
 
 @functools.lru_cache(maxsize=1)
 def _api_src() -> str:
-    return open(API, encoding="utf-8").read()
+    return api_source()
 
 
 @functools.lru_cache(maxsize=1)

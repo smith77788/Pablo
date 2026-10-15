@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services import channel_admin as ca
+from tests.miniapp_source import api_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -99,7 +100,7 @@ def test_empty_network_is_zeroes_not_error():
 
 
 def test_api_returns_network():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "network_overview(pool, uid)" in api
     assert '"network": network' in api
     assert 'request.query.get("summary") != "0"' in api

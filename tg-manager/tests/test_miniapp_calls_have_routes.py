@@ -16,6 +16,7 @@ from __future__ import annotations
 import collections
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _MINI_APP = os.path.join(ROOT, "mini_app")
@@ -36,7 +37,7 @@ def _api_sources() -> list[str]:
     (`mini_app_X.setup_routes(app, pool)`): экраны «Хранилище», «Сообщество»,
     «Рейтинг» вынесены в свои файлы, и чтение одного mini_app_api делало их
     маршруты невидимыми — храповик кричал о 404, которых нет."""
-    api = open(_API, encoding="utf-8").read()
+    api = api_source()
     out = [api]
     for mod in sorted(set(re.findall(r"\b(mini_app_\w+)\.setup_routes\(\s*app", api))):
         path = os.path.join(os.path.dirname(_API), mod + ".py")

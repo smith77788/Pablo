@@ -13,6 +13,7 @@ import os
 import re
 
 from services import ai_providers, mini_app_api
+from tests.miniapp_source import api_source
 
 _HTML = os.path.join(os.path.dirname(__file__), "..", "mini_app", "index.html")
 
@@ -27,7 +28,7 @@ def test_ping_providers_helper_exists_and_shape():
 
 
 def test_owner_endpoints_registered_and_scoped():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert re.search(r'add_get\(\s*"/api/miniapp/ai/status"\s*,\s*ai_status', src)
     assert re.search(r'add_post\(\s*"/api/miniapp/ai/test"\s*,\s*ai_test', src)
     for handler in ("ai_status", "ai_test"):

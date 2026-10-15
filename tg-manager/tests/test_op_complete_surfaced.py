@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+API = api_source()
 
 
 def test_frontend_subscribes_to_op_complete():

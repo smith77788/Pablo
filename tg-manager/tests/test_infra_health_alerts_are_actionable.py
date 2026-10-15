@@ -13,6 +13,7 @@ import ast
 import functools
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
@@ -86,7 +87,7 @@ def test_alert_can_be_dismissed_from_the_mini_app():
     res = _js_func("ihResolve")
     assert "/infra_health/anomaly/" in res and "/resolve" in res
     assert "askConfirm" in res
-    api_src = open(API, encoding="utf-8").read()
+    api_src = api_source()
     assert 'add_post("/api/miniapp/infra_health/anomaly/{anomaly_id}/resolve"' in api_src
 
 

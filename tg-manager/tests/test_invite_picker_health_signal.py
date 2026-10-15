@@ -15,12 +15,13 @@ from pathlib import Path
 # Источник берём целиком, иначе вынос экрана роняет проверку, хотя
 # функциональность на месте.
 from tests.miniapp_source import miniapp_source
+from tests.miniapp_source import api_source
 
 HTML = miniapp_source()
 
 
 def test_backend_accounts_expose_health_status():
-    src = (Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     assert 'r["health_status"] = h["status"]' in src, "accounts должен отдавать health_status"
 
 

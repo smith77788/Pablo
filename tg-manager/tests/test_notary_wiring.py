@@ -14,9 +14,10 @@ import ast
 import asyncio
 import pathlib
 import re
+from tests.miniapp_source import api_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+API = api_source()
 UI = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 MAIN = (ROOT / "main.py").read_text(encoding="utf-8")
 OBS = (ROOT / "services" / "notary_observer.py").read_text(encoding="utf-8")

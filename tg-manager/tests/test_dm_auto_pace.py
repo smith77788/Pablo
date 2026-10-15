@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 
 from services import dm_engine, mini_app_api
+from tests.miniapp_source import api_source
 
 
 def _index_html() -> str:
@@ -51,7 +52,7 @@ def test_dm_engine_auto_is_not_more_dangerous_on_failure():
 
 
 def test_dm_create_accepts_auto_pace():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def dm_campaign_create\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "dm_campaign_create не найден"
     body = m.group(1)

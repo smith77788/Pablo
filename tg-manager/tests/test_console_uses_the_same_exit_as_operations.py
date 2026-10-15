@@ -19,6 +19,7 @@ import ast
 import os
 
 import pytest
+from tests.miniapp_source import api_source
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -53,7 +54,7 @@ def test_canonical_loader_provides_every_transport_field():
 
 
 def test_console_uses_the_canonical_loader():
-    body = _fn_body(_read("services/mini_app_api.py"), "_console_account")
+    body = _fn_body(api_source(), "_console_account")
     assert "get_account_for_telethon" in body, (
         "консоль грузит аккаунт своим запросом — транспорт разъедется с операциями"
     )
@@ -61,14 +62,14 @@ def test_console_uses_the_canonical_loader():
 
 def test_console_still_scopes_by_owner_and_active():
     """Чужой и выключенный аккаунт консоли по-прежнему недоступны."""
-    body = _fn_body(_read("services/mini_app_api.py"), "_console_account")
+    body = _fn_body(api_source(), "_console_account")
     assert "owner_id=$2" in body, "консоль перестала скоупить аккаунт по владельцу"
     assert "is_active=TRUE" in body, "консоль отдаёт выключенный аккаунт"
 
 
 def test_console_query_no_longer_drops_transport():
     """Старый усечённый SELECT не должен вернуться."""
-    body = _fn_body(_read("services/mini_app_api.py"), "_console_account")
+    body = _fn_body(api_source(), "_console_account")
     assert "SELECT id, session_str, device_model" not in body
 
 

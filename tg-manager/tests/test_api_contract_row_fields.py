@@ -27,9 +27,10 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
-_API_SRC = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+_API_SRC = api_source()
 
 
 def _frontend_js() -> str:

@@ -19,9 +19,10 @@ ROOT = Path(__file__).resolve().parents[1]
 # Мини-апп больше не один файл: экраны выносятся в mini_app/screens/*.js.
 # Берём исходник целиком, иначе каждый вынос ронял бы эти проверки.
 from tests.miniapp_source import miniapp_source
+from tests.miniapp_source import api_source
 
 UI = miniapp_source()
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+API = api_source()
 BOT = (ROOT / "bot" / "handlers" / "mass_inviter.py").read_text(encoding="utf-8")
 WORKER = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
 

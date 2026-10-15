@@ -11,6 +11,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from services import account_manager as am
+from tests.miniapp_source import api_source
 
 
 class _Btn:
@@ -140,6 +141,6 @@ def test_mistake_step_unaffected():
 def test_route_and_engine_wired():
     import inspect
     from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert 'app.router.add_post("/api/miniapp/account/{acc_id}/spamblock_appeal", account_spamblock_appeal)' in src
     assert hasattr(am, "appeal_spamblock")

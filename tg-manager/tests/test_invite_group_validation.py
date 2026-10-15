@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from services.mass_inviter_engine import validate_group_ref as v
+from tests.miniapp_source import api_source
 
 
 @pytest.mark.parametrize("ref", [
@@ -71,7 +72,7 @@ def test_bot_validates_raw_input_not_normalized():
 
 
 def test_miniapp_validates_before_queueing():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     i = src.index("async def mass_inviter_submit")
     seg = src[i:src.index("    async def ", i + 30)]
     assert "validate_group_ref" in seg, (

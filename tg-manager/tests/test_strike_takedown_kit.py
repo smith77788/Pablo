@@ -18,6 +18,7 @@ from pathlib import Path
 
 from services import mini_app_api
 from services.strike_engine import build_takedown_kit
+from tests.miniapp_source import api_source
 
 
 def test_kit_contains_store_and_legal_channels():
@@ -61,7 +62,7 @@ def test_kit_does_not_promise_guaranteed_removal():
 
 
 def test_takedown_kit_endpoint_registered_and_scoped():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert 'add_get("/api/miniapp/strike/takedown_kit", strike_takedown_kit)' in src
     m = re.search(r"async def strike_takedown_kit\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "strike_takedown_kit не найден"

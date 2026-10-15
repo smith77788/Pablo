@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
-API = ROOT / "services" / "mini_app_api.py"
+
 INDEX = ROOT / "mini_app" / "index.html"
 
 
 def _handler_src() -> str:
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     m = re.search(r"    async def ad_intel_overview.*?(?=\n    async def )", src, re.DOTALL)
     assert m, "ad_intel_overview не найден"
     return m.group(0)

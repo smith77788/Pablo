@@ -16,6 +16,7 @@ import asyncio
 
 from services import infra_orchestrator as IO
 from services import resource_selector as RS
+from tests.miniapp_source import api_source
 
 
 def _acc(i, alive=True, streak=0, has_proxy=True):
@@ -112,6 +113,5 @@ def test_warning_is_fail_open():
 def test_warning_reaches_the_mass_operation_banner():
     import pathlib
 
-    api = (pathlib.Path(__file__).resolve().parent.parent
-           / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert "get_dead_proxy_warning" in api

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,7 +48,7 @@ def _bot_src() -> str:
 
 
 def _mini_src() -> str:
-    return _strip_comments((ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8"))
+    return _strip_comments(api_source())
 
 
 def _dynamic_prefixes(src: str) -> list[str]:

@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-API = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+API = api_source()
 DB = open(os.path.join(ROOT, "database", "db.py"), encoding="utf-8").read()
 SNAPSHOT = open(os.path.join(ROOT, "tests", "miniapp_routes_snapshot.txt"),
                 encoding="utf-8").read()

@@ -16,9 +16,10 @@ import asyncio
 import pathlib
 
 from services import infra_orchestrator as IO
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+_API = api_source()
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 

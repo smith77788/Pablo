@@ -16,6 +16,7 @@ import pathlib
 import re
 
 from services import op_quick_actions as QA
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
@@ -23,7 +24,7 @@ _SCREENS = "\n".join(
     p.read_text(encoding="utf-8")
     for p in sorted((_ROOT / "mini_app" / "screens").glob("*.js"))
 )
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+_API = api_source()
 _OPW = (_ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
 
 

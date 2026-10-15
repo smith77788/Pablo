@@ -17,6 +17,7 @@ operation_queue в handler'ах («Заменяет прямые INSERT INTO ope
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -48,7 +49,7 @@ def test_bot_handler_uses_submit_not_raw_insert():
 
 
 def test_mini_app_handler_uses_submit_not_raw_insert():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     seg = src[src.index("async def mass_inviter_submit"):]
     seg = seg[:seg.index("\n    # ── Stars Hub")]
     assert "_obus.submit(" in seg, "мини-апп не вызывает operation_bus.submit"

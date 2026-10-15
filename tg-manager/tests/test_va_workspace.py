@@ -11,6 +11,7 @@ import pytest
 from services import channel_admin as ca
 from services import va_control, va_references
 from services import va_workspace as workspace
+from tests.miniapp_source import api_source
 
 OWNER = 42
 CHANNEL = -1001234567890
@@ -250,7 +251,7 @@ async def test_cancellation_propagates_and_stops_all_readers(env, monkeypatch, c
 @pytest.mark.parametrize("found", [False, True])
 async def test_api_wrapper_delegates_without_changing_response(env, monkeypatch, found):
     path = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(api_source())
     names = {"_va_payload", "va_channel_get_for"}
     functions = [node for node in ast.walk(tree)
                  if isinstance(node, ast.AsyncFunctionDef) and node.name in names]

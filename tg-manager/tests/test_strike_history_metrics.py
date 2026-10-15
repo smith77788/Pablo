@@ -12,10 +12,11 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def _handler_src() -> str:
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def strike_history\(.*?\n(.*?)async def ", src, re.DOTALL)
     assert m, "strike_history handler not found"
     return m.group(1)

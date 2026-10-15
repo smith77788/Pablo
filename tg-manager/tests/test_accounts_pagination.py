@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,7 +20,7 @@ def _read(rel: str) -> str:
 
 
 def test_where_builder_scoped_by_owner():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     m = re.search(r"def _accounts_where\(.*?\n(.*?)\n    async def accounts", src, re.DOTALL)
     assert m, "_accounts_where не найден"
     body = m.group(1)
@@ -35,7 +36,7 @@ def test_where_builder_scoped_by_owner():
 
 
 def test_pagination_params_and_response():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     acc = src[src.index("async def accounts(request"):]
     acc = acc[:acc.index("async def account_detail")]
     # лимит клампится (не даём выкачать всё одним запросом), offset неотрицателен

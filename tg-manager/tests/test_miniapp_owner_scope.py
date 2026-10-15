@@ -17,8 +17,9 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
-_SRC = inspect.getsource(mini_app_api)
+_SRC = api_source()
 
 
 def test_presence_pack_bot_link_is_owner_scoped():

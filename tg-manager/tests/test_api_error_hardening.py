@@ -11,12 +11,13 @@ from __future__ import annotations
 import os
 
 import pytest
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def test_api_middleware_catches_all_unhandled():
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     i = src.index("async def plan_gate_middleware")
     body = src[i:i + 1400]
     assert "except web.HTTPException:" in body and "raise" in body   # штатные ответы не глушим

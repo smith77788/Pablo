@@ -17,11 +17,10 @@ from __future__ import annotations
 import functools
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
-
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
@@ -56,7 +55,7 @@ def test_health_numbers_open_the_accounts():
 
 def test_health_does_not_fake_filters_it_cannot_do():
     """Сервер знает all/active/cooldown/banned/spamblock/dead — и только их."""
-    src = open(API, encoding="utf-8").read()
+    src = api_source()
     i = src.index("ACCOUNT_FILTERS = (")
     known = src[i:src.index(")", i) + 1]
     for slice_name in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
@@ -82,14 +81,14 @@ def test_health_does_not_fake_filters_it_cannot_do():
 def test_flood_event_opens_the_account():
     body = _js_func("openHealth")
     assert "openAccount(" in body, "со строки флуд-события нельзя попасть в аккаунт"
-    src = open(API, encoding="utf-8").read()
+    src = api_source()
     assert "ta.id AS account_id" in src, "сервер не отдаёт id аккаунта в событии"
 
 
 def test_flood_list_admits_its_cap():
     body = _js_func("openHealth")
     assert "events_total" in body, "«последние 10» выдаются за всю историю"
-    src = open(API, encoding="utf-8").read()
+    src = api_source()
     assert '"events_total"' in src
     assert "Последние флуд-события (7 дней)" not in _html(), (
         "заголовок обещает неделю, а список приходит за всё время")

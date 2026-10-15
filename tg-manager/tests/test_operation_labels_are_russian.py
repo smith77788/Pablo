@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+from tests.miniapp_source import api_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -90,7 +91,7 @@ def test_no_english_operation_labels():
 
 
 def test_quick_post_label_agrees_with_any_number():
-    src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     assert 'f"Quick Post в {len(channel_ids)} каналов"' not in src
     assert "каналов: {len(channel_ids)}" in src, (
         "подпись снова склоняет «каналов» по числу, которое заранее неизвестно")

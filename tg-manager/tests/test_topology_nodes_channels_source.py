@@ -14,6 +14,7 @@ import ast
 import os
 
 import pytest
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -21,7 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _topology_fetch_sql() -> list[str]:
     """SQL-строки всех .fetch/.fetchrow/.fetchval внутри topology_nodes (AST
     склеивает соседние строковые литералы в один Constant)."""
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     tree = ast.parse(src)
     fn = next((n for n in ast.walk(tree)
                if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))

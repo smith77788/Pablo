@@ -20,7 +20,6 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
 ENGINE = os.path.join(ROOT, "services", "contacts_hub", "bulk_ops_engine.py")
 
 

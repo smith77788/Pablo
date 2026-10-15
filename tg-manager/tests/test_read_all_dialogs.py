@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 from services import op_worker
+from tests.miniapp_source import api_source
 
 
 
@@ -79,5 +80,5 @@ def test_wired_in_dispatch_and_action():
     src = inspect.getsource(op_worker)
     assert op_worker.handler_for("read_all_dialogs") is not None
     from services import mini_app_api
-    msrc = inspect.getsource(mini_app_api)
+    msrc = api_source()
     assert '"read_all_dialogs"' in msrc and 'act == "read_all"' in msrc

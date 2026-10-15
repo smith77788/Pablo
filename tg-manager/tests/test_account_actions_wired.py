@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,7 +30,7 @@ def test_no_phantom_op_executors_left():
 
 
 def test_account_action_handles_three_inline_not_as_ops():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     seg = api[api.index("async def account_action"):api.index("async def account_post_story")]
     # больше НЕ ставим фантомные op'ы этих типов
     assert "\"reauth_account\"" not in seg and "'reauth_account'" not in seg

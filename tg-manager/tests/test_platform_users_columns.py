@@ -15,6 +15,7 @@ import re
 
 from bot.handlers import admin as admin_mod
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def test_mini_app_no_bare_platform_users_created_at_alias():
@@ -22,7 +23,7 @@ def test_mini_app_no_bare_platform_users_created_at_alias():
     pu.last_active_at на platform_users (алиас pu) — таких колонок нет
     (реальные registered_at/last_seen). Носитель бага — team_members (экран
     «Команда» отдавал 500). Допустим только явный алиас `... AS created_at`."""
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     bad = re.findall(r"pu\.(?:created_at|last_active_at)\b", src)
     assert not bad, (
         "platform_users (алиас pu) не имеет created_at/last_active_at — "
@@ -31,7 +32,7 @@ def test_mini_app_no_bare_platform_users_created_at_alias():
 
 
 def test_team_members_aliases_platform_users_columns():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def team_members\(.*?\n(.*?)app\.router", src, re.DOTALL)
     if not m:
         m = re.search(r"async def team_members\(.*?\n(.*?)async def ", src, re.DOTALL)

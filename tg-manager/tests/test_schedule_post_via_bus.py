@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
-API = ROOT / "services" / "mini_app_api.py"
-
 
 def _handler_src() -> str:
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     m = re.search(r"    async def schedule_post.*?(?=\n    # ──|\n    async def )", src, re.DOTALL)
     assert m, "schedule_post не найден"
     return m.group(0)

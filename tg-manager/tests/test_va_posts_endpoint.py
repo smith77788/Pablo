@@ -12,6 +12,7 @@ import os
 import pytest
 
 from services.mini_app_api import va_post_link
+from tests.miniapp_source import api_source
 
 
 # ── Фронт: экран постов и переход в канал ─────────────────────────────────────
@@ -30,8 +31,7 @@ def test_frontend_posts_screen_links_to_channel():
     assert "openTgLink('" in html or "openTgLink(`" in html, \
         "строка поста не ведёт в канал через openTgLink"
     # роут зарегистрирован на бэкенде
-    api = (pathlib.Path(__file__).resolve().parent.parent
-           / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert '"/api/miniapp/va/posts"' in api and "va_posts)" in api
 
 

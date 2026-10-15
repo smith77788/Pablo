@@ -15,11 +15,10 @@ from __future__ import annotations
 import functools
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
-
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
@@ -75,7 +74,7 @@ def test_screen_admits_the_server_cap():
     """Сервер отдаёт последние 50 — список не должен выдавать себя за полный."""
     body = _js_func("openDevices")
     assert "50" in body, "потолок выдачи не признаётся"
-    src = open(API, encoding="utf-8").read()
+    src = api_source()
     assert "devices_list" in src
 
 

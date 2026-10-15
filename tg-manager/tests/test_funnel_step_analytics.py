@@ -12,9 +12,10 @@ drip-цепочке («на каком шаге теряем людей») от�
 from __future__ import annotations
 
 import pathlib
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+_API = api_source()
 
 
 def _funnel_stats(steps: list[dict], dist: list[dict]) -> dict:

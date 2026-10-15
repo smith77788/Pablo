@@ -26,6 +26,7 @@ import re
 from pathlib import Path
 
 from services.infra_memory import get_account_health
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -201,7 +202,7 @@ def test_reset_all_uses_same_steps_as_single():
 # ── кнопки зовут общий сброс, а не свою копию ────────────────────────────────
 
 def _call_sites() -> dict[str, str]:
-    api = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     dash = (ROOT / "bot" / "handlers" / "health_dashboard.py").read_text(encoding="utf-8")
     m = re.search(r'elif act == "reset_cooldown":(.*?)\n        elif act == "', api, re.S)
     assert m, "ветка reset_cooldown в Mini App не найдена — тест устарел"

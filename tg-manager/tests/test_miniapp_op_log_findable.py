@@ -25,11 +25,11 @@ import re
 
 from tests.miniapp_source import miniapp_html
 from tests.miniapp_source import api_function
+from tests.miniapp_source import api_source
 
 
 def _api_src() -> str:
-    return (pathlib.Path(__file__).resolve().parents[1]
-            / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    return api_source()
 
 
 def _js_fn(src: str, name: str) -> str:

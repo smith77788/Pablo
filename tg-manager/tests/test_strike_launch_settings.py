@@ -19,10 +19,11 @@ import re
 from pathlib import Path
 
 from services import mini_app_api, op_worker
+from tests.miniapp_source import api_source
 
 
 def _api_src() -> str:
-    return inspect.getsource(mini_app_api)
+    return api_source()
 
 
 def _launch_body() -> str:

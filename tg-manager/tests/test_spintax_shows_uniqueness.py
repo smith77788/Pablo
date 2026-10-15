@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(os.path.join(ROOT, "mini_app", "screens", "spintax.js"),
           encoding="utf-8").read()
-API = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+API = api_source()
 SVC = open(os.path.join(ROOT, "services", "spintax_service.py"),
            encoding="utf-8").read()
 

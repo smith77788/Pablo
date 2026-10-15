@@ -42,6 +42,7 @@ from aiohttp import web
 
 from services import mini_app_api as M
 from services import session_importer as SI
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "mini_app" / "index.html"
@@ -216,7 +217,7 @@ def test_someone_elses_proxy_id_is_not_trusted(monkeypatch):
 
 def test_the_api_ignores_a_client_address_when_an_id_is_given():
     """Подменить адрес у выбранного прокси через тело запроса нельзя."""
-    src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     i = src.index("async def import_sessions_api")
     body = src[i:src.index("app.router.add_post(\"/api/miniapp/import_sessions\"", i)]
     assert 'proxy = None if proxy_id else data.get("proxy_url")' in body, (

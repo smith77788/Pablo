@@ -14,6 +14,7 @@ import re
 
 from services import mini_app_api, op_worker
 from services.audience_filters import parsed_audience_filters
+from tests.miniapp_source import api_source
 
 # Мини-апп больше не один файл: экраны вынесены в mini_app/screens/*.js.
 
@@ -36,14 +37,14 @@ def test_filter_sql_builder():
 
 
 def test_mini_app_reuses_shared_helper_not_local_dup():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     # локального определения быть НЕ должно (единый источник — audience_filters)
     assert "def parsed_audience_filters(" not in src, "должна быть ОДНА реализация (в audience_filters)"
     assert "from services.audience_filters import parsed_audience_filters" in src
 
 
 def test_invite_submit_passes_aud_filters():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def mass_inviter_submit\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "mass_inviter_submit not found"
     body = m.group(1)

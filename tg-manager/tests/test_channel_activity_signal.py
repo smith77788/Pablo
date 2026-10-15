@@ -13,6 +13,7 @@ import pathlib
 import pytest
 
 from tests.test_executors import FakePool
+from tests.miniapp_source import api_source
 
 
 @pytest.mark.asyncio
@@ -44,8 +45,8 @@ def test_publish_sets_last_post_at():
 
 def test_column_self_healed():
     """Колонка last_post_at должна добавляться self-heal'ом при старте."""
-    api = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-    src = api.read_text(encoding="utf-8")
+
+    src = api_source()
     assert "ADD COLUMN IF NOT EXISTS last_post_at" in src
 
 

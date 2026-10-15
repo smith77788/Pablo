@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -26,7 +27,7 @@ def _err_source() -> str:
     src[i:i+600] обрезает маркер пейволла раньше, чем до него доходит текст —
     тест начинает падать на ЗДОРОВОМ коде. Границей служит сама структура
     функции, а не подобранное когда-то число."""
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     i = src.index("def _err(")
     j = src.index("\n\n", src.index("return _json_resp(body, status)", i))
     return src[i:j]

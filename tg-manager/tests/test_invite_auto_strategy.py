@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 from services import flood_engine as fe
+from tests.miniapp_source import api_source
 
 WORKER = Path(__file__).resolve().parents[1] / "services" / "op_worker.py"
 
@@ -149,8 +150,7 @@ def test_auto_reason_reaches_the_user():
 
 
 def test_api_accepts_auto():
-    api = (Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py").read_text(
-        encoding="utf-8")
+    api = api_source()
     assert '"slow", "normal", "fast", "auto"' in api, (
         "иначе бэкенд молча заменит auto на normal и режим не заработает"
     )

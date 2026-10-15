@@ -23,7 +23,6 @@ import re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CC = os.path.join(ROOT, "mini_app", "screens", "cmdcenter.js")
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
 
 
 @functools.lru_cache(maxsize=1)

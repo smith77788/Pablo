@@ -5,6 +5,7 @@ import os
 
 from services.fleet_doctor import (compute_funnel, verdict, classify_errors,
                                    _transport_verdict)
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -89,7 +90,7 @@ def test_diagnose_override_wired():
 
 
 def test_endpoint_route_and_ui_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def fleet_diagnose" in api
     assert '"/api/miniapp/fleet/diagnose"' in api
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()

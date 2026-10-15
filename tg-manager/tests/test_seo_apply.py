@@ -13,17 +13,18 @@ import re
 
 from services import mini_app_api
 from services import op_worker
+from tests.miniapp_source import api_source
 
 
 def _handler_src() -> str:
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def seo_apply\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "seo_apply handler not found"
     return m.group(1)
 
 
 def test_seo_apply_route_registered():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert re.search(
         r'add_post\(\s*["\']/api/miniapp/seo/apply["\']\s*,\s*seo_apply', src
     ), "маршрут POST /api/miniapp/seo/apply должен быть зарегистрирован"
@@ -77,7 +78,7 @@ def test_shared_helper_exists_and_endpoint_reuses_it():
 
 
 def test_seo_apply_all_route_registered():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert re.search(
         r'add_post\(\s*["\']/api/miniapp/seo/apply_all["\']\s*,\s*seo_apply_all', src
     ), "маршрут POST /api/miniapp/seo/apply_all должен быть зарегистрирован"

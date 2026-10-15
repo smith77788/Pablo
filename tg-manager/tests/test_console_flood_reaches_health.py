@@ -23,6 +23,7 @@ import pytest
 
 from services import account_console as ac
 from services import flood_engine as fe
+from tests.miniapp_source import api_source
 
 
 class _FloodWaitError(Exception):
@@ -135,6 +136,8 @@ def test_session_function_records_the_flood(fn):
     import ast as _ast
     import os
 
+    # Тут читается ИМЕННО account_console.py, а не API-слой: проверка про
+    # сетевые функции консоли, а не про ручки мини-аппа.
     path = os.path.join(os.path.dirname(__file__), "..", "services", "account_console.py")
     src = open(path, encoding="utf-8").read()
     lines = src.split("\n")
@@ -155,7 +158,7 @@ def test_miniapp_passes_the_pool():
     import os
 
     path = os.path.join(os.path.dirname(__file__), "..", "services", "mini_app_api.py")
-    src = open(path, encoding="utf-8").read()
+    src = api_source()
     calls = 0
     for m in re.finditer(r"account_console\.(\w+)\(", src):
         fn = m.group(1)

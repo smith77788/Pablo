@@ -11,10 +11,11 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def _src() -> str:
-    return inspect.getsource(mini_app_api)
+    return api_source()
 
 
 def test_team_members_is_tenant_scoped():

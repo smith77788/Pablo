@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 
 from bot.handlers.crm import _parse_contact_line
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -64,5 +65,5 @@ def test_insert_uses_manual_source_upsert():
 
 
 def test_app_endpoint_still_present():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def crm_contact_create" in api

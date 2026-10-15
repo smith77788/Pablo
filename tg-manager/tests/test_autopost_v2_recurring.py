@@ -10,6 +10,7 @@ import inspect
 
 from services import op_worker
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def test_allowlist_has_posting_ops_only():
@@ -48,7 +49,7 @@ def test_op_worker_reschedules_on_done():
 
 
 def test_endpoints_accept_repeat_interval():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     # оба постинг-эндпойнта принимают repeat_interval_min
     assert src.count("repeat_interval_min") >= 2
     assert '"repeat_interval_min"' in src or "'repeat_interval_min'" in src

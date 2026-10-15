@@ -23,14 +23,15 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
-API = ROOT / "services" / "mini_app_api.py"
+
 INDEX = ROOT / "mini_app" / "index.html"
 
 
 def _handler(name: str) -> str:
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     m = re.search(r"    async def " + name + r"\b.*?(?=\n    async def )", src, re.DOTALL)
     assert m, f"{name} не найден"
     return m.group(0)
@@ -123,7 +124,7 @@ def test_token_path_toast_is_honest():
 # ── общий инвариант класса 3 ────────────────────────────────────────────────
 
 def test_no_unused_body_params_in_both_handlers():
-    tree = ast.parse(API.read_text(encoding="utf-8"))
+    tree = ast.parse(api_source())
     for fname in ("bot_factory_create", "bot_factory_create_new"):
         target = next((n for n in ast.walk(tree)
                        if isinstance(n, ast.AsyncFunctionDef) and n.name == fname), None)

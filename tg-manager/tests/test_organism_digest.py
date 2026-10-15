@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 from services.organism.digest import compose_digest, _flat_metrics, _headline
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -71,7 +72,7 @@ def test_headline_variants():
 
 
 def test_endpoint_route_and_ui_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def organism_digest" in api
     assert '"/api/miniapp/organism/digest"' in api
     assert "from services.organism import digest" in api

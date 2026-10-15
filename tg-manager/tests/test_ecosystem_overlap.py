@@ -12,6 +12,7 @@ import pathlib
 import pytest
 
 from tests.test_executors import FakePool
+from tests.miniapp_source import api_source
 
 
 @pytest.mark.asyncio
@@ -43,8 +44,8 @@ def test_endpoint_reads_ecosystem_members_not_dead_table():
     """ecosystem_overlaps должен читать членов из ecosystem_members, а не из
     мёртвой ecosystem_channels — иначе overlap всегда пустой."""
     import ast
-    api = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-    src = api.read_text(encoding="utf-8")
+
+    src = api_source()
     # Границы функции по AST, а не срез фиксированной длины: у отрицательного
     # утверждения ниже сдвинувшееся окно означает «проверка молча выключилась».
     region = None

@@ -20,6 +20,7 @@ import re
 import pytest
 
 from services import bot_reoptimizer as br
+from tests.miniapp_source import api_source
 
 
 # ── (1) чистая логика ──────────────────────────────────────────────────────
@@ -159,7 +160,7 @@ async def test_apply_bot_seo_rejects_foreign_bot(monkeypatch):
 
 def test_endpoints_and_routes_registered():
     from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert "async def seo_apply_bot(" in src
     assert "async def reopt_setting(" in src
     assert re.search(r'add_post\(\s*["\']/api/miniapp/seo/apply_bot["\']\s*,\s*seo_apply_bot', src)
@@ -168,7 +169,7 @@ def test_endpoints_and_routes_registered():
 
 def test_apply_bot_endpoint_reuses_service():
     from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def seo_apply_bot\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m and "bot_reoptimizer.apply_bot_seo" in m.group(1), (
         "эндпоинт должен переиспользовать сервис (без дублей логики)"

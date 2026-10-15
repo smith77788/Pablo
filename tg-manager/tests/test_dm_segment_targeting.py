@@ -18,6 +18,7 @@ import types
 import pytest
 
 from services import dm_engine
+from tests.miniapp_source import api_source
 
 
 class _FakePool:
@@ -166,8 +167,7 @@ def test_segment_target_limit_is_bounded():
 def test_api_allows_segment_target_type():
     import pathlib
 
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     assert '"segment"' in src and "get_segment_filters" in src, (
         "эндпоинт создания кампании обязан принимать сегмент и проверять владение им"
     )
@@ -218,6 +218,5 @@ def test_contacts_target_needs_no_segment_id(monkeypatch):
 def test_legacy_crm_target_still_accepted():
     """Уже созданные кампании с target_type='crm' обязаны продолжать работать."""
     import pathlib
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     assert '"crm", "contacts"' in src

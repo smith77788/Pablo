@@ -19,6 +19,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -143,7 +144,7 @@ def test_no_english_fallback_names_for_people_and_accounts():
             line = src[: m.start()].count("\n") + 1
             bad.append(f"{name}:{line}  {src[m.start():m.start()+30]!r}")
     api = os.path.join(ROOT, "services", "mini_app_api.py")
-    asrc = open(api, encoding="utf-8").read()
+    asrc = api_source()
     for m in re.finditer(r"'(?:User|user|Acc|acc|Bot|bot)\s*#", asrc):
         line = asrc[: m.start()].count("\n") + 1
         bad.append(f"services/mini_app_api.py:{line}  {asrc[m.start():m.start()+30]!r}")

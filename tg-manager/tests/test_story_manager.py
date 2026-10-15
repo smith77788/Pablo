@@ -9,6 +9,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from services import story_manager as sm
+from tests.miniapp_source import api_source
 
 
 def _run(coro):
@@ -79,6 +80,6 @@ def test_download_error_surfaced():
 def test_route_and_engine_wired():
     import inspect
     from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert 'app.router.add_post("/api/miniapp/account/{acc_id}/post_story", account_post_story)' in src
     assert hasattr(sm, "post_story")

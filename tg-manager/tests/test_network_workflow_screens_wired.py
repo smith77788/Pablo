@@ -8,6 +8,7 @@ list_workflows → 500. Фикс: plural-эндпоинты поверх сущ�
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,7 +19,7 @@ def _read(rel: str) -> str:
 
 
 def test_network_plural_routes_registered():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     for line in [
         'add_get("/api/miniapp/networks", networks_list)',
         'add_post("/api/miniapp/networks", network_create_plural)',

@@ -16,8 +16,7 @@ from __future__ import annotations
 import ast
 import builtins
 from pathlib import Path
-
-SRC = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
+from tests.miniapp_source import api_source
 
 
 def _module_scope(tree: ast.AST) -> set[str]:
@@ -79,7 +78,7 @@ def _bound_names(fn: ast.AST) -> set[str]:
 
 
 def test_no_undefined_names_in_mini_app_api():
-    src = SRC.read_text(encoding="utf-8")
+    src = api_source()
     tree = ast.parse(src)
     module_names = _module_scope(tree)
 

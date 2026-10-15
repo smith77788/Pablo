@@ -29,6 +29,7 @@ import pytest
 from aiohttp import web
 
 from services import mini_app_api, op_status
+from tests.miniapp_source import api_source
 
 
 class _Pool:
@@ -138,7 +139,7 @@ def test_whitelist_is_derived_not_copied():
     набором литералов, все проверки выше будут зелёными ровно до следующего
     нового состояния — то есть ровно до следующей жалобы владельца.
     """
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     decl = re.search(r"^OPERATION_STATUSES = (.+?)\n(?=\w|\n)", src, re.M | re.S)
     assert decl, "объявление списка статусов не найдено"
     body = decl.group(1)
@@ -157,7 +158,7 @@ def test_no_hand_written_exceptions():
     утверждение неоткуда: оно снова отстанет. Пустой ответ на статус, которого в
     очереди не бывает, честнее отказа на статус, который в ней есть.
     """
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     decl = re.search(r"^OPERATION_STATUSES = (.+?)\n(?=\w|\n)", src, re.M | re.S)
     assert "-" not in decl.group(1), (
         "из набора статусов что-то вычитается — это рукописное исключение"
@@ -166,5 +167,5 @@ def test_no_hand_written_exceptions():
 
 def test_model_is_imported_once():
     """Дубль импорта — след автоправки; синтаксис его не ловит."""
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert src.count("from services import op_status\n") == 1

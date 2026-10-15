@@ -23,6 +23,7 @@ import pytest
 pytest.importorskip("aiohttp")
 from aiohttp import web                                    # noqa: E402
 from aiohttp.test_utils import TestClient, TestServer      # noqa: E402
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = os.path.join(ROOT, "mini_app", "index.html")
@@ -36,7 +37,7 @@ def _build_app() -> web.Application:
     проде подменят на несжатую отдачу.
     """
     import logging
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     i = src.index("    _static_dir = os.path.join")
     j = src.index('        log.info("Mini App static served')
     block = src[i:j].replace(

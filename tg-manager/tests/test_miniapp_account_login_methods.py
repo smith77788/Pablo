@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import inspect
 import pathlib
+from tests.miniapp_source import api_source
 
 
-API = (pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py").read_text("utf-8")
+API = api_source()
 
 
 def test_all_login_routes_registered():

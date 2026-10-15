@@ -18,6 +18,7 @@ import importlib
 import pytest
 
 from services import showcase_layer as sl
+from tests.miniapp_source import api_source
 
 
 @pytest.fixture(autouse=True)
@@ -140,7 +141,7 @@ def test_toggle_exists_and_is_sent():
 
 
 def test_api_accepts_the_flag():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert '"use_showcase"' in api and 'params["use_showcase"] = True' in api, (
         "API не принимает параметр — галочка не доедет до исполнителя"
     )

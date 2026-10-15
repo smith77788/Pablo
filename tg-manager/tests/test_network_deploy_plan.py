@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from services import network_builder
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -53,7 +54,7 @@ def test_edge_action_text_uses_labels():
 
 
 def test_endpoint_and_ui_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def network_deploy_plan" in api
     assert '"/api/miniapp/networks/{net_id}/deploy_plan"' in api
     assert "plan_deployment" in api

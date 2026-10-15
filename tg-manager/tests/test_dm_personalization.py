@@ -18,6 +18,7 @@ from services.dm_engine import (
     personalize,
     template_uses_personalization,
 )
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -141,7 +142,7 @@ def test_name_fallback_is_settable_end_to_end():
     """Движок читал params.name_fallback, но задать его было нечем — настройка
     без ввода. Проверяем весь путь: поле → создание → правка → движок."""
     ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     src = (_ROOT / "services" / "dm_engine.py").read_text(encoding="utf-8")
     assert 'id="cmpNameFb"' in ui, "нет поля ввода"
     assert "payload.name_fallback" in ui, "не отправляется при создании"
@@ -152,10 +153,10 @@ def test_name_fallback_is_settable_end_to_end():
 
 
 def test_name_fallback_length_capped_in_api():
-    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert "_nf[:32]" in api
 
 
 def test_clearing_fallback_returns_to_engine_default():
-    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert '_p.pop("name_fallback", None)' in api

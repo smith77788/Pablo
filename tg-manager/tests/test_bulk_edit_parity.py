@@ -11,22 +11,23 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
-API = ROOT / "services" / "mini_app_api.py"
+
 WORKER = ROOT / "services" / "op_worker.py"
 INDEX = ROOT / "mini_app" / "index.html"
 
 
 def _handler() -> str:
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     m = re.search(r"    async def _bulk_edit_op\b.*?(?=\n    async def )", src, re.DOTALL)
     assert m, "_bulk_edit_op не найден"
     return m.group(0)
 
 
 def _allowed_map() -> dict[str, set[str]]:
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     m = re.search(r"_BULK_EDIT_FIELDS\s*=\s*\{(.*?)\n    \}", src, re.DOTALL)
     assert m, "_BULK_EDIT_FIELDS не найден"
     out: dict[str, set[str]] = {}
@@ -65,7 +66,7 @@ def test_all_three_ops_wired():
 
 
 def test_routes_registered():
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     for route in ("/api/miniapp/channels/bulk_edit",
                   "/api/miniapp/bots/bulk_edit",
                   "/api/miniapp/accounts/bulk_profile"):

@@ -5,6 +5,7 @@ import os
 
 from services import growth_center
 from services.organism.brain import build_suggestions
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -100,7 +101,7 @@ def test_recommend_plan_clamps_bad_input():
 
 
 def test_plan_endpoint_and_ui_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def growth_plan" in api
     assert '"/api/miniapp/growth/plan"' in api
     assert "growth_center.recommend_plan" in api
@@ -110,7 +111,7 @@ def test_plan_endpoint_and_ui_wired():
 
 
 def test_endpoint_and_ui_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def growth_overview" in api
     assert '"/api/miniapp/growth/overview"' in api
     assert "growth_center.summarize_growth" in api

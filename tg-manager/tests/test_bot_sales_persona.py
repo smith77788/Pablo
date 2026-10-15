@@ -12,6 +12,7 @@ import os
 import pytest
 
 from services import bot_sales_persona as bsp
+from tests.miniapp_source import api_source
 
 
 # ── Чистые ────────────────────────────────────────────────────────────────────
@@ -156,7 +157,7 @@ def test_auto_responder_wires_sales_persona():
 
 def test_mini_app_api_registers_sales_routes():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    src = open(os.path.join(root, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     for route in ("/api/miniapp/sales/persona", "/api/miniapp/sales/persona/{pid}/assign",
                   "/api/miniapp/sales/persona/{pid}/product", "/api/miniapp/sales/orders"):
         assert route in src, route

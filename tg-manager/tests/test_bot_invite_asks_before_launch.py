@@ -13,11 +13,10 @@ import ast
 import functools
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HANDLER = os.path.join(ROOT, "bot", "handlers", "mass_inviter.py")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
-
 
 @functools.lru_cache(maxsize=1)
 def _src() -> str:
@@ -134,5 +133,5 @@ def test_invite_text_reaches_the_fallback_too():
         "текст приглашения снова уходит только для метода «ссылка в ЛС», а "
         "фолбэк для обычного инвайта шлёт текст по умолчанию")
     # Тот же разбор в мини-аппе — чтобы поверхности не разъезжались.
-    api = open(API, encoding="utf-8").read()
+    api = api_source()
     assert "link_fallback" in api, "мини-апп потерял этот же флаг"

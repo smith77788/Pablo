@@ -18,6 +18,7 @@ from services.infra_memory import (
     is_account_quarantined,
     quarantined_accounts,
 )
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -236,7 +237,7 @@ def test_warmer_skips_session_expired():
 
 def test_pulse_surfaced_in_api_and_ui():
     """Пульс виден: эндпоинт + инъекция в dashboard + плитка «Здоровье»."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def accounts_health" in api
     assert 'add_get("/api/miniapp/accounts/health", accounts_health)' in api
     assert '"account_health": await _account_health_summary' in api

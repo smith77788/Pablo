@@ -10,6 +10,7 @@ account_manager импортирует telethon (нет в песочнице) �
 from __future__ import annotations
 import ipaddress
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -66,7 +67,7 @@ def test_make_client_wires_ipv6_priority_over_relay():
 
 def test_ipv6_configurable_in_app():
     """Пользователь настраивает всё сам: эндпоинты транспорта + панель IPv6 в UI."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def transport_get" in api and "async def transport_ipv6_save" in api
     assert 'add_get("/api/miniapp/transport", transport_get)' in api
     assert 'add_post("/api/miniapp/transport/ipv6", transport_ipv6_save)' in api

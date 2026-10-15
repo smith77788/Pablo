@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import os
 import re
-
-_API = os.path.join(os.path.dirname(__file__), "..", "services", "mini_app_api.py")
+from tests.miniapp_source import api_source
 
 
 def test_all_called_safe_helpers_are_defined():
-    src = open(_API, encoding="utf-8").read()
+    src = api_source()
     called = set(re.findall(r"\b(_safe_\w+)\s*\(", src))
     defined = set(re.findall(r"(?:async\s+)?def\s+(_safe_\w+)\s*\(", src))
     missing = called - defined
@@ -27,7 +26,7 @@ def test_all_called_safe_helpers_are_defined():
 
 
 def test_safe_fetchval_defined():
-    src = open(_API, encoding="utf-8").read()
+    src = api_source()
     assert re.search(r"async def _safe_fetchval\s*\(", src), (
         "_safe_fetchval должен быть определён (использовался, но был undefined)"
     )

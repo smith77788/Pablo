@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -54,7 +55,7 @@ def test_cf_pool_ui_button_wired():
     ui = _read("mini_app/index.html")
     assert "deployCfPool" in ui and "loadCfPoolStatus" in ui
     assert "/api/miniapp/cf/pool/deploy" in ui and "/api/miniapp/cf/pool/status" in ui
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert 'add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)' in api
     assert 'add_get("/api/miniapp/cf/pool/status", cf_pool_status)' in api
     # хендлеры делают реальную работу (не заглушки)
@@ -88,7 +89,7 @@ def test_cf_credentials_in_app_no_railway():
     dbsrc = _read("database/db.py")
     assert "async def set_cf_credentials" in dbsrc and "async def get_cf_credentials" in dbsrc
     assert "encrypt_token" in dbsrc[dbsrc.index("async def set_cf_credentials"):dbsrc.index("async def get_cf_credentials")]
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def cf_credentials_save" in api
     assert 'add_post("/api/miniapp/cf/credentials", cf_credentials_save)' in api
     # deploy берёт доступы из БД-владельца, с фолбэком на env (не жёстко Railway)
@@ -156,7 +157,7 @@ def test_deploy_errors_are_surfaced_not_swallowed():
     cf = _read("services/cf_pool_manager.py")
     seg = cf[cf.index("async def deploy_pool"):cf.index("async def assign_urls_to_accounts")]
     assert '"errors"' in seg and '"urls"' in seg and '"ok"' in seg
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     dep = api[api.index("async def cf_pool_deploy"):
               api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
     # результат/ошибки сохраняются в process-local карту, а не глотаются
@@ -174,7 +175,7 @@ def test_deploy_auto_count_by_active_accounts():
     assert "async def count_relay_targets" in cf
     seg = cf[cf.index("async def count_relay_targets"):cf.index("async def assign_urls_to_accounts")]
     assert "proxy_id IS NULL" in seg and "is_active" in seg.lower()
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     dep = api[api.index("async def cf_pool_deploy"):
               api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
     assert "count_relay_targets" in dep
@@ -199,7 +200,7 @@ def test_worker_health_and_check_pool():
     cf = _read("services/cf_pool_manager.py")
     assert "'/health'" in cf and "request.cf" in cf and "colo" in cf
     assert "async def check_pool" in cf and "/health" in cf
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def cf_pool_check" in api
     assert 'add_post("/api/miniapp/cf/pool/check", cf_pool_check)' in api
     ui = _read("mini_app/index.html")
@@ -225,7 +226,7 @@ def test_pool_lifecycle_ops_exist():
                "async def heal_dead_relays"):
         assert fn in cf, fn
     # deploy делает reconcile (снос старых лишних воркеров)
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "reconcile_pool" in api
     for route in ('add_post("/api/miniapp/cf/pool/assign", cf_pool_assign)',
                   'add_post("/api/miniapp/cf/pool/clear", cf_pool_clear)'):

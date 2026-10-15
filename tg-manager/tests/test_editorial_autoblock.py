@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services import channel_brain as cb  # noqa: E402
 from services import channel_brain_store as store  # noqa: E402
+from tests.miniapp_source import api_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -194,7 +195,7 @@ def test_validate_without_mode_leaves_it_untouched():
 
 
 def test_save_endpoint_applies_the_new_mode():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert 'clean.get("autonomy_mode"' in api, (
         "save по-прежнему затирает режим прежним — включить блокировку нельзя"
     )

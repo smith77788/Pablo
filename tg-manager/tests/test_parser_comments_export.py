@@ -10,6 +10,7 @@ import json
 import os
 
 from services.parser import audience_to_txt, audience_to_json
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -46,12 +47,12 @@ def test_comments_wired_in_op_worker():
 
 
 def test_comments_accepted_by_submit_endpoint():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     assert '("members", "active", "comments")' in src, "эндпоинт сабмита не принимает comments"
 
 
 def test_export_supports_multiformat():
-    src = _read("services/mini_app_api.py")
+    src = api_source()
     # эндпоинт экспорта различает форматы и зовёт чистые хелперы parser
     assert '("csv", "txt", "json")' in src
     assert "audience_to_txt(users)" in src and "audience_to_json(users)" in src

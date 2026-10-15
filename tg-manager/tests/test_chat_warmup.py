@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 
 from services import chat_warmup as cw
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -167,7 +168,7 @@ def test_schema_defines_table():
 
 
 def test_api_endpoints_and_routes():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     for fn in ("chatwarmup_sessions", "chatwarmup_create", "chatwarmup_status"):
         assert f"async def {fn}" in api
     for r in ('"/api/miniapp/chatwarmup/sessions"', '"/api/miniapp/chatwarmup/session"',
@@ -202,7 +203,7 @@ def test_executor_has_reaction_branch():
 
 
 def test_account_selection_endpoint_and_ui():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def chatwarmup_accounts" in api
     assert '"/api/miniapp/chatwarmup/accounts"' in api
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
@@ -251,7 +252,7 @@ def test_ambient_keyless_flag(monkeypatch):
 
 
 def test_ai_status_reports_claude_and_warmup_model():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     i = api.index("async def ai_status")
     body = api[i:i + 1600]
     assert '"claude": claude_on' in body                # статус Claude

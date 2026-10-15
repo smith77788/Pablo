@@ -16,6 +16,7 @@ import os
 import pytest
 
 from services import metrics as m
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -122,7 +123,7 @@ def test_db_pool_saturation_is_instrumented():
 
 
 def test_metrics_endpoint_registered():
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     assert 'app.router.add_get("/metrics", prom_metrics)' in src, (
         "endpoint /metrics не зарегистрирован — собирать нечем")
 

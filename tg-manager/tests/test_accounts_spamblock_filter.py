@@ -15,6 +15,7 @@ mini_app_api не импортируется в песочнице — пров�
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,7 +26,7 @@ def _read(rel: str) -> str:
 
 
 def test_backend_has_spamblock_filter_and_active_excludes_it():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     where = api[api.index("def _accounts_where"):]
     where = where[:where.index("return ")]
     assert 'flt == "spamblock"' in where, "нет фильтра списка spamblock"
@@ -50,7 +51,7 @@ def test_filter_whitelists_include_spamblock():
     (списки не могут разъехаться, потому что список один), поэтому проверяем
     сам набор и то, что оба места сверяются с ним, а не форму литерала.
     """
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     i = api.index("ACCOUNT_FILTERS = (")
     decl = api[i:api.index(")", i) + 1]
     for slice_name in ("all", "active", "cooldown", "banned", "spamblock", "dead"):
@@ -61,7 +62,7 @@ def test_filter_whitelists_include_spamblock():
 
 
 def test_stats_counts_spamblock_separately():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "COALESCE(acc_status,'ok')='spamblock') AS spamblock" in api
     # Счётчик готовых — то же общее условие, что у среза списка (оба ветки,
     # владелец и админ), иначе чип обещает не то, что откроет клик по нему.

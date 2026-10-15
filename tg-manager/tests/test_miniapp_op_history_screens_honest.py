@@ -27,6 +27,7 @@ import pytest
 
 from services import mini_app_api
 from tests.miniapp_source import source_of
+from tests.miniapp_source import api_source
 
 SCREENS = [
     # функция экрана, элемент истории, тип(ы) операций, русская подпись
@@ -93,7 +94,7 @@ def test_empty_history_explains_itself(fn, elem, op_types, ru):
 
 def test_op_type_filter_accepts_several_types():
     """Раздел «Накрутка» объединяет пять типов операций."""
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert '_op_raw.split(",")' in src, (
         "фильтр принимает только один тип — экран с несколькими типами "
         "вынужден отбирать их у себя")

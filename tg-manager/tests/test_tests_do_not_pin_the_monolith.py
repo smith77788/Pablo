@@ -26,8 +26,9 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 
-# Снято 15.10.2026, после выноса рассылок и прогрева. Только вниз.
-CEILING = 123
+# Снято 15.10.2026: 123 набора переведены на общий источник за один проход,
+# осталось 18. Только вниз.
+CEILING = 18
 
 # Имя файла КАК ЛИТЕРАЛ — в любом виде, которым его собирают в путь:
 # `"services/mini_app_api.py"`, `ROOT / "services" / "mini_app_api.py"`,
@@ -48,7 +49,13 @@ def _pinned() -> list[str]:
     out = []
     for path in sorted(TESTS.glob("test_*.py")):
         # Этот файл сам носит имя монолита в своём регулярном выражении.
-        if path.name in ("miniapp_source.py", pathlib.Path(__file__).name):
+        #
+        # test_workflow_actions_go_through_the_engine — законное исключение:
+        # его утверждение ОТРИЦАТЕЛЬНОЕ («копии ручки в монолите не осталось»),
+        # и по всему слою оно ложно по определению, потому что ручка живёт в
+        # вынесенном модуле. Такому утверждению нужен именно один файл.
+        if path.name in ("miniapp_source.py", pathlib.Path(__file__).name,
+                         "test_workflow_actions_go_through_the_engine.py"):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if PIN.search(text):

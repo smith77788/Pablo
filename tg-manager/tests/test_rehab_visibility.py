@@ -22,9 +22,10 @@ import pathlib
 from datetime import datetime, timedelta, timezone
 
 from services import account_rehab as RH
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API_SRC = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+_API_SRC = api_source()
 _MAIN = (_ROOT / "main.py").read_text(encoding="utf-8")
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 

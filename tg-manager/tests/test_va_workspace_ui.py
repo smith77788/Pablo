@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node") or shutil.which("node.exe")
@@ -22,7 +23,7 @@ def test_channel_list_is_filterable_and_bounded():
     js = (ROOT / "mini_app" / "screens" / "va_admin.js").read_text(encoding="utf-8")
     assert "function vaFilterChannels()" in js
     assert "function vaChannelPage(delta)" in js
-    assert "page_size=30" in (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    assert "page_size=30" in api_source()
     assert "page_size + 1" in (ROOT / "services" / "channel_admin.py").read_text(encoding="utf-8")
     assert "Показать ещё " in js
     assert "concat(data.channels" in js

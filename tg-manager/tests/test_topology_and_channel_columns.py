@@ -18,10 +18,11 @@ import inspect
 import re
 
 from services import ecosystem_brain, mini_app_api
+from tests.miniapp_source import api_source
 
 
 def _topology_nodes_body() -> str:
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def topology_nodes\(.*?\n(.*?)async def ", src, re.DOTALL)
     assert m, "topology_nodes handler not found"
     return m.group(1)

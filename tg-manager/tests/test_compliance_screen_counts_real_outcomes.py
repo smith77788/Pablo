@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -107,7 +108,7 @@ def test_partial_is_neither_success_nor_silence():
 
 
 def test_overview_asks_the_engine_instead_of_inventing_a_vocabulary():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     i = api.index("async def compliance_overview")
     # Границы — по следующему хендлеру: в окне фиксированной длины «искомого
     # нет» однажды станет правдой просто потому, что код сдвинулся.

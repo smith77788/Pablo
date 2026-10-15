@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,7 +32,7 @@ def test_strike_respects_quarantine_fail_open():
 def test_dashboard_has_seo_and_geo_vitals():
     """Дашборд — приборный щиток: реальные SEO (tracked_keywords) + гео
     (global_presence_plans), owner-scoped, fail-soft."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def _seo_vitals" in api and "async def _geo_vitals" in api
     assert "FROM tracked_keywords WHERE owner_id=$1" in api
     assert "FROM global_presence_plans WHERE owner_id=$1" in api
@@ -83,7 +84,7 @@ def test_boost_migrated_to_bus():
 def test_seo_surfaces_pending_suggestions():
     """SEO decision-фаза видна: непринятые авто-подсказки реоптимизации в дашборде
     (mini-app) и в боте."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "pending_suggestions" in api
     assert "FROM bot_seo_suggestions" in api and "applied_at IS NULL" in api
     from tests.miniapp_source import miniapp_source

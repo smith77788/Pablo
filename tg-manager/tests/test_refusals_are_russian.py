@@ -27,8 +27,9 @@ import re
 from pathlib import Path
 
 from services import operation_bus
+from tests.miniapp_source import api_source
 
-API = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
+
 CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 
 
@@ -72,7 +73,7 @@ USER_VISIBLE_STATUSES = (400, 403, 404)
 
 def _err_literals() -> list[tuple[int, int, str]]:
     """(строка, статус, текст) для каждого `_err` с литеральным сообщением."""
-    tree = ast.parse(API.read_text("utf-8"))
+    tree = ast.parse(api_source())
     out = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)

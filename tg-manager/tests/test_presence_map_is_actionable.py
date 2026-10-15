@@ -18,7 +18,8 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-API = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+from tests.miniapp_source import api_source
+API = api_source()
 
 from services import presence_map  # noqa: E402
 

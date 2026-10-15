@@ -15,10 +15,11 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def test_no_gateway_status_for_business_errors():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     offenders = re.findall(r"_err\([^\n]*,\s*(50[23]|52\d)\)", src)
     assert not offenders, (
         f"_err(..., {set(offenders)}) — бизнес-ошибка с gateway-статусом → фронт "
@@ -27,7 +28,7 @@ def test_no_gateway_status_for_business_errors():
 
 
 def test_inline_account_telethon_has_timeout():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     for fn in ("account_check_restriction", "account_login_code"):
         m = re.search(rf"async def {fn}\(.*?\n(.*?)(?=\n    async def |\Z)", src, re.DOTALL)
         assert m, f"{fn} не найден"

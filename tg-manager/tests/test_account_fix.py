@@ -14,10 +14,11 @@ import pathlib
 import re
 
 from services import account_fix as F
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+_API = api_source()
 
 
 def _row(**over):

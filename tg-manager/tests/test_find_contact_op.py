@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from services import op_worker
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_find_contact_registered_and_dispatched():
     reg = (ROOT / "services" / "operation_bus.py").read_text(encoding="utf-8")
     worker = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
-    api = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert '"find_contact":' in reg, "find_contact не в OP_REGISTRY"
     assert op_worker.handler_for("find_contact") is not None, "нет ветки диспетчера find_contact"
     assert "async def _exec_find_contact(" in worker, "нет исполнителя _exec_find_contact"

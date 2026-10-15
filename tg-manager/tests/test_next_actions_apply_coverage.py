@@ -16,7 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 NA = (ROOT / "services" / "next_actions.py").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_source
+API = api_source()
 # Весь мини-апп, а не только index.html: экраны вынесены в mini_app/screens/*.js,
 # и цель подсказки может жить там. Гейт «цель существует во фронте» это
 # проглядел — openMassInvite переехала в screens/invite.js, а проверка

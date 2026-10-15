@@ -13,6 +13,7 @@ import asyncio
 import pathlib
 
 from services.proxy_rotation import apply_rotation
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -126,7 +127,7 @@ def test_busy_accounts_still_skipped():
 
 def test_reason_is_reported_in_both_frontends():
     """«Не хватило прокси» при полном списке выглядит беспричинным."""
-    api = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
     bot = (_ROOT / "bot" / "handlers" / "proxy_manager.py").read_text(encoding="utf-8")
     assert "skipped_dead" in api and "skipped_dead" in ui and "skipped_dead" in bot

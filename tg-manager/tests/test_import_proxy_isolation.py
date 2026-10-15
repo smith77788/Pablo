@@ -22,10 +22,11 @@ import pathlib
 from services.proxy_balancer import (
     isolation_note, isolation_summary, plan_distribution,
 )
+from tests.miniapp_source import api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _IMPORTER = (_ROOT / "services" / "session_importer.py").read_text(encoding="utf-8")
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+_API = api_source()
 # Обработчики прокси вынесены из 25-тысячестрочного mini_app_api.py в
 # services/mini_app_proxies.py; логин аккаунта (_persist_login) остался там.
 _PROXIES = (_ROOT / "services" / "mini_app_proxies.py").read_text(encoding="utf-8")

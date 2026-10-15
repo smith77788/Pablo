@@ -14,6 +14,7 @@ import os
 from services.content_watch import classify_texts, CATEGORY_LABELS
 from services import content_safety
 from services import op_worker
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -64,7 +65,7 @@ def test_op_endpoint_route_and_ui_wired():
     seg = ow[ow.index("async def _exec_compliance_scan"):ow.index("async def _exec_niche_growth_post")]
     assert "content_watch.scan_resource" in seg
     assert "ReportPeerRequest" not in seg and "send_message" not in seg
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def compliance_scan_submit" in api
     # Эндпоинт ставит op через operation_bus (рефактор с сырого INSERT на bus).
     _seg = api[api.index("async def compliance_scan_submit"):]

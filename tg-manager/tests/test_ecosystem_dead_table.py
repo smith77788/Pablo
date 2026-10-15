@@ -11,11 +11,12 @@ import pathlib
 import pytest
 
 from tests.test_executors import FakePool
+from tests.miniapp_source import api_source
 
 
 def _mini_app_src() -> str:
-    p = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-    return p.read_text(encoding="utf-8")
+
+    return api_source()
 
 
 def test_channels_list_uses_ecosystem_members_by_channel_id():

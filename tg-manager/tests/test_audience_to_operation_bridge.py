@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -67,7 +68,7 @@ def test_backend_send_filters_by_parse_run_id():
 
 def test_backend_count_matches_target_run():
     """Счётчик total_targets для parsed_audience тоже считает по parse_run_id."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert ("FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2" in api), (
         "total_targets для выбранного запуска должен считаться по parse_run_id"
     )
@@ -100,7 +101,7 @@ def test_invite_bridge_preselects_run_and_sends_parse_run_id():
 def test_invite_backend_threads_and_filters_parse_run_id():
     """mass_inviter_submit кладёт parse_run_id в params, а исполнитель фильтрует
     parsed_audiences по нему (иначе инвайт шёл бы по всей аудитории)."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert 'params["parse_run_id"] = int(_pr)' in api, "submit должен прокинуть parse_run_id в params"
     worker = _read("services/op_worker.py")
     seg = worker[worker.index('if source == "parsed":'):]

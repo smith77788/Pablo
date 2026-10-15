@@ -11,6 +11,7 @@ import os
 import pytest
 
 from services import broadcaster
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -107,7 +108,7 @@ def test_bot_and_app_wired_to_shared_impl():
     b = _read("bot/handlers/broadcast.py")
     assert 'BroadcastCb.filter(F.action == "resend")' in b
     assert "broadcaster.resend_undelivered(" in b
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "broadcaster.resend_undelivered(pool, uid, bc_id)" in api
     kb = _read("bot/keyboards.py")
     assert 'action="resend"' in kb

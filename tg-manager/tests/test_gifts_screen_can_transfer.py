@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,7 +33,7 @@ def _handler(src: str, name: str) -> str:
 
 
 def test_transfer_route_exists_and_goes_through_the_bus():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert '"/api/miniapp/gifts/transfer"' in api, "передавать подарки по-прежнему нечем"
     fn = _handler(api, "gift_transfer_submit")
     assert "gift_transfer" in fn and "submit(" in fn, (
@@ -40,14 +41,14 @@ def test_transfer_route_exists_and_goes_through_the_bus():
 
 
 def _selection_helper() -> str:
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     i = api.index("async def _gift_selection(")
     return api[i:api.index("\n    async def ", i + 10)]
 
 
 def test_transfer_takes_only_my_own_gifts():
     """Скоуп живёт в общем помощнике — проверяем и его, и что им пользуются."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     for name in ("gift_transfer_submit", "gift_transfer_preview"):
         assert "_gift_selection(" in _handler(api, name), (
             f"{name} выбирает подарки мимо общего помощника — скоуп по "
@@ -59,7 +60,7 @@ def test_transfer_takes_only_my_own_gifts():
 
 def test_preview_tells_the_cost_before_anything_leaves():
     """Передача необратима: сколько уйдёт и во сколько обойдётся — до нажатия."""
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert '"/api/miniapp/gifts/transfer/preview"' in api, "предпросмотра нет"
     fn = _handler(api, "gift_transfer_preview")
     assert "stars" in fn, "предпросмотр молчит о стоимости"
@@ -68,13 +69,13 @@ def test_preview_tells_the_cost_before_anything_leaves():
 
 
 def test_saved_recipients_are_reachable_from_the_app():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert '"/api/miniapp/gifts/recipients"' in api, (
         "сохранённые получатели есть в базе и в боте, но не в приложении")
 
 
 def test_inventory_returns_what_the_transfer_needs():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     fn = _handler(api, "gift_inventory")
     for col in ("gi.account_id", "gi.gift_id"):
         assert col in fn, f"без {col} позицию плана передачи не собрать"

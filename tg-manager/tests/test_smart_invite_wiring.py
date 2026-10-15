@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -23,7 +24,7 @@ def test_bot_offers_safe_mode_and_passes_it():
 
 
 def test_miniapp_passes_safe_mode():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     m = api[api.index("async def mass_inviter_submit"):]
     m = m[:m.index("\n    async def ", 1)]
     assert 'body.get("safe_mode")' in m, "мини-апп не читает safe_mode"

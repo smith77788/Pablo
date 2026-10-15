@@ -16,6 +16,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+from tests.miniapp_source import api_source
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
 _FRONT = [os.path.join(_ROOT, "mini_app", "index.html")] + glob.glob(
@@ -42,7 +43,7 @@ def _api_sources() -> list[str]:
     (`mini_app_X.setup_routes(app, pool)`): экраны «Хранилище», «Сообщество»,
     «Рейтинг» вынесены в свои файлы, и чтение одного mini_app_api делало их
     маршруты невидимыми — храповик кричал о 404, которых нет."""
-    api = open(_API, encoding="utf-8").read()
+    api = api_source()
     out = [api]
     for mod in sorted(set(re.findall(r"\b(mini_app_\w+)\.setup_routes\(\s*app", api))):
         path = os.path.join(os.path.dirname(_API), mod + ".py")
@@ -94,7 +95,7 @@ def test_specific_aliases_registered():
 
 
 def test_broadcast_schedule_accepts_both_field_contracts():
-    api = open(_API, encoding="utf-8").read()
+    api = api_source()
     m = re.search(r"async def broadcast_schedule\(.*?\n(.*?)\n    async def ", api, re.DOTALL)
     assert m, "broadcast_schedule handler not found"
     body = m.group(1)

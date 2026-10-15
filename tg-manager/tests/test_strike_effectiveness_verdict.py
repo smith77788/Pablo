@@ -27,6 +27,7 @@ from pathlib import Path
 
 from services import mini_app_api
 from services.strike_engine import StrikeResult, _strike_effectiveness_verdict, format_strike_summary
+from tests.miniapp_source import api_source
 
 
 def _index_html() -> str:
@@ -68,7 +69,7 @@ def test_summary_embeds_verdict_for_surviving_target():
 
 
 def test_strike_status_exposes_email_vector():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def strike_status\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "strike_status не найден"
     body = m.group(1)

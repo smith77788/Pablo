@@ -12,6 +12,7 @@ import types
 from unittest.mock import AsyncMock, patch
 
 from services import global_search_engine as gse
+from tests.miniapp_source import api_source
 
 
 class _Ent:
@@ -109,6 +110,6 @@ def test_call_error_surfaced_not_swallowed():
 
 def test_route_registered():
     from services import mini_app_api
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert 'app.router.add_post("/api/miniapp/global_search", global_search)' in src
     assert "async def global_search(" in src

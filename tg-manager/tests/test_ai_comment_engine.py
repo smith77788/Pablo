@@ -12,6 +12,7 @@ from services.ai_comment_engine import (
     build_comment_prompt, sanitize_comment, COMMENT_TONES,
 )
 from services import op_worker
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,7 +58,7 @@ def test_op_and_endpoint_and_ui_wired():
     # content-safety guard присутствует в исполнителе
     seg = ow[ow.index("async def _exec_ai_comment"):ow.index("async def _exec_niche_growth_post")]
     assert "content_safety.enforce" in seg
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def ai_comment_submit" in api
     # операция ставится через шину (гейт тарифа + предохранитель + дедуп),
     # а не сырым INSERT в очередь

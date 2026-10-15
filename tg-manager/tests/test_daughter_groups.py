@@ -19,6 +19,7 @@ import asyncio
 import os
 
 import pytest
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -87,7 +88,7 @@ def test_creates_an_invite_link_not_a_bare_id():
 def test_ui_and_api_expose_the_toggle():
     from tests.miniapp_source import miniapp_source
     ui = miniapp_source()
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert 'id="invDaughterGroups"' in ui
     assert "body.use_daughter_groups" in ui
     assert '"use_daughter_groups"' in api

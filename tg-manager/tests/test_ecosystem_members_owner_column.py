@@ -10,10 +10,11 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def test_no_ecosystem_members_queries_use_user_id():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     bad = re.findall(r"ecosystem_members WHERE user_id=", src)
     assert not bad, (
         "ecosystem_members не имеет колонки user_id (только owner_id) — "
@@ -30,7 +31,7 @@ def test_membership_lookups_are_scoped_by_owner_id():
     тест покраснел на правильной правке. Проверяем настоящий инвариант: выборка
     «мои экосистемы» по-прежнему скоупится по owner_id и не исчезла совсем.
     """
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     scoped = re.findall(r"ecosystem_id FROM ecosystem_members WHERE owner_id=\$\d", src)
     assert scoped, (
         "в mini_app_api не осталось ни одной выборки «мои экосистемы» по "

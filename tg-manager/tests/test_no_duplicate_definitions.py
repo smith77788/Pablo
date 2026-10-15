@@ -26,6 +26,7 @@ import ast
 import re
 from collections import Counter
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,7 +35,7 @@ def test_no_duplicate_api_handlers():
     """В create_app() все хендлеры — вложенные функции одной области видимости;
     два `async def name(request...)` с одним именем = затенение (мёртвый код +
     молчаливая смена поведения роута)."""
-    src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     names = re.findall(r"^\s{4}async def ([a-z_][\w]*)\(request", src, re.MULTILINE)
     dups = {n: c for n, c in Counter(names).items() if c > 1}
     assert not dups, (
@@ -46,7 +47,7 @@ def test_no_duplicate_api_handlers():
 def test_no_duplicate_registered_routes():
     """Один и тот же путь+метод зарегистрирован дважды — второй add_* побеждает,
     первый хендлер недостижим."""
-    src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     routes = re.findall(r'router\.add_(get|post|put|delete)\("([^"]+)"', src)
     key = [f"{m.upper()} {p}" for m, p in routes]
     dups = {k: c for k, c in Counter(key).items() if c > 1}
