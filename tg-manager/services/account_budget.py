@@ -68,10 +68,19 @@ async def actions_today(pool: asyncpg.Pool, account_id: int) -> int:
     return counts.get(int(account_id), 0)
 
 
+class BudgetUnreadable(RuntimeError):
+    """Счёт действий за сутки не прочитался — считать аккаунты свободными нельзя."""
+
+
 async def actions_today_bulk(
     pool: asyncpg.Pool, account_ids: Iterable[int]
 ) -> dict[int, int]:
-    """Счётчик действий за 24ч для набора аккаунтов одним запросом."""
+    """Счётчик действий за 24ч для набора аккаунтов одним запросом.
+
+    Бросает `BudgetUnreadable`, если счёт не прочитался и после повтора:
+    пустой счёт означал бы «сделано 0» и полный бюджет каждому аккаунту
+    заново. Решают вызывающие (`filter_within_budget`, `remaining_bulk`) — они
+    переводят отказ в «бюджет исчерпан», и операция ждёт, а не перебирает."""
     ids = [int(a) for a in account_ids]
     if not ids:
         return {}
@@ -93,12 +102,13 @@ async def actions_today_bulk(
             # ЗДЕСЬ ЛОМАЕТСЯ ЗАЩИТА, А НЕ УЧЁТ. Пустой счёт читается как
             # «сделано 0», то есть на этот прогон суточный лимит аккаунта
             # перестаёт существовать: фильтр пропускает всех, остаток
-            # считается полным. Решение остаться fail-open — сознательное
-            # (сбой учёта не должен останавливать операцию), но молчать о нём
-            # нельзя: это риск перебора и бана. Поэтому log.warning и счётчик,
-            # который сторож защитных записей доносит до владельца словами.
+            # считается полным. Прежнее решение остаться fail-open стоило
+            # ровно того, от чего лимит и защищает — перебора и бана, причём
+            # на фоне общей деградации базы, когда рисковать хуже всего.
+            # Теперь отказ: вызывающие считают такие аккаунты исчерпавшими
+            # бюджет, и операция ждёт следующего круга.
             log.error("бюджет: счёт действий за сутки НЕ ПРОЧИТАН (%d аккаунтов) "
-                      "— суточный лимит на этот прогон не сработает",
+                      "— аккаунты считаем исчерпавшими лимит, операция подождёт",
                       len(ids), exc_info=True)
             try:
                 from services import metrics as _m
@@ -107,7 +117,8 @@ async def actions_today_bulk(
                        {"where": "budget"})
             except Exception:
                 log.debug("бюджет: счётчик сбоя чтения недоступен")
-            counts = {}
+            raise BudgetUnreadable(
+                "счёт действий за сутки недоступен, аккаунты не выдаём")
     return {i: counts.get(i, 0) for i in ids}
 
 
@@ -127,7 +138,13 @@ async def filter_within_budget(
         limit = await get_daily_budget(pool)
     if limit <= 0:
         return ids, []
-    counts = await actions_today_bulk(pool, ids)
+    try:
+        counts = await actions_today_bulk(pool, ids)
+    except BudgetUnreadable:
+        # Не знаем, сколько аккаунты уже сделали, — значит не выдаём ни одного.
+        # Вызывающие это умеют: пустой within читается как «работать некем», и
+        # операция откладывается ровно как при занятом флоте.
+        return [], ids
     within = [i for i in ids if counts.get(i, 0) < limit]
     over = [i for i in ids if counts.get(i, 0) >= limit]
     if over:
@@ -146,15 +163,19 @@ async def remaining_bulk(
     None — лимит выключен (без ограничения). Исполнитель обязан ограничивать
     объём ВНУТРИ прогона этим числом: отбор по `filter_within_budget` на старте
     пропускает аккаунт с остатком 1, и без счёта по ходу он делает за прогон
-    сколько угодно. Сбой чтения → считаем, что сделано 0 (fail-open, как и
-    фильтр): сбой учёта не должен останавливать операцию.
+    сколько угодно. Сбой чтения → остаток НОЛЬ (как и у фильтра): прежний
+    «сделано 0» выдавал полный бюджет заново, то есть лимит переставал
+    существовать ровно тогда, когда база подрагивает.
     """
     ids = [int(a) for a in account_ids]
     if limit is None:
         limit = await get_daily_budget(pool)
     if limit <= 0:
         return {i: None for i in ids}
-    counts = await actions_today_bulk(pool, ids)
+    try:
+        counts = await actions_today_bulk(pool, ids)
+    except BudgetUnreadable:
+        return {i: 0 for i in ids}
     return {i: max(0, limit - counts.get(i, 0)) for i in ids}
 
 

@@ -36,7 +36,16 @@ class _Pool:
 
     async def fetch(self, query, *args):
         self.queries.append(query)
-        if "operation_audit" in query:
+        # Счёт суточного бюджета идёт к той же таблице, но форму строки имеет
+        # другую (account_id + n). Отдавать ему журнальные строки нельзя: с
+        # недавних пор непрочитанный бюджет означает «аккаунты исчерпали
+        # лимит», и заглушка, подсунувшая не ту форму, оставила бы исполнителя
+        # вообще без аккаунтов — тест падал бы на здоровом коде
+        # (tests/test_an_unreadable_budget_does_not_hand_out_the_fleet.py).
+        # Отличаем по GROUP BY: он есть только у счёта бюджета. Пробовать на
+        # слово COUNT нельзя — его содержит ACCOUNT_ID из журнального запроса,
+        # и журнал перестал бы читаться вообще (проверено: тесты краснели).
+        if "operation_audit" in query and "GROUP BY" not in query.upper():
             return self.audit_rows
         return []
 
