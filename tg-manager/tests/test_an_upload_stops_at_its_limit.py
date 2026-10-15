@@ -68,7 +68,30 @@ class _EndlessField:
         return b"\x00" * size
 
     async def text(self) -> str:
-        return ""
+        raise _UnboundedRead(
+            "ручка вызвала field.text() — поле читается целиком, предел не действует")
+
+
+class _EndlessText(_EndlessField):
+    """Бесконечное ТЕКСТОВОЕ поле: подпись, идентификатор аккаунта, фильтры.
+
+    Отдельный класс нужен, потому что такое поле ручки читают не через
+    `read()`, а через `text()` — и по коду `(await field.text())[:1024]`
+    выглядит как «берём тысячу символов», хотя поле сначала втягивается
+    целиком. Предел у этих полей тоже был только после чтения.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name=name, filename=None)
+
+    def get_charset(self, default: str = "utf-8") -> str:
+        return default
+
+    async def read_chunk(self, size: int = 8192) -> bytes:
+        if self.given > 300 * 1024 * 1024:
+            raise _Runaway("чтение текстового поля не остановилось на пределе")
+        self.given += size
+        return b"a" * size
 
 
 class _TextField:
@@ -77,11 +100,18 @@ class _TextField:
         self.filename = None
         self._value = value
 
+    def get_charset(self, default: str = "utf-8") -> str:
+        return default
+
     async def text(self) -> str:
         return self._value
 
     async def read(self, decode: bool = False):  # noqa: ARG002
         return self._value.encode()
+
+    async def read_chunk(self, size: int = 8192) -> bytes:
+        data, self._value = self._value.encode()[:size], ""
+        return data
 
 
 class _Reader:
@@ -192,3 +222,68 @@ def test_too_large_is_a_value_error():
     превратила бы их 413 в необработанное исключение.
     """
     assert issubclass(mini_app_api.UploadTooLarge, ValueError)
+
+
+TEXT_FIELDS = [
+    ("invite_parse_file", lambda: [_TextField("file", "@kolya"), _EndlessText("group")], {}),
+    ("uch_contact_media", lambda: [_TextField("file", "x"), _EndlessText("text")],
+     {"contact_id": "11111111-1111-1111-1111-111111111111"}),
+    ("uch_segment_media", lambda: [_TextField("file", "x"), _EndlessText("filters")], {}),
+    ("uch_segment_media", lambda: [_TextField("file", "x"), _EndlessText("account_ids")], {}),
+]
+
+
+@pytest.mark.parametrize("name,fields,match", TEXT_FIELDS,
+                         ids=[f"{n}:{i}" for i, (n, _f, _m) in enumerate(TEXT_FIELDS)])
+def test_a_text_field_stops_instead_of_swallowing_the_stream(handlers, name, fields, match):
+    """Подпись и фильтры — тоже поля multipart, и предел у них тоже на чтении."""
+    handler = handlers.get(name)
+    assert handler is not None, f"ручка {name} не зарегистрирована — проверка измеряет не то"
+    field_list = fields()
+    loop = asyncio.new_event_loop()
+    try:
+        resp = loop.run_until_complete(handler(_Request(field_list, match)))
+    finally:
+        loop.close()
+    # Ручка может ответить и 400, и 413, и даже дойти до своей логики с
+    # обрезанной подписью — важно одно: поток она не проглотила целиком.
+    assert resp is not None
+    endless = next(f for f in field_list if isinstance(f, _EndlessText))
+    assert endless.given <= 2 * 1024 * 1024, (
+        f"{name}/{endless.name}: прочитано {endless.given} байт — "
+        "текстовое поле читается без предела")
+
+
+def test_no_handler_reads_a_multipart_field_whole():
+    """Сеть на весь API-слой: `part.text()`/`field.read()` там быть не должно.
+
+    Проба выше гоняет только те ручки, у которых запрос собирается тремя
+    полями. Медиа в диалог аккаунта, файл сессии и облако принимают ещё и
+    `access_hash`, `proxy_id`, имя файла — подделать их все дешевле один раз
+    разбором, чем поддерживать четыре поддельных запроса.
+
+    Проверка по именам получателя (`part`, `field`) — так эти поля зовут во всём
+    слое; `await resp.text()` у ответа aiohttp под неё не попадает. Имя — слабее
+    типа, и это сознательный компромисс: цена ошибки здесь — лишний разговор в
+    ревью, а не пропущенная находка.
+    """
+    import ast
+
+    from tests.miniapp_source import api_files
+
+    PART_NAMES = {"part", "field"}
+    offenders = []
+    for path in api_files():
+        src = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(src)):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            recv = node.func.value
+            if not (isinstance(recv, ast.Name) and recv.id in PART_NAMES):
+                continue
+            if node.func.attr in ("text", "read", "json"):
+                offenders.append(f"{path.name}:{node.lineno}: {recv.id}.{node.func.attr}()")
+    assert not offenders, (
+        "поле multipart читается целиком — предел, объявленный после чтения, "
+        "не действует; читайте через read_upload/read_upload_text:\n  "
+        + "\n  ".join(offenders))

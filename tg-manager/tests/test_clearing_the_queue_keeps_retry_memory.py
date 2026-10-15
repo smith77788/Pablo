@@ -24,12 +24,14 @@ from services import op_status
 
 
 def _handler_src(module_src: str, name: str) -> str:
-    m = re.search(
-        r"\n(?:    )?async def " + name + r"\(.*?\n(.*?)\n(?:    )?async def ",
-        module_src, re.DOTALL,
-    )
-    assert m, f"обработчик {name} не найден"
-    return m.group(1)
+    """Тело ручки API-слоя по границам парсера, в любом его модуле.
+
+    Поиск по одному модулю жил до выноса ручки: обработчики очереди
+    операций уехали в services/mini_app_operations.py, и проверка стала
+    падать «функция не найдена» — не про идемпотентность вовсе.
+    """
+    del module_src
+    return api_function(name)
 
 
 # ── Список живых статусов — один на весь продукт ─────────────────────────────
@@ -58,9 +60,7 @@ def test_in_flight_and_terminal_lists_do_not_overlap():
 # ── Обе кнопки уборки ────────────────────────────────────────────────────────
 
 def test_miniapp_clear_keeps_the_ancestor_of_a_live_retry():
-    from services import mini_app_api
-
-    body = _handler_src(inspect.getsource(mini_app_api), "clear_operations")
+    body = _handler_src("", "clear_operations")
     assert "DELETE FROM operation_queue" in body
     assert "retry_of_op" in body, (
         "«Очистить» снесёт операцию, на журнал которой опирается живой повтор — "
@@ -87,6 +87,7 @@ def test_bot_clear_keeps_the_ancestor_of_a_live_retry():
 
 import json  # noqa: E402
 import os  # noqa: E402
+from tests.miniapp_source import api_function
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
 

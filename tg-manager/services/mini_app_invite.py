@@ -26,7 +26,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.mini_app_api import (
         _INTERNAL_ERROR, _PREFLIGHT_CONCURRENCY, _err, _get_uid, _json_resp,
         _safe_count, _safe_fetch, _safe_fetchrow, _scan_admin_status, log,
-        read_upload, UploadTooLarge,
+        read_upload, read_upload_text, UploadTooLarge,
     )
 
     async def invite_retention_overview(request: web.Request) -> web.Response:
@@ -221,7 +221,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     # защищает — память израсходована.
                     data = await read_upload(field, MAX_FILE_BYTES)
                 elif field.name == "group":
-                    group = (await field.text()).strip()
+                    group = (await read_upload_text(field)).strip()
         except UploadTooLarge:
             return _err(too_big, 413)
         except Exception:

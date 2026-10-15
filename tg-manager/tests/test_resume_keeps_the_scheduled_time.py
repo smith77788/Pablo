@@ -25,10 +25,11 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def _handler_body(name: str) -> str:
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(
         r"    async def " + name + r"\(.*?\n(.*?)\n    async def ", src, re.DOTALL
     )
@@ -75,7 +76,7 @@ def test_hurrying_an_operation_is_still_possible_explicitly():
 
 
 def test_run_now_route_is_registered():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert (
         'app.router.add_post("/api/miniapp/operation/{op_id}/run_now", run_now_operation)'
         in src

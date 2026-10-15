@@ -27,6 +27,7 @@ import ast
 import inspect
 
 import pytest
+from tests.miniapp_source import api_function
 
 
 PUBLISHING = {
@@ -112,9 +113,8 @@ def test_a_channel_that_succeeded_later_is_not_repeated():
 
 
 def test_miniapp_publish_retry_uses_the_shared_collector():
-    from services import mini_app_api
 
-    body = _func_body(mini_app_api, "retry_operation")
+    body = api_function("retry_operation")
 
     assert "collect_failed_targets(" in body, (
         "мини-апп собирает список упавших каналов своим запросом: он берёт все "

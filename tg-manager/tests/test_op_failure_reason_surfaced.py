@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 from services import op_status, op_worker, mini_app_api
+from tests.miniapp_source import api_source
 
 
 def test_worker_persists_error_msg_on_soft_failure():
@@ -28,7 +29,7 @@ def test_worker_persists_error_msg_on_soft_failure():
 
 
 def test_operation_status_coalesces_reason():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def operation_status.*?FROM operation_queue WHERE id=\$1", src, re.DOTALL)
     assert m, "operation_status не найден"
     body = m.group(0)

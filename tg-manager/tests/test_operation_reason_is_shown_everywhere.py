@@ -67,8 +67,8 @@ def test_the_alias_is_applied_to_every_column():
 @pytest.mark.parametrize(
     "rel,name",
     [
-        ("services/mini_app_api.py", "operations"),
-        ("services/mini_app_api.py", "operation_status"),
+        ("services/mini_app_operations.py", "operations"),
+        ("services/mini_app_operations.py", "operation_status"),
     ],
 )
 def test_mini_app_readers_use_the_shared_expression(rel, name):

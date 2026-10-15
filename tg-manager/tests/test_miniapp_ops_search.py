@@ -28,7 +28,9 @@ import re
 from tests.miniapp_source import miniapp_html
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_source
+
+API = api_source()
 
 
 def _handler(name: str) -> str:

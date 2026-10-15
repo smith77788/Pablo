@@ -31,10 +31,11 @@ import pytest
 from aiohttp import web
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def _api_src() -> str:
-    return inspect.getsource(mini_app_api)
+    return api_source()
 
 
 def _index_html() -> str:

@@ -19,12 +19,13 @@ import re
 from pathlib import Path
 
 from tests.miniapp_source import miniapp_html, source_of
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def _operations_handler() -> str:
-    src = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    src = api_source()
     tree = ast.parse(src)
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "operations":

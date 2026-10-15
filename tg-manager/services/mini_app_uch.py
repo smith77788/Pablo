@@ -28,7 +28,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
         _safe_fetch, _safe_fetchrow, alive_accounts, log,
-        read_upload, UploadTooLarge,
+        read_upload, read_upload_text, UploadTooLarge,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
@@ -37,6 +37,9 @@ def setup_routes(app: web.Application, pool) -> None:
     # Предел одной медиа-загрузки. Был записан числом в двух ручках, и в них
     # же проверялся ПОСЛЕ полного чтения поля — то есть не действовал.
     _UCH_MEDIA_MAX = 50 * 1024 * 1024
+    # Фильтры и список контактов приходят полем формы как JSON: тысяча
+    # идентификаторов это около сорока килобайт, мегабайта хватает с запасом.
+    _UCH_JSON_MAX = 1024 * 1024
 
     _SEG_MAX = _segments.SEG_MAX
     _SEG_DM_CHUNK = _segments.SEG_DM_CHUNK
@@ -220,9 +223,9 @@ def setup_routes(app: web.Application, pool) -> None:
                     # защищает — память израсходована.
                     data = await read_upload(field, _UCH_MEDIA_MAX)
                 elif field.name == "text":
-                    caption = (await field.text())[:1024]
+                    caption = (await read_upload_text(field))[:1024]
                 elif field.name == "account_ids":
-                    acc_raw = (await field.text()).strip()
+                    acc_raw = (await read_upload_text(field)).strip()
         except UploadTooLarge:
             return _err("Файл слишком большой (лимит 50 МБ)", 413)
         except Exception:
@@ -452,14 +455,14 @@ def setup_routes(app: web.Application, pool) -> None:
                     filename = field.filename or "media"
                     data = await read_upload(field, _UCH_MEDIA_MAX)
                 elif field.name == "text":
-                    caption = (await field.text())[:1024]
+                    caption = (await read_upload_text(field))[:1024]
                 elif field.name == "account_ids":
-                    acc_raw = (await field.text()).strip()
+                    acc_raw = (await read_upload_text(field)).strip()
                 elif field.name == "filters":
-                    try: body = _json.loads(await field.text())
+                    try: body = _json.loads(await read_upload_text(field, _UCH_JSON_MAX))
                     except Exception: body = {}
                 elif field.name == "contact_ids":
-                    try: body["contact_ids"] = _json.loads(await field.text())
+                    try: body["contact_ids"] = _json.loads(await read_upload_text(field, _UCH_JSON_MAX))
                     except Exception: pass
         except UploadTooLarge:
             return _err("Файл слишком большой (лимит 50 МБ)", 413)

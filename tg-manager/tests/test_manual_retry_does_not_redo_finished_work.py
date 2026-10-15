@@ -27,6 +27,7 @@ import ast
 import inspect
 
 import pytest
+from tests.miniapp_source import api_function
 
 
 class _ChainPool:
@@ -122,19 +123,14 @@ async def test_every_idempotency_key_spans_the_retry_chain(helper):
 
 
 def _handler_src(module, name: str) -> str:
-    """Тело функции по границам AST, а не окном фиксированной длины.
+    """Тело ручки API-слоя по границам парсера, в любом его модуле.
 
-    Окно живёт до следующей правки: подросла функция — срез перестал совпадать с
-    тем, что имелось в виду, и ОТРИЦАТЕЛЬНОЕ утверждение о нём зеленеет навсегда
-    (в чужом куске искомого нет). Это запрещено — tests/test_no_silently_disabled_guards.py.
+    Поиск по одному модулю жил до выноса ручки: обработчики очереди
+    операций уехали в services/mini_app_operations.py, и проверка стала
+    падать «функция не найдена» — не про идемпотентность вовсе.
     """
-    src = inspect.getsource(module)
-    tree = ast.parse(src)
-    lines = src.split("\n")
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return "\n".join(lines[node.lineno - 1:node.end_lineno])
-    raise AssertionError(f"функция {name} не найдена в {module.__name__}")
+    del module
+    return api_function(name)
 
 
 def test_miniapp_retry_links_the_new_operation_to_the_old_one():

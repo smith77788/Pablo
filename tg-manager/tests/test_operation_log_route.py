@@ -12,10 +12,11 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def test_operation_log_route_registered():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert re.search(
         r'add_get\(\s*["\']/api/miniapp/operation/\{op_id\}/log["\']\s*,\s*operation_log',
         src,
@@ -23,7 +24,7 @@ def test_operation_log_route_registered():
 
 
 def test_operation_log_handler_scopes_by_owner():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def operation_log\(.*?\n(.*?)async def ", src, re.DOTALL)
     assert m, "handler operation_log not found"
     body = m.group(1)

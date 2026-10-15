@@ -19,7 +19,9 @@ from pathlib import Path
 from tests.miniapp_source import miniapp_source
 
 SRC = miniapp_source()
-API = (Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_source
+
+API = api_source()
 
 
 def _handler(name: str) -> str:

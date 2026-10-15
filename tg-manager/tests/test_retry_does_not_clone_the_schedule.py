@@ -32,6 +32,7 @@ import ast
 import inspect
 
 import pytest
+from tests.miniapp_source import api_function
 
 
 def _func_body(module, name: str) -> str:
@@ -215,9 +216,8 @@ async def test_next_round_does_not_inherit_a_foreign_journal(monkeypatch):
 # ── все пути повтора идут через один сборщик ────────────────────────────────
 
 def test_single_retry_in_the_mini_app_uses_the_shared_builder():
-    from services import mini_app_api
 
-    body = _func_body(mini_app_api, "retry_operation")
+    body = api_function("retry_operation")
 
     assert body.count("params_for_retry(") == 2, (
         "повтор в мини-аппе собирает params сам: оба пути (точечный повтор "
@@ -228,9 +228,8 @@ def test_single_retry_in_the_mini_app_uses_the_shared_builder():
 
 
 def test_bulk_retry_in_the_mini_app_uses_the_shared_builder():
-    from services import mini_app_api
 
-    body = _func_body(mini_app_api, "operations_retry_failed")
+    body = api_function("operations_retry_failed")
 
     assert "params_for_retry(" in body, (
         "массовый повтор берёт до 25 операций за раз — собирая params сам, он "

@@ -24,6 +24,7 @@ import pathlib
 import re
 
 from tests.miniapp_source import miniapp_html
+from tests.miniapp_source import api_function
 
 
 def _api_src() -> str:
@@ -58,14 +59,15 @@ def _js_fn(src: str, name: str) -> str:
 
 
 def _py_fn(src: str, name: str) -> str:
-    i = src.index("async def " + name + "(")
-    indent = len(src[:i].split("\n")[-1])
-    out = []
-    for line in src[src.index("\n", i):].split("\n"):
-        if line.strip() and (len(line) - len(line.lstrip())) <= indent and out:
-            break
-        out.append(line)
-    return "\n".join(out)
+    """Тело ручки API-слоя по границам парсера, в любом его модуле.
+
+    Отсчёт по отступу жил ровно до выноса ручки: `src.index` падал
+    `substring not found`, едва `operation_log` уехал в
+    services/mini_app_operations.py. Аргумент `src` оставлен ради прежних
+    вызовов, но игнорируется: файл ищет сам api_function.
+    """
+    del src
+    return api_function(name)
 
 
 def test_log_endpoint_pages_and_counts():

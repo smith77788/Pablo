@@ -703,7 +703,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     me = await _resp.json()
             if not me.get("ok"):
                 desc = me.get("description") or "неверный токен"
-                return _err(f"Telegram API: {desc}", 400)
+                return _err(f"Telegram отказал: {desc}", 400)
             bot_info = me["result"]
             bot_id = bot_info["id"]
             username = bot_info.get("username", "")
@@ -988,7 +988,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Неверный запрос", 400)
         valid_roles = ("entry", "conversion", "retention", "general")
         if role not in valid_roles:
-            return _err(f"role must be one of {valid_roles}", 400)
+            return _err("Роль бота: entry, conversion, retention или general", 400)
         try:
             res = await pool.execute(
                 "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4",

@@ -20,10 +20,10 @@ import ast
 import re
 from pathlib import Path
 
-API = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
+from tests.miniapp_source import api_files, api_source
 
 
-def _handlers() -> list[tuple[str, str, int]]:
+def _handlers() -> list[tuple[str, str, str]]:
     """(имя, тело, номер строки) для каждого async-обработчика мини-аппа.
 
     Границы берём из AST. Раньше тело резалось по тексту — от одной строки
@@ -38,23 +38,26 @@ def _handlers() -> list[tuple[str, str, int]]:
     находку тоже убирала, но обработчики искала по отступу ровно в четыре
     пробела — вложенные глубже в детектор не попадали вовсе. AST видит все.
     """
-    src = API.read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    # Границы — по номерам строк узла. `ast.get_source_segment` здесь нельзя:
-    # он режет весь исходник на строки на КАЖДЫЙ вызов, а файл больше мегабайта
-    # и обработчиков почти семь сотен — один прогон храповика занимал 80 секунд.
-    lines = src.splitlines(keepends=True)
+    # По ВСЕМ файлам API-слоя, а не по монолиту: обработчики переезжают в
+    # services/mini_app_*.py, и детектор, читающий один файл, после каждого
+    # выноса тихо перестаёт их видеть — то есть зеленеет, ничего не проверив.
     out = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.AsyncFunctionDef):
-            continue
-        args = node.args.args
-        if not args or args[0].arg != "request":
-            continue
-        start = node.lineno - 1
-        end = node.end_lineno or node.lineno
-        body = "".join(lines[start:end])
-        out.append((node.name, body, node.lineno))
+    for path in api_files():
+        src = path.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        # Границы — по номерам строк узла. `ast.get_source_segment` здесь нельзя:
+        # он режет весь исходник на строки на КАЖДЫЙ вызов, а файл больше
+        # мегабайта и обработчиков почти семь сотен — один прогон храповика
+        # занимал 80 секунд.
+        lines = src.splitlines(keepends=True)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef):
+                continue
+            args = node.args.args
+            if not args or args[0].arg != "request":
+                continue
+            body = "".join(lines[node.lineno - 1:node.end_lineno or node.lineno])
+            out.append((node.name, body, f"{path.parent.name}/{path.name}:{node.lineno}"))
     return out
 
 
@@ -77,7 +80,7 @@ def test_every_submitting_handler_surfaces_plan_refusal():
            if "submit(" in body and not re.search(r"except\s+.*PermissionError", body)]
     assert not bad, (
         "отказ по тарифу уйдёт сырым 500 — платная функция выглядит сломанной:\n"
-        + "\n".join(f"  services/mini_app_api.py:{ln}  {n}" for n, ln in bad)
+        + "\n".join(f"  {ln}  {n}" for n, ln in bad)
     )
 
 
@@ -98,7 +101,7 @@ def test_refusal_is_403_with_reason():
 def test_middleware_catches_unguarded_handlers():
     """Страховка для хендлеров, которые добавят без перехвата: PermissionError,
     вылетевший наружу, всё равно становится 403, а не 500 от aiohttp."""
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     assert "plan_gate_middleware" in src, "нужна страховка на уровне приложения"
     m = re.search(r"async def plan_gate_middleware.*?app\.middlewares\.append\(plan_gate_middleware\)",
                   src, re.DOTALL)

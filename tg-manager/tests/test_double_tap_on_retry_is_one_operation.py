@@ -29,16 +29,18 @@ import inspect
 import re
 
 import pytest
+from tests.miniapp_source import api_function
 
 
 def _func_body(module, name: str) -> str:
-    src = inspect.getsource(module)
-    tree = ast.parse(src)
-    lines = src.split("\n")
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return "\n".join(lines[node.lineno - 1:node.end_lineno])
-    raise AssertionError(f"функция {name} не найдена в {module.__name__}")
+    """Тело ручки API-слоя по границам парсера, в любом его модуле.
+
+    Поиск по одному модулю жил до выноса ручки: обработчики очереди
+    операций уехали в services/mini_app_operations.py, и проверка стала
+    падать «функция не найдена» — не про идемпотентность вовсе.
+    """
+    del module
+    return api_function(name)
 
 
 @pytest.mark.parametrize("name", ["retry_operation", "operations_retry_failed"])
