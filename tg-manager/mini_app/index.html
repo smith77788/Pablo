@@ -10721,7 +10721,9 @@ async function reviveFleet() {
   if (!await askConfirm('Поднять флот? Снимет залипшие блокировки (зависший «в работе», кулдаун, обнулённое доверие) со всех аккаунтов, у которых есть сессия — недавно переподключённый флот сразу заработает. Реально мёртвые сессии монитор пометит заново.')) return;
   try {
     const r = await api('/api/miniapp/accounts/revive', {method:'POST'});
-    toast(`🚀 Флот поднят: разблокировано ${r.revived||0} аккаунтов`);
+    const _busy = r.busy_skipped || 0;
+    toast(`🚀 Флот поднят: разблокировано ${r.revived||0} аккаунтов`
+          + (_busy ? `, ${_busy} заняты операцией и не тронуты` : ''));
     if (typeof loadAccounts==='function') loadAccounts();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }

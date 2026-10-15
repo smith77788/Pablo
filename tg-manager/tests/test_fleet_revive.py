@@ -29,7 +29,12 @@ def test_revive_endpoint_and_route_exist():
     assert "async def accounts_revive" in api
     assert '"/api/miniapp/accounts/revive"' in api
     i = api.index("async def accounts_revive")
-    body = api[i:i + 4200]
+    # Окно пришлось расширить: ручка обзавелась проверкой занятости (аккаунт под
+    # живой арендой не поднимаем, иначе его сессию заберёт второй исполнитель —
+    # см. tests/test_reviving_the_fleet_does_not_steal_a_busy_account_postgres.py),
+    # и `release_accounts` уехал за прежние 4200 символов. Пробник, который
+    # краснеет от выросшего здорового кода, измеряет не то, что обещает.
+    body = api[i:i + 7000]
     # снимает блокировки только у аккаунтов С сессией, оптимистично активирует
     assert "session_str IS NOT NULL" in body
     assert "in_operation=FALSE" in body
@@ -37,6 +42,13 @@ def test_revive_endpoint_and_route_exist():
     assert "release_accounts" in body   # снимаем и in-memory lock op_worker
     # снимаем cf_relay_url с аккаунтов на мёртвом CF-воркере (иначе таймаут на релей)
     assert "SET cf_relay_url=NULL" in body and "cf_worker_pool" in body
+    # ...но НЕ у тех, которыми прямо сейчас работает операция: оба источника
+    # правды о занятости (аренда в БД и память арбитра) обязаны спрашиваться.
+    assert "accounts_busy_now" in body, (
+        "ручка не спрашивает память арбитра — поднимет аккаунт под живым коннектом")
+    assert "op_lease_until IS NULL OR op_lease_until < now()" in body, (
+        "в UPDATE нет защиты по аренде: снимок занятости устаревает между "
+        "SELECT и UPDATE, защищать обязан сам запрос")
 
 
 def test_revive_button_wired_in_ui():

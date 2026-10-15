@@ -310,8 +310,14 @@ async def _db_claim(acc_ids: list[int]) -> list[int]:
                       op_lease_owner = $2,
                       op_lease_until = now() + make_interval(secs => $3)
                 WHERE id = ANY($1::int[])
-                  AND (in_operation = FALSE
-                       OR op_lease_until IS NULL
+                  -- Арбитр — АРЕНДА, а не флаг. `in_operation = FALSE` стоял
+                  -- здесь отдельным пропуском, и любой, кто снимал флаг, не
+                  -- сняв аренду, отдавал ЖИВУЮ сессию второму исполнителю:
+                  -- это AUTH_KEY_DUPLICATED, самая дорогая поломка продукта.
+                  -- Все снятия аренды в коде гасят оба поля сразу, поэтому
+                  -- свободный аккаунт проходит по `op_lease_until IS NULL`, а
+                  -- брошенный — по истёкшему сроку.
+                  AND (op_lease_until IS NULL
                        OR op_lease_until < now()
                        OR op_lease_owner = $2)
              RETURNING id""",
@@ -379,9 +385,24 @@ async def renew_leases() -> int:
             _WORKER_ID, float(_LEASE_TTL_S), held,
         )
         try:
-            return int(str(res).rsplit(" ", 1)[-1])
+            _renewed = int(str(res).rsplit(" ", 1)[-1])
         except (TypeError, ValueError):
             return 0
+        # Продлили МЕНЬШЕ, чем держим. Значит у части аккаунтов аренда уже не
+        # наша: кто-то снял in_operation или перебил op_lease_owner, а наши
+        # задачи продолжают работать этими сессиями. Через TTL такой аккаунт
+        # законно заберёт другой исполнитель — AUTH_KEY_DUPLICATED. Раньше
+        # число продлённых возвращалось и выбрасывалось вызывающим, то есть
+        # расхождение памяти и БД о флоте не оставляло ни одного следа.
+        if _renewed < len(held):
+            log.error(
+                "op_worker: аренда продлена у %d из %d занятых аккаунтов — "
+                "у остальных её снял кто-то другой, а операции ещё идут",
+                _renewed, len(held),
+            )
+            _reliability_metric(
+                "infragram_account_lease_renew_drift_total", len(held) - _renewed)
+        return _renewed
     except Exception as e:
         log.warning("op_worker: продление аренды не удалось: %s", e)
         return 0
@@ -1303,6 +1324,25 @@ async def release_accounts(acc_ids: list[int]) -> None:
             for locked_acc_ids in _operation_account_locks.values():
                 locked_acc_ids.discard(aid)
     await _db_release([int(a) for a in acc_ids])
+
+
+async def accounts_busy_now(acc_ids: list[int]) -> set[int]:
+    """Какие из этих аккаунтов прямо сейчас ведёт живая работа ЭТОГО процесса.
+
+    Единственная дверь к вопросу «занят ли аккаунт сейчас» снаружи op_worker.
+    Нужна, потому что правда о занятости живёт в двух местах: аренда в БД
+    (видна другим процессам) и `_accounts_in_use` в памяти (этот процесс, в
+    том числе прогрев/призрак/пре-флайт). Спрашивать множество напрямую
+    нельзя: оно живёт под `_accounts_lock`.
+
+    Повод завести: «Поднять флот» в мини-аппе снимало операционные блокировки
+    со ВСЕХ аккаунтов владельца, включая те, которыми в эту секунду работает
+    операция, — и сессию сразу же законно забирал второй исполнитель.
+    """
+    if not acc_ids:
+        return set()
+    async with _accounts_lock:
+        return {int(a) for a in acc_ids if int(a) in _accounts_in_use}
 
 
 async def try_claim_accounts(acc_ids: list[int]) -> list[int]:

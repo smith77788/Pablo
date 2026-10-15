@@ -9514,18 +9514,61 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+
+        # Аккаунты, которыми ПРЯМО СЕЙЧАС работает операция, не трогаем.
+        # Снять с такого блокировку значит отдать живую сессию второму
+        # исполнителю: `_db_claim` пускает по аренде, аренда снята — аккаунт
+        # свободен, и две операции коннектятся одним auth-key
+        # (AUTH_KEY_DUPLICATED, сессия сгорает). Спрашиваем оба источника
+        # правды: аренду в БД (её держит любой процесс) и память этого
+        # процесса (там же прогрев, призрак и пре-флайт).
+        #
+        # FAIL-CLOSED: не смогли узнать, кто занят — не поднимаем ничего.
+        # Цена отказа — владелец нажмёт кнопку снова; цена ошибки —
+        # сожжённая сессия.
+        _own_ids: list[int] = []
+        busy: set[int] = set()
+        try:
+            _own = await pool.fetch(
+                "SELECT id, (op_lease_until IS NOT NULL "
+                "            AND op_lease_until > now()) AS leased "
+                "  FROM tg_accounts "
+                " WHERE owner_id=$1 AND session_str IS NOT NULL "
+                "   AND session_str != ''",
+                uid,
+            )
+            _own_ids = [int(r["id"]) for r in (_own or [])]
+            busy = {int(r["id"]) for r in (_own or []) if r["leased"]}
+            from services import op_worker as _opw
+            busy |= await _opw.accounts_busy_now(_own_ids)
+        except Exception:
+            log.exception("accounts_revive uid=%s: проверка занятости", uid)
+            return _err(
+                "Не удалось проверить, какие аккаунты заняты операцией — "
+                "флот не тронут, попробуйте ещё раз", 500)
+
         try:
             res = await pool.execute(
+                # op_lease_until/op_lease_owner гасим вместе с флагом: снятый
+                # флаг при живой аренде — это и есть то состояние, в котором
+                # аккаунт нельзя ни взять, ни продлить (см. _db_claim).
+                # Условие по аренде дублирует список busy намеренно: между
+                # SELECT выше и этим UPDATE операция может успеть взять
+                # аккаунт, и защищает здесь именно SQL, а не снимок.
                 """UPDATE tg_accounts
                    SET is_active=TRUE,
                        acc_status='active',
                        status_reason=NULL,
                        in_operation=FALSE,
+                       op_lease_until=NULL,
+                       op_lease_owner=NULL,
                        cooldown_until=NULL,
                        trust_score=GREATEST(COALESCE(trust_score, 1.0), 1.0),
                        flood_count_7d=0
                    WHERE owner_id=$1
                      AND session_str IS NOT NULL AND session_str != ''
+                     AND NOT (id = ANY($2::int[]))
+                     AND (op_lease_until IS NULL OR op_lease_until < now())
                      AND (
                            COALESCE(is_active, FALSE) = FALSE
                         OR COALESCE(in_operation, FALSE) = TRUE
@@ -9533,7 +9576,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                         OR COALESCE(acc_status, 'active') <> 'active'
                         OR COALESCE(trust_score, 1.0) < 1.0
                      )""",
-                uid,
+                uid, sorted(busy),
             )
             try:
                 revived = int(str(res).split()[-1])
@@ -9557,12 +9600,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # до рестарта, и revive из БД не помог бы операции их захватить).
             try:
                 from services import op_worker as _opw
-                _ids = await pool.fetch(
-                    "SELECT id FROM tg_accounts WHERE owner_id=$1 AND session_str IS NOT NULL", uid)
-                await _opw.release_accounts([int(r["id"]) for r in (_ids or [])])
+                # Занятые — мимо: release_accounts снимает и аренду в БД, то
+                # есть вернул бы ровно то состояние, от которого защищает
+                # UPDATE выше.
+                await _opw.release_accounts(
+                    [i for i in _own_ids if i not in busy])
             except Exception:
                 log.debug("accounts_revive: op_worker release skipped", exc_info=True)
-            return _json_resp({"ok": True, "revived": revived})
+            return _json_resp(
+                {"ok": True, "revived": revived, "busy_skipped": len(busy)})
         except Exception:
             log.exception("accounts_revive uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
