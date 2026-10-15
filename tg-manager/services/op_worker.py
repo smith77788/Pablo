@@ -11509,6 +11509,14 @@ async def _exec_bulk_dm_adhoc(
                 "reason": "Все аккаунты заняты другой операцией — попробуйте позже"}
     _busy = len(active_accounts) - len(claimed_ids)
     active_accounts = [a for a in active_accounts if int(a["id"]) in set(claimed_ids)]
+    # Что рассылка держит ПРЯМО СЕЙЧАС. Отдельно от claimed_ids, потому что
+    # дележ флота ниже возвращает часть аккаунтов в пул, и их почти сразу
+    # берёт другая операция владельца. Освободить в finally список «как было
+    # при захвате» значило бы снять аренду с чужой живой сессии: `_db_release`
+    # сверяет владельца аренды по ВОРКЕРУ, а не по операции, и внутри одного
+    # процесса такое снятие пройдёт. Дальше аккаунт выглядит свободным, его
+    # законно берёт третий — это AUTH_KEY_DUPLICATED, самая дорогая поломка.
+    _held_ids = {int(i) for i in claimed_ids}
 
     try:
 
@@ -11592,9 +11600,13 @@ async def _exec_bulk_dm_adhoc(
             if time.monotonic() - _last_rebalance >= _REBALANCE_EVERY_S:
                 _last_rebalance = time.monotonic()
                 _before_n = len(active_accounts)
+                _before_ids = {int(a["id"]) for a in active_accounts}
                 active_accounts = await _rebalance_claim(
                     op_id, owner_id, active_accounts)
                 if len(active_accounts) < _before_n:
+                    # Отданное больше не наше: из списка на освобождение — долой.
+                    _held_ids -= _before_ids - {
+                        int(a["id"]) for a in active_accounts}
                     log.info(
                         "bulk_dm_adhoc op=%d: отдал %d аккаунт(ов) другой операции "
                         "владельца — обе идут параллельно",
@@ -11747,7 +11759,8 @@ async def _exec_bulk_dm_adhoc(
                         f"{_skip_note}{_quar_note}{_oo_note}"),
         }
     finally:
-        await release_accounts(claimed_ids)
+        # Только то, что держим сейчас: отданное дележом уже у другой операции.
+        await release_accounts(sorted(_held_ids))
 
 
 async def _exec_pin_last_post(

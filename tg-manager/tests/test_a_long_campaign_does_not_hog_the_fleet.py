@@ -151,3 +151,50 @@ def test_the_fleet_is_not_given_back_where_work_is_not_divided(name):
         f"{name} отдаёт аккаунты посреди прогона, а его работа по аккаунтам не "
         "делится: отданный аккаунт свою часть не сделает вообще. Справедливость "
         "для таких типов — просить меньше при захвате, а не отдавать на ходу")
+
+
+# ── Отданное нельзя освобождать повторно ─────────────────────────────────────
+
+def test_the_giver_does_not_release_what_it_gave_away():
+    """Двойное освобождение снимает аренду с ЧУЖОЙ живой сессии.
+
+    `_db_release` сверяет владельца аренды по ВОРКЕРУ, а не по операции: внутри
+    одного процесса снятие аренды с аккаунта, который уже взяла соседняя
+    операция, пройдёт успешно. Дальше аккаунт выглядит свободным, его законно
+    берёт третий — и одна auth-key сессия коннектится из двух мест. Это
+    AUTH_KEY_DUPLICATED, самая дорогая поломка продукта.
+
+    Поэтому исполнитель, который отдаёт аккаунты на ходу, обязан освобождать не
+    список «как было при захвате», а то, что держит СЕЙЧАС. (Массовый инвайт
+    своего release в finally не имеет вовсе — за него это делает общий
+    `release_operation_accounts(op_id)`, который читает актуальный набор.)
+    """
+    fn = _executor("_exec_bulk_dm_adhoc")
+    releases = []
+    for node in ast.walk(fn):
+        if not (isinstance(node, ast.Try) and node.finalbody):
+            continue
+        for stmt in node.finalbody:
+            for call in ast.walk(stmt):
+                if (isinstance(call, ast.Call)
+                        and ast.unparse(call.func).endswith("release_accounts")
+                        and call.args):
+                    releases.append(ast.unparse(call.args[0]))
+    assert releases, (
+        "рассылка больше не освобождает флот в finally — проверьте, кто это "
+        "делает теперь, и поправьте проверку")
+    for arg in releases:
+        assert "claimed_ids" not in arg, (
+            "в finally освобождается список захвата: отданные дележом аккаунты "
+            "уже у другой операции, и это снятие аренды с её живой сессии "
+            f"(AUTH_KEY_DUPLICATED). Освобождать нужно текущий набор: {arg}")
+        assert "_held_ids" in arg, (
+            f"непонятно, что освобождается ({arg}) — проверка смотрит не туда")
+
+    # И набор обязан уменьшаться там же, где отдаются аккаунты.
+    src = ast.unparse(fn)
+    at = src.index("_rebalance_claim")
+    after = src[at:at + 600]
+    assert "_held_ids" in after, (
+        "дележ не вычёркивает отданные аккаунты из набора на освобождение — "
+        "finally снимет аренду с чужой сессии")
