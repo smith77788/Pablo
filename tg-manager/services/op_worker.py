@@ -918,6 +918,26 @@ async def _pause_watching_for_cancel(
     """
     step = max(0.05, float(_CANCEL_PAUSE_STEP_S))
     waited = 0.0
+    # Сторож застоя судит по движению `done_items`, а эта пауза его как раз и
+    # не двигает. Самая долгая из них — пауза между группами у Growth Agent:
+    # 10–20 минут, и губернатор растягивает её до четырёх раз, то есть до 80
+    # минут при окне сторожа 90 (а окно владелец вправе сузить до 10). Без
+    # объявления сторож обрывал прогон за соблюдение собственного анти-бан
+    # темпа: прогресс обнулялся, бюджет живучести горел, и здоровая операция
+    # в итоге объявлялась ядовитой. Дедлайн у объявления свой, поэтому
+    # исполнитель, зависший ПОСЛЕ паузы, по-прежнему будет снят.
+    _declared_pause_until[int(op_id)] = time.monotonic() + float(seconds)
+    try:
+        return await _pause_steps(pool, op_id, seconds, where, step)
+    finally:
+        _declared_pause_until.pop(int(op_id), None)
+
+
+async def _pause_steps(
+    pool: "asyncpg.Pool", op_id: int, seconds: float, where: str, step: float,
+) -> float:
+    """Сама дробная пауза: шаг сна, затем проверка отмены (см. вызывающего)."""
+    waited = 0.0
     while waited < seconds:
         chunk = min(step, seconds - waited)
         await asyncio.sleep(chunk)
@@ -2441,6 +2461,12 @@ _QUIET_PROGRESS_OPS = {"contacts_sync"}
 
 # Cache for _is_cancelled: op_id -> (result: bool, checked_at: float)
 _cancel_cache: dict[int, tuple[bool, float]] = {}
+
+# Прогоны, которые стоят на месте ОСОЗНАННО: op_id → monotonic-дедлайн паузы.
+# Заполняет `_pause_watching_for_cancel`, читает сторож застоя: оба живут в
+# одном процессе с самой задачей операции, поэтому делить это состояние не с
+# кем (и нечего — после рестарта ни задачи, ни её паузы уже нет).
+_declared_pause_until: dict[int, float] = {}
 _CANCEL_CACHE_TTL = 5.0  # seconds between DB checks in tight loops
 
 # ETA tracking: op_id -> {start_time, start_done, last_done, last_time}
@@ -4508,6 +4534,15 @@ async def _run_with_stall_guard(pool: asyncpg.Pool, coro, op_id: int, op_type: s
 
             if done != last_done:
                 last_done = done
+                last_move = time.monotonic()
+                continue
+
+            if _declared_pause_until.get(int(op_id), 0.0) > time.monotonic():
+                # Прогон стоит ОСОЗНАННО: пейсинг или назначенная Telegram
+                # пауза (`_pause_watching_for_cancel`). Это не застой, а
+                # соблюдение правил — снимать за него прогон значит наказывать
+                # за осторожность. Зависание ПОСЛЕ паузы сторож поймает: у
+                # объявления есть свой дедлайн.
                 last_move = time.monotonic()
                 continue
 

@@ -135,6 +135,10 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/error_reporting.py:_default_reporter": "синглтон процесса",
     "services/managed_bot_webhooks.py:_queues": "asyncio.Queue",
     "services/op_worker.py:_active_op_ids": "операции, выполняемые ЭТИМ процессом",
+    "services/op_worker.py:_declared_pause_until": (
+        "дедлайны ОСОЗНАННЫХ пауз прогона: их объявляет пауза, читает сторож "
+        "застоя, и оба живут в одном процессе с самой задачей операции. "
+        "Делить не с кем и нечего: после рестарта ни задачи, ни паузы нет."),
     "services/op_worker.py:_active_op_tasks": "asyncio.Task этого процесса",
     "services/op_worker.py:_accounts_in_use": "быстрый локальный фильтр; арбитр — аренда в БД",
     "services/op_worker.py:_operation_account_locks": "то же, привязка операция→аккаунты",
