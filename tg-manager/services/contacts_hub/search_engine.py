@@ -382,41 +382,52 @@ async def search_contacts_spotlight(
     params.extend(op_params)
 
     q = f'%{query.strip().lower()}%'
+    bare = query.strip().lower()
+
+    # Шаблон поиска и сам запрос нужны И в условии, И в ранжировании (CASE), в
+    # том числе когда условие собрано по операторам, — поэтому параметры
+    # заводятся всегда, а не внутри ветки.
+    pat_idx = idx
+    params.append(q)
+    idx += 1
+    tag_idx = idx
+    params.append(bare)
+    idx += 1
 
     if not has_operators:
         all_conditions.append(
             f'''(
-                first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR
-                username ILIKE ${idx} OR display_name ILIKE ${idx} OR
-                CAST(telegram_user_id AS TEXT) ILIKE ${idx} OR
-                company ILIKE ${idx} OR notes ILIKE ${idx} OR
-                $${idx} = ANY(tags)
+                first_name ILIKE ${pat_idx} OR last_name ILIKE ${pat_idx} OR
+                username ILIKE ${pat_idx} OR display_name ILIKE ${pat_idx} OR
+                CAST(telegram_user_id AS TEXT) ILIKE ${pat_idx} OR
+                company ILIKE ${pat_idx} OR notes ILIKE ${pat_idx} OR
+                ${tag_idx} = ANY(tags)
             )'''
         )
-        params.append(q)
-        idx += 1
 
     where_clause = ' AND '.join(all_conditions)
 
-    params.append(limit)
-    rank_limit = idx
-    params.append(999999)
-    rank_limit2 = idx + 1
+    # Пул кандидатов для питоновского ранжирования: `limit` отдаётся наружу
+    # после сортировки по combined_score, поэтому выбрать нужно больше, чем
+    # вернём, — но не всю таблицу (раньше стояло 999999, то есть «прочитать
+    # все контакты владельца на каждое нажатие в поиске»).
+    cand_idx = idx
+    params.append(min(max(int(limit) * 10, 100), 1000))
 
     rows = await pool.fetch(
         f'''SELECT *,
             CASE
-                WHEN first_name ILIKE ${idx} THEN 0
-                WHEN username ILIKE ${idx} THEN 1
-                WHEN display_name ILIKE ${idx} THEN 2
-                WHEN $${idx} = ANY(tags) THEN 3
-                WHEN company ILIKE ${idx} THEN 4
+                WHEN first_name ILIKE ${pat_idx} THEN 0
+                WHEN username ILIKE ${pat_idx} THEN 1
+                WHEN display_name ILIKE ${pat_idx} THEN 2
+                WHEN ${tag_idx} = ANY(tags) THEN 3
+                WHEN company ILIKE ${pat_idx} THEN 4
                 ELSE 5
             END as rank
            FROM unified_contacts
            WHERE {where_clause}
            ORDER BY rank, first_name
-           LIMIT ${rank_limit2}''',
+           LIMIT ${cand_idx}''',
         *params)
 
     seen: set[int] = set()
