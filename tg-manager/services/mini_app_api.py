@@ -1306,6 +1306,18 @@ def _list_limit(request: web.Request, default: int, maximum: int) -> int:
     return min(validate_integer(raw, min_val=1, max_val=maximum) or default, maximum)
 
 
+def _list_offset(request: web.Request, maximum: int = 10_000_000) -> int:
+    """Сдвиг страницы. Мусор и отрицательное — ноль, а не ошибка запроса.
+
+    `OFFSET -5` Postgres не принимает, и запрос падает пятисоткой: экран
+    показывает «внутренняя ошибка сервера» там, где достаточно начать с начала.
+    """
+    raw = request.rel_url.query.get("offset")
+    if raw is None:
+        return 0
+    return validate_integer(raw, min_val=0, max_val=maximum) or 0
+
+
 async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
     try:
         return int(await pool.fetchval(query, *args) or 0)
@@ -14248,14 +14260,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         q = request.rel_url.query
-        try:
-            limit = min(int(q.get("limit", "50")), 200)
-        except (ValueError, TypeError):
-            limit = 50
-        try:
-            offset = int(q.get("offset", "0"))
-        except (ValueError, TypeError):
-            offset = 0
+        # Потолок и сдвиг — через общие двери: `LIMIT -5` / `OFFSET -5` Postgres
+        # не принимает, и раньше отрицательное число в параметрах давало
+        # пятисотку вместо первой страницы.
+        limit = _list_limit(request, 50, 200)
+        offset = _list_offset(request)
         filt_sql, filt_params = parsed_audience_filters(q, base_params_count=1)
         try:
             rows = await pool.fetch(
@@ -20295,7 +20304,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             items = await _mp.browse_catalog(
                 pool, category=q.get("category") or None,
                 resource_kind=q.get("kind") or None, q=q.get("q") or None,
-                limit=int(q.get("limit", 50)), offset=int(q.get("offset", 0)))
+                limit=_list_limit(request, 50, 200), offset=_list_offset(request))
             return _json_resp({"items": items})
         except Exception:
             log.exception("mp_catalog uid=%s", uid)

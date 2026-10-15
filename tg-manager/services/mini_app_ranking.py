@@ -19,7 +19,10 @@ def setup_routes(app: web.Application, pool) -> None:
     """Регистрирует маршруты на общем приложении мини-аппа."""
     # Общие помощники живут в mini_app_api, а он импортирует этот модуль —
     # импорт сверху дал бы цикл. К моменту вызова mini_app_api уже загружен.
-    from services.mini_app_api import _err, _get_uid, _json_resp, log
+    from services.mini_app_api import (
+        _err, _get_uid, _json_resp, _list_limit, log,
+    )
+    from services.security import validate_integer
 
     async def ranking_track(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -84,9 +87,13 @@ def setup_routes(app: web.Application, pool) -> None:
     async def ranking_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
+        # Мусор в адресе — ошибка запроса (400), а не «внутренняя ошибка
+        # сервера»: раньше `int('abc')` улетал в except и экран получал 500.
+        kw_id = validate_integer(request.match_info.get('keyword_id'), min_val=1)
+        if not kw_id:
+            return _err("Неверный идентификатор ключевого слова", 400)
+        limit = _list_limit(request, 30, 365)
         try:
-            kw_id = int(request.match_info.get('keyword_id', 0))
-            limit = max(1, min(int(request.query.get('limit', 30)), 365))
             from services.ranking_engine import get_position_history
             history = await get_position_history(pool, uid, kw_id, limit)
             return _json_resp({'history': history})
