@@ -26,12 +26,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _bot_avatar_handler_source() -> str:
-    """Тело обработчика аватара: от его def до следующего def того же уровня."""
-    with open(os.path.join(ROOT, "services/mini_app_api.py"), encoding="utf-8") as f:
-        src = f.read()
-    i = src.index("async def bot_avatar(")
-    m = re.compile(r"\n    async def (?!bot_avatar\()", re.S).search(src, i)
-    return src[i:m.start()] if m else src[i:]
+    """Тело обработчика аватара по ТОЧНЫМ границам функции (ast).
+
+    Ручки ботов живут в services/mini_app_bots.py, остальной API-слой — ещё в
+    десяти модулях `mini_app_*`. Единственная дверь к нему —
+    tests/miniapp_source: поиск по одному файлу молча перестаёт что-либо
+    стеречь, как только ручка переезжает.
+    """
+    from tests.miniapp_source import api_function
+
+    return api_function("bot_avatar")
 
 
 def test_bot_avatar_uses_dns_resolving_guard():

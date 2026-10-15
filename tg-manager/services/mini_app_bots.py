@@ -28,8 +28,8 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты ботов на приложении мини-аппа."""
     from services import operation_bus as _obus
     from services.mini_app_api import (
-        _BOTS_VISIBLE_SQL, _INTERNAL_ERROR, _err, _get_uid, _json_resp,
-        _safe_count, _safe_fetch, _safe_fetchrow, _str_list, _text,
+        _BOTS_VISIBLE_SQL, _INTERNAL_ERROR, _cached_user, _err, _get_uid,
+        _json_resp, _safe_count, _safe_fetch, _safe_fetchrow, _str_list, _text,
         _user_can_use_bot, log, schedule_repeat_minutes,
     )
     from services.security import (
@@ -37,6 +37,7 @@ def setup_routes(app: web.Application, pool) -> None:
         validate_integer, validate_start_param, validate_string,
     )
 
+    @_cached_user()
     async def bots(request: web.Request) -> web.Response:
         """Боты пользователя: страница по limit/offset и честное общее число.
 

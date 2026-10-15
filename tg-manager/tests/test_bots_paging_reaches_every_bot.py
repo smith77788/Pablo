@@ -134,7 +134,13 @@ def test_visibility_condition_has_one_source():
     и ровно этот эндпоинт начал бы отдавать чужого бота, пока остальные три
     отказывают правильно: снаружи такую дыру почти нечем заметить.
     """
-    src = Path(M.__file__).read_text("utf-8")
+    # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py, а
+    # условие доступа (`_BOTS_VISIBLE_SQL`, `_user_can_use_bot`) осталось общим
+    # в монолите. Считать копии нужно по всем модулям сразу, иначе проверка
+    # «условие не размножено» слепа к размножению в соседнем файле.
+    from tests.miniapp_source import api_source
+
+    src = api_source()
     assert src.count("_BOTS_VISIBLE_SQL = ") == 1
     assert src.count("FROM ecosystem_bots eb") == 1, (
         "условие доступа к ботам снова размножено по файлу")
@@ -172,10 +178,11 @@ def test_access_check_closes_on_a_database_error():
 
 def test_count_and_list_agree_on_the_same_column():
     """Счёт по строкам обещал бы страницы, которых нет."""
-    src = Path(M.__file__).read_text("utf-8")
-    i = src.index("async def bots(request")
-    j = src.index("async def bot_detail(request")
-    block = src[i:j]
+    # Тело ручки по ТОЧНЫМ границам функции, в любом модуле API-слоя: срез
+    # «от def до def» рассыпается, как только соседняя функция переезжает.
+    from tests.miniapp_source import api_function
+
+    block = api_function("bots")
     listed = re.search(r"SELECT DISTINCT\s+(\S+)", block)
     assert listed, "в списке ботов не найден SELECT DISTINCT — проверка ослепла"
     counted = re.findall(r"COUNT\(DISTINCT\s+([\w.]+)\)\s+FROM", block)

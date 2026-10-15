@@ -2497,12 +2497,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        "warn": int(hl.get("warn") or 0), "bad": int(hl.get("bad") or 0)},
         })
 
-    # ── Bots ─────────────────────────────────────────────────────────────────
-
-    @_cached_user()
-
-
-
+    # ── Автоответы бота ──────────────────────────────────────────────────────
+    # Сами ручки ботов уехали в services/mini_app_bots.py; здесь осталось то,
+    # что делят с ними другие блоки.
 
     async def toggle_auto_reply(request: web.Request) -> web.Response:
         uid = _get_uid(request)

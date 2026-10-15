@@ -284,11 +284,7 @@ def _seed(owner: int):
 
 
 def _wipe(owner: int):
-    loop, pool = _STATE["loop"], _STATE["pool"]
-    for sql in ("DELETE FROM unified_contacts WHERE owner_id=$1",
-                "DELETE FROM tg_accounts WHERE owner_id=$1",
-                "DELETE FROM platform_users WHERE user_id=$1"):
-        loop.run_until_complete(pool.execute(sql, owner))
+    _purge([owner])
 
 
 def test_no_action_answers_an_internal_error_for_an_owner_with_data():
@@ -324,3 +320,51 @@ def test_no_action_answers_an_internal_error_for_an_owner_with_data():
     assert not broken, (
         "у владельца С ДАННЫМИ эти действия отвечают «внутренней ошибкой "
         "сервера» на мусор в теле:\n  " + "\n  ".join(broken))
+
+
+def _purge(owners: list[int]) -> None:
+    """Снести ВСЁ, что проходы оставили в базе за этими владельцами.
+
+    Обход изменяющих ручек создаёт строки — и это не косметика: в CI весь набор
+    идёт в ОДНОЙ базе, и забытые записи ловят соседние тесты. Так и вышло:
+    проход оставил две операции в `operation_queue`, а тест о паузе после
+    деплоя берёт из очереди самую старую подходящую операцию — и получал чужую.
+    Поэтому чистим по всем таблицам, где есть `owner_id`, несколькими проходами
+    (внешние ключи задают порядок), и напоследок саму строку владельца.
+    """
+    loop, pool = _STATE["loop"], _STATE["pool"]
+    rows = loop.run_until_complete(pool.fetch(
+        "SELECT DISTINCT table_name FROM information_schema.columns "
+        "WHERE table_schema='public' AND column_name='owner_id'"))
+    names = [r["table_name"] for r in rows]
+    for _ in range(4):
+        left = []
+        for t in names:
+            try:
+                loop.run_until_complete(pool.execute(
+                    f'DELETE FROM "{t}" WHERE owner_id = ANY($1::bigint[])', owners))
+            except Exception:
+                left.append(t)
+        names = left
+        if not names:
+            break
+    for sql in ("DELETE FROM platform_users WHERE user_id = ANY($1::bigint[])",):
+        try:
+            loop.run_until_complete(pool.execute(sql, owners))
+        except Exception:
+            pass
+
+
+def test_the_sweep_leaves_no_rows_behind():
+    """Последним: проход обязан убрать за собой и своего, и пустого владельца.
+
+    Весь набор в CI идёт в одной базе, и забытая строка проходa — это
+    падение соседнего теста с совершенно другой причиной в тексте.
+    """
+    _routes()                      # база уже поднята предыдущими тестами
+    _purge([ACTION_OWNER, DATA_OWNER])
+    loop, pool = _STATE["loop"], _STATE["pool"]
+    left = loop.run_until_complete(pool.fetch(
+        "SELECT COUNT(*) n FROM operation_queue WHERE owner_id = ANY($1::bigint[])",
+        [ACTION_OWNER, DATA_OWNER]))
+    assert left[0]["n"] == 0, "проход оставил операции в очереди"

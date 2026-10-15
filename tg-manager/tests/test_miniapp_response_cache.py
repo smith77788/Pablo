@@ -192,14 +192,19 @@ def test_a_cached_handler_is_not_put_on_a_route_with_a_path_parameter():
     `__wrapped__` и по тому, что он объявлен кэшируемым.
     """
     import re
-    from pathlib import Path
 
     from aiohttp import web as _web
 
     from services import mini_app_api as _M
 
-    root = Path(__file__).resolve().parents[1]
-    src = (root / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    # ВЕСЬ API-слой, а не только монолит: кэшируемая ручка может жить в любом
+    # из модулей `services/mini_app_*.py`. Пока проверка читала один файл, она
+    # была наполовину слепа — и ровно так пропустила бы кэш, оставшийся без
+    # своей ручки при выносе блока ботов (декоратор остался в монолите и
+    # навесился на следующую функцию — PUT на пути с параметром).
+    from tests.miniapp_source import api_source
+
+    src = api_source()
     # Имена обработчиков, помеченных декоратором кэша.
     cached = set(re.findall(r"@_cached_user\(\)\s*\n\s*async def (\w+)", src))
     assert cached, "декоратор кэша перестал находиться — проверка измеряет не то"

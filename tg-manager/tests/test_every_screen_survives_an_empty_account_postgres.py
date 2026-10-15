@@ -310,12 +310,51 @@ def test_no_screen_answers_an_error_to_an_owner_with_data():
                 broken.append(f"{path} → {resp.status}")
     finally:
         _WHO["id"] = EMPTY_OWNER
-        loop.run_until_complete(pool.execute(
-            "DELETE FROM unified_contacts WHERE owner_id=$1", DATA_OWNER))
-        loop.run_until_complete(pool.execute(
-            "DELETE FROM tg_accounts WHERE owner_id=$1", DATA_OWNER))
-        loop.run_until_complete(pool.execute(
-            "DELETE FROM platform_users WHERE user_id=$1", DATA_OWNER))
+        _purge([EMPTY_OWNER, DATA_OWNER])
     assert not broken, (
         "у владельца С ДАННЫМИ эти экраны отвечают ошибкой:\n  "
         + "\n  ".join(broken))
+
+
+def _purge(owners: list[int]) -> None:
+    """Снести всё, что проход оставил за этими владельцами.
+
+    Читающая ручка обычно не пишет, но часть экранов заводит строки по пути
+    (ленивая инициализация настроек, журнал просмотра). Весь набор в CI идёт в
+    ОДНОЙ базе, и забытая строка проходa — это падение соседнего теста с
+    совершенно другой причиной в тексте: так проход по изменяющим ручкам
+    оставил две операции в очереди и сломал тест о паузе после деплоя.
+    """
+    loop, pool = _CTX
+    rows = loop.run_until_complete(pool.fetch(
+        "SELECT DISTINCT table_name FROM information_schema.columns "
+        "WHERE table_schema='public' AND column_name='owner_id'"))
+    names = [r["table_name"] for r in rows]
+    for _ in range(4):
+        left = []
+        for t_name in names:
+            try:
+                loop.run_until_complete(pool.execute(
+                    f'DELETE FROM "{t_name}" WHERE owner_id = ANY($1::bigint[])',
+                    owners))
+            except Exception:
+                left.append(t_name)
+        names = left
+        if not names:
+            break
+    try:
+        loop.run_until_complete(pool.execute(
+            "DELETE FROM platform_users WHERE user_id = ANY($1::bigint[])", owners))
+    except Exception:
+        pass
+
+
+def test_the_scan_leaves_no_rows_behind():
+    """Последним: скан обязан убрать за собой."""
+    _routes()
+    _purge([EMPTY_OWNER, DATA_OWNER])
+    loop, pool = _CTX
+    n = loop.run_until_complete(pool.fetchval(
+        "SELECT COUNT(*) FROM operation_queue WHERE owner_id = ANY($1::bigint[])",
+        [EMPTY_OWNER, DATA_OWNER]))
+    assert int(n or 0) == 0, "скан оставил операции в очереди"

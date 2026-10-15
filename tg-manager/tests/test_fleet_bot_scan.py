@@ -18,7 +18,9 @@ import pathlib
 from services.account_manager import parse_mybots_usernames as P
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py.
+from tests.miniapp_source import api_source
+_API = api_source()
 _OPW = (_ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 _BUS = (_ROOT / "services" / "operation_bus.py").read_text(encoding="utf-8")
