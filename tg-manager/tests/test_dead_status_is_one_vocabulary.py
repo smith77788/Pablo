@@ -67,7 +67,7 @@ class _HealthPool:
         return [
             {"id": 1000 + i, "phone": f"+7000000{i:04d}", "acc_status": s,
              "trust_score": 1.0, "cd_active": False,
-             "restrictions": 0, "severe": 0, "floods": 0}
+             "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0}
             for i, s in enumerate(self.statuses)
         ]
 

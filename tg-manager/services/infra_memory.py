@@ -746,6 +746,20 @@ async def record_account_restriction(
 # кулдаун, а карантин по старым событиям держал аккаунт вне операций — жалоба
 # «кулдаун не сбрасывается»). Событие свежее сброса снова уводит аккаунт в
 # карантин — это правильно.
+# Окно карантина в сутках — ОДНО число на гейт и на пульс.
+#
+# ЧТО ЛОМАЛОСЬ. Гейт (`quarantined_accounts`) считал карантином ограничение за
+# последние трое суток, а экран здоровья (`get_account_health`) выносил вердикт
+# «Карантин» по своему окну в семь суток. С четвёртых по седьмые сутки после
+# ограничения владелец читал на экране аккаунта «аккаунт на паузе», подсказку
+# «дайте отлежаться» и плашку в мини-аппе — а все двери выбора этот аккаунт уже
+# брали и работали им. Экран описывал не то поведение, которое у системы есть.
+#
+# «Карантин» — утверждение о том, возьмут ли аккаунт в работу, поэтому окно у
+# вердикта обязано быть то же, что у гейта. Более широкое окно пульса остаётся
+# для мягких сигналов (флуды, несерьёзные ограничения) — они дают «Под риском».
+QUARANTINE_DAYS = 3
+
 _QUARANTINE_WHERE = (
     "re.created_at > NOW() - make_interval(days => $2) "
     "AND (a.risk_cleared_at IS NULL OR re.created_at > a.risk_cleared_at) "
@@ -754,7 +768,7 @@ _QUARANTINE_WHERE = (
 )
 
 
-async def quarantined_accounts(pool, account_ids, *, days: int = 3) -> set[int]:
+async def quarantined_accounts(pool, account_ids, *, days: int = QUARANTINE_DAYS) -> set[int]:
     """Кто из `account_ids` под карантином — ОДНИМ запросом.
 
     ЗАЧЕМ ПАКЕТНЫЙ ВХОД. Гейт стоит перед КАЖДОЙ массовой операцией и на экране
@@ -798,7 +812,7 @@ async def quarantined_accounts(pool, account_ids, *, days: int = 3) -> set[int]:
     return out
 
 
-async def is_account_quarantined(pool, account_id: int, *, days: int = 3) -> bool:
+async def is_account_quarantined(pool, account_id: int, *, days: int = QUARANTINE_DAYS) -> bool:
     """Fail-open: True только при недавнем СЕРЬЁЗНОМ ограничении (critical severity
     или event_type про ban/block/restrict) за последние `days` суток.
 
@@ -864,6 +878,17 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
                    AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
                         OR r.event_type ILIKE '%block%'
                         OR r.event_type ILIKE '%restrict%')) AS severe,
+              -- То же серьёзное ограничение, но в окне ГЕЙТА ($3), а не экрана.
+              -- Вердикт «Карантин» стоит на нём: он обязан значить ровно то же,
+              -- что значит отказ дверей выбора взять аккаунт в работу.
+              (SELECT COUNT(*) FROM restriction_events r
+                 WHERE r.account_id=a.id
+                   AND r.created_at > NOW() - make_interval(days => $3)
+                   AND (a.risk_cleared_at IS NULL
+                        OR r.created_at > a.risk_cleared_at)
+                   AND (r.severity='critical' OR r.event_type ILIKE '%ban%'
+                        OR r.event_type ILIKE '%block%'
+                        OR r.event_type ILIKE '%restrict%')) AS severe_gate,
               (SELECT COUNT(*) FROM account_flood_log f
                  WHERE f.account_id=a.id
                    AND f.created_at > NOW() - make_interval(days => $2)
@@ -872,7 +897,7 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             FROM tg_accounts a
             WHERE a.owner_id=$1 AND a.is_active=TRUE
             ORDER BY a.id
-            """, owner_id, days)
+            """, owner_id, days, QUARANTINE_DAYS)
     except Exception as e:
         log.warning("get_account_health owner=%s: %s", owner_id, e)
         return empty
@@ -881,6 +906,7 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
     healthy = at_risk = quarantine = 0
     for r in rows:
         severe = int(r["severe"] or 0)
+        severe_gate = int(r["severe_gate"] or 0)
         restr = int(r["restrictions"] or 0)
         floods = int(r["floods"] or 0)
         acc_status = (r["acc_status"] or "active").lower()
@@ -936,9 +962,17 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
         if status_bad:
             codes.append("acc_status")
             reasons.append(_acc_status_mod.ru_label(acc_status))
-        if severe:
+        if severe_gate:
             codes.append("severe")
-            reasons.append(f"серьёзных ограничений за {int(days)} дн.: {severe}")
+            reasons.append(
+                f"серьёзных ограничений за {int(QUARANTINE_DAYS)} дн.: {severe_gate}")
+        elif severe:
+            # Ограничение было, но окно гейта уже прошло: двери аккаунт берут,
+            # и называть это карантином значит врать владельцу про поведение.
+            codes.append("severe_past")
+            reasons.append(
+                f"серьёзное ограничение было за {int(days)} дн. ({severe}), "
+                f"окно паузы уже прошло")
         if hscore < dead_score:
             codes.append("failing")
             reasons.append(f"действия подряд не проходят (здоровье {int(hscore)}/100)")
@@ -959,10 +993,11 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             codes.append("weak")
             reasons.append(f"слабое здоровье: {int(hscore)}/100")
 
-        if severe or status_bad or no_session or hscore < dead_score:
+        if severe_gate or status_bad or no_session or hscore < dead_score:
             status, score = "quarantine", 0.2
             quarantine += 1
-        elif restr or floods >= 3 or status_risk or low_trust or hscore < weak_score:
+        elif (severe or restr or floods >= 3 or status_risk or low_trust
+              or hscore < weak_score):
             status, score = "at_risk", min(0.5, trust)
             at_risk += 1
         elif floods:
@@ -993,8 +1028,9 @@ async def get_account_health(pool, owner_id: int, *, days: int = 7) -> dict:
             advice = ("Счётчик отказов живёт в памяти процесса: нажмите «Снять "
                       "паузу» на этом аккаунте и запустите щадящий прогрев.")
         elif status == "quarantine":
-            advice = ("Дайте аккаунту отлежаться (3+ дней без действий) или "
-                      "запустите щадящий прогрев — пульс снимет паузу сам.")
+            advice = (f"Дайте аккаунту отлежаться ({int(QUARANTINE_DAYS)}+ дней "
+                      f"без действий) или запустите щадящий прогрев — пульс "
+                      f"снимет паузу сам.")
         elif status == "at_risk":
             advice = "Снизьте нагрузку и запустите прогрев — риск спадёт сам."
         else:

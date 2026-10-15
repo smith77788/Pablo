@@ -36,10 +36,16 @@ class _Pool:
 
 
 def _row(**kw):
+    # severe_gate — те же серьёзные ограничения, но в окне ГЕЙТА (3 дня) против
+    # окна экрана (7): свежее ограничение считают оба счётчика, и по умолчанию
+    # заглушка это и моделирует. Случай «ограничение было, окно паузы прошло»
+    # задаётся явно: severe=N, severe_gate=0.
     row = {"id": 1, "phone": "+70000000001", "acc_status": "active",
            "trust_score": 1.0, "has_session": True, "cd_active": False,
-           "restrictions": 0, "severe": 0, "floods": 0}
+           "restrictions": 0, "severe": 0, "severe_gate": None, "floods": 0}
     row.update(kw)
+    if row["severe_gate"] is None:
+        row["severe_gate"] = row["severe"]
     return row
 
 
@@ -188,3 +194,16 @@ def test_the_screen_prints_the_advice_the_pulse_computed():
     html = (Path(__file__).resolve().parents[1]
             / "mini_app" / "index.html").read_text(encoding="utf-8")
     assert "_h.advice" in html, "экран снова сам решает, что посоветовать"
+
+
+def test_a_restriction_past_its_window_is_a_risk_not_a_pause():
+    """Окно паузы прошло — двери аккаунт берут, и экран обязан это признать."""
+    a = _one(severe=2, severe_gate=0)
+    assert a["status"] == "at_risk", (
+        "экран держит «Карантин» на ограничении, срок которого уже вышел — "
+        "владелец видит паузу, которой у системы нет"
+    )
+    assert "severe_past" in a["reason_codes"]
+    assert "окно паузы уже прошло" in a["reason"]
+    assert "отлежаться" not in a["advice"], (
+        "совет «отлежаться» на аккаунте, который уже в работе, бессмыслен")

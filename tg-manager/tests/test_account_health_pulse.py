@@ -119,10 +119,10 @@ def test_the_quarantine_condition_lives_in_one_place():
 def test_health_scoring_and_summary():
     async def _run():
         rows = [
-            {"id": 1, "phone": "a", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 0, "floods": 0},
-            {"id": 2, "phone": "b", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 1, "floods": 0},
-            {"id": 3, "phone": "c", "acc_status": "active", "trust_score": 1.0, "restrictions": 2, "severe": 0, "floods": 0},
-            {"id": 4, "phone": "d", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 0, "floods": 1},
+            {"id": 1, "phone": "a", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
+            {"id": 2, "phone": "b", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 1, "severe_gate": 1, "floods": 0},
+            {"id": 3, "phone": "c", "acc_status": "active", "trust_score": 1.0, "restrictions": 2, "severe": 0, "severe_gate": 0, "floods": 0},
+            {"id": 4, "phone": "d", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 1},
         ]
         r = await get_account_health(_FakePool(rows=rows), 99)
         assert r["summary"] == {"healthy": 1, "at_risk": 2, "quarantine": 1, "total": 4}
@@ -137,9 +137,9 @@ def test_acc_status_folds_into_health():
     """acc_status тоже сигнал: banned→карантин, cooldown/warming→риск (read-only)."""
     async def _run():
         rows = [
-            {"id": 1, "phone": "a", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 0, "floods": 0},
-            {"id": 2, "phone": "b", "acc_status": "banned", "trust_score": 1.0, "restrictions": 0, "severe": 0, "floods": 0},
-            {"id": 3, "phone": "c", "acc_status": "warming", "trust_score": 1.0, "restrictions": 0, "severe": 0, "floods": 0},
+            {"id": 1, "phone": "a", "acc_status": "active", "trust_score": 1.0, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
+            {"id": 2, "phone": "b", "acc_status": "banned", "trust_score": 1.0, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
+            {"id": 3, "phone": "c", "acc_status": "warming", "trust_score": 1.0, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
         ]
         r = await get_account_health(_FakePool(rows=rows), 99)
         assert r["summary"] == {"healthy": 1, "at_risk": 1, "quarantine": 1, "total": 3}
@@ -150,9 +150,9 @@ def test_low_trust_folds_into_health():
     """Единый пульс: низкий trust_score (<0.4) → at_risk, даже без ограничений."""
     async def _run():
         rows = [
-            {"id": 1, "phone": "a", "acc_status": "active", "trust_score": 0.9, "restrictions": 0, "severe": 0, "floods": 0},
-            {"id": 2, "phone": "b", "acc_status": "active", "trust_score": 0.2, "restrictions": 0, "severe": 0, "floods": 0},
-            {"id": 3, "phone": "c", "acc_status": "active", "trust_score": None, "restrictions": 0, "severe": 0, "floods": 0},
+            {"id": 1, "phone": "a", "acc_status": "active", "trust_score": 0.9, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
+            {"id": 2, "phone": "b", "acc_status": "active", "trust_score": 0.2, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
+            {"id": 3, "phone": "c", "acc_status": "active", "trust_score": None, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
         ]
         r = await get_account_health(_FakePool(rows=rows), 99)
         # #1 здоров (trust 0.9), #2 at_risk (trust 0.2), #3 здоров (NULL→1.0)
@@ -180,7 +180,7 @@ def test_pulse_folds_all_five_signals():
         _ah._health_cache.pop(77, None)
         _ah.get_health(77).health_score = score
         rows = [{"id": 77, "phone": "x", "acc_status": "active",
-                 "trust_score": 1.0, "restrictions": 0, "severe": 0, "floods": 0}]
+                 "trust_score": 1.0, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0}]
         out = await get_account_health(_FakePool(rows=rows), 99)
         _ah._health_cache.pop(77, None)
         return out["accounts"][0]["status"]

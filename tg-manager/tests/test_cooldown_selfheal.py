@@ -37,10 +37,10 @@ def test_expired_cooldown_not_risk_in_pulse():
         rows = [
             # активное окно кулдауна → риск
             {"id": 1, "phone": "a", "acc_status": "cooldown", "trust_score": 1.0,
-             "cd_active": True, "restrictions": 0, "severe": 0, "floods": 0},
+             "cd_active": True, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
             # окно истекло → здоров (не риск)
             {"id": 2, "phone": "b", "acc_status": "cooldown", "trust_score": 1.0,
-             "cd_active": False, "restrictions": 0, "severe": 0, "floods": 0},
+             "cd_active": False, "restrictions": 0, "severe": 0, "severe_gate": 0, "floods": 0},
         ]
         r = await get_account_health(_FakePool(rows=rows), 7)
         by_id = {a["account_id"]: a for a in r["accounts"]}

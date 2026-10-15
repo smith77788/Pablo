@@ -77,7 +77,7 @@ def _guarded_subqueries(sql: str) -> dict[str, bool]:
 def test_pulse_subqueries_honour_risk_cleared_at():
     """Каждый счётчик риска в пульсе обязан пропускать историю до ручного сброса."""
     guarded = _guarded_subqueries(_pulse_sql())
-    assert set(guarded) == {"restrictions", "severe", "floods"}, (
+    assert set(guarded) == {"restrictions", "severe", "severe_gate", "floods"}, (
         f"состав счётчиков пульса изменился: {sorted(guarded)} — "
         "проверь, что новый счётчик тоже учитывает risk_cleared_at")
     unguarded = sorted(n for n, ok in guarded.items() if not ok)
@@ -95,8 +95,12 @@ def test_pulse_guard_compares_event_time_not_now():
     n = len(re.findall(
         r"risk_cleared_at IS NULL\s+OR\s+\w+\.created_at > a\.risk_cleared_at",
         _pulse_sql()))
-    assert n == 3, (
-        f"ожидалось 3 фильтра вида «created_at > risk_cleared_at», найдено {n}: "
+    # Четыре счётчика: restrictions, severe (окно экрана), severe_gate (окно
+    # гейта — на нём стоит вердикт «Карантин») и floods. Каждому нужен свой
+    # фильтр, иначе ручной сброс риска перестаёт действовать на тот из них,
+    # который его потерял.
+    assert n == 4, (
+        f"ожидалось 4 фильтра вида «created_at > risk_cleared_at», найдено {n}: "
         "сброс риска не должен ослеплять пульс навсегда")
 
 
