@@ -33,6 +33,7 @@ from services import mini_app_channels
 from services import mini_app_operations
 from services import mini_app_dashboard
 from services import mini_app_dm
+from services import mini_app_sales
 from services import mini_app_warmup
 from services import mini_app_accounts
 from services import mini_app_uch
@@ -1322,6 +1323,42 @@ def _list_limit(request: web.Request, default: int, maximum: int) -> int:
     if raw is None:
         return default
     return min(validate_integer(raw, min_val=1, max_val=maximum) or default, maximum)
+
+
+def int_field(value, title: str, *, default: int | None = None,
+              min_val: int | None = None, max_val: int | None = None) -> int:
+    """Целое число из тела запроса — с РУССКОЙ причиной отказа.
+
+    `int(d["price_cents"])` внутри try, чей `except ValueError as e` отдаёт
+    экрану `str(e)`, показывает владельцу «invalid literal for int() with
+    base 10: 'abc'». Владелец английского не читает (CLAUDE.md, первая
+    строка), и в этой фразе нет ни имени поля, ни того, что сделать. Проверено
+    по реальному пути: так отвечали четыре ручки продаж.
+
+    Фильтровать текст исключения по признаку «есть кириллица» нельзя:
+    Python вставляет в сообщение САМО значение, поэтому на русском вводе
+    («дорого») английская фраза проходит такой фильтр насквозь. Поэтому
+    причина пишется здесь, где поле ещё известно по имени, а не угадывается
+    потом по тексту.
+
+    `default=None` значит «поле обязательно»; пустая строка и отсутствие
+    значения — это «поля нет», а не ноль.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if default is None:
+            raise ValueError(f"{title}: нужно число")
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"{title}: нужно число")
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{title}: нужно целое число, а не «{str(value)[:40]}»")
+    if min_val is not None and n < min_val:
+        raise ValueError(f"{title}: не меньше {min_val}")
+    if max_val is not None and n > max_val:
+        raise ValueError(f"{title}: не больше {max_val}")
+    return n
 
 
 def _text(value, max_len: int | None = None) -> str:
@@ -13794,6 +13831,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_dm.setup_routes(app, pool)
     mini_app_warmup.setup_routes(app, pool)
     mini_app_accounts.setup_routes(app, pool)
+    mini_app_sales.setup_routes(app, pool)
     # Analytics
     app.router.add_get("/api/miniapp/analytics", analytics)
     # Subscription
@@ -14067,15 +14105,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not await _mp_owned_provider(uid, pid):
             return _err("Не найдено", 404)
         try:
-            price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
+            price_cents = (int_field(d["price_cents"], "Цена")
+                           if d.get("price_cents") is not None
                            else _mp.to_cents(d.get("price", "0")))
             s = await _mp.create_service(
                 pool, pid, title=d.get("title", ""), category=d.get("category", "other"),
                 resource_kind=d.get("resource_kind", ""),
                 description=d.get("description", ""), price_cents=price_cents,
                 currency=d.get("currency", "USD"), unit=d.get("unit", "unit"),
-                min_qty=int(d.get("min_qty", 1)), max_qty=int(d.get("max_qty", 1000000)),
-                stock=int(d.get("stock", -1)), sla_hours=int(d.get("sla_hours", 24)),
+                min_qty=int_field(d.get("min_qty"), "Минимальный объём", default=1),
+                max_qty=int_field(d.get("max_qty"), "Максимальный объём",
+                                  default=1000000),
+                stock=int_field(d.get("stock"), "Остаток", default=-1),
+                sla_hours=int_field(d.get("sla_hours"), "Срок исполнения, часов",
+                                    default=24),
                 params_schema=d.get("params_schema") or [], actor_id=uid)
             return _json_resp({"ok": True, "service": s})
         except ValueError as e:
@@ -14182,423 +14225,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # ── Sales Persona (сущность бота — живой менеджер по продажам) ────────────
     from services import bot_sales_persona as _bsp
 
-    async def _sp_owned(uid, pid):
-        p = await _bsp.get_persona(pool, pid)
-        return p if (p and int(p["owner_id"]) == int(uid)) else None
 
-    async def sp_list(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        return _json_resp({"personas": await _bsp.list_personas(pool, uid)})
 
-    async def sp_create(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            d = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        try:
-            name = d.pop("name", "")
-            p = await _bsp.create_persona(pool, uid, name, **d)
-            return _json_resp({"ok": True, "persona": p})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_create uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_detail(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        p = await _sp_owned(uid, pid)
-        if not p:
-            return _err("Не найдено", 404)
-        return _json_resp({"persona": p,
-                           "products": await _bsp.list_products(pool, pid),
-                           "faqs": await _bsp.list_faq(pool, pid),
-                           "examples": await _bsp.list_examples(pool, pid),
-                           "delivery": await _bsp.list_delivery(pool, pid),
-                           "promos": await _bsp.list_promos(pool, pid)})
 
-    async def sp_update(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            return _json_resp({"ok": True,
-                               "persona": await _bsp.update_persona(pool, pid, uid, **d)})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_update uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_delete(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        return _json_resp({"ok": await _bsp.delete_persona(pool, pid, uid)})
 
-    async def sp_assign(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-            bot_id = int(d["bot_id"])
-        except Exception:
-            return _err("Неверный запрос", 400)
-        # бот должен принадлежать пользователю (added_by)
-        own = await pool.fetchval(
-            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
-        if not own:
-            return _err("бот не найден или не ваш", 403)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        r = await _bsp.assign_to_bot(pool, pid, uid, bot_id)
-        return _json_resp({"ok": bool(r), "persona": r})
 
-    async def sp_unassign(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        return _json_resp({"ok": await _bsp.unassign_from_bot(pool, pid, uid)})
 
-    async def sp_product_add(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
-                           else _mp.to_cents(d.get("price", "0")))
-            prod = await _bsp.add_product(
-                pool, pid, uid, d.get("name", ""), description=d.get("description", ""),
-                sku=d.get("sku", ""), price_cents=price_cents,
-                currency=d.get("currency", "USD"), in_stock=bool(d.get("in_stock", True)),
-                min_qty=int(d.get("min_qty", 1) or 1), unit=d.get("unit", "шт") or "шт",
-                stock_qty=d.get("stock_qty"), related_skus=d.get("related_skus", "") or "",
-                variants=d.get("variants") or [],
-                attributes=d.get("attributes") or {})
-            return _json_resp({"ok": True, "product": prod})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_product_add uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_product_update(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            prid = int(request.match_info["prid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        try:
-            if d.get("price") is not None and d.get("price_cents") is None:
-                d["price_cents"] = _mp.to_cents(d.pop("price"))
-            r = await _bsp.update_product(pool, prid, uid, **d)
-            if not r:
-                return _err("Не найдено", 404)
-            return _json_resp({"ok": True, "product": r})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_product_update uid=%s prid=%s", uid, prid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_product_delete(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            prid = int(request.match_info["prid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        return _json_resp({"ok": await _bsp.delete_product(pool, prid, uid)})
 
-    async def sp_test(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        p = await _sp_owned(uid, pid)
-        if not p:
-            return _err("Не найдено", 404)
-        products = await _bsp.list_products(pool, pid, active_only=True)
-        return _json_resp(await _bsp.diagnose_generation(p, products))
 
-    async def sp_stats(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        return _json_resp({"stats": await _bsp.persona_stats(pool, pid, uid)})
 
-    async def sp_chat(request):
-        """Песочница: владелец тестирует бота, история — на клиенте."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        p = await _sp_owned(uid, pid)
-        if not p:
-            return _err("Не найдено", 404)
-        text = (d.get("text") or "").strip()
-        if not text:
-            return _err("пустое сообщение", 400)
-        try:
-            reply = await _bsp.sandbox_reply(pool, p, text, d.get("history") or [])
-            return _json_resp({"ok": True, "reply": reply})
-        except Exception:
-            log.exception("sp_chat uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
     # ── База знаний (FAQ) ──────────────────────────────────────────────────
-    async def sp_faq_add(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            faq = await _bsp.add_faq(
-                pool, pid, uid, d.get("question", ""), d.get("answer", ""),
-                keywords=d.get("keywords", "") or "",
-                priority=int(d.get("priority", 0) or 0))
-            return _json_resp({"ok": True, "faq": faq})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_faq_add uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_faq_update(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            fid = int(request.match_info["fid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        r = await _bsp.update_faq(pool, fid, uid, **d)
-        if not r:
-            return _err("Не найдено", 404)
-        return _json_resp({"ok": True, "faq": r})
 
-    async def sp_faq_delete(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            fid = int(request.match_info["fid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        return _json_resp({"ok": await _bsp.delete_faq(pool, fid, uid)})
 
     # ── Эталонные примеры (few-shot) ───────────────────────────────────────
-    async def sp_example_add(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            ex = await _bsp.add_example(
-                pool, pid, uid, d.get("user_msg", ""), d.get("assistant_msg", ""),
-                ord=int(d.get("ord", 0) or 0))
-            return _json_resp({"ok": True, "example": ex})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_example_add uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_example_delete(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            eid = int(request.match_info["eid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        return _json_resp({"ok": await _bsp.delete_example(pool, eid, uid)})
 
     # ── Способы доставки ───────────────────────────────────────────────────
-    async def sp_delivery_add(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
-                           else _mp.to_cents(d.get("price", "0")))
-            r = await _bsp.add_delivery(
-                pool, pid, uid, d.get("name", ""), price_cents=price_cents,
-                eta=d.get("eta", "") or "", zones=d.get("zones", "") or "")
-            return _json_resp({"ok": True, "delivery": r})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_delivery_add uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_delivery_delete(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            did = int(request.match_info["did"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        return _json_resp({"ok": await _bsp.delete_delivery(pool, did, uid)})
 
     # ── Промокоды ──────────────────────────────────────────────────────────
-    async def sp_promo_add(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _sp_owned(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            min_total = (int(d["min_total_cents"]) if d.get("min_total_cents") is not None
-                         else _mp.to_cents(d.get("min_total", "0")))
-            r = await _bsp.add_promo(
-                pool, pid, uid, d.get("code", ""), int(d.get("percent", 0) or 0),
-                min_total_cents=min_total)
-            return _json_resp({"ok": True, "promo": r})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("sp_promo_add uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def sp_promo_delete(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            prid = int(request.match_info["prid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        return _json_resp({"ok": await _bsp.delete_promo(pool, prid, uid)})
 
-    async def sp_orders(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        q = request.query
-        try:
-            bid = int(q["bot_id"]) if q.get("bot_id") else None
-        except ValueError:
-            bid = None
-        return _json_resp({"orders": await _bsp.list_orders(
-            pool, uid, bot_id=bid, status=q.get("status") or None)})
 
-    async def sp_order_update(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            oid = int(request.match_info["oid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        r = await _bsp.update_order(pool, oid, uid, **d)
-        if not r:
-            return _err("Не найдено", 404)
-        return _json_resp({"ok": True, "order": r})
 
-    app.router.add_get("/api/miniapp/sales/personas", sp_list)
-    app.router.add_post("/api/miniapp/sales/persona", sp_create)
-    app.router.add_get("/api/miniapp/sales/persona/{pid}", sp_detail)
-    app.router.add_patch("/api/miniapp/sales/persona/{pid}", sp_update)
-    app.router.add_delete("/api/miniapp/sales/persona/{pid}", sp_delete)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/assign", sp_assign)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/unassign", sp_unassign)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/product", sp_product_add)
-    app.router.add_patch("/api/miniapp/sales/product/{prid}", sp_product_update)
-    app.router.add_delete("/api/miniapp/sales/product/{prid}", sp_product_delete)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/test", sp_test)
-    app.router.add_get("/api/miniapp/sales/persona/{pid}/stats", sp_stats)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/chat", sp_chat)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/faq", sp_faq_add)
-    app.router.add_patch("/api/miniapp/sales/faq/{fid}", sp_faq_update)
-    app.router.add_delete("/api/miniapp/sales/faq/{fid}", sp_faq_delete)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/example", sp_example_add)
-    app.router.add_delete("/api/miniapp/sales/example/{eid}", sp_example_delete)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/delivery", sp_delivery_add)
-    app.router.add_delete("/api/miniapp/sales/delivery/{did}", sp_delivery_delete)
-    app.router.add_post("/api/miniapp/sales/persona/{pid}/promo", sp_promo_add)
-    app.router.add_delete("/api/miniapp/sales/promo/{prid}", sp_promo_delete)
-    app.router.add_get("/api/miniapp/sales/orders", sp_orders)
-    app.router.add_patch("/api/miniapp/sales/order/{oid}", sp_order_update)
 
     # ── Защита от накрутки/ботов (per-bot) ───────────────────────────────────
     from services import flood_guard as _fg

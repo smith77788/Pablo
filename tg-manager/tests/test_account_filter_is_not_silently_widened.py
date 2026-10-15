@@ -19,12 +19,17 @@ from __future__ import annotations
 import os
 import re
 
+from tests.miniapp_source import api_source
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _src() -> str:
-    with open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8") as f:
-        return f.read()
+    """Весь слой мини-апп-API: сборщик фильтра аккаунтов уехал в
+    `services/mini_app_accounts.py`, и чтение одного монолита делало эту
+    проверку красной не потому, что фильтр расширили, а потому, что он
+    переехал."""
+    return api_source()
 
 
 def _builder(src: str) -> str:

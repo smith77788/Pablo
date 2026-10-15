@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 
+from tests.miniapp_source import api_source
+
 from services.proxy_policy import proxy_decision, normalize_policy, DEFAULT_POLICY, VALID_POLICIES
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -107,8 +109,7 @@ def test_resolver_keys_on_proxy_id_not_just_url():
 
 
 def test_mass_detach_proxy_scoped_and_nulls():
-    with open(os.path.join(ROOT, "services/mini_app_api.py"), encoding="utf-8") as f:
-        api = f.read()
+    api = api_source()
     assert 'op == "detach_proxy"' in api
     assert "SET proxy_id=NULL WHERE owner_id=$1 AND id=ANY($2::bigint[])" in api
 
@@ -118,8 +119,7 @@ def test_low_risk_via_account_dict_and_inline_reads_marked():
         am = f.read()
     # аккаунт-словарь может пометить соединение низкорисковым
     assert 'low_risk = low_risk or bool(device.get("_low_risk"))' in am
-    with open(os.path.join(ROOT, "services/mini_app_api.py"), encoding="utf-8") as f:
-        api = f.read()
+    api = api_source()
     # одиночные инлайн-чтения помечают соединение low_risk (не требуют прокси)
     assert 'get_login_code(acc["session_str"], {**dict(acc), "_low_risk": True})' in api
     assert 'check_restriction(acc["session_str"], {**dict(acc), "_low_risk": True})' in api

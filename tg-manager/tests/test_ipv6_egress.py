@@ -163,7 +163,8 @@ def test_start_login_uses_owner_subnet_and_falls_back():
 
 
 @pytest.mark.parametrize("rel,needle", [
-    ("services/mini_app_api.py", "am.start_login(phone, proxy_url=proxy_url, owner_id=uid)"),
+    # Интерактивный вход уехал в mini_app_accounts вместе с блоком аккаунтов.
+    ("services/mini_app_accounts.py", "am.start_login(phone, proxy_url=proxy_url, owner_id=uid)"),
     ("bot/handlers/accounts.py", "start_login(phone, owner_id=message.from_user.id)"),
     ("bot/handlers/accounts.py", "start_login(phone, owner_id=callback.from_user.id)"),
     ("bot/handlers/accounts.py", "start_login(phone, owner_id=message.chat.id)"),

@@ -34,12 +34,12 @@ def test_backend_has_spamblock_filter_and_active_excludes_it():
     # active больше не тянет спамблок — и не тянет вообще никого мёртвого.
     # Срез берёт общее условие, а в нём набор из единственного места.
     from services import account_status
-    i = api.index("_ACTIVE_ACC_SQL = (")
+    i = api.index("ACTIVE_ACC_SQL = (")
     active_sql = api[i:api.index(")\n", i)]
     assert "sql_dead_list()" in active_sql, (
         "срез «Активные» снова судит по своему списку статусов")
     assert "spamblock" in account_status.DEAD_STATUSES
-    assert "clauses.append(_ACTIVE_ACC_SQL)" in where, (
+    assert "clauses.append(ACTIVE_ACC_SQL)" in where, (
         "срез списка перестал брать общее условие — он разъедется со счётчиком")
 
 
@@ -66,7 +66,7 @@ def test_stats_counts_spamblock_separately():
     assert "COALESCE(acc_status,'ok')='spamblock') AS spamblock" in api
     # Счётчик готовых — то же общее условие, что у среза списка (оба ветки,
     # владелец и админ), иначе чип обещает не то, что откроет клик по нему.
-    assert api.count('_ACTIVE_ACC_SQL + """) AS active') == 2, (
+    assert api.count('ACTIVE_ACC_SQL + """) AS active') == 2, (
         "счётчик готовых считает по своему условию хотя бы в одной ветке")
     # ключ выведен наружу в stats-словарь. Проверяем сам ключ, а не точный
     # список: набор счётчиков расширяется (добавился, например, proxy_down —

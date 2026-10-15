@@ -20,7 +20,9 @@ def setup_routes(app: web.Application, pool) -> None:
     # импорт сверху дал бы цикл. Внутри функции его нет: к моменту вызова
     # mini_app_api уже загружен. Когда таких модулей станет несколько, помощники
     # переедут в общий модуль и этот импорт уйдёт.
-    from services.mini_app_api import _err, _get_uid, _is_admin, _json_resp, log
+    from services.mini_app_api import (
+        _err, _get_uid, _is_admin, _json_resp, int_field, log,
+    )
 
     async def host_server_status(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -166,7 +168,8 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            rental_id = int(request.match_info["rental_id"])
+            rental_id = int_field(request.match_info.get("rental_id"),
+                                  "Идентификатор аренды")
             body = await request.json()
             new_status = body.get("status", "")
             as_provider = bool(body.get("as_provider", True))
