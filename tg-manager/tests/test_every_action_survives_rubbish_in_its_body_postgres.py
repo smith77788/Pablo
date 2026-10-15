@@ -54,6 +54,15 @@ os.environ.setdefault("DATABASE_URL", DSN or "postgresql://localhost/none")
 # Telegram — дойти там не до чего.
 ACTION_OWNER = 998877665545
 
+# Второй проход — владелец С ДАННЫМИ: один аккаунт и один контакт, связанные
+# друг с другом. Целый класс ошибок виден только когда данные есть: у
+# GET-ручек так нашлась выгрузка контактов, падавшая на uuid в строке.
+DATA_OWNER = 998877665547
+
+# Ячейка с владельцем: подменять `_get_uid` после setup_routes бесполезно —
+# вынесенные модули забирают его в замыкание при регистрации маршрутов.
+_WHO = {"id": ACTION_OWNER}
+
 SAMPLE = {"contact_id": "00000000-0000-0000-0000-000000000001", "code": "nosuch"}
 
 # Значения, которые фронт присылает, когда поле не заполнено или заполнено не
@@ -151,7 +160,7 @@ def _routes():
     # Подмена владельца — ДО setup_routes: вынесенные модули забирают `_get_uid`
     # в замыкание при регистрации маршрутов, и подмена после setup на них не
     # действует (их ручки отвечали бы 401, а скан считает ошибкой только 5xx).
-    mini_app_api._get_uid = lambda request: ACTION_OWNER
+    mini_app_api._get_uid = lambda request: _WHO["id"]
     app = web.Application()
     mini_app_api.setup_routes(app, pool)
     routes = [(r.resource.canonical, r.handler) for r in app.router.routes()
@@ -245,3 +254,73 @@ def test_an_exception_that_escapes_a_handler_becomes_a_russian_error():
     with pytest.raises(web.HTTPFound):
         _STATE["loop"].run_until_complete(
             mw(_Req("/api/miniapp/x", {}, {}), redirect))
+
+
+def _seed(owner: int):
+    """Аккаунт и контакт владельца, связанные друг с другом."""
+    import uuid as _uuid
+
+    loop, pool = _STATE["loop"], _STATE["pool"]
+    cid = _uuid.uuid4()
+    loop.run_until_complete(pool.execute(
+        "INSERT INTO platform_users(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+        owner))
+    loop.run_until_complete(pool.execute(
+        "DELETE FROM unified_contacts WHERE owner_id=$1", owner))
+    acc_id = loop.run_until_complete(pool.fetchval(
+        "INSERT INTO tg_accounts(owner_id, phone, session_str, first_name)"
+        " VALUES($1,$2,$3,$4) RETURNING id",
+        owner, "+79990000003", "stub-session", "Проверка"))
+    loop.run_until_complete(pool.execute(
+        "INSERT INTO unified_contacts(id, owner_id, telegram_user_id, username,"
+        " first_name, last_name, display_name, phones)"
+        " VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)",
+        cid, owner, 3201, "probe2", "Иван", "Петров", "Иван Петров",
+        '["+79990000004"]'))
+    loop.run_until_complete(pool.execute(
+        "INSERT INTO contact_sources(contact_id, account_id) VALUES($1,$2)"
+        " ON CONFLICT DO NOTHING", cid, acc_id))
+    return str(cid)
+
+
+def _wipe(owner: int):
+    loop, pool = _STATE["loop"], _STATE["pool"]
+    for sql in ("DELETE FROM unified_contacts WHERE owner_id=$1",
+                "DELETE FROM tg_accounts WHERE owner_id=$1",
+                "DELETE FROM platform_users WHERE user_id=$1"):
+        loop.run_until_complete(pool.execute(sql, owner))
+
+
+def test_no_action_answers_an_internal_error_for_an_owner_with_data():
+    """Тот же обход, но у владельца есть аккаунт и контакт.
+
+    Действие, которое сначала загружает аккаунт или контакт и только потом
+    падает на формате, у пустого владельца завершается раньше — и выглядит
+    исправным.
+    """
+    routes = _routes()
+    loop = _STATE["loop"]
+    cid = _seed(DATA_OWNER)
+    _WHO["id"] = DATA_OWNER
+    sample = dict(SAMPLE, contact_id=cid)
+    broken: list[str] = []
+    try:
+        for case, body in RUBBISH.items():
+            for path, handler in routes:
+                match = {k: sample.get(k, "1")
+                         for k in re.findall(r"\{(\w+)[:}]", path)}
+                try:
+                    resp = loop.run_until_complete(
+                        handler(_Req(path, match, dict(body))))
+                except Exception as exc:
+                    broken.append(f"[{case}] {path} → исключение наружу: "
+                                  f"{type(exc).__name__}: {str(exc)[:90]}")
+                    continue
+                if getattr(resp, "status", 0) >= 500:
+                    broken.append(f"[{case}] {path} → {resp.status}")
+    finally:
+        _WHO["id"] = ACTION_OWNER
+        _wipe(DATA_OWNER)
+    assert not broken, (
+        "у владельца С ДАННЫМИ эти действия отвечают «внутренней ошибкой "
+        "сервера» на мусор в теле:\n  " + "\n  ".join(broken))
