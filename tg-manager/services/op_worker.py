@@ -98,6 +98,59 @@ async def _safe_fetch(pool: asyncpg.Pool, query: str, *args, log_ctx: str = "") 
         return []
 
 
+class JournalUnreadable(RuntimeError):
+    """Журнал целей не прочитался — продолжать прогон нельзя: это задвоит дела."""
+
+
+# Пауза перед вторым чтением журнала. Блип к БД лечится повтором, а длинная
+# пауза здесь ничего не стоит: это один запрос на прогон, а не на цель.
+_JOURNAL_READ_RETRY_DELAY_S = 0.5
+
+
+async def _journal_fetch(
+    pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
+) -> list[asyncpg.Record]:
+    """Прочитать журнал идемпотентности: один повтор, затем ОТКАЗ работать.
+
+    ПОЧЕМУ ОТДЕЛЬНАЯ ДВЕРЬ, А НЕ `_safe_fetch`. Двери идемпотентности
+    (`completed_targets`, `completed_account_targets`, `settled_targets`,
+    `completed_steps`) существуют ровно затем, чтобы возобновлённый прогон не
+    повторил уже сделанное. Читали они через `_safe_fetch`, а тот на сбое БД
+    возвращает ПУСТОЙ список — то есть «ни одна цель ещё не отработана».
+
+    Для возобновлённой рассылки на 380 адресатов это второе сообщение всем,
+    кто уже получил первое; для постинга — второй пост в каналы; для
+    приглашений — второе приглашение, самая палевная сигнатура продукта и
+    самая баноопасная операция. Один сетевой блип к БД стоил ровно этого, а в
+    логе оставалась строчка warning, которую никто не читает.
+
+    Поэтому здесь fail-CLOSED, в отличие от большинства чтений воркера:
+    сначала повтор (блипы лечатся им), а если и он не прошёл — исключение.
+    `_classify_op_error` относит его к 'retry', то есть операция уходит на
+    обычный повтор с отсрочкой и доработает позже. Отсрочка дешевле дубля:
+    задержку владелец переживёт, второе сообщение живому человеку — нет.
+
+    Формулировка исключения намеренно без слов, которые классификатор считает
+    фатальными: иначе операция закрылась бы провалом вместо повтора.
+    """
+    last: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            return await pool.fetch(query, *args)
+        except Exception as e:
+            last = e
+            if attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    report_error(last, extra={"context": f"op_worker_journal{log_ctx}"})
+    log.error(
+        "op_worker: журнал целей не прочитался%s (%s) — операция уйдёт на "
+        "повтор, иначе повторила бы уже сделанное", log_ctx, last,
+    )
+    _reliability_metric("infragram_journal_read_failures_total", where=where or "journal")
+    raise JournalUnreadable(
+        "журнал целей недоступен, прогон отложен до повтора") from last
+
+
 async def _safe_fetchval(pool: asyncpg.Pool, query: str, *args, log_ctx: str = ""):
     """Fetch a single value, return None on failure. Never raises."""
     try:
@@ -3594,19 +3647,22 @@ async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
     удар по анти-детекту.
 
     Пустое множество на первом прогоне (журнал ещё пуст), поэтому вызов
-    безопасен и там, где повтора не было.
+    безопасен и там, где повтора не было. А вот пустое множество ИЗ-ЗА СБОЯ
+    означало бы «ничего не сделано» и повтор всей рассылки, поэтому читаем
+    через `_journal_fetch`: он повторяет запрос и, не прочитав, бросает —
+    операция уходит на обычный повтор (см. его докстринг).
 
     Ключ — ровно та строка, которую исполнитель пишет в operation_log.target;
     сравнивать имеет смысл только внутри одного исполнителя, где ключ
     канонический (см. комментарий про retry_targets в services/operation_bus.py).
     """
-    rows = await _safe_fetch(
+    rows = await _journal_fetch(
         pool,
         "SELECT DISTINCT target FROM operation_log "
         " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND target IS NOT NULL"
         + _obus_reg.REAL_TARGET_SQL,
         await journal_op_ids(pool, op_id),
-        log_ctx=f"[completed_targets op={op_id}]",
+        log_ctx=f"[completed_targets op={op_id}]", where="completed_targets",
     )
     return {str(r["target"]) for r in (rows or []) if r["target"]}
 
@@ -3651,12 +3707,12 @@ async def completed_steps(pool: asyncpg.Pool, op_id: int) -> set[int]:
 
     Пустое множество на первом прогоне. Никогда не бросает.
     """
-    rows = await _safe_fetch(
+    rows = await _journal_fetch(
         pool,
         "SELECT DISTINCT step_num FROM operation_log "
         " WHERE op_id = ANY($1::bigint[]) AND status='ok' AND step_num IS NOT NULL",
         await journal_op_ids(pool, op_id),
-        log_ctx=f"[completed_steps op={op_id}]",
+        log_ctx=f"[completed_steps op={op_id}]", where="completed_steps",
     )
     out: set[int] = set()
     for r in (rows or []):
@@ -3687,7 +3743,7 @@ async def settled_targets(pool: asyncpg.Pool, op_id: int) -> dict[str, str]:
     повтора не было. Никогда не бросает: не прочитали журнал — работаем как
     раньше.
     """
-    rows = await _safe_fetch(
+    rows = await _journal_fetch(
         pool,
         "SELECT DISTINCT ON (target) target, status FROM operation_log "
         " WHERE op_id = ANY($1::bigint[]) AND status IN ('ok','skip') "
@@ -3695,7 +3751,7 @@ async def settled_targets(pool: asyncpg.Pool, op_id: int) -> dict[str, str]:
         + _obus_reg.REAL_TARGET_SQL +
         " ORDER BY target, (status='ok') DESC",
         await journal_op_ids(pool, op_id),
-        log_ctx=f"[settled_targets op={op_id}]",
+        log_ctx=f"[settled_targets op={op_id}]", where="settled_targets",
     )
     # Разбор строк — защищённый: обещание «никогда не бросает» обязано держаться
     # и на неожиданной форме строки, иначе сбой чтения журнала уронит саму
@@ -3740,14 +3796,14 @@ async def completed_account_targets(
     повтора не было. Никогда не бросает: не смогли прочитать журнал — работаем
     как раньше (лучше лишний повтор, чем сорванная операция).
     """
-    rows = await _safe_fetch(
+    rows = await _journal_fetch(
         pool,
         "SELECT DISTINCT account_id, target FROM operation_audit "
         " WHERE operation_id=$1 AND action=$2 AND result='success' "
         "   AND account_id IS NOT NULL AND target IS NOT NULL",
         op_id,
         action,
-        log_ctx=f"[completed_account_targets op={op_id}]",
+        log_ctx=f"[completed_account_targets op={op_id}]", where="completed_account_targets",
     )
     return {(int(r["account_id"]), str(r["target"])) for r in (rows or [])}
 

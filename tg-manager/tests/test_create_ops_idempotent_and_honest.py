@@ -86,7 +86,13 @@ def test_helper_reads_only_successful_steps():
     assert "journal_op_ids(pool, op_id)" in body, (
         "скоуп собран не по цепочке повторов"
     )
-    assert "_safe_fetch(" in body, "сбой чтения журнала не должен ронять операцию"
+    # Раньше здесь требовался `_safe_fetch`: «сбой чтения не должен ронять
+    # операцию». Он и не роняет — но ценой пустого ответа, который для создания
+    # каналов и ботов означает ВТОРОЙ комплект. Теперь чтение идёт
+    # fail-closed-дверью: повтор запроса, затем отказ и обычный повтор
+    # операции (tests/test_a_blip_in_the_journal_does_not_repeat_the_work.py).
+    assert "_journal_fetch(" in body, (
+        "сбой чтения журнала обернётся вторым комплектом каналов/ботов")
 
 
 @pytest.mark.parametrize("name,guard", [

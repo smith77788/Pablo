@@ -156,8 +156,16 @@ async def test_first_run_attempts_everything(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unreadable_journal_does_not_break_the_operation(monkeypatch):
-    """Не прочитали журнал — работаем как раньше: лишний повтор дешевле срыва."""
+async def test_unreadable_journal_postpones_the_run_instead_of_working_blind(monkeypatch):
+    """Не прочитали журнал — прогон откладывается, а не идёт по списку наугад.
+
+    Прежний контракт был «лишний повтор дешевле срыва», и для выхода из
+    канала это почти верно. Но дверь у выхода общая со вступлением, где
+    повтор — лишний joinChannel в лимит и давление PEER_FLOOD, а у рассылок и
+    постинга повтор означает второе сообщение живому человеку и второй пост.
+    Единое правило дешевле исключения: ни одна цель не трогается с неизвестным
+    журналом, операция уходит на обычный повтор и доработает позже.
+    """
     attempted: list[tuple[int, str]] = []
     op_worker = _harness(monkeypatch, attempted)
 
@@ -167,9 +175,10 @@ async def test_unreadable_journal_does_not_break_the_operation(monkeypatch):
                 raise RuntimeError("журнал недоступен")
             return await super().fetch(query, *args)
 
-    res = await op_worker._exec_bulk_leave(
-        _BrokenPool(), object(), 77, 555,
-        {"channels": ["alpha"], "account_ids": [1], "delay_mode": "fast"},
-    )
-    assert attempted == [(1, "alpha")]
-    assert res["ok"] == 1
+    with pytest.raises(op_worker.JournalUnreadable):
+        await op_worker._exec_bulk_leave(
+            _BrokenPool(), object(), 77, 555,
+            {"channels": ["alpha"], "account_ids": [1], "delay_mode": "fast"},
+        )
+    assert attempted == [], (
+        "исполнитель начал работать, не зная, что уже сделано")

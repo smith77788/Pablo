@@ -89,15 +89,28 @@ async def test_completed_pairs_are_read_per_account_not_per_target():
 
 
 @pytest.mark.asyncio
-async def test_unreadable_journal_does_not_break_the_operation():
-    """Не прочитали журнал — работаем как раньше, а не срываем операцию."""
+async def test_unreadable_journal_postpones_the_run_instead_of_repeating_it():
+    """Не прочитали журнал — уходим на повтор, а не вступаем во всё заново.
+
+    Прежний контракт был обратным: пустое множество на сбое, то есть «ни один
+    канал ещё не взят». Для возобновлённого прогона это повторный joinChannel
+    по всему списку — лишний расход лимита и прямое давление PEER_FLOOD, то
+    есть ровно та цена, от которой дверь и защищает (см. соседний тест про
+    пропуск уже взятых каналов). Отказ дороже не стоит: исключение
+    классифицируется как 'retry', операция возвращается в очередь и
+    доработает позже.
+    """
     from services import op_worker
+    from services.op_errors import _classify_op_error
 
     class _Broken(_Pool):
         async def fetch(self, query, *args):
             raise RuntimeError("БД недоступна")
 
-    assert await op_worker.completed_account_targets(_Broken(), 77, "join") == set()
+    with pytest.raises(op_worker.JournalUnreadable) as e:
+        await op_worker.completed_account_targets(_Broken(), 77, "join")
+    assert _classify_op_error(e.value) == "retry", (
+        "отказ читать журнал обязан вести к повтору, а не к провалу операции")
 
 
 @pytest.mark.asyncio
