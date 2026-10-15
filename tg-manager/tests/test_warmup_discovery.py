@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services import account_warmer as aw  # noqa: E402
+from tests.miniapp_source import api_source  # noqa: E402
 
 
 class _Pool:
@@ -214,7 +215,7 @@ def test_discovering_actions_are_marked_as_such():
 def test_owner_can_see_the_circle():
     """Невидимая механика — недоделанная механика: подтвердить, что круг растёт
     (или заметить, что он встал), владельцу должно быть чем."""
-    api = _src("services/mini_app_api.py")
+    api = api_source()
     ui = _src("mini_app/index.html")
     assert "account_warmup_interests" in api, "эндпойнт журнала не отдаёт круг каналов"
     assert '"circle"' in api

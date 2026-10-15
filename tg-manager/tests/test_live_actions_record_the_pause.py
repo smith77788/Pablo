@@ -128,7 +128,7 @@ def test_story_flood_message_is_russian():
 
 
 def test_story_callers_pass_the_pool():
-    for rel in ("bot/handlers/accounts.py", "services/mini_app_api.py"):
+    for rel in ("bot/handlers/accounts.py", "services/mini_app_accounts.py"):
         with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
             src = f.read()
         # Только ВЫЗОВЫ. Без этого сюда попадал `async def account_post_story(`

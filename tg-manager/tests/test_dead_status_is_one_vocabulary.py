@@ -24,6 +24,7 @@ import os
 
 import pytest
 
+from tests.miniapp_source import api_source
 from services import account_status as acc_status
 from services import fleet_pulse, immunity_engine, infra_memory, resource_selector
 
@@ -274,11 +275,11 @@ def test_mini_app_ready_counter_requires_a_session():
 
 def test_server_ready_counter_matches_the_selection_door():
     """Серверный счётчик «готовых» — по тем же условиям, что дверь выбора."""
-    src = open("services/mini_app_api.py", encoding="utf-8").read()
-    assert "_ACTIVE_ACC_SQL = (" in src, (
+    src = api_source()
+    assert "ACTIVE_ACC_SQL = (" in src, (
         "общего условия «готов к работе» в мини-апп-API нет — счётчик снова "
         "считает по своему списку")
-    i = src.index("_ACTIVE_ACC_SQL = (")
+    i = src.index("ACTIVE_ACC_SQL = (")
     block = src[i:src.index(")\n", i)]
     assert "session_str IS NOT NULL" in block
     assert "sql_dead_list()" in block
@@ -294,7 +295,7 @@ def test_purge_filter_stays_narrower_on_purpose():
     фиксированной длины сдвигается от любой правки рядом, и защита выключается
     молча (`test_no_silently_disabled_guards` ловит именно это).
     """
-    src = open("services/mini_app_api.py", encoding="utf-8").read()
+    src = api_source()
     clause = "COALESCE(acc_status,'ok') IN ('banned','deactivated','session_expired')"
     assert clause in src, (
         "набор «невоскрешаемых» для массового удаления изменился — проверьте, "

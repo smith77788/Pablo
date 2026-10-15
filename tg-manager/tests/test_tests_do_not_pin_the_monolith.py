@@ -42,7 +42,19 @@ CEILING = 18
 #
 # Упоминание имени в прозе (docstring, комментарий «переехало из
 # mini_app_api.py») под литерал не попадает: кавычек вокруг него нет.
-PIN = re.compile(r'["\']mini_app_api\.py["\']')
+# Второй вид привязки — КАВЫЧНЫЙ МОДУЛЬНЫЙ ПУТЬ (`"services.mini_app_api"`
+# рядом с `importlib.import_module` + `inspect.getsource`), а также
+# `getsource(mini_app_api)` у уже импортированного модуля. Это та же привязка
+# к тексту монолита, только записанная точками, и первая версия измерителя её
+# не видела: `test_stuck_threshold_is_one_number` держал мини-апп именно так,
+# не попал в счёт, и вынос карточки «требует внимания» в mini_app_dashboard
+# покраснел в CI уже после пуша. Обычный `from services import mini_app_api`
+# под привязку НЕ попадает: вызов ручки через импорт переезд переживает,
+# потому что маршруты по-прежнему подключает setup_routes.
+PIN = re.compile(
+    r'["\']mini_app_api\.py["\']'
+    r'|["\']services\.mini_app_api["\']'
+    r'|getsource\(\s*_?mini_app_api\b')
 
 
 def _pinned() -> list[str]:

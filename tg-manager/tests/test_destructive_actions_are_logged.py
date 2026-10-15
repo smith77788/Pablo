@@ -30,9 +30,11 @@ _ОБЯЗАНЫ = {
         "use_workspace_invite",       # вход в чужое пространство — выдача прав
         "delete_workspace_member",    # выход/исключение — снятие прав
     ],
-    "services/mini_app_api.py": [
+    "services/mini_app_accounts.py": [
         "account_delete",
         "accounts_mass",              # массовое удаление аккаунтов
+    ],
+    "services/mini_app_api.py": [
         "leave_workspace",            # выход участника и удаление пространства
         "presence_pack_delete",
         "ecosystem_delete",
