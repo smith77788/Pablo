@@ -14,7 +14,10 @@ from services import bot_b2b as B
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OPW = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py
+# (и ещё девять модулей mini_app_*). Одна дверь — tests/miniapp_source.
+from tests.miniapp_source import api_source
+API = api_source()
 UI = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 BUS = (ROOT / "services" / "operation_bus.py").read_text(encoding="utf-8")
 

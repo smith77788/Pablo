@@ -49,8 +49,10 @@ def test_create_endpoint_persists_match_mode():
     """create_auto_reply обязан читать и писать match_mode в INSERT."""
     import pathlib
 
-    api = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-    src = api.read_text(encoding="utf-8")
+    # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py.
+    from tests.miniapp_source import api_source
+
+    src = api_source()
     start = src.index("async def create_auto_reply")
     body = src[start:start + 4000]
     assert 'body.get("match_mode")' in body, "match_mode не читается из тела"
@@ -68,8 +70,10 @@ def test_create_endpoint_persists_buttons_priority_delay():
     """
     import pathlib
 
-    api = pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-    src = api.read_text(encoding="utf-8")
+    # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py.
+    from tests.miniapp_source import api_source
+
+    src = api_source()
     start = src.index("async def create_auto_reply")
     body = src[start:start + 4000]
     # читаются из тела

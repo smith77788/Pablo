@@ -19,7 +19,6 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
 
 
 @functools.lru_cache(maxsize=1)
@@ -30,8 +29,9 @@ def _html() -> str:
 
 @functools.lru_cache(maxsize=1)
 def _api() -> str:
-    with open(API, encoding="utf-8") as f:
-        return f.read()
+    from tests.miniapp_source import api_source
+
+    return api_source()
 
 
 def _js_func(name: str) -> str:

@@ -28,7 +28,10 @@ import pathlib
 from services import bot_health as BH
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_API = (_ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py
+# (и ещё девять модулей mini_app_*). Одна дверь — tests/miniapp_source.
+from tests.miniapp_source import api_source
+_API = api_source()
 _AR = (_ROOT / "services" / "auto_responder.py").read_text(encoding="utf-8")
 _DB = (_ROOT / "database" / "db.py").read_text(encoding="utf-8")
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
