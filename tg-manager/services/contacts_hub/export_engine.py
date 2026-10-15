@@ -215,19 +215,21 @@ async def export_json(pool, owner_id: int, contact_ids: list = None) -> str:
                     d[k] = json.loads(d[k])
                 except (json.JSONDecodeError, TypeError):
                     pass
-        if 'created_at' in d and d['created_at']:
-            d['created_at'] = str(d['created_at'])
-        if 'updated_at' in d and d['updated_at']:
-            d['updated_at'] = str(d['updated_at'])
-        if 'discovered_at' in d and d['discovered_at']:
-            d['discovered_at'] = str(d['discovered_at'])
-        if 'last_synced_at' in d and d['last_synced_at']:
-            d['last_synced_at'] = str(d['last_synced_at'])
-        if 'last_changed_at' in d and d['last_changed_at']:
-            d['last_changed_at'] = str(d['last_changed_at'])
         result.append(d)
 
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    # `default=str` вместо перечисления колонок по именам.
+    #
+    # ЧТО БЫЛО: пять колонок с временем приводились к строке вручную, а
+    # `SELECT *` отдаёт ещё и `id` типа UUID — его в этом списке не было, и
+    # `json.dumps` падал «Object of type UUID is not JSON serializable». То
+    # есть выгрузка контактов в JSON не работала НИ РАЗУ у владельца, у
+    # которого есть контакты: на пустом справочнике возвращался «[]», а на
+    # непустом — «внутренняя ошибка сервера».
+    #
+    # Перечисление по именам и не могло держаться: в таблице 60+ колонок,
+    # добавят ещё одну с датой или uuid — выгрузка снова упадёт. Общий
+    # сериализатор закрывает класс (и ровно так уже устроен `_json_resp`).
+    return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 
 async def export_csv_streaming(pool, owner_id: int, contact_ids: list = None):

@@ -51,6 +51,16 @@ os.environ.setdefault("DATABASE_URL", DSN or "postgresql://localhost/none")
 # Владелец, которого в базе нет и не будет: «пустой аккаунт» по построению.
 EMPTY_OWNER = 998877665544
 
+# Владелец С ДАННЫМИ: один аккаунт и один контакт. Нужен отдельным проходом,
+# потому что целый класс ошибок виден только когда данные есть (выгрузка
+# контактов в JSON падала на uuid в строке — на пустом справочнике она
+# возвращала «[]» и выглядела исправной).
+DATA_OWNER = 998877665546
+
+# Ячейка с владельцем: подменять `_get_uid` после setup_routes бесполезно —
+# вынесенные модули забирают его в замыкание при регистрации маршрутов.
+_WHO = {"id": EMPTY_OWNER}
+
 # Ручки, которые по своей природе не отвечают телом и проверяются отдельно.
 SKIP = {
     "/api/miniapp/events": "SSE: держит соединение открытым, а не отвечает телом",
@@ -130,7 +140,7 @@ def _collect() -> tuple[list[tuple[str, object]], object]:
     # проверка молча не доходит до кода 79 ручек хранилища контактов и ещё
     # девяти модулей. Ровно это и было, пока сюда не добавили проверку
     # «ни одного 401» (test_the_scan_actually_reaches_the_handlers).
-    mini_app_api._get_uid = lambda request: EMPTY_OWNER
+    mini_app_api._get_uid = lambda request: _WHO["id"]
     app = web.Application()
     mini_app_api.setup_routes(app, pool)
     routes = []
@@ -168,7 +178,7 @@ def test_the_scan_actually_reaches_the_handlers():
 
     routes = _routes()
     loop, _pool = _CTX
-    mini_app_api._get_uid = lambda request: EMPTY_OWNER
+    _WHO["id"] = EMPTY_OWNER
     unauth = []
     for path, handler in routes:
         try:
@@ -187,7 +197,7 @@ def test_no_screen_answers_an_error_to_a_new_owner():
 
     routes = _routes()
     loop, _pool = _CTX
-    mini_app_api._get_uid = lambda request: EMPTY_OWNER
+    _WHO["id"] = EMPTY_OWNER
     broken: list[str] = []
     for path, handler in routes:
         try:
@@ -226,7 +236,7 @@ def test_no_screen_answers_an_error_to_rubbish_in_its_parameters():
 
     routes = _routes()
     loop, _pool = _CTX
-    mini_app_api._get_uid = lambda request: EMPTY_OWNER
+    _WHO["id"] = EMPTY_OWNER
     broken: list[str] = []
     for case, query in RUBBISH.items():
         for path, handler in routes:
@@ -242,3 +252,70 @@ def test_no_screen_answers_an_error_to_rubbish_in_its_parameters():
     assert not broken, (
         "эти экраны отвечают «внутренней ошибкой сервера» на мусор в "
         "параметрах:\n  " + "\n  ".join(broken))
+
+
+def _seed_data_owner():
+    """Минимальные данные владельца: аккаунт и контакт, связанные друг с другом.
+
+    Одной строки в двух главных таблицах достаточно, чтобы пройти путь
+    «запрос → строки → формат ответа» у большинства экранов: именно там живут
+    ошибки, невидимые на пустом справочнике.
+    """
+    import uuid as _uuid
+
+    loop, pool = _CTX
+    cid = _uuid.uuid4()
+    loop.run_until_complete(pool.execute(
+        "INSERT INTO platform_users(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+        DATA_OWNER))
+    loop.run_until_complete(pool.execute(
+        "DELETE FROM unified_contacts WHERE owner_id=$1", DATA_OWNER))
+    acc_id = loop.run_until_complete(pool.fetchval(
+        "INSERT INTO tg_accounts(owner_id, phone, session_str, first_name)"
+        " VALUES($1,$2,$3,$4) RETURNING id",
+        DATA_OWNER, "+79990000001", "stub-session", "Проверка"))
+    loop.run_until_complete(pool.execute(
+        "INSERT INTO unified_contacts(id, owner_id, telegram_user_id, username,"
+        " first_name, last_name, company, tags, display_name, phones)"
+        " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)",
+        cid, DATA_OWNER, 3101, "probe", "Иван", "Петров", "ООО Ромашка",
+        ["vip"], "Иван Петров", '["+79990000002"]'))
+    loop.run_until_complete(pool.execute(
+        "INSERT INTO contact_sources(contact_id, account_id) VALUES($1,$2)"
+        " ON CONFLICT DO NOTHING", cid, acc_id))
+    return acc_id
+
+
+def test_no_screen_answers_an_error_to_an_owner_with_data():
+    """Класс «падает, только когда данные есть».
+
+    Так нашлась выгрузка контактов в JSON: `SELECT *` отдаёт `id` типа UUID, а
+    сериализатор перечислял колонки по именам — `json.dumps` падал. У владельца
+    без контактов та же ручка возвращала «[]» и выглядела исправной.
+    """
+    routes = _routes()
+    loop, pool = _CTX
+    _seed_data_owner()
+    _WHO["id"] = DATA_OWNER
+    broken: list[str] = []
+    try:
+        for path, handler in routes:
+            try:
+                resp = loop.run_until_complete(handler(_Req(path, _sample(path))))
+            except Exception as exc:
+                broken.append(f"{path} → исключение наружу: "
+                              f"{type(exc).__name__}: {str(exc)[:90]}")
+                continue
+            if getattr(resp, "status", 0) >= 500:
+                broken.append(f"{path} → {resp.status}")
+    finally:
+        _WHO["id"] = EMPTY_OWNER
+        loop.run_until_complete(pool.execute(
+            "DELETE FROM unified_contacts WHERE owner_id=$1", DATA_OWNER))
+        loop.run_until_complete(pool.execute(
+            "DELETE FROM tg_accounts WHERE owner_id=$1", DATA_OWNER))
+        loop.run_until_complete(pool.execute(
+            "DELETE FROM platform_users WHERE user_id=$1", DATA_OWNER))
+    assert not broken, (
+        "у владельца С ДАННЫМИ эти экраны отвечают ошибкой:\n  "
+        + "\n  ".join(broken))
