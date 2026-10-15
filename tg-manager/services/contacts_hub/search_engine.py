@@ -161,6 +161,21 @@ _cache = _SearchCache()
 # SQL builders
 # ---------------------------------------------------------------------------
 
+def _page(limit: Any, offset: Any) -> tuple[int, int]:
+    """Потолок и сдвиг страницы: мусор, отрицательные и «всю базу» — к разумным
+    значениям. Иначе `LIMIT -5` — ошибка запроса, а `limit=abc` — пятисотка ещё
+    до обращения к базе."""
+    try:
+        lim = int(limit)
+    except (TypeError, ValueError):
+        lim = _DEFAULT_LIMIT
+    try:
+        off = int(offset)
+    except (TypeError, ValueError):
+        off = 0
+    return max(1, min(lim, _PAGINATION_MAX_LIMIT)), max(0, min(off, 10_000_000))
+
+
 def _build_operator_conditions(parsed: ParsedQuery, param_offset: int) -> tuple[list[str], list[Any], int]:
     conditions: list[str] = []
     params: list[Any] = []
@@ -255,6 +270,72 @@ def _build_match_count_expression(tokens: list[str], param_offset: int) -> tuple
 # Main search function
 # ---------------------------------------------------------------------------
 
+def _build_search_query(
+    parsed: ParsedQuery, tokens: list[str], owner_id: int, limit: int, offset: int,
+) -> tuple[str, list[Any], str, list[Any]]:
+    """Запрос страницы поиска: (SQL, параметры, WHERE, параметры WHERE).
+
+    ОДНА арифметика плейсхолдеров на весь движок. Раньше её повторяли семь
+    почти одинаковых ветвей в двух функциях, и в шести из них она была сломана:
+    ранжирование (`match_score`) строилось от индекса ПОСЛЕ слов запроса, то
+    есть ссылалось на плейсхолдеры `limit`/`offset` («first_name ILIKE
+    <число>»), а `LIMIT ${idx - 1} OFFSET ${idx}` брали на один меньше реальных
+    позиций — в `LIMIT` уезжала строка `%слово%`. Postgres отвечал «argument of
+    LIMIT must be type bigint, not type text», и поиск по контактам падал
+    пятисоткой на любом запросе из двух слов и на любом запросе с оператором.
+
+    Правила, которые держит эта функция:
+    * ранжирование ПЕРЕИСПОЛЬЗУЕТ плейсхолдеры слов (`tokens_at`), своих не
+      заводит;
+    * номера страницы считаются от фактической длины списка параметров — это и
+      есть единственная правда о том, что уедет в запрос.
+    """
+    all_conditions: list[str] = ['owner_id = $1']
+    params: list[Any] = [owner_id]
+    idx = 2
+
+    op_conditions, op_params, idx = _build_operator_conditions(parsed, idx)
+    all_conditions.extend(op_conditions)
+    params.extend(op_params)
+
+    tokens_at = idx
+    if tokens:
+        token_where, token_params = _build_search_conditions(tokens, tokens_at)
+        if token_where:
+            all_conditions.append(f'({token_where})')
+            params.extend(token_params)
+
+    where_clause = ' AND '.join(all_conditions)
+    where_params = list(params)
+
+    if tokens:
+        match_count_expr, _unused = _build_match_count_expression(tokens, tokens_at)
+        score_expr = f'({match_count_expr})'
+    else:
+        score_expr = '0'
+
+    if len(tokens) == 1:
+        # одно слово: порядок задаёт поле, в котором совпало
+        order_by = (f'CASE WHEN first_name ILIKE ${tokens_at} THEN 0 '
+                    f'WHEN username ILIKE ${tokens_at} THEN 1 '
+                    f'WHEN display_name ILIKE ${tokens_at} THEN 2 '
+                    f'WHEN company ILIKE ${tokens_at} THEN 3 '
+                    f'ELSE 4 END, first_name')
+    elif tokens:
+        order_by = 'match_score DESC, first_name'
+    else:
+        order_by = 'first_name'
+
+    lim_idx = len(params) + 1
+    params.append(limit)
+    params.append(offset)
+    sql = (f'SELECT *, {score_expr} as match_score FROM unified_contacts\n'
+           f'            WHERE {where_clause}\n'
+           f'            ORDER BY {order_by}\n'
+           f'            LIMIT ${lim_idx} OFFSET ${lim_idx + 1}')
+    return sql, params, where_clause, where_params
+
+
 async def search_contacts(
     pool,
     owner_id: int,
@@ -262,6 +343,7 @@ async def search_contacts(
     limit: int = _DEFAULT_LIMIT,
     offset: int = 0,
 ) -> list[dict]:
+    limit, offset = _page(limit, offset)
     parsed = _parse_operators(query)
     has_operators = any([parsed.username, parsed.tag, parsed.company, parsed.phone])
 
@@ -279,71 +361,9 @@ async def search_contacts(
     if cached is not None:
         return cached
 
-    all_conditions: list[str] = [f'owner_id = $1']
-    params: list[Any] = [owner_id]
-    idx = 2
-
-    op_conditions, op_params, idx = _build_operator_conditions(parsed, idx)
-    all_conditions.extend(op_conditions)
-    params.extend(op_params)
-
-    if tokens:
-        token_where, token_params = _build_search_conditions(tokens, idx)
-        if token_where:
-            all_conditions.append(f'({token_where})')
-            params.extend(token_params)
-            idx += len(token_params)
-
-    where_clause = ' AND '.join(all_conditions)
-
-    if has_operators and tokens:
-        match_count_expr, new_idx = _build_match_count_expression(tokens, idx)
-        idx = new_idx
-        params.append(limit)
-        params.append(offset)
-        rows = await pool.fetch(
-            f'''SELECT *, ({match_count_expr}) as match_score FROM unified_contacts
-                WHERE {where_clause}
-                ORDER BY match_score DESC, first_name
-                LIMIT ${idx - 1} OFFSET ${idx}''',
-            *params)
-    elif has_operators:
-        params.append(limit)
-        params.append(offset)
-        rows = await pool.fetch(
-            f'''SELECT *, 0 as match_score FROM unified_contacts
-                WHERE {where_clause}
-                ORDER BY first_name
-                LIMIT ${idx - 1} OFFSET ${idx}''',
-            *params)
-    elif len(tokens) == 1:
-        q = f'%{tokens[0]}%'
-        params.append(q)
-        params.append(limit)
-        params.append(offset)
-        rows = await pool.fetch(
-            f'''SELECT *, 0 as match_score FROM unified_contacts
-                WHERE {where_clause}
-                ORDER BY
-                    CASE WHEN first_name ILIKE ${idx} THEN 0
-                         WHEN username ILIKE ${idx} THEN 1
-                         WHEN display_name ILIKE ${idx} THEN 2
-                         WHEN company ILIKE ${idx} THEN 3
-                         ELSE 4 END,
-                    first_name
-                LIMIT ${idx + 1} OFFSET ${idx + 2}''',
-            *params)
-    else:
-        match_count_expr, new_idx = _build_match_count_expression(tokens, idx)
-        idx = new_idx
-        params.append(limit)
-        params.append(offset)
-        rows = await pool.fetch(
-            f'''SELECT *, ({match_count_expr}) as match_score FROM unified_contacts
-                WHERE {where_clause}
-                ORDER BY match_score DESC, first_name
-                LIMIT ${idx - 1} OFFSET ${idx}''',
-            *params)
+    sql, params, _where, _wp = _build_search_query(
+        parsed, tokens, owner_id, limit, offset)
+    rows = await pool.fetch(sql, *params)
 
     from services.contacts_hub.repository import _parse_json_fields
     result = [_parse_json_fields(dict(r)) for r in rows]
@@ -490,6 +510,7 @@ async def search_contacts_advanced(
     fuzzy: bool = True,
     fuzzy_threshold: float = _FUZZY_THRESHOLD,
 ) -> dict:
+    limit, offset = _page(limit, offset)
     parsed = _parse_operators(query)
     tokens = parsed.free_text
     has_operators = any([parsed.username, parsed.tag, parsed.company, parsed.phone])
@@ -514,67 +535,15 @@ async def search_contacts_advanced(
     if cached is not None:
         return cached
 
-    all_conditions: list[str] = [f'owner_id = $1']
-    params: list[Any] = [owner_id]
-    idx = 2
+    sql, params, where_clause, where_params = _build_search_query(
+        parsed, tokens, owner_id, limit, offset)
 
-    op_conditions, op_params, idx = _build_operator_conditions(parsed, idx)
-    all_conditions.extend(op_conditions)
-    params.extend(op_params)
-
-    if tokens:
-        token_where, token_params = _build_search_conditions(tokens, idx)
-        if token_where:
-            all_conditions.append(f'({token_where})')
-            params.extend(token_params)
-            idx += len(token_params)
-
-    where_clause = ' AND '.join(all_conditions)
-
-    count_params = list(params)
     count_row = await pool.fetchrow(
         f'SELECT COUNT(*) as cnt FROM unified_contacts WHERE {where_clause}',
-        *count_params)
+        *where_params)
     total = count_row['cnt'] if count_row else 0
 
-    if has_operators and tokens:
-        match_count_expr, new_idx = _build_match_count_expression(tokens, idx)
-        idx = new_idx
-        params.append(limit)
-        params.append(offset)
-        rows = await pool.fetch(
-            f'''SELECT *, ({match_count_expr}) as match_score FROM unified_contacts
-                WHERE {where_clause}
-                ORDER BY match_score DESC, first_name
-                LIMIT ${idx - 1} OFFSET ${idx}''',
-            *params)
-    elif len(tokens) == 1:
-        params.append(f'%{tokens[0]}%')
-        params.append(limit)
-        params.append(offset)
-        rows = await pool.fetch(
-            f'''SELECT *, 0 as match_score FROM unified_contacts
-                WHERE {where_clause}
-                ORDER BY
-                    CASE WHEN first_name ILIKE ${idx} THEN 0
-                         WHEN username ILIKE ${idx} THEN 1
-                         WHEN display_name ILIKE ${idx} THEN 2
-                         WHEN company ILIKE ${idx} THEN 3
-                         ELSE 4 END,
-                    first_name
-                LIMIT ${idx + 1} OFFSET ${idx + 2}''',
-            *params)
-    else:
-        match_count_expr, new_idx = _build_match_count_expression(tokens, idx)
-        idx = new_idx
-        params.append(limit)
-        params.append(offset)
-        rows = await pool.fetch(
-            f'''SELECT *, ({match_count_expr}) as match_score FROM unified_contacts
-                WHERE {where_clause}
-                ORDER BY match_score DESC, first_name
-                LIMIT ${idx - 1} OFFSET ${idx}''',
-            *params)
+    rows = await pool.fetch(sql, *params)
 
     items = [dict(r) for r in rows]
 
