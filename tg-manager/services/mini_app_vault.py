@@ -38,7 +38,7 @@ def setup_routes(app: web.Application, pool) -> None:
     # импорт сверху дал бы цикл. К моменту вызова mini_app_api уже загружен.
     from services.mini_app_api import (
         _INTERNAL_ERROR, _bot_token, _err, _get_uid, _json_resp,
-        _resolve_bot_username, _safe_fetch, _vault_export_html, log,
+        _resolve_bot_username, _safe_fetch, _text, _vault_export_html, log,
     )
 
     async def vault_status(request: web.Request) -> web.Response:
@@ -306,7 +306,7 @@ def setup_routes(app: web.Application, pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        text = (body.get("text") or "").strip()
+        text = _text(body.get("text"))
         if not text:
             return _err("Введите текст сообщения", 400)
         from services import vault_service as _v

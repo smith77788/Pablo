@@ -2,6 +2,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import logging
+import uuid as _uuid
 from typing import Optional
 
 import asyncpg
@@ -40,6 +41,42 @@ def _normalize_ts(data: dict) -> dict:
     return out
 
 
+class ContactNotFound(LookupError):
+    """Контакта с таким id у этого владельца нет.
+
+    Два случая в одном: контакт удалили (в другой вкладке, другим экраном) и
+    контакт чужой. Оба — ответ «контакт не найден» (404), а не «внутренняя
+    ошибка сервера».
+    """
+
+
+async def _require_contact(pool, owner_id: int, contact_id) -> str:
+    """Контакт существует И принадлежит владельцу — иначе ContactNotFound.
+
+    ЧТО БЫЛО. Записи CRM шли в базу без этой проверки. Внешний ключ
+    `contact_crm_contact_id_fkey` ловил только НЕСУЩЕСТВУЮЩИЙ id, и ловил его
+    пятисоткой: владелец, у которого контакт удалили в другой вкладке,
+    нажимал «Сохранить» и получал «внутреннюю ошибку сервера».
+
+    А на ЧУЖОЙ id внешний ключ не срабатывал вовсе — он проверяет только
+    наличие контакта в `unified_contacts`, не владельца. То есть по чужому id
+    можно было завести строку CRM и журнал активности, привязанные к чужому
+    контакту. Прочитать чужое это не давало (чтения скоупятся по owner_id), но
+    запись по чужому идентификатору — ровно то, что обязано требовать
+    авторизации.
+    """
+    try:
+        key = str(_uuid.UUID(str(contact_id)))
+    except (ValueError, AttributeError, TypeError):
+        raise ContactNotFound("Контакт не найден")
+    ok = await pool.fetchval(
+        'SELECT 1 FROM unified_contacts WHERE id=$1::uuid AND owner_id=$2',
+        key, owner_id)
+    if not ok:
+        raise ContactNotFound("Контакт не найден")
+    return key
+
+
 async def get_crm_data(pool, owner_id: int, contact_id: str) -> Optional[dict]:
     row = await pool.fetchrow(
         'SELECT * FROM contact_crm WHERE owner_id=$1 AND contact_id=$2',
@@ -59,6 +96,7 @@ async def upsert_crm(pool, owner_id: int, contact_id: str, data: dict) -> dict:
     # timestamptz-поля из тела запроса могут прийти строкой → привести к datetime,
     # иначе asyncpg роняет весь upsert (класс #15). ValueError пробросится вызывающему.
     data = _normalize_ts(data)
+    await _require_contact(pool, owner_id, contact_id)
     existing = await get_crm_data(pool, owner_id, contact_id)
     if existing:
         sets = []
@@ -133,6 +171,7 @@ async def _signal_virtual_layer(pool, owner_id: int, contact_id: str,
 async def log_crm_activity(pool, owner_id: int, contact_id: str,
                            activity_type: str, description: str = None,
                            metadata: dict = None) -> None:
+    await _require_contact(pool, owner_id, contact_id)
     await pool.execute(
         '''INSERT INTO contact_crm_activity (owner_id, contact_id, activity_type, description, metadata)
            VALUES ($1,$2,$3,$4,$5::jsonb)''',

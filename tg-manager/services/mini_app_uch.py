@@ -1168,9 +1168,11 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             cid = request.match_info['contact_id']
             data = await request.json()
-            from services.contacts_hub.crm_engine import upsert_crm
+            from services.contacts_hub.crm_engine import ContactNotFound, upsert_crm
             crm = await upsert_crm(pool, uid, cid, data)
             return _json_resp({'ok': True, 'crm': crm})
+        except ContactNotFound as nf:
+            return _err(str(nf), 404)
         except ValueError as ve:
             return _err(str(ve), 400)
         except Exception:
@@ -1183,10 +1185,14 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             cid = request.match_info['contact_id']
             data = await request.json()
-            from services.contacts_hub.crm_engine import log_crm_activity
+            from services.contacts_hub.crm_engine import (
+                ContactNotFound, log_crm_activity,
+            )
             await log_crm_activity(pool, uid, cid, data.get('type', 'note'),
                                    data.get('description'), data.get('metadata'))
             return _json_resp({'ok': True})
+        except ContactNotFound as nf:
+            return _err(str(nf), 404)
         except Exception:
             log.exception("uch_crm_activity")
             return _err(_INTERNAL_ERROR, 500)
@@ -1224,12 +1230,14 @@ def setup_routes(app: web.Application, pool) -> None:
                     return _err("Некорректная дата напоминания", 400)
                 if remind_dt.tzinfo is None:
                     remind_dt = remind_dt.replace(tzinfo=_dtm.timezone.utc)
-            from services.contacts_hub.crm_engine import upsert_crm
+            from services.contacts_hub.crm_engine import ContactNotFound, upsert_crm
             await upsert_crm(pool, uid, cid, {
                 'next_reminder_at': remind_dt,
                 'next_reminder_text': data.get('text', ''),
             })
             return _json_resp({'ok': True})
+        except ContactNotFound as nf:
+            return _err(str(nf), 404)
         except Exception:
             log.exception("uch_crm_reminder uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -1418,17 +1426,31 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_bulk_exclude")
             return _err(_INTERNAL_ERROR, 500)
 
+    def _filter_account_id(body: dict):
+        """id аккаунта из фильтра: None (не задан), число или False (мусор).
+
+        Раньше `int(body['account_id'])` стоял прямо в вызове внутри try, и
+        нечисловое значение выпадало пятисоткой — «внутренняя ошибка сервера»
+        вместо «неверный идентификатор аккаунта».
+        """
+        raw = body.get('account_id')
+        if not raw:
+            return None
+        return validate_integer(raw, min_val=1) or False
+
     async def uch_filter_preview(request: web.Request) -> web.Response:
         """Сколько контактов попадёт под фильтр (страна/тег/источник) — до действия."""
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
             d = await request.json()
+            acc_id = _filter_account_id(d)
+            if acc_id is False:
+                return _err("Неверный идентификатор аккаунта", 400)
             from services.contacts_hub.bulk_ops_engine import count_by_filter
             n = await count_by_filter(
                 pool, uid, country=(d.get('country') or None),
-                tag=(d.get('tag') or None),
-                account_id=(int(d['account_id']) if d.get('account_id') else None))
+                tag=(d.get('tag') or None), account_id=acc_id)
             return _json_resp({'count': n})
         except Exception:
             log.exception("uch_filter_preview")
@@ -1440,11 +1462,14 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             d = await request.json()
+            acc_id = _filter_account_id(d)
+            if acc_id is False:
+                return _err("Неверный идентификатор аккаунта", 400)
             from services.contacts_hub.bulk_ops_engine import exclude_by_filter
             result = await exclude_by_filter(
                 pool, uid, excluded=bool(d.get('excluded', True)),
                 country=(d.get('country') or None), tag=(d.get('tag') or None),
-                account_id=(int(d['account_id']) if d.get('account_id') else None))
+                account_id=acc_id)
             return _json_resp(result)
         except Exception:
             log.exception("uch_filter_exclude")

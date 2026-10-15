@@ -1306,6 +1306,37 @@ def _list_limit(request: web.Request, default: int, maximum: int) -> int:
     return min(validate_integer(raw, min_val=1, max_val=maximum) or default, maximum)
 
 
+def _text(value, max_len: int | None = None) -> str:
+    """Текст из тела запроса. Не строка — приводим, а не падаем.
+
+    `(body.get("text") or "").strip()` — самый частый способ прочитать текст в
+    этом файле, и на нестроковом значении он кидает AttributeError НАРУЖУ
+    обработчика: ответ уходит не русским JSON, а страницей aiohttp «Internal
+    Server Error», которую экран разобрать не может. Пробой тела по 417
+    изменяющим ручкам нашёл девять таких мест.
+
+    `False`/`True` — не текст: логическое значение в текстовом поле значит
+    «поля нет», а не строку «False».
+    """
+    if value is None or isinstance(value, bool):
+        return ""
+    s = str(value).strip()
+    return s[:max_len] if max_len else s
+
+
+def _str_list(value) -> list[str]:
+    """Список строк из тела запроса: строка — разбить, не список — пусто.
+
+    `for u in (body.get("usernames") or [])` на числе даёт TypeError наружу
+    обработчика — см. `_text`.
+    """
+    if isinstance(value, str):
+        return [p for p in re.split(r"[\s,;]+", value) if p]
+    if isinstance(value, (list, tuple, set)):
+        return [str(x).strip() for x in value if str(x).strip()]
+    return []
+
+
 def _list_offset(request: web.Request, maximum: int = 10_000_000) -> int:
     """Сдвиг страницы. Мусор и отрицательное — ноль, а не ошибка запроса.
 
@@ -1971,12 +2002,59 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 log.debug("сброс кэша после изменения не удался", exc_info=True)
         return response
 
+    @web.middleware
+    async def unhandled_error_middleware(request: web.Request, handler):
+        """Исключение, выпавшее из обработчика, — русская ошибка, а не пустая 500.
+
+        Весь контракт мини-аппа: ответ — JSON, текст ошибки — по-русски.
+        Обработчик, у которого исключение вылетело НАРУЖУ (а не было поймано
+        своим try), ломает этот контракт: aiohttp отдаёт свою страницу 500 с
+        английским «Internal Server Error», экран не может её разобрать и
+        показывает владельцу пустоту или сырой текст.
+
+        Пробой тела запроса по 417 изменяющим ручкам нашёл девять таких:
+        поле, которое ждали строкой, приходило числом — `(x or '').strip()` на
+        целом даёт AttributeError, а список, собранный из числа, —
+        TypeError. Чинить это по месту в девяти ручках значит оставить класс
+        открытым для десятой: исключение может выпасть из любой. Поэтому
+        страховка стоит слоем — один ответ, один лог, один путь.
+
+        Это НЕ замена обработке ошибок в ручках: своя обработка знает, что
+        именно пошло не так, и говорит это владельцу. Слой — последняя сетка.
+
+        `web.HTTPException` пропускаем: это намеренный ответ (редирект, 404
+        статики), а не сбой. `CancelledError` — тоже не сбой: так выглядит
+        обрыв соединения клиентом и срабатывание потолка времени.
+        """
+        try:
+            return await handler(request)
+        except (web.HTTPException, asyncio.CancelledError):
+            raise
+        except Exception:
+            log.exception("API: необработанное исключение в %s %s",
+                          request.method, request.rel_url.path)
+            try:
+                report_error_safe(request)
+            except Exception:
+                log.debug("отчёт об ошибке не отправлен", exc_info=True)
+            return _err(_INTERNAL_ERROR, 500)
+
+    def report_error_safe(request: web.Request) -> None:
+        from services.error_reporting import report_error
+        import sys
+        exc = sys.exc_info()[1]
+        if exc is not None:
+            report_error(exc, extra={"context": f"miniapp {request.method} "
+                                                f"{request.rel_url.path}"})
+
     # Самым внешним: статус, который реально увидел человек, складывается уже
     # после plan_gate (он превращает отказ по подписке в 403).
     # Потолок времени — САМЫМ ВНЕШНИМ слоем (aiohttp строит цепочку так, что
     # первый в списке оказывается снаружи): он должен накрывать и остальные
     # middleware, а не только обработчик.
     app.middlewares.append(make_request_timeout_middleware(request_timeout_seconds()))
+    # Сразу под потолком времени: накрывает и остальные middleware, и все ручки.
+    app.middlewares.append(unhandled_error_middleware)
     app.middlewares.append(cache_invalidate_middleware)
     app.middlewares.append(compress_middleware)
     app.middlewares.append(plan_gate_middleware)
@@ -6413,7 +6491,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         peer = account_console.parse_peer(request.match_info.get("peer", ""))
         if peer == "" or peer is None:
             return _err("Не указан собеседник", 400)
-        text = (body.get("text") or "").strip()
+        text = _text(body.get("text"))
         if not text:
             return _err("Введите текст сообщения", 400)
         access_hash = _parse_access_hash(body.get("access_hash"))
@@ -9270,11 +9348,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
 
-        raw = data.get("usernames") or []
-        if isinstance(raw, str):
-            raw = re.split(r"[\s,;]+", raw)
-        _cleaned = [u.strip().lstrip("@") for u in raw
-                    if isinstance(u, str) and u.strip()]
+        _cleaned = [u.lstrip("@") for u in _str_list(data.get("usernames"))]
         # Дедуп на входе: два одинаковых ЛС одному человеку — самая заметная
         # спам-сигнатура, и без этого возвращаемое число получателей врало бы.
         _seen: set[str] = set()
@@ -11093,9 +11167,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             data = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        account_id = data.get("account_id")
-        if not account_id:
+        if not data.get("account_id"):
             return _err("account_id обязателен", 400)
+        # Нечисловой id раньше доходил до `int()` внутри try и выпадал
+        # пятисоткой: «внутренняя ошибка сервера» вместо «неверный аккаунт».
+        account_id = validate_integer(data.get("account_id"), min_val=1)
+        if not account_id:
+            return _err("Неверный идентификатор аккаунта", 400)
         _f, _ferr = _ghost_fields(data)
         if _ferr:
             return _err(_ferr, 400)
@@ -11301,8 +11379,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        name = (body.get("name") or "").strip()
-        text = (body.get("text") or "").strip()
+        name = _text(body.get("name"))
+        text = _text(body.get("text"))
         target_type = body.get("target_type", "bot_users")
         target_id = body.get("target_id")
         if not name or not text:
@@ -12135,7 +12213,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        names = [str(u).lstrip("@") for u in (body.get("usernames") or []) if str(u or "").strip()]
+        names = [u.lstrip("@") for u in _str_list(body.get("usernames"))]
         try:
             limit = max(1, min(50, int(body.get("limit") or 20)))
         except (TypeError, ValueError):
@@ -12845,12 +12923,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        account_id = body.get("account_id")
         plan_type = body.get("plan_type", "standard")
         if plan_type not in ("gentle", "standard", "aggressive"):
             return _err("plan_type должен быть gentle/standard/aggressive", 400)
-        if not account_id:
+        if not body.get("account_id"):
             return _err("account_id обязателен", 400)
+        # Нечисловой id уезжал параметром в запрос и давал DataError → 500.
+        account_id = validate_integer(body.get("account_id"), min_val=1)
+        if not account_id:
+            return _err("Неверный идентификатор аккаунта", 400)
 
         # ── Расширенные настройки поведения прогрева (движок читает их из
         # account_niche_profiles) — раньше не выводились в UI, аккаунт всегда
@@ -15349,7 +15430,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        text = (body.get("text") or "").strip()
+        text = _text(body.get("text"))
         if not text:
             return _err("Нужен текст")
         if len(text) > 4096:
@@ -15726,8 +15807,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        text = (body.get("text") or "").strip()
-        execute_at = (body.get("execute_at") or "").strip()
+        text = _text(body.get("text"))
+        execute_at = _text(body.get("execute_at"))
         if not text:
             return _err("Нужен текст")
         if not execute_at:
@@ -15809,8 +15890,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос")
-        name = (body.get("name") or "").strip()
-        text = (body.get("text") or "").strip()
+        name = _text(body.get("name"))
+        text = _text(body.get("text"))
         if not name:
             return _err("Нужно название")
         if not text:
