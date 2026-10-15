@@ -22,7 +22,11 @@ def test_repository_supports_mutual_only():
 
 
 def test_endpoint_accepts_mutual_param():
-    src = inspect.getsource(mini_app_api)
+    # Весь API-слой: ручки контактов вынесены из 25-тысячестрочного
+    # mini_app_api.py в services/mini_app_uch.py.
+    from tests.miniapp_source import api_source
+
+    src = api_source()
     assert "request.query.get('mutual')" in src
     assert "mutual_only=mutual" in src
 

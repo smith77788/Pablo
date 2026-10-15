@@ -41,7 +41,11 @@ def test_enrich_bundles_both():
 
 
 def test_endpoint_and_ui_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    # Весь API-слой: ручки контактов вынесены из 25-тысячестрочного
+    # mini_app_api.py в services/mini_app_uch.py.
+    from tests.miniapp_source import api_source
+
+    api = api_source()
     assert "enrich as _enr" in api
     assert '"enriched"' in api
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()

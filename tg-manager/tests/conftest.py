@@ -271,6 +271,23 @@ def _live_schema():
                         await conn.execute(fh.read())
                 except Exception:
                     pass
+            # Инлайн-миграции — часть продовой схемы: в проде их накатывает
+            # mini_app на старте, а schema_v*.sql их НЕ содержат. Без них
+            # тестовая база отличается от продовой, и тест краснеет (или
+            # зеленеет) по причине, которой в проде нет: так
+            # /api/miniapp/self_promo «ломался» на отсутствующем owner_id,
+            # который в проде добавляет ровно этот список. Семь e2e-файлов
+            # накатывали его каждый сам — теперь один раз на сессию здесь,
+            # ровно тем же списком (единый источник истины).
+            try:
+                from services.mini_app_api import INLINE_MIGRATIONS
+            except Exception:
+                INLINE_MIGRATIONS = []
+            for stmt in INLINE_MIGRATIONS:
+                try:
+                    await conn.execute(stmt)
+                except Exception:
+                    pass
         finally:
             await conn.close()
 
