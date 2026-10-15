@@ -17,7 +17,7 @@ import ast
 import re
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py"
+from tests.miniapp_source import api_function
 
 
 def _sql_text(node: ast.AST) -> str | None:
@@ -40,7 +40,9 @@ def _sql_text(node: ast.AST) -> str | None:
 
 def _channels_fetch_sql() -> str:
     """Достаёт первый большой SQL-литерал из тела вложенной функции `channels`."""
-    tree = ast.parse(SRC.read_text(encoding="utf-8"))
+    # Ручка уехала из монолита в services/mini_app_channels.py; ищем её
+    # по всему API-слою, а не по одному файлу.
+    tree = ast.parse(api_function("channels"))
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "channels":
             for sub in ast.walk(node):

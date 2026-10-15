@@ -168,7 +168,9 @@ def _read(rel):
     return (Path(__file__).resolve().parents[1] / rel).read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("rel", ["services/mini_app_api.py", "services/organism/world.py"])
+# Читатель со стороны мини-аппа уехал из монолита в services/mini_app_invite.py
+# вместе с ручкой «Ретеншен»; маркер проверяем там, где он теперь читается.
+@pytest.mark.parametrize("rel", ["services/mini_app_invite.py", "services/organism/world.py"])
 def test_readers_query_the_marker_that_is_actually_written(rel):
     """Оба читателя ищут ровно тот маркер, который пишет исполнитель."""
     src = _read(rel)

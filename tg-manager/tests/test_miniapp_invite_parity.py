@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -14,7 +15,7 @@ def _read(rel: str) -> str:
 
 
 def test_backend_forwards_method_and_volume():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     # mass_inviter_submit прокидывает способ инвайта и режим объёма в params
     assert 'params["invite_method"]' in api
     assert 'params["volume_mode"] = "progressive"' in api
@@ -23,7 +24,7 @@ def test_backend_forwards_method_and_volume():
 
 
 def test_backend_readiness_and_joinall_endpoints():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def invite_fleet_readiness" in api
     assert "async def invite_join_all" in api
     assert 'add_get("/api/miniapp/invite/fleet_readiness"' in api
@@ -61,7 +62,7 @@ def test_frontend_has_readiness_and_joinall():
 
 
 def test_backend_file_upload_and_dedup():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     # эндпоинт загрузки файла + маршрут
     assert "async def invite_parse_file" in api
     assert 'add_post("/api/miniapp/invite/parse_file"' in api

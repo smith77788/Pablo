@@ -16,6 +16,7 @@ import re
 
 from services.mass_inviter_engine import classify_invite_list, split_invite_targets
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 
 def test_bare_and_plus_numbers_recognized():
@@ -56,7 +57,7 @@ def test_split_wrapper_backcompat():
 
 
 def test_parse_list_endpoint_registered_and_uses_classifier():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert 'app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)' in src
     m = re.search(r"async def invite_parse_list\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "invite_parse_list handler not found"

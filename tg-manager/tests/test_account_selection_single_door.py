@@ -75,7 +75,7 @@ BASELINE = {
     'bot/handlers/infra_analytics.py::id, phone, first_name, session_str, device_model, system_ver',  # LEAVE: аналитика
     'bot/handlers/promo_platform.py::id, session_str, first_name, username, phone, proxy_id',  # LEAVE: поиск аккаунта-владельца ботов (не выживаемость)
     'services/invite_preflight.py::id, phone, session_str',  # LEAVE: предполётная проверка (показывает и cooling)
-    'services/mini_app_api.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # LEAVE: rights_check/grant_admin (предполёт, свой proxy-фильтр)
+    'services/mini_app_invite.py::a.id, a.owner_id, a.session_str, a.device_model, a.system_ve',  # LEAVE: rights_check/grant_admin (предполёт, свой proxy-фильтр); уехало из монолита вместе с блоком инвайтов
     'services/mini_app_api.py::a.id, a.session_str, a.first_name, a.phone, a.device_model, ',  # LEAVE: diag
     # МИГРИРОВАНО (шаг №1): _ACC_COLS (9 исполнителей op_worker) → select_all_active(include_ids).
     'services/op_worker.py::a.id, a.session_str, a.first_name, a.phone, a.username, a.de',  # LEAVE: health/scan (диагностика)

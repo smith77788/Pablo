@@ -13,16 +13,16 @@ import ast
 import re
 from pathlib import Path
 
+from tests.miniapp_source import api_function, api_source
 ROOT = Path(__file__).resolve().parents[1]
-API = ROOT / "services" / "mini_app_api.py"
 INDEX = ROOT / "mini_app" / "index.html"
 
 
 def _handler() -> str:
-    src = API.read_text(encoding="utf-8")
-    m = re.search(r"    async def channels_bulk_create\b.*?(?=\n    async def )", src, re.DOTALL)
-    assert m, "channels_bulk_create не найден"
-    return m.group(0)
+    # Границы ручки знает только парсер, и файл API-слоя уже не один:
+    # «до следующего async def» ломалось на каждой правке выше, а путь к
+    # монолиту — на выносе ручки в services/mini_app_channels.py.
+    return api_function("channels_bulk_create")
 
 
 def _fn(name: str) -> str:
@@ -50,7 +50,7 @@ def test_endpoint_submits_bulk_operation():
 
 
 def test_route_registered():
-    src = API.read_text(encoding="utf-8")
+    src = api_source()
     assert '"/api/miniapp/channels/bulk_create"' in src, "роут не зарегистрирован"
 
 
@@ -93,10 +93,7 @@ def test_ui_exposes_multi_account_and_params():
 
 
 def test_no_unused_body_params():
-    tree = ast.parse(API.read_text(encoding="utf-8"))
-    target = next((n for n in ast.walk(tree)
-                   if isinstance(n, ast.AsyncFunctionDef) and n.name == "channels_bulk_create"), None)
-    assert target is not None
+    target = ast.parse(api_function("channels_bulk_create")).body[0]
     assigned = set()
     for n in ast.walk(target):
         if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):

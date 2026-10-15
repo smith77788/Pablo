@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from services import invite_retention
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,7 +43,7 @@ def test_chat_guard_emits_left_event():
 
 
 def test_endpoint_and_ui_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    api = api_source()
     assert "async def invite_retention_overview" in api
     assert '"/api/miniapp/invite/retention"' in api
     assert "invite_retention.summarize" in api

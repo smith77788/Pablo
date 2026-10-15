@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from services import invite_overflow as ovf
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,7 +69,7 @@ class _BusyPool:
 
 
 def test_picker_uses_the_server_verdict():
-    api = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert '"/api/miniapp/invite/reserve_options"' in api
     js = (ROOT / "mini_app" / "screens" / "invite.js").read_text(encoding="utf-8")
     assert "/api/miniapp/invite/reserve_options?group=" in js
@@ -103,7 +104,7 @@ def test_chain_panel_says_where_the_next_run_continues(tmp_path):
 
     if not shutil.which("node"):
         pytest.skip("нужен node")
-    api = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert '"chain": chain' in api
     js = (ROOT / "mini_app" / "screens" / "invite.js").read_text(encoding="utf-8")
     start = js.index("function _invRenderChain(")

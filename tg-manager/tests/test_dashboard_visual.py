@@ -10,6 +10,8 @@ import os
 import shutil
 import subprocess
 
+from tests.miniapp_source import api_function, api_source
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -19,15 +21,16 @@ def _read(rel: str) -> str:
 
 
 def test_backend_endpoint_and_route_registered():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def dashboard_visual" in api
     assert 'app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)' in api
 
 
 def test_backend_scoped_and_uses_trust_score():
-    api = _read("services/mini_app_api.py")
-    seg = api[api.index("async def dashboard_visual"):]
-    seg = seg[:seg.index("    # ── Bots")]
+    # Границы ручки знает только парсер. Срез «до комментария `# ── Bots`»
+    # оборвался, едва тот комментарий переименовали в соседней правке, и
+    # проверка упала в CI как «substring not found» — не про дашборд вовсе.
+    seg = api_function("dashboard_visual")
     # owner-скоуп (не даём чужие данные) + health по trust_score (каноничный)
     assert "_get_uid(request)" in seg and 'return _err("Unauthorized", 401)' in seg
     assert "owner_id=$1" in seg

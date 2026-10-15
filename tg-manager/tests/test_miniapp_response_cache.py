@@ -228,3 +228,49 @@ def test_a_cached_handler_is_not_put_on_a_route_with_a_path_parameter():
         "кэшируемый обработчик стоит на пути с параметром, а параметра пути в "
         "ключе кэша нет — ответы про разные объекты лягут под один ключ:\n  "
         + "\n  ".join(offenders))
+
+
+def test_a_cached_handler_is_never_put_on_a_mutating_route():
+    """Кэш отвечает из памяти, не доходя до обработчика — значит мутация не произойдёт.
+
+    Отдельная проверка от соседней, про параметр пути: та ловит подмену
+    объекта, эта — потерю самого действия. Повесить `@_cached_user()` на POST
+    или PUT — значит, что второй такой запрос за время жизни ключа вернёт
+    владельцу прошлый ответ и НИЧЕГО не изменит в базе. По экрану это выглядит
+    как успех: он нажал «включить», увидел ответ, а переключатель не
+    переключился.
+
+    Так и случилось при выносе блока ботов: границы функции брались по
+    `lineno`, а у декорированной функции `lineno` указывает на `def`, поэтому
+    `@_cached_user()` остался в монолите и навесился на следующую функцию —
+    `toggle_auto_reply`, то есть PUT. Проверка по маршрутам, а не по тексту:
+    только маршрут знает метод.
+    """
+    import re
+
+    from aiohttp import web as _web
+
+    from services import mini_app_api as _M
+    from tests.miniapp_source import api_source
+
+    cached = set(re.findall(r"@_cached_user\(\)\s*\n\s*async def (\w+)", api_source()))
+    assert cached, "декоратор кэша перестал находиться — проверка измеряет не то"
+
+    class _P:
+        async def fetch(self, q, *a): return []
+        async def fetchrow(self, q, *a): return None
+        async def fetchval(self, q, *a): return None
+        async def execute(self, q, *a): return "OK"
+
+    app = _web.Application()
+    _M.setup_routes(app, _P())
+    offenders = [
+        f"{route.method} {(route.resource.get_info() if route.resource else {}).get('path') or (route.resource.get_info() if route.resource else {}).get('formatter') or ''} → {getattr(route.handler, '__name__', '')}"
+        for route in app.router.routes()
+        if getattr(route.handler, "__name__", "") in cached
+        and route.method not in ("GET", "HEAD")
+    ]
+    assert not offenders, (
+        "кэшируемый обработчик стоит на мутирующем маршруте — повторный "
+        "запрос вернётся из кэша и действие не выполнится:\n  "
+        + "\n  ".join(offenders))

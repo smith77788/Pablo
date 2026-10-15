@@ -28,10 +28,15 @@ def setup_routes(app: web.Application, pool) -> None:
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
         _safe_fetch, _safe_fetchrow, alive_accounts, log,
+        read_upload, UploadTooLarge,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
     )
+
+    # Предел одной медиа-загрузки. Был записан числом в двух ручках, и в них
+    # же проверялся ПОСЛЕ полного чтения поля — то есть не действовал.
+    _UCH_MEDIA_MAX = 50 * 1024 * 1024
 
     _SEG_MAX = _segments.SEG_MAX
     _SEG_DM_CHUNK = _segments.SEG_DM_CHUNK
@@ -210,18 +215,20 @@ def setup_routes(app: web.Application, pool) -> None:
             async for field in reader:
                 if field.name == "file":
                     filename = field.filename or "media"
-                    data = await field.read(decode=False)
+                    # Предел действует НА ЧТЕНИИ: `field.read()` втянул бы поле
+                    # целиком, и проверка длины после этого уже ничего не
+                    # защищает — память израсходована.
+                    data = await read_upload(field, _UCH_MEDIA_MAX)
                 elif field.name == "text":
                     caption = (await field.text())[:1024]
                 elif field.name == "account_ids":
                     acc_raw = (await field.text()).strip()
+        except UploadTooLarge:
+            return _err("Файл слишком большой (лимит 50 МБ)", 413)
         except Exception:
             return _err("Не удалось прочитать загрузку", 400)
         if not data:
             return _err("Файл пуст", 400)
-        _MAX = 50 * 1024 * 1024
-        if len(data) > _MAX:
-            return _err("Файл слишком большой (лимит 50 МБ)", 400)
         from services.contacts_hub.repository import get_contact
         res = await get_contact(pool, contact_id, uid)
         if not res:
@@ -443,7 +450,7 @@ def setup_routes(app: web.Application, pool) -> None:
             async for field in reader:
                 if field.name == "file":
                     filename = field.filename or "media"
-                    data = await field.read(decode=False)
+                    data = await read_upload(field, _UCH_MEDIA_MAX)
                 elif field.name == "text":
                     caption = (await field.text())[:1024]
                 elif field.name == "account_ids":
@@ -454,12 +461,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 elif field.name == "contact_ids":
                     try: body["contact_ids"] = _json.loads(await field.text())
                     except Exception: pass
+        except UploadTooLarge:
+            return _err("Файл слишком большой (лимит 50 МБ)", 413)
         except Exception:
             return _err("Не удалось прочитать загрузку", 400)
         if not data:
             return _err("Файл пуст", 400)
-        if len(data) > 50 * 1024 * 1024:
-            return _err("Файл слишком большой (лимит 50 МБ)", 400)
         acc_ids = await _alive_accounts(
             uid, [int(x) for x in re.split(r"[,\s]+", acc_raw) if x.strip().isdigit()])
         if not acc_ids:

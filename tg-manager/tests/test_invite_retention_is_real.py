@@ -12,9 +12,10 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-API = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+API = api_source()
 HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
 SCREEN = os.path.join(ROOT, "mini_app", "screens", "retention.js")
 
@@ -63,8 +64,10 @@ def test_retention_metric_reacts_to_churn():
 # ── Где уходят ───────────────────────────────────────────────────────────────
 
 def test_endpoint_says_where_people_leave():
-    ep = API[API.index("async def invite_retention_overview"):]
-    ep = ep[:ep.index("async def boost_submit")]
+    # Границы функции знает только парсер, а файл API-слоя — уже не один:
+    # срез «от имени до следующей ручки» ломался и при правке выше, и при
+    # выносе ручки в services/mini_app_invite.py.
+    ep = api_function("invite_retention_overview")
     assert '"by_chat"' in ep, "одна общая цифра оттока не говорит, что делать"
     assert "payload->>'chat_id'" in ep
     assert "kind='left'" in ep

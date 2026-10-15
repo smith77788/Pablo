@@ -6,6 +6,7 @@ import os
 
 from services import channel_service
 
+from tests.miniapp_source import api_source
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -30,7 +31,7 @@ def test_get_channel_stats_counts_posts():
 
 
 def test_channel_detail_returns_posts_published():
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = api_source()
     i = src.index("async def channel_detail")
     window = src[i:i + 3000]
     assert "channel_service.get_channel_stats" in window

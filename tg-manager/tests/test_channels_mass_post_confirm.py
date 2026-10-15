@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.miniapp_source import api_source
 
 HTML = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
 
@@ -44,9 +45,8 @@ def _channels_mass_src() -> str:
     окном при сдвиге кода и выключилась молча (храповик про это)."""
     import ast
     import inspect
-    from services import mini_app_api
 
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     tree = ast.parse(src)
     lines = src.splitlines()
     for node in ast.walk(tree):

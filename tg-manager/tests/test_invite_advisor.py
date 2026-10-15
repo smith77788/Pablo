@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from services import invite_advisor as ia
+from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -244,12 +245,12 @@ def test_no_llm_in_the_numbers_path():
 # ── проводка ─────────────────────────────────────────────────────────────────
 
 def test_route_is_registered():
-    api = ROOT.joinpath("services", "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert '"/api/miniapp/invite/advice"' in api, "иначе экран стучится в никуда"
 
 
 def test_card_exposes_factors():
-    api = ROOT.joinpath("services", "mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     assert '"limit_factors"' in api, (
         "карточка должна показывать не только ЧТО решено, но и по каким признакам"
     )

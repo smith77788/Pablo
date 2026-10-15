@@ -19,15 +19,15 @@ import ast
 import pathlib
 import re
 
+from tests.miniapp_source import api_function
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _handler_source(name: str) -> str:
-    tree = ast.parse((ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
-            return ast.unparse(node)
-    raise AssertionError(f"обработчик {name} не найден")
+    # API-слой мини-аппа — больше не один файл; ручка списка каналов живёт в
+    # services/mini_app_channels.py.
+    return ast.unparse(ast.parse(api_function(name)))
 
 
 def test_channels_count_and_list_agree_on_the_same_column():

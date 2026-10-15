@@ -21,11 +21,11 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_source, miniapp_source
+API = api_source()
 # Мини-апп больше не один файл: экраны вынесены в mini_app/screens/*.js.
 # Источник берём целиком, иначе вынос экрана роняет проверку, хотя
 # функциональность на месте.
-from tests.miniapp_source import miniapp_source
 
 HTML = miniapp_source()
 

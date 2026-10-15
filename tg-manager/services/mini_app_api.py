@@ -28,6 +28,8 @@ from services import mini_app_vault
 from services import mini_app_ranking
 from services.contacts_hub import segments as _segments
 from services import mini_app_bots
+from services import mini_app_invite
+from services import mini_app_channels
 from services import mini_app_uch
 from services import mini_app_proxies
 from services import mini_app_workflows
@@ -1348,6 +1350,34 @@ def _list_offset(request: web.Request, maximum: int = 10_000_000) -> int:
     if raw is None:
         return 0
     return validate_integer(raw, min_val=0, max_val=maximum) or 0
+
+
+class UploadTooLarge(ValueError):
+    """Загрузка превысила предел ещё в процессе чтения."""
+
+
+async def read_upload(part, max_bytes: int) -> bytes:
+    """Прочитать поле multipart кусками, остановившись на пределе.
+
+    Разница с `await part.read()` не в итоговой проверке длины, а в том, что
+    проверять уже поздно: `read()` сначала втягивает поле ЦЕЛИКОМ в память, и
+    только потом хендлер смотрит на `len(data)`. Предел «25 МБ» при этом
+    объявлен, но не действует: владелец с правом загрузки может отправить
+    гигабайт, процесс мини-аппа его забуферизует и шлюз ляжет для ВСЕХ
+    владельцев, а в ответ тот всё равно получит своё «файл слишком большой».
+
+    Здесь предел действует на чтении: как только в буфере больше `max_bytes`,
+    чтение прекращается и остаток тела не читается.
+    """
+    buf = bytearray()
+    while True:
+        chunk = await part.read_chunk(65536)
+        if not chunk:
+            break
+        buf += chunk
+        if len(buf) > max_bytes:
+            raise UploadTooLarge("Файл слишком большой")
+    return bytes(buf)
 
 
 async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
@@ -2901,82 +2931,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Channels ─────────────────────────────────────────────────────────────
 
-    @_cached_user()
-    async def channels(request: web.Request) -> web.Response:
-        """Каналы владельца: страница + срез + поиск + честные счётчики срезов.
-
-        Поиск и срезы (каналы/группы/мои/чужие) раньше считались на клиенте по
-        уже загруженным страницам. У кого каналов больше страницы, поиск по
-        каналу со следующей страницы не находил ничего, а чип «👑 Мои 500»
-        показывал не сколько их, а сколько успело загрузиться — рядом с
-        заголовком, где стояло настоящее общее число.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        q = request.rel_url.query
-        try:
-            limit = min(validate_integer(q.get("limit", "500"), min_val=1, max_val=5000) or 500, 5000)
-        except (ValueError, TypeError):
-            limit = 500
-        try:
-            offset = max(validate_integer(q.get("offset", "0"), min_val=0) or 0, 0)
-        except (ValueError, TypeError):
-            offset = 0
-        kind = q.get("kind") if q.get("kind") in ("channel", "group") else None
-        role = q.get("role") if q.get("role") in ("mine", "foreign") else None
-        search = (q.get("search") or "").strip()[:100] or None
-
-        cond, extra = _channel_filter_sql(kind, role, search, next_param=4)
-        rows = await _safe_fetch(pool,
-            f"""SELECT DISTINCT channel_id AS id, channel_id, username, title,
-                      COALESCE(members_count, 0) AS member_count,
-                      type, added_at, is_admin, is_creator,
-                      CASE
-                          WHEN is_creator THEN 'owner'
-                          WHEN is_admin THEN 'admin'
-                          WHEN is_admin IS FALSE THEN 'member'
-                          ELSE 'unknown'
-                      END AS role
-               FROM managed_channels
-               WHERE ({_CHANNELS_VISIBLE_SQL}){cond}
-               ORDER BY member_count DESC NULLS LAST
-               LIMIT $2 OFFSET $3""", uid, limit, offset, *extra)
-        # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
-        # счётчик брал DISTINCT id (первичный ключ строки). Один и тот же канал
-        # лежит в managed_channels отдельной строкой у каждого владельца, а выборка
-        # тянет ещё и чужие строки — из экосистем и рабочих пространств. Общий
-        # канал попадал в список один раз, а в счётчик — столько раз, сколько у
-        # него владельцев: шапка писала «47 каналов» там, где их 40, и кнопка
-        # «Загрузить ещё» предлагала догрузить то, чего нет. То же правило — и в
-        # счётчиках чипов ниже: они стоят рядом с этой же шапкой.
-        #
-        # Сколько каналов отвечает ТЕКУЩЕМУ срезу: по нему считается «загрузить
-        # ещё», и он обязан совпадать с тем, что реально отдаётся страницами.
-        cond_total, extra_total = _channel_filter_sql(kind, role, search, next_param=2)
-        total = await _safe_count(pool,
-            f"""SELECT COUNT(DISTINCT channel_id) FROM managed_channels
-                WHERE ({_CHANNELS_VISIBLE_SQL}){cond_total}""", uid, *extra_total)
-        # Счётчики чипов — по ВСЕМ видимым каналам (и с учётом поиска, если он
-        # есть), одним запросом вместо подсчёта загруженного на клиенте.
-        cond_counts, extra_counts = _channel_filter_sql(None, None, search, next_param=2)
-        crow = await _safe_fetchrow(pool,
-            f"""SELECT COUNT(DISTINCT channel_id) AS all_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE {_CHANNEL_IS_GROUP_SQL}) AS group_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE NOT {_CHANNEL_IS_GROUP_SQL}) AS channel_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE is_creator IS TRUE) AS mine_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE is_admin IS FALSE) AS foreign_n
-                  FROM managed_channels
-                 WHERE ({_CHANNELS_VISIBLE_SQL}){cond_counts}""", uid, *extra_counts)
-        counts = {"all": 0, "channel": 0, "group": 0, "mine": 0, "foreign": 0}
-        if crow:
-            counts = {"all": int(crow["all_n"] or 0),
-                      "channel": int(crow["channel_n"] or 0),
-                      "group": int(crow["group_n"] or 0),
-                      "mine": int(crow["mine_n"] or 0),
-                      "foreign": int(crow["foreign_n"] or 0)}
-        return _json_resp({"channels": rows, "total": int(total or 0),
-                           "counts": counts, "offset": offset, "limit": limit})
 
     # ── Campaigns / Funnels ──────────────────────────────────────────────────
 
@@ -3486,199 +3440,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("create_dm_campaign uid=%d", uid)
             return _err("Не удалось создать кампанию", 500)
 
-    async def post_to_channel(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-            body = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        text = validate_string(body.get("text"), max_len=4096)
-        if not text:
-            return _err("Нужен текст")
-        if check_sql_suspicious(text):
-            return _err("Недопустимые символы в тексте поста")
-        if len(text) > 4096:
-            return _err("Сообщение длиннее 4096 символов")
-        ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
-            ch_id, uid)
-        if not ch:
-            return _err("Канал не найден", 404)
-        if not ch.get("acc_id"):
-            return _err("У канала нет привязанного аккаунта", 400)
-        # Отложенная публикация: schedule_minutes минут от текущего момента.
-        try:
-            schedule_minutes = max(0, min(int(body.get("schedule_minutes") or 0), 60 * 24 * 30))
-        except (TypeError, ValueError):
-            schedule_minutes = 0
-        sched = None
-        if schedule_minutes > 0:
-            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-            sched = (_dt.now(_tz.utc) + _td(minutes=schedule_minutes)).isoformat()
-        try:
-            from services.operation_bus import submit
-            # Контракт _exec_bulk_post_to_channel: account_ids[], channel_ref (числовой
-            # channel_id), text_to_post, bulk_access_hash. Раньше слали channel_id/
-            # account_id/text — воркер их не читал и пост в канал ничего не делал.
-            op_id = await submit(pool, uid, "bulk_post_to_channel", {
-                "account_ids": [int(ch["acc_id"])],
-                "channel_ref": int(ch_id),
-                "text_to_post": text,
-                "bulk_access_hash": int(ch.get("access_hash") or 0),
-            }, total_items=1, scheduled_for=sched)
-            return _json_resp({"ok": True, "op_id": op_id, "scheduled_minutes": schedule_minutes})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("post_to_channel ch=%d uid=%d", ch_id, uid)
-            return _err("Не удалось поставить публикацию в очередь", 500)
 
-    async def pin_channel_last_post(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор канала", 400)
-        ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
-            "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
-        if not ch:
-            return _err("Канал не найден", 404)
-        if not ch.get("acc_id"):
-            return _err("У канала нет привязанного аккаунта", 400)
-        try:
-            from services.operation_bus import submit
-            op_id = await submit(pool, uid, "pin_last_post", {
-                "channel_ref": int(ch_id),
-                "account_id": int(ch["acc_id"]),
-                "access_hash": int(ch.get("access_hash") or 0),
-            }, total_items=1)
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("pin_channel_last_post ch=%d uid=%d", ch_id, uid)
-            return _err("Не удалось поставить закрепление в очередь", 500)
 
-    async def channel_invite_link(request: web.Request) -> web.Response:
-        """Сгенерировать/получить инвайт-ссылку канала (инлайн, один Telethon-вызов).
-        Возможность account_manager.get_channel_invite_link раньше была недоступна в UI."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор канала", 400)
-        ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, title, acc_id, access_hash FROM managed_channels "
-            "WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
-        if not ch:
-            return _err("Канал не найден", 404)
-        if not ch.get("acc_id"):
-            return _err("У канала нет привязанного аккаунта", 400)
-        acc = await _safe_fetchrow(pool,
-            "SELECT id, session_str, device_model, system_version, app_version, "
-            "lang_code, system_lang_code, "
-            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE", int(ch["acc_id"]), uid)
-        if not acc or not acc.get("session_str"):
-            return _err("Привязанный аккаунт недоступен", 400)
-        try:
-            from services import account_manager
-            link = await account_manager.get_channel_invite_link(
-                acc["session_str"], int(ch_id), _acc=dict(acc),
-                access_hash=int(ch.get("access_hash") or 0),
-            )
-            if not link:
-                return _err("Не удалось получить ссылку (нужны права администратора у аккаунта)", 400)
-            return _json_resp({"ok": True, "invite_link": link, "title": ch.get("title") or ""})
-        except Exception:
-            log.exception("channel_invite_link ch=%d uid=%d", ch_id, uid)
-            return _err("Ошибка получения ссылки", 500)
 
-    async def channel_detail(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор канала", 400)
-        ch = await _safe_fetchrow(pool,
-            """SELECT channel_id, username, title, type,
-                      COALESCE(members_count, 0) AS member_count,
-                      acc_id, added_at
-               FROM managed_channels WHERE channel_id=$1 AND owner_id=$2""", ch_id, uid)
-        if not ch:
-            return _err("Канал не найден", 404)
-        acc = None
-        if ch and ch.get("acc_id"):
-            acc = await _safe_fetchrow(pool,
-                "SELECT id, phone, first_name, username FROM tg_accounts WHERE id=$1",
-                ch["acc_id"])
-        recent_ops = await _safe_fetch(pool,
-            """SELECT op_type, status, done_items, total_items, created_at
-               FROM operation_queue WHERE owner_id=$1
-               ORDER BY created_at DESC LIMIT 8""", uid)
-        # ── Статистика роста участников (снимок за день + дельты) ─────────────
-        mc = int(ch.get("member_count") or 0)
-        if mc > 0:
-            try:
-                await pool.execute(
-                    """INSERT INTO channel_member_history(owner_id, channel_id, members_count)
-                       VALUES($1,$2,$3)
-                       ON CONFLICT (owner_id, channel_id, captured_on)
-                       DO UPDATE SET members_count=EXCLUDED.members_count, captured_at=NOW()""",
-                    uid, ch_id, mc)
-            except Exception:
-                log.debug("channel_detail: member snapshot failed ch=%d", ch_id)
-        hist = await _safe_fetch(pool,
-            """SELECT members_count, captured_on FROM channel_member_history
-               WHERE owner_id=$1 AND channel_id=$2
-               ORDER BY captured_on DESC LIMIT 30""", uid, ch_id)
-        def _delta(days):
-            from datetime import date as _date, timedelta as _tdd
-            cutoff = _date.today() - _tdd(days=days)
-            for r in hist:
-                if r["captured_on"] <= cutoff:
-                    return mc - int(r["members_count"])
-            return None
-        member_growth = {
-            "current": mc,
-            "points": len(hist),
-            "d1": _delta(1),
-            "d7": _delta(7),
-            "d30": _delta(30),
-            "series": [
-                {"d": r["captured_on"].isoformat(), "c": int(r["members_count"])}
-                for r in reversed(hist)
-            ],
-        }
-        # Публикаций через нас — из channel_service (единственный источник этой метрики).
-        posts_published = 0
-        try:
-            from services import channel_service
-            stats = await channel_service.get_channel_stats(pool, ch_id, uid)
-            posts_published = int(stats.get("posts_published") or 0)
-        except Exception:
-            log.debug("channel_detail: posts_published failed ch=%d", ch_id)
-        return _json_resp({
-            "channel": ch,
-            "linked_account": acc,
-            "recent_ops": recent_ops,
-            "member_growth": member_growth,
-            "posts_published": posts_published,
-        })
 
     # ── Operations ───────────────────────────────────────────────────────────
 
@@ -5366,224 +5130,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             out.append(d)
         return _json_resp({"ok": True, "count": len(out), "accounts": out})
 
-    async def channel_edit(request: web.Request) -> web.Response:
-        """Изменить название/описание/username канала (op: title|about|username).
-        Маппится на op_type=bulk_chan_exec (per-channel пара)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-            body = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        op = body.get("op")
-        value = (body.get("value") or "").strip()
-        worker_op = channel_edit_worker_op(op)
-        if not worker_op or not value:
-            return _err("Укажите op (title|about|username) и значение", 400)
-        if op == "title" and len(value) > 128:
-            return _err("Название канала — до 128 символов", 400)
-        ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
-            ch_id, uid)
-        if not ch:
-            return _err("Канал не найден", 404)
-        if not ch.get("acc_id"):
-            return _err("У канала нет привязанного аккаунта", 400)
-        params = {
-            "op": worker_op,
-            "value": value,
-            "base_uname": value,
-            "channel_acc_pairs": [{"channel_id": ch_id, "acc_id": int(ch["acc_id"]), "title": ch.get("title") or ""}],
-        }
-        try:
-            op_id = await _obus.submit(
-                pool, uid, "bulk_chan_exec", params,
-                total_items=1, label=f"Канал: {op}")
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
-            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
-            # причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channel_edit uid=%d ch=%d op=%s", uid, ch_id, op)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def channel_promote(request: web.Request) -> web.Response:
-        """Назначить все аккаунты администраторами канала (promote_all_admins)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор канала", 400)
-        ch = await _safe_fetchrow(pool,
-            "SELECT channel_id, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
-            ch_id, uid)
-        if not ch:
-            return _err("Канал не найден", 404)
-        if not ch.get("acc_id"):
-            return _err("У канала нет привязанного аккаунта (создателя)", 400)
-        params = {"channel_id": ch_id, "owner_acc_id": int(ch["acc_id"])}
-        try:
-            op_id = await _obus.submit(
-                pool, uid, "promote_all_admins", params,
-                total_items=1, label="Назначение админов")
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channel_promote uid=%d ch=%d", uid, ch_id)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def channels_mass(request: web.Request) -> web.Response:
-        """Массовое действие над выбранными каналами.
-        body: {op: post|about|username|promote, channel_ids: [..], value?/text?}"""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        op = body.get("op")
-        ids_in = [int(x) for x in (body.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
-        if not ids_in:
-            return _err("Выберите каналы", 400)
-        chans = await _safe_fetch(pool,
-            "SELECT channel_id, title, acc_id, access_hash, username FROM managed_channels "
-            "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])", uid, ids_in)
-        chans = [c for c in (chans or []) if c.get("acc_id")]
-        if not chans:
-            return _err("Каналы не найдены или нет привязанного аккаунта", 404)
-        n = len(chans)
-        try:
-            if channel_edit_worker_op(op):
-                value = (body.get("value") or "").strip()
-                if not value:
-                    return _err("Укажите значение", 400)
-                if op == "title" and len(value) > 128:
-                    return _err("Название канала — до 128 символов", 400)
-                if op == "title" and len(chans) != 1:
-                    return _err("Название можно менять только у одного явно выбранного канала", 400)
-                worker_op = channel_edit_worker_op(op)
-                pairs = [{"channel_id": int(c["channel_id"]), "acc_id": int(c["acc_id"]),
-                          "title": c.get("title") or "",
-                          "access_hash": int(c.get("access_hash") or 0),
-                          "username": c.get("username") or ""} for c in chans]
-                params = {"op": worker_op, "value": value, "base_uname": value,
-                          "channel_acc_pairs": pairs}
-                op_id = await _obus.submit(
-                    pool, uid, "bulk_chan_exec", params,
-                    total_items=n, label=f"Каналы ({op}): {n}")
-                return _json_resp({"ok": True, "op_id": op_id, "count": n})
-            if op == "post":
-                text = (body.get("text") or "").strip()
-                if not text:
-                    return _err("Введите текст поста", 400)
-                if len(text) > 4096:
-                    return _err("Слишком длинный текст (макс. 4096)", 400)
-                # ОДНА операция на все каналы, а не по одной на канал. Цикл
-                # submit плодил десятки «Массовая публикация в канал» в
-                # диспетчере: у каждой свой предохранитель и пейсинг, общий
-                # разнос (в т.ч. анти-детект ссылок) ломался, а прогресс и отчёт
-                # дробились. mass_publish публикует в channel_ids от управляющего
-                # аккаунта КАЖДОГО канала (mc.acc_id) одной операцией — с единым
-                # пейсингом, идемпотентностью повтора, spintax и варьированием
-                # ссылок. target="all": пользователь выбрал каналы явно, среди
-                # них могут быть и группы — по типу не отсекаем.
-                acc_ids = sorted({int(c["acc_id"]) for c in chans})
-                ch_ids = [int(c["channel_id"]) for c in chans]
-                op_id = await _obus.submit(
-                    pool, uid, "mass_publish",
-                    {"text": text, "channel_ids": ch_ids,
-                     "account_ids": acc_ids, "target": "all"},
-                    total_items=n, label=f"Публикация в каналы: {n}")
-                return _json_resp(
-                    {"ok": True, "op_id": op_id, "op_ids": [op_id], "count": n})
-            if op == "promote":
-                op_ids = []
-                for c in chans:
-                    oid = await _obus.submit(
-                        pool, uid, "promote_all_admins",
-                        {"channel_id": int(c["channel_id"]),
-                         "owner_acc_id": int(c["acc_id"])},
-                        total_items=1,
-                        label=f"Админы: {c.get('title') or c['channel_id']}")
-                    op_ids.append(int(oid))
-                return _json_resp({"ok": True, "op_ids": op_ids, "count": n})
-            return _err("Неизвестная операция", 400)
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channels_mass uid=%d op=%s", uid, op)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def channel_add(request: web.Request) -> web.Response:
-        """Вступить в существующий канал/группу по ссылке и добавить в управление."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Неверное тело запроса", 400)
-        link = validate_string(body.get("channel_identifier"), max_len=500)
-        if not link:
-            return _err("Нужен идентификатор канала")
-        # Validate URL format for channel identifier
-        if not link.startswith(("http", "@", "t.me")):
-            return _err("Неверный формат идентификатора канала")
-        try:
-            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
-            _lim = await get_channel_limit(pool, uid)
-            if await get_effective_channel_count(pool, uid) >= _lim:
-                return _err(f"Достигнут лимит каналов ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
-            op_id = await _obus.submit(
-                pool, uid, "channel_add", {"channel_identifier": link},
-                total_items=1, label=f"Добавить канал: {link}")
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) или предохранитель
-            # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
-            # причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channel_add uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def channel_remove(request: web.Request) -> web.Response:
-        """Убрать канал из управления (запись managed_channels)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            ch_id = int(request.match_info["ch_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор канала", 400)
-        try:
-            res = await pool.execute(
-                "DELETE FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
-            if str(res).endswith(" 0"):
-                return _err("Канал не найден", 404)
-            # Канал — владеемый ресурс, и убрать его может не только хозяин:
-            # доступ даётся и через workspace, и через экосистему. Без записи
-            # на вопрос «куда делся канал» в системе нет ответа.
-            from database.db import record_manual_action
-
-            await record_manual_action(
-                pool, uid, "channel_remove", target=str(ch_id))
-            return _json_resp({"ok": True})
-        except Exception:
-            log.exception("channel_remove uid=%d ch=%d", uid, ch_id)
-            return _err(_INTERNAL_ERROR, 500)
 
     async def account_toggle(request: web.Request) -> web.Response:
         """Вкл/выкл аккаунта (is_active)."""
@@ -6333,51 +5883,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp(growth_center.recommend_plan(
             int(goal), int(days), len(acc_ids), daily))
 
-    async def invite_retention_overview(request: web.Request) -> web.Response:
-        """Ретеншен инвайта: приток (успешные вступления) vs отток (left-события).
-
-        joined — из operation_log по инвайт-операциям владельца за период;
-        left — из organism_events kind='left' (chat_guard). Свёртка — чистый
-        invite_retention.summarize. Отток виден только по модерируемым чатам."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            days = int(request.query.get("days", "30"))
-        except (TypeError, ValueError):
-            days = 30
-        days = max(1, min(days, 180))
-        joined = await _safe_count(pool,
-            """SELECT COUNT(*) FROM operation_log ol
-               JOIN operation_queue oq ON oq.id = ol.op_id
-               WHERE oq.owner_id=$1 AND oq.op_type LIKE '%invite%'
-                 AND ol.status='ok' AND ol.message='joined'
-                 AND ol.created_at > NOW() - ($2 || ' days')::interval""",
-            uid, str(days))
-        left = await _safe_count(pool,
-            "SELECT COUNT(*) FROM organism_events WHERE owner_id=$1 AND kind='left' "
-            "AND created_at > NOW() - ($2 || ' days')::interval", uid, str(days))
-        from services import invite_retention
-        summary = invite_retention.summarize(joined, left)
-        summary["health"] = invite_retention.health(summary["retention_pct"])
-        summary["days"] = days
-        # Где именно уходят. Одна общая цифра оттока не говорит, что делать:
-        # приветствие и правила настраиваются по конкретному чату.
-        summary["by_chat"] = [
-            {"chat_id": str(r["chat_id"] or ""), "title": str(r["title"] or ""),
-             "left": int(r["c"] or 0)}
-            for r in await _safe_fetch(
-                pool,
-                "SELECT payload->>'chat_id' AS chat_id, "
-                "       COALESCE(MAX(payload->>'title'), '') AS title, "
-                "       COUNT(*) AS c "
-                "FROM organism_events "
-                "WHERE owner_id=$1 AND kind='left' "
-                "  AND created_at > NOW() - ($2 || ' days')::interval "
-                "GROUP BY payload->>'chat_id' ORDER BY c DESC LIMIT 20",
-                uid, str(days))
-        ]
-        return _json_resp(summary)
 
     async def boost_submit(request: web.Request) -> web.Response:
         """Накрутка: просмотры / реакции / сторис / подписчики / старты в ботах."""
@@ -7184,207 +6689,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("bot_factory_create_new uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    async def channels_bulk_create(request: web.Request) -> web.Response:
-        """Массовое создание каналов аккаунтом (паритет с ботом).
 
-        Контракт параметров совпадает с ботовым путём (bot/handlers —
-        bulk_create_confirm), чтобы не плодить второй источник правды.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
 
-        # ── Мульти-аккаунт: создаём у КАЖДОГО выбранного аккаунта (Фабрика в
-        # мини-аппе). Тот же op bulk_create_channels — при наличии account_ids
-        # исполнитель уходит в multi-путь (_exec_bulk_create_channels_multi). ──
-        raw_ids = data.get("account_ids")
-        if raw_ids:
-            try:
-                acc_ids = [int(x) for x in raw_ids][:200]
-            except (TypeError, ValueError):
-                return _err("account_ids должен быть списком чисел", 400)
-            acc_ids = [a for a in acc_ids if a > 0]
-            if not acc_ids:
-                return _err("Выберите хотя бы один аккаунт", 400)
-            title = validate_string(data.get("title") or data.get("prefix"), max_len=128)
-            if not title:
-                return _err("Укажите название", 400)
-            about = validate_string(data.get("about"), max_len=255) or ""
-            channel_count = min(max(validate_integer(data.get("channel_count", 1), min_val=1, max_val=20) or 1, 1), 20)
-            name_mode = (data.get("name_mode") or "num")
-            if name_mode not in ("num", "acc", "none", "keywords"):
-                name_mode = "num"
-            # SEO-массив: имя как набор ключей (перестановки) + шаблон @юзернейма,
-            # который тоже вращается по ключам (@Dostavka_Moskva → @Moskva_Dostavka,
-            # @Dostavkaj_Moskva …). Публичные @ занимают много мест в поиске.
-            username_template = validate_string(data.get("username_template"), max_len=64) or ""
-            # Автопосев + первый контент — настраиваются ДО старта (автоматизация).
-            first_post = validate_string(data.get("first_post"), max_len=4000) or ""
-            pin_first_post = bool(data.get("pin_first_post"))
-            seed_count = min(max(validate_integer(data.get("seed_count", 0), min_val=0, max_val=200) or 0, 0), 200)
-            engage_count = min(max(validate_integer(data.get("engage_count", 0), min_val=0, max_val=200) or 0, 0), 200)
-            is_group = bool(data.get("is_group"))
-            # Оставляем только СВОИ активные аккаунты с сессией.
-            rows = await _safe_fetch(
-                pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[]) "
-                "AND is_active=TRUE AND session_str IS NOT NULL",
-                uid, acc_ids)
-            owned = [int(r["id"]) for r in (rows or [])]
-            if not owned:
-                return _err("Нет доступных активных аккаунтов из выбранных", 400)
-            total = len(owned) * channel_count
-            try:
-                from services import operation_bus
-                op_id = await operation_bus.submit(
-                    pool, uid, "bulk_create_channels",
-                    {
-                        "account_ids": owned,
-                        "title": title,
-                        "about": about,
-                        "channel_count": channel_count,
-                        "name_mode": name_mode,
-                        "username_template": username_template,
-                        "first_post": first_post,
-                        "pin_first_post": pin_first_post,
-                        "seed_count": seed_count,
-                        "engage_count": engage_count,
-                        "is_group": is_group,
-                    },
-                    total_items=total,
-                    label=f"Массовое создание {'групп' if is_group else 'каналов'}: "
-                          f"{total} шт. на {len(owned)} акк.",
-                )
-                return _json_resp({"ok": True, "op_id": op_id, "count": total})
-            except PermissionError as exc:
-                return _err(str(exc) or "Требуется подписка", 403)
-            except Exception:
-                log.exception("channels_bulk_create(multi) uid=%d", uid)
-                return _err(_INTERNAL_ERROR, 500)
-
-        acc_id = validate_integer(data.get("acc_id"), min_val=1)
-        if not acc_id:
-            return _err("Выберите аккаунт, который создаст каналы", 400)
-        prefix = validate_string(data.get("prefix"), max_len=128)
-        if not prefix:
-            return _err("Укажите название/префикс канала", 400)
-        about = validate_string(data.get("about"), max_len=255) or ""
-        uname_pattern = validate_string(data.get("username_pattern"), max_len=32) or ""
-        count = min(max(validate_integer(data.get("count", 1), min_val=1, max_val=20) or 1, 1), 20)
-
-        acc = await _safe_fetchrow(
-            pool,
-            "SELECT id, is_active, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            int(acc_id), uid,
-        )
-        if not acc:
-            return _err("Аккаунт не найден", 404)
-        if not acc["is_active"] or not acc["session_str"]:
-            return _err("Аккаунт неактивен или без сессии — выберите другой", 400)
-
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "bulk_create_channels",
-                {
-                    "prefix": prefix,
-                    "count": count,
-                    "about": about,
-                    "username_pattern": uname_pattern,
-                    "acc_id": int(acc_id),
-                },
-                total_items=count,
-                label=f"Создание каналов: {count} шт. через аккаунт #{acc_id}",
-            )
-            return _json_resp({"ok": True, "op_id": op_id, "count": count})
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channels_bulk_create uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    _JOIN_DELAY_MODES = ("fast", "normal", "slow", "smart")
-
-    async def _mass_membership_op(request: web.Request, kind: str) -> web.Response:
-        """Массовое вступление/выход по списку чатов (паритет с ботом).
-
-        kind='join'  → op bulk_join,  список зовётся "links";
-        kind='leave' → op bulk_leave, список зовётся "channels".
-        Имена параметров и total_items = цели × аккаунты повторяют ботовый путь
-        (bot/handlers/mass_ops.py) — второй источник правды не плодим.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-
-        raw = data.get("targets") or data.get("links") or data.get("channels") or []
-        if isinstance(raw, str):
-            raw = re.split(r"[\s,;]+", raw)
-        targets = [t.strip() for t in raw if isinstance(t, str) and t.strip()][:500]
-        if not targets:
-            return _err("Укажите хотя бы один канал/группу", 400)
-
-        acc_ids = [int(x) for x in (data.get("account_ids") or []) if str(x).isdigit()]
-        if not acc_ids:
-            return _err("Выберите хотя бы один аккаунт", 400)
-
-        delay_mode = str(data.get("delay_mode") or "smart")
-        if delay_mode not in _JOIN_DELAY_MODES:
-            delay_mode = "smart"
-
-        # Аккаунты — только свои и живые, иначе операция провалится уже в воркере.
-        rows = await _safe_fetch(
-            pool,
-            "SELECT id FROM tg_accounts WHERE id = ANY($1::bigint[]) AND owner_id=$2 "
-            "AND is_active AND session_str IS NOT NULL",
-            acc_ids, uid,
-        )
-        acc_ids = [r["id"] for r in (rows or [])]
-        if not acc_ids:
-            return _err("Нет доступных активных аккаунтов из выбранных", 400)
-
-        # Ban-safety: массовый join/leave — рисковая операция, и бот проверяет
-        # давление инфраструктуры ПЕРЕД постановкой. Мини-апп обязан так же,
-        # иначе через второй вход тот же аккаунт получит больше нагрузки.
-        try:
-            from services import infra_orchestrator
-            op_name = "bulk_join" if kind == "join" else "bulk_leave"
-            ready, reason = await infra_orchestrator.is_ready_for_op(pool, uid, op_name)
-            if not ready:
-                return _err(f"Инфраструктура перегружена: {reason}", 429)
-        except Exception:
-            # Гейт давления — защита, а не блокер: его собственный сбой не должен
-            # мешать пользователю запустить операцию.
-            log.warning("_mass_membership_op(%s): pressure check failed", kind, exc_info=True)
-
-        op_type = "bulk_join" if kind == "join" else "bulk_leave"
-        key = "links" if kind == "join" else "channels"
-        params = {key: targets, "account_ids": acc_ids, "delay_mode": delay_mode}
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, op_type, params,
-                total_items=len(targets) * len(acc_ids),
-                label=(f"{'Вступление в' if kind == 'join' else 'Выход из'} "
-                       f"{len(targets)} чатов × {len(acc_ids)} акк."),
-            )
-            return _json_resp({
-                "ok": True, "op_id": op_id,
-                "targets": len(targets), "accounts": len(acc_ids),
-            })
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("_mass_membership_op(%s) uid=%d", kind, uid)
-            return _err(_INTERNAL_ERROR, 500)
 
     async def _import_all_op(request: web.Request, kind: str) -> web.Response:
         """Импорт каналов/групп со ВСЕХ активных аккаунтов (паритет с ботом).
@@ -7552,541 +6858,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def _alive_accounts(uid: int, wanted: list[int] | None = None) -> list[int]:
         return await alive_accounts(pool, uid, wanted)
 
-    async def invite_analytics(request: web.Request) -> web.Response:
-        """Аналитика инвайтинга по флоту: факты за сегодня и за 7 дней.
 
-        Раньше пользователь видел только итог одной операции («добавлено 40/50»)
-        и не мог ответить на главные вопросы: растёт ли риск, какие аккаунты
-        тянут флот вниз, можно ли ускоряться. Здесь всё считается из
-        `account_daily_stats` — тех самых суточных фактов, которые до этого
-        никто не писал.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
 
-        today = await _safe_fetchrow(
-            pool,
-            """SELECT COALESCE(SUM(s.invites_ok), 0)   AS ok,
-                      COALESCE(SUM(s.actions_fail), 0) AS failed,
-                      COALESCE(SUM(s.flood_events), 0) AS floods,
-                      COUNT(DISTINCT s.account_id)     AS accounts
-               FROM account_daily_stats s
-               JOIN tg_accounts a ON a.id = s.account_id
-               WHERE a.owner_id = $1 AND s.stat_date = CURRENT_DATE""",
-            uid,
-        ) or {}
-        # ПЛОТНЫЙ ряд из 7 дней: generate_series даёт по строке на каждый из
-        # последних 7 дней, дни без активности → 0. Раньше GROUP BY по факту
-        # возвращал ТОЛЬКО дни с данными, и график в мини-аппе из 1–2 столбцов
-        # растягивал их на пол-ширины («кривой» график). Теперь всегда 7 столбцов.
-        week = await _safe_fetch(
-            pool,
-            """SELECT to_char(d.day, 'YYYY-MM-DD')          AS day,
-                      COALESCE(SUM(s.invites_ok), 0)         AS ok,
-                      COALESCE(SUM(s.flood_events), 0)       AS floods
-               FROM generate_series(
-                        (CURRENT_DATE - INTERVAL '6 days')::date,
-                        CURRENT_DATE,
-                        INTERVAL '1 day') AS d(day)
-               LEFT JOIN (
-                   SELECT s.stat_date, s.invites_ok, s.flood_events
-                   FROM account_daily_stats s
-                   JOIN tg_accounts a ON a.id = s.account_id
-                   WHERE a.owner_id = $1
-               ) s ON s.stat_date = d.day::date
-               GROUP BY d.day ORDER BY d.day""",
-            uid,
-        )
-        # Лучший/худший за неделю: лучший — больше всего успешных при нуле флудов,
-        # худший — больше всего флудов. Показываем ФАКТ, а не «оценку».
-        ranked = await _safe_fetch(
-            pool,
-            """SELECT s.account_id,
-                      COALESCE(a.phone, a.first_name, '#' || a.id::text) AS label,
-                      COALESCE(SUM(s.invites_ok), 0)   AS ok,
-                      COALESCE(SUM(s.actions_fail), 0) AS failed,
-                      COALESCE(SUM(s.flood_events), 0) AS floods
-               FROM account_daily_stats s
-               JOIN tg_accounts a ON a.id = s.account_id
-               WHERE a.owner_id = $1 AND s.stat_date >= CURRENT_DATE - INTERVAL '6 days'
-               GROUP BY s.account_id, a.phone, a.first_name, a.id
-               ORDER BY floods DESC, ok DESC""",
-            uid,
-        ) or []
 
-        ok_t = int((today or {}).get("ok") or 0)
-        fail_t = int((today or {}).get("failed") or 0)
-        total_t = ok_t + fail_t
-        best = min(ranked, key=lambda r: (int(r["floods"]), -int(r["ok"])), default=None)
-        worst = max(ranked, key=lambda r: (int(r["floods"]), int(r["failed"])), default=None)
 
-        return _json_resp({
-            "today": {
-                "ok": ok_t,
-                "failed": fail_t,
-                "floods": int((today or {}).get("floods") or 0),
-                "accounts": int((today or {}).get("accounts") or 0),
-                # Конверсия честная: доля успеха среди ПОПЫТОК, а не «сколько
-                # запросили». Нет попыток — показываем null, а не 0%.
-                "conversion_pct": round(ok_t / total_t * 100, 1) if total_t else None,
-            },
-            "week": [dict(r) for r in (week or [])],
-            "best": dict(best) if best else None,
-            "worst": dict(worst) if worst else None,
-            "has_data": bool(ranked),
-        })
 
-    async def invite_parse_list(request: web.Request) -> web.Response:
-        """Предпросмотр «Своего списка» ДО запуска: сколько распознано и что нет.
 
-        Раньше пользователь узнавал результат разбора только по факту операции
-        («Добавлено 0/0»). Теперь мини-апп показывает сразу: N номеров + M
-        @username/ID распознано, K строк не понято — и какие именно.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        raw = str(body.get("import_list") or "")
-        from services.mass_inviter_engine import classify_invite_list
-        r = classify_invite_list(raw)
-        total = len(r["phones"]) + len(r["user_refs"])
-        # Превью дедупа (паритет с ботом): сколько из списка уже приглашались в
-        # эту группу. Группа опциональна — без неё дедуп не считаем.
-        already = 0
-        _grp = str(body.get("group") or "").strip()
-        if _grp:
-            from services.invite_preflight import count_already_invited
-            already = await count_already_invited(
-                pool, uid, _grp, list(r["phones"]) + list(r["user_refs"]))
-        return _json_resp({
-            "phones": len(r["phones"]),
-            "user_refs": len(r["user_refs"]),
-            "total": total,
-            "already_invited": already,
-            "new": max(0, total - already),
-            "unrecognized": r["unrecognized"],
-            "unrecognized_count": len(r["unrecognized"]),
-        })
 
-    async def invite_parse_file(request: web.Request) -> web.Response:
-        """Загрузка списка ФАЙЛОМ (паритет с ботом): .txt/.csv/.xlsx/.db → разбор
-        в user_refs/phones. Опционально group → превью дедупа. Multipart upload.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services.invite_list_parser import extract_text, MAX_FILE_BYTES
-        try:
-            reader = await request.multipart()
-        except Exception:
-            return _err("Ожидался файл (multipart/form-data)", 400)
-        filename = "list.txt"
-        data = b""
-        group = ""
-        try:
-            async for field in reader:
-                if field.name == "file":
-                    filename = field.filename or "list.txt"
-                    data = await field.read(decode=False)
-                elif field.name == "group":
-                    group = (await field.text()).strip()
-        except Exception:
-            return _err("Не удалось прочитать загрузку", 400)
-        if not data:
-            return _err("Файл пуст", 400)
-        if len(data) > MAX_FILE_BYTES:
-            return _err(f"Файл слишком большой (>{MAX_FILE_BYTES // (1024 * 1024)} МБ)", 400)
-        try:
-            text = extract_text(filename, data)
-        except Exception:
-            return _err("Не удалось прочитать файл (формат не поддержан или повреждён)", 400)
-        from services.mass_inviter_engine import split_invite_targets
-        user_refs, phones = split_invite_targets(text)
-        total = len(user_refs) + len(phones)
-        if total == 0:
-            return _err("В файле не распознано ни одной цели", 400)
-        already = 0
-        if group:
-            from services.invite_preflight import count_already_invited
-            already = await count_already_invited(pool, uid, group, list(phones) + list(user_refs))
-        return _json_resp({
-            "ok": True, "user_refs": user_refs, "phones": phones, "total": total,
-            "already_invited": already, "new": max(0, total - already),
-        })
 
-    async def invite_reserve_options(request: web.Request) -> web.Response:
-        """Каналы для резерва перелива: кого исполнитель возьмёт, а кого нет и почему."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        from services import invite_overflow as _ovf
-        from services.mass_inviter_engine import parse_group_ref
-        group = (request.query.get("group") or "").strip()
-        _ck = parse_group_ref(group) if group else ""
-        try:
-            chans = await _ovf.reserve_options(pool, uid, _ck)
-            # Цепочка этой кампании: по каким каналам она уже шла, сколько в
-            # каждый пригласили и с какого продолжит следующий запуск.
-            chain = await _ovf.chain_rows(pool, uid, _ck) if _ck else []
-        except Exception:
-            log.warning("invite_reserve_options uid=%s", uid, exc_info=True)
-            return _err("Не удалось загрузить каналы", 500)
-        return _json_resp({"channels": chans, "chain": chain})
-
-    async def invite_audience_size(request: web.Request) -> web.Response:
-        """Сколько целей даст выбранный источник — ДО запуска операции.
-
-        Без этого сценарий обрывался молча: пользователь выбирал источник (по
-        умолчанию «из парсера»), жал «Запустить», операция уходила в очередь и
-        падала с «Аудитория пуста» — а увидеть это можно было только в истории
-        операций. Снаружи это выглядит как «инвайтинг не работает совсем».
-        DM-кампании считают получателей до старта (`total_targets`) — инвайт нет.
-
-        Запросы намеренно повторяют те, что делает `op_worker._exec_mass_invite`
-        при загрузке аудитории: показанное число обязано совпадать с тем, что
-        реально возьмёт исполнитель. Расхождение здесь хуже отсутствия счётчика —
-        оно врёт с видом точности. Сторожит tests/test_invite_audience_size.py.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        source = (request.query.get("source") or "parsed").strip()
-        if source not in ("parsed", "crm", "bot_users", "segment"):
-            return _err("Неизвестный источник аудитории", 400)
-
-        total, hint = 0, ""
-        try:
-            if source == "parsed":
-                _pr = request.query.get("parse_run_id")
-                try:
-                    _pr = int(_pr) if _pr else None
-                except (TypeError, ValueError):
-                    _pr = None
-                if _pr:
-                    total = await _safe_count(
-                        pool,
-                        "SELECT COUNT(*) FROM parsed_audiences "
-                        "WHERE owner_id=$1 AND parse_run_id=$2 "
-                        "AND (username IS NOT NULL OR tg_user_id IS NOT NULL)",
-                        uid, _pr)
-                else:
-                    total = await _safe_count(
-                        pool,
-                        "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1 "
-                        "AND (username IS NOT NULL OR tg_user_id IS NOT NULL)",
-                        uid)
-                hint = "Соберите аудиторию в «Парсер аудитории» — оттуда она попадёт сюда."
-            elif source == "crm":
-                total = await _safe_count(
-                    pool,
-                    "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1 "
-                    "AND (username IS NOT NULL OR tg_user_id IS NOT NULL OR phone IS NOT NULL)",
-                    uid)
-                hint = "Добавьте контакты в CRM или импортируйте их."
-            elif source == "segment":
-                from services.contacts_hub import repository as _crepo
-                _ssid = request.query.get("saved_segment_id")
-                _filters = None
-                if _ssid and str(_ssid).isdigit():
-                    _filters = await _crepo.get_segment_filters(pool, uid, int(_ssid))
-                # Быстрый выбор (избранные / по тегу) шлёт segment_filters —
-                # превью обязано считать ИМЕННО их, иначе счётчик покажет «весь
-                # список», а операция возьмёт срез: число соврёт с видом точности.
-                if _filters is None:
-                    _sf_raw = request.query.get("segment_filters")
-                    if _sf_raw:
-                        try:
-                            _filters = _crepo._clean_filters(json.loads(_sf_raw))
-                        except Exception:
-                            _filters = None
-                total = await _crepo.count_segment(pool, uid, _filters or {})
-                hint = "Сохраните срез контактов («Сегменты») — приглашайте его напрямую."
-            else:
-                total = await _safe_count(
-                    pool,
-                    "SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu "
-                    "JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
-                    "WHERE mb.added_by=$1 AND bu.is_active=TRUE",
-                    uid)
-                hint = "Подписчики появятся, когда люди начнут писать вашим ботам."
-        except Exception:
-            log.warning("invite_audience_size uid=%s source=%s", uid, source, exc_info=True)
-            # Честно говорим «не знаем», а не показываем 0: ноль здесь означал бы
-            # «источник пуст» и оттолкнул бы от запуска рабочей операции.
-            return _json_resp({"source": source, "total": None, "hint": ""})
-
-        # Сколько из этого реально пойдёт в прогон: фильтры аудитории, уже
-        # приглашённые в этот канал, «не приглашать», повторы — теми же
-        # ключами, что у исполнителя. Без этого вторая кампания в тот же канал
-        # обещала тысячи целей, а прогон заканчивался словами «новых нет».
-        breakdown = None
-        if source in ("parsed", "crm", "bot_users"):
-            from services.invite_preflight import audience_breakdown
-            _af = {}
-            try:
-                _af_raw = request.query.get("aud_filters")
-                _af = json.loads(_af_raw) if _af_raw else {}
-                if not isinstance(_af, dict):
-                    _af = {}
-            except Exception:
-                _af = {}
-            _pr_b = request.query.get("parse_run_id") if source == "parsed" else None
-            breakdown = await audience_breakdown(
-                pool, uid, source, (request.query.get("group") or "").strip(),
-                parse_run_id=int(_pr_b) if _pr_b and str(_pr_b).isdigit() else None,
-                aud_filters=_af)
-            if breakdown is not None:
-                total = breakdown["rows"]
-
-        # Потолок пула целей за прогон — тот же, что у исполнителя (остаток уходит
-        # в продолжение). Раньше здесь стояло 2000, когда исполнитель брал уже
-        # 20 000, и экран пугал «за прогон возьмём 2 000».
-        from services.op_worker import _INVITE_AUDIENCE_CAP as _INV_AUD_CAP
-        return _json_resp({
-            "source": source,
-            "total": int(total or 0),
-            "capped_at": _INV_AUD_CAP,
-            "hint": hint if not total else "",
-            "breakdown": breakdown,
-        })
-
-    async def invite_segment_options(request: web.Request) -> web.Response:
-        """Быстрые срезы хранилища контактов для инвайта: избранные + топ-тегов.
-
-        Чтобы приглашать из хранилища не только «весь список» и сохранённые
-        сегменты, но и «избранные» / «по тегу» без предварительного создания
-        сегмента. Счётчики считаются тем же движком сегментов (count_segment),
-        что и превью с исполнителем, — показанное число обязано совпасть с тем,
-        что реально возьмёт операция.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services.contacts_hub import repository as _crepo
-            all_n = await _crepo.count_segment(pool, uid, {})
-            fav_n = await _crepo.count_segment(pool, uid, {"favorite_only": True})
-            tag_rows = await _safe_fetch(
-                pool,
-                "SELECT t AS tag, COUNT(*) AS cnt FROM unified_contacts, unnest(tags) AS t "
-                "WHERE owner_id=$1 GROUP BY t ORDER BY cnt DESC, t LIMIT 8",
-                uid)
-            tags = [{"tag": r["tag"], "count": int(r["cnt"])} for r in (tag_rows or [])]
-            return _json_resp({"all": int(all_n or 0), "favorites": int(fav_n or 0),
-                               "tags": tags})
-        except Exception:
-            log.warning("invite_segment_options uid=%s", uid, exc_info=True)
-            return _json_resp({"all": 0, "favorites": 0, "tags": []})
-
-    async def invite_preflight(request: web.Request) -> web.Response:
-        """Предполётная проверка инвайта ДО запуска: флот, прокси, оценка проходов.
-
-        Отвечает на «почему за один проход не уходит» и «работают ли аккаунты без
-        прокси» ЧЕСТНО, ещё до старта: сколько аккаунтов реально пригодны, сколько
-        без прокси (работают напрямую — риск), сколько заблокированы (назначен
-        прокси, но он недоступен — прямое соединение убьёт сессию), суточный
-        суммарный лимит флота и во сколько проходов уйдёт аудитория.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            audience = int(request.query.get("audience") or 0)
-        except (TypeError, ValueError):
-            audience = 0
-        # В режиме «один проход» оценка ёмкости считается по потолку (до
-        # _INVITE_LIMIT_CEILING на аккаунт), а не по консервативному предсказанию.
-        one_pass = str(request.query.get("one_pass") or "").lower() in ("1", "true", "yes", "on")
-        try:
-            # Разбивка флота по транспорту. proxy_broken = назначен прокси, но он
-            # неактивен/удалён → напрямую подключать НЕЛЬЗЯ (AUTH_KEY_DUPLICATED),
-            # такие аккаунты в инвайт не идут. direct = прокси не назначен вовсе →
-            # каноничное прямое соединение, работает, но с риском (предупреждаем).
-            rows = await _safe_fetch(pool,
-                """SELECT a.id,
-                          (a.proxy_id IS NOT NULL AND p.id IS NOT NULL) AS has_proxy,
-                          (a.proxy_id IS NOT NULL AND p.id IS NULL)     AS proxy_broken
-                   FROM tg_accounts a
-                   LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-                   WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL
-                     AND """ + _acc_status.sql_not_dead("a.acc_status") + """""",
-                uid) or []
-            total = len(rows)
-            with_proxy = sum(1 for r in rows if r["has_proxy"])
-            proxy_broken = sum(1 for r in rows if r["proxy_broken"])
-            direct = total - with_proxy - proxy_broken
-            # Пригодны = всё, кроме заблокированных по битому прокси. Аккаунты без
-            # прокси РАЗРЕШЕНЫ (работают напрямую) — но помечаем предупреждением.
-            usable_rows = [r for r in rows if not r["proxy_broken"]]
-
-            # Суммарный суточный бюджет флота (с учётом уже потраченного сегодня и
-            # выученных лимитов на аккаунт) + карантин. Это и есть «сколько уйдёт за
-            # один проход».
-            from services.flood_engine import recommended_daily_limit, _INVITE_LIMIT_CEILING
-            from services import infra_memory as _im
-
-            # Карантин всего флота — ОДНИМ запросом до оценки: он читает одну
-            # таблицу по списку id, и дробить его на запрос на аккаунт было
-            # нечем оправдать. Остаток лимита посчитать так нельзя (на аккаунт
-            # он свой), поэтому он остаётся запросом на аккаунт — управляемо
-            # параллельно, числом одновременных заметно ниже размера пула,
-            # чтобы оценка не выедала соединения у остальных запросов.
-            _quarantined_ids = await _im.quarantined_accounts(
-                pool, [r["id"] for r in usable_rows[:200]])
-            _preflight_sem = asyncio.Semaphore(_PREFLIGHT_CONCURRENCY)
-
-            async def _capacity(r) -> tuple[int, int]:
-                """(вклад в ёмкость, 1 если аккаунт в карантине)."""
-                async with _preflight_sem:
-                    try:
-                        if int(r["id"]) in _quarantined_ids:
-                            return 0, 1
-                        if one_pass:
-                            # ёмкость одного прохода = потолок на аккаунт
-                            return _INVITE_LIMIT_CEILING, 0
-                        _rec = await recommended_daily_limit(pool, int(r["id"]))
-                        return int(_rec.get("remaining") or 0), 0
-                    except Exception:
-                        log.debug("invite_preflight: ёмкость аккаунта %s не посчиталась",
-                                  r.get("id"), exc_info=True)
-                        return (_INVITE_LIMIT_CEILING if one_pass else 15), 0
-
-            # Потолок в 200 — на случай огромного флота.
-            parts = await asyncio.gather(*(_capacity(r) for r in usable_rows[:200]))
-            per_pass = sum(p for p, _q in parts)
-            quarantined = sum(q for _p, q in parts)
-            import math as _math
-            est_passes = (_math.ceil(audience / per_pass) if audience and per_pass else
-                          (1 if audience and audience <= per_pass else 0))
-
-            warnings = []
-            if proxy_broken:
-                warnings.append(
-                    f"🚫 {proxy_broken} аккаунт(ов) с назначенным, но недоступным прокси — "
-                    "в инвайт не пойдут (прямое подключение убьёт сессию, AUTH_KEY_DUPLICATED). "
-                    "Почините прокси или снимите привязку.")
-            if direct:
-                warnings.append(
-                    f"⚠️ {direct} аккаунт(ов) без прокси — работают напрямую (разрешено), "
-                    "но выше риск бана и AUTH_KEY_DUPLICATED, если та же сессия активна "
-                    "где-то ещё (телефон/другой софт). Для массового инвайта надёжнее прокси.")
-            if quarantined:
-                warnings.append(
-                    f"🚫 {quarantined} аккаунт(ов) под риск-пульсом — временно исключены "
-                    "(недавнее ограничение). Дайте им отдохнуть.")
-            if audience and est_passes and est_passes > 1:
-                warnings.append(
-                    f"🔁 Аудитория {audience} при суточном лимите флота ~{per_pass} уйдёт за "
-                    f"~{est_passes} прохода(ов) (по дню на проход). Один проход — это "
-                    "аккаунты × безопасный суточный лимит; лимит растёт по мере прогрева. "
-                    "Больше аккаунтов = меньше проходов.")
-
-            usable = len(usable_rows) - quarantined
-            return _json_resp({
-                "accounts": {
-                    "total": total, "with_proxy": with_proxy,
-                    "direct": direct, "proxy_broken": proxy_broken,
-                    "quarantined": quarantined,
-                },
-                "usable": max(0, usable),
-                "audience": audience,
-                "per_pass": per_pass,
-                "est_passes": est_passes,
-                "one_pass": bool(audience and est_passes <= 1 and usable > 0),
-                "can_launch": usable > 0,
-                "warnings": warnings,
-            })
-        except Exception:
-            log.exception("invite_preflight uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def _own_channel_acc_ids(uid: int, group: str) -> list[int]:
-        """Аккаунты, к которым этот канал привязан в «Моих каналах».
-
-        Канал узнаём по id (голый или -100…) или по @username/ссылке."""
-        from services.mass_inviter_engine import _as_channel_id
-        cid = _as_channel_id(group)
-        uname = ""
-        if cid is None:
-            g = group.strip()
-            for pre in ("https://", "http://", "t.me/", "telegram.me/", "@"):
-                if g.lower().startswith(pre):
-                    g = g[len(pre):]
-            g = g.split("/")[0].split("?")[0]
-            if g and not g.startswith("+") and g.lower() != "joinchat":
-                uname = g
-        if cid is None and not uname:
-            return []
-        rows = await _safe_fetch(pool,
-            "SELECT acc_id FROM managed_channels WHERE owner_id=$1 AND acc_id IS NOT NULL "
-            "AND (channel_id=$2 OR (LOWER(username)=LOWER($3) AND $3<>''))",
-            uid, int(cid or 0), uname)
-        return [int(r["acc_id"]) for r in rows or [] if r.get("acc_id")]
-
-    async def invite_rights_check(request: web.Request) -> web.Response:
-        """Живая проверка прав ДО запуска: есть ли среди аккаунтов админ ЦЕЛЕВОГО
-        чата, способный раздать право приглашать остальным.
-
-        Главная причина «вступили, но не инвайтят»: инвайт в чат/канал требует
-        права invite_users, а раздаёт его только аккаунт-создатель/админ с
-        «Назначать администраторов». Раньше это выяснялось только по факту
-        провала. Здесь — до старта: подключаем несколько аккаунтов к чату и
-        смотрим их права (channel_admin_status). Дорогой живой вызов → отдельный
-        on-demand эндпоинт, не на горячем пути.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        group = (request.query.get("group") or "").strip()
-        if not group:
-            return _err("Укажите группу/канал", 400)
-        try:
-            rows = await _safe_fetch(pool,
-                "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
-                "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
-                "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
-                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
-                "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
-                "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
-                # Сначала аккаунты, к которым канал привязан в «Моих каналах»:
-                # создатель канала — и есть промоутер. Раньше брались первые
-                # восемь по id, и если владельца среди них не было, а остальные
-                # ещё не вступили, экран говорил «ни один аккаунт не админ».
-                "ORDER BY (a.id = ANY($2::bigint[])) DESC, a.id LIMIT 8",
-                uid, await _own_channel_acc_ids(uid, group)) or []
-            if not rows:
-                return _json_resp({"has_promoter": False, "has_inviter": False,
-                                   "checked": 0, "usable": 0, "promoter_label": None})
-            has_promoter = has_inviter = False
-            promoter_label = None
-            checked = 0
-            for r, st in zip(rows, await _scan_admin_status(rows, group)):
-                if not st.get("ok"):
-                    continue
-                checked += 1
-                if st.get("can_invite") or st.get("creator"):
-                    has_inviter = True
-                if st.get("can_promote") and not has_promoter:
-                    # Достаточно одного — он раздаст право остальным. Берём
-                    # первого по порядку строк, как и при обходе по очереди.
-                    has_promoter = True
-                    promoter_label = str(r["phone"] or f"#{r['id']}")
-            return _json_resp({
-                "has_promoter": has_promoter,
-                "has_inviter": has_inviter,
-                "promoter_label": promoter_label,
-                "checked": checked,
-                "usable": len(rows),
-            })
-        except Exception:
-            log.exception("invite_rights_check uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
     async def organism_pulse(request: web.Request) -> web.Response:
         """Живой пульс организма: единый контекст + цепочки следующих действий."""
@@ -8358,236 +7137,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("fleet_governor_status uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    async def invite_fleet_readiness(request: web.Request) -> web.Response:
-        """Паритет с ботом (пре-флайт): по целевой группе показать готовность
-        флота — кто подключится, кто в группе, кто админ. Живой вызов (подключает
-        аккаунты), поэтому on-demand, не на горячем пути.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        group = (request.query.get("group") or "").strip()
-        if not group:
-            return _err("Укажите группу/канал", 400)
-        try:
-            from services.invite_preflight import run_preflight
-            _ids = request.query.get("account_ids") or ""
-            _acc = [int(x) for x in _ids.split(",") if x.strip().isdigit()] or None
-            # Выборка: проверяем до 16 аккаунтов вживую, чтобы уложиться в таймаут
-            # шлюза (полный флот проверяется по факту при самой операции).
-            rep = await run_preflight(pool, uid, group, account_ids=_acc, limit=16)
-            return _json_resp(rep)
-        except Exception:
-            log.exception("invite_fleet_readiness uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def invite_join_all(request: web.Request) -> web.Response:
-        """Паритет с ботом: вступить всеми аккаунтами в группу (для прямого
-        инвайта нужно членство).
 
-        Живое вступление флотом — долгая операция (коннект+join на каждый
-        аккаунт), поэтому НЕ выполняем инлайн в запросе (шлюз рвёт по таймауту),
-        а ставим фоновую операцию bulk_join (один чат × N аккаунтов) и сразу
-        отдаём op_id. Прогресс/отмена — через общий трекер операций.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        group = (body.get("group") or request.query.get("group") or "").strip()
-        if not group:
-            return _err("Укажите группу/канал", 400)
-        # Аккаунты — только свои и живые (иначе операция провалится в воркере).
-        _ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
-        if _ids:
-            rows = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
-                "AND is_active AND session_str IS NOT NULL", uid, _ids)
-        else:
-            rows = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
-                "AND session_str IS NOT NULL ORDER BY trust_score DESC NULLS LAST LIMIT 200", uid)
-        acc_ids = [int(r["id"]) for r in (rows or [])]
-        if not acc_ids:
-            return _err("Нет доступных активных аккаунтов", 400)
-        # Ban-safety: массовый join — рисковая операция; бот проверяет давление
-        # инфраструктуры ПЕРЕД постановкой, мини-апп обязан так же.
-        try:
-            from services import infra_orchestrator
-            ready, reason = await infra_orchestrator.is_ready_for_op(pool, uid, "bulk_join")
-            if not ready:
-                return _err(f"Инфраструктура перегружена: {reason}", 429)
-        except Exception:
-            log.warning("invite_join_all: pressure check failed", exc_info=True)
-        params = {"links": [group], "account_ids": acc_ids, "delay_mode": "smart"}
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "bulk_join", params,
-                total_items=len(acc_ids),
-                label=f"Вступление в {group} × {len(acc_ids)} акк.",
-            )
-            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("invite_join_all uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def invite_grant_admin(request: web.Request) -> web.Response:
-        """В один тап: найти аккаунт-админа чата и через него выдать ОСТАЛЬНЫМ
-        аккаунтам право приглашать (операция promote_all_admins).
 
-        Убирает ручной шаг «сделай каждый аккаунт админом в Telegram». Промоутер
-        подбирается автоматически (создатель/админ с add_admins). Идёт как
-        Operation через operation_bus (прогресс/отмена/гейт по тарифу), а не инлайн.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        group = (str(body.get("group") or "").strip()
-                 or (request.query.get("group") or "").strip())
-        if not group:
-            return _err("Укажите группу/канал", 400)
-        try:
-            rows = await _safe_fetch(pool,
-                "SELECT a.id, a.owner_id, a.session_str, a.device_model, a.system_version, "
-                "a.app_version, a.lang_code, a.system_lang_code, a.proxy_id, a.cf_relay_url, "
-                "a.phone, COALESCE(p.proxy_url, NULL) AS proxy_url "
-                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
-                "AND " + _acc_status.sql_not_dead("a.acc_status") + " "
-                "AND NOT (a.proxy_id IS NOT NULL AND p.id IS NULL) "
-                # Владелец канала из «Моих каналов» — первым (см. rights_check).
-                "ORDER BY (a.id = ANY($2::bigint[])) DESC, a.id LIMIT 8",
-                uid, await _own_channel_acc_ids(uid, group)) or []
-            if not rows:
-                return _err("Нет доступных аккаунтов", 404)
-            promoter = None
-            channel_id = None
-            for r, st in zip(rows, await _scan_admin_status(rows, group)):
-                if st.get("ok") and st.get("can_promote") and st.get("channel_id"):
-                    promoter = r
-                    channel_id = int(st["channel_id"])
-                    break
-            if promoter is None:
-                return _json_resp({
-                    "ok": False, "no_promoter": True,
-                    "message": ("Ни один аккаунт не админ этого чата с правом «Назначать "
-                                "администраторов». Сделайте один свой аккаунт таким админом "
-                                "в Telegram — тогда я раздам право приглашать остальным."),
-                })
-            op_id = await _obus.submit(
-                pool, uid, "promote_all_admins",
-                {"channel_id": channel_id, "owner_acc_id": int(promoter["id"])},
-                total_items=1, label="Выдача прав инвайтерам")
-            return _json_resp({
-                "ok": True, "op_id": op_id,
-                "promoter_label": str(promoter["phone"] or f"#{promoter['id']}"),
-            })
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("invite_grant_admin uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def invite_advice(request: web.Request) -> web.Response:
-        """Аналитик инвайтинга: не «что произошло», а «что теперь делать».
-
-        Аналитика показывает цифры; они не подсказывают, что три конкретных
-        аккаунта пора вывести из ротации, что у половины флота пустой профиль и
-        он поэтому сам себе режет лимит, или что аккаунтов не хватит под
-        заявленную аудиторию. Разбор детерминированный, по БД: каждая
-        рекомендация несёт числа, на которых построена, и её можно перепроверить.
-        """
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            audience = max(0, int(request.query.get("audience") or 0))
-        except (TypeError, ValueError):
-            audience = 0
-        try:
-            from services import invite_advisor
-            data = await invite_advisor.build_advice(pool, uid, audience_size=audience)
-        except Exception:
-            log.warning("invite_advice failed uid=%s", uid, exc_info=True)
-            return _err("Не удалось собрать разбор", 500)
-        return _json_resp(data)
-
-    async def invite_account_card(request: web.Request) -> web.Response:
-        """Карточка аккаунта для инвайтинга: лимит, пауза, риск — с объяснением."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            acc_id = int(request.match_info["acc_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор аккаунта", 400)
-
-        acc = await _safe_fetchrow(
-            pool,
-            # В tg_accounts колонка называется added_at; created_at нет, и запрос
-            # падал — _safe_fetchrow глотал ошибку, и карточка существующего
-            # аккаунта отвечала «Аккаунт не найден». Имя поля в ответе сохраняем.
-            "SELECT id, phone, first_name, is_active, trust_score, "
-            "added_at AS created_at, cooldown_until "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id, uid,
-        )
-        if not acc:
-            return _err("Аккаунт не найден", 404)
-
-        limit_info, pause_s, risk = {}, None, {}
-        try:
-            from services import flood_engine as _fe
-            limit_info = await _fe.recommended_daily_limit(pool, acc_id)
-            pause_s = round(_fe.recommended_delay(acc_id, "invite"), 1)
-            risk = _fe.get_risk_summary([acc_id]).get(acc_id, {})
-        except Exception:
-            log.warning("invite_account_card: engine unavailable acc=%s", acc_id, exc_info=True)
-
-        week = await _safe_fetchrow(
-            pool,
-            """SELECT COALESCE(SUM(invites_ok), 0)   AS ok,
-                      COALESCE(SUM(actions_fail), 0) AS failed,
-                      COALESCE(SUM(flood_events), 0) AS floods
-               FROM account_daily_stats
-               WHERE account_id=$1 AND stat_date >= CURRENT_DATE - INTERVAL '6 days'""",
-            acc_id,
-        ) or {}
-
-        age_days = None
-        if acc.get("created_at"):
-            try:
-                import datetime as _d
-                age_days = (_d.datetime.now(_d.timezone.utc) - acc["created_at"]).days
-            except Exception:
-                age_days = None
-
-        return _json_resp({
-            "id": acc["id"],
-            "label": acc.get("phone") or acc.get("first_name") or f"#{acc['id']}",
-            "age_days": age_days,
-            "trust_score": acc.get("trust_score"),
-            "recommended_limit": limit_info.get("limit"),
-            "used_today": limit_info.get("used_today"),
-            "remaining_today": limit_info.get("remaining"),
-            "limit_basis": limit_info.get("basis"),
-            # Факторы отдаём отдельным полем: пользователь должен видеть не только
-            # ЧТО система решила, но и по каким признакам аккаунта.
-            "limit_factors": limit_info.get("factors") or {},
-            "recommended_pause_s": pause_s,
-            "risk": risk,
-            "week": {k: int(week.get(k) or 0) for k in ("ok", "failed", "floods")},
-        })
 
     async def dm_preview(request: web.Request) -> web.Response:
         """Как будет выглядеть сообщение у получателя.
@@ -8798,50 +7351,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                   for r in (rows or [])]
         return _json_resp({"ok": True, "op": kind, "total": int(total or 0), "sample": sample})
 
-    async def channels_bulk_post(request: web.Request) -> web.Response:
-        """Пост во все (или выбранные) каналы одного аккаунта (паритет с ботом)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-
-        acc_id = validate_integer(data.get("acc_id"), min_val=1)
-        if not acc_id:
-            return _err("Выберите аккаунт", 400)
-        text = validate_string(data.get("text"), max_len=4096)
-        if not text:
-            return _err("Введите текст поста", 400)
-        if check_sql_suspicious(text):
-            return _err("Недопустимые символы в тексте", 400)
-
-        wanted = [int(x) for x in (data.get("channel_ids") or []) if str(x).lstrip("-").isdigit()]
-        rows = await _safe_fetch(
-            pool,
-            "SELECT channel_id FROM managed_channels WHERE owner_id=$1 AND acc_id=$2"
-            + (" AND channel_id = ANY($3::bigint[])" if wanted else ""),
-            *([uid, int(acc_id), wanted] if wanted else [uid, int(acc_id)]),
-        )
-        channel_ids = [int(r["channel_id"]) for r in (rows or [])]
-        if not channel_ids:
-            return _err("У этого аккаунта нет каналов — сначала импортируйте их", 400)
-
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "bulk_post_chans",
-                {"acc_id": int(acc_id), "channel_ids": channel_ids, "text": text},
-                total_items=len(channel_ids),
-                label=f"Пост в {len(channel_ids)} каналов аккаунта #{acc_id}",
-            )
-            return _json_resp({"ok": True, "op_id": op_id, "channels": len(channel_ids)})
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channels_bulk_post uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
     _REPORT_REASONS = {"spam", "violence", "porn", "drugs", "fake", "personal", "other"}
 
@@ -9093,49 +7602,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     async def groups_import_all(request: web.Request) -> web.Response:
         return await _import_all_op(request, "groups")
 
-    async def channels_reclassify(request: web.Request) -> web.Response:
-        """Переопределить «мою инфраструктуру»: живыми сессиями проставить роль
-        каждой строке managed_channels и убрать чужие (только участник). Чинит
-        уже накопленную засорённость списка чужими подписками."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        rows = await _safe_fetch(
-            pool,
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active "
-            "AND session_str IS NOT NULL ORDER BY id",
-            uid,
-        )
-        acc_ids = [int(r["id"]) for r in (rows or [])]
-        if not acc_ids:
-            return _err("Нет активных аккаунтов с сессией", 400)
-        prune = True
-        try:
-            body = await request.json()
-            if isinstance(body, dict) and "prune" in body:
-                prune = bool(body["prune"])
-        except Exception:
-            pass
-        try:
-            from services import operation_bus
-            op_id = await operation_bus.submit(
-                pool, uid, "reclassify_channels",
-                {"prune": prune},
-                total_items=len(acc_ids),
-                label="Переопределение моей инфраструктуры",
-            )
-            return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
-        except PermissionError as exc:
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("channels_reclassify uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def channels_bulk_join(request: web.Request) -> web.Response:
-        return await _mass_membership_op(request, "join")
 
-    async def channels_bulk_leave(request: web.Request) -> web.Response:
-        return await _mass_membership_op(request, "leave")
 
 
     # ── Persona Hub ───────────────────────────────────────────────────────────
@@ -18622,20 +17090,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bots
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)
     app.router.add_post("/api/miniapp/bot_factory/create_new", bot_factory_create_new)
-    app.router.add_post("/api/miniapp/channels/bulk_create", channels_bulk_create)
     app.router.add_post("/api/miniapp/channels/import_all", channels_import_all)
     app.router.add_post("/api/miniapp/groups/import_all", groups_import_all)
-    app.router.add_post("/api/miniapp/channels/reclassify", channels_reclassify)
     app.router.add_get("/api/miniapp/mass_targets", mass_targets)
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
-    app.router.add_get("/api/miniapp/invite/analytics", invite_analytics)
-    app.router.add_get("/api/miniapp/invite/audience", invite_audience_size)
-    app.router.add_get("/api/miniapp/invite/reserve_options", invite_reserve_options)
-    app.router.add_get("/api/miniapp/invite/segment_options", invite_segment_options)
-    app.router.add_post("/api/miniapp/invite/parse_list", invite_parse_list)
-    app.router.add_post("/api/miniapp/invite/parse_file", invite_parse_file)
-    app.router.add_get("/api/miniapp/invite/preflight", invite_preflight)
-    app.router.add_get("/api/miniapp/invite/rights_check", invite_rights_check)
     app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
     app.router.add_post("/api/miniapp/campaign/plan", campaign_plan)
     app.router.add_post("/api/miniapp/seo/analyze", seo_analyze)
@@ -18649,21 +17107,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
     app.router.add_get("/api/miniapp/fleet/diagnose/blocked", fleet_diagnose_blocked)
     app.router.add_post("/api/miniapp/organism/dismiss", organism_dismiss)
-    app.router.add_get("/api/miniapp/invite/fleet_readiness", invite_fleet_readiness)
-    app.router.add_post("/api/miniapp/invite/join_all", invite_join_all)
-    app.router.add_post("/api/miniapp/invite/grant_admin", invite_grant_admin)
-    app.router.add_get("/api/miniapp/invite/advice", invite_advice)
-    app.router.add_get("/api/miniapp/invite/account/{acc_id}", invite_account_card)
     app.router.add_post("/api/miniapp/dm/preview", dm_preview)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
-    app.router.add_post("/api/miniapp/channels/bulk_post", channels_bulk_post)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
     app.router.add_post("/api/miniapp/channels/bulk_edit", channels_bulk_edit)
     app.router.add_post("/api/miniapp/bots/bulk_edit", bots_bulk_edit)
     app.router.add_post("/api/miniapp/accounts/bulk_profile", accounts_bulk_profile)
     app.router.add_post("/api/miniapp/accounts/revive", accounts_revive)
-    app.router.add_post("/api/miniapp/channels/bulk_join", channels_bulk_join)
-    app.router.add_post("/api/miniapp/channels/bulk_leave", channels_bulk_leave)
     app.router.add_put("/api/miniapp/auto_reply/{reply_id}/toggle", toggle_auto_reply)
     app.router.add_delete("/api/miniapp/auto_reply/{reply_id}", delete_auto_reply)
     app.router.add_put("/api/miniapp/funnel/{funnel_id}/toggle", toggle_funnel)
@@ -18678,7 +17128,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/broadcast/ab_test", broadcast_ab_test)
     app.router.add_get("/api/miniapp/broadcast/{bc_id}/analytics", broadcast_analytics)
     # Channels
-    app.router.add_get("/api/miniapp/channels", channels)
     # Campaigns / Funnels
     app.router.add_get("/api/miniapp/campaigns", campaigns)
     app.router.add_get("/api/miniapp/funnels", funnels_all)
@@ -18687,10 +17136,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/accounts/export", accounts_export)
     app.router.add_get("/api/miniapp/account/{acc_id}", account_detail)
     # Channels
-    app.router.add_get("/api/miniapp/channel/{ch_id}", channel_detail)
-    app.router.add_post("/api/miniapp/channel/{ch_id}/post", post_to_channel)
-    app.router.add_post("/api/miniapp/channel/{ch_id}/pin", pin_channel_last_post)
-    app.router.add_get("/api/miniapp/channel/{ch_id}/invite_link", channel_invite_link)
     # Bot subscribers
     # DM campaigns
     app.router.add_post("/api/miniapp/dm_campaign", create_dm_campaign)
@@ -18762,6 +17207,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_proxies.setup_routes(app, pool)
     mini_app_uch.setup_routes(app, pool)
     mini_app_bots.setup_routes(app, pool)
+    mini_app_invite.setup_routes(app, pool)
+    mini_app_channels.setup_routes(app, pool)
     # Analytics
     app.router.add_get("/api/miniapp/analytics", analytics)
     # Subscription
@@ -19695,11 +18142,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/login_code", account_login_code)
     app.router.add_post("/api/miniapp/account/{acc_id}/check_restriction", account_check_restriction)
     app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)
-    app.router.add_post("/api/miniapp/channel/add", channel_add)
-    app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
-    app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
-    app.router.add_post("/api/miniapp/channels/mass", channels_mass)
-    app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)
     app.router.add_post("/api/miniapp/account/{acc_id}/check", account_check_one)
     app.router.add_post("/api/miniapp/account/{acc_id}/action/{act}", account_action)
@@ -19719,7 +18161,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/account/{acc_id}/meta", account_set_meta)
     app.router.add_delete("/api/miniapp/account/{acc_id}", account_delete)
     app.router.add_post("/api/miniapp/boost", boost_submit)
-    app.router.add_get("/api/miniapp/invite/retention", invite_retention_overview)
     app.router.add_post("/api/miniapp/growth", growth_submit)
     app.router.add_get("/api/miniapp/growth/overview", growth_overview)
     app.router.add_get("/api/miniapp/growth/plan", growth_plan)
@@ -21244,16 +19685,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось подтвердить 2FA", 400)
 
     async def _read_upload(part, max_bytes: int) -> bytes:
-        """Прочитать multipart-part с жёстким лимитом (защита от OOM)."""
-        buf = bytearray()
-        while True:
-            chunk = await part.read_chunk(65536)
-            if not chunk:
-                break
-            buf += chunk
-            if len(buf) > max_bytes:
-                raise ValueError("Файл слишком большой")
-        return bytes(buf)
+        """Прочитать multipart-part с жёстким лимитом (защита от OOM).
+
+        Один источник правды — модульный `read_upload`: тот же помощник нужен
+        модулям `services/mini_app_*.py`, а вложенная копия им недоступна.
+        `UploadTooLarge` — наследник `ValueError`, поэтому прежние обработчики
+        `except ValueError` продолжают ловить его как раньше.
+        """
+        return await read_upload(part, max_bytes)
 
     async def _multipart_file_and_proxy(request, max_bytes: int):
         """Достать (file_bytes, filename, proxy_id) из multipart-запроса."""
