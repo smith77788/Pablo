@@ -122,6 +122,54 @@ def test_every_decider_skips_operations_that_are_running_now(module_name, func):
     )
 
 
+def _flat_rule_offenders(sources) -> list[str]:
+    """Строки, где рядом с выборкой 'running' стоит собственный интервал."""
+    found: list[str] = []
+    for where, src in sources:
+        for i, line in enumerate(src.split("\n"), 1):
+            if line.strip().startswith("#"):
+                continue
+            if "status='running'" not in line and "status = 'running'" not in line:
+                continue
+            if "INTERVAL" in line.upper():
+                found.append(f"{where}:{i}: {line.strip()[:90]}")
+    return found
+
+
+def test_the_flat_rule_detector_bites():
+    """Зелёный храповик без этой самопроверки ничего не значит."""
+    sick = "WHERE status='running' AND started_at < now() - INTERVAL '2 hours'"
+    assert _flat_rule_offenders([("демо", sick)])
+    healthy = "WHERE status='running' AND id = ANY($1::bigint[])"
+    assert not _flat_rule_offenders([("демо", healthy)])
+
+
+def test_no_decider_keeps_a_flat_time_rule():
+    """Прежние плоские пороги не должны вернуться незамеченными.
+
+    Эта проверка была в наборе и пропала при переводе храповика на весь слой
+    мини-аппа (решение о зависании уехало из mini_app_api в
+    mini_app_dashboard). Возвращаю её в том же стиле: источник мини-аппа —
+    целиком слоем, остальные решающие — своими файлами. Без неё порог снова
+    можно зашить прямо в запрос, и набор этого не заметит: два parametrize
+    выше требуют, чтобы общий порог УПОМИНАЛСЯ, но не запрещают рядом с ним
+    собственное число.
+    """
+    import pathlib as _pl
+
+    root = _pl.Path(__file__).resolve().parents[1]
+    sources = [("мини-апп (весь слой)", api_source())]
+    for rel in ("services/infra_advisor.py", "services/account_monitor.py"):
+        sources.append((rel, (root / rel).read_text(encoding="utf-8")))
+
+    offenders = _flat_rule_offenders(sources)
+    assert not offenders, (
+        "порог зависания снова зашит рядом с запросом — так и разъехались 60 "
+        "минут, 2 часа и 3 часа при потолке прогона в 6 часов:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 def test_the_collector_really_reads_each_decider():
     """Пустой исходник сделал бы оба храповика зелёными навсегда."""
     for module_name, func in _DECIDERS:
