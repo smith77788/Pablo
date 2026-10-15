@@ -185,6 +185,7 @@ async def select_all_active(
     action_type: str = "default",
     min_trust_score: float | None = None,
     respect_daily_budget: bool = False,
+    respect_quarantine: bool = True,
     geo_country: str | None = None,
 ) -> list[asyncpg.Record]:
     """Вернуть все активные аккаунты (аналог _get_active_accounts, но с опцией фильтра cooldown).
@@ -195,6 +196,9 @@ async def select_all_active(
     include_ids: если указан — вернуть только эти аккаунты (пользователь выбрал конкретные).
     respect_daily_budget: исключить аккаунты, исчерпавшие дневной бюджет действий
         (долговечность). Если исчерпали ВСЕ — возвращаем пусто: лимит соблюдается.
+    respect_quarantine: исключить аккаунты под карантином риск-пульса. False —
+        только для ЗАГРУЗКИ (наполнения пула сессий), где отбор делается при
+        раздаче, а не здесь; для действия всегда True.
     """
     conditions = ["a.owner_id=$1", "a.is_active=TRUE", "a.session_str IS NOT NULL",
                   # Мёртвые по статусу не годятся для действия. Раньше bulk-
@@ -284,6 +288,47 @@ async def select_all_active(
                 "(owner=%d) — операция пойдёт, но упадёт по сети: замените прокси",
                 len(_dead), owner_id,
             )
+
+    # Карантин риск-пульса — в ЭТОЙ двери, а не у каждого исполнителя.
+    #
+    # ЧТО ЛОМАЛОСЬ. Мёртвые статусы и кулдаун сюда уже переехали (см. условия
+    # выше), а карантин остался «ручным»: каждый исполнитель должен был сам
+    # позвать _filter_quarantined_accounts ПОСЛЕ выбора. Двадцать восемь позвали,
+    # остальные — нет, и дверь честно отдавала им аккаунт с подтверждённым
+    # свежим ограничением. Среди забывших — phone_check, в собственном
+    # комментарии которого написано «ImportContacts — одна из самых баноопасных
+    # операций Telegram»; он берёт аккаунт через select_account_rotated, то есть
+    # через эту же дверь. Защита, которую нужно не забыть позвать, — это не
+    # защита, а соглашение.
+    #
+    # Правило «если в карантине ВСЕ — работаем всеми» скопировано у
+    # _filter_quarantined_accounts дословно и намеренно: иначе у двадцати восьми
+    # уже закрытых исполнителей поведение изменилось бы (дверь отдала бы пусто
+    # там, где их собственный фильтр пропускал флот целиком).
+    #
+    # Fail-open, как и сам пульс: ошибка проверки никого не держит.
+    if respect_quarantine and rows:
+        try:
+            from services import infra_memory as _infra_mem
+
+            _quar = await _infra_mem.quarantined_accounts(
+                pool, [int(r["id"]) for r in rows])
+            if _quar:
+                _kept = [r for r in rows if int(r["id"]) not in _quar]
+                if _kept:
+                    log.info(
+                        "select_all_active: пропущено %d аккаунтов в карантине "
+                        "риск-пульса (owner=%d)", len(rows) - len(_kept), owner_id,
+                    )
+                    rows = _kept
+                else:
+                    log.warning(
+                        "select_all_active: в карантине ВЕСЬ флот (%d аккаунтов, "
+                        "owner=%d) — операция пойдёт на них, иначе она просто "
+                        "не состоится", len(rows), owner_id,
+                    )
+        except Exception:
+            log.debug("select_all_active: quarantine filter failed", exc_info=True)
 
     if respect_daily_budget and rows:
         try:

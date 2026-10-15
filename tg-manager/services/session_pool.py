@@ -164,8 +164,13 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
     # при раздаче, а не здесь). Заодно тянем cf_relay_url — раньше device-словарь
     # пула его терял, и сессии из пула шли мимо релея (транспортная дыра).
     from services import resource_selector as _rsel
+    # respect_quarantine=False по той же причине, что и respect_cooldown: это
+    # загрузка пула, а не действие. Пул обязан знать про аккаунт и пока тот под
+    # карантином — иначе снятие карантина заметил бы только перезапуск. Отбор
+    # для действия делает дверь выбора в момент раздачи.
     rows = await _rsel.select_all_active(
-        pool, owner_id, respect_cooldown=False, min_trust_score=0.0)
+        pool, owner_id, respect_cooldown=False, respect_quarantine=False,
+        min_trust_score=0.0)
     loaded = 0
     for row in rows:
         device = {
