@@ -15400,23 +15400,55 @@ _INVITE_LOG_DDL = (
 
 
 async def _load_invited_targets(pool, owner_id: int, group_key: str) -> set:
-    """Кого уже приглашали в эту группу. Fail-open: при сбое — пустой набор
-    (лучше не дедупить, чем сорвать инвайт)."""
-    try:
-        await pool.execute(_INVITE_LOG_DDL)
-        rows = await pool.fetch(
-            "SELECT target FROM invite_target_log WHERE owner_id=$1 AND group_key=$2",
-            owner_id, group_key,
-        )
-        # Ключи нормализованные: '@Ivan' и '@ivan' — один человек, и Telegram
-        # матчит username именно так. Сырое сравнение строк давало второй инвайт
-        # в ту же группу тому, кто попал в аудиторию из двух парсингов с разным
-        # регистром (в реестре «не приглашать» это уже было учтено, здесь — нет).
-        from services.contact_opt_out import compare_key as _ck
-        return {_ck(r["target"]) for r in (rows or [])}
-    except Exception:
-        log_exc_swallow(log, "invite dedup: load failed")
-        return set()
+    """Кого уже приглашали в эту группу.
+
+    ЧТО БЫЛО. Сбой чтения давал пустой набор, беззвучно (`log_exc_swallow`), с
+    объяснением «лучше не дедупить, чем сорвать инвайт». Пустой набор означает
+    «в эту группу ещё никого не звали», то есть операция зовёт ВСЮ аудиторию
+    заново — тех же людей второй раз. Инвайт — самая баноопасная операция
+    продукта, а повторное приглашение тем же людям — прямая дорога к
+    PEER_FLOOD и бану флота. Один сетевой блип до базы стоил ровно этого, и
+    следа не оставалось вообще: ни строки владельцу, ни счётчика.
+
+    ЧТО ТЕПЕРЬ. Один повтор (блип — самая частая причина), а если журнал так и
+    не прочитался — отказ, как у остальных дверей идемпотентности
+    (`_journal_fetch`): операция уходит на обычный повтор с отсрочкой и
+    позовёт людей позже, ровно один раз. Отсрочка дешевле второго приглашения.
+    Отказ виден счётчиком, который входит в набор защитных сбоев и доходит до
+    владельца словами.
+
+    Когда владелец сам снял дедуп (`skip_invited=False`), эта функция не
+    зовётся — выбор «звать всех» остаётся за ним.
+    """
+    last: Exception | None = None
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(_INVITE_LOG_DDL)
+            rows = await pool.fetch(
+                "SELECT target FROM invite_target_log WHERE owner_id=$1 AND group_key=$2",
+                owner_id, group_key,
+            )
+            # Ключи нормализованные: '@Ivan' и '@ivan' — один человек, и Telegram
+            # матчит username именно так. Сырое сравнение строк давало второй инвайт
+            # в ту же группу тому, кто попал в аудиторию из двух парсингов с разным
+            # регистром (в реестре «не приглашать» это уже было учтено, здесь — нет).
+            from services.contact_opt_out import compare_key as _ck
+            return {_ck(r["target"]) for r in (rows or [])}
+        except Exception as e:
+            last = e
+            if _attempt == 1:
+                log.warning(
+                    "invite dedup: журнал приглашений не прочитан (owner=%s), "
+                    "повторяю", owner_id)
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    log.error(
+        "invite dedup: журнал приглашений НЕ ПРОЧИТАН (owner=%s, group=%s, %s) "
+        "— операция отложена на повтор, иначе позвала бы людей второй раз",
+        owner_id, group_key, last,
+    )
+    _reliability_metric("infragram_invite_dedup_read_failures_total", where="mass_invite")
+    raise JournalUnreadable(
+        "журнал приглашений недоступен, прогон отложен до повтора") from last
 
 
 async def _journal_done(pool, op_id: int, step_num: int, target,
