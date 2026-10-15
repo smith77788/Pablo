@@ -8438,7 +8438,9 @@ async def _exec_gp_bulk_apply(
                         item_failed = True
                     # Присвоение username — самое чувствительное к темпу действие:
                     # Telegram трактует частые UpdateUsername как автоматизацию.
-                    await asyncio.sleep(random.uniform(90, 180) * session_simulator.chaos_factor())
+                    await _pause_watching_for_cancel(
+                        pool, op_id, random.uniform(90, 180) * session_simulator.chaos_factor(),
+                        "gp_bulk_apply_pace")
 
             if item_failed:
                 failed += 1
@@ -8694,7 +8696,9 @@ async def _exec_global_presence_bot(
                         pool,
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
-                await asyncio.sleep(random.uniform(30, 60))
+                await _pause_watching_for_cancel(
+                    pool, op_id, random.uniform(30, 60),
+                    "gp_bot_retry")
                 continue
 
             token = result.get("token", "")
@@ -8797,8 +8801,10 @@ async def _exec_global_presence_bot(
                     )
 
             # Humanized delay between BotFather interactions (под губернатором темпа)
-            await asyncio.sleep(await _governed_delay(
-                pool, owner_id, random.uniform(60, 120) * session_simulator.chaos_factor()))
+            _bot_pace = await _governed_delay(
+                pool, owner_id,
+                random.uniform(60, 120) * session_simulator.chaos_factor())
+            await _pause_watching_for_cancel(pool, op_id, _bot_pace, "gp_bot_pace")
 
         final_status = (
             "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
@@ -9974,7 +9980,9 @@ async def _exec_bot_factory(
                                     pool,
                                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                             )
-                            await asyncio.sleep(random.uniform(30, 60))
+                            await _pause_watching_for_cancel(
+                                pool, op_id, random.uniform(30, 60),
+                                "bot_factory_retry")
                             continue
 
                 failed_count += 1
@@ -19077,13 +19085,15 @@ async def _exec_ai_comment(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, err[:200])
                 if "FloodWait" in err or "flood" in err.lower():
-                    await asyncio.sleep(30)
+                    await _pause_watching_for_cancel(pool, op_id, 30, "ai_comment_flood")
         except Exception as exc:
             fail_count += 1
             log.warning("ai_comment op=%d ref=%s: %s", op_id, ref, exc)
         await _safe_execute(pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
         if idx < total:
-            await asyncio.sleep(random.uniform(20, 45))  # органическая пауза между каналами
+            await _pause_watching_for_cancel(
+                pool, op_id, random.uniform(20, 45),
+                "ai_comment_pace")  # органическая пауза между каналами
 
     summary = (f"💬 AI-комментинг\n✅ Успешно: {ok_count}/{total}"
                + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else ""))
@@ -19358,7 +19368,9 @@ async def _exec_niche_growth_post(
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                     )
                     # Большая пауза при флуде — переключиться на следующий аккаунт
-                    await asyncio.sleep(random.uniform(300, 600))
+                    await _pause_watching_for_cancel(
+                        pool, op_id, random.uniform(300, 600),
+                        "niche_growth_flood_join")
                     continue
                 log.warning("niche_growth_post: join exc grp=%s: %s", join_ref, exc)
                 err_count += 1
@@ -19381,7 +19393,9 @@ async def _exec_niche_growth_post(
             # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
             join_to_post_delay = random.uniform(180, 480)
             log.debug("niche_growth_post: waiting %.0fs before posting to grp=%s", join_to_post_delay, join_ref)
-            await asyncio.sleep(join_to_post_delay)
+            await _pause_watching_for_cancel(
+                pool, op_id, join_to_post_delay,
+                "niche_growth_join_to_post")
 
             if await _is_cancelled(pool, op_id):
                 return {
@@ -19418,7 +19432,9 @@ async def _exec_niche_growth_post(
                 exc_str = str(exc).lower()
                 if "floodwait" in exc_str or "flood" in exc_str:
                     log.warning("niche_growth_post: FloodWait on post grp=%s: %s", join_ref, exc)
-                    await asyncio.sleep(random.uniform(300, 600))
+                    await _pause_watching_for_cancel(
+                        pool, op_id, random.uniform(300, 600),
+                        "niche_growth_flood_post")
                 else:
                     log.warning("niche_growth_post: post exc grp=%s: %s", join_ref, exc)
                 err_count += 1
@@ -19438,7 +19454,9 @@ async def _exec_niche_growth_post(
                     "niche_growth_post: waiting %.0fs before next group (%d/%d done)",
                     between_groups_delay, idx + 1, total,
                 )
-                await asyncio.sleep(between_groups_delay)
+                await _pause_watching_for_cancel(
+                    pool, op_id, between_groups_delay,
+                    "niche_growth_between_groups")
 
         summary = f"🌱 Growth Agent: ✅ {ok_count} ❌ {err_count} из {total} групп"
         return {

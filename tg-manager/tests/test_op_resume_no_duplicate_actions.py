@@ -153,8 +153,12 @@ def test_skip_happens_before_the_pause(ow, name):
     body = _fn(ow, name)
     skip_at = body.index("in _already_")
     # Пауза между целями у исполнителей разная: у одного прямой sleep, у
-    # другого — темп под губернатором. Берём ту, что есть.
-    pauses = [body.rindex(p) for p in ("asyncio.sleep(", "_governed_delay(") if p in body]
+    # другого — темп под губернатором, у третьего — пауза, слышащая отмену
+    # (`_pause_watching_for_cancel`: длинные паузы темпа дробятся, чтобы
+    # отменённая операция не держала флот до их конца). Берём ту, что есть.
+    pauses = [body.rindex(p) for p in (
+        "asyncio.sleep(", "_governed_delay(", "_pause_watching_for_cancel(")
+        if p in body]
     assert pauses, f"{name}: межцелевой паузы нет — проверять нечего"
     sleep_at = max(pauses)
     assert skip_at < sleep_at
