@@ -63,7 +63,7 @@ def test_journal_counters_return_what_the_journal_says(monkeypatch):
     async def _family(pool, op_id):
         return [op_id, op_id + 1]
 
-    monkeypatch.setattr(op_worker, "_safe_fetchrow", _fetchrow)
+    monkeypatch.setattr(op_worker, "_retrying_fetchrow", _fetchrow)
     monkeypatch.setattr(op_worker, "journal_op_ids", _family)
 
     assert _run(op_worker._journal_counters(None, 42)) == (150, 7)
@@ -85,7 +85,7 @@ def test_journal_counters_count_targets_not_rows(monkeypatch):
     async def _family(pool, op_id):
         return [op_id]
 
-    monkeypatch.setattr(op_worker, "_safe_fetchrow", _fetchrow)
+    monkeypatch.setattr(op_worker, "_retrying_fetchrow", _fetchrow)
     monkeypatch.setattr(op_worker, "journal_op_ids", _family)
     _run(op_worker._journal_counters(None, 1))
 
@@ -98,11 +98,17 @@ def test_journal_counters_count_targets_not_rows(monkeypatch):
 
 
 def test_journal_counters_are_fail_open(monkeypatch):
-    """Нет журнала или сбой чтения — остаёмся при прежнем поведении, не падаем."""
+    """Сбой чтения не валит разбор краха — счётчики остаются нулевыми.
+
+    Одна попытка повтора живёт внутри `_retrying_fetchrow` (блип БД на
+    закрытии больше не превращает доведённую работу в «частично»), но если
+    журнал не прочитался и со второго раза — разбор краха продолжается на
+    нулях, а не падает: иначе операция осталась бы без финального статуса.
+    """
     async def _boom(*a, **k):
         raise RuntimeError("БД недоступна")
 
-    monkeypatch.setattr(op_worker, "_safe_fetchrow", _boom)
+    monkeypatch.setattr(op_worker, "_retrying_fetchrow", _boom)
     assert _run(op_worker._journal_counters(None, 1)) == (0, 0)
 
     async def _none(*a, **k):
@@ -111,7 +117,7 @@ def test_journal_counters_are_fail_open(monkeypatch):
     async def _family(pool, op_id):
         return [op_id]
 
-    monkeypatch.setattr(op_worker, "_safe_fetchrow", _none)
+    monkeypatch.setattr(op_worker, "_retrying_fetchrow", _none)
     monkeypatch.setattr(op_worker, "journal_op_ids", _family)
     assert _run(op_worker._journal_counters(None, 1)) == (0, 0)
 

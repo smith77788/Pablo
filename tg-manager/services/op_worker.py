@@ -107,6 +107,40 @@ class JournalUnreadable(RuntimeError):
 _JOURNAL_READ_RETRY_DELAY_S = 0.5
 
 
+async def _retrying_fetchrow(
+    pool: asyncpg.Pool, query: str, *args, log_ctx: str = "",
+) -> "asyncpg.Record | None":
+    """Однострочное чтение с одним повтором. None — не прочитали и после него.
+
+    Нужно там, где по одному запросу собирается ИТОГ операции: сколько целей
+    закрыто за все попытки и сколько из них успешны. Такое чтение случается
+    один раз на закрытие операции, поэтому повтор ничего не стоит, а цена
+    промаха высокая: `done_items` обнуляется на каждой новой попытке, и без
+    покрытия из журнала доведённая со второй попытки операция объявляется
+    ЧАСТИЧНОЙ — владелец получает предложение повторить и эскалацию о работе,
+    которая на самом деле сделана (ровно тот класс, который разбирает
+    докстринг `_own_journal_coverage`).
+
+    Запасной ответ вызывающих при неудаче не меняется: «частично» на
+    неизвестности безопаснее «выполнено». Повтор лишь делает эту
+    неизвестность редкой.
+    """
+    last: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            return await pool.fetchrow(query, *args)
+        except Exception as e:
+            last = e
+            if attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    report_error(last, extra={"context": f"op_worker_fetchrow{log_ctx}"})
+    log.error(
+        "op_worker: итог операции%s не прочитан (%s) — доведённая работа может "
+        "быть названа частичной", log_ctx, last,
+    )
+    return None
+
+
 async def _journal_write(
     pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
 ) -> str:
@@ -1001,7 +1035,7 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
     удалось; вызывающий тогда остаётся при прежнем поведении.
     """
     try:
-        row = await _safe_fetchrow(
+        row = await _retrying_fetchrow(
             pool,
             "SELECT count(*) FILTER (WHERE ok) AS ok_n, "
             "       count(*) FILTER (WHERE NOT ok) AS failed_n "
@@ -1053,7 +1087,7 @@ async def _own_journal_coverage(pool: "asyncpg.Pool", op_id: int) -> int:
     вызывающий тогда остаётся при прежнем поведении.
     """
     try:
-        row = await _safe_fetchrow(
+        row = await _retrying_fetchrow(
             pool,
             "SELECT count(DISTINCT target) AS n FROM operation_log "
             " WHERE op_id=$1 AND target IS NOT NULL "
