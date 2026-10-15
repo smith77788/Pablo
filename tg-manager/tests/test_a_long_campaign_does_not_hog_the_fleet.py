@@ -124,3 +124,30 @@ async def test_nobody_waiting_means_nothing_is_given_back(monkeypatch):
     monkeypatch.setattr(op_worker, "_db_pool", _Pool(waiting=0))
     held = [{"id": i} for i in (1, 2, 3, 4)]
     assert await op_worker._rebalance_claim(555, 77, held) is held
+
+
+# ── Где дележ НЕ уместен ─────────────────────────────────────────────────────
+
+# Исполнители, у которых работа размножена по аккаунтам или привязана к
+# конкретному аккаунту: отданный аккаунт свою работу не сделает НИКОГДА, и
+# владелец получит меньше, чем просил, а не позже.
+#   * вступление/выход — единица работы это пара (аккаунт, ссылка), каждый
+#     аккаунт проходит ВЕСЬ список (см. completed_account_targets);
+#   * публикация по своим каналам — канал умеет публиковать только тот
+#     аккаунт, который им админит.
+_WORK_IS_NOT_DIVIDED = (
+    "_exec_bulk_join_inner",
+    "_exec_bulk_leave",
+    "_exec_mass_publish",
+    "_exec_bulk_post_chans",
+)
+
+
+@pytest.mark.parametrize("name", _WORK_IS_NOT_DIVIDED)
+def test_the_fleet_is_not_given_back_where_work_is_not_divided(name):
+    """Иначе «честный дележ» молча урезал бы саму работу операции."""
+    src = ast.unparse(_executor(name))
+    assert "_rebalance_claim(" not in src, (
+        f"{name} отдаёт аккаунты посреди прогона, а его работа по аккаунтам не "
+        "делится: отданный аккаунт свою часть не сделает вообще. Справедливость "
+        "для таких типов — просить меньше при захвате, а не отдавать на ходу")
