@@ -1670,6 +1670,61 @@ async def _note_skip(pool: asyncpg.Pool, plan_id: int, reason: str) -> None:
         log.debug("warmup: не удалось записать причину пропуска plan=%s", plan_id)
 
 
+async def risk_hold(pool: asyncpg.Pool, account_id: int) -> str | None:
+    """Почему греть этот аккаунт прямо сейчас нельзя: пауза в базе или карантин пульса.
+
+    ЧТО ЛОМАЛОСЬ. Прогрев был единственным потребителем живых аккаунтов, который
+    не спрашивал ни про одну из двух ОБЩИХ пауз флота. Массовая операция ловила
+    PEER_FLOOD: flood_engine.apply_cooldown ставил `tg_accounts.cooldown_until`,
+    а в restriction_events ложилась запись, и риск-пульс уводил аккаунт в
+    карантин. С этой секунды аккаунт не брала НИ ОДНА операция — а цикл прогрева
+    в ближайший час поднимал ту же самую сессию и шёл вступать в каналы, ставить
+    реакции и писать комментарии: ровно то поведение, за которое Telegram только
+    что ограничил аккаунт. Собственное правило прогрева «не добивать флагнутый
+    аккаунт» соблюдалось только для ограничений, которые он поймал сам, внутри
+    своей же сессии; про чужие он не знал.
+
+    Пропуск здесь дёшев и ничего не теряет: last_action_at на пропуске не
+    двигается, поэтому цикл вернётся к плану уже через час — как только пауза
+    истечёт или владелец снимет риск кнопкой «Сбросить кулдаун» (её отметку
+    risk_cleared_at пульс уважает).
+
+    Пауза читается из БАЗЫ, а не из памяти flood_engine: пауза, поставленная
+    соседней репликой, обязана остановить и нас, а процесс-локального состояния
+    у неё нет.
+
+    Fail-open, как и сам пульс: ошибка чтения → None (прогрев не блокируем).
+    """
+    if not pool or not account_id:
+        return None
+    try:
+        acc = int(account_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        row = await pool.fetchrow(
+            "SELECT cooldown_until FROM tg_accounts WHERE id=$1", acc)
+    except Exception:
+        log_exc_swallow(log, "warmup: чтение паузы аккаунта не удалось")
+        row = None
+    if row is not None:
+        _cd = row["cooldown_until"]
+        if _cd is not None:
+            try:
+                if _cd.tzinfo is None:
+                    _cd = _cd.replace(tzinfo=datetime.timezone.utc)
+                if _cd > datetime.datetime.now(datetime.timezone.utc):
+                    return "cooldown"
+            except (AttributeError, TypeError, ValueError):
+                pass
+    try:
+        if await infra_memory.is_account_quarantined(pool, acc):
+            return "quarantine"
+    except Exception:
+        log_exc_swallow(log, "warmup: риск-пульс недоступен")
+    return None
+
+
 async def _pause_plan(pool: asyncpg.Pool, plan_id: int, reason: str,
                       detail: str | None = None) -> None:
     """Остановить план С УКАЗАНИЕМ причины.
@@ -1820,6 +1875,18 @@ async def _run_daily_warmup_impl(
             )
             await _note_skip(pool, plan_id, str(acc_health["acc_status"]))
             return _skip_result
+
+    # Общие паузы флота: пауза в базе (FloodWait/PeerFlood/тяжёлая операция) и
+    # карантин риск-пульса. Подробности — в docstring risk_hold; коротко: пока
+    # аккаунт под любой из них, его не берёт ни одна операция, и прогрев —
+    # такой же живой трафик через ту же сессию — тоже обязан подождать.
+    _hold = await risk_hold(pool, account_id)
+    if _hold:
+        log.info("warmup: acc=%d под паузой (%s) — пропуск цикла", account_id, _hold)
+        await _note_skip(pool, plan_id, _hold)
+        return _skip_result
+
+    if acc_health:
         # Очень свежий аккаунт: форсируем поведение дня 0 (минимум действий, read-only)
         added_at = acc_health["added_at"]
         if added_at is not None:
@@ -2413,6 +2480,22 @@ async def _run_warmup_session_impl(
                     await _opw.release_accounts([acc_id])
                 except Exception:
                     log_exc_swallow(log, "warmup_session: release on skip failed")
+            continue
+
+        # Тот же гейт, что и в одиночном плане: пауза в базе и карантин пульса.
+        # Сессионный путь шёл мимо него так же слепо — и вдобавок греет пачкой,
+        # то есть флагнутый аккаунт добивался в компании соседей по прокси.
+        _hold = await risk_hold(pool, acc_id)
+        if _hold:
+            log.info(
+                "warmup_session: acc=%d под паузой (%s) — пропуск цикла", acc_id, _hold)
+            if _claimed:
+                try:
+                    from services import op_worker as _opw
+
+                    await _opw.release_accounts([acc_id])
+                except Exception:
+                    log_exc_swallow(log, "warmup_session: release on hold skip failed")
             continue
 
         # Локальная ночь аккаунта (по гео его прокси) — не греем. Сессия может
