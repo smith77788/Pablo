@@ -14,21 +14,19 @@
 """
 from __future__ import annotations
 
-import os
 import re
 
 
-def _mini_app_api_path() -> str:
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "services",
-        "mini_app_api.py",
-    )
-
-
 def _load_source() -> str:
-    with open(_mini_app_api_path(), encoding="utf-8") as f:
-        return f.read()
+    """Весь API-слой мини-аппа, а не один файл.
+
+    Ручки переезжают из 25-тысячестрочного mini_app_api.py в соседние модули
+    services/mini_app_*.py (контакты, прокси, сценарии…). Скан по одному файлу
+    после каждого выноса объявлял живые маршруты незарегистрированными.
+    """
+    from tests.miniapp_source import api_source
+
+    return api_source()
 
 
 def test_no_orphaned_route_handlers():

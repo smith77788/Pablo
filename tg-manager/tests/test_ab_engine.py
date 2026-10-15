@@ -50,12 +50,18 @@ def test_pick_winner_empty():
     assert r["winner"] is None and r["rates"] == {}
 
 
+def _api_src() -> str:
+    """Весь API-слой мини-аппа: ручки сегмента вынесены в mini_app_uch.py."""
+    from tests.miniapp_source import api_source
+
+    return api_source()
+
 def test_segment_message_supports_ab_variants():
     # Границы обработчика берёт парсер: окно в 3200 символов «кончалось» на
     # каждой правке выше — так ab_variant однажды выпал из него на ВЕРНОМ коде.
     import ast
 
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = _api_src()
     window = ""
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "uch_segment_message":
@@ -67,7 +73,7 @@ def test_segment_message_supports_ab_variants():
 
 
 def test_ab_results_endpoint_wired():
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = _api_src()
     assert "async def ab_results" in src
     assert '"/api/miniapp/ab/results"' in src
     assert "ab_engine.pick_winner" in src
@@ -127,7 +133,7 @@ def test_followup_blank_winner_label():
 
 
 def test_ab_followup_endpoint_wired():
-    src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    src = _api_src()
     assert "async def ab_followup" in src
     assert '"/api/miniapp/ab/followup"' in src
     assert "plan_winner_followup" in src

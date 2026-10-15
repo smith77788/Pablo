@@ -28,7 +28,12 @@ from tests.miniapp_source import miniapp_html, source_of
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = (ROOT / "services" / "mass_inviter_engine.py").read_text(encoding="utf-8")
 WORKER = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_source
+
+# Весь API-слой мини-аппа: ручки переезжают из 25-тысячестрочного
+# mini_app_api.py в соседние services/mini_app_*.py, и проверка не должна
+# зависеть от того, в каком файле лежит обработчик.
+API = api_source()
 
 
 def _exec_mass_invite_body() -> str:

@@ -16,6 +16,15 @@ import os
 
 from services.contact_invite_link import contact_target_candidates
 
+
+# Весь API-слой мини-аппа: ручки контактов вынесены из 25-тысячестрочного
+# mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
+# от того, в каком файле лежит обработчик.
+def _api_src() -> str:
+    from tests.miniapp_source import api_source
+
+    return api_source()
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -100,7 +109,7 @@ def test_opt_out_contact_registers_all_forms_not_just_first():
 
 
 def test_mini_app_endpoints_registered_and_wired():
-    src = _read("services/mini_app_api.py")
+    src = _api_src()
     for path, fn in (
         ("/api/miniapp/uch/contacts/{contact_id}/invite_history", "uch_contact_invite_history"),
         ("/api/miniapp/uch/contacts/{contact_id}/opt_out", "uch_contact_opt_out"),

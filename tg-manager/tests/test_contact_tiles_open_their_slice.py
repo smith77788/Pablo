@@ -22,6 +22,15 @@ from __future__ import annotations
 import os
 import re
 
+
+# Весь API-слой мини-аппа: ручки контактов вынесены из 25-тысячестрочного
+# mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
+# от того, в каком файле лежит обработчик.
+def _api_src() -> str:
+    from tests.miniapp_source import api_source
+
+    return api_source()
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -86,7 +95,7 @@ def test_probe_cuts_the_function_by_the_next_definition():
 # ─── Сама проверка ───
 
 def test_every_filter_the_front_sends_is_read_by_the_list_handler():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     handler = _handler(api, "uch_contacts")
     for param, filt in sorted(_filter_params(_read("mini_app/index.html")).items()):
         assert f"request.query.get('{param}')" in handler, (
@@ -96,7 +105,7 @@ def test_every_filter_the_front_sends_is_read_by_the_list_handler():
 
 def test_account_slice_is_not_silently_the_whole_vault():
     """Фильтр по аккаунту: фронт отправлял, сервер игнорировал."""
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     handler = _handler(api, "uch_contacts")
     assert "request.query.get('account_id')" in handler, (
         "срез «контакты этого аккаунта» снова молча отдаёт весь справочник")

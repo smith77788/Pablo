@@ -14,16 +14,17 @@ from __future__ import annotations
 
 import datetime as dtm
 import re
-from pathlib import Path
-
-API = Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py"
-
 
 def _handler_src() -> str:
-    src = API.read_text(encoding="utf-8")
-    m = re.search(r"    async def uch_crm_reminder.*?(?=\n    async def )", src, re.DOTALL)
-    assert m, "uch_crm_reminder не найден"
-    return m.group(0)
+    """Границы обработчика берёт парсер, файл ищется по всему API-слою.
+
+    Было «от `async def uch_crm_reminder` до следующего `async def`» в одном
+    файле: ручки контактов вынесены в services/mini_app_uch.py, и регулярка
+    перестала совпадать на верном коде.
+    """
+    from tests.miniapp_source import api_function
+
+    return api_function("uch_crm_reminder")
 
 
 def test_reminder_parsed_to_datetime_not_string():

@@ -10,6 +10,15 @@ from __future__ import annotations
 
 import os
 
+
+# Весь API-слой мини-аппа: ручки контактов вынесены из 25-тысячестрочного
+# mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
+# от того, в каком файле лежит обработчик.
+def _api_src() -> str:
+    from tests.miniapp_source import api_source
+
+    return api_source()
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -19,7 +28,7 @@ def _read(rel: str) -> str:
 
 
 def test_backend_endpoints_and_routes():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     assert "async def uch_contact_message" in api
     assert "async def uch_contact_invite" in api
     # маршруты зарегистрированы
@@ -28,7 +37,7 @@ def test_backend_endpoints_and_routes():
 
 
 def test_message_reuses_dm_engine_and_invite_reuses_invite_engine():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     msg = api[api.index("async def uch_contact_message"):api.index("async def uch_contact_invite")]
     # ЛС идёт через безопасный DM-движок, а не прямой send
     assert '"bulk_dm_adhoc"' in msg
@@ -42,7 +51,7 @@ def test_message_reuses_dm_engine_and_invite_reuses_invite_engine():
 
 
 def test_target_resolver_prefers_username_then_id():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     assert "def _uch_msg_ref" in api
     assert "def _uch_invite_target" in api
     ref = api[api.index("def _uch_msg_ref"):api.index("def _uch_invite_target")]
@@ -93,7 +102,7 @@ def test_frontend_picker_defaults_to_source_accounts():
 
 
 def test_backend_media_endpoint_and_op_branch():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     assert "async def uch_contact_media" in api
     assert '/media", uch_contact_media)' in api
     med = api[api.index("async def uch_contact_media"):api.index("async def uch_contact_invite")]

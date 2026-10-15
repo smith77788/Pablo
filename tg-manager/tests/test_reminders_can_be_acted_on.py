@@ -59,7 +59,8 @@ def test_actions_pass_an_index_not_the_contact_text():
 
 
 def test_backend_accepts_clearing_a_reminder():
-    api = _read("services/mini_app_api.py")
+    from tests.miniapp_source import api_source
+    api = api_source()
     i = api.index("async def uch_crm_reminder")
     fn = api[i:api.index("\n    async def ", i + 10)]
     assert "remind_dt = None" in fn, (

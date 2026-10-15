@@ -70,7 +70,8 @@ def test_get_segment_filters_parses_json():
 
 
 def test_backend_endpoints_and_saved_id_wired():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    from tests.miniapp_source import api_source
+    api = api_source()
     for r in ('"/api/miniapp/uch/segments"', '/segments/save"', '/segments/{seg_id}"'):
         assert r in api
     # сегмент-действия принимают saved_segment_id (единый резолвер)

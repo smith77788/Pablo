@@ -30,7 +30,6 @@ import pytest
 from services.contacts_hub import segments
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
 UI = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 CAP = 50          # потолок в тестах — маленький, чтобы не плодить 20000 строк
@@ -133,12 +132,21 @@ def test_duplicate_ids_are_asked_for_once():
 # ── Ручки ────────────────────────────────────────────────────────────────────
 
 def _handler(name: str) -> str:
+    """Тело обработчика, в каком бы модуле API-слоя он ни лежал.
+
+    Ручки контактов вынесены из mini_app_api.py в services/mini_app_uch.py;
+    привязывать проверку к файлу — значит красить её на каждом переносе.
+    """
     import ast
-    tree = ast.parse(API)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
-            return ast.get_source_segment(API, node) or ""
-    raise AssertionError(f"обработчик {name} не найден")
+
+    from tests.miniapp_source import api_files
+
+    for path in api_files():
+        text = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
+                return ast.get_source_segment(text, node) or ""
+    raise AssertionError(f"обработчик {name} не найден ни в одном модуле API")
 
 
 def test_preview_returns_the_segment_size_and_the_remainder():

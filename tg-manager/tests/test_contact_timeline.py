@@ -54,7 +54,8 @@ def test_empty_inputs():
 
 
 def test_endpoint_uses_builder_and_no_duplicate_route():
-    api = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+    from tests.miniapp_source import api_source
+    api = api_source()
     assert "timeline.build_timeline" in api
     assert "payload->>'contact_id'" in api
     # ровно один маршрут /timeline (без дубликата)

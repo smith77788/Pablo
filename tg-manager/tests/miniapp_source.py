@@ -95,3 +95,21 @@ def api_routes() -> frozenset[str]:
 
     return frozenset(re.findall(
         r'app\.router\.add_(?:get|post|put|delete|patch)\("([^"]+)"', api_source()))
+
+
+def api_function(name: str) -> str:
+    """Тело функции API-слоя по ТОЧНЫМ границам (ast), в любом его модуле.
+
+    Срез фиксированной длины и «до следующего `async def`» промахиваются на
+    каждой правке выше, а привязка к файлу — на каждом выносе ручки в
+    отдельный модуль. Границы знает только парсер, файл ищем сами.
+    """
+    import ast
+
+    for path in api_files():
+        text = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(text)):
+            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name == name):
+                return ast.get_source_segment(text, node) or ""
+    raise AssertionError(f"функция {name} не найдена ни в одном модуле API-слоя")

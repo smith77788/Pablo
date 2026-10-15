@@ -10,7 +10,12 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Весь API-слой мини-аппа: ручки контактов вынесены из 25-тысячестрочного
+# mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
+# от того, в каком файле лежит обработчик.
+from tests.miniapp_source import api_source  # noqa: E402
+
+API = api_source()
 HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 SYNC = (ROOT / "services" / "contacts_hub" / "sync_service.py").read_text(encoding="utf-8")
 

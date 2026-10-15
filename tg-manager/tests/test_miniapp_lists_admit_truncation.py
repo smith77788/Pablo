@@ -16,7 +16,12 @@ import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-API = os.path.join(ROOT, "services", "mini_app_api.py")
+from tests.miniapp_source import api_source
+
+# Весь API-слой мини-аппа: ручки переезжают из 25-тысячестрочного
+# mini_app_api.py в соседние services/mini_app_*.py, и проверка не должна
+# зависеть от того, в каком файле лежит обработчик.
+_API_SRC = api_source()
 HTML = os.path.join(ROOT, "mini_app", "index.html")
 
 # Списки, которые владелец наполняет сам: их легко перерасти, и обрыв на
@@ -43,7 +48,7 @@ SCREENS_WITH_MORE = [
 
 @functools.lru_cache(maxsize=1)
 def _api_funcs() -> dict[str, str]:
-    src = open(API, encoding="utf-8").read()
+    src = _API_SRC
     lines = src.splitlines()
     out: dict[str, str] = {}
     for node in ast.walk(ast.parse(src)):
@@ -80,7 +85,7 @@ def test_helpers_exist():
     assert "function moreBtn(" in h, "общей кнопки «Показать ещё» нет"
     assert "function listOf(" in h and "function totalOf(" in h, (
         "общего чтения ответа списка нет")
-    assert "def _list_limit(" in open(API, encoding="utf-8").read(), (
+    assert "def _list_limit(" in _API_SRC, (
         "общего разбора потолка на сервере нет")
     # Заведомо здоровый пример, который был в продукте до этой проверки.
     assert "loadContacts(true)" in h, "образцовый список контактов исчез"

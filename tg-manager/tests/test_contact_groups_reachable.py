@@ -62,8 +62,10 @@ def _py_func(name: str) -> str:
 
 @functools.lru_cache(maxsize=1)
 def _api() -> str:
-    with open(API, encoding="utf-8") as f:
-        return f.read()
+    # весь API-слой: ручки контактов вынесены в services/mini_app_uch.py
+    from tests.miniapp_source import api_source
+
+    return api_source()
 
 
 def _api_func(name: str) -> str:

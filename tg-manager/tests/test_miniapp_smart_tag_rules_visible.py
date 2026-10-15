@@ -18,7 +18,12 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
-API = os.path.join(ROOT, "services", "mini_app_api.py")
+from tests.miniapp_source import api_source
+
+# Весь API-слой мини-аппа: ручки переезжают из 25-тысячестрочного
+# mini_app_api.py в соседние services/mini_app_*.py, и проверка не должна
+# зависеть от того, в каком файле лежит обработчик.
+_API_SRC = api_source()
 
 
 @functools.lru_cache(maxsize=1)
@@ -101,7 +106,7 @@ def test_apply_reports_what_actually_changed():
     assert "d.matched" in body, "экран не показывает, сколько совпало"
     assert "d.applied" in body
     assert re.search(r"applied\s*=\s*await|api\(", body)
-    src = open(API, encoding="utf-8").read()
+    src = _API_SRC
     assert "uch_smart_tags_apply" in src
 
 

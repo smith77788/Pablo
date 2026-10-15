@@ -22,7 +22,12 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-API = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
+from tests.miniapp_source import api_source  # noqa: E402
+
+# Весь API-слой мини-аппа: ручки переезжают из 25-тысячестрочного
+# mini_app_api.py в соседние services/mini_app_*.py, и проверка не должна
+# зависеть от того, в каком файле лежит обработчик.
+API = api_source()
 SYNC = open(os.path.join(ROOT, "services", "contacts_hub", "sync_service.py"),
             encoding="utf-8").read()
 SNAPSHOT = open(os.path.join(ROOT, "tests", "miniapp_routes_snapshot.txt"),

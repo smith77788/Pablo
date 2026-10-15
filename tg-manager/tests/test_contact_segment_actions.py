@@ -7,6 +7,15 @@ from __future__ import annotations
 
 import os
 
+
+# Весь API-слой мини-аппа: ручки контактов вынесены из 25-тысячестрочного
+# mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
+# от того, в каком файле лежит обработчик.
+def _api_src() -> str:
+    from tests.miniapp_source import api_source
+
+    return api_source()
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -20,7 +29,7 @@ def _slice(api: str, start: str, end: str) -> str:
 
 
 def test_endpoints_and_routes():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     for fn in ("uch_segment_preview", "uch_segment_message",
                "uch_segment_media", "uch_segment_invite"):
         assert f"async def {fn}" in api
@@ -28,7 +37,7 @@ def test_endpoints_and_routes():
 
 
 def test_message_autosplits_into_chunks():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     msg = _slice(api, "async def uch_segment_message", "async def uch_segment_media")
     assert "_SEG_DM_CHUNK" in msg
     # Разбивка на чанки по получателям варианта (vrefs — аудитория A/B-варианта
@@ -41,7 +50,7 @@ def test_message_autosplits_into_chunks():
 
 
 def test_media_writes_own_file_per_chunk():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     med = _slice(api, "async def uch_segment_media", "async def uch_segment_invite")
     # каждый чанк — своя копия файла (op удаляет свою; общий путь → гонка удаления)
     assert "mkstemp" in med and "range(0, len(refs), _SEG_DM_CHUNK)" in med
@@ -49,7 +58,7 @@ def test_media_writes_own_file_per_chunk():
 
 
 def test_invite_uses_mass_invite_no_chunk():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     inv = _slice(api, "async def uch_segment_invite", "async def uch_contact_update")
     assert '"mass_invite"' in inv and '"source": "import_list"' in inv
     assert "_uch_invite_target" in inv
@@ -57,12 +66,16 @@ def test_invite_uses_mass_invite_no_chunk():
 
 
 def test_conservative_defaults():
-    api = _read("services/mini_app_api.py")
+    api = _api_src()
     msg = _slice(api, "async def uch_segment_message", "async def uch_segment_media")
     # консервативный темп по умолчанию (45с)
     assert '"delay", 45' in msg
-    # кап чанка = 1000
-    assert "_SEG_DM_CHUNK = 1000" in api
+    # кап чанка = 1000, и он один на весь продукт: число живёт в общем модуле
+    # среза, а не дублируется в каждом файле, который его читает
+    from services.contacts_hub import segments
+
+    assert segments.SEG_DM_CHUNK == 1000
+    assert "_SEG_DM_CHUNK = _segments.SEG_DM_CHUNK" in api
 
 
 def test_frontend_segment_controls():
