@@ -1011,6 +1011,47 @@ async def record_peer_flood(
     return applied
 
 
+
+async def _drop_quarantined(pool, rows: list) -> list:
+    """Убрать из выборки аккаунты под карантином риск-пульса.
+
+    ЗАЧЕМ ЗДЕСЬ. get_best_account и get_active_accounts — это ещё две двери
+    выбора аккаунта для действия, рядом с resource_selector.select_all_active.
+    Мёртвые статусы и кулдаун в их условиях уже есть, а подтверждённое свежее
+    ограничение (restriction_events) они не спрашивали вовсе: аккаунт, который
+    риск-пульс только что убрал из работы, спокойно выигрывал ранжирование и
+    шёл в следующую операцию. Защита, стоящая в одной двери из трёх, — это
+    дыра, а не защита.
+
+    Правило «в карантине ВСЕ — работаем всеми» то же, что в
+    op_worker._filter_quarantined_accounts и в select_all_active: обнулить
+    операцию хуже, чем рискнуть, и три места обязаны вести себя одинаково.
+
+    Fail-open, как и сам пульс: ошибка проверки никого не держит.
+    """
+    if not rows:
+        return rows
+    try:
+        from services import infra_memory as _infra_mem
+
+        quar = await _infra_mem.quarantined_accounts(
+            pool, [int(r["id"]) for r in rows])
+        if not quar:
+            return rows
+        kept = [r for r in rows if int(r["id"]) not in quar]
+        if not kept:
+            log.warning(
+                "flood_engine: в карантине ВЕСЬ флот (%d аккаунтов) — выбор "
+                "пойдёт по ним, иначе операция просто не состоится", len(rows))
+            return rows
+        log.info("flood_engine: пропущено %d аккаунтов в карантине риск-пульса",
+                 len(rows) - len(kept))
+        return kept
+    except Exception:
+        log.debug("flood_engine: проверка карантина не удалась", exc_info=True)
+        return rows
+
+
 async def get_best_account(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -1085,6 +1126,9 @@ async def get_best_account(
     )
     if not rows:
         return None
+
+    # Карантин риск-пульса — третья дверь выбора; подробности в _drop_quarantined.
+    rows = await _drop_quarantined(pool, list(rows))
 
     # From DB candidates, pick the one with lowest combined risk: in-memory
     # flood-engine risk (this-process, reactive) blended with Physics
@@ -1193,6 +1237,9 @@ async def get_active_accounts(
             ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST""",
         *params,
     )
+
+    # Карантин риск-пульса — четвёртая дверь; подробности в _drop_quarantined.
+    rows = await _drop_quarantined(pool, list(rows))
 
     # Exclude in-memory cooling accounts, then re-sort by combined score —
     # in-memory flood-engine risk blended with Physics Engine's persisted
