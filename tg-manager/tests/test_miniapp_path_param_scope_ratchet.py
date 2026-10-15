@@ -5,7 +5,8 @@
 авторизованному пользователю, который подставит соседний id. Репозиторий это
 уже переживал дважды: `/team/members` отдавал весь `platform_users`, а `/audit` —
 операции всех владельцев (см. `tests/test_miniapp_tenant_scope.py`). Те две дыры
-закрыты точечными тестами; здесь замораживается ВЕСЬ класс — 139 хендлеров.
+закрыты точечными тестами; здесь замораживается ВЕСЬ класс — 172 ручки во
+всех файлах `services/mini_app_*.py`.
 
 **Что проверяется.** Функция попадает под проверку, если она одновременно:
 читает `request.match_info` (значит, id пришёл извне и не выведен из uid),
@@ -27,8 +28,18 @@ import ast
 import pathlib
 import re
 
-_SRC = (pathlib.Path(__file__).resolve().parent.parent
-        / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_files
+
+# ВЕСЬ API-слой, а не только монолит. Хендлер, уехавший в
+# `services/mini_app_*.py`, по-прежнему берёт id из пути и обязан скоупить
+# запрос; храповик, читающий один файл, после каждого выноса охватывал всё
+# меньше ручек — и упал бы своей же самопроверкой, а не находкой (так и вышло
+# в CI на 89f3fc5: 119 ручек вместо 120 после выноса инвайтов и каналов).
+#
+# Файлы разбираются ПООТДЕЛЬНОСТИ: склеенный текст — не валидный модуль
+# (`from __future__ import annotations` окажется не первым), и `ast.parse`
+# на нём падает.
+_SOURCES = tuple(p.read_text(encoding="utf-8") for p in api_files())
 
 _DB_CALL = re.compile(
     r"\b(?:fetch|fetchval|fetchrow|execute|executemany"
@@ -184,17 +195,17 @@ def test_every_gate_really_scopes():
     однажды выпотрошат — здесь станет красным, а не тихо разрешит всё, что на
     неё сослалось.
     """
-    db_src = _DB_SRC
     for gate in _ACCESS_GATES:
-        body = _gate_source(gate, _SRC) or _gate_source(gate, db_src)
+        body = _any_gate_source(gate) or _gate_source(gate, _DB_SRC)
         assert body, f"проверка {gate} не найдена — список устарел"
         proof = _GATE_PROOF.get(gate, ())
         assert proof, f"для {gate} не записано, чем он скоупит"
         assert any(p in body for p in proof), (
             f"{gate} больше не спрашивает владельца или участие: {body[:160]}")
     # Условие видимости ботов — общее для списка и для проверки доступа.
-    m = re.search(r"_BOTS_VISIBLE_SQL\s*=\s*(?:f?\"\"\"|f?[\"'])(.*?)(?:\"\"\"|[\"'])",
-                  _SRC, re.DOTALL)
+    m = next((m for m in (
+        re.search(r"_BOTS_VISIBLE_SQL\s*=\s*(?:f?\"\"\"|f?[\"'])(.*?)(?:\"\"\"|[\"'])",
+                  src, re.DOTALL) for src in _SOURCES) if m), None)
     assert m, "_BOTS_VISIBLE_SQL не найден"
     assert "added_by" in m.group(1), (
         "видимость ботов больше не привязана к владельцу: " + m.group(1)[:200])
@@ -214,8 +225,19 @@ def _gate_source(name: str, src: str) -> str:
     return ""
 
 
+def _any_gate_source(name: str) -> str:
+    """Текст проверки в ЛЮБОМ файле API-слоя: проверки тоже переезжают."""
+    for src in _SOURCES:
+        body = _gate_source(name, src)
+        if body:
+            return body
+    return ""
+
+
 def test_every_path_param_handler_is_owner_scoped():
-    leaks = _unscoped(_SRC)
+    leaks = set()
+    for src in _SOURCES:
+        leaks |= set(_unscoped(src))
     assert not leaks, (
         "хендлеры берут id из пути и ходят в БД без скоупа по владельцу — "
         f"подстановка чужого id вернёт чужие данные: {sorted(leaks)}"
@@ -225,8 +247,10 @@ def test_every_path_param_handler_is_owner_scoped():
 def test_the_ratchet_actually_covers_the_surface():
     """Если фильтр однажды перестанет находить хендлеры, тест выше станет
     зелёным всегда и защита выключится молча."""
-    n = sum(1 for _ in _handlers_with_path_param(_SRC))
-    assert n >= 120, f"проверка охватывает лишь {n} хендлеров — фильтр сломался"
+    n = sum(1 for src in _SOURCES for _ in _handlers_with_path_param(src))
+    # Порог поднят со 120 до 170: пока храповик читал один файл, он видел
+    # 119 ручек из 172 — больше трети поверхности было вне защиты.
+    assert n >= 170, f"проверка охватывает лишь {n} хендлеров — фильтр сломался"
 
 
 # ── Проверка самого измерителя ─────────────────────────────────────────────
@@ -321,10 +345,10 @@ def test_every_recognised_gate_exists_and_is_fail_closed():
     # ответу ОТКАЗЫВАЕТ. Это и есть fail-closed.
     _FAIL_CLOSED = ("_safe_count(", "_safe_fetchval(", "_safe_fetchrow(")
     for gate in _ACCESS_GATES:
-        if f"async def {gate}(" in _SRC:
+        if any(f"async def {gate}(" in src for src in _SOURCES):
             # Границы функции — по разбору: срез фиксированной длины рвёт
             # длинную проверку и молча выключает утверждение ниже.
-            body = _gate_source(gate, _SRC)
+            body = _any_gate_source(gate)
             assert body, f"{gate} в списке, но в коде нет"
             assert any(h in body for h in _FAIL_CLOSED), (
                 f"{gate} не пользуется fail-closed помощником — при ошибке базы она "
@@ -338,7 +362,9 @@ def test_every_recognised_gate_exists_and_is_fail_closed():
         assert body, f"{gate} в списке, но в коде нет"
         assert "except" not in body, (
             f"{gate} глотает ошибку базы — при сбое может ОТКРЫТЬ доступ")
-        unguarded = _calls_outside_try(gate, _SRC)
+        unguarded = set()
+        for src in _SOURCES:
+            unguarded |= _calls_outside_try(gate, src)
         assert not unguarded, (
             f"{gate} вызывается вне try в: {sorted(unguarded)} — при сбое базы "
             f"ответ не превратится в отказ")

@@ -12,6 +12,7 @@ import asyncio
 from pathlib import Path
 
 from services import mini_app_api
+from tests.miniapp_source import api_function
 
 
 def _run(coro):
@@ -75,7 +76,9 @@ def test_dashboard_acc_health_admin_aware():
     health-aware SQL по всей платформе — и он учитывает НЕ только trust, а
     мёртвый статус/кулдаун/флуд (durable-сигналы пульса)."""
     import re
-    src = (Path(__file__).resolve().parent.parent / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+    # Ручка уехала в services/mini_app_dashboard.py: берём её по всему
+    # API-слою и парсером, а не куском текста монолита.
+    src = api_function("dashboard")
     m = re.search(r"async def dashboard\(request.*?_res = await asyncio\.gather", src, re.DOTALL)
     assert m, "dashboard не найден"
     body = m.group(0)

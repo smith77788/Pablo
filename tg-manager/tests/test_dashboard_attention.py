@@ -23,7 +23,9 @@ import re
 from tests.miniapp_source import api_routes
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+from tests.miniapp_source import api_source
+
+API = api_source()
 DASH = (ROOT / "mini_app" / "screens" / "dashboard.js").read_text(encoding="utf-8")
 
 

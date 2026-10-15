@@ -14,8 +14,9 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
-_SRC = inspect.getsource(mini_app_api)
+_SRC = api_source()
 
 
 def test_exp_row_query_selects_plan():

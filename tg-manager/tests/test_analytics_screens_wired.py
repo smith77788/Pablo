@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,7 +19,7 @@ def _read(rel: str) -> str:
 
 
 def test_dashboard_endpoint_route_and_shape():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def dashboard_realtime" in api
     assert 'add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)' in api
     seg = api[api.index("async def dashboard_realtime"):api.index("async def audience_analytics")]
@@ -34,7 +35,7 @@ def test_dashboard_endpoint_route_and_shape():
 
 
 def test_audience_endpoint_route_and_shape():
-    api = _read("services/mini_app_api.py")
+    api = api_source()
     assert "async def audience_analytics" in api
     assert 'add_get("/api/miniapp/audience_analytics", audience_analytics)' in api
     seg = api[api.index("async def audience_analytics"):api.index("async def operation_export")]
