@@ -17504,7 +17504,15 @@ async def _exec_mass_invite(
                         _wait = max(1.0, min(float(_dec.wait_sec), 120.0))
                         log.info("mass_invite op=%d: safe-режим пауза чата %.0fс: %s",
                                  op_id, _wait, _dec.reason)
-                        await asyncio.sleep(_wait)
+                        await _pause_watching_for_cancel(
+                            pool, op_id, _wait, "mass_invite_chat_window")
+                        # Раньше срока из этой паузы выходят ТОЛЬКО по отмене — и
+                        # тогда круг обязан закончиться здесь же. Просто пропустить
+                        # паузу нельзя: её назначил governor чата (окно частоты), и
+                        # уже набранный чанк ушёл бы в рассылку раньше, чем чат
+                        # готов принимать — это новый флуд, а не экономия времени.
+                        if await _is_cancelled(pool, op_id):
+                            return
                         continue
 
                 _chunk.append((acc, acc_id, cap, batch, queue, by_phone))
@@ -17798,7 +17806,13 @@ async def _exec_mass_invite(
                 if attempted:
                     _d2 = await _si.can_invite(pool, owner_id, _group_key)
                     if _d2.next_delay_sec > 0:
-                        await asyncio.sleep(min(_d2.next_delay_sec, 120.0))
+                        # Пауза до двух минут: слышит отмену. Выход раньше срока
+                        # не ускоряет приглашения — следующая рассылка идёт только
+                        # после проверки отмены в начале круга `_iter_round`,
+                        # то есть при отмене её уже не будет.
+                        await _pause_watching_for_cancel(
+                            pool, op_id, min(_d2.next_delay_sec, 120.0),
+                            "mass_invite_batch_pace")
 
             step += attempted
             if attempted:

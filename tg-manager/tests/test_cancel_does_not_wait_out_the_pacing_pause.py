@@ -45,18 +45,10 @@ _LONG_S = 30.0
 # username, опубликовать пост), и между ними нет проверки отмены. Ранний
 # выход сделал бы действие раньше, чем разрешает темп, — то есть обменял бы
 # простой флота на риск ограничения, а это не обмен.
-#
-# Две последних — инвайт: там длину назначает governor чата (окно частоты), и
-# выход из неё раньше срока разбирается отдельно, вместе со всей цепочкой
-# `_iter_round`. Инвайт — самая баноопасная операция продукта, и трогать его
-# темп заодно с остальными нельзя.
 _MUST_STAY_WHOLE = {
     ("_exec_global_presence_channel", "pause"),
     ("_exec_global_presence_channel", "_post_delay"),
     ("_exec_bulk_create_channels", "_pub_delay"),
-    ("_exec_mass_invite", "_wait"),
-    ("_iter_round", "_wait"),
-    ("_exec_mass_invite", "min(_d2.next_delay_sec, 120.0)"),
 }
 
 
@@ -163,6 +155,52 @@ def test_the_detector_bites():
         "    await asyncio.sleep(between)\n"
     )
     assert _long_raw_sleeps(sick) == [("_exec_demo", "between", 3, 600.0)]
+
+
+def test_the_invite_window_pause_ends_the_round_on_cancel():
+    """У инвайта ранний выход обязан ОСТАНОВИТЬ круг, а не пропустить паузу.
+
+    Длину этой паузы назначает governor чата (окно частоты приёма). Уже
+    набранный чанк уходит в рассылку сразу после фазы набора, поэтому «вышли
+    из паузы и пошли дальше» означало бы приглашения раньше, чем чат готов
+    принимать — то есть новый флуд вместо экономии времени. Инвайт — самая
+    баноопасная операция продукта, и здесь это не формальность.
+    """
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
+    tree = ast.parse(src)
+    target = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and ast.unparse(node.func).endswith("_pause_watching_for_cancel")
+                and node.args and isinstance(node.args[-1], ast.Constant)
+                and node.args[-1].value == "mass_invite_chat_window"):
+            target = node
+    assert target is not None, (
+        "пауза окна чата у инвайта не найдена — ориентир сменился, поправьте тест")
+    # Границы берём по AST (у оператора есть end_lineno), а не окном в символах:
+    # окно фиксированной длины врёт при любой правке рядом.
+    owner = None
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if fn.lineno <= target.lineno <= fn.end_lineno:
+            if owner is None or fn.end_lineno - fn.lineno < owner.end_lineno - owner.lineno:
+                owner = fn
+    assert owner is not None and owner.name == "_iter_round", (
+        f"пауза переехала в {owner.name if owner else '?'} — проверьте, что круг "
+        "по-прежнему обязан завершаться по отмене")
+    after = [n for n in ast.walk(owner)
+             if isinstance(n, ast.If) and n.lineno > target.lineno
+             and "_is_cancelled" in ast.unparse(n.test)]
+    assert after, "после паузы окна чата нет проверки отмены"
+    nearest = min(after, key=lambda n: n.lineno)
+    assert nearest.lineno - target.end_lineno <= 8, (
+        "проверка отмены стоит далеко от паузы — между ними успели появиться "
+        "операторы, и смысл «вышли по отмене — круг закончен» потерялся")
+    assert any(isinstance(x, ast.Return) for x in ast.walk(nearest)), (
+        "по отмене круг обязан закончиться (return), иначе набранный чанк всё "
+        "равно уйдёт в рассылку раньше окна чата")
 
 
 def test_the_detector_spares_short_pauses():
