@@ -2024,6 +2024,41 @@ async def _deactivate_dead_session(
             )
 
 
+async def _failed_after_the_op_was_closed(
+    pool: "asyncpg.Pool", op_id: int, op_type: str, exc: Exception,
+) -> bool:
+    """Исключение пришло ПОСЛЕ записи терминального статуса? Тогда это не провал.
+
+    Обработчик ошибок в `_run_op_task` накрывает весь успешный путь, включая
+    всё, что идёт после закрытия операции: отчёт владельцу, графики,
+    подписанный аудит, память организма. Одна ошибка там (429 от Bot API на
+    сообщении, недоступный график) превращала ВЫПОЛНЕННУЮ операцию в провал:
+    владелец получал «❌» вслед за «✅», аккаунтам писался неуспех — то есть
+    падал trust и губернатор тормозил весь флот, — а на графике одна операция
+    давала два исхода.
+
+    Сам статус в БД при этом не менялся: и запись провала, и `_maybe_requeue`
+    стоят под `status NOT IN terminal`. То есть от «провала» здесь оставались
+    ровно последствия и ни одного полезного решения.
+
+    Не прочитали статус (None) — считаем, что операция НЕ закрыта, и идём
+    обычным путём разбора провала: доложить о провале, которого не было, хуже
+    промолчать о настоящем.
+    """
+    row = await _retrying_fetchrow(
+        pool, "SELECT status FROM operation_queue WHERE id=$1", op_id,
+        log_ctx=f"[run_op_report_failure op={op_id}]")
+    if row is None or not op_status.is_terminal(row["status"]):
+        return False
+    log.error(
+        "op_worker: op=%d уже закрыта со статусом %s, а отчёт о ней упал (%s) — "
+        "исход не переписываем и провал не докладываем",
+        op_id, row["status"], exc,
+    )
+    _reliability_metric("infragram_op_report_after_close_total", op_type=op_type)
+    return True
+
+
 async def _maybe_requeue(
     pool: asyncpg.Pool, op_id: int, exc: Exception, params: dict, op_type: str,
     bot=None, owner_id: int | None = None,
@@ -5276,6 +5311,20 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             log.exception("op_worker: op %d failed: %s", op_id, e)
             # Немедленно деактивировать аккаунт при AUTH_KEY/SESSION_REVOKED
             await _deactivate_dead_session(pool, e, params)
+
+            # ИСКЛЮЧЕНИЕ ПОСЛЕ ЗАКРЫТИЯ — НЕ ПРОВАЛ ОПЕРАЦИИ. Этот обработчик
+            # накрывает весь успешный путь, включая всё, что идёт ПОСЛЕ записи
+            # терминального статуса: отчёт владельцу, графики, подписанный
+            # аудит, память организма. Одна ошибка там (429 от Bot API на
+            # сообщении, недоступный график) превращала выполненную операцию в
+            # провал: владелец получал «❌» вслед за «✅», аккаунтам писался
+            # неуспех — то есть падал trust и губернатор тормозил ВЕСЬ флот, —
+            # а на графике одна операция давала два исхода. Сам статус в БД при
+            # этом не менялся: и запись провала, и `_maybe_requeue` стоят под
+            # `status NOT IN terminal`. То есть от провала здесь оставались
+            # ровно последствия, и ни одного полезного.
+            if await _failed_after_the_op_was_closed(pool, op_id, op_type, e):
+                return
             # Фиксируем ошибку в Infrastructure Memory
             try:
                 from services.infra_memory import record_account_op
