@@ -8963,7 +8963,9 @@ async function cwStart(){
   try{
     const r=await api('/api/miniapp/chatwarmup/session',{method:'POST',
       body:JSON.stringify({chat_ref:chat,account_ids:[...CW_ACCS],mode:CW_MODE,topics:topics,intensity:CW_INT})});
-    toast(`💬 Разогрев запущен: ${r.accounts||0} акк.`);
+    // Потолок флота на чат (30) раньше срабатывал молча.
+    toast(`💬 Разогрев запущен: ${r.accounts||0} акк.`
+      + (r.omitted>0?` · не вошли: ${r.omitted}`:''));
     document.getElementById('cwChat').value='';
     cwLoad();
   }catch(e){toast('⚠️ '+errRu(e,'Ошибка'));}
@@ -20763,7 +20765,14 @@ async function submitPhoneCheck() {
   btn.disabled=true; btn.textContent='Отправляю…';
   try {
     const r = await api('/api/miniapp/phone_check',{method:'POST',body:JSON.stringify({phones})});
-    toast(`📞 Запущена проверка ${r.count} ${plural(r.count,'номера','номеров','номеров')} (#${r.op_id})`);
+    // Потолок партии и отброшенное считаем вслух: раньше из двух тысяч номеров
+    // проверялись первые пятьсот, и тост сообщал только это число.
+    const extra = [];
+    if (r.truncated>0) extra.push(`осталось на следующий раз: ${r.truncated}`);
+    if (r.duplicates>0) extra.push(`дублей: ${r.duplicates}`);
+    if (r.invalid>0) extra.push(`не номера: ${r.invalid}`);
+    toast(`📞 Запущена проверка ${r.count} ${plural(r.count,'номера','номеров','номеров')} (#${r.op_id})`
+      + (extra.length?` · ${extra.join(' · ')}`:''));
     errEl.textContent='';
     openPhoneChecker();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }

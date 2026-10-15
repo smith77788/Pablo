@@ -8756,6 +8756,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("chatwarmup_sessions uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    _CW_FLEET_CAP = 30         # сколько аккаунтов максимум греют один чат
+
     async def chatwarmup_create(request: web.Request) -> web.Response:
         """Создать сессию разогрева: {chat_ref, account_ids[], mode, topics, intensity}.
         Флот вступит в чат и начнёт осмысленный диалог (фоновый цикл chat_warmup)."""
@@ -8775,7 +8777,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         acc_ids = await _alive_accounts(uid, ids or None)
         if not acc_ids:
             return _err("Выберите хотя бы один живой аккаунт для разогрева", 400)
-        acc_ids = acc_ids[:30]   # разумный потолок флота на один чат
+        # Потолок флота на один чат был молчаливым: отметив 50 аккаунтов,
+        # владелец получал разогрев тридцатью и ни слова об остальных.
+        requested_accs = len(acc_ids)
+        acc_ids = acc_ids[:_CW_FLEET_CAP]
         from services import chat_warmup
         mode = chat_warmup.valid_mode(body.get("mode"))
         topics = validate_string(body.get("topics"), max_len=500) or ""
@@ -8785,7 +8790,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             s = await chat_warmup.create_session(pool, uid, chat_ref, acc_ids,
                                                  mode=mode, topics=topics, intensity=intensity)
-            return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids)})
+            return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids),
+                               "requested": requested_accs,
+                               "omitted": requested_accs - len(acc_ids)})
         except Exception:
             log.exception("chatwarmup_create uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -9936,6 +9943,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Phone Checker ─────────────────────────────────────────────────────────
 
+    _PHONES_RAW_MAX = 20000    # потолок размера вставки; режется ТОЛЬКО по разделителю
+    _PHONES_BATCH = 500        # сколько номеров уходит в одну операцию проверки
+
     async def phone_check_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -9944,23 +9954,49 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             return _err("Не удалось разобрать запрос", 400)
-        phones_raw = validate_string(body.get("phones"), max_len=10000)
-        if not phones_raw:
+        raw = body.get("phones")
+        raw = raw.strip() if isinstance(raw, str) else ""
+        if not raw:
             return _err("Укажите номера телефонов", 400)
-        phones = [p.strip() for p in phones_raw.replace(",", "\n").split("\n") if p.strip()]
-        # Validate phone format (digits, spaces, dashes, plus)
-        phones = [re.sub(r'[^\d+\-() ]', '', p) for p in phones]
-        phones = [p for p in phones if len(p) >= 5]
-        if not phones:
+        # Раньше вставку резал validate_string(max_len=10000) — ПОСЕРЕДИНЕ номера:
+        # обрубок «+7916123» проходил фильтр длины и уезжал на проверку как ДРУГОЙ
+        # номер, то есть ответ приходил про чужой телефон. Режем только по границе
+        # разделителя, а что не влезло — честно считаем.
+        if len(raw) > _PHONES_RAW_MAX:
+            head = raw[:_PHONES_RAW_MAX]
+            edge = max(head.rfind("\n"), head.rfind(","))
+            if edge <= 0:
+                return _err("Номера идут без разделителей — поставьте запятую или "
+                            "перевод строки", 400)
+            raw = head[:edge]
+        parts = [p.strip() for p in raw.replace(",", "\n").split("\n") if p.strip()]
+        cleaned = [re.sub(r'[^\d+\-() ]', '', p) for p in parts]
+        valid = [p for p in cleaned if len(p) >= 5]
+        invalid = len(parts) - len(valid)
+        # Дубль номера — это лишний запрос в Telegram по тому же человеку: платим
+        # лимитом и риском дважды. Сравниваем по цифрам, а не по написанию.
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for ph in valid:
+            key = re.sub(r"\D", "", ph)
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(ph)
+        duplicates = len(valid) - len(uniq)
+        if not uniq:
             return _err("Нет валидных номеров", 400)
-        # Limit batch size
-        phones = phones[:500]
+        phones = uniq[:_PHONES_BATCH]
+        truncated = len(uniq) - len(phones)
         try:
             label = f"Проверка {len(phones)} номеров"
             op_id = await _obus.submit(
                 pool, uid, "phone_check", {"phones": phones},
                 total_items=len(phones), label=label)
-            return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(phones)})
+            return _json_resp({"ok": True, "op_id": op_id, "label": label,
+                               "count": len(phones), "total": len(uniq),
+                               "truncated": truncated, "duplicates": duplicates,
+                               "invalid": invalid})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
             # честный 403 с причиной вместо сырого 500 с внутренним текстом.
