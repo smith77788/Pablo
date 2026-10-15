@@ -15,11 +15,19 @@ from services.contacts_hub import crm_engine
 from services.contacts_hub.crm_engine import _coerce_dt, upsert_crm
 
 
+# id контакта — настоящий uuid: запись CRM проверяет его в unified_contacts.
+CID = "11111111-1111-1111-1111-111111111111"
+
+
 class RecPool:
     """Фейк-пул: fetchrow → заданный existing; execute запоминает биндинги."""
     def __init__(self, existing=None):
         self._existing = existing
         self.execute_calls = []
+
+    async def fetchval(self, query, *args):
+        # Проверка владельца контакта (crm_engine._require_contact).
+        return 1 if "unified_contacts" in query else None
 
     async def fetchrow(self, query, *args):
         return self._existing
@@ -67,7 +75,7 @@ def test_coerce_bad_string_raises():
 @pytest.mark.asyncio
 async def test_insert_branch_binds_datetime_not_string():
     pool = RecPool(existing=None)  # нет записи → INSERT
-    await upsert_crm(pool, 1, "c1", {"next_reminder_at": "2026-07-25T15:00:00Z"})
+    await upsert_crm(pool, 1, CID, {"next_reminder_at": "2026-07-25T15:00:00Z"})
     # найти INSERT-вызов и проверить, что среди аргументов есть datetime, не str
     ins = [c for c in pool.execute_calls if "INSERT INTO contact_crm" in c[0]]
     assert ins, "ожидался INSERT"
@@ -80,7 +88,7 @@ async def test_insert_branch_binds_datetime_not_string():
 @pytest.mark.asyncio
 async def test_update_branch_binds_datetime_not_string():
     pool = RecPool(existing={"stage": "lead", "custom_fields": "{}"})  # есть → UPDATE
-    await upsert_crm(pool, 1, "c1", {"next_reminder_at": "2026-07-25T15:00:00Z"})
+    await upsert_crm(pool, 1, CID, {"next_reminder_at": "2026-07-25T15:00:00Z"})
     upd = [c for c in pool.execute_calls if c[0].strip().startswith("UPDATE contact_crm")]
     assert upd, "ожидался UPDATE"
     args = upd[0][1]
@@ -91,11 +99,11 @@ async def test_update_branch_binds_datetime_not_string():
 async def test_bad_date_raises_valueerror():
     pool = RecPool(existing=None)
     with pytest.raises(ValueError):
-        await upsert_crm(pool, 1, "c1", {"next_reminder_at": "totally-bad"})
+        await upsert_crm(pool, 1, CID, {"next_reminder_at": "totally-bad"})
 
 
 @pytest.mark.asyncio
 async def test_no_ts_fields_unchanged():
     pool = RecPool(existing=None)
-    await upsert_crm(pool, 1, "c1", {"stage": "won"})  # без дат — не падает
+    await upsert_crm(pool, 1, CID, {"stage": "won"})  # без дат — не падает
     assert pool.execute_calls

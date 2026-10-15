@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -75,12 +76,31 @@ def _segment_where(owner_id, f: dict):
             "NOT (last_seen_type = 'offline' AND last_seen_at IS NOT NULL "
             "AND last_seen_at < now() - interval '30 days')")
     if f.get('search'):
-        conds.append(
-            f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
-            f'username ILIKE ${idx} OR display_name ILIKE ${idx} OR '
-            f'CAST(telegram_user_id AS TEXT) ILIKE ${idx} OR '
-            f'notes ILIKE ${idx} OR company ILIKE ${idx})')
-        params.append(f"%{f['search']}%"); idx += 1
+        # Поиск по словам, а не по фразе целиком, и С ТЕГАМИ.
+        #
+        # ЧТО БЫЛО: одно условие `ILIKE '%вся фраза%'` по семи колонкам. Два
+        # следствия, оба выглядели как «контакта нет»:
+        #  * «петров иван» не находило Ивана Петрова — такой подстроки нет ни в
+        #    одной колонке (спасало только display_name, если порядок совпал);
+        #  * тег не искался вообще. Владелец помечает контакты тегом `vip`,
+        #    набирает «vip» в поиске и не находит никого, хотя поиск в БОТЕ по
+        #    тегам ищет (search_engine). Та же база, тот же тег, разный ответ.
+        #
+        # Теперь: каждое слово обязано где-то совпасть (И между словами), а
+        # совпадением считается и точный тег. Условие собирается ЗДЕСЬ, то есть
+        # остаётся общим для списка и для рабочего среза: «что вижу» и «на что
+        # применяю действие» по-прежнему считаются одним запросом.
+        words = [w for w in re.split(r'\s+', str(f['search']).strip().lower()) if w]
+        for w in words:
+            conds.append(
+                f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
+                f'username ILIKE ${idx} OR display_name ILIKE ${idx} OR '
+                f'CAST(telegram_user_id AS TEXT) ILIKE ${idx} OR '
+                f'notes ILIKE ${idx} OR company ILIKE ${idx} OR '
+                f'${idx + 1} = ANY(tags))')
+            params.append(f'%{w}%')
+            params.append(w)
+            idx += 2
     if f.get('favorite_only'):
         conds.append('is_favorite = TRUE')
     if f.get('premium_only'):

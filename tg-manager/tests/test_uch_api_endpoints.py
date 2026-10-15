@@ -1002,10 +1002,13 @@ class TestCRMEngine:
     @pytest.mark.asyncio
     async def test_log_crm_activity(self):
         from services.contacts_hub.crm_engine import log_crm_activity
-        pool = FakePool()
-        await log_crm_activity(pool, 123, "uuid-1", "call", "Called client")
-        assert len(pool._calls) == 1
-        assert "INSERT INTO contact_crm_activity" in pool._calls[0][1]
+        # fetch_val=1 — ответ проверки «контакт принадлежит владельцу»
+        # (crm_engine._require_contact), id контакта — настоящий uuid.
+        pool = FakePool(fetch_val=1)
+        await log_crm_activity(pool, 123, "11111111-1111-1111-1111-111111111111", "call", "Called client")
+        inserts = [c for c in pool._calls
+                   if "INSERT INTO contact_crm_activity" in c[1]]
+        assert len(inserts) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

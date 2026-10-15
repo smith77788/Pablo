@@ -80,10 +80,21 @@ def test_the_purchase_fires_its_virtual_event():
 
 # ── Ручная дверь ───────────────────────────────────────────────────────────
 
+# Запись CRM требует, чтобы контакт существовал и принадлежал владельцу
+# (crm_engine._require_contact): id — настоящий uuid, а проверка владельца
+# отвечает «да».
+CID = "11111111-1111-1111-1111-111111111111"
+
+
 class _Pool:
     def __init__(self, existing_stage=None):
         self.existing_stage = existing_stage
         self.executed: list[str] = []
+
+    async def fetchval(self, sql, *args):
+        if "unified_contacts" in sql:
+            return 1
+        return None
 
     async def fetchrow(self, sql, *args):
         if "contact_crm" in sql and self.existing_stage is not None:
@@ -107,8 +118,8 @@ async def test_manual_stage_change_signals_the_layer(monkeypatch):
         return {"value": "purchased"}
 
     monkeypatch.setattr(V, "signal", _sig)
-    await crm_engine.upsert_crm(_Pool("negotiation"), 42, "c-1", {"stage": "won"})
-    assert seen == [("c-1", "paid", "crm_manual")], (
+    await crm_engine.upsert_crm(_Pool("negotiation"), 42, CID, {"stage": "won"})
+    assert seen == [(CID, "paid", "crm_manual")], (
         "ручная смена стадии слою не сообщается: владелец перетащил человека в "
         "«Выиграно», а слой продолжает считать его «Готов купить»")
 
@@ -121,7 +132,7 @@ async def test_unchanged_stage_is_quiet(monkeypatch):
         return None
 
     monkeypatch.setattr(V, "signal", _sig)
-    await crm_engine.upsert_crm(_Pool("won"), 42, "c-1", {"stage": "won"})
+    await crm_engine.upsert_crm(_Pool("won"), 42, CID, {"stage": "won"})
     assert seen == [], "сигнал на несменившуюся стадию — лишний шум в истории"
 
 
@@ -133,7 +144,7 @@ async def test_a_change_without_a_stage_is_quiet(monkeypatch):
         return None
 
     monkeypatch.setattr(V, "signal", _sig)
-    await crm_engine.upsert_crm(_Pool("lead"), 42, "c-1",
+    await crm_engine.upsert_crm(_Pool("lead"), 42, CID,
                                 {"next_reminder_text": "позвонить"})
     assert seen == []
 
@@ -144,7 +155,7 @@ async def test_the_manual_door_never_breaks_the_save(monkeypatch):
 
     monkeypatch.setattr(V, "signal", _boom)
     pool = _Pool("lead")
-    await crm_engine.upsert_crm(pool, 42, "c-1", {"stage": "won"})
+    await crm_engine.upsert_crm(pool, 42, CID, {"stage": "won"})
     assert any("UPDATE contact_crm" in q for q in pool.executed), (
         "сохранение стадии упало из-за слоя — слой вспомогательный")
 

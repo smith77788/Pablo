@@ -12,7 +12,8 @@ from services import intent_sensor as ins
 
 class _FakePool:
     """Мини-эмуляция: контакт по tg_id, его теги и CRM-стадия."""
-    def __init__(self, rules, contact_id="c-1", tags=None, stage=None):
+    def __init__(self, rules,
+                 contact_id="11111111-1111-1111-1111-111111111111", tags=None, stage=None):
         self._rules = rules
         self._cid = contact_id
         self._tags = list(tags or [])
@@ -35,6 +36,10 @@ class _FakePool:
     async def fetchval(self, sql, *a):
         if "stage FROM contact_crm" in sql:
             return self._stage
+        # Запись CRM требует, чтобы контакт принадлежал владельцу
+        # (crm_engine._require_contact).
+        if "unified_contacts WHERE id" in sql:
+            return 1
         return None
 
     async def execute(self, sql, *a):
