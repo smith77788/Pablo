@@ -33,10 +33,11 @@ import pytest
 
 from services import mini_app_api
 from tests.miniapp_source import miniapp_html, source_of
+from tests.miniapp_source import api_source
 
 
 def _api_src() -> str:
-    return inspect.getsource(mini_app_api)
+    return api_source()
 
 
 def _fn(name: str) -> str:

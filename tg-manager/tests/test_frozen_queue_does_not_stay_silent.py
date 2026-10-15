@@ -38,6 +38,7 @@ import asyncio
 import inspect
 
 import pytest
+from tests.miniapp_source import api_source
 
 
 # ── Заглушка пула ────────────────────────────────────────────────────────────
@@ -280,7 +281,7 @@ def test_the_global_check_runs_even_without_owners():
 def test_the_miniapp_shows_the_frozen_queue():
     from services import mini_app_api
 
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     assert 'add("ops_frozen"' in src, (
         "мини-апп по-прежнему показывает только «ожидает» — владелец не может "
         "отличить нормальную очередь от остановленного исполнителя"

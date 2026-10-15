@@ -14,9 +14,10 @@ import re
 from pathlib import Path
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
 HTML = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
-SRC = inspect.getsource(mini_app_api)
+SRC = api_source()
 
 
 def test_account_detail_returns_warmup_plan_id():

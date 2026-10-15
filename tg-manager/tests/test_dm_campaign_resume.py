@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from services import mini_app_api, dm_engine
+from tests.miniapp_source import api_source
 
 HTML = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read_text(encoding="utf-8")
 
@@ -24,7 +25,7 @@ def test_paused_campaign_has_resume_button():
 
 
 def test_launch_backend_allows_non_running():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def dm_campaign_launch\(request.*?\n(.*?)\n    async def dm_campaign_delete", src, re.DOTALL)
     assert m, "dm_campaign_launch не найден"
     body = m.group(1)

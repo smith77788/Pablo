@@ -26,16 +26,29 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 
-# Снято 15.10.2026, после выноса дашборда: 55 наборов. Только вниз.
-CEILING = 55
+# Снято 15.10.2026, после выноса рассылок и прогрева. Только вниз.
+CEILING = 123
 
-PIN = re.compile(r'["\']services[/\\]mini_app_api\.py["\']')
+# Имя файла КАК ЛИТЕРАЛ — в любом виде, которым его собирают в путь:
+# `"services/mini_app_api.py"`, `ROOT / "services" / "mini_app_api.py"`,
+# `os.path.join(ROOT, "services", "mini_app_api.py")`.
+#
+# Первая версия этой проверки искала только склеенный путь одной строкой и
+# насчитала 55 наборов вместо 123 — то есть собственный измеритель видел
+# меньше половины долга, которую взялся сторожить. Ровно тот случай из
+# CLAUDE.md: проверять измеритель на заведомо известном примере ПРЕЖДЕ, чем
+# верить его числу. Заведомый пример здесь — `grep -l '"mini_app_api.py"'`.
+#
+# Упоминание имени в прозе (docstring, комментарий «переехало из
+# mini_app_api.py») под литерал не попадает: кавычек вокруг него нет.
+PIN = re.compile(r'["\']mini_app_api\.py["\']')
 
 
 def _pinned() -> list[str]:
     out = []
     for path in sorted(TESTS.glob("test_*.py")):
-        if path.name == "miniapp_source.py":
+        # Этот файл сам носит имя монолита в своём регулярном выражении.
+        if path.name in ("miniapp_source.py", pathlib.Path(__file__).name):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if PIN.search(text):

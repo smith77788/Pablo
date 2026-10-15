@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 from services import flood_engine, mini_app_api
+from tests.miniapp_source import api_source
 
 
 class _CapPool:
@@ -58,7 +59,7 @@ def test_cooldown_update_independent_of_log_insert():
 
 
 def test_operation_status_returns_account_impact_scoped():
-    src = inspect.getsource(mini_app_api)
+    src = api_source()
     m = re.search(r"async def operation_status\(.*?\n(.*?)\n    async def operation_log",
                   src, re.DOTALL)
     assert m, "operation_status не найден"

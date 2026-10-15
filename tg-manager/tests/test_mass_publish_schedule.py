@@ -17,8 +17,9 @@ import inspect
 import re
 
 from services import mini_app_api
+from tests.miniapp_source import api_source
 
-SRC = inspect.getsource(mini_app_api)
+SRC = api_source()
 
 
 def _fn(name, after=None):
