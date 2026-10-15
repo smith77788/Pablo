@@ -133,3 +133,74 @@ def test_every_idempotency_door_reads_through_the_closed_one():
             "уже сделанных действий")
         assert "_safe_fetch(" not in body, (
             f"{door} оставила за собой fail-open чтение журнала")
+
+
+# ── Та же дыра с другой стороны: пропавшая отметка «сделано» ────────────────
+
+
+class _WritePool:
+    """Пул, который падает на первых `fail` записях, а дальше пишет."""
+
+    def __init__(self, fail: int):
+        self.fail = fail
+        self.writes = 0
+
+    async def execute(self, query, *args):
+        self.writes += 1
+        if self.writes <= self.fail:
+            raise ConnectionResetError("БД отвалилась на записи")
+        return "INSERT 0 1"
+
+
+def test_a_lost_mark_is_retried_and_then_said_out_loud(counted):
+    """Отметка «цель сделана» пропала — об этом обязан знать график.
+
+    Запись идёт ПОСЛЕ доставки: цель уже отработана, отменять нечего, падать
+    нельзя (потеряли бы остаток прогона). Но пропавшая отметка означает, что
+    возобновлённый прогон сделает эту цель второй раз, а это второе сообщение
+    живому человеку. Раньше оставался только warning в логе.
+    """
+    pool = _WritePool(fail=2)
+    res = _run(op_worker._journal_write(
+        pool, "INSERT INTO operation_log(op_id, target, status) VALUES($1,$2,'ok')",
+        777, "@ivan", log_ctx="[t]", where="bulk_dm"))
+    assert res == "ERROR", "дверь обязана отвечать тем же, чем прежняя запись"
+    assert pool.writes == 2, f"блип обязан лечиться повтором: записей {pool.writes}"
+    assert ("infragram_journal_write_failures_total", "bulk_dm") in counted, (
+        f"риск дубля не виден на графике: {counted}")
+
+
+def test_a_single_blip_on_the_write_is_healed():
+    """Один сбой из двух — отметка всё-таки записана, дубля не будет."""
+    pool = _WritePool(fail=1)
+    assert _run(op_worker._journal_write(pool, "INSERT INTO operation_log", 1)) == "INSERT 0 1"
+    assert pool.writes == 2
+
+
+def test_no_journal_write_silently_swallows_a_failure():
+    """Храповик: новая запись в журнал не завелась на молчаливом глотателе.
+
+    Проверяем по AST, а не по тексту окна: записей в журнал больше пятидесяти,
+    и любая новая, сделанная «как рядом», вернула бы дыру целиком.
+    """
+    src = inspect.getsource(op_worker)
+    tree = ast.parse(src)
+    swallowed = []
+    through_door = 0
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)):
+            continue
+        q = next((a.value for a in n.args
+                  if isinstance(a, ast.Constant) and isinstance(a.value, str)), "")
+        if "INSERT INTO operation_log" not in q:
+            continue
+        if n.func.id == "_safe_execute":
+            swallowed.append(n.lineno)
+        elif n.func.id == "_journal_write":
+            through_door += 1
+    assert not swallowed, (
+        "записи в журнал целей через молчаливое _safe_execute (строки "
+        f"{swallowed}): пропавшая отметка обернётся повтором уже сделанного")
+    assert through_door >= 30, (
+        f"через дверь журнала идёт всего {through_door} записей — похоже, "
+        "пробник перестал их видеть, а не код починился")

@@ -107,6 +107,43 @@ class JournalUnreadable(RuntimeError):
 _JOURNAL_READ_RETRY_DELAY_S = 0.5
 
 
+async def _journal_write(
+    pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
+) -> str:
+    """Записать отметку в журнал целей: один повтор, затем ГРОМКО.
+
+    Журнал — источник правды о том, что уже сделано: по нему двери
+    идемпотентности решают, какие цели пропустить на возобновлённом прогоне.
+    Писались отметки обычным `_safe_execute`, а он на сбое БД пишет warning и
+    возвращает "ERROR" — то есть пропавшая отметка «ok» не оставляла следа, и
+    следующий прогон делал эту цель ВТОРОЙ раз: второе сообщение живому
+    человеку, второй пост в канал, второе приглашение.
+
+    Симметрично чтению (`_journal_fetch`), но решение другое. Чтение может
+    отложить всю работу, потому что ещё ничего не сделано. Запись идёт ПОСЛЕ
+    доставки: цель уже отработана, отменять нечего, и падать здесь значило бы
+    потерять ещё и остаток прогона. Поэтому повтор (блипы лечатся им), а
+    дальше — log.error и счётчик, чтобы риск дубля был виден на графике, а не
+    только в логе.
+    """
+    last: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            return await pool.execute(query, *args)
+        except Exception as e:
+            last = e
+            if attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    report_error(last, extra={"context": f"op_worker_journal_write{log_ctx}",
+                              "query": query[:100]})
+    log.error(
+        "op_worker: отметка в журнале целей не записалась%s (%s) — повторный "
+        "прогон может сделать эту цель второй раз", log_ctx, last,
+    )
+    _reliability_metric("infragram_journal_write_failures_total", where=where or "journal")
+    return "ERROR"
+
+
 async def _journal_fetch(
     pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
 ) -> list[asyncpg.Record]:
@@ -1841,7 +1878,7 @@ async def _record_network_isolation(
             log,
             f"op_worker: account_health network isolation failed for account_id={account_id}",
         )
-    await _safe_execute(
+    await _journal_write(
         pool,
         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,0,$2,'error',$3)",
         operation_id,
@@ -3208,6 +3245,9 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "суточный лимит аккаунта — счёт сделанного за сутки не прочитался, и "
         "на том прогоне лимит не действовал: аккаунт мог сделать дневную норму "
         "второй раз",
+    "infragram_journal_read_failures_total":
+        "журнал сделанного — не прочитался, и операция отложена на повтор: "
+        "так она не повторит то, что уже сделала",
     "infragram_budget_write_failures_total":
         "суточный счёт действий аккаунта — лимит недосчитает сделанное, и "
         "следующая операция может взять аккаунт сверх него",
@@ -5932,7 +5972,7 @@ async def _exec_mass_publish(
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
                 failed_channels.append(ch_label)
-            await _safe_execute(
+            await _journal_write(
                     pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,'error',$4)",
@@ -6237,7 +6277,7 @@ async def _exec_mass_publish(
                     await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_flood failed")
-            await _safe_execute(
+            await _journal_write(
                     pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,'error',$4)",
@@ -6508,7 +6548,7 @@ async def _exec_bulk_join_inner(
                     # писать «исправьте прокси» — это уводит чинить несуществующее.
                     _logmsg, _usermsg = _proxy_skip_reason(acc)
                     log.warning("bulk_join: acc=%s %s", acc_dict.get("phone", "?"), _logmsg)
-                    await _safe_execute(
+                    await _journal_write(
                         pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
                         " VALUES($1,$2,$3,'error',$4)",
@@ -6645,7 +6685,7 @@ async def _exec_bulk_join_inner(
                         acc_dict.get("phone"),
                         err_str,
                     )
-                await _safe_execute(
+                await _journal_write(
                         pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
@@ -6776,7 +6816,7 @@ async def _exec_find_contact(
         return {"status": "failed", "summary": "⚠️ Нет свободных аккаунтов для поиска."}
 
     async def _log(target: str, status: str, message: str) -> None:
-        await _safe_execute(
+        await _journal_write(
             pool,
             "INSERT INTO operation_log(op_id, step_num, target, status, message)"
             " VALUES($1,0,$2,$3,$4)",
@@ -7100,7 +7140,7 @@ async def _exec_bulk_leave(
                 if res.get("proxy_error") and proxy_mode == "bound":
                     _logmsg, _usermsg = _proxy_skip_reason(acc)
                     log.warning("bulk_leave: acc=%s %s", acc_dict.get("phone", "?"), _logmsg)
-                    await _safe_execute(
+                    await _journal_write(
                         pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message)"
                         " VALUES($1,$2,$3,'error',$4)",
@@ -7173,7 +7213,7 @@ async def _exec_bulk_leave(
                         acc_dict.get("phone"),
                         err_str,
                     )
-                await _safe_execute(
+                await _journal_write(
                         pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
@@ -9355,7 +9395,7 @@ async def _exec_bulk_create_channels(
                 created_count += 1
             else:
                 err_msg = result if isinstance(result, str) else str(result)
-                await _safe_execute(
+                await _journal_write(
                         pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id,
@@ -9624,7 +9664,7 @@ async def _exec_bot_factory_multi(
                     f"@{actual_uname}")
             else:
                 failed_count += 1
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
@@ -9877,7 +9917,7 @@ async def _exec_bot_factory(
                             continue
 
                 failed_count += 1
-                await _safe_execute(
+                await _journal_write(
                         pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
@@ -10704,7 +10744,7 @@ async def _exec_seed_presence_pack(
             else:
                 fail += 1
                 fail_names.append(chan_name)
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
@@ -10860,7 +10900,7 @@ async def _exec_bulk_seo_apply(
                 pool, op_id, idx, f"ch#{chan_id}", ("SEO: " + applied)[:200])
         else:
             fail_count += 1
-            await _safe_execute(pool,
+            await _journal_write(pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,'error',$4)",
                 op_id, idx, f"ch#{chan_id}", (res.get("error") or "не удалось")[:200])
@@ -11049,7 +11089,7 @@ async def _exec_group_announce(
             # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
             # дневной лимит аккаунта и лишний повод для флуда.
         async def _log_grp(step: int, key: str, ok: bool, msg: str = "") -> None:
-            await _safe_execute(
+            await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,$4,$5)",
@@ -11259,7 +11299,7 @@ async def _exec_bulk_dm_adhoc(
             Раньше разовая рассылка не писала НИ ОДНОЙ строки: пользователь
             видел только «✅ N ❌ M» и не мог узнать, кому именно не дошло.
             """
-            await _safe_execute(
+            await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,$4,$5)",
@@ -11577,7 +11617,7 @@ async def _exec_bulk_post_to_channel(
         # публиковал в канал второй раз (дубль у подписчиков, сожжённый дневной
         # лимит аккаунта и лишний повод для флуда).
         async def _log_acc(step: int, key: str, ok: bool, msg: str = "") -> None:
-            await _safe_execute(
+            await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,$4,$5)",
@@ -12201,7 +12241,7 @@ async def _exec_bulk_post_chans(
             # публикация туда, где пост уже стоит: дубль у подписчиков, сожжённый
             # дневной лимит аккаунта и лишний повод для флуда.
         async def _log_ch(step: int, key: str, ok: bool, msg: str = "") -> None:
-            await _safe_execute(
+            await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,$4,$5)",
@@ -12714,7 +12754,7 @@ async def _exec_check_accounts_health(
         _verdict = _STATUS_LABELS.get(status, status)
         _reason = (result.get("reason") or "").strip()
         _log_msg = f"{_verdict}{(' — ' + _reason) if _reason else ''}"
-        await _safe_execute(
+        await _journal_write(
             pool,
             "INSERT INTO operation_log(op_id, step_num, target, status, message) "
             "VALUES($1,$2,$3,$4,$5)",
@@ -13011,7 +13051,7 @@ async def _exec_check_owned_restrictions(
                       or (f"@{ent['username']}" if ent.get("username") else str(ent["id"])))
             _label = f"{_KIND_RU.get(ent['kind'], ent['kind'])} «{_title}»"
             _log_msg = f"{verdict['label']} — {verdict['reason_ru']}"
-            await _safe_execute(
+            await _journal_write(
                 pool,
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,$4,$5)",
@@ -13547,7 +13587,7 @@ async def _exec_scan_owned_resources(
                     _lstatus = "skip"
                 else:
                     _lstatus = "error"
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,$4,$5)",
@@ -14390,7 +14430,7 @@ async def _exec_promote_all_admins(
                 fail_count += 1
                 _txt = _why_ru.get(_why, "не удалось выдать права")
                 _reasons[_txt] = _reasons.get(_txt, 0) + 1
-                await _safe_execute(
+                await _journal_write(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)", op_id, idx + 1, _target, _txt)
                 # Дальше этот отказ повторится у всех остальных — не жжём
@@ -14530,7 +14570,7 @@ async def _exec_boost_views(
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, _acc_key, (res.get("error") or "")[:200],
@@ -14664,7 +14704,7 @@ async def _exec_boost_reactions(
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, _acc_key, (res.get("error") or "")[:200],
@@ -14770,7 +14810,7 @@ async def _exec_boost_stories(
             else:
                 fail_count += 1
                 await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, _acc_key, (res.get("error") or "")[:200],
@@ -15176,7 +15216,7 @@ async def _exec_boost_subscribers(
                 if res.get("error") and not res.get("already_member"):
                     fail_count += 1
                     await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                    await _safe_execute(
+                    await _journal_write(
                         pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                         op_id, idx, _acc_key, (res.get("error") or "")[:200],
@@ -15304,7 +15344,7 @@ async def _exec_boost_bot_starts(
                 if res.get("error"):
                     fail_count += 1
                     await _record_boost_flood(pool, acc["id"], res.get("error") or "", op_id)
-                    await _safe_execute(
+                    await _journal_write(
                         pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                         op_id, idx, _acc_key, (res.get("error") or "")[:200],
@@ -16504,7 +16544,7 @@ async def _exec_mass_invite(
         if _promoter is None and _admin_probe_ok:
             # Аккаунты подключились и ответили — но ни у кого нет права промоута.
             _promote_skipped_no_admin = bool(_auto_promote)
-            await _safe_execute(
+            await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','skip',$2)", op_id,
                 "автовыдача админки пропущена: ни один инвайтер не создатель/админ чата "
@@ -16513,7 +16553,7 @@ async def _exec_mass_invite(
             # Ни один аккаунт не подключился → проверить права было невозможно.
             # НЕ утверждаем «админа нет» (это ввело бы в заблуждение — как в жалобе,
             # где админ был, но флот не подключился). Причину покажет блок сессии/сети.
-            await _safe_execute(
+            await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','skip',$2)", op_id,
                 "проверка прав админа не выполнена: ни один аккаунт не подключился "
@@ -16636,7 +16676,7 @@ async def _exec_mass_invite(
                 _promote_msg += (f"; у чата закончились места админа ({len(_admin_seats)}) — "
                                  "остальные аккаунты получат права по очереди, по мере того как "
                                  "отработавшие свой батч их освобождают")
-            await _safe_execute(
+            await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'promote','ok',$2)", op_id, _promote_msg)
 
@@ -16782,7 +16822,7 @@ async def _exec_mass_invite(
                     log_exc_swallow(log, f"mass_invite op={op_id}: overflow link export")
             log.info("mass_invite op=%d: канал исчерпан (%s) — переходим в канал "
                      "резерва %s", op_id, reason[:100], group[:80])
-            await _safe_execute(
+            await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'overflow','ok',$2)", op_id,
                 f"канал исчерпан ({reason[:120]}) → следующий канал резерва: {group[:120]}")
@@ -17700,7 +17740,7 @@ async def _exec_mass_invite(
                     _tgt, _msg = _raw.split(": ", 1)
                 else:
                     _tgt, _msg = "—", _raw
-                await _safe_execute(
+                await _journal_write(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'fail',$4)", op_id, step, _tgt[:120], _msg[:200])
 
@@ -18019,7 +18059,7 @@ async def _exec_mass_invite(
                 # «добавлено+ошибок» превышал размер аудитории).
                 total_fail = max(0, total_fail - _trick_ok)
                 _still_blocked = _tried_blocked + _never_tried
-                await _safe_execute(
+                await _journal_write(
                     pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,0,'promote_trick',$2,$3)", op_id,
                     "ok" if _trick_ok else "fail",
@@ -18055,7 +18095,7 @@ async def _exec_mass_invite(
     if _admins_left:
         log.warning("mass_invite op=%d: права админа не сняты у %d человек",
                     op_id, len(_admins_left))
-        await _safe_execute(
+        await _journal_write(
             pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
             "VALUES($1,0,'promote_trick',$2,$3)", op_id, "fail",
             "права админа не сняты: " + ", ".join(str(x) for x in _admins_left[:50]))
@@ -18164,7 +18204,7 @@ async def _exec_mass_invite(
         # основном цикле — переводим их из провала в успех (без двойного счёта).
         total_fail = max(0, total_fail - _link_fallback_ok)
         if _uniq_fallback:
-            await _safe_execute(
+            await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'link_fallback',$2,$3)", op_id,
                 "ok" if _link_fallback_ok else "fail",
@@ -18647,7 +18687,7 @@ async def _exec_mass_report(
                     _acc_key)
             else:
                 fail_count += 1
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                     op_id, idx, _acc_key, (res.get("error") or "")[:200],
@@ -18741,7 +18781,7 @@ async def _exec_content_clone(
     # (см. ниже), и следующий прогон начинал список сначала — половина каналов
     # получала дубль постов.
     async def _log_tgt(step: int, key: str, ok: bool, msg: str = "") -> None:
-        await _safe_execute(
+        await _journal_write(
             pool,
             "INSERT INTO operation_log(op_id, step_num, target, status, message) "
             "VALUES($1,$2,$3,$4,$5)",
@@ -18930,7 +18970,7 @@ async def _exec_ai_comment(
             else:
                 fail_count += 1
                 err = (res.get("error") or "")
-                await _safe_execute(
+                await _journal_write(
                     pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)", op_id, idx, ref, err[:200])
@@ -19658,7 +19698,7 @@ async def _exec_self_promo_blast(
     # второй раз — при том что оно и с первого раза на грани терпения, а
     # повторная отправка тому, кто уже заблокировал бота, вдобавок копит отказы.
     async def _log_user(step: int, key: str, status: str, msg: str = "") -> None:
-        await _safe_execute(
+        await _journal_write(
             pool,
             "INSERT INTO operation_log(op_id, step_num, target, status, message) "
             "VALUES($1,$2,$3,$4,$5)",
@@ -19974,7 +20014,7 @@ async def _exec_report_peer(
     # аккаунта тем же голосом, — зато это ровно то поведение, за которое аккаунт
     # получает ограничения, а репорт и так самое рискованное действие в списке.
     async def _log_acc_rep(step: int, key: str, ok: bool, msg: str = "") -> None:
-        await _safe_execute(
+        await _journal_write(
             pool,
             "INSERT INTO operation_log(op_id, step_num, target, status, message) "
             "VALUES($1,$2,$3,$4,$5)",

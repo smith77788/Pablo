@@ -106,6 +106,11 @@ def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
     monkeypatch.setattr(op_worker.resource_selector, "select_all_active", _fetch)
     monkeypatch.setattr(op_worker, "_safe_fetch", _fetch)
     monkeypatch.setattr(op_worker, "_safe_execute", _exec)
+    # Журнал целей ходит своими дверями (повтор + отказ/громкая запись вместо
+    # молчаливого глотка), и заглушку БД надо ставить и им: иначе исполнитель
+    # уходит в настоящий пул, которого в этом тесте нет.
+    monkeypatch.setattr(op_worker, "_journal_fetch", _fetch)
+    monkeypatch.setattr(op_worker, "_journal_write", _exec)
     monkeypatch.setattr(op_worker._infra_mem, "quarantined_accounts", _quar)
     monkeypatch.setattr(op_worker, "_is_cancelled", _not_cancelled)
 
