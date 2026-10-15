@@ -18478,6 +18478,9 @@ async function _loadSegmentPreview(previewElId) {
     const p = await api('/api/miniapp/uch/segment/preview', {method:'POST', body:JSON.stringify(_segmentBody(SEGMENT_TARGET))});
     el.innerHTML = `🎯 В сегменте: <b>${p.total}</b> · адресуемых в ЛС: <b>${p.addressable_dm}</b>`
       + (p.skipped_dm?` · без @username/ID: ${p.skipped_dm}`:'')
+      // Срез больше потолка одного запуска: раньше здесь печаталась длина
+      // ОБРЕЗАННОЙ выдачи как размер сегмента, и остаток исчезал молча.
+      + (p.omitted>0?`<br><span style="color:#f59e0b">⚠️ За один запуск возьму первые <b>${p.resolved}</b> — остальные <b>${p.omitted}</b> в эту отправку не попадут, повторите после неё</span>`:'')
       + `<br>активных аккаунтов: <b>${p.accounts_active}</b>`
       + (p.dm_chunks>1?` · разобью на ${p.dm_chunks} операц.`:'');
   } catch(e){ el.innerHTML = '<span style="color:#ef4444">Не удалось посчитать сегмент</span>'; }
@@ -18540,7 +18543,7 @@ async function submitContactWrite() {
       closeModal('mo-contact-write');
       if (fileEl) fileEl.value = '';
       SEGMENT_TARGET = null;
-      toast(`✉️ Запущено: ${r.recipients} получателей${r.chunks>1?` · ${r.chunks} операц.`:` · #${r.op_ids&&r.op_ids[0]}`}`);
+      toast(`✉️ Запущено: ${r.recipients} получателей${r.chunks>1?` · ${r.chunks} операц.`:` · #${r.op_ids&&r.op_ids[0]}`}${r.omitted>0?` · не попали: ${r.omitted}`:''}`);
       return;
     }
     if (file) {
@@ -18721,7 +18724,7 @@ async function submitContactInvite() {
       r = await api('/api/miniapp/uch/segment/invite', {method:'POST', body: JSON.stringify(body)});
       closeModal('mo-contact-invite');
       SEGMENT_TARGET = null;
-      toast(`➕ Инвайт сегмента запущен (операция #${r.op_id}) — ${r.targets} целей × ${r.accounts} акк.`);
+      toast(`➕ Инвайт сегмента запущен (операция #${r.op_id}) — ${r.targets} целей × ${r.accounts} акк.${r.omitted>0?` · не попали: ${r.omitted}`:''}`);
       return;
     }
     r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/invite',

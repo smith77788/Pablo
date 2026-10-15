@@ -26,6 +26,7 @@ from services.secret_masking import redact_secrets, scrub_payload
 from services import mini_app_host_server
 from services import mini_app_vault
 from services import mini_app_ranking
+from services.contacts_hub import segments as _segments
 from services import mini_app_proxies
 from services import mini_app_workflows
 from services import mini_app_community
@@ -22744,63 +22745,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Сегмент → действие флотом ────────────────────────────────────────────
     _SEG_DM_CHUNK = 1000       # кап получателей на одну bulk_dm_adhoc; больше — авто-разбивка
-    _SEG_MAX = 20000           # потолок размера сегмента (защита от случайного «всё»)
+    # Потолок, резолвер среза и гейт давления — в services/contacts_hub/segments.py:
+    # тем же срезом пользуются рассылка по кампании и оценка аудитории инвайта, а
+    # замыкание внутри setup_routes им было видно только по счастливой случайности
+    # (вызов происходит уже после сборки роутов). Заодно резолвер теперь отдаёт
+    # НАСТОЯЩИЙ размер среза, а не длину обрезанной выдачи.
+    _SEG_MAX = _segments.SEG_MAX
 
     def _segment_filters(src: dict) -> dict:
-        """Фильтры среза из тела запроса — те же оси, что у списка контактов."""
-        def _b(k):
-            return str(src.get(k)).lower() in ("1", "true", "yes", "on")
-        g = src.get("gender")
-        if g not in ("m", "f", "unknown"):
-            g = None
-        def _int(k):
-            v = src.get(k)
-            return int(v) if str(v).isdigit() else None
-        return {
-            "search": (src.get("search") or "").strip() or None,
-            "tag": (src.get("tag") or "").strip() or None,
-            "group_id": _int("group_id"),
-            "favorite_only": _b("favorite"), "premium_only": _b("premium"),
-            "multi_only": _b("multi"), "mutual_only": _b("mutual"),
-            "gender": g, "crm_stage": (src.get("crm_stage") or "").strip()[:40] or None,
-            "account_id": _int("account_id"),
-        }
+        return _segments.segment_filters(src)
+
+    async def _segment_resolve(uid: int, body: dict) -> tuple[list, int]:
+        """Контакты сегмента и сколько их в срезе ВСЕГО (может быть больше выдачи)."""
+        return await _segments.resolve(pool, uid, body, limit=_SEG_MAX)
 
     async def _segment_contacts(uid: int, body: dict) -> list:
-        """Контакты сегмента: явный список contact_ids ИЛИ весь срез по фильтру.
-        Возвращает строки с полями адресации (username/telegram_user_id/phones)."""
-        cids = body.get("contact_ids")
-        if isinstance(cids, list) and cids:
-            rows = await _safe_fetch(pool,
-                "SELECT id, username, telegram_user_id, first_name, last_name, phones "
-                "FROM unified_contacts WHERE owner_id=$1 AND id = ANY($2::uuid[]) LIMIT $3",
-                uid, [str(x) for x in cids], _SEG_MAX)
-            out = []
-            for r in (rows or []):
-                d = dict(r)
-                if isinstance(d.get("phones"), str):
-                    try: d["phones"] = _json.loads(d["phones"])
-                    except Exception: d["phones"] = []
-                out.append(d)
-            return out
-        from services.contacts_hub.repository import resolve_segment, get_segment_filters
-        # Сохранённый сегмент (по id) ИЛИ фильтры из тела — единый резолвер.
-        filters = None
-        _sid = body.get("saved_segment_id")
-        if str(_sid).isdigit():
-            filters = await get_segment_filters(pool, uid, int(_sid))
-        if filters is None:
-            filters = _segment_filters(body)
-        return await resolve_segment(pool, uid, filters, limit=_SEG_MAX)
+        rows, _total = await _segment_resolve(uid, body)
+        return rows
 
     async def _segment_pressure_ok(uid: int, op_name: str) -> tuple[bool, str]:
-        """Гейт давления инфраструктуры (ban-safety) — как у остальных масс-опер."""
-        try:
-            from services import infra_orchestrator
-            return await infra_orchestrator.is_ready_for_op(pool, uid, op_name)
-        except Exception:
-            log.warning("segment: pressure check failed", exc_info=True)
-            return True, ""
+        return await _segments.pressure_ok(pool, uid, op_name)
 
     async def fleet_warnings(request: web.Request) -> web.Response:
         """Мягкие предупреждения перед массовой операцией.
@@ -22837,12 +22801,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        contacts = await _segment_contacts(uid, body)
+        try:
+            contacts, total = await _segment_resolve(uid, body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        except Exception:
+            # Сбой базы раньше приходил сюда пустым списком и печатался как
+            # «в сегменте 0» — пустой экран вместо ошибки.
+            log.exception("uch_segment_preview uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
         dm = sum(1 for c in contacts if _uch_msg_ref(c))
         inv = sum(1 for c in contacts if _uch_invite_target(c)[1])
         acc_ids = await _alive_accounts(uid, None)
         return _json_resp({
-            "total": len(contacts), "addressable_dm": dm, "addressable_invite": inv,
+            # total — размер СРЕЗА, а не длина выдачи: за один запуск берём не
+            # больше cap, и остаток (omitted) экран обязан показать. Иначе
+            # «в сегменте 20000» на пятидесяти тысячах читается как «все».
+            "total": total, "resolved": len(contacts), "cap": _SEG_MAX,
+            "omitted": max(0, total - len(contacts)),
+            "addressable_dm": dm, "addressable_invite": inv,
             "skipped_dm": len(contacts) - dm, "accounts_active": len(acc_ids),
             "dm_chunks": (dm + _SEG_DM_CHUNK - 1) // _SEG_DM_CHUNK if dm else 0,
         })
@@ -22870,7 +22847,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             uid, [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()])
         if not acc_ids:
             return _err("Выберите хотя бы один активный аккаунт", 400)
-        contacts = await _segment_contacts(uid, body)
+        try:
+            contacts, seg_total = await _segment_resolve(uid, body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        # omitted — те, кто в срез попал, но за этот запуск НЕ поедет (потолок
+        # _SEG_MAX). Молчать об этом нельзя: тост «запущено N получателей»
+        # читается как «сегмент разослан».
         refs = [r for r in (_uch_msg_ref(c) for c in contacts) if r]
         if not refs:
             return _err("В сегменте нет адресуемых контактов (нужен @username или ID)", 400)
@@ -22908,6 +22891,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     op_ids.append(oid)
             return _json_resp({"ok": True, "op_ids": op_ids, "chunks": len(op_ids),
                                "recipients": len(refs), "skipped": len(contacts) - len(refs),
+                               "segment_total": seg_total,
+                               "omitted": max(0, seg_total - len(contacts)),
                                "accounts": len(acc_ids), "variants": len(variants) or 1,
                                "ab_batch": ab_batch})
         except PermissionError as exc:
@@ -23129,7 +23114,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             uid, [int(x) for x in re.split(r"[,\s]+", acc_raw) if x.strip().isdigit()])
         if not acc_ids:
             return _err("Выберите хотя бы один активный аккаунт", 400)
-        contacts = await _segment_contacts(uid, body)
+        try:
+            contacts, seg_total = await _segment_resolve(uid, body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        # omitted — те, кто в срез попал, но за этот запуск НЕ поедет (потолок
+        # _SEG_MAX). Молчать об этом нельзя: тост «запущено N получателей»
+        # читается как «сегмент разослан».
         refs = [r for r in (_uch_msg_ref(c) for c in contacts) if r]
         if not refs:
             return _err("В сегменте нет адресуемых контактов (нужен @username или ID)", 400)
@@ -23154,7 +23145,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     label=f"Сегмент медиа ч.{i // _SEG_DM_CHUNK + 1}: {len(chunk)} × {len(acc_ids)} акк.")
                 op_ids.append(oid)
             return _json_resp({"ok": True, "op_ids": op_ids, "chunks": len(op_ids),
-                               "recipients": len(refs), "accounts": len(acc_ids)})
+                               "recipients": len(refs), "accounts": len(acc_ids),
+                               "segment_total": seg_total,
+                               "omitted": max(0, seg_total - len(contacts))})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
@@ -23178,7 +23171,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             uid, [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()])
         if not acc_ids:
             return _err("Выберите хотя бы один активный аккаунт", 400)
-        contacts = await _segment_contacts(uid, body)
+        try:
+            contacts, seg_total = await _segment_resolve(uid, body)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        # omitted — те, кто в срез попал, но за этот запуск НЕ поедет (потолок
+        # _SEG_MAX). Молчать об этом нельзя: тост «запущено N получателей»
+        # читается как «сегмент разослан».
         user_refs, phones = [], []
         for c in contacts:
             kind, ref = _uch_invite_target(c)
@@ -23212,7 +23211,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, "mass_invite", params, total_items=n_targets,
                 label=f"Сегмент-инвайт → {group}: {n_targets} × {len(acc_ids)} акк.")
             return _json_resp({"ok": True, "op_id": op_id,
-                               "targets": n_targets, "accounts": len(acc_ids)})
+                               "targets": n_targets, "accounts": len(acc_ids),
+                               "segment_total": seg_total,
+                               "omitted": max(0, seg_total - len(contacts))})
         except module_kit.OpGateError as exc:
             return _err(f"Инфраструктура перегружена: {exc}", 429)
         except PermissionError as exc:

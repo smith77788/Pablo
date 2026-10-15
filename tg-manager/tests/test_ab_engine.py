@@ -51,9 +51,16 @@ def test_pick_winner_empty():
 
 
 def test_segment_message_supports_ab_variants():
+    # Границы обработчика берёт парсер: окно в 3200 символов «кончалось» на
+    # каждой правке выше — так ab_variant однажды выпал из него на ВЕРНОМ коде.
+    import ast
+
     src = open(os.path.join(ROOT, "services", "mini_app_api.py"), encoding="utf-8").read()
-    i = src.index("async def uch_segment_message")
-    window = src[i:i + 3200]
+    window = ""
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "uch_segment_message":
+            window = ast.get_source_segment(src, node) or ""
+    assert window, "обработчик uch_segment_message не найден"
     assert "ab_engine.clean_variants" in window
     assert "ab_engine.split_audience" in window
     assert "ab_variant" in window
