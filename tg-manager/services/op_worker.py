@@ -21313,15 +21313,20 @@ async def _exec_run_broadcast(
     await _safe_execute(
             pool,"UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
 
+    # Аудитория — ПОДМНОЖЕСТВО, когда её задал сегмент ИЛИ явный список
+    # получателей (повтор недоставленным, вариант A/B-теста). Признак один на
+    # обе ветки ниже: они уже разъезжались — ветка с готовым broadcast_id
+    # считала подмножеством только сегмент, и список недоставленных в строку
+    # рассылки не попадал вовсе.
+    _is_subset = bool(_seg_sql) or bool(isinstance(explicit_ids, list) and explicit_ids)
+
     # Create/reuse broadcast record
     if not broadcast_id:
         from database import db as _db
-        # target_user_ids обязателен, когда аудитория — ПОДМНОЖЕСТВО (сегмент
-        # или явный список недоставленных): resume после рестарта читает именно
-        # его, и без него прерванная сегментная рассылка догонялась бы ВСЕЙ
-        # аудиторией бота. Ниже по коду этот же список сохранялся, но только на
-        # ветке с уже готовым broadcast_id — на ветке создания его не было.
-        _subset = user_ids if (_seg_sql or (isinstance(explicit_ids, list) and explicit_ids)) else None
+        # target_user_ids обязателен для подмножества: resume после рестарта
+        # читает именно его, и без него прерванная рассылка догонялась бы ВСЕЙ
+        # аудиторией бота.
+        _subset = user_ids if _is_subset else None
         broadcast_id = await _db.create_broadcast(
             pool, int(bot_id), text, total, owner_id,
             target_user_ids=_subset, buttons=buttons, silent=silent)
@@ -21338,15 +21343,24 @@ async def _exec_run_broadcast(
             json.dumps({"broadcast_id": int(broadcast_id)}), op_id,
             log_ctx=f"[run_broadcast_pin op={op_id}]",
         )
-    elif _seg_sql:
-        # Сегментная рассылка: сохраняем целевой список, иначе resume после
-        # рестарта отправит всей аудитории бота.
+    elif _is_subset:
+        # Рассылка по подмножеству: сохраняем целевой список, иначе resume после
+        # рестарта отправит ВСЕЙ аудитории бота.
+        #
+        # Условие было `elif _seg_sql`, то есть только сегмент. А строку
+        # рассылки заранее создают именно те пути, где аудитория задана списком:
+        # «повтор недоставленным» (broadcaster.resend_undelivered) и варианты
+        # A/B-теста. Их список не сохранялся НИКОГДА, и любой рестарт посреди
+        # отправки — а он бывает на каждом деплое — догонял рассылку по всей
+        # аудитории: люди, уже получившие исходное сообщение, получали его
+        # второй раз. Ровно от этого `resend_undelivered` отказывается, когда у
+        # исходной рассылки вычищен журнал доставки.
         try:
             await _safe_execute(pool,
                 "UPDATE broadcasts SET target_user_ids=$1::jsonb WHERE id=$2",
                 json.dumps(user_ids), broadcast_id)
         except Exception:
-            log.warning("run_broadcast: не удалось сохранить target_user_ids для сегмента op=%s", op_id)
+            log.warning("run_broadcast: не удалось сохранить target_user_ids подмножества op=%s", op_id)
 
     # Повторный прогон этой же операции (таймаут, воскрешение после рестарта)
     # НЕ должен запускать вторую задачу на тот же broadcast_id: два цикла
