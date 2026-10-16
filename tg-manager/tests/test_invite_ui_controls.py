@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 # Мини-апп больше не один файл: экраны выносятся в mini_app/screens/*.js.
 # Берём исходник целиком, иначе каждый вынос ронял бы эти проверки.
-from tests.miniapp_source import miniapp_source
+from tests.miniapp_source import api_function, miniapp_source
 from tests.miniapp_source import api_source
 
 UI = miniapp_source()
@@ -28,8 +28,7 @@ WORKER = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
 
 
 def _submit_seg() -> str:
-    i = API.index("async def mass_inviter_submit")
-    return API[i:API.index("    async def ", i + 30)]
+    return api_function("mass_inviter_submit")
 
 
 def test_link_message_has_a_control_on_both_surfaces():

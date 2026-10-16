@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,9 +20,7 @@ def _read(rel: str) -> str:
 
 
 def test_backend_resolves_whole_filter_scoped():
-    src = api_source()
-    mass = src[src.index("async def accounts_mass"):]
-    mass = mass[:mass.index("n = len(ids)") + 20]
+    mass = api_function("accounts_mass")
     assert 'body.get("select_all_filtered")' in mass, "нет режима select_all_filtered"
     # использует тот же билдер WHERE со скоупом owner/admin — и с ТЕМИ ЖЕ
     # срезами, что видит владелец: фильтр, CRM-этап, поиск и пул. Пропущенный

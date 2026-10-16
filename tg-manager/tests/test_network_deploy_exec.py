@@ -4,7 +4,7 @@ from __future__ import annotations
 import ast
 import os
 from services import op_worker
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -74,8 +74,7 @@ def test_set_discussion_group_helper_exists():
 
 def test_deploy_endpoint_goes_through_bus():
     src = _api()
-    i = src.index("async def network_deploy(")
-    fn = src[i:i + 1800]
+    fn = api_function("network_deploy")
     assert 'operation_bus.submit' in fn
     assert '"deploy_network"' in fn
     assert "plan_deployment" in fn        # пусто → 400

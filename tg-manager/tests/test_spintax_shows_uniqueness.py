@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = open(os.path.join(ROOT, "mini_app", "screens", "spintax.js"),
@@ -58,8 +58,7 @@ def test_counting_is_right_on_a_known_template():
 
 
 def test_api_sends_the_number():
-    i = API.index("def _spintax_pack(")
-    block = API[i:API.index("\ndef ", i + 10)]
+    block = api_function("_spintax_pack")
     assert "count_group_variants" in block, "число комбинаций не считается"
     assert '"combos"' in block and '"groups"' in block
     assert "10 ** 9" in block, (

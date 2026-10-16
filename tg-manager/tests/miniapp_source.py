@@ -218,6 +218,29 @@ def js_function(name: str) -> str:
     raise AssertionError(f"функция {name} не найдена ни в одном файле мини-аппа")
 
 
+# ── Тело функции в ЛЮБОМ файле репозитория ──────────────────────────────────
+#
+# api_function знает только слой мини-аппа, а срезы «от маркера до маркера»
+# есть и по services/account_manager.py, services/op_worker.py и прочим. Та же
+# ловушка: в test_channel_resolve_invalid_object окно было задано длиной
+# (`src[i:i + 4000]`) при теле post_to_channel в 146 строк, и проверка
+# «резолвим через PeerChannel» проходила на выпотрошенной функции — её
+# выполняли соседи, попавшие в окно.
+
+
+def py_function(rel_path: str, name: str) -> str:
+    """Тело функции по ТОЧНЫМ границам (ast) в указанном файле репозитория."""
+    import ast
+
+    path = ROOT / rel_path
+    text = path.read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(text)):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == name):
+            return ast.get_source_segment(text, node) or ""
+    raise AssertionError(f"функция {name} не найдена в {rel_path}")
+
+
 # ── Серверная сторона: API-слой тоже перестал быть одним файлом ──────────────
 #
 # Тот же урок, что и выше, но про сервер. `services/mini_app_api.py` разросся до

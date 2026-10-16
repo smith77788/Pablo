@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from services.mass_inviter_engine import validate_group_ref as v
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source, py_function
 
 
 @pytest.mark.parametrize("ref", [
@@ -72,9 +72,7 @@ def test_bot_validates_raw_input_not_normalized():
 
 
 def test_miniapp_validates_before_queueing():
-    src = api_source()
-    i = src.index("async def mass_inviter_submit")
-    seg = src[i:src.index("    async def ", i + 30)]
+    seg = api_function("mass_inviter_submit")
     assert "validate_group_ref" in seg, (
         "мини-апп обязан отказать на входе, а не ставить негодную операцию в очередь"
     )
@@ -85,9 +83,7 @@ def test_miniapp_validates_before_queueing():
 
 def test_executor_has_last_line_of_defence():
     """Операция приходит не только из мини-аппа: бот, цепочка продолжения, API."""
-    src = _read("services/op_worker.py")
-    i = src.index("async def _exec_mass_invite")
-    seg = src[i:src.index("\nasync def _exec_", i + 1)]
+    seg = py_function("services/op_worker.py", "_exec_mass_invite")
     assert "validate_group_ref" in seg
     assert seg.index("validate_group_ref") < seg.index("_claim_available_accounts"), (
         "отказ должен случиться ДО клейма аккаунтов и подключения ими"

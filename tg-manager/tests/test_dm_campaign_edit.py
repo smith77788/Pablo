@@ -10,15 +10,14 @@ from __future__ import annotations
 import pathlib
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 _API = api_source()
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 
 def _body() -> str:
-    start = _API.index("async def dm_campaign_update")
-    return _API[start:start + 6000]
+    return api_function("dm_campaign_update")
 
 
 def test_update_endpoint_exists_and_is_routed():

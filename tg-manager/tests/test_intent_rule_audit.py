@@ -19,7 +19,7 @@ import pytest
 from services import intent_sensor as S
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 # Весь API-слой мини-аппа: ручки переезжают из 25-тысячестрочного
 # mini_app_api.py в соседние services/mini_app_*.py, и проверка не должна
@@ -152,8 +152,7 @@ def test_endpoints_registered():
 
 def test_update_endpoint_distinguishes_absent_field_from_empty():
     """None для stage/tag — осмысленное «снять», а не «не прислали»."""
-    start = _API.index("async def uch_intent_rule_update")
-    body = _API[start:start + 2200]
+    body = api_function("uch_intent_rule_update")
     assert '"stage" in body' in body and '"tag" in body' in body
 
 

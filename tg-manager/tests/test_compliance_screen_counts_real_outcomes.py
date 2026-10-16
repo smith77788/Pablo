@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source, js_function
+from tests.miniapp_source import api_function, api_source, js_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -108,11 +108,7 @@ def test_partial_is_neither_success_nor_silence():
 
 
 def test_overview_asks_the_engine_instead_of_inventing_a_vocabulary():
-    api = api_source()
-    i = api.index("async def compliance_overview")
-    # Границы — по следующему хендлеру: в окне фиксированной длины «искомого
-    # нет» однажды станет правдой просто потому, что код сдвинулся.
-    window = api[i:api.index("async def compliance_export", i)]
+    window = api_function("compliance_overview")
     assert "outcome='success'" not in window, (
         "обзор снова считает исход, которого никто не пишет")
     assert "'ban','flood_wait'" not in window.replace(" ", ""), (

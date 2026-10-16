@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -16,9 +16,7 @@ def _html():
 
 
 def test_overview_includes_signed_report():
-    src = _api()
-    i = src.index("async def compliance_overview")
-    window = src[i:src.index("async def compliance_export", i)]
+    window = api_function("compliance_overview")
     assert "compliance_engine.get_report" in window
     assert '"report"' in window
 

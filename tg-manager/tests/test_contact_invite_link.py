@@ -16,6 +16,8 @@ import os
 
 from services.contact_invite_link import contact_target_candidates
 
+from tests.miniapp_source import api_function, py_function
+
 
 # Весь API-слой мини-аппа: ручки контактов вынесены из 25-тысячестрочного
 # mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
@@ -83,9 +85,7 @@ def test_history_query_case_insensitive_against_invite_target_log():
     """invite_target_log хранит username в исходном регистре из user_refs —
     точное сравнение с канонизированными (lowercase) candidates тихо не нашло
     бы историю. Регресс на сам факт LOWER() в SQL."""
-    src = _read("services/contact_invite_link.py")
-    seg = src[src.index("async def invite_history_for_contact"):]
-    seg = seg[:seg.index("async def is_contact_opted_out")]
+    seg = py_function("services/contact_invite_link.py", "invite_history_for_contact")
     assert "LOWER(target) = ANY(" in seg, "сравнение стало точным — регрессия по регистру"
 
 
@@ -101,9 +101,7 @@ def test_opt_out_contact_registers_all_forms_not_just_first():
     поэтому аудитория, ссылающаяся на контакт по username/телефону (другая
     форма ТОГО ЖЕ человека), не блокировалась — ложное чувство защиты.
     Пойман на реальном PG (см. коммит): здесь фиксируем контракт функции."""
-    src = _read("services/contact_invite_link.py")
-    seg = src[src.index("async def opt_out_contact"):]
-    seg = seg[:seg.index("async def allow_contact_invite")]
+    seg = py_function("services/contact_invite_link.py", "opt_out_contact")
     assert "for target in candidates:" in seg, "регистрирует не все формы контакта"
     assert "candidates[0]" not in seg, "регрессия к «только первая форма»"
 
@@ -117,12 +115,16 @@ def test_mini_app_endpoints_registered_and_wired():
     ):
         assert f'"{path}", {fn})' in src, f"не зарегистрирован маршрут {path}"
         assert f"async def {fn}(" in src, f"нет реализации {fn}"
-    # реально вызывают сервисный слой, а не заглушки
-    seg = src[src.index("async def uch_contact_invite_history"):]
-    seg = seg[:seg.index("async def uch_contact_versions")]
-    assert "invite_history_for_contact" in seg
-    assert "opt_out_contact" in seg
-    assert "allow_contact_invite" in seg
+    # Реально вызывают сервисный слой, а не заглушки — каждую ручку спрашиваем
+    # отдельно. Раньше здесь был один срез на три ручки: он держался на том,
+    # что они идут подряд, и любая из трёх могла опустеть незаметно.
+    for fn, service_call in (
+        ("uch_contact_invite_history", "invite_history_for_contact"),
+        ("uch_contact_opt_out", "opt_out_contact"),
+        ("uch_contact_allow_invite", "allow_contact_invite"),
+    ):
+        assert service_call in api_function(fn), (
+            f"ручка {fn} больше не зовёт {service_call}")
 
 
 def test_mini_app_ui_wired_into_contact_detail():

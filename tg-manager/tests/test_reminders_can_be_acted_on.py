@@ -17,7 +17,7 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-from tests.miniapp_source import api_source, js_function
+from tests.miniapp_source import api_function, api_source, js_function
 
 
 def _read(rel: str) -> str:
@@ -67,9 +67,7 @@ def test_actions_pass_an_index_not_the_contact_text():
 
 
 def test_backend_accepts_clearing_a_reminder():
-    api = api_source()
-    i = api.index("async def uch_crm_reminder")
-    fn = api[i:api.index("\n    async def ", i + 10)]
+    fn = api_function("uch_crm_reminder")
     assert "remind_dt = None" in fn, (
         "снять напоминание нечем: пустая дата обязана обнулять поле")
 

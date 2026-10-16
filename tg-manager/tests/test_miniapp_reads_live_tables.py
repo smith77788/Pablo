@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from tests.miniapp_source import api_source, js_function
+from tests.miniapp_source import api_function, api_source, js_function
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -84,9 +84,7 @@ def test_miniapp_reads_no_table_that_nobody_writes():
 
 def test_infra_health_reads_live_anomalies():
     """Экран здоровья берёт оповещения из живого источника, а не из пустоты."""
-    src = api_source()
-    start = src.index("async def infra_health_overview")
-    body = src[start : src.index("async def ", start + 10)]
+    body = api_function("infra_health_overview")
     assert "get_active_anomalies" in body, (
         "оповещения на экране здоровья больше не берутся из anomaly_events — "
         "список снова станет вечно пустым")

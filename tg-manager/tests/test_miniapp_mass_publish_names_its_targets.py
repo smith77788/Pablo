@@ -32,7 +32,7 @@ import re
 import pytest
 
 from services import mini_app_api
-from tests.miniapp_source import miniapp_html, source_of
+from tests.miniapp_source import api_function, miniapp_html, source_of
 from tests.miniapp_source import api_source
 
 
@@ -70,10 +70,8 @@ def test_targets_endpoint_exists_and_is_registered():
 
 def test_targets_counts_the_same_set_mass_publish_publishes_to():
     """Иначе подпись под кнопкой обещает один набор, а пост уходит в другой."""
-    src = _api_src()
     counting = "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1"
-    targets = src[src.index("async def mass_publish_targets("):]
-    targets = targets[:targets.index("async def mass_publish(")]
+    targets = api_function("mass_publish_targets")
     assert counting in targets, (
         "счёт адресатов должен идти тем же запросом, что и в mass_publish: "
         "список /channels шире (экосистемы, рабочие пространства)")

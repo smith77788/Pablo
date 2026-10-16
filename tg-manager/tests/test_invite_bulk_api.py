@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from services import mass_inviter_engine as mie
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 
 class _Ent:
@@ -234,8 +234,6 @@ def test_absent_flag_means_environment_decides():
 
 
 def test_endpoint_passes_the_flag_through():
-    api = api_source()
-    i = api.index("async def mass_inviter_submit")
-    seg = api[i:api.index("    async def ", i + 30)]
+    seg = api_function("mass_inviter_submit")
     assert 'body.get("bulk_api") is not None' in seg
     assert 'params["bulk_api"]' in seg

@@ -9,7 +9,7 @@ mini_app_api не импортируется в песочнице — пров�
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source, miniapp_source
+from tests.miniapp_source import api_function, api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -21,8 +21,7 @@ def _read(rel: str) -> str:
 
 def test_backend_dead_filter_and_delete_op():
     api = api_source()
-    where = api[api.index("def _accounts_where"):]
-    where = where[:where.index("return ")]
+    where = api_function("_accounts_where")
     assert 'flt == "dead"' in where
     assert "IN ('banned','deactivated','session_expired')" in where
     # масс-операция удаления

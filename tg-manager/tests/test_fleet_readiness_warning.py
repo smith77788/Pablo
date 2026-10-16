@@ -16,7 +16,7 @@ import asyncio
 import pathlib
 
 from services import infra_orchestrator as IO
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _API = api_source()
@@ -89,14 +89,12 @@ def test_it_is_a_warning_not_a_block():
 # ── Доведено до пользователя ──────────────────────────────────────────────────
 
 def test_endpoint_returns_both_warnings():
-    start = _API.index("async def fleet_warnings")
-    body = _API[start:start + 1600]
+    body = api_function("fleet_warnings")
     assert "get_pressure_warning" in body and "get_readiness_warning" in body
 
 
 def test_endpoint_is_fail_open():
-    start = _API.index("async def fleet_warnings")
-    body = _API[start:start + 1600]
+    body = api_function("fleet_warnings")
     assert body.count("except Exception") >= 2
 
 

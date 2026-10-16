@@ -12,7 +12,7 @@ drip-цепочке («на каком шаге теряем людей») от�
 from __future__ import annotations
 
 import pathlib
-from tests.miniapp_source import api_source, js_function
+from tests.miniapp_source import api_function, api_source, js_function
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _API = api_source()
@@ -101,8 +101,7 @@ def test_more_progress_than_steps_does_not_go_negative():
 # ── Подключение к эндпоинту ───────────────────────────────────────────────────
 
 def _endpoint() -> str:
-    start = _API.index("async def funnel_steps")
-    return _API[start:start + 4000]
+    return api_function("funnel_steps")
 
 
 def test_endpoint_returns_step_stats():
@@ -133,8 +132,7 @@ def test_ui_renders_dropoff():
 # ── Правка шага ───────────────────────────────────────────────────────────────
 
 def _update_step() -> str:
-    start = _API.index("async def update_funnel_step")
-    return _API[start:start + 3000]
+    return api_function("update_funnel_step")
 
 
 def test_step_edit_endpoint_exists_and_is_routed():

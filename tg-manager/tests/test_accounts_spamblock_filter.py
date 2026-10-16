@@ -15,7 +15,7 @@ mini_app_api не импортируется в песочнице — пров�
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,8 +27,7 @@ def _read(rel: str) -> str:
 
 def test_backend_has_spamblock_filter_and_active_excludes_it():
     api = api_source()
-    where = api[api.index("def _accounts_where"):]
-    where = where[:where.index("return ")]
+    where = api_function("_accounts_where")
     assert 'flt == "spamblock"' in where, "нет фильтра списка spamblock"
     assert "COALESCE(acc_status,'ok') = 'spamblock'" in where
     # active больше не тянет спамблок — и не тянет вообще никого мёртвого.

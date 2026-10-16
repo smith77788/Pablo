@@ -22,7 +22,7 @@ from services.dm_engine import (
 )
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 _API = api_source()
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
@@ -89,16 +89,14 @@ def test_pause_endpoint_exists_and_is_routed():
 
 def test_pause_only_for_running_campaign():
     """Пауза черновика или завершённой кампании — бессмыслица, ждём отказ."""
-    start = _API.index("async def dm_campaign_pause")
-    body = _API[start:start + 2000]
+    body = api_function("dm_campaign_pause")
     assert 'row["status"] != "running"' in body
     assert "409" in body
 
 
 def test_pause_is_owner_scoped():
     """Чужую кампанию остановить нельзя."""
-    start = _API.index("async def dm_campaign_pause")
-    body = _API[start:start + 2000]
+    body = api_function("dm_campaign_pause")
     assert "owner_id=$2" in body
 
 

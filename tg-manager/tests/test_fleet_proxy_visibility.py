@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from tests.miniapp_source import api_source, js_function, miniapp_source
+from tests.miniapp_source import api_function, api_source, js_function, miniapp_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _API = api_source()
@@ -22,8 +22,7 @@ _UI = miniapp_source()
 
 
 def _accounts_query() -> str:
-    start = _API.index("async def accounts(request")
-    body = _API[start:start + 4000]
+    body = api_function("accounts")
     i = body.index("SELECT id, phone")
     return body[i:body.index("ORDER BY is_active DESC")]
 
@@ -100,16 +99,14 @@ def test_dead_proxy_outranks_plain_active_but_not_a_ban():
 def test_filter_exists_and_is_strict():
     """Видеть мало — нужен срез, чтобы починить оптом. Строго IS FALSE:
     непроверенный прокси (NULL) не должен попадать в «мёртвые»."""
-    start = _API.index("def _accounts_where")
-    body = _API[start:start + 3000]
+    body = api_function("_accounts_where")
     assert 'flt == "proxy_down"' in body
     assert "p.is_alive IS FALSE" in body
     assert "proxy_id IS NOT NULL" in body
 
 
 def test_filter_is_correlated_to_the_account_row():
-    start = _API.index("def _accounts_where")
-    body = _API[start:start + 3000]
+    body = api_function("_accounts_where")
     assert "p.id = tg_accounts.proxy_id" in body
 
 

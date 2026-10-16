@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -36,9 +36,7 @@ def test_where_builder_scoped_by_owner():
 
 
 def test_pagination_params_and_response():
-    src = api_source()
-    acc = src[src.index("async def accounts(request"):]
-    acc = acc[:acc.index("async def account_detail")]
+    acc = api_function("accounts")
     # лимит клампится (не даём выкачать всё одним запросом), offset неотрицателен
     assert "min(200, max(1, int(qs.get(\"limit\", 100)))" in acc.replace("'", '"')
     assert "max(0, int(qs.get(\"offset\", 0))" in acc.replace("'", '"')

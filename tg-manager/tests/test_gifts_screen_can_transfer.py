@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source, js_function, miniapp_source
+from tests.miniapp_source import api_function, api_source, js_function, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,9 +41,7 @@ def test_transfer_route_exists_and_goes_through_the_bus():
 
 
 def _selection_helper() -> str:
-    api = api_source()
-    i = api.index("async def _gift_selection(")
-    return api[i:api.index("\n    async def ", i + 10)]
+    return api_function("_gift_selection")
 
 
 def test_transfer_takes_only_my_own_gifts():

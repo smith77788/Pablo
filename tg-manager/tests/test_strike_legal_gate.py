@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source, js_function
+from tests.miniapp_source import api_function, api_source, js_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -12,18 +12,14 @@ def _api():
 
 
 def test_launch_rejects_unknown_category():
-    src = _api()
-    i = src.index("async def strike_launch")
-    window = src[i:i + 2600]
+    window = api_function("strike_launch")
     # неизвестная категория отбивается (гейт по abuse-таксономии)
     assert "MINI_CATEGORIES.get(category)" in window
     assert "Неизвестная категория" in window
 
 
 def test_launch_records_signed_legal_basis():
-    src = _api()
-    i = src.index("async def strike_launch")
-    window = src[i:i + 5200]
+    window = api_function("strike_launch")
     assert "compliance_engine.record" in window
     assert "strike_legal_basis" in window
     assert "abuse_report" in window

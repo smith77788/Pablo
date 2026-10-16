@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 
 from bot.utils import tariffs
-from tests.miniapp_source import api_source, js_function
+from tests.miniapp_source import api_function, api_source, js_function
 
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
 
@@ -92,9 +92,7 @@ def test_env_override_reaches_the_screen(monkeypatch):
 
 
 def test_config_endpoint_serves_the_matrix():
-    src = api_source()
-    block = src[src.index("async def miniapp_config"):]
-    block = block[:block.index("add_get(\"/api/miniapp/config\"")]
+    block = api_function("miniapp_config")
     assert "plan_matrix()" in block, "состав тарифов не уезжает в мини-апп"
     assert '"plans": plans' in block
 

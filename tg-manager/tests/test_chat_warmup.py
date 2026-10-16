@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 from services import chat_warmup as cw
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -252,9 +252,7 @@ def test_ambient_keyless_flag(monkeypatch):
 
 
 def test_ai_status_reports_claude_and_warmup_model():
-    api = api_source()
-    i = api.index("async def ai_status")
-    body = api[i:i + 1600]
+    body = api_function("ai_status")
     assert '"claude": claude_on' in body                # статус Claude
     assert "warmup_groq_model" in body                  # какая Groq-модель у разогрева
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()

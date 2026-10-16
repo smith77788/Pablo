@@ -9,7 +9,7 @@ cooldown_until, обнулённый trust_score) → аккаунт молча 
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,13 +29,7 @@ def test_revive_endpoint_and_route_exist():
     api = api_source()
     assert "async def accounts_revive" in api
     assert '"/api/miniapp/accounts/revive"' in api
-    i = api.index("async def accounts_revive")
-    # Окно пришлось расширить: ручка обзавелась проверкой занятости (аккаунт под
-    # живой арендой не поднимаем, иначе его сессию заберёт второй исполнитель —
-    # см. tests/test_reviving_the_fleet_does_not_steal_a_busy_account_postgres.py),
-    # и `release_accounts` уехал за прежние 4200 символов. Пробник, который
-    # краснеет от выросшего здорового кода, измеряет не то, что обещает.
-    body = api[i:i + 7000]
+    body = api_function("accounts_revive")
     # снимает блокировки только у аккаунтов С сессией, оптимистично активирует
     assert "session_str IS NOT NULL" in body
     assert "in_operation=FALSE" in body

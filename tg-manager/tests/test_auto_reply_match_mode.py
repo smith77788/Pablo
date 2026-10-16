@@ -11,6 +11,8 @@ import inspect
 
 from services.auto_responder import _match_rule
 
+from tests.miniapp_source import api_function
+
 
 def _rule(keyword, mode):
     return {"trigger_type": "keyword", "keyword": keyword, "match_mode": mode}
@@ -52,9 +54,7 @@ def test_create_endpoint_persists_match_mode():
     # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py.
     from tests.miniapp_source import api_source
 
-    src = api_source()
-    start = src.index("async def create_auto_reply")
-    body = src[start:start + 4000]
+    body = api_function("create_auto_reply")
     assert 'body.get("match_mode")' in body, "match_mode не читается из тела"
     insert = body.index("INSERT INTO auto_replies")
     assert "match_mode" in body[insert:insert + 400], \
@@ -73,9 +73,7 @@ def test_create_endpoint_persists_buttons_priority_delay():
     # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py.
     from tests.miniapp_source import api_source
 
-    src = api_source()
-    start = src.index("async def create_auto_reply")
-    body = src[start:start + 4000]
+    body = api_function("create_auto_reply")
     # читаются из тела
     assert 'body.get("buttons")' in body, "buttons не читается из тела"
     assert 'body.get("priority")' in body, "priority не читается из тела"

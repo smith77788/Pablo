@@ -16,7 +16,7 @@ import os
 import re
 
 from services import audience_analytics as aa
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
@@ -100,8 +100,7 @@ def test_segment_key_reaches_the_screen():
 
 def test_insights_are_actually_readable():
     """Бэкенд клал text, экран читал description — подпись всегда пустая."""
-    i = API.index("async def audience_analytics")
-    chunk = API[i:API.index("async def audience_segment_members")]
+    chunk = api_function("audience_analytics")
     assert '"text":' not in chunk, "инсайт снова уедет в несуществующий ключ"
     assert chunk.count('"description":') >= 3
     assert "esc(i.description || '')" in _fn("renderAudInsights")

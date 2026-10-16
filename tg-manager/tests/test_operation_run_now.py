@@ -27,7 +27,7 @@ import re
 
 import pytest
 
-from tests.miniapp_source import js_function, miniapp_source
+from tests.miniapp_source import api_function, js_function, miniapp_source
 from tests.miniapp_source import api_source
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
@@ -62,9 +62,7 @@ def test_run_now_route_registered():
 
 
 def test_run_now_handler_scoped_and_pending_only():
-    src = api_source()
-    i = src.index("async def run_now_operation")
-    seg = src[i:src.index("\n    async def ", i + 10)]
+    seg = api_function("run_now_operation")
     assert "SET scheduled_for=NULL" in seg
     assert "status='pending'" in seg
     assert "owner_id=$2" in seg
@@ -83,17 +81,14 @@ def test_resume_operation_does_not_touch_scheduled_for():
     пропускается без INFRAGRAM_TEST_DSN, поэтому противоречие с кодом никто не
     видел. Теперь он стережёт принятое решение.
     """
-    src = api_source()
-    i = src.index("async def resume_operation")
-    seg = src[i:src.index("\n    async def ", i + 10)]
+    seg = api_function("resume_operation")
     body = seg[seg.index("uid = _get_uid(request)"):]
     assert "scheduled_for" not in body, (
         "возобновление снова трогает время запуска — запланированное владельцем "
         "время и флуд-пауза будут сниматься в обход")
 
     # Поторопить операцию можно, но это отдельное явное действие.
-    j = src.index("async def run_now_operation")
-    run_now = src[j:src.index("\n    async def ", j + 10)]
+    run_now = api_function("run_now_operation")
     assert "scheduled_for=NULL" in run_now, (
         "«Запустить сейчас» обязано снимать расписание — иначе торопить нечем")
 

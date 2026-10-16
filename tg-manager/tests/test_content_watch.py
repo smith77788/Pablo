@@ -14,7 +14,7 @@ import os
 from services.content_watch import classify_texts, CATEGORY_LABELS
 from services import content_safety
 from services import op_worker
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -68,8 +68,7 @@ def test_op_endpoint_route_and_ui_wired():
     api = api_source()
     assert "async def compliance_scan_submit" in api
     # Эндпоинт ставит op через operation_bus (рефактор с сырого INSERT на bus).
-    _seg = api[api.index("async def compliance_scan_submit"):]
-    _seg = _seg[:_seg.index("async def ", 10)]
+    _seg = api_function("compliance_scan_submit")
     assert ".submit(" in _seg and '"compliance_scan"' in _seg
     assert 'add_post("/api/miniapp/compliance_scan", compliance_scan_submit)' in api
     ui = _read("mini_app/index.html")

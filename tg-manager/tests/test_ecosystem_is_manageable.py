@@ -12,7 +12,7 @@ from __future__ import annotations
 import inspect
 import os
 import re
-from tests.miniapp_source import api_source, miniapp_source
+from tests.miniapp_source import api_function, api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Весь фронт (index.html + screens/*.js), а не один файл: экраны
@@ -47,20 +47,17 @@ def _fn(js: str, name: str) -> str:
 
 def test_server_resolves_member_names():
     assert "async def _eco_member_names" in API
-    body = API[API.index("async def _eco_member_names"):]
-    body = body[:body.index("async def ecosystem_detail")]
+    body = api_function("_eco_member_names")
     for table in ("tg_accounts", "managed_bots", "managed_channels"):
         assert table in API, table
     assert 'm["name"] = found.get' in body
     # Выборка имён — по владельцу: чужой объект имени не получает.
-    detail = API[API.index("async def ecosystem_detail"):]
-    detail = detail[:detail.index("async def ecosystem_member_drop")]
+    detail = api_function("ecosystem_detail")
     assert "_eco_member_names(uid, members)" in detail
 
 
 def test_member_count_is_real_not_page_size():
-    detail = API[API.index("async def ecosystem_detail"):]
-    detail = detail[:detail.index("async def ecosystem_member_drop")]
+    detail = api_function("ecosystem_detail")
     assert "members_total" in detail
     assert "SELECT COUNT(*) FROM ecosystem_members WHERE ecosystem_id=$1" in detail
 
@@ -68,8 +65,7 @@ def test_member_count_is_real_not_page_size():
 def test_member_can_be_removed():
     assert "async def ecosystem_member_drop" in API
     assert '"/api/miniapp/ecosystem/{eco_id}/member/drop"' in API
-    drop = API[API.index("async def ecosystem_member_drop"):]
-    drop = drop[:drop.index("async def ecosystem_auto_discover")]
+    drop = api_function("ecosystem_member_drop")
     # Владение проверяется до удаления, тип объекта — из белого списка.
     assert "FROM ecosystems WHERE id=$1 AND owner_id=$2" in drop
     assert '("account", "bot", "channel", "group")' in drop
@@ -123,8 +119,7 @@ def test_overlaps_screen_exists_and_is_wired():
 
 
 def test_overlaps_pairs_carry_channel_names():
-    ov = API[API.index("async def ecosystem_overlaps"):]
-    ov = ov[:ov.index("app.router.add_get") if "app.router.add_get" in ov else len(ov)]
+    ov = api_function("ecosystem_overlaps")
     assert 'pr["name_a"]' in ov and 'pr["name_b"]' in ov
     assert "FROM managed_channels" in ov and "owner_id=$1" in ov
     js = open(OVERLAPS_JS, encoding="utf-8").read()

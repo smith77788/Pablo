@@ -26,6 +26,8 @@ import types
 
 import pytest
 
+from tests.miniapp_source import py_function
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -108,9 +110,11 @@ def test_access_hash_still_shortcuts(_tl):
 
 def test_post_to_channel_strategy_uses_peerchannel():
     """Публикация (прямая причина прод-лога) тоже резолвит через PeerChannel."""
-    src = (ROOT / "services/account_manager.py").read_text(encoding="utf-8")
-    i = src.index("async def post_to_channel")
-    body = src[i:i + 4000]
+    # Окно в 4000 символов при теле в 146 строк брало ещё и соседей: на
+    # выпотрошенной post_to_channel проверка «резолвим через PeerChannel»
+    # проходила, потому что PeerChannel находился у соседа (измерено
+    # 16.10.2026). Границы — по ast.
+    body = py_function("services/account_manager.py", "post_to_channel")
     assert "PeerChannel" in body, "post_to_channel снова резолвит голым id"
     # и именно в стратегии по id, а не только через access_hash
     assert "get_entity(_ref)" in body

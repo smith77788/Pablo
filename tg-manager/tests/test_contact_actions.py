@@ -20,7 +20,7 @@ def _api_src() -> str:
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-from tests.miniapp_source import api_source, js_function
+from tests.miniapp_source import api_function, api_source, js_function
 
 
 def _read(rel: str) -> str:
@@ -38,13 +38,11 @@ def test_backend_endpoints_and_routes():
 
 
 def test_message_reuses_dm_engine_and_invite_reuses_invite_engine():
-    api = _api_src()
-    msg = api[api.index("async def uch_contact_message"):api.index("async def uch_contact_invite")]
+    msg = api_function("uch_contact_message")
     # ЛС идёт через безопасный DM-движок, а не прямой send
     assert '"bulk_dm_adhoc"' in msg
     assert '"usernames": [ref]' in msg
-    inv = api[api.index("async def uch_contact_invite"):]
-    inv = inv[:inv.index("async def uch_contact_update")]
+    inv = api_function("uch_contact_invite")
     assert '"mass_invite"' in inv
     assert '"source": "import_list"' in inv
     # способ инвайта на выбор (паритет с массовым)
@@ -55,11 +53,10 @@ def test_target_resolver_prefers_username_then_id():
     api = _api_src()
     assert "def _uch_msg_ref" in api
     assert "def _uch_invite_target" in api
-    ref = api[api.index("def _uch_msg_ref"):api.index("def _uch_invite_target")]
+    ref = api_function("_uch_msg_ref")
     # username → id; телефон в ЛС НЕ используем (ненадёжно)
     assert '"username"' in ref and "telegram_user_id" in ref
-    inv = api[api.index("def _uch_invite_target"):]
-    inv = inv[:inv.index("async def uch_contact_message")]
+    inv = api_function("_uch_invite_target")
     # Сам разбор переехал в services/contacts_hub/invite_target.py — хендлер
     # обязан звать его, а не держать вторую копию порядка адресов.
     assert "invite_target(c)" in inv, (
@@ -105,7 +102,7 @@ def test_backend_media_endpoint_and_op_branch():
     api = _api_src()
     assert "async def uch_contact_media" in api
     assert '/media", uch_contact_media)' in api
-    med = api[api.index("async def uch_contact_media"):api.index("async def uch_contact_invite")]
+    med = api_function("uch_contact_media")
     # multipart-приём + кладём media_path в тот же DM-движок
     assert "await request.multipart()" in med
     assert '"media_path"' in med

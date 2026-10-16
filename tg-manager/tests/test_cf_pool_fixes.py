@@ -59,8 +59,7 @@ def test_cf_pool_ui_button_wired():
     assert 'add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)' in api
     assert 'add_get("/api/miniapp/cf/pool/status", cf_pool_status)' in api
     # хендлеры делают реальную работу (не заглушки)
-    seg = api[api.index("async def cf_pool_deploy"):
-              api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
+    seg = api_function("cf_pool_deploy")
     assert "deploy_pool" in seg and "assign_urls_to_accounts" in seg
     # деплой в ФОНЕ (иначе 100 воркеров синхронно → таймаут шлюза → «ответ не JSON»)
     assert "create_task" in seg and '"started": True' in seg
@@ -159,9 +158,7 @@ def test_deploy_errors_are_surfaced_not_swallowed():
     cf = _read("services/cf_pool_manager.py")
     seg = cf[cf.index("async def deploy_pool"):cf.index("async def assign_urls_to_accounts")]
     assert '"errors"' in seg and '"urls"' in seg and '"ok"' in seg
-    api = api_source()
-    dep = api[api.index("async def cf_pool_deploy"):
-              api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
+    dep = api_function("cf_pool_deploy")
     # результат/ошибки сохраняются в process-local карту, а не глотаются
     assert '_cf_deploy_last' in dep and 'res.get("errors"' in dep
     st = api_function("cf_pool_status")
@@ -177,9 +174,7 @@ def test_deploy_auto_count_by_active_accounts():
     assert "async def count_relay_targets" in cf
     seg = cf[cf.index("async def count_relay_targets"):cf.index("async def assign_urls_to_accounts")]
     assert "proxy_id IS NULL" in seg and "is_active" in seg.lower()
-    api = api_source()
-    dep = api[api.index("async def cf_pool_deploy"):
-              api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
+    dep = api_function("cf_pool_deploy")
     assert "count_relay_targets" in dep
     assert "'auto'" in dep and "relay_needed" in dep
     ui = _read("mini_app/index.html")

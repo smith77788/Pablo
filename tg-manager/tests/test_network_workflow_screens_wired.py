@@ -8,7 +8,7 @@ list_workflows → 500. Фикс: plural-эндпоинты поверх сущ�
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,10 +31,10 @@ def test_network_plural_routes_registered():
     ]:
         assert line in api, f"нет маршрута: {line}"
     # detail отдаёт форму графа (from_id/to_id/labels)
-    seg = api[api.index("async def network_detail_plural"):api.index("async def network_add_node")]
+    seg = api_function("network_detail_plural")
     assert '"from_id"' in seg and '"to_id"' in seg and '"from_label"' in seg
     # delete узла/ребра owner-scoped (через instance владельца)
-    dseg = api[api.index("async def network_delete_node"):api.index("async def network_add_edge")]
+    dseg = api_function("network_delete_node")
     assert "WHERE owner_id=$2" in dseg
 
 
@@ -57,12 +57,11 @@ def test_workflow_plural_routes_and_list_fixed():
     assert 'add_delete("/api/miniapp/workflows/{wf_id}", workflow_delete_any)' in api
     assert 'add_delete("/api/miniapp/workflow/{wf_id}", workflow_delete_any)' in api
     # workflow_list больше НЕ зовёт несуществующий list_workflows (был 500)
-    lst = api[api.index("async def workflow_list"):
-              api.index("async def workflow_create_plural")]
+    lst = api_function("workflow_list")
     assert "list_workflows" not in lst
     assert "jsonb_array_length" in lst and "'active'" in lst
     # add_step аппендит в inline jsonb steps
-    st = api[api.index("async def workflow_add_step"):api.index("async def _toggle")]
+    st = api_function("workflow_add_step")
     assert "steps = COALESCE(steps,'[]'::jsonb) || $1::jsonb" in st
     # И проверяет шаг словарём типов: шаг без type ронял весь экран деталей.
     assert "validate_steps(" in st

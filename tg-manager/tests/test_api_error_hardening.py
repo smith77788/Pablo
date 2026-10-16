@@ -11,15 +11,13 @@ from __future__ import annotations
 import os
 
 import pytest
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def test_api_middleware_catches_all_unhandled():
-    src = api_source()
-    i = src.index("async def plan_gate_middleware")
-    body = src[i:i + 1400]
+    body = api_function("plan_gate_middleware")
     assert "except web.HTTPException:" in body and "raise" in body   # штатные ответы не глушим
     assert "except Exception" in body                                # ловим ВСЁ остальное
     # Текст внутренней ошибки живёт в одной константе `_INTERNAL_ERROR`

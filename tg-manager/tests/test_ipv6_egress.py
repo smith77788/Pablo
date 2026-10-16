@@ -17,7 +17,7 @@ import threading
 import pytest
 
 from services import ipv6_egress as eg
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source, py_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,8 +57,7 @@ def test_preserve_is_noop_when_nothing_to_fix():
 
 
 def test_make_client_preserves_dc_before_connect():
-    src = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
-    body = src[src.index("def _make_client("):src.index("def _direct_fallback_ok(")]
+    body = py_function("services/account_manager.py", "_make_client")
     assert "preserve_session_dc" in body
     assert body.index("_client = TelegramClient(") < body.index("preserve_session_dc")
 
@@ -120,9 +119,7 @@ def test_probe_ok_when_bind_and_connect_work(monkeypatch):
 
 
 def test_save_endpoint_probes_before_saving():
-    src = api_source()
-    body = src[src.index("async def transport_ipv6_save("):]
-    body = body[:body.index("app.router.add_get")]
+    body = api_function("transport_ipv6_save")
     assert "probe_subnet" in body
     assert body.index("probe_subnet") < body.index("db.set_ipv6_subnet")
 
@@ -153,8 +150,7 @@ def test_ipv6_key_takes_phone_from_transport_map(monkeypatch):
 
 
 def test_start_login_uses_owner_subnet_and_falls_back():
-    src = open(os.path.join(ROOT, "services", "account_manager.py"), encoding="utf-8").read()
-    body = src[src.index("async def start_login("):src.index("async def resend_code(")]
+    body = py_function("services/account_manager.py", "start_login")
     assert "owner_id: int | None = None" in body
     assert 'device["ipv6_subnet"] = _OWNER_IPV6_SUBNET' in body
     assert body.index('device["ipv6_subnet"]') < body.index('_make_client("", device)')

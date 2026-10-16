@@ -28,7 +28,7 @@ from tests.miniapp_source import miniapp_html, source_of
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = (ROOT / "services" / "mass_inviter_engine.py").read_text(encoding="utf-8")
 WORKER = (ROOT / "services" / "op_worker.py").read_text(encoding="utf-8")
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 # Весь API-слой мини-аппа: ручки переезжают из 25-тысячестрочного
 # mini_app_api.py в соседние services/mini_app_*.py, и проверка не должна
@@ -228,16 +228,15 @@ def test_api_forwards_link_fallback_param_on_main_screen():
 
 
 def test_api_forwards_link_fallback_on_single_contact_invite():
-    i = API.index('async def uch_contact_invite(')
-    j = API.index('async def uch_contact_invite_history(')
-    seg = API[i:j]
+    # Границы по ast: срез «от uch_contact_invite до uch_contact_invite_history»
+    # проходил и на выпотрошенной ручке — обе строки находились между ними
+    # (измерено 16.10.2026).
+    seg = api_function("uch_contact_invite")
     assert 'params["link_fallback"] = False' in seg
     assert 'link_message' in seg
 
 
 def test_api_forwards_link_fallback_on_segment_invite():
-    i = API.index('async def uch_segment_invite')
-    j = API.index('n_targets = len(user_refs) + len(phones)', i)
-    seg = API[i:j]
+    seg = api_function("uch_segment_invite")
     assert 'params["link_fallback"] = False' in seg
     assert 'link_message' in seg
