@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,7 +41,7 @@ def test_accounts_health_aggregate_uses_correct_scale():
 
 
 def test_frontend_zero_trust_not_treated_as_100():
-    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+    html = miniapp_source()
     # trust=0 (нулевой траст) не должен становиться 100 из-за `||100` (0 — falsy)
     assert "Math.round(a.trust_score||100)" not in html
     assert html.count("a.trust_score!=null?Math.round(a.trust_score):100") >= 2

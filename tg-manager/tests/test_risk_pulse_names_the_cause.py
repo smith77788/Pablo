@@ -25,7 +25,7 @@ import asyncio
 
 from services import account_status as acc
 from services.infra_memory import get_account_health
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 
 class _Pool:
@@ -134,10 +134,7 @@ def test_time_does_not_heal_a_dead_session():
 # ── Экран печатает причину сервера, а не пересказывает её ───────────────────
 
 def test_the_account_screen_prints_the_cause_the_pulse_computed():
-    from pathlib import Path
-
-    html = (Path(__file__).resolve().parents[1]
-            / "mini_app" / "index.html").read_text(encoding="utf-8")
+    html = miniapp_source()
     assert "_h.reason ||" in html, (
         "карточка аккаунта снова пересказывает причину своими полями")
     assert "_h.needs_owner" in html, (
@@ -189,10 +186,7 @@ def test_a_healthy_account_gets_no_advice():
 
 
 def test_the_screen_prints_the_advice_the_pulse_computed():
-    from pathlib import Path
-
-    html = (Path(__file__).resolve().parents[1]
-            / "mini_app" / "index.html").read_text(encoding="utf-8")
+    html = miniapp_source()
     assert "_h.advice" in html, "экран снова сам решает, что посоветовать"
 
 

@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 
 from services import mini_app_api
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 
 def _api_src() -> str:
@@ -26,8 +26,9 @@ def _api_src() -> str:
 
 
 def _index_html() -> str:
-    p = Path(__file__).resolve().parent.parent / "mini_app" / "index.html"
-    return p.read_text(encoding="utf-8")
+    # Весь фронт, а не index.html: экраны выносятся в screens/*.js. Имя
+    # функции оставлено прежним, чтобы не трогать её вызовы ниже.
+    return miniapp_source()
 
 
 def test_operation_status_handler_owner_scoped():

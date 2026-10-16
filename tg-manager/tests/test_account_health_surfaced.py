@@ -12,12 +12,9 @@
 """
 from __future__ import annotations
 
-import inspect
 import re
-from pathlib import Path
 
-from services import mini_app_api
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 
 def _api_src() -> str:
@@ -25,8 +22,9 @@ def _api_src() -> str:
 
 
 def _index_html() -> str:
-    p = Path(__file__).resolve().parent.parent / "mini_app" / "index.html"
-    return p.read_text(encoding="utf-8")
+    # Весь фронт, а не index.html: строка аккаунта уехала в
+    # screens/accounts_list.js, и привязка к одному файлу краснеет на выносе.
+    return miniapp_source()
 
 
 def test_accounts_list_merges_health_pulse():

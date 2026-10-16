@@ -16,10 +16,13 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
+# Весь фронт (index.html + screens/*.js), а не один файл: экраны
+# выносятся в mini_app/screens/*.js, и привязка к index.html краснеет
+# на каждом таком выносе.
+HTML = miniapp_source()
 API = api_source()
 
 

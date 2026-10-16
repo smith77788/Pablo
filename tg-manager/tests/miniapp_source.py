@@ -64,6 +64,160 @@ def source_of(function_name: str) -> str:
     raise AssertionError(f"функция {function_name} не найдена ни в одном файле мини-аппа")
 
 
+# ── Тело ОДНОЙ функции фронта по точным границам ─────────────────────────────
+#
+# Десятки тестов вычленяли кусок фронта «от маркера до маркера»:
+#
+#     seg = html[html.index("function accReasonHuman("):]
+#     seg = seg[:seg.index("function buildAccDetail")]
+#
+# Пока фронт был одним файлом, это работало случайно: функции шли подряд.
+# После выноса экранов второй маркер уезжает в соседний файл, и срез либо
+# падает (`substring not found`), либо — что хуже — становится ПУСТЫМ или,
+# наоборот, захватывает десять тысяч строк и проверка делается вакуумной:
+# ровно так шесть полей аналитики «проверялись» против 10551 строки.
+#
+# Поэтому границы берём не по соседям, а по скобкам: сканер пропускает
+# комментарии, кавычки и шаблонные строки, поэтому `'{'` в тексте и `//` внутри
+# `https://` его не сбивают. Самопроверка сканера — в
+# tests/test_js_function_door.py: тела всех функций фронта не перекрываются и ни
+# одно не перехлёстывает в следующее объявление.
+
+
+def _skip_quoted(src: str, i: int) -> int:
+    """За закрывающую кавычку. Незакрытая кавычка — не строка, а апостроф."""
+    quote = src[i]
+    i += 1
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == quote:
+            return i + 1
+        if c == "\n":
+            return i + 1
+        i += 1
+    return i
+
+
+def _skip_template(src: str, i: int) -> int:
+    """За закрывающий обратный апостроф, вместе со вставками ${...}."""
+    i += 1
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "`":
+            return i + 1
+        if c == "$" and src[i + 1:i + 2] == "{":
+            i = _skip_braces(src, i + 1)
+            continue
+        i += 1
+    return i
+
+
+_EXPR_WORDS = frozenset((
+    "return", "typeof", "case", "in", "of", "new", "delete", "void", "do",
+    "else", "instanceof", "yield", "await",
+))
+
+
+def _regex_position(src: str, i: int) -> bool:
+    """Косая черта на месте, где ждут выражение, открывает регексп, не деление."""
+    j = i - 1
+    while j >= 0 and src[j] in " \t\r\n":
+        j -= 1
+    if j < 0:
+        return True
+    if src[j] in "(,=:[!&|?{};+-*%~^<>":
+        return True
+    k = j
+    while k >= 0 and (src[k].isalnum() or src[k] in "_$"):
+        k -= 1
+    return src[k + 1:j + 1] in _EXPR_WORDS
+
+
+def _skip_regex(src: str, i: int) -> int:
+    """За закрывающую косую черту регекспа. Внутри [...] косая — обычный символ."""
+    i += 1
+    in_class = False
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "\n":
+            return i
+        if in_class:
+            if c == "]":
+                in_class = False
+        elif c == "[":
+            in_class = True
+        elif c == "/":
+            return i + 1
+        i += 1
+    return i
+
+
+def _skip_braces(src: str, i: int) -> int:
+    """За парную закрывающую скобку к src[i] == "{"."""
+    assert src[i] == "{", src[i:i + 40]
+    depth = 0
+    n = len(src)
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n:
+            nxt = src[i + 1]
+            if nxt == "/":
+                j = src.find("\n", i)
+                i = n if j < 0 else j + 1
+                continue
+            if nxt == "*":
+                j = src.find("*/", i + 2)
+                i = n if j < 0 else j + 2
+                continue
+            # `/^https?:\\/\\//` — экранированные косые внутри регекспа выглядят
+            # как начало комментария; без этой ветки сканер съедал всё до
+            # конца строки и терял закрывающую скобку функции.
+            if _regex_position(src, i):
+                i = _skip_regex(src, i)
+                continue
+        if c in "\"'":
+            i = _skip_quoted(src, i)
+            continue
+        if c == "`":
+            i = _skip_template(src, i)
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    raise AssertionError("не нашли парную скобку")
+
+
+def js_function(name: str) -> str:
+    """Функция фронта от слова `function` до её закрывающей скобки.
+
+    Зеркало `api_function` для JS: тест, которому нужно тело, получает ровно
+    тело — ни соседей, ни пустоты.
+    """
+    import re
+
+    pat = re.compile(r"(?:async\s+)?function\s+" + re.escape(name) + r"\s*\(")
+    for text in (miniapp_html(), *(p.read_text(encoding="utf-8") for p in screen_files())):
+        m = pat.search(text)
+        if not m:
+            continue
+        brace = text.index("{", m.end() - 1)
+        return text[m.start():_skip_braces(text, brace)]
+    raise AssertionError(f"функция {name} не найдена ни в одном файле мини-аппа")
+
+
 # ── Серверная сторона: API-слой тоже перестал быть одним файлом ──────────────
 #
 # Тот же урок, что и выше, но про сервер. `services/mini_app_api.py` разросся до

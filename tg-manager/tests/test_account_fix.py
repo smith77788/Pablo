@@ -14,10 +14,11 @@ import pathlib
 import re
 
 from services import account_fix as F
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Весь фронт: строка аккаунта и её кнопки живут в screens/accounts_list.js.
+_UI = miniapp_source()
 _API = api_source()
 
 

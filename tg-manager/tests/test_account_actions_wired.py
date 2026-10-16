@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -50,8 +50,10 @@ def test_account_action_handles_three_inline_not_as_ops():
 
 
 def test_reauth_ui_shows_instruction_not_fake_launch():
-    ui = _read("mini_app/index.html")
-    seg = ui[ui.index("async function reauthAccount"):ui.index("async function unbindAccProxy")]
+    # Границы по скобкам, а не по соседней функции: reauthAccount уехала в
+    # screens/accounts_list.js, а unbindAccProxy осталась в index.html — срез
+    # «от маркера до маркера» после выноса экрана не существует.
+    seg = js_function("reauthAccount")
     # убрали ложный «Запускаю переавторизацию…» — показываем реальную инструкцию
     assert "Запускаю переавторизацию" not in seg
     assert "/api/miniapp/account/${id}/action/reauth" in seg

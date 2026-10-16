@@ -7,12 +7,9 @@
 """
 from __future__ import annotations
 
-import inspect
 import re
-from pathlib import Path
 
-from services import mini_app_api
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function, miniapp_source
 
 
 def _api_src() -> str:
@@ -20,8 +17,8 @@ def _api_src() -> str:
 
 
 def _index_html() -> str:
-    p = Path(__file__).resolve().parent.parent / "mini_app" / "index.html"
-    return p.read_text(encoding="utf-8")
+    # Весь фронт: accReasonHuman уехала в screens/accounts_list.js.
+    return miniapp_source()
 
 
 def test_account_detail_selects_status_reason():
@@ -50,9 +47,10 @@ def test_ui_humanizes_status_reason():
 def test_humanizer_maps_known_reasons_locally():
     """Логику humanizer можно проверить, вычленив тело функции и прогнав как JS
     нельзя без node — поэтому проверяем текстовые ветки присутствуют."""
-    html = _index_html()
-    seg = html[html.index("function accReasonHuman("):]
-    seg = seg[:seg.index("function buildAccDetail")]
+    # Границы по скобкам: accReasonHuman уехала в screens/accounts_list.js, а
+    # buildAccDetail осталась в index.html — срез между ними не существует, а
+    # до выноса он прихватывал ещё и половину соседних функций.
+    seg = js_function("accReasonHuman")
     assert "Проблема с прокси" in seg
     assert "FloodWait" in seg
     assert "переавторизац" in seg.lower()

@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import pathlib
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _API = api_source()
-_UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Весь фронт (index.html + screens/*.js), а не один файл: экраны
+# выносятся в mini_app/screens/*.js, и привязка к index.html краснеет
+# на каждом таком выносе.
+_UI = miniapp_source()
 
 
 def _accounts_query() -> str:

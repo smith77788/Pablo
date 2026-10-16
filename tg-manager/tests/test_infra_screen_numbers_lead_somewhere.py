@@ -18,7 +18,7 @@ import ast
 import functools
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
@@ -27,8 +27,8 @@ WORKER = os.path.join(ROOT, "services", "op_worker.py")
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
-    with open(HTML, encoding="utf-8") as f:
-        return f.read()
+    # Весь фронт, а не index.html: экраны выносятся в screens/*.js.
+    return miniapp_source()
 
 
 @functools.lru_cache(maxsize=1)

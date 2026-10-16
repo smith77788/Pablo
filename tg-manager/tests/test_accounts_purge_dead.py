@@ -9,7 +9,7 @@ mini_app_api не импортируется в песочнице — пров�
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -36,7 +36,7 @@ def test_backend_stats_has_dead():
 
 
 def test_frontend_has_dead_kpi_and_purge():
-    ui = _read("mini_app/index.html")
+    ui = miniapp_source()
     assert "filterAcc('dead'" in ui
     assert 'id="kpi-dead"' in ui
     assert "function purgeDeadAccounts" in ui
