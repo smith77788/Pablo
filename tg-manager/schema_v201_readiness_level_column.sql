@@ -1,0 +1,13 @@
+-- v201: readiness_level — отдельная колонка от warmup_level.
+--
+-- До этой миграции services/account_readiness.py::refresh_account_readiness()
+-- писал свой уровень готовности ("blocked"/"raw"/"warming"/"ready"/"veteran")
+-- в ТУ ЖЕ колонку tg_accounts.warmup_level, куда services/account_warmer.py
+-- пишет СВОЙ, другой по смыслу уровень прогрева сессии ("light"/"medium"/
+-- "deep") — причём именно в таком порядке: сначала warmup_level=light/medium/
+-- deep, тут же следующим запросом readiness_level затирает его поверх. В
+-- проде warmup_level после любого прогрева фактически ВСЕГДА содержал
+-- значение из словаря readiness, а не warmer. `int(warmup_level or 0)` в
+-- invite_advisor.py падал ValueError на любой из этих строк (кроме NULL) —
+-- Invite Advisor отвечал 500 всем, кто хоть раз прогревал аккаунт.
+ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS readiness_level TEXT DEFAULT NULL;

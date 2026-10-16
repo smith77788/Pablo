@@ -1,0 +1,4 @@
+# Minimal deps for the personal assistant bot. It talks to the AI provider
+# (OpenRouter, OpenAI-compatible) over plain HTTP, so no heavy SDKs are needed.
+httpx>=0.27.0
+python-dotenv>=1.0.0
