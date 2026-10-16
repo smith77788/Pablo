@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 from services.geo_data import GEO_PRESETS, preset_city_options, filter_preset_cities
+from tests.miniapp_source import api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _KEY = next(iter(GEO_PRESETS))
@@ -45,8 +46,8 @@ def test_subset_by_slug_and_name_case_insensitive():
 
 
 def test_endpoint_and_create_wired():
-    with open(os.path.join(ROOT, "services/mini_app_api.py"), encoding="utf-8") as f:
-        src = f.read()
+    # Весь слой: экраны присутствия уехали в services/mini_app_presence.py.
+    src = api_source()
     # эндпоинт умеет отдавать города пресета
     assert 'request.rel_url.query.get("cities")' in src
     assert "preset_city_options(want)" in src
