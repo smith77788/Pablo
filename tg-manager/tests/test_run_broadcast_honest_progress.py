@@ -119,20 +119,24 @@ def test_partial_broadcast_reported_partial(_stub_broadcaster):
     assert res["ok"] == 8 and res["failed"] == 2
 
 
-def test_cancel_stops_the_sending(_stub_broadcaster, monkeypatch):
-    marked: list[tuple] = []
-
-    async def _upd(pool, bid, sent, failed, status):
-        marked.append((bid, status))
-
-    monkeypatch.setattr(_db, "update_broadcast", _upd)
+def test_cancel_stops_the_sending(_stub_broadcaster):
     pool = _FakePool([_bc("running", 3)], op_status_seq=["cancelled"])
     res = _exec(pool, BASE)
     assert _stub_broadcaster["cancel"] == [900], (
         "отмена операции обязана останавливать саму отправку, иначе сообщения "
         "продолжают уходить после нажатия «Отменить»"
     )
-    assert marked == [(900, "cancelled")]
+    # Метка в БД — вторая половина остановки, и она важнее первой: без неё
+    # строка остаётся в ('pending','running'), а ровно эти статусы поднимает
+    # старт процесса (`resume_interrupted`). Пишет её общая дверь остановки
+    # `_stop_broadcasts`, поэтому проверяем сам запрос, а не вызов
+    # `db.update_broadcast`: счётчики отправленных дверь не трогает — их ведёт
+    # сама рассылка. См. tests/test_a_stopped_broadcast_does_not_resurrect_postgres.py.
+    stop = pool.wrote("UPDATE broadcasts SET status='cancelled'")
+    assert stop, (
+        "остановка не записана в базу — рассылка воскреснет на следующем "
+        "рестарте процесса")
+    assert [int(x) for x in stop[0][0]] == [900], stop
     assert res["status"] == "cancelled"
 
 

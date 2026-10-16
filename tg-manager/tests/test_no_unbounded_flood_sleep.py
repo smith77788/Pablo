@@ -65,10 +65,68 @@ def _source(path: str | None = None) -> str:
         return f.read()
 
 
-def _flood_sleeps(tree: ast.AST) -> list[ast.Call]:
-    """Вызовы asyncio.sleep, длительность которых приходит из флуд-паузы."""
-    found: list[ast.Call] = []
-    for node in ast.walk(tree):
+def _capped(expr: ast.AST, names: set[str]) -> bool:
+    """Все флуд-имена внутри выражения стоят под `min(...)` — то есть с потолком.
+
+    `min(flood_wait, 30)` — настоящий предел, и дальше такое значение уже не
+    флуд-пауза. `max(...)` наоборот: он только ПОДНИМАЕТ длину до флуда, и
+    именно поэтому стоит в `_FAKE_GUARD_CALLS`.
+    """
+    inside: set[int] = set()
+    for n in ast.walk(expr):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "min":
+            for x in ast.walk(n):
+                inside.add(id(x))
+    hits = [n for n in ast.walk(expr)
+            if isinstance(n, ast.Name) and n.id in names]
+    return bool(hits) and all(id(n) in inside for n in hits)
+
+
+def _flood_names_in_scope(fn: ast.AST) -> set[str]:
+    """Имена этой функции, в которых лежит флуд-пауза — включая переодетые.
+
+    СЛЕПОЕ ПЯТНО, которое это закрывает. Детектор смотрел только на выражение
+    внутри самого `sleep(...)`, поэтому пауза, переложенная в локальную
+    переменную, проходила мимо правила целиком:
+
+        pause = max(pause, gaussian_delay(float(flood_wait) + 20.0, ...))
+        await asyncio.sleep(pause)        # для детектора — обычный пейсинг
+
+    Так два исполнителя (массовое вступление и массовый выход) часами
+    пересиживали флуд в занятом слоте, а храповик был зелёным. Поэтому имя
+    считается флудовым и тогда, когда получило значение из флудового — хоть
+    через цепочку присваиваний, хоть через вызов. Исключение — присваивание,
+    в котором флуд накрыт `min(...)`: там предел уже стоит.
+    """
+    names = set(_FLOOD_NAMES)
+    for _ in range(4):  # цепочка присваиваний; на деле хватает одного-двух
+        grew = False
+        for n in ast.walk(fn):
+            if not isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                continue
+            if n.value is None:
+                continue
+            used = {x.id for x in ast.walk(n.value) if isinstance(x, ast.Name)}
+            targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+            if isinstance(n, ast.AugAssign):
+                used |= {x.id for x in ast.walk(n.target) if isinstance(x, ast.Name)}
+            if not (used & names):
+                continue
+            if _capped(n.value, names):
+                continue
+            for t in targets:
+                for x in ast.walk(t):
+                    if isinstance(x, ast.Name) and x.id not in names:
+                        names.add(x.id)
+                        grew = True
+        if not grew:
+            break
+    return names
+
+
+def _sleep_calls(scope: ast.AST) -> list[ast.Call]:
+    out: list[ast.Call] = []
+    for node in ast.walk(scope):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -76,13 +134,28 @@ def _flood_sleeps(tree: ast.AST) -> list[ast.Call]:
             continue  # общая обёртка ограничена по построению
         if not (isinstance(func, ast.Attribute) and func.attr == "sleep"):
             continue
-        if not node.args:
+        if node.args:
+            out.append(node)
+    return out
+
+
+def _flood_sleeps(tree: ast.AST) -> list[ast.Call]:
+    """Вызовы asyncio.sleep, длительность которых приходит из флуд-паузы."""
+    found: list[ast.Call] = []
+    seen: set[int] = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.AsyncFunctionDef, ast.FunctionDef)):
             continue
-        names = {
-            n.id for n in ast.walk(node.args[0]) if isinstance(n, ast.Name)
-        }
-        if names & _FLOOD_NAMES:
-            found.append(node)
+        names = _flood_names_in_scope(fn)
+        for node in _sleep_calls(fn):
+            if id(node) in seen:
+                continue
+            arg_names = {
+                n.id for n in ast.walk(node.args[0]) if isinstance(n, ast.Name)
+            }
+            if arg_names & names:
+                seen.add(id(node))
+                found.append(node)
     return found
 
 
@@ -109,6 +182,34 @@ def test_flood_sleeps_are_detected_at_all():
     """
     sleeps = _flood_sleeps(ast.parse(_source()))
     assert sleeps, "детектор флуд-снов не нашёл ни одного — проверьте _FLOOD_NAMES"
+
+
+def test_the_detector_follows_a_flood_pause_through_a_variable():
+    """Самопроверка слепого пятна: пауза, переодетая в локальную переменную.
+
+    Ровно в такой форме два исполнителя пересиживали часовой FloodWait, а
+    храповик этого не видел. Если детектор снова начнёт смотреть только внутрь
+    `sleep(...)`, этот тест покраснеет.
+    """
+    sick = ast.parse(
+        "async def f(flood_wait):\n"
+        "    pause = 30.0\n"
+        "    if flood_wait:\n"
+        "        pause = max(pause, float(flood_wait) + 20.0)\n"
+        "    await asyncio.sleep(pause)\n"
+    )
+    assert _flood_sleeps(sick), (
+        "детектор не узнаёт флуд-паузу, переложенную в переменную — правило "
+        "обходится одной лишней строкой")
+
+    healthy = ast.parse(
+        "async def f(flood_wait):\n"
+        "    pause = 30.0 + min(float(flood_wait), 30.0)\n"
+        "    await asyncio.sleep(pause)\n"
+    )
+    assert not _flood_sleeps(healthy), (
+        "предел через min() детектор обязан признавать: иначе он даёт ложные "
+        "находки на уже ограниченных паузах")
 
 
 def test_every_flood_sleep_is_bounded():
