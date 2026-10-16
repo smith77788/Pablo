@@ -2487,115 +2487,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-    async def broadcasts_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        # История была обрезана тридцатью без признака обрезки: тридцать первая
-        # рассылка просто не существовала для владельца, и понять это было
-        # неоткуда. Плюс срез по статусу — неудачные рассылки ищут именно так.
-        try:
-            limit = min(validate_integer(request.query.get("limit", "30"),
-                                         min_val=1, max_val=200) or 30, 200)
-        except (ValueError, TypeError):
-            limit = 30
-        try:
-            offset = max(validate_integer(request.query.get("offset", "0"),
-                                          min_val=0, max_val=100000) or 0, 0)
-        except (ValueError, TypeError):
-            offset = 0
-        status = (request.query.get("status") or "").strip().lower()
 
-        counts: dict = {}
-        try:
-            agg = await pool.fetch(
-                "SELECT status, COUNT(*) AS n, "
-                "       COALESCE(SUM(sent_count), 0)   AS sent, "
-                "       COALESCE(SUM(failed_count), 0) AS failed "
-                "FROM broadcasts WHERE created_by=$1 GROUP BY status", uid)
-            sent_all = failed_all = 0
-            for r in agg:
-                counts[(r["status"] or "").lower() or "unknown"] = int(r["n"] or 0)
-                sent_all += int(r["sent"] or 0)
-                failed_all += int(r["failed"] or 0)
-            # Доставляемость по ВСЕЙ истории: экран расписания считал её по
-            # странице в тридцать строк и показывал как общий процент.
-            totals = {"sent": sent_all, "failed": failed_all}
-        except Exception as exc:
-            log.warning("broadcasts uid=%d: агрегат недоступен: %s", uid, exc)
-            totals = {}
-        total = sum(counts.values()) if counts else await _safe_count(
-            pool, "SELECT COUNT(*) FROM broadcasts WHERE created_by=$1", uid)
-        # Неизвестный статус не отбрасываем молча: если его нет среди
-        # существующих, список по нему пуст, и это честный ответ.
-        if status and status not in counts:
-            status = ""
-
-        cols = """b.id, b.bot_id, mb.username AS bot_username,
-                  b.message_text, b.status, b.sent_count, b.failed_count,
-                  b.total_users, b.created_at"""
-        if status:
-            rows = await _safe_fetch(pool,
-                f"""SELECT {cols} FROM broadcasts b
-                    JOIN managed_bots mb ON mb.bot_id=b.bot_id
-                    WHERE b.created_by=$1 AND lower(b.status)=$2
-                    ORDER BY b.created_at DESC LIMIT $3 OFFSET $4""",
-                uid, status, limit, offset)
-            shown_total = counts.get(status, len(rows) + offset)
-        else:
-            rows = await _safe_fetch(pool,
-                f"""SELECT {cols} FROM broadcasts b
-                    JOIN managed_bots mb ON mb.bot_id=b.bot_id
-                    WHERE b.created_by=$1
-                    ORDER BY b.created_at DESC LIMIT $2 OFFSET $3""",
-                uid, limit, offset)
-            shown_total = total
-        return _json_resp({
-            "broadcasts": rows,
-            "total": total,
-            "counts": counts,
-            "totals": totals,
-            "status": status,
-            "page": {"offset": offset, "limit": limit,
-                     "has_more": offset + len(rows) < shown_total},
-        })
-
-    async def broadcast_schedule(request: web.Request) -> web.Response:
-        """Рассылка с расписанием: POST /api/miniapp/broadcast/schedule"""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        bot_id = validate_integer(body.get("bot_id"), min_val=1)
-        # Фронт (submitScheduledBroadcast) шлёт message_text/scheduled_at — принимаем
-        # оба контракта (иначе кнопка «Запланировать» отдавала бы 400/404).
-        text = validate_string(body.get("text") or body.get("message_text"), max_len=4096)
-        if not bot_id or not text:
-            return _err("Нужны идентификатор бота и текст")
-        if check_sql_suspicious(text):
-            return _err("Недопустимые символы в тексте сообщения")
-        try:
-            bot_id_int = int(bot_id)
-        except (TypeError, ValueError):
-            return _err("Неверный идентификатор бота")
-        schedule = {
-            "schedule_minutes": body.get("schedule_minutes"),
-            "scheduled_for": body.get("scheduled_for") or body.get("scheduled_at"),
-            "segment": body.get("segment"),
-            "buttons": body.get("buttons"),
-        }
-        try:
-            from services.broadcaster import mass_broadcast_with_scheduling
-            result = await mass_broadcast_with_scheduling(pool, uid, bot_id_int, text, schedule)
-            if result.get("ok"):
-                return _json_resp(result)
-            return _err(result.get("error") or "Не удалось поставить рассылку", 400)
-        except Exception:
-            log.exception("broadcast_schedule uid=%d bot=%d", uid, bot_id_int)
-            return _err("Не удалось создать отложенную рассылку", 500)
 
 
 
@@ -6318,48 +6210,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # ── Templates ────────────────────────────────────────────────────────────
 
-    async def templates(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            """SELECT id, name, asset_type, template, created_at
-               FROM asset_templates WHERE owner_id=$1 AND asset_type='post'
-               ORDER BY created_at DESC LIMIT 30""", uid)
-        for r in rows:
-            if isinstance(r.get("template"), str):
-                try:
-                    r["template"] = _json.loads(r["template"])
-                except Exception:
-                    r["template"] = {}
-        total = await _safe_count(pool,
-            "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1 AND asset_type='post'", uid)
-        return _json_resp({"templates": rows, "total": int(total or 0)})
 
-    async def create_template(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос")
-        name = _text(body.get("name"))
-        text = _text(body.get("text"))
-        if not name:
-            return _err("Нужно название")
-        if not text:
-            return _err("Нужен текст")
-        if len(text) > 4096:
-            return _err("Текст длиннее 4096 символов")
-        try:
-            row = await pool.fetchrow(
-                "INSERT INTO asset_templates(owner_id, asset_type, name, template) VALUES($1,'post',$2,$3::jsonb) RETURNING id",
-                uid, name, _json.dumps({"text": text}))
-            return _json_resp({"ok": True, "id": row["id"]})
-        except Exception:
-            log.exception("create_template uid=%d", uid)
-            return _err("Не удалось создать шаблон", 500)
 
 
     # ── Mass Publish ─────────────────────────────────────────────────────────
@@ -6892,43 +6743,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("asset_templates_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    async def asset_template_detail(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            tpl_id = int(request.match_info["tpl_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор шаблона", 400)
-        try:
-            tpl = await pool.fetchrow(
-                "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
-            )
-            if not tpl:
-                return _err("Не найдено", 404)
-            return _json_resp(dict(tpl))
-        except Exception:
-            log.exception("asset_template_detail uid=%d tpl=%d", uid, tpl_id)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def asset_template_delete(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            tpl_id = int(request.match_info["tpl_id"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор шаблона", 400)
-        try:
-            result = await pool.execute(
-                "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
-            )
-            if result == "DELETE 0":
-                return _err("Не найдено", 404)
-            return _json_resp({"ok": True})
-        except Exception:
-            log.exception("asset_template_delete uid=%d tpl=%d", uid, tpl_id)
-            return _err(_INTERNAL_ERROR, 500)
 
     # ── Infra Health Center ───────────────────────────────────────────────────
 
@@ -8042,10 +7857,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_put("/api/miniapp/auto_reply/{reply_id}/toggle", toggle_auto_reply)
     app.router.add_delete("/api/miniapp/auto_reply/{reply_id}", delete_auto_reply)
     # Broadcasts
-    app.router.add_get("/api/miniapp/broadcasts", broadcasts_list)
-    app.router.add_post("/api/miniapp/broadcast/schedule", broadcast_schedule)
     # Алиас: фронт зовёт множественное /broadcasts/schedule (был 404).
-    app.router.add_post("/api/miniapp/broadcasts/schedule", broadcast_schedule)
     # Channels
     # Campaigns / Funnels
     app.router.add_get("/api/miniapp/campaigns", campaigns)
@@ -8072,8 +7884,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Schedules
     app.router.add_post("/api/miniapp/schedule/{sch_id}/cancel", cancel_schedule)
     # Templates
-    app.router.add_get("/api/miniapp/templates", templates)
-    app.router.add_post("/api/miniapp/template", create_template)
     # Mass Publish
     app.router.add_get("/api/miniapp/mass_publish/targets", mass_publish_targets)
     app.router.add_post("/api/miniapp/mass_publish", mass_publish)
@@ -8289,9 +8099,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
     # Asset Templates
     app.router.add_get("/api/miniapp/asset_templates", asset_templates_list)
-    app.router.add_post("/api/miniapp/asset_template", create_template)
-    app.router.add_get("/api/miniapp/asset_template/{tpl_id}", asset_template_detail)
-    app.router.add_delete("/api/miniapp/asset_template/{tpl_id}", asset_template_delete)
     # Infra Health Center
     app.router.add_get("/api/miniapp/infra_health", infra_health_overview)
     app.router.add_post("/api/miniapp/infra_health/anomaly/{anomaly_id}/resolve", infra_health_resolve)
