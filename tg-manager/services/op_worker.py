@@ -2640,10 +2640,20 @@ async def _release_op_for_owner_limit(pool: "asyncpg.Pool", op_id: int) -> None:
     до сторожа зависших, то есть на час. done_items=0 — как у всех возвратов в
     очередь: при следующем прогоне прогресс считается заново, иначе счётчик
     копится поверх прошлого (класс «done > total»).
+
+    acct_wait_since=NULL — тоже как у всех остальных возвратов, и единственный
+    возврат, где этого НЕ было. Отметка копится в ожидании свободного флота, и
+    по ней `_requeue_op_no_accounts` проваливает операцию, прождавшую
+    _ACCT_WAIT_MAX_MIN. Операция, однажды ждавшая флот 19 минут и вернувшаяся
+    сюда по ВНУТРЕННЕЙ причине (занят семафор владельца), наследовала чужой
+    отсчёт: на следующем прогоне первая же секунда занятого флота закрывала её
+    текстом «все аккаунты 20 мин были заняты». Возврат по месту в семафоре —
+    новая попытка, а не продолжение ожидания.
     """
     await _safe_execute(
         pool,
         "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        "acct_wait_since=NULL, "
         "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id,
