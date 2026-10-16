@@ -58,6 +58,12 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
     await GiftTransferService.mark_plan_running(pool, plan_id)
 
     await pool.execute(
+        "UPDATE operation_queue SET total_items=$2, done_items=0 WHERE id=$1",
+        op_id,
+        len(plan["items"]),
+    )
+
+    await pool.execute(
         """
         INSERT INTO gift_transfer_ops (plan_id, operation_id, total_items)
         VALUES ($1, $2, $3)
@@ -91,7 +97,23 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
     failed_count = 0
     total_cost = 0
 
+    # Отмена доходит до исполнителя ОПРОСОМ: своей задачи у него нет, владелец
+    # нажимает «Отменить» и ждёт, что необратимое прекратится. Передача подарка
+    # необратима и тратит звёзды, поэтому спрашиваем перед КАЖДОЙ — как все
+    # остальные исполнители (`_is_cancelled` в op_worker, десятки вызовов).
+    from services.op_worker import _is_cancelled
+
+    cancelled = False
     for item in pending_items:
+        if await _is_cancelled(pool, op_id):
+            cancelled = True
+            log.info(
+                "_exec_gift_transfer: отмена владельца plan_id=%d op_id=%d — "
+                "передано %d, остальные подарки остаются у аккаунтов",
+                plan_id, op_id, transferred_count,
+            )
+            break
+
         result = await _transfer_single_gift(
             pool, item, plan["recipient_user_id"], plan["recipient_username"]
         )
@@ -125,22 +147,30 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
             transferred_count,
             failed_count,
         )
+        # Счётчик операции двигается по каждому разобранному подарку: по нему
+        # владелец видит прогресс, а сторож застоя — что работа идёт.
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=$2 WHERE id=$1",
+            op_id,
+            transferred_count + failed_count,
+        )
 
-    await GiftTransferService.mark_plan_done(pool, plan_id, total_cost)
+    if cancelled:
+        # План возвращается из 'running': иначе владелец видит остановленную
+        # передачу вечно работающей и не может запустить её заново.
+        await pool.execute(
+            "UPDATE gift_transfer_plans SET status='cancelled', updated_at=now() "
+            "WHERE id=$1 AND status='running'",
+            plan_id,
+        )
+    else:
+        await GiftTransferService.mark_plan_done(pool, plan_id, total_cost)
 
-    await pool.execute(
-        """
-        UPDATE operation_queue SET
-            finished_at = now(),
-            status = 'done',
-            total_items = $2,
-            done_items = $3
-        WHERE id = $1
-        """,
-        op_id,
-        len(plan["items"]),
-        transferred_count,
-    )
+    # Терминальный статус операции здесь НЕ пишется. Все пути завершения идут
+    # через одну дверь (`op_worker._op_closed_by_us`), и её UPDATE щадит уже
+    # закрытую строку — так отмена владельца не превращается в «выполнено».
+    # Раньше этот UPDATE стоял здесь без условия и последним: он затирал отмену,
+    # а дверь после него получала ноль строк и об исходе не докладывала вовсе.
 
     report_id = await GiftTransferReportService.generate_report(pool, plan_id, op_id)
     log.info(
@@ -151,11 +181,18 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
         failed_count,
     )
     return {
-        "status": "done",
+        # Отмену и исход решает вызывающий: `op_status.classify_final` судит по
+        # счётчикам, а не по слову исполнителя. Ключ "ok" обязателен: алиасы
+        # нормализатора (`sent`, `created`, `invited`…) слова "transferred" не
+        # знают, поэтому две ушедшие передачи из трёх объявлялись провалом.
+        "status": "cancelled" if cancelled else "done",
         "summary": (
+            f"🛑 Передача остановлена: {transferred_count} / {len(plan['items'])}"
+            if cancelled else
             f"✅ Подарки отправлены: {transferred_count} / {len(plan['items'])} "
             f"(не удалось: {failed_count})"
         ),
+        "ok": transferred_count,
         "transferred": transferred_count,
         "failed": failed_count,
         "total": len(plan["items"]),
