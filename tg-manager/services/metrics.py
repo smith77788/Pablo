@@ -54,6 +54,8 @@ _HELP = {
         "Сбои записи финала операции (исход не сохранён, строка осталась running)",
     "infragram_maintenance_step_failures_total":
         "Сбои шагов обслуживания воркера (сторожа, уборка, оповещения)",
+    "infragram_broadcast_stop_write_failures_total":
+        "Сбои записи остановки рассылки (риск воскрешения после рестарта)",
     "infragram_recurring_chains_repaired_total":
         "Продолженные расписания, оборвавшиеся на закрытии круга",
     "infragram_invite_dedup_read_failures_total":

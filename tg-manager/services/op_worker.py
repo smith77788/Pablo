@@ -3593,6 +3593,9 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_maintenance_step_failures_total":
         "сторож воркера падает: сброс зависших операций, уборка занятых "
         "аккаунтов или оповещения могли не сработать",
+    "infragram_broadcast_stop_write_failures_total":
+        "остановка рассылки — не записалась в базу: после перезапуска "
+        "процесса остановленная рассылка может продолжить уходить людям",
     "infragram_invite_dedup_write_failures_total":
         "дедуп инвайта — возможны повторные приглашения тем же людям",
     "infragram_journal_write_failures_total":
@@ -10729,6 +10732,59 @@ async def _exec_strike(
 _NB_BOT_START_DELAY_S = 2.0
 
 
+async def _stop_broadcasts(pool: asyncpg.Pool, broadcast_ids) -> None:
+    """Остановить рассылки НАСОВСЕМ: и задачу в процессе, и строку в БД.
+
+    `broadcaster.cancel()` снимает только asyncio-задачу ЭТОГО процесса.
+    Терминальный статус в БД пишет сама задача (`broadcaster.run` ловит и
+    CancelledError, чтобы его записать), но ровно в двух случаях она его не
+    запишет:
+
+      • задача ещё спит в разбеге `start_delay` — он стоит ДО защищённого
+        блока, так что отмена там уносит задачу без записи. Для сетевой
+        рассылки разбег растёт с номером бота (`order * 2s`), так что окно
+        открыто первые десятки секунд после запуска — ровно когда владелец и
+        жмёт «стоп»;
+      • задачи вообще нет в `_running` — процесс успел перезапуститься
+        (рабочая ветка едет в прод на каждом пуше), а список запущенных
+        рассылок операция читает из `params`, которые рестарт переживают.
+
+    В обоих случаях строка остаётся в ('pending','running'), а
+    `get_interrupted_broadcasts` поднимает на следующем старте процесса ровно
+    эти статусы: остановленная владельцем рассылка продолжает уходить ЖИВЫМ
+    ЛЮДЯМ после деплоя, и отменённая операция при этом честно закрыта как
+    «остановлена».
+
+    Одиночная рассылка (`_await_broadcast`) метку в БД ставила с самого начала,
+    сетевая — нет: четыре ветки сегментов звали только `broadcaster.cancel`.
+    Поэтому дверь одна на все пути остановки.
+
+    Счётчики `sent_count/failed_count` не трогаем: их ведёт сама рассылка, а у
+    останавливающего на руках только id. Условие по статусу — чтобы не
+    переписать исход, который задача уже успела записать.
+    """
+    from services import broadcaster
+
+    ids = [int(x) for x in (broadcast_ids or [])]
+    if not ids:
+        return
+    for _bc in ids:
+        try:
+            broadcaster.cancel(_bc)
+        except Exception:
+            log_exc_swallow(log, f"stop_broadcast cancel bc={_bc}")
+    await _retrying_execute(
+        pool,
+        "UPDATE broadcasts SET status='cancelled', finished_at=NOW() "
+        "WHERE id = ANY($1::bigint[]) AND status IN ('pending','running')",
+        ids,
+        log_ctx=f"[stop_broadcasts bc={ids[:5]}]",
+        where="stop_broadcasts",
+        metric="infragram_broadcast_stop_write_failures_total",
+        lost="остановленная рассылка может продолжиться после перезапуска",
+    )
+
+
 async def _nb_launch(
     pool: asyncpg.Pool, op_id: int, owner_id: int, bot_id: int, token: str,
     text: str, ids: list, buttons, *, subset: bool, order: int,
@@ -10790,7 +10846,6 @@ async def _exec_network_broadcast(
 ) -> dict:
     """Выполнить сетевую рассылку по сегменту через broadcaster."""
     from collections import defaultdict
-    from services import broadcaster
 
     text: str = str(params.get("text") or "").strip()
     segment: str = str(params.get("segment") or "all_each")
@@ -10850,8 +10905,7 @@ async def _exec_network_broadcast(
     if segment in ("all_each", "selected_bots", "cluster"):
         for b in bots:
             if await _is_cancelled(pool, op_id):
-                for _bc in launched_bc_ids:
-                    broadcaster.cancel(_bc)
+                await _stop_broadcasts(pool, launched_bc_ids)
                 return {
                     "status": "cancelled",
                     "ok": total_started,
@@ -10888,8 +10942,7 @@ async def _exec_network_broadcast(
             token_map[u["bot_id"]] = u["token"]
         for bid, ids in by_bot.items():
             if await _is_cancelled(pool, op_id):
-                for _bc in launched_bc_ids:
-                    broadcaster.cancel(_bc)
+                await _stop_broadcasts(pool, launched_bc_ids)
                 return {
                     "status": "cancelled",
                     "ok": total_started,
@@ -10911,8 +10964,7 @@ async def _exec_network_broadcast(
         days_to = None if segment == "lost_all" else 30
         for b in bots:
             if await _is_cancelled(pool, op_id):
-                for _bc in launched_bc_ids:
-                    broadcaster.cancel(_bc)
+                await _stop_broadcasts(pool, launched_bc_ids)
                 return {
                     "status": "cancelled",
                     "ok": total_started,
@@ -10935,8 +10987,7 @@ async def _exec_network_broadcast(
     elif segment == "lang":
         for b in bots:
             if await _is_cancelled(pool, op_id):
-                for _bc in launched_bc_ids:
-                    broadcaster.cancel(_bc)
+                await _stop_broadcasts(pool, launched_bc_ids)
                 return {
                     "status": "cancelled",
                     "ok": total_started,
@@ -20911,7 +20962,6 @@ async def _await_broadcast(
     через токен бота), поэтому длительность никому не стоит ресурса.
     """
     from services import broadcaster
-    from database import db as _db
 
     orphan_polls = 0
     restarted = False
@@ -20932,11 +20982,7 @@ async def _await_broadcast(
         )
 
         if await _is_cancelled(pool, op_id):
-            broadcaster.cancel(broadcast_id)
-            try:
-                await _db.update_broadcast(pool, broadcast_id, sent, failed, "cancelled")
-            except Exception:
-                log_exc_swallow(log, f"await_broadcast cancel mark op={op_id}")
+            await _stop_broadcasts(pool, [broadcast_id])
             return {
                 "status": "cancelled",
                 "broadcast_id": broadcast_id,
