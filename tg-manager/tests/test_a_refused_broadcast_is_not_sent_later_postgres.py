@@ -87,7 +87,7 @@ def test_the_safety_brake_is_not_undone_by_the_next_restart(pool, monkeypatch):
 
     async def _refuse(*a, **kw):
         raise operation_bus.ImmunityBlockedError(
-            "⛔️ Шторм банов: новые рассылки приостановлены")
+            "run_broadcast", "⛔️ Шторм банов: новые рассылки приостановлены")
 
     monkeypatch.setattr(operation_bus, "submit", _refuse)
 
@@ -106,6 +106,35 @@ def test_the_safety_brake_is_not_undone_by_the_next_restart(pool, monkeypatch):
         "аудитории бота — мимо предохранителя, который её запретил")
     assert all(str(r["status"]) == "cancelled" for r in new_rows), (
         [dict(r) for r in new_rows])
+
+
+def test_a_refused_resend_does_not_turn_into_a_full_audience_send(pool, monkeypatch):
+    """Повтор недоставленным — самый дорогой случай того же отказа.
+
+    У записи повтора нет `target_user_ids` (аудиторию исполнитель кладёт в неё
+    уже на прогоне), поэтому воскрешённая отправка ушла бы ВСЕЙ аудитории
+    бота, а не недоставленным: исходное сообщение пришло бы людям второй раз.
+    """
+    from services import broadcaster, operation_bus
+
+    src = int(_run(pool.fetchval(
+        "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by, "
+        "                       sent_count) "
+        "VALUES($1,'исходная',2,'partial',$2,1) RETURNING id", BOT_ID, OWNER)))
+    _run(pool.execute(
+        "INSERT INTO broadcast_delivery_log(broadcast_id, user_id) VALUES($1,$2) "
+        "ON CONFLICT DO NOTHING", src, 7101))
+
+    async def _refuse(*a, **kw):
+        raise operation_bus.PlanRequiredError("run_broadcast", "starter")
+
+    monkeypatch.setattr(operation_bus, "submit", _refuse)
+    before = _resurrectable_ids(pool)
+    res = _run(broadcaster.resend_undelivered(pool, OWNER, src))
+    assert res.get("ok") is False, f"гейт тарифа не отказал: {res}"
+    assert not (_resurrectable_ids(pool) - before), (
+        "запись повтора осталась «ожидающей»: рестарт отправит её всей "
+        "аудитории бота вместо недоставленных")
 
 
 def test_the_door_does_not_touch_a_live_broadcast(pool):

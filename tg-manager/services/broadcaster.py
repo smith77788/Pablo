@@ -793,6 +793,7 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
                 "error": "Все активные подписчики уже получили рассылку", "code": 400}
     total = len(undelivered)
     import json as _json
+    new_bc = None
     try:
         row = await pool.fetchrow(
             "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) "
@@ -810,6 +811,11 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
         return {"ok": True, "broadcast_id": new_bc, "op_id": op_id, "total_users": total}
     except Exception:
         logger.exception("resend_undelivered bc=%d uid=%d", bc_id, owner_id)
+        # Отказ постановки (тариф, предохранитель) не должен оставлять запись,
+        # которую поднимет старт процесса — см. abandon_unstarted. Для повтора
+        # это дороже всего: у его записи нет target_user_ids, поэтому
+        # воскрешённая отправка ушла бы ВСЕЙ аудитории, а не недоставленным.
+        await abandon_unstarted(pool, new_bc)
         return {"ok": False, "error": "Не удалось создать повторную рассылку", "code": 500}
 
 
@@ -868,6 +874,7 @@ async def ab_test_broadcast(
         if not text:
             continue
 
+        bc_id = None
         try:
             row = await pool.fetchrow(
                 "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) "
@@ -884,6 +891,10 @@ async def ab_test_broadcast(
             results.append({"variant_index": idx, "broadcast_id": bc_id, "op_id": op_id, "users": len(chunk)})
         except Exception as exc:
             logger.warning("ab_test_broadcast variant %d failed: %s", idx, exc)
+            # Вариант, который не поставили, обязан перестать быть «ожидающим»:
+            # его аудитория — доля от общей, и воскрешённая отправка ушла бы
+            # всем сразу (см. abandon_unstarted).
+            await abandon_unstarted(pool, bc_id)
 
     return {"ok": True, "broadcasts": results, "total_users": len(user_ids)}
 
