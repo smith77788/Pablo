@@ -57,10 +57,22 @@ class _LongFlood(Exception):
     seconds = 3600
 
 
+ACC_ID = 980011   # не «1»: штраф, записанный тестом, живёт в процессе — см. _spy
+
+
 @pytest.fixture
 def _spy(monkeypatch):
-    """Сны не спим, а записываем: нас интересует, НА СКОЛЬКО прогон встал."""
-    from services import op_worker
+    """Сны не спим, а записываем: нас интересует, НА СКОЛЬКО прогон встал.
+
+    Заодно убираем за собой штраф аккаунта. `record_flood` пишет не только в
+    БД, но и в `flood_engine._flood_state` — память ПРОЦЕССА, которая живёт до
+    конца прогона. Часовой FloodWait, записанный здесь на аккаунт №1, уводил
+    его risk в 1.00, и `tests/test_account_rotation.py` краснел в CI на выборе
+    «аккаунт с большим trust побеждает»: по отдельности оба теста зелёные, и
+    разобраться в этом можно было только по CI. Поэтому и чужой номер аккаунта,
+    и уборка.
+    """
+    from services import flood_engine, op_worker
 
     slept: list[float] = []
 
@@ -74,7 +86,10 @@ def _spy(monkeypatch):
         return False
 
     monkeypatch.setattr(op_worker._infra_mem, "is_account_quarantined", _not_quarantined)
-    return slept
+    try:
+        yield slept
+    finally:
+        flood_engine._flood_state.pop(ACC_ID, None)
 
 
 async def _zero(base=0.0):
@@ -96,7 +111,7 @@ async def test_bulk_join_stops_the_account_instead_of_sitting_on_the_flood(_spy,
     res = await op_worker._exec_bulk_join_inner(
         _Pool(), object(), 77, 555,
         {"links": ["t.me/a", "t.me/b", "t.me/c"], "delay_mode": "fast"},
-        [{"id": 1, "phone": "+70000000001", "session_str": "s1"}],
+        [{"id": ACC_ID, "phone": "+70000980011", "session_str": "s1"}],
     )
 
     assert attempted == ["t.me/a"], (
@@ -119,7 +134,7 @@ async def test_bulk_leave_stops_the_account_instead_of_sitting_on_the_flood(_spy
         raise _LongFlood("A wait of 3600 seconds is required")
 
     async def _select(pool, owner_id, **kw):
-        return [{"id": 1, "phone": "+70000000001", "session_str": "s1"}]
+        return [{"id": ACC_ID, "phone": "+70000980011", "session_str": "s1"}]
 
     monkeypatch.setattr(account_manager, "leave_channel", _leave)
     monkeypatch.setattr(resource_selector, "select_all_active", _select)
