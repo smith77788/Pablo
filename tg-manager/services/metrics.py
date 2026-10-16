@@ -50,6 +50,8 @@ _HELP = {
         "Аккаунтов, у которых аренду снял кто-то другой, пока операция ими работала",
     "infragram_account_lease_regained_total":
         "Аккаунтов, чья пропавшая аренда взята заново до истечения TTL",
+    "infragram_op_close_write_failures_total":
+        "Сбои записи финала операции (исход не сохранён, строка осталась running)",
     "infragram_recurring_chains_repaired_total":
         "Продолженные расписания, оборвавшиеся на закрытии круга",
     "infragram_invite_dedup_read_failures_total":

@@ -175,15 +175,21 @@ def test_a_close_that_changed_nothing_does_not_report_a_second_outcome():
     Путь падения эту развилку разбирает давно — здесь храповик на то, чтобы
     успешный путь её не потерял. Проверяется порядок: результат записи
     сохранён, проверен на ноль строк и путь прерван ДО доклада об исходе.
+
+    Пишется финал ДВЕРЬЮ С ПОВТОРОМ (`_retrying_execute`): это решение о
+    судьбе операции, и блип БД на нём оставлял строку 'running' при уже
+    разосланном «✅ выполнена» — см.
+    tests/test_the_unsaved_outcome_is_not_reported_postgres.py.
     """
     body = _run_op_task_source()
-    assert "_close_res = await _safe_execute(" in body, (
-        "результат закрывающей записи снова не сохраняется: ноль строк "
-        "(строку закрыл кто-то другой) опять неотличим от успешной записи")
+    assert "_close_res = await _retrying_execute(" in body, (
+        "результат закрывающей записи снова не сохраняется или пишется без "
+        "повтора: ноль строк (строку закрыл кто-то другой) опять неотличим от "
+        "успешной записи, а блип БД — от сохранённого исхода")
     flat = body.replace(" ", "")
     guard = flat.find('ifstr(_close_res or"").strip().endswith("0")'.replace(" ", ""))
     assert guard > 0, "нет проверки «запись не изменила ни одной строки»"
-    close = flat.find("_close_res=await_safe_execute(")
+    close = flat.find("_close_res=await_retrying_execute(")
     report = flat.find("await_announce_op_outcome(", close)
     assert close < guard < report, (
         "проверка нулевой записи стоит не между закрытием и докладом об "

@@ -182,6 +182,11 @@ def test_every_protective_failure_counter_is_surfaced():
         "в _PROTECTIVE_FAILURE_COUNTERS словами владельца:\n  " + "\n  ".join(missing))
 
 
+_INCREMENT_RE = (
+    r'(?:(?:\binc|_metric|_reliability_metric)\(\s*|metric\s*(?::\s*str\s*)?=\s*)'
+    r'"(infragram_[a-z_]+)"')
+
+
 def _counters_actually_incremented() -> set[str]:
     """Счётчики, которые код РЕАЛЬНО увеличивает, а не просто упоминает.
 
@@ -189,6 +194,11 @@ def _counters_actually_incremented() -> set[str]:
     сама таблица `_PROTECTIVE_FAILURE_COUNTERS` живёт в `services/`, то есть
     своё же объявление детектор и находит. Для обратного направления нужен
     именно ВЫЗОВ увеличения.
+
+    Увеличением считается и имя, ПЕРЕДАННОЕ счётчиком в аргументе `metric=`
+    (включая значение по умолчанию): у дверей с повтором механика одна, а
+    тревогу они поднимают разную, поэтому имя счётчика у них — параметр.
+    Опечатку это по-прежнему ловит: ни одна из двух форм её не найдёт.
     """
     import re
 
@@ -200,9 +210,7 @@ def _counters_actually_incremented() -> set[str]:
                     continue
                 with open(os.path.join(dirpath, f), encoding="utf-8") as fh:
                     text = fh.read()
-                found |= set(re.findall(
-                    r'(?:\binc|_metric|_reliability_metric)\(\s*"(infragram_[a-z_]+)"',
-                    text))
+                found |= set(re.findall(_INCREMENT_RE, text))
     return found
 
 
@@ -225,9 +233,14 @@ def test_the_increment_detector_bites():
     """Самопроверка обратного детектора на заведомо больном и здоровом тексте."""
     import re
 
-    pat = r'(?:\binc|_metric|_reliability_metric)\(\s*"(infragram_[a-z_]+)"'
+    pat = _INCREMENT_RE
     assert re.findall(pat, '_reliability_metric("infragram_x_failures_total")') \
         == ["infragram_x_failures_total"]
+    # Имя, переданное двери с повтором, — тоже увеличение.
+    assert re.findall(pat, 'await _retrying_execute(p, q, metric="infragram_y_total")') \
+        == ["infragram_y_total"]
+    assert re.findall(pat, '    metric: str = "infragram_z_total",') \
+        == ["infragram_z_total"]
     # Упоминание в словаре увеличением не считается — иначе мёртвый счётчик
     # прошёл бы проверку сам по себе.
     assert re.findall(pat, '{"infragram_x_failures_total": "словами"}') == []

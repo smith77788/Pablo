@@ -185,6 +185,8 @@ async def _journal_write(
 
 async def _retrying_execute(
     pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
+    metric: str = "infragram_requeue_write_failures_total",
+    lost: str = "автоматический повтор потерян",
 ) -> str:
     """Записать РЕШЕНИЕ о судьбе операции: один повтор, затем громко.
 
@@ -208,11 +210,13 @@ async def _retrying_execute(
     report_error(last, extra={"context": f"op_worker_decision_write{log_ctx}",
                               "query": query[:100]})
     log.error(
-        "op_worker: решение о судьбе операции не записалось%s (%s) — "
-        "автоматический повтор потерян", log_ctx, last,
+        "op_worker: решение о судьбе операции не записалось%s (%s) — %s",
+        log_ctx, last, lost,
     )
-    _reliability_metric("infragram_requeue_write_failures_total",
-                        where=where or "requeue")
+    # Что именно потеряно, решает вызывающий: счётчик повтора и счётчик
+    # незаписанного финала поднимают разную тревогу (см. их описания в
+    # _PROTECTIVE_FAILURE_COUNTERS), а механика повтора у них одна.
+    _reliability_metric(metric, where=where or "requeue")
     return "ERROR"
 
 
@@ -3430,6 +3434,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_requeue_write_failures_total":
         "повтор операции — не записался, и операцию, которую ошибка только "
         "отложила, автомат не поднял: её придётся запустить заново вручную",
+    "infragram_op_close_write_failures_total":
+        "исход операции — не сохранился: операция отработала, но в списке "
+        "осталась «работает», и её поднимет сторож зависших (повтор пропустит "
+        "уже сделанное)",
     "infragram_invite_dedup_write_failures_total":
         "дедуп инвайта — возможны повторные приглашения тем же людям",
     "infragram_journal_write_failures_total":
@@ -5120,7 +5128,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             _err_text = None
             if _final_status in ("failed", op_status.PARTIAL):
                 _err_text = (str(result.get("reason") or result.get("summary") or "").strip()[:300]) or None
-            _close_res = await _safe_execute(
+            # Самая важная запись операции: ОДИН повтор. На сбое без повтора
+            # строка оставалась 'running', а код ниже рапортовал владельцу
+            # «выполнена» — и через сторож зависших та же операция поднималась
+            # заново, давая второй отчёт о той же работе.
+            _close_res = await _retrying_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb, "
                 # Исполнитель отработал — накопленное ожидание флота больше не
@@ -5141,7 +5153,24 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _err_text,
                 _done_n,
                 log_ctx=f"[run_op_done op={op_id}]",
+                where="op_close",
+                metric="infragram_op_close_write_failures_total",
+                lost="исход операции не сохранён",
             )
+            # Финал не записался даже с повтором. Молчим — и это честнее
+            # доклада: в БД операция осталась 'running', её поднимет сторож
+            # зависших, повтор пропустит сделанное по журналу целей и закроется
+            # сам. Доложив сейчас, мы дали бы владельцу «✅ выполнена» по
+            # операции, которая в его списке продолжает крутиться, а потом
+            # второй отчёт о той же работе. О самом сбое человек узнаёт:
+            # счётчик ниже разбирает _watchdog_protective_failures.
+            if str(_close_res or "").strip() == "ERROR":
+                log.error(
+                    "op_worker: op=%d отработала со статусом %s, но финал не "
+                    "записался — доклад и аудит пропускаем, операцию поднимет "
+                    "сторож зависших", op_id, _final_status,
+                )
+                return
             # Ноль строк = строку уже закрыл кто-то другой, пока исполнитель
             # работал: сторож зависших операций, dead letter из recovery_engine
             # или отмена владельцем в зазоре между проверкой выше и этой
