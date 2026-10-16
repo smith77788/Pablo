@@ -144,9 +144,18 @@ def setup_routes(app: web.Application, pool) -> None:
                             bot_id_int, text, total, uid)
                 broadcast_id = row["id"]
                 _op_params["broadcast_id"] = broadcast_id
-                op_id = await _obus.submit(
-                    pool, uid, "run_broadcast", _op_params,
-                    total_items=total, label=label)
+                try:
+                    op_id = await _obus.submit(
+                        pool, uid, "run_broadcast", _op_params,
+                        total_items=total, label=label)
+                except Exception:
+                    # Постановка имеет право отказать (тариф, предохранитель Ban
+                    # Weather), и тогда созданная выше запись рассылки обязана
+                    # перестать быть «ожидающей»: иначе старт процесса поднимет
+                    # её и отправит всей аудитории мимо отказа.
+                    from services import broadcaster as _bc
+                    await _bc.abandon_unstarted(pool, broadcast_id)
+                    raise
             else:
                 # Отложенная: НЕ создаём запись рассылки заранее (иначе resume
                 # отправит её сразу при рестарте). Воркер создаст её, когда

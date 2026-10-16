@@ -555,6 +555,43 @@ async def resume_interrupted(
             logger.warning("resume_interrupted: рассылка %s не перезапущена: %s", r.get("id"), exc)
 
 
+async def abandon_unstarted(pool: asyncpg.Pool, broadcast_id) -> None:
+    """Снять запись рассылки, которую так и не поставили в очередь.
+
+    Немедленная рассылка создаётся в два шага: сперва строка в `broadcasts`
+    (она нужна исполнителю и прогрессу), потом постановка операции через шину.
+    Второй шаг имеет право ОТКАЗАТЬ: гейт тарифа (`PlanRequiredError`) и
+    предохранитель Ban Weather (`ImmunityBlockedError`) — это его работа.
+    Владелец при этом получал честный отказ, а строка оставалась в 'pending'.
+
+    Беда в том, что ровно статусы ('pending','running') поднимает старт
+    процесса (`resume_interrupted`): рабочая ветка едет в прод на каждом пуше,
+    и на ближайшем деплое отказанная рассылка уходила ВСЕЙ аудитории бота — без
+    операции, без прогресса и мимо предохранителя, который её запретил. То есть
+    шторм банов останавливал рассылку ровно до следующего деплоя.
+
+    Отложенная рассылка этого не знала с самого начала: там строка не
+    создаётся заранее, и в коде рядом написано, почему.
+
+    Снимаем только то, что ещё не начинало отправку: условие по статусу и
+    нулевому счётчику не даёт задеть живую рассылку, если отказ пришёл из
+    другого места. Падать нельзя — вызывающий уже решил вернуть отказ.
+    """
+    if not broadcast_id:
+        return
+    try:
+        await pool.execute(
+            "UPDATE broadcasts SET status='cancelled', finished_at=NOW() "
+            "WHERE id=$1 AND status='pending' AND sent_count=0",
+            int(broadcast_id),
+        )
+    except Exception as exc:
+        logger.error(
+            "abandon_unstarted: запись рассылки %s осталась в 'pending' (%s) — "
+            "старт процесса может её отправить", broadcast_id, exc,
+        )
+
+
 def cancel(broadcast_id: int) -> bool:
     task = _running.get(broadcast_id)
     if task and not task.done():
@@ -659,6 +696,9 @@ async def mass_broadcast_with_scheduling(
             )
         except Exception as exc:
             logger.exception("mass_broadcast_with_scheduling insert uid=%d", owner_id)
+            # Отказ постановки (тариф, предохранитель) не должен оставлять
+            # запись, которую поднимет старт процесса — см. abandon_unstarted.
+            await abandon_unstarted(pool, broadcast_id)
             return {"ok": False, "error": str(exc)[:200]}
     else:
         label = f"⏰ {label}"
