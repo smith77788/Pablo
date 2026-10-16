@@ -7147,7 +7147,30 @@ async def _exec_bulk_join_inner(
                         maximum=float(flood_wait) + 45.0,
                     ),
                 )
-            await asyncio.sleep(pause)
+            # Паузу, назначенную Telegram, прогон имеет право пересидеть только
+            # до `_FLOOD_INLINE_MAX_S` — этот потолок согласован со сторожем
+            # застоя (`_inline_pause_cap`). Длинный флуд пересиживался тут сырым
+            # `asyncio.sleep` на всю назначенную длину: отмена владельца не
+            # замечалась (она доходит опросом на витке цикла), слот и
+            # арендованные аккаунты держались час и больше, а `done_items` при
+            # этом не двигался — то есть прогон снимался как застойный за
+            # соблюдение собственного анти-бан темпа, с расходом бюджета
+            # живучести.
+            #
+            # Укоротить паузу нельзя: штраф назначил Telegram, и действие в
+            # этом классе стоит аккаунта, а не задержки. Поэтому у аккаунта
+            # заканчиваются остальные ссылки — штраф уже записан в
+            # flood_engine, пейсинг и карантин его учтут, а остальной флот
+            # продолжает работу. Так же поступает ветка PEER_FLOOD выше.
+            if pause > _FLOOD_INLINE_MAX_S:
+                log.warning(
+                    "op_worker bulk_join: пауза Telegram %.0fс длиннее допустимой "
+                    "%dс — аккаунт %s заканчивает на этом прогоне, остальной флот "
+                    "продолжает", pause, _FLOOD_INLINE_MAX_S, acc_dict.get("phone"),
+                )
+                _reliability_metric("infragram_long_flood_stops_total", where="bulk_join")
+                break
+            await _pause_watching_for_cancel(pool, op_id, pause, "bulk_join_pace")
 
         # Небольшой разнос перед тем, как слот возьмёт следующий аккаунт.
         # Раньше здесь была пауза «смены аккаунта» 30–90 с (between_accounts_pause)
@@ -7676,7 +7699,30 @@ async def _exec_bulk_leave(
                         maximum=float(flood_wait) + 45.0,
                     ),
                 )
-            await asyncio.sleep(pause)
+            # Паузу, назначенную Telegram, прогон имеет право пересидеть только
+            # до `_FLOOD_INLINE_MAX_S` — этот потолок согласован со сторожем
+            # застоя (`_inline_pause_cap`). Длинный флуд пересиживался тут сырым
+            # `asyncio.sleep` на всю назначенную длину: отмена владельца не
+            # замечалась (она доходит опросом на витке цикла), слот и
+            # арендованные аккаунты держались час и больше, а `done_items` при
+            # этом не двигался — то есть прогон снимался как застойный за
+            # соблюдение собственного анти-бан темпа, с расходом бюджета
+            # живучести.
+            #
+            # Укоротить паузу нельзя: штраф назначил Telegram, и действие в
+            # этом классе стоит аккаунта, а не задержки. Поэтому у аккаунта
+            # заканчиваются остальные каналы — штраф уже записан в
+            # flood_engine, пейсинг и карантин его учтут, а остальной флот
+            # продолжает работу. Так же поступает ветка PEER_FLOOD выше.
+            if pause > _FLOOD_INLINE_MAX_S:
+                log.warning(
+                    "op_worker bulk_leave: пауза Telegram %.0fс длиннее допустимой "
+                    "%dс — аккаунт %s заканчивает на этом прогоне, остальной флот "
+                    "продолжает", pause, _FLOOD_INLINE_MAX_S, acc_dict.get("phone"),
+                )
+                _reliability_metric("infragram_long_flood_stops_total", where="bulk_leave")
+                break
+            await _pause_watching_for_cancel(pool, op_id, pause, "bulk_leave_pace")
 
         # Пауза при смене аккаунта — защита от account-hopping detection
         if acc_idx < len(accounts) - 1:
