@@ -57,11 +57,12 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
 
     await GiftTransferService.mark_plan_running(pool, plan_id)
 
-    await pool.execute(
-        "UPDATE operation_queue SET total_items=$2, done_items=0 WHERE id=$1",
-        op_id,
-        len(plan["items"]),
-    )
+    # Размер цели объявляет общая дверь: она пишет его один раз, на первом
+    # прогоне, и не уменьшает под владельцем на возобновлённом (там список
+    # короче — уже переданные подарки из него выпадают).
+    from services.op_worker import _declare_total_items
+
+    await _declare_total_items(pool, op_id, len(plan["items"]))
 
     await pool.execute(
         """
@@ -96,6 +97,10 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
     transferred_count = 0
     failed_count = 0
     total_cost = 0
+    # Подарки, по которым вопрос был закрыт до этого прогона (уже переданные,
+    # непередаваемые): прогресс обязан их учитывать, иначе возобновлённый
+    # прогон показывает владельцу меньше сделанного, чем есть.
+    settled_before = len(plan["items"]) - len(pending_items)
 
     # Отмена доходит до исполнителя ОПРОСОМ: своей задачи у него нет, владелец
     # нажимает «Отменить» и ждёт, что необратимое прекратится. Передача подарка
@@ -152,7 +157,7 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> dict:
         await pool.execute(
             "UPDATE operation_queue SET done_items=$2 WHERE id=$1",
             op_id,
-            transferred_count + failed_count,
+            settled_before + transferred_count + failed_count,
         )
 
     if cancelled:
