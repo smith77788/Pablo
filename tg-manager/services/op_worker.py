@@ -1202,6 +1202,38 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
         return 0, 0
 
 
+async def _declare_total_items(pool: "asyncpg.Pool", op_id: int, n: int) -> None:
+    """Объявить размер цели операции — ОДИН РАЗ, на первом прогоне.
+
+    ПОЧЕМУ НЕ ПРОСТО UPDATE. Исполнители ставят `total_items` по списку, с
+    которым идут работать, а список на ВОЗОБНОВЛЁННОМ прогоне короче: двери
+    идемпотентности выбрасывают цели, взятые прошлыми прогонами. Инвайт писал
+    этот укороченный размер поверх прежнего, и цель операции уменьшалась под
+    владельцем.
+
+    Чем это кончалось. 380 целей, первый прогон взял 177 и ушёл в повтор по
+    флуд-паузе. Второй прогон видит 203 новых, пишет `total_items=203`, берёт
+    из них 50 и упирается в суточные лимиты аккаунтов. На закрытии покрытие
+    журнала (227 целей за все прогоны) оказывается БОЛЬШЕ укороченной цели,
+    проверка недобора `done < total` не срабатывает — и операция, сделавшая
+    227 из 380, уходит владельцу с зелёной галочкой «выполнено». Ровно для
+    этого случая существует статус 'partial': работа была, но не доведена.
+
+    Разбор исхода опирается на то, что `total_items` — это замах ПЕРВОГО
+    прогона (см. `_own_journal_coverage`), поэтому и объявляем его только
+    тогда, когда журнал этой операции ещё пуст. Исполнители, которые журнал не
+    пишут, ведут себя как раньше: у них покрытие всегда 0.
+    """
+    if await _own_journal_coverage(pool, op_id) > 0:
+        log.info(
+            "op_worker: op=%d возобновлена — цель остаётся от первого замаха, "
+            "предложенный размер %d не пишем", op_id, int(n))
+        return
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        max(0, int(n)), op_id, log_ctx=f"[declare_total op={op_id}]")
+
+
 async def _own_journal_coverage(pool: "asyncpg.Pool", op_id: int) -> int:
     """Сколько РАЗНЫХ целей эта операция закрыла за ВСЕ свои прогоны.
 
@@ -16502,13 +16534,11 @@ async def _exec_mass_invite(
     if not account_ids:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов-инвайтеров с сессией"}
 
-    # Keep op progress meaningful: total_items reflects the real audience size
-    # (the Mini App submits total_items=1 as a placeholder).
-    await _safe_execute(
-            pool,
-        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
-        len(user_refs) + len(phones), op_id,
-    )
+    # Размер цели: мини-апп присылает total_items=1 как заглушку, поэтому
+    # реальную аудиторию объявляет исполнитель. Через общую дверь — на
+    # возобновлении список короче (дедуп выбросил взятые цели), и запись
+    # поверх уменьшала цель операции: см. _declare_total_items.
+    await _declare_total_items(pool, op_id, len(user_refs) + len(phones))
 
     # Владелец может ПРИНУДИТЕЛЬНО взять рисковые аккаунты («если очень нужно»):
     # include_risky снимает МЯГКИЕ гейты — кулдаун и карантин риск-пульса. Жёсткие
