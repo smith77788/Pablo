@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -22,7 +22,10 @@ def test_dashboard_endpoint_route_and_shape():
     api = api_source()
     assert "async def dashboard_realtime" in api
     assert 'add_get("/api/miniapp/dashboard_realtime", dashboard_realtime)' in api
-    seg = api[api.index("async def dashboard_realtime"):api.index("async def audience_analytics")]
+    # Тело ручки — по точным границам ast, а не срезом «до следующей ручки».
+    # Срез брал лишние сорок строк соседей, а после выноса ручек в отдельные
+    # модули стал бы брать чужие модули целиком.
+    seg = api_function("dashboard_realtime")
     # все поля, которые читает экран, присутствуют в ответе
     for f in ["total_subscribers", "total_channels", "total_posts", "total_views",
               "growth_7d", "subs_history", "views_history", "engagement_history",
@@ -38,7 +41,11 @@ def test_audience_endpoint_route_and_shape():
     api = api_source()
     assert "async def audience_analytics" in api
     assert 'add_get("/api/miniapp/audience_analytics", audience_analytics)' in api
-    seg = api[api.index("async def audience_analytics"):api.index("async def operation_export")]
+    # Было: срез от audience_analytics до operation_export. Эти ручки лежат
+    # теперь в РАЗНЫХ модулях слоя, и срез по сцепленному слою захватывал
+    # 10551 строку вместо 86 — проверка полей проходила бы, даже если ручка
+    # не возвращает ничего. Берём тело ручки по границам ast.
+    seg = api_function("audience_analytics")
     for f in ["total_users", "active_users", "avg_engagement", "segments",
               "insights", "heatmap"]:
         assert f'"{f}"' in seg, f"нет поля {f}"
