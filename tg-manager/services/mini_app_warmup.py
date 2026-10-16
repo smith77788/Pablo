@@ -1,8 +1,17 @@
-"""Прогрев аккаунтов — маршруты мини-аппа.
+"""Прогрев — маршруты мини-аппа: аккаунты и чаты.
 
 Вынесено из `services/mini_app_api.py`: восемь маршрутов
 `/api/miniapp/warmup*` и восемь функций — обзор, создание плана, массовый
-старт, журнал, пауза, возобновление, отмена, удаление.
+старт, журнал, пауза, возобновление, отмена, удаление. Плюс четыре маршрута
+`/api/miniapp/chatwarmup/*` — разогрев ЧАТОВ: список сессий, создание,
+смена состояния, список пригодных аккаунтов.
+
+Разогрев чатов живёт здесь, а не отдельным модулем, потому что для владельца
+это та же работа «сделать аккаунт похожим на живой»: прогрев аккаунта и
+беседа в чате — две её половины, и расходиться им нельзя. Обе берут живые
+аккаунты через одну дверь `_alive_accounts` (правду о живости знает
+`mini_app_api.alive_accounts`: пульс, карантин, сессия), и обе ограничены
+сверху — прогрев планом, беседа `_CW_FLEET_CAP`.
 
 Прогрев — это долгая мягкая активность, которая делает аккаунт похожим на
 живой ПЕРЕД массовыми действиями; сам он живёт в `services/warmup_*` и
@@ -19,9 +28,25 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты прогрева на приложении мини-аппа."""
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, _obus, _safe_fetch,
-        _safe_fetchrow, _warmup_bulk_core, log,
+        _safe_fetchrow, _warmup_bulk_core, alive_accounts, log,
     )
-    from services.security import validate_integer
+    from services import account_status as _acc_status
+    from services.security import (
+        check_sql_suspicious, validate_integer, validate_string,
+    )
+
+    # Сколько аккаунтов максимум греют один чат: выше этого числа разогрев
+    # перестаёт быть похожим на живую беседу.
+    _CW_FLEET_CAP = 30
+
+    async def _alive_accounts(uid: int, wanted: list[int] | None = None) -> list[int]:
+        """Живые аккаунты владельца — тонкая обёртка над общей функцией.
+
+        Правду о «живости» знает mini_app_api.alive_accounts: пульс здоровья,
+        карантин, наличие сессии. Здесь только удобная подпись, как было в
+        монолите, откуда разогрев чатов переехал.
+        """
+        return await alive_accounts(pool, uid, wanted)
 
     async def warmup_overview(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -446,6 +471,90 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("warmup_cancel_plan uid=%d plan=%d", uid, plan_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def chatwarmup_sessions(request: web.Request) -> web.Response:
+        """Список сессий разогрева чатов владельца."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            from services import chat_warmup
+            return _json_resp({"ok": True, "sessions": await chat_warmup.list_sessions(pool, uid)})
+        except Exception:
+            log.exception("chatwarmup_sessions uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def chatwarmup_create(request: web.Request) -> web.Response:
+        """Создать сессию разогрева: {chat_ref, account_ids[], mode, topics, intensity}.
+        Флот вступит в чат и начнёт осмысленный диалог (фоновый цикл chat_warmup)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        chat_ref = validate_string(body.get("chat_ref"), max_len=256)
+        if not chat_ref:
+            return _err("Укажите чат (@username, ссылка или ID)", 400)
+        if check_sql_suspicious(chat_ref):
+            return _err("Недопустимые символы в ссылке на чат", 400)
+        ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
+        acc_ids = await _alive_accounts(uid, ids or None)
+        if not acc_ids:
+            return _err("Выберите хотя бы один живой аккаунт для разогрева", 400)
+        # Потолок флота на один чат был молчаливым: отметив 50 аккаунтов,
+        # владелец получал разогрев тридцатью и ни слова об остальных.
+        requested_accs = len(acc_ids)
+        acc_ids = acc_ids[:_CW_FLEET_CAP]
+        from services import chat_warmup
+        mode = chat_warmup.valid_mode(body.get("mode"))
+        topics = validate_string(body.get("topics"), max_len=500) or ""
+        intensity = (body.get("intensity") or "normal")
+        if intensity not in ("calm", "normal", "active"):
+            intensity = "normal"
+        try:
+            s = await chat_warmup.create_session(pool, uid, chat_ref, acc_ids,
+                                                 mode=mode, topics=topics, intensity=intensity)
+            return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids),
+                               "requested": requested_accs,
+                               "omitted": requested_accs - len(acc_ids)})
+        except Exception:
+            log.exception("chatwarmup_create uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def chatwarmup_status(request: web.Request) -> web.Response:
+        """Сменить статус сессии: {status: active|paused|stopped}."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sid = int(request.match_info["sid"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        status = body.get("status")
+        from services import chat_warmup
+        ok = await chat_warmup.set_status(pool, uid, sid, status)
+        return _json_resp({"ok": ok}) if ok else _err("Сессия не найдена или неверный статус", 404)
+
+    async def chatwarmup_accounts(request: web.Request) -> web.Response:
+        """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            "SELECT id, phone, first_name, username FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
+            "AND " + _acc_status.sql_not_dead() + " "
+            "ORDER BY trust_score DESC NULLS LAST, added_at LIMIT 200", uid)
+        accs = [{"id": r["id"],
+                 "label": (r["username"] or r["first_name"] or r["phone"] or f"#{r['id']}")}
+                for r in (rows or [])]
+        return _json_resp({"ok": True, "accounts": accs})
+
     app.router.add_get("/api/miniapp/warmup", warmup_overview)
     app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
     app.router.add_post("/api/miniapp/warmup/bulk_start", warmup_bulk_start)
@@ -454,3 +563,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/warmup/{plan_id}/pause", warmup_pause_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/resume", warmup_resume_plan)
     app.router.add_post("/api/miniapp/warmup/{plan_id}/cancel", warmup_cancel_plan)
+    app.router.add_get("/api/miniapp/chatwarmup/sessions", chatwarmup_sessions)
+    app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
+    app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
+    app.router.add_get("/api/miniapp/chatwarmup/accounts", chatwarmup_accounts)

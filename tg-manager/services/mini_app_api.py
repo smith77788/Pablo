@@ -4043,76 +4043,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                                "total": 0, "next_step": None})
 
 
-    async def chatwarmup_sessions(request: web.Request) -> web.Response:
-        """Список сессий разогрева чатов владельца."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            from services import chat_warmup
-            return _json_resp({"ok": True, "sessions": await chat_warmup.list_sessions(pool, uid)})
-        except Exception:
-            log.exception("chatwarmup_sessions uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    _CW_FLEET_CAP = 30         # сколько аккаунтов максимум греют один чат
 
-    async def chatwarmup_create(request: web.Request) -> web.Response:
-        """Создать сессию разогрева: {chat_ref, account_ids[], mode, topics, intensity}.
-        Флот вступит в чат и начнёт осмысленный диалог (фоновый цикл chat_warmup)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        chat_ref = validate_string(body.get("chat_ref"), max_len=256)
-        if not chat_ref:
-            return _err("Укажите чат (@username, ссылка или ID)", 400)
-        if check_sql_suspicious(chat_ref):
-            return _err("Недопустимые символы в ссылке на чат", 400)
-        ids = [int(x) for x in (body.get("account_ids") or []) if str(x).isdigit()]
-        acc_ids = await _alive_accounts(uid, ids or None)
-        if not acc_ids:
-            return _err("Выберите хотя бы один живой аккаунт для разогрева", 400)
-        # Потолок флота на один чат был молчаливым: отметив 50 аккаунтов,
-        # владелец получал разогрев тридцатью и ни слова об остальных.
-        requested_accs = len(acc_ids)
-        acc_ids = acc_ids[:_CW_FLEET_CAP]
-        from services import chat_warmup
-        mode = chat_warmup.valid_mode(body.get("mode"))
-        topics = validate_string(body.get("topics"), max_len=500) or ""
-        intensity = (body.get("intensity") or "normal")
-        if intensity not in ("calm", "normal", "active"):
-            intensity = "normal"
-        try:
-            s = await chat_warmup.create_session(pool, uid, chat_ref, acc_ids,
-                                                 mode=mode, topics=topics, intensity=intensity)
-            return _json_resp({"ok": True, "session": s, "accounts": len(acc_ids),
-                               "requested": requested_accs,
-                               "omitted": requested_accs - len(acc_ids)})
-        except Exception:
-            log.exception("chatwarmup_create uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def chatwarmup_status(request: web.Request) -> web.Response:
-        """Сменить статус сессии: {status: active|paused|stopped}."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            sid = int(request.match_info["sid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        status = body.get("status")
-        from services import chat_warmup
-        ok = await chat_warmup.set_status(pool, uid, sid, status)
-        return _json_resp({"ok": ok}) if ok else _err("Сессия не найдена или неверный статус", 404)
 
     async def fleet_diagnose(request: web.Request) -> web.Response:
         """Диагностика «почему флот не исполняет»: воронка отбора аккаунтов +
@@ -4161,20 +4094,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         } for b in blocked[:limit]]
         return _json_resp({"step": step, "items": items, "total": len(blocked)})
 
-    async def chatwarmup_accounts(request: web.Request) -> web.Response:
-        """Живой флот владельца для выбора под разогрев чата (id + подпись)."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        rows = await _safe_fetch(pool,
-            "SELECT id, phone, first_name, username FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active AND session_str IS NOT NULL "
-            "AND " + _acc_status.sql_not_dead() + " "
-            "ORDER BY trust_score DESC NULLS LAST, added_at LIMIT 200", uid)
-        accs = [{"id": r["id"],
-                 "label": (r["username"] or r["first_name"] or r["phone"] or f"#{r['id']}")}
-                for r in (rows or [])]
-        return _json_resp({"ok": True, "accounts": accs})
 
 
 
@@ -8112,10 +8031,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/groups/announce", groups_announce)
     app.router.add_get("/api/miniapp/fleet/governor", fleet_governor_status)
     app.router.add_get("/api/miniapp/onboarding", onboarding_status)
-    app.router.add_get("/api/miniapp/chatwarmup/sessions", chatwarmup_sessions)
-    app.router.add_post("/api/miniapp/chatwarmup/session", chatwarmup_create)
-    app.router.add_post("/api/miniapp/chatwarmup/session/{sid}/status", chatwarmup_status)
-    app.router.add_get("/api/miniapp/chatwarmup/accounts", chatwarmup_accounts)
     app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
     app.router.add_get("/api/miniapp/fleet/diagnose/blocked", fleet_diagnose_blocked)
     app.router.add_post("/api/miniapp/dm/preview", dm_preview)

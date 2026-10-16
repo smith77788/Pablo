@@ -56,7 +56,14 @@ class _Pool:
 class _Req:
     def __init__(self, body: dict):
         self._body = body
-        self.query = {}
+        # Токен в запросе, а не подменённый _get_uid: ручки, вынесенные из
+        # монолита в отдельные модули слоя, забирают _get_uid ПО ЗНАЧЕНИЮ в
+        # момент сборки приложения, то есть раньше, чем monkeypatch успеет
+        # что-то подменить. Настоящий _get_uid читает токен из запроса и
+        # разбирает его через mini_app_api.parse_token — вот его и подменяем
+        # (см. _call). Так проверка работает одинаково и для монолита, и для
+        # вынесенных модулей.
+        self.query = {"token": "t"}
         self.match_info = {}
         self.headers = {}
         self.app = web.Application()
@@ -86,6 +93,11 @@ def _handlers(pool) -> dict[str, object]:
 
 
 def _call(handler, body: dict, *, uid: int = 7, monkeypatch=None, bus=None):
+    # parse_token ищется в globals mini_app_api в момент ВЫЗОВА, поэтому
+    # подмена действует и на ручки вынесенных модулей; подмена _get_uid —
+    # только на те, что остались в монолите. Нужны обе: первая для вынесенных,
+    # вторая для тех, кто читает uid не из токена.
+    monkeypatch.setattr(mini_app_api, "parse_token", lambda *a, **k: uid)
     monkeypatch.setattr(mini_app_api, "_get_uid", lambda request: uid)
     if bus is not None:
         monkeypatch.setattr(mini_app_api, "_obus", bus)
