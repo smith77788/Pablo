@@ -406,8 +406,12 @@ def test_pin_failure_not_counted_as_item_failure():
     Считать это провалом элемента значит занижать реальный результат.
     """
     src = _func_src(WORKER, "_exec_gp_bulk_apply")
-    idx = src.find('if action == "post_pin"')
-    tail = src[idx : idx + 2500]
+    # Срез идёт от самой публикации, а не от маркера ветки: условий с
+    # post_pin в функции теперь два (второе — пропуск объекта, который уже
+    # получил пост на прошлом прогоне этой же операции), и прежний срез «от
+    # первого маркера на 2500 символов» до счётчика закрепа не доходил, то
+    # есть проверка падала бы на любой вставке выше по ветке.
+    tail = src[src.find("post_to_channel(") :]
     assert 'counters["pin"] += 1' in tail
     # После неудачного закрепа item_failed не выставляется.
     pin_block = tail[tail.find("pin_last_channel_post") :]

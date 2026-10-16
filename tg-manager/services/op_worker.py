@@ -8623,6 +8623,17 @@ async def _exec_gp_bulk_apply(
         counters = {"about": 0, "avatar": 0, "post": 0, "pin": 0, "admin": 0, "username": 0}
         failed = skipped = 0
 
+        # Публикация необратима, а прогон длинный: 20–45 секунд на канал, то есть
+        # часы на сеть из сотен объектов. Любой деплой в это окно возвращает
+        # операцию в очередь (см. docstring `shutdown`), и без журнала
+        # возобновлённый прогон публикует ВТОРОЙ пост в каждом канале, который
+        # его уже получил. Тот же ключ идемпотентности, что у фабрики каналов:
+        # номер шага — здесь это устойчивый id объекта проекта.
+        _posted: set[int] = await completed_steps(pool, op_id) if action == "post_pin" else set()
+        if _posted:
+            log.info("gp_bulk_apply op=%d: повтор — %d объектов уже получили пост",
+                     op_id, len(_posted))
+
         for target in targets:
             if await _is_cancelled(pool, op_id):
                 return {
@@ -8720,7 +8731,12 @@ async def _exec_gp_bulk_apply(
                     item_failed = True
                 await asyncio.sleep(random.uniform(4, 10) * session_simulator.chaos_factor())
 
-            if action == "post_pin":
+            if action == "post_pin" and int(target["id"]) in _posted:
+                # Этот объект получил пост на прошлом прогоне этой же операции.
+                # Считаем его сделанным (как фабрика каналов считает созданный
+                # шаг) и ничего не публикуем.
+                counters["post"] += 1
+            elif action == "post_pin":
                 # Пост тоже индивидуален: одинаковый текст в 800 каналах — прямой
                 # спам-сигнал, ровно то, ради чего существует генератор.
                 text = render_pattern(post_template, dict(target)).strip() if post_template else ""
@@ -8746,6 +8762,10 @@ async def _exec_gp_bulk_apply(
                             )
                         else:
                             counters["post"] += 1
+                            # Отметка о публикации — ДО закрепа: закреп может не
+                            # удаться, но пост уже ушёл, и повторять его нельзя.
+                            await _journal_done(
+                                pool, op_id, int(target["id"]), f"gp_post:{channel_id}")
                             await asyncio.sleep(
                                 random.uniform(3, 7) * session_simulator.chaos_factor()
                             )
