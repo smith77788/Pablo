@@ -240,6 +240,25 @@ def test_reconciler_clears_all_when_nothing_held():
 
 
 def test_reconciler_wired_into_watchdog_cycle():
+    """Уборку залипших флагов обязан вызывать круг обслуживания воркера.
+
+    Ищем вызов в самой `run`, а не строку в файле: шаги круга теперь идут
+    через `_maintenance_step` (сбой одного сторожа больше не забирает
+    остальные), поэтому вызов стоит внутри лямбды, и привязка к точному тексту
+    `await _reconcile_in_operation(pool)` краснела бы на каждой такой правке,
+    хотя уборка на месте.
+    """
+    import ast
+    import inspect
+
     src = open("services/op_worker.py", encoding="utf-8").read()
-    assert "await _reconcile_in_operation(pool)" in src
     assert "async def _reconcile_in_operation" in src
+    run = ast.parse(inspect.getsource(ow.run)).body[0]
+    called = {
+        (n.func.attr if isinstance(n.func, ast.Attribute)
+         else getattr(n.func, "id", ""))
+        for n in ast.walk(run) if isinstance(n, ast.Call)
+    }
+    assert "_reconcile_in_operation" in called, (
+        "уборка залипших флагов занятости выпала из круга обслуживания: "
+        "аккаунты-«зомби» молча выпадут из прогрева и ротации")
