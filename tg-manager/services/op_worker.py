@@ -15918,6 +15918,16 @@ async def _exec_contacts_push(
     total_sent = total_imp = total_left = 0
     failed = 0
     for acc_id in acc_ids:
+        # «Остановить» здесь не слышали вовсе: выгрузка идёт по аккаунтам, у
+        # каждого push_contacts плюс обратное чтение книги (до 600с), и на
+        # флоте это часы. Владелец останавливал операцию, а она продолжала
+        # заливать контакты аккаунт за аккаунтом; узнавал он об этом по тому,
+        # что книга менялась после стопа.
+        if await _is_cancelled(pool, op_id):
+            summary = (f"⏹ Остановлено: добавлено {total_imp} из {total_sent} "
+                       f"отправленных\n" + "\n".join(lines[:20]))
+            return {"status": "cancelled", "ok": total_imp, "failed": failed,
+                    "summary": summary}
         acc = await _db.get_account_for_telethon(pool, acc_id, owner_id)
         label = (acc or {}).get("phone") or f"#{acc_id}"
         if not acc or not acc.get("session_str"):
