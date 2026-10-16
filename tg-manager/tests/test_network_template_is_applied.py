@@ -27,6 +27,7 @@ import pytest
 from aiohttp import web
 
 from services import mini_app_api as M
+from tests.miniapp_source import api_function
 from services import network_builder as NB
 
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
@@ -198,9 +199,10 @@ def test_the_description_reaches_the_database():
 
 def test_the_list_returns_the_description_so_the_screen_can_show_it():
     """Записать и не показать — то же, что потерять."""
-    src = Path(M.__file__).read_text("utf-8")
-    i = src.index("async def networks_list")
-    block = src[i:src.index("async def network_create_plural")]
+    # Границы функции даёт ast по всему слою: ручка уехала из mini_app_api в
+    # services/mini_app_networks.py, а срез «до следующего async def» и до
+    # этого ломался от любой правки между ними.
+    block = api_function("networks_list")
     assert "description" in block, "список сетей не отдаёт описание"
     assert "n.description" in INDEX.read_text("utf-8"), (
         "карточка сети не показывает описание")

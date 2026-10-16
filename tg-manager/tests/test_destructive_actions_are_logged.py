@@ -34,10 +34,12 @@ _ОБЯЗАНЫ = {
         "account_delete",
         "accounts_mass",              # массовое удаление аккаунтов
     ],
+    "services/mini_app_networks.py": [
+        "ecosystem_delete",           # уехал сюда вместе с блоком сетей
+    ],
     "services/mini_app_api.py": [
         "leave_workspace",            # выход участника и удаление пространства
         "presence_pack_delete",
-        "ecosystem_delete",
     ],
     "services/mini_app_channels.py": [
         "channel_remove",             # уехал сюда вместе с блоком каналов

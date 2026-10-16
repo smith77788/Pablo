@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from services import op_worker
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -79,7 +79,9 @@ def test_endpoints_through_bus_and_routes():
     assert '"/api/miniapp/crosspost/links"' in api
     # Границы функции из ast, а не окно в 900 символов: окно промахивалось,
     # стоило добавить в функцию пару строк, и проверка «через шину» замолкала.
-    fn = _func_src(os.path.join(ROOT, "services", "mini_app_api.py"), "crosspost_run")
+    # Границы ищет api_function по всему слою: ручка уехала в
+    # services/mini_app_networks.py, и адрес одного файла снова покраснел бы.
+    fn = api_function("crosspost_run")
     assert 'operation_bus.submit' in fn
 
 

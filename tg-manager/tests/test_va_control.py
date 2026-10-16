@@ -5,6 +5,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+
+from tests.miniapp_source import api_source
 from services import channel_admin as ca
 from services import infra_memory, operation_bus, va_control
 
@@ -132,7 +134,7 @@ async def test_network_actions_prioritize_errors_then_owner_review():
 def test_interface_connects_control_cards_network_actions_and_safe_rollback():
     root = Path(__file__).resolve().parents[1]
     js = (root / "mini_app/screens/va_admin.js").read_text(encoding="utf-8")
-    api = (root / "services/mini_app_api.py").read_text(encoding="utf-8")
+    api = api_source()
     network = js[js.index("function _vaNetworkHtml"):js.index("let _vaDraftCtx")]
     control = js[js.index("function _vaControlHtml"):js.index("function _vaBriefHtml")]
 

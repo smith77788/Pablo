@@ -20,6 +20,8 @@ import functools
 import os
 import re
 
+from tests.miniapp_source import api_function
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OP_WORKER = os.path.join(ROOT, "services", "op_worker.py")
 
@@ -280,8 +282,7 @@ def _func_source(path: str, name: str) -> str:
 
 def test_crosspost_total_matches_what_the_run_covers():
     """«1 из 12» в конце прогона одного правила — это неверный масштаб."""
-    body = _func_source(os.path.join(ROOT, "services", "mini_app_api.py"),
-                        "crosspost_run")
+    body = api_function("crosspost_run")
     assert "operation_bus.submit" in body, "постановка через шину пропала"
     assert re.search(r"1 if [\"']link_id[\"'] in p else min\(", body), (
         "масштаб кросспостинга снова считается не по тому, что реально пройдёт: "
