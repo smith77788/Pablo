@@ -10610,6 +10610,26 @@ async def _exec_strike(
             op_id, _smtp_cnt,
         )
 
+    # ── Повтор этой же операции не бьёт второй жалобой с того же аккаунта ────
+    # Страйк идёт волнами с паузами 2–5 минут, то есть минутами десятками. За
+    # это окно операция легко возвращается в очередь: деплой (shutdown) или
+    # автоматический повтор по флуд-ошибке (max_retries=1 у этого типа). Без
+    # журнала исполнитель начинал с первой волны, и аккаунты, уже отправившие
+    # жалобу, отправляли её снова — а повторная жалоба с одного аккаунта по
+    # одной цели это злоупотребление репортом, то есть риск для аккаунта.
+    _struck = await completed_steps(pool, op_id)
+    if _struck:
+        _before = len(viable)
+        viable = [a for a in viable if int(a["id"]) not in _struck]
+        log.info(
+            "_exec_strike op=%d: повтор — %d аккаунтов уже отработали, в волны "
+            "идут %d из %d", op_id, len(_struck), len(viable), _before,
+        )
+
+    async def _journal_struck(acc_id: int) -> None:
+        """Отметить аккаунт, который реально отправил жалобу."""
+        await _journal_done(pool, op_id, int(acc_id), str(acc_id), "strike")
+
     # ── Волны ─────────────────────────────────────────────────────────────────
     waves = plan_waves(viable, num_waves=num_waves)
 
@@ -10670,7 +10690,9 @@ async def _exec_strike(
                 log.warning("strike progress update failed for op %d: %s", op_id, e)
 
     try:
-        results = await staggered_strike(plan, progress_cb=_strike_progress, pool=pool, op_id=op_id)
+        results = await staggered_strike(
+            plan, progress_cb=_strike_progress, pool=pool, op_id=op_id,
+            journal_cb=_journal_struck)
     except Exception as e:
         log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
         return {

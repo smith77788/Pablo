@@ -1806,6 +1806,7 @@ async def staggered_strike(
     progress_cb=None,
     pool=None,
     op_id: int | None = None,
+    journal_cb=None,
 ) -> list[StrikeResult]:
     """
     Эшелонированная атака: волны аккаунтов с нарастающей интенсивностью.
@@ -1814,9 +1815,34 @@ async def staggered_strike(
     op_id — если задан, на чекпоинтах (смена цели, перед волнами) проверяется
     отмена операции (operation_queue.status='cancelled'), чтобы «Отмена» из
     очереди реально останавливала страйк, а не игнорировалась до конца волн.
+
+    journal_cb(acc_id) — отметить аккаунт, который РЕАЛЬНО отработал. Нужен для
+    идемпотентности повтора: страйк идёт волнами с паузами 2–5 минут, и возврат
+    операции в очередь (деплой, автоматический повтор по флуд-ошибке) запускает
+    исполнителя заново с первой волны. Без отметок те же аккаунты жалуются на ту
+    же цель второй раз, а повторная жалоба с одного аккаунта — это
+    злоупотребление репортом, то есть риск для аккаунта. Саму запись делает
+    вызывающий (у него дверь журнала), здесь только момент «этот отработал».
     """
     all_results: list[StrikeResult] = []
     sem = asyncio.Semaphore(_CONCURRENCY)
+
+    async def _strike_and_journal(acc, *a, **kw) -> dict:
+        """Отработать аккаунтом и отметить его в журнале, если он что-то сделал."""
+        res = await _one_account_strike(acc, *a, **kw)
+        if journal_cb and isinstance(res, dict) and _acc_result_success(res):
+            try:
+                await journal_cb(int(acc.get("id") or 0))
+            except Exception as _je:
+                # Потеря отметки — риск дубля на повторе, но прерывать волну
+                # из-за неё поздно: жалоба уже ушла. Громко в лог; о самом
+                # сбое записи предупреждает дверь журнала у вызывающего.
+                log.error(
+                    "strike: отметка журнала не записалась acc=%s (%s) — повтор "
+                    "операции может пожаловаться с этого аккаунта второй раз",
+                    acc.get("id"), _je,
+                )
+        return res
 
     async def _op_cancelled() -> bool:
         """Пора ли прекратить бить цель.
@@ -1913,7 +1939,7 @@ async def staggered_strike(
                 rest0 = w0[_CANARY_SIZE:]
 
                 def _mk_task(acc, idx):
-                    return _one_account_strike(
+                    return _strike_and_journal(
                         acc, target, intel, plan.reason, plan.preset,
                         texts_w1, idx, 0, sem, mode=plan.mode, pool=pool)
 
@@ -1973,7 +1999,7 @@ async def staggered_strike(
                     )
                 texts_w2 = assign_texts(plan.preset or plan.reason, len(plan.waves[1]))
                 tasks = [
-                    _one_account_strike(
+                    _strike_and_journal(
                         acc,
                         target,
                         intel,
@@ -2015,7 +2041,7 @@ async def staggered_strike(
                     )
                 texts_w3 = assign_texts(plan.preset or plan.reason, len(plan.waves[2]))
                 tasks = [
-                    _one_account_strike(
+                    _strike_and_journal(
                         acc,
                         target,
                         intel,
