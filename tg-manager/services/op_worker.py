@@ -220,6 +220,33 @@ async def _retrying_execute(
     return "ERROR"
 
 
+async def _maintenance_step(name: str, step) -> None:
+    """Выполнить ОДИН шаг обслуживания, не утащив за собой остальные.
+
+    Шесть сторожей воркера стояли в одном try: сброс зависших, уборка залипших
+    флагов, сироты отмены, алерты о застрявших операциях, продолжение
+    расписаний и — последним — алерт о сбое защитных записей. Исключение в
+    ЛЮБОМ из них забирало весь остаток круга, и так на каждом круге: одна
+    устойчивая ошибка в раннем стороже молча отключала все поздние.
+
+    Цена именно в порядке. Последний сторож — единственный способ, которым
+    владелец вообще узнаёт, что защита от повторного РЕАЛЬНОГО действия
+    перестала писаться (счётчики живут в памяти процесса, логи он не читает).
+    То есть сбой одного сторожа выключал оповещение о сбое остальных — ровно
+    тот класс, из-за которого защитные механизмы и объявляются «молча
+    отключёнными».
+
+    Отмену пробрасываем: остановка воркера — не ошибка шага.
+    """
+    try:
+        await step()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.exception("op_worker: шаг обслуживания %s упал: %s", name, e)
+        _reliability_metric("infragram_maintenance_step_failures_total", where=name)
+
+
 async def _op_closed_by_us(
     pool: asyncpg.Pool, op_id: int, query: str, *args, log_ctx: str = "",
     final_status: str = "",
@@ -3529,6 +3556,9 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "исход операции — не сохранился: операция отработала, но в списке "
         "осталась «работает», и её поднимет сторож зависших (повтор пропустит "
         "уже сделанное)",
+    "infragram_maintenance_step_failures_total":
+        "сторож воркера падает: сброс зависших операций, уборка занятых "
+        "аккаунтов или оповещения могли не сработать",
     "infragram_invite_dedup_write_failures_total":
         "дедуп инвайта — возможны повторные приглашения тем же людям",
     "infragram_journal_write_failures_total":
@@ -3730,35 +3760,50 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # Heartbeat аренды: пока процесс жив, его аккаунты не уводит другая
             # реплика. Каждые ~30с — на порядок чаще TTL (15 мин), так что одна
             # неудачная попытка ничего не роняет.
+            # КАЖДЫЙ шаг в своей защите: раньше все шесть стояли в одном try,
+            # и исключение в раннем стороже забирало весь остаток круга — в
+            # том числе последний, которым владелец узнаёт о сбое защитных
+            # записей. См. _maintenance_step.
             if _watchdog_tick % 3 == 0:
-                await renew_leases()
+                await _maintenance_step("renew_leases", renew_leases)
                 # Признак жизни самого поллера: единственный способ узнать
                 # снаружи, что очередь ещё кто-то разбирает
                 # (operation_bus.queue_frozen).
-                await _obus_reg.mark_poller_alive(pool, _WORKER_ID)
+                await _maintenance_step(
+                    "poller_alive",
+                    lambda: _obus_reg.mark_poller_alive(pool, _WORKER_ID))
             # Run stale-running watchdog every 6 poll cycles (~1 minute)
             if _watchdog_tick % 6 == 0:
-                await _watchdog_stale(pool, bot)
+                await _maintenance_step(
+                    "watchdog_stale", lambda: _watchdog_stale(pool, bot))
                 # Сразу после сброса зависших op снимаем их залипшие in_operation-флаги
                 # (аккаунты-«зомби» иначе молча выпадают из warmup/ghost/rotation).
-                await _reconcile_in_operation(pool)
+                await _maintenance_step(
+                    "reconcile_in_operation", lambda: _reconcile_in_operation(pool))
                 # Там же — отмены, закрыть которые было некому: сторож выше
                 # лечит только 'running', а отменённая на ходу операция
                 # терминальна и не чинится ни рестартом, ни временем.
-                await _watchdog_cancelled_orphans(pool, bot)
+                await _maintenance_step(
+                    "watchdog_cancelled_orphans",
+                    lambda: _watchdog_cancelled_orphans(pool, bot))
             # Alert admins about stuck operations every ~5 minutes (30 cycles)
             if _watchdog_tick % 30 == 0:
-                await _watchdog_alerts(pool, bot)
+                await _maintenance_step(
+                    "watchdog_alerts", lambda: _watchdog_alerts(pool, bot))
                 # Там же — расписания, оборвавшиеся на закрытии круга: круг
                 # закрыт, следующий не поставлен, и закрытую операцию больше
                 # никто не смотрит. Без этого автопостинг умирал от одного
                 # неудачно совпавшего деплоя — молча и навсегда.
-                await _watchdog_recurring_chain(pool, bot)
+                await _maintenance_step(
+                    "watchdog_recurring_chain",
+                    lambda: _watchdog_recurring_chain(pool, bot))
                 # Там же — сбой защитных записей: он опаснее застрявшей
                 # операции (повторное РЕАЛЬНОЕ действие), а виден был только
                 # в логах и во внутреннем счётчике.
-                await _watchdog_protective_failures(
-                    pool, bot, _protective_seen)
+                await _maintenance_step(
+                    "watchdog_protective_failures",
+                    lambda: _watchdog_protective_failures(
+                        pool, bot, _protective_seen))
         except asyncio.CancelledError:
             raise
         except Exception as e:

@@ -189,12 +189,40 @@ def test_the_poll_loop_marks_itself_alive():
     )
 
 
-@pytest.mark.parametrize("name", _MAINTENANCE)
-def test_maintenance_failure_costs_one_cycle_not_the_worker(name: str):
-    """Каждый вызов обслуживания обязан стоять ВНУТРИ try.
+def _step_names() -> set[str]:
+    """Имена, отданные `_maintenance_step` — вызовом или ссылкой на функцию.
 
-    Иначе его сбой завершает `run`, присмотр запускает её заново, и
-    `_reset_stale_running` списывает бюджет живучести живым операциям.
+    Шаг передаётся либо как `lambda: _watchdog_stale(pool, bot)`, либо прямой
+    ссылкой (`renew_leases`), поэтому ищем и то и другое.
+    """
+    names: set[str] = set()
+    for node in ast.walk(_run_body()):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "_maintenance_step"):
+            continue
+        for arg in node.args[1:]:
+            if isinstance(arg, ast.Name):
+                names.add(arg.id)
+            elif isinstance(arg, ast.Attribute):
+                names.add(arg.attr)
+            else:
+                for n in ast.walk(arg):
+                    if isinstance(n, ast.Call):
+                        names.add(n.func.attr if isinstance(n.func, ast.Attribute)
+                                  else getattr(n.func, "id", ""))
+    return names
+
+
+@pytest.mark.parametrize("name", _MAINTENANCE)
+def test_maintenance_failure_costs_one_step_not_the_whole_round(name: str):
+    """Каждый шаг обслуживания обязан стоять в СВОЕЙ защите.
+
+    Два требования, и оба про цену сбоя. Сбой не должен завершать `run`
+    (присмотр запустит её заново, а `_reset_stale_running` спишет бюджет
+    живучести живым операциям) и не должен забирать ОСТАЛЬНЫЕ шаги круга:
+    шесть сторожей стояли в одном try, и устойчивая ошибка в раннем молча
+    отключала поздние — включая последний, которым владелец узнаёт о сбое
+    защитных записей.
     """
     body = _run_body()
     guarded: set[int] = set()
@@ -205,19 +233,61 @@ def test_maintenance_failure_costs_one_cycle_not_the_worker(name: str):
                     if isinstance(n, ast.Call):
                         guarded.add(id(n))
 
-    found = False
+    steps = _step_names()
+    assert name in steps, (
+        f"{name}() пропал из цикла воркера или вызывается напрямую: его сбой "
+        f"заберёт остальные шаги круга — оберните в _maintenance_step")
+
     for node in ast.walk(body):
         if not isinstance(node, ast.Call):
             continue
-        fname = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
-        if fname != name:
+        fname = (node.func.attr if isinstance(node.func, ast.Attribute)
+                 else getattr(node.func, "id", ""))
+        if fname != "_maintenance_step":
             continue
-        found = True
         assert id(node) in guarded, (
-            f"{name}() вызывается вне try: его сбой завершит цикл воркера, а не "
-            f"один круг"
-        )
-    assert found, f"{name}() пропал из цикла воркера"
+            "_maintenance_step вызывается вне try: его сбой завершит цикл "
+            "воркера, а не один круг")
+
+
+def test_a_failing_step_does_not_take_the_next_one_with_it():
+    """Поведение шага: падение проглочено и посчитано, отмена — проброшена."""
+    from services import op_worker
+
+    seen: list[tuple] = []
+    orig = op_worker._reliability_metric
+    op_worker._reliability_metric = lambda n, v=1.0, **lbl: seen.append((n, lbl))
+    done: list[str] = []
+
+    async def _boom():
+        raise RuntimeError("БД недоступна")
+
+    async def _next():
+        done.append("next")
+
+    async def _go():
+        await op_worker._maintenance_step("boom", _boom)
+        await op_worker._maintenance_step("next", _next)
+
+    try:
+        asyncio.run(_go())
+    finally:
+        op_worker._reliability_metric = orig
+
+    assert done == ["next"], (
+        "сбой одного сторожа забрал следующий — именно так молча отключались "
+        "поздние сторожа, включая оповещение о сбое защитных записей")
+    assert ("infragram_maintenance_step_failures_total", {"where": "boom"}) in seen, (
+        f"падение сторожа не оставило следа: {seen}")
+
+    async def _cancel():
+        raise asyncio.CancelledError
+
+    async def _go_cancel():
+        await op_worker._maintenance_step("cancel", _cancel)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_go_cancel())
 
 
 def test_a_cancelled_worker_still_stops():
