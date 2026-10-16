@@ -27,8 +27,9 @@ import sys
 sys.path.insert(0, "tests")
 from miniapp_source import api_files, miniapp_source  # noqa: E402
 
-# Измерено 16.10.2026. Только вниз.
-CEILING = 63
+# Измерено 16.10.2026: было 63. Минус выгрузка операций — кнопка на экране
+# была, но собирала CSV из разметки вместо этой ручки. Только вниз.
+CEILING = 62
 
 _ROUTE = re.compile(
     r'app\.router\.add_(get|post|put|patch|delete)\(\s*"(/api/miniapp/[^"]+)"')

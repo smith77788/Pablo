@@ -17016,22 +17016,19 @@ function exportCSV(path) {
 }
 
 function exportOpsCSV() {
-  const rows = [['ID','Тип','Статус','Создана','Канал','Прогресс']];
-  document.querySelectorAll('#opsList .li').forEach(el => {
-    const name = el.querySelector('.li-name')?.textContent?.trim() || '';
-    const sub = el.querySelector('.li-sub')?.textContent?.trim() || '';
-    const badge = el.querySelector('.badge')?.textContent?.trim() || '';
-    rows.push(['', name, badge, '', sub, '']);
-  });
-  if (rows.length < 2) { toast('✅ Нет операций для экспорта'); return; }
-  const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
-  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'operations_' + new Date().toISOString().slice(0,10) + '.csv';
-  a.click();
-  URL.revokeObjectURL(a.href);
-  toast('✅ CSV файл скачан');
+  // Выгрузку делает БЭКЕНД (/api/miniapp/operations/export): он отдаёт 500
+  // последних операций владельца со всеми полями.
+  //
+  // Раньше эта кнопка собирала CSV из РАЗМЕТКИ экрана: querySelectorAll по
+  // #opsList. Отсюда три беды, и ни одна не выглядела как ошибка. Первая: в
+  // файл попадало только то, что уже дорисовано на экране, то есть одна
+  // страница списка, а не история. Вторая: три колонки из шести — ID,
+  // «Создана» и «Прогресс» — писались пустыми строками ВСЕГДА, а в «Канал»
+  // уезжал подзаголовок строки. Третья: ни всего/сделано, ни числа ошибок, ни
+  // времени завершения в разметке нет вовсе, хотя бэкенд их отдаёт. Владелец
+  // получал файл с правильной шапкой и почти пустым телом — это хуже отказа,
+  // потому что по такому отчёту принимают решения.
+  exportCSV('/api/miniapp/operations/export');
 }
 
 function nuSwitch(which) {
