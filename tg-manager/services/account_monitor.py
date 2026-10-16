@@ -274,13 +274,25 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
             if waited_s < limit_s:
                 continue
             _hours = int(waited_s // 3600)
-            await _close_orphan_op(pool, bot, op_id, row, _hours)
+            # КАЖДАЯ осиротевшая операция закрывается в своей защите. Весь
+            # обход стоял в одном try: сбой на ОДНОЙ операции (блип БД на
+            # записи, недоступный Telegram в докладе) забирал остаток обхода, и
+            # остальные осиротевшие строки оставались висеть — при том, что
+            # этот сторож и есть последняя страховка для них. Дверь та же, что
+            # у круга обслуживания воркера: падение шага проглочено, посчитано
+            # и не трогает следующие.
+            await _ow._maintenance_step(
+                f"close_orphan_op:{op_id}",
+                lambda op_id=op_id, row=row, _hours=_hours: _close_orphan_op(
+                    pool, bot, op_id, row, _hours))
             log.warning(
                 "account_monitor: операция %d висела %d ч без завершения → failed",
                 op_id, _hours,
             )
     except Exception as exc:
-        log.debug("account_monitor: stuck ops check error: %s", exc)
+        # Был log.debug — то есть сбой самого сторожа зависших операций не
+        # оставлял следа вообще: в прод уезжает уровень INFO.
+        log.warning("account_monitor: обход зависших операций сорвался: %s", exc)
 
 
 async def _close_orphan_op(
@@ -324,14 +336,18 @@ async def _close_orphan_op(
     result = {"status": status, "ok": ok_n, "failed": failed_n,
               "total": ok_n + failed_n, "summary": summary,
               "duration_s": float(hours * 3600), "op_type": op_type}
-    res = await pool.execute(
+    # Ноль строк — операцию уже закрыли (чаще всего владелец отменил её сам,
+    # пока она висела). Чужой итог не переписываем и о провале не докладываем.
+    # Решает это общая дверь воркера: она же делает повтор записи и отличает
+    # «закрыл кто-то другой» от «запись не прошла» — до неё сырой execute на
+    # блипе БД бросал исключение в обход зависших операций.
+    if not await _ow._op_closed_by_us(
+        pool, op_id,
         "UPDATE operation_queue SET status=$3, finished_at=NOW(), error_msg=$2, "
         "result=$4::jsonb WHERE id=$1 AND status='running'",
         op_id, reason, status, _json.dumps(result, ensure_ascii=False),
-    )
-    # Ноль строк — операцию уже закрыли (чаще всего владелец отменил её сам,
-    # пока она висела). Чужой итог не переписываем и о провале не докладываем.
-    if str(res or "").strip().endswith(" 0"):
+        log_ctx=f"[orphan_close op={op_id}]", final_status=status,
+    ):
         return
     try:
         await _ow._announce_op_outcome(

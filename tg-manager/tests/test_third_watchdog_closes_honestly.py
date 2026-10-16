@@ -196,3 +196,76 @@ def test_the_close_still_spares_a_finished_operation():
         "закрытие затрёт итог операции, которую исполнитель уже записал"
     )
     assert "_journal_counters(" in seg, "счётчики снова берутся не из журнала"
+
+
+# ── Сбой на одной операции не забирает остальные ─────────────────────────────
+
+class _TwoStuck(_Pool):
+    """Две осиротевшие операции вместо одной: проверяем цену сбоя на первой."""
+
+    async def fetch(self, query, *args):
+        if "operation_queue" in query:
+            import datetime as _dt
+            old = (_dt.datetime.now(_dt.timezone.utc)
+                   - _dt.timedelta(hours=self.hours))
+            return [
+                {"id": 101, "owner_id": 5, "op_type": "mass_invite",
+                 "started_at": old},
+                {"id": 102, "owner_id": 5, "op_type": "mass_invite",
+                 "started_at": old},
+            ]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_a_failure_on_one_orphan_does_not_skip_the_rest(spies, monkeypatch):
+    """Весь обход стоял в одном try — сбой на первой строке бросал остальные.
+
+    Этот сторож и есть последняя страховка для осиротевших операций: если
+    обход срывается на первой из них, остальные продолжают висеть в 'running',
+    держат слоты параллельности владельца и не получают ни статуса, ни отчёта.
+    А сорваться есть на чём: блип БД на записи финала, недоступный Telegram в
+    докладе владельцу.
+    """
+    from services import account_monitor, op_worker
+
+    closed: list[int] = []
+
+    async def _close(pool, bot, op_id, row, hours):
+        closed.append(int(op_id))
+        if int(op_id) == 101:
+            raise RuntimeError("БД недоступна на записи финала")
+
+    monkeypatch.setattr(account_monitor, "_close_orphan_op", _close)
+    await _sweep(_TwoStuck())
+
+    assert closed == [101, 102], (
+        "сбой на первой осиротевшей операции забрал остальные: закрыты "
+        f"{closed} — они останутся висеть до следующего круга или навсегда")
+    assert any(n == "infragram_maintenance_step_failures_total"
+               for n, _lbl in spies["metric"]), (
+        f"падение шага не оставило следа: {spies['metric']}")
+    assert op_worker is not None  # дверь живёт в воркере: импорт обязан быть
+
+
+def test_the_orphan_close_goes_through_the_one_door():
+    """Храповик: финал осиротевшей операции пишется общей дверью воркера.
+
+    Сырой `pool.execute` здесь не только не отличал «закрыл кто-то другой» от
+    «запись не прошла» — он ещё и БРОСАЛ на блипе БД, то есть срывал обход.
+    """
+    import ast
+    import inspect
+
+    from services import account_monitor
+
+    src = inspect.getsource(account_monitor._close_orphan_op)
+    assert "_op_closed_by_us(" in src, (
+        "финал осиротевшей операции пишется мимо общей двери: на блипе БД "
+        "владельцу уйдёт отчёт о статусе, которого в БД нет")
+    tree = ast.parse(src.lstrip())
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute) and node.attr == "execute"
+                and getattr(node.value, "id", "") == "pool"):
+            raise AssertionError(
+                "в закрытии осиротевшей операции снова сырой pool.execute")
