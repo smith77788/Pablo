@@ -134,8 +134,19 @@ def transliterate(text: str) -> str:
 
 
 def slugify(text: str) -> str:
-    """Convert text to Telegram-safe slug: lowercase a-z0-9 and underscores, max 32 chars."""
-    text = transliterate(text)
+    """Convert text to Telegram-safe slug: lowercase a-z0-9 and underscores, max 32 chars.
+
+    Пустое значение даёт пустой слаг, а не исключение. Двенадцать мест в коде
+    зовут слагификацию как `slugify(row.get("city", ""))`, а строка базы с
+    пустой колонкой приходит как None: ключ ЕСТЬ, значение по умолчанию не
+    применяется. Прежний `for ch in text` ронял на этом TypeError, и падение
+    стоило не одной цели, а всего прогона — шаблон имени объекта вызывается
+    вне изоляции элемента, поэтому исключение уходило из цикла и роняло
+    операцию целиком.
+    """
+    if not text:
+        return ""
+    text = transliterate(str(text))
     text = text.lower()
     text = re.sub(r"[^a-z0-9]+", "_", text)
     text = re.sub(r"_+", "_", text)
