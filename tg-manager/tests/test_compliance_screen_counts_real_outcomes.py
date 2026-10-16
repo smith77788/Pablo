@@ -113,7 +113,13 @@ def test_overview_asks_the_engine_instead_of_inventing_a_vocabulary():
         "обзор снова считает исход, которого никто не пишет")
     assert "'ban','flood_wait'" not in window.replace(" ", ""), (
         "обзор снова считает риск по словарю, которого нет в журнале")
-    assert "compliance_engine" in window, "обзор обязан брать словарь из движка"
+    # Условие — на ВЫЗОВАХ движка, а не на упоминании его имени: слово
+    # «compliance_engine» есть и в докстроке ручки, поэтому выпотрошенная
+    # ручка проходила такую проверку (измерено 16.10.2026).
+    for call in ("compliance_engine.get_totals(",
+                 "compliance_engine.get_recent(",
+                 "compliance_engine.count_recent("):
+        assert call in window, f"обзор считает сам, вместо {call}"
 
 
 def test_records_carry_the_way_to_the_operation():
