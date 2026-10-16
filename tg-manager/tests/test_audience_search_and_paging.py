@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 
 from services.audience_filters import parsed_audience_filters
-from tests.miniapp_source import miniapp_html, miniapp_source
+from tests.miniapp_source import api_function, miniapp_html, miniapp_source
 
 SRC = miniapp_source()
 HTML = miniapp_html()
@@ -95,13 +95,20 @@ def test_empty_search_adds_nothing():
 
 
 def test_view_and_export_share_the_builder():
-    """Список и выгрузка обязаны идти через ОДИН построитель условий."""
-    api = open("services/mini_app_api.py", encoding="utf-8").read()
-    view = api.index("async def parsed_audience(")
-    exp = api.index("async def parsed_audience_export(")
-    end = api.index("app.router.add_get(\"/api/miniapp/parser/audience\"")
-    assert "parsed_audience_filters(q, base_params_count=1)" in api[view:exp]
-    assert "parsed_audience_filters(q, base_params_count=1)" in api[exp:end]
+    """Список и выгрузка обязаны идти через ОДИН построитель условий.
+
+    Раньше тест резал файл монолита по индексам: от `async def
+    parsed_audience(` до `async def parsed_audience_export(` и дальше до
+    строки регистрации маршрута. Обе ручки уехали в
+    services/mini_app_parser.py, и срез упал на ValueError. Берём каждую
+    ручку по точным границам ast через api_function: ей безразлично, в каком
+    модуле слоя ручка лежит сегодня.
+    """
+    call = "parsed_audience_filters(q, base_params_count=1)"
+    for name in ("parsed_audience", "parsed_audience_export"):
+        assert call in api_function(name), (
+            f"{name} отбирает людей своим условием, а не общим построителем: "
+            f"на экране будет одно, а в выгрузке другое")
 
 
 # ─────────────────────────── фронт: поиск и страницы ──────────────────────────
