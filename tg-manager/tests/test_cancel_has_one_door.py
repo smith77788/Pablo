@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pathlib
 import re
 
 import pytest
@@ -31,8 +32,16 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Поверхности, которые отменяют операции владельца.
-SURFACES = (
-    "services/mini_app_api.py",
+#
+# Слой мини-аппа берём ЦЕЛИКОМ, а не поимённо: он разъехался из одного
+# монолита в три десятка модулей, и отмена ушла в services/mini_app_
+# operations.py. Поимённый список молча перестал бы покрывать новый модуль, а
+# храповик ниже именно на покрытие и рассчитан — поэтому glob, а не имена.
+_MINI_APP_LAYER = tuple(
+    "services/" + p.name
+    for p in sorted((pathlib.Path(ROOT) / "services").glob("mini_app*.py"))
+)
+SURFACES = _MINI_APP_LAYER + (
     "bot/handlers/approval_flow.py",
     "bot/handlers/mass_ops.py",
     "bot/handlers/botmother_menu.py",
@@ -188,8 +197,21 @@ def test_no_surface_cancels_an_operation_by_hand():
 
 
 def test_the_detector_sees_the_surfaces_at_all():
-    """Детектор, который ничего не находит, зелёный всегда."""
+    """Детектор, который ничего не находит, зелёный всегда.
+
+    Слой мини-аппа проверяется как слой: отмена живёт в одном его модуле, и
+    требовать дверь от каждого из трёх десятков — значит требовать её от
+    модуля про подарки. Но если дверь исчезнет из слоя ЦЕЛИКОМ, список
+    поверхностей устарел и храповик ниже сторожит пустоту.
+    """
+    layer = "\n".join(_read(rel) for rel in _MINI_APP_LAYER)
+    assert "operation_bus" in layer and "cancel(" in layer, (
+        "слой мини-аппа больше не отменяет операции — список поверхностей "
+        "устарел"
+    )
     for rel in SURFACES:
+        if rel in _MINI_APP_LAYER:
+            continue
         src = _read(rel)
         assert "operation_bus" in src and "cancel(" in src, (
             f"{rel} больше не отменяет операции — список поверхностей устарел"
