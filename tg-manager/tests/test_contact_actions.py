@@ -15,11 +15,12 @@ import os
 # mini_app_api.py в services/mini_app_uch.py, и проверка не должна зависеть
 # от того, в каком файле лежит обработчик.
 def _api_src() -> str:
-    from tests.miniapp_source import api_source
 
     return api_source()
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from tests.miniapp_source import api_source, js_function
 
 
 def _read(rel: str) -> str:
@@ -96,8 +97,7 @@ def test_frontend_picker_defaults_to_source_accounts():
     ui = _read("mini_app/index.html")
     # по умолчанию отмечаем аккаунты, где контакт найден (sources)
     assert "window._cdSources" in ui
-    fn = ui[ui.index("function openContactWrite"):]
-    fn = fn[:fn.index("async function submitContactWrite")]
+    fn = js_function("openContactWrite")
     assert "_cdSources" in fn and "account_id" in fn
 
 

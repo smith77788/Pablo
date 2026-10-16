@@ -27,7 +27,7 @@ import re
 
 import pytest
 
-from tests.miniapp_source import miniapp_source
+from tests.miniapp_source import js_function, miniapp_source
 from tests.miniapp_source import api_source
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
@@ -101,8 +101,7 @@ def test_resume_operation_does_not_touch_scheduled_for():
 def test_ui_has_run_now_button_only_for_scheduled_pending():
     ui = miniapp_source()
     assert "runNowOp" in ui
-    i = ui.index("async function runNowOp")
-    seg = ui[i:ui.index("\n}", i)]
+    seg = js_function("runNowOp")
     assert "/run_now" in seg
 
     # Кнопка условна на реально будущем scheduled_for — не на любом pending.
@@ -143,7 +142,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     _run(pool.execute("DELETE FROM operation_queue WHERE owner_id IN ($1,$2)", OWNER, OTHER_OWNER))
     yield
 

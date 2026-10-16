@@ -18,7 +18,7 @@ import ast
 import pathlib
 
 from services.dm_engine import classify_send_result
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _OP_WORKER = _ROOT / "services" / "op_worker.py"
@@ -162,9 +162,7 @@ def test_endpoint_returns_duration_estimate():
 
 
 def test_ui_confirm_shows_duration_and_duplicates():
-    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-    seg = ui[ui.index("async function submitDmAdhoc"):]
-    seg = seg[:2500]
+    seg = js_function("submitDmAdhoc")
     assert "humanDur(" in seg, "подтверждение обязано показывать срок рассылки"
     assert "Дублей в списке" in seg
     assert "первая 1000" in seg, "молчаливое усечение списка недопустимо"

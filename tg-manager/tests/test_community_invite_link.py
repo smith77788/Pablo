@@ -24,7 +24,7 @@ import re
 
 import pytest
 
-from tests.miniapp_source import miniapp_source
+from tests.miniapp_source import js_function, miniapp_source
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -81,9 +81,7 @@ def test_handler_prefers_admin_members_and_is_owner_scoped():
 
 
 def test_frontend_invite_to_community_fetches_link_not_raw_id():
-    ui = miniapp_source()
-    i = ui.index("async function inviteToCommunity")
-    seg = ui[i:ui.index("\n}", i)]
+    seg = js_function("inviteToCommunity")
     assert "/invite_link" in seg
     assert "massInviteGroup" in seg
     assert "r.invite_link" in seg
@@ -132,7 +130,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     _run(pool.execute("DELETE FROM community_nodes WHERE owner_id=$1", OWNER))
     _run(pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER))
     yield

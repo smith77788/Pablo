@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 from services import channel_admin as ca
 from services import infra_memory, operation_bus, va_control
 
@@ -135,8 +135,8 @@ def test_interface_connects_control_cards_network_actions_and_safe_rollback():
     root = Path(__file__).resolve().parents[1]
     js = (root / "mini_app/screens/va_admin.js").read_text(encoding="utf-8")
     api = api_source()
-    network = js[js.index("function _vaNetworkHtml"):js.index("let _vaDraftCtx")]
-    control = js[js.index("function _vaControlHtml"):js.index("function _vaBriefHtml")]
+    network = js_function("_vaNetworkHtml")
+    control = js_function("_vaControlHtml")
 
     assert "n.next_actions" in network
     assert "n.next_actions" not in control

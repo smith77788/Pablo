@@ -22,6 +22,8 @@ from services import op_status
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+from tests.miniapp_source import js_function
+
 
 def _read(rel: str) -> str:
     with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
@@ -213,7 +215,5 @@ def test_bot_status_maps_render_partial():
 
 def test_miniapp_stops_polling_on_partial():
     """Иначе завершённая операция висела бы в опросе и врала «ещё выполняется»."""
-    html = _read("mini_app/index.html")
-    poll = html[html.index("async function pollOpResult"):]
-    poll = poll[:poll.index("function opCanRetry")]
+    poll = js_function("pollOpResult")
     assert "d.status==='partial'" in poll

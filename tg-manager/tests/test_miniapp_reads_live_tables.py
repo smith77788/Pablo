@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -100,8 +100,6 @@ def test_infra_health_reads_live_anomalies():
 def test_infra_health_screen_shows_why():
     """У аномалии есть текст причины — экран обязан его показывать, иначе
     человек видит заголовок без объяснения, что именно сломалось."""
-    html = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-    start = html.index("async function openInfraHealth")
-    body = html[start : start + 2500]
+    body = js_function("openInfraHealth")
     assert "a.description" in body, "экран здоровья не показывает причину аномалии"
     assert "a.severity" in body and "a.first_seen_at" in body

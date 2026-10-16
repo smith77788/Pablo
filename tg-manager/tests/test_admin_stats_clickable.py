@@ -10,11 +10,12 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+from tests.miniapp_source import js_function
+
 
 def test_stats_tiles_are_clickable():
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-    body = html[html.index("async function openAdminStats"):]
-    body = body[:body.index("async function openAdminUsers")]
+    body = js_function("openAdminStats")
     # Юзеры/Подписки → список пользователей; операции → экран операций
     assert "openAdminUsers()" in body, "плитки юзеров/подписок не кликабельны"
     assert "openOps()" in body, "плитки операций не кликабельны"

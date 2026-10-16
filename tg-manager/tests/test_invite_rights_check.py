@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from services import mini_app_api
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 
 def _src() -> str:
@@ -71,8 +71,7 @@ def test_own_channel_account_is_checked_first():
 
 def test_unchecked_is_not_reported_as_no_admin():
     html = _index()
-    i = html.index("function checkInviteRights(")
-    body = html[i:i + 4000]
+    body = js_function("checkInviteRights")
     assert "!d.checked" in body, "«проверить было некому» сливалось с «админа нет»"
     j = html.index("async function openMassInviteForChannel(")
     assert "loadFleetReadiness()" in html[j:j + 2500], (

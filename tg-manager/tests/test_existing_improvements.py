@@ -7,6 +7,8 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+from tests.miniapp_source import js_function
+
 
 def _read(rel):
     return open(os.path.join(ROOT, rel), encoding="utf-8").read()
@@ -67,9 +69,7 @@ def test_ban_reaction_helper_invalidates_and_emits():
 
 # ── Контакты: поиск КОМБИНИРУЕТСЯ с фильтрами (единый путь, не отдельный /search)
 def test_contacts_list_unified_search_with_filters():
-    ui = _read("mini_app/index.html")
-    fn = ui[ui.index("async function loadContacts"):]
-    fn = fn[:fn.index("async function searchContacts")]
+    fn = js_function("loadContacts")
     # список всегда идёт через uch/contacts (search как параметр), без ветки на /uch/search
     assert "/api/miniapp/uch/contacts?" in fn
     assert "params.set('search', q)" in fn

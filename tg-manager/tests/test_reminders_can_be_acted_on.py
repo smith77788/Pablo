@@ -17,6 +17,8 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+from tests.miniapp_source import api_source, js_function
+
 
 def _read(rel: str) -> str:
     with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
@@ -24,9 +26,7 @@ def _read(rel: str) -> str:
 
 
 def _screen() -> str:
-    html = _read("mini_app/index.html")
-    i = html.index("async function openUchReminders()")
-    return html[i:html.index("function openUchSyncCenter()", i)]
+    return js_function("openUchReminders")
 
 
 def test_probe_sees_the_rows():
@@ -35,8 +35,14 @@ def test_probe_sees_the_rows():
 
 
 def test_reminder_opens_the_contact_it_is_about():
-    body = _screen()
-    assert "openContactDetail(" in body, (
+    """Строку рисует remRow, а в карточку ведёт remOpen — спрашиваем обе.
+
+    Раньше здесь был срез «от openUchReminders до openUchSyncCenter» (тело
+    1227, срез 3855), и openContactDetail находился в соседней функции: после
+    перехода на точные границы проверка покраснела, хотя путь к контакту цел.
+    """
+    assert "remOpen(" in js_function("remRow"), "строка напоминания никуда не ведёт"
+    assert "openContactDetail(" in js_function("remOpen"), (
         "из напоминания нельзя попасть к контакту, о котором оно")
 
 
@@ -44,22 +50,23 @@ def test_reminder_can_be_closed_and_postponed():
     html = _read("mini_app/index.html")
     assert "function remDone(" in html, "напоминание нельзя отметить сделанным"
     assert "function remSnooze(" in html, "напоминание нельзя отложить"
-    done = html[html.index("async function remDone("):]
-    done = done[:done.index("\nasync function ", 10)]
+    done = js_function("remDone")
     assert "remind_at: null" in done or '"remind_at":null' in done.replace(" ", ""), (
         "«готово» обязано снимать напоминание, а не ставить новое")
 
 
 def test_actions_pass_an_index_not_the_contact_text():
     """Имя контакта — внешний текст, в onclick ему не место."""
-    body = _screen()
-    for m in re.finditer(r"onclick=\"(rem\w+)\(([^\"]*)\)", body):
+    # Разметку строки держит remRow, а не экран.
+    body = js_function("remRow")
+    found = list(re.finditer(r"onclick=\"(?:event\.stopPropagation\(\);)?(rem\w+)\(([^\"]*)\)", body))
+    assert len(found) >= 4, f"обработчиков в строке найдено {len(found)} — проверка ослепла"
+    for m in found:
         assert re.fullmatch(r"\d+|\$\{\w+\}|\$\{\w+\},\s*-?\d+", m.group(2).strip()), (
             f"в обработчик {m.group(1)} уходит не индекс: {m.group(2)!r}")
 
 
 def test_backend_accepts_clearing_a_reminder():
-    from tests.miniapp_source import api_source
     api = api_source()
     i = api.index("async def uch_crm_reminder")
     fn = api[i:api.index("\n    async def ", i + 10)]

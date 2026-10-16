@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -103,19 +103,25 @@ def test_bot_recipient_lookup_is_owner_scoped():
 
 
 def test_screen_lets_pick_gifts_and_name_the_recipient():
-    html = _read("mini_app/index.html")
-    i = html.index("async function openGifts")
-    body = html[i:html.index("async function scanGifts", i)]
+    """Выбор подарка рисует giftsRender, а не openGifts.
+
+    Раньше здесь был срез «от openGifts до scanGifts»: тело openGifts — 1031
+    символ, срез — 7041. Выпотрошенный openGifts не краснил ни одной строки
+    этого файла (измерено 16.10.2026), потому что обе проверяемые строки лежали
+    в соседней функции.
+    """
+    body = js_function("giftsRender")
     assert "giftToggle(" in body, "подарок нельзя выбрать"
-    assert "giftsTransferStart(" in html, "некуда перейти к передаче"
+    assert "giftsTransferStart(" in miniapp_source(), "некуда перейти к передаче"
     # Непередаваемый подарок выбирать нельзя: операция всё равно его пропустит.
     assert "is_transferable" in body
+    # Экран обязан звать отрисовку — иначе список пуст при живом рендере.
+    assert "giftsRender(" in js_function("openGifts") or \
+        "loadGifts(" in js_function("openGifts"), "экран ничего не рисует"
 
 
 def test_confirmation_names_what_goes_and_to_whom():
-    html = _read("mini_app/index.html")
-    i = html.index("async function giftsTransferSubmit")
-    body = html[i:i + 2000]
+    body = js_function("giftsTransferSubmit")
     assert "askConfirm(" in body, "необратимая передача уходит без подтверждения"
     assert "RECIP" in body or "recipient" in body, (
         "в подтверждении не названо, кому уходят подарки")

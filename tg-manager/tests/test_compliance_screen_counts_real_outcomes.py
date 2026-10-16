@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -130,23 +130,31 @@ def test_records_carry_the_way_to_the_operation():
 
 
 def test_screen_opens_the_operation_and_lets_filter_by_outcome():
-    html = _read("mini_app/index.html")
-    i = html.index("async function openCompliance")
-    # Границы по соседней функции, а не по длине: срез фиксированной длины рвёт
-    # экран пополам и начинает лгать при первой же правке.
-    body = html[i:html.index("async function exportCompliance", i)]
-    assert "openOpDetail(" in body, "строка аудита никуда не ведёт"
-    assert "complianceFilter(" in body or "compGo(" in body, (
+    """Проводка журнала разнесена по трём функциям — каждую спрашиваем отдельно.
+
+    Раньше здесь был срез «от openCompliance до exportCompliance»: тело
+    openCompliance — 431 символ, а срез — 5990, то есть в него попадало ещё
+    тринадцать функций. Проверка была зелёной всегда: выпотроши openCompliance
+    целиком — ни одна строка этого файла не краснела (измерено 16.10.2026).
+    Сами проводки на месте, но живут они в loadCompliance и compRender.
+    """
+    # Условие не должно выполняться самим объявлением: «openCompliance()»
+    # встречается в строке `async function openCompliance()`, поэтому
+    # выпотрошенная функция проходила бы такую проверку.
+    assert "loadCompliance(" in js_function("openCompliance"), "экран ничего не грузит"
+    stats = js_function("loadCompliance")
+    assert "compGo(" in stats, (
         "по исходу нельзя отфильтровать — «Рисковых 12» снова ни во что не ведёт")
-    assert "moreBtn(" in body, "видно только первые записи, остальные не достать"
+    rows = js_function("compRender")
+    assert "openOpDetail(" in rows, "строка аудита никуда не ведёт"
+    assert "moreBtn(" in rows, "видно только первые записи, остальные не достать"
+    assert "compShow(" in rows, "запись без живой операции никуда не ведёт"
 
 
 def test_front_knows_a_russian_name_for_every_outcome_the_engine_classifies():
     from services import compliance_engine as ce
 
-    html = _read("mini_app/index.html")
-    i = html.index("function outRu(")
-    table = html[i:i + 700]
+    table = js_function("outRu")
     for outcome in sorted(ce.OUTCOME_RU):
         assert outcome in table, (
             f"{outcome} движок уже знает, а экран покажет его по-английски")

@@ -18,7 +18,7 @@ import ast
 import re
 from pathlib import Path
 
-from tests.miniapp_source import miniapp_html, source_of
+from tests.miniapp_source import js_function, miniapp_html, source_of
 from tests.miniapp_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,8 +76,6 @@ def test_ops_screen_has_load_more():
 
 
 def test_changing_filter_starts_a_new_page():
-    src = source_of("filterOps")
-    i = src.index("function filterOps(")
-    body = src[i:i + 700]
+    body = js_function("filterOps")
     assert "OPS_OFFSET = 0" in body, (
         "смена среза не сбрасывает страницу — остаток считался бы от прошлого фильтра")

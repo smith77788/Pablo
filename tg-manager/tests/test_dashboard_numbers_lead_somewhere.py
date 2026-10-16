@@ -20,6 +20,8 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+from tests.miniapp_source import js_function
+
 
 def _html() -> str:
     with open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8") as f:
@@ -27,8 +29,7 @@ def _html() -> str:
 
 
 def _dashboard(html: str) -> str:
-    i = html.index("async function loadDashboard()")
-    return html[i:html.index("function dashSetMetric", i)]
+    return js_function("loadDashboard")
 
 
 def _silent(calls):

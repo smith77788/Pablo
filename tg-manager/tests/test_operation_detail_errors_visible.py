@@ -1,15 +1,11 @@
 """Сбой API на экране операции не маскируется под отсутствие данных."""
 from __future__ import annotations
 
-from pathlib import Path
+from tests.miniapp_source import js_function
 
 
 def _detail_source() -> str:
-    html = (
-        Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
-    ).read_text(encoding="utf-8")
-    start = html.index("async function openOpDetail")
-    return html[start:html.index("\n// ── Лог операции", start)]
+    return js_function("openOpDetail")
 
 
 def test_operation_request_error_is_not_reported_as_not_found():

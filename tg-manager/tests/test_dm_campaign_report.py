@@ -11,7 +11,7 @@ from __future__ import annotations
 import pathlib
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 _API = api_source()
 _UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
@@ -98,6 +98,5 @@ def test_ui_translates_log_statuses_for_humans():
 
 def test_ui_handles_empty_report():
     """Кампания без единой отправки не должна выглядеть поломкой."""
-    seg = _UI[_UI.index("function openDmReport"):]
-    seg = seg[:4000]
+    seg = js_function("openDmReport")
     assert "Отправок ещё не было" in seg

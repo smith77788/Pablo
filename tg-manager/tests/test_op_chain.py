@@ -26,6 +26,8 @@ from services import op_quick_actions as qa  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
+from tests.miniapp_source import js_function
+
 
 def _src(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
@@ -217,8 +219,7 @@ def test_miniapp_functions_and_screens_exist():
         assert re.search(r"function\s+" + fn + r"\s*\(", ui), fn
     assert "/api/miniapp/op_chain/launch" in _func_src(_src("services/mini_app_api.py"),
                                                       "setup_routes")
-    body = ui[ui.index("function runPulseAction(a)"):]
-    body = body[:body.index("\n}\n")]
+    body = js_function("runPulseAction")
     samples = [
         ("parse_audience", {"total_saved": 1, "handoff": {"parse_run_id": 1}}),
         ("bulk_create_channels", {"handoff": {"channel_ids": [1]}}),

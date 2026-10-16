@@ -40,7 +40,12 @@ import re
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
+# Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
+# Модульный pytestmark уносил вместе с ними и проверки по исходникам
+# (храповики на транспорт, регистрацию маршрута, проводку экрана): локально
+# они не выполнялись НИ РАЗУ, а в CI любая заминка базы превращала их в
+# «пропущено» на зелёном прогоне.
+requires_pg = pytest.mark.skipif(
     not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
 OWNER = 991778
@@ -81,7 +86,18 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        return
+    pool = request.getfixturevalue("pool")
     _run(pool.execute(
         "DELETE FROM operation_log WHERE op_id IN "
         "(SELECT id FROM operation_queue WHERE owner_id=$1)", OWNER))
@@ -134,6 +150,7 @@ def _sweep(pool):
 
 # ── Главное: цифры доходят до владельца ──────────────────────────────────────
 
+@requires_pg
 def test_an_abandoned_cancelled_operation_gets_its_numbers(pool):
     """Без этого владелец видит «Отменено» и ноль цифр — навсегда."""
     op_id = _run(_abandoned(pool))
@@ -151,6 +168,7 @@ def test_an_abandoned_cancelled_operation_gets_its_numbers(pool):
     assert res["summary"], "итог без слов для владельца"
 
 
+@requires_pg
 def test_the_real_duration_is_written_not_zero(pool):
     """«Сколько шла» — половина ответа на «успело ли что-нибудь уйти»."""
     op_id = _run(_abandoned(pool, ran_for_min=10))
@@ -160,6 +178,7 @@ def test_the_real_duration_is_written_not_zero(pool):
         f"длительность не посчитана по started_at..finished_at: {res}")
 
 
+@requires_pg
 def test_the_status_stays_terminal(pool):
     """Уборщик дописывает итог, а не воскрешает операцию."""
     op_id = _run(_abandoned(pool))
@@ -170,6 +189,7 @@ def test_the_status_stays_terminal(pool):
 
 # ── Чего уборщик делать не должен ────────────────────────────────────────────
 
+@requires_pg
 def test_a_freshly_cancelled_operation_is_left_alone(pool):
     """Исполнитель закроет её сам в течение секунд — иначе итог объявят дважды.
 
@@ -184,6 +204,7 @@ def test_a_freshly_cancelled_operation_is_left_alone(pool):
         "второй раз, когда исполнитель свернётся")
 
 
+@requires_pg
 def test_an_operation_running_in_this_process_is_left_alone(pool):
     """Тот же критерий, по которому её щадят оба сторожа зависших."""
     from services import op_worker
@@ -198,6 +219,7 @@ def test_an_operation_running_in_this_process_is_left_alone(pool):
         "закрыли операцию, которая выполняется в этом процессе прямо сейчас")
 
 
+@requires_pg
 def test_an_operation_that_already_has_a_result_is_not_touched(pool):
     """Иначе исход объявлялся бы заново на каждом круге сторожа."""
     op_id = _run(_abandoned(pool, result={"status": "cancelled", "ok": 99,
@@ -207,6 +229,7 @@ def test_an_operation_that_already_has_a_result_is_not_touched(pool):
     assert res and res["ok"] == 99, f"итог перезаписан уборщиком: {res}"
 
 
+@requires_pg
 def test_other_terminal_statuses_are_not_touched(pool):
     """Провал без итога — другой класс и другой путь закрытия."""
     op_id = _run(_abandoned(pool))
@@ -239,6 +262,7 @@ def test_the_sweep_goes_through_the_single_finish_door():
         "уборщик пишет статус сам — это и есть обход двери")
 
 
+@requires_pg
 def test_the_probe_would_notice_a_sweep_that_does_nothing(pool):
     """Проверка измерителя: тесты выше обязаны падать, если уборщик пуст."""
     from services import op_worker

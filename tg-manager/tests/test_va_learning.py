@@ -3,12 +3,13 @@ import json
 import shutil
 import subprocess
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from services import channel_admin as ca
 from services import va_learning as learning
+
+from tests.miniapp_source import js_function
 
 
 def samples(pillar, scores, start=1):
@@ -193,8 +194,7 @@ def test_report_explains_learning_only_when_enabled():
     node = shutil.which("node")
     if not node:
         pytest.skip("нужен Node.js")
-    source = Path("mini_app/screens/va_admin.js").read_text(encoding="utf-8")
-    function = source[source.index("function _vaReportHtml("):source.index("function _vaBriefHtml(")]
+    function = js_function("_vaReportHtml")
     script = "const esc=String, _vaNum=String, plural=()=>'';\n" + function + """
 const report={members:null, members_delta_7d:null, posts_7d:0, posts_total:0};
 const on=_vaReportHtml(report,{auto_tune:true});

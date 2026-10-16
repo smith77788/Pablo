@@ -34,7 +34,12 @@ import os
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
+# Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
+# Модульный pytestmark уносил вместе с ними и проверки по исходникам
+# (храповики на транспорт, регистрацию маршрута, проводку экрана): локально
+# они не выполнялись НИ РАЗУ, а в CI любая заминка базы превращала их в
+# «пропущено» на зелёном прогоне.
+requires_pg = pytest.mark.skipif(
     not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -104,7 +109,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     _run(pool.execute("DELETE FROM tg_accounts"))
     _run(pool.execute("DELETE FROM account_status_events"))
     yield
@@ -146,6 +163,7 @@ def _statuses(pool):
 
 # ── ядро ─────────────────────────────────────────────────────────────────────
 
+@requires_pg
 def test_first_conflict_does_not_touch_the_status(pool, monkeypatch):
     """Главное: один проход монитора не паркует флот."""
     _add(pool, 5)
@@ -159,6 +177,7 @@ def test_first_conflict_does_not_touch_the_status(pool, monkeypatch):
     assert marked == 5, "конфликт не запомнен — повтор будет считаться первым"
 
 
+@requires_pg
 def test_repeated_conflict_does_park_the_account(pool, monkeypatch):
     """Устойчивый конфликт обязан приводить к cooldown: молчать тоже нельзя."""
     _add(pool, 3)
@@ -168,6 +187,7 @@ def test_repeated_conflict_does_park_the_account(pool, monkeypatch):
     assert _statuses(pool) == ["cooldown"] * 3
 
 
+@requires_pg
 def test_a_clean_check_clears_the_mark(pool, monkeypatch):
     """Разовый флап не должен копиться: чистая проверка обнуляет счёт."""
     _add(pool, 2)
@@ -181,6 +201,7 @@ def test_a_clean_check_clears_the_mark(pool, monkeypatch):
     assert _statuses(pool) == ["active"] * 2
 
 
+@requires_pg
 def test_other_statuses_are_applied_immediately(pool, monkeypatch):
     """Отсрочка касается ТОЛЬКО конфликта сессии, а не всех проверок подряд."""
     _add(pool, 2)
@@ -189,6 +210,7 @@ def test_other_statuses_are_applied_immediately(pool, monkeypatch):
     assert _statuses(pool) == ["spamblock"] * 2
 
 
+@requires_pg
 def test_reason_tells_the_user_what_to_do(pool):
     """Причина обязана объяснять, где искать вторую сессию и что нажать."""
     src = open(os.path.join(ROOT, "services", "account_manager.py"),
@@ -201,6 +223,7 @@ def test_reason_tells_the_user_what_to_do(pool):
             "что именно делать")
 
 
+@requires_pg
 def test_self_heal_does_not_flip_flop_a_persistent_conflict(pool):
     """Самолечение не должно снимать кулдаун, поставленный за УСТОЙЧИВЫЙ конфликт.
 

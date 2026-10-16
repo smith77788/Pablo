@@ -18,7 +18,12 @@ import os
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
+# Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
+# Модульный pytestmark уносил вместе с ними и проверки по исходникам
+# (храповики на транспорт, регистрацию маршрута, проводку экрана): локально
+# они не выполнялись НИ РАЗУ, а в CI любая заминка базы превращала их в
+# «пропущено» на зелёном прогоне.
+requires_pg = pytest.mark.skipif(
     not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
 _LOOP: "asyncio.AbstractEventLoop | None" = None
@@ -62,7 +67,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     from services import infra_memory as im
     _run(pool.execute("DELETE FROM infra_memory_accounts WHERE account_id=$1", ACC))
     im._account_memory.clear()
@@ -79,6 +96,7 @@ def _db_counts(pool):
     return (row["successes"], row["failures"]) if row else (0, 0)
 
 
+@requires_pg
 def test_two_replicas_do_not_overwrite_each_other(pool):
     """Главное: инкременты соседа не теряются.
 
@@ -110,6 +128,7 @@ def test_two_replicas_do_not_overwrite_each_other(pool):
         "Абсолютная перезапись затирает работу соседней реплики")
 
 
+@requires_pg
 def test_reload_then_flush_does_not_double_counters(pool):
     """Рестарт не должен раздувать счётчики.
 
@@ -133,6 +152,7 @@ def test_reload_then_flush_does_not_double_counters(pool):
         f"счётчики раздулись при рестарте: {_db_counts(pool)} вместо (51, 7)")
 
 
+@requires_pg
 def test_repeated_flush_without_new_events_changes_nothing(pool):
     """Повторный флаш без новых событий не должен ничего прибавлять."""
     from services import infra_memory as im

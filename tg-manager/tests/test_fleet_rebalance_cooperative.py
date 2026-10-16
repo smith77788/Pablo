@@ -30,7 +30,12 @@ import re
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
+# Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
+# Модульный pytestmark уносил вместе с ними и проверки по исходникам
+# (храповики на транспорт, регистрацию маршрута, проводку экрана): локально
+# они не выполнялись НИ РАЗУ, а в CI любая заминка базы превращала их в
+# «пропущено» на зелёном прогоне.
+requires_pg = pytest.mark.skipif(
     not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -77,7 +82,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     _run(pool.execute("DELETE FROM operation_queue WHERE owner_id=$1", OWNER))
     _run(pool.execute("DELETE FROM tg_accounts WHERE owner_id=$1", OWNER))
     yield
@@ -125,6 +142,7 @@ async def _mk_running_op(pool, owner_id: int, op_type="warmup") -> int:
     )
 
 
+@requires_pg
 def test_rebalance_is_a_noop_when_running_alone(pool):
     from services import op_worker as w
 
@@ -135,6 +153,7 @@ def test_rebalance_is_a_noop_when_running_alone(pool):
     assert result == held, "без конкурентных операций делить нечего"
 
 
+@requires_pg
 def test_rebalance_gives_back_a_fair_share_to_a_rival_operation(pool):
     """Ядро фичи: появилась вторая running-операция того же владельца —
     первая обязана вернуть половину флота в пул, а не держать всё до конца."""

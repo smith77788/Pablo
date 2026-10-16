@@ -23,7 +23,12 @@ import os
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
+# Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
+# Модульный pytestmark уносил вместе с ними и проверки по исходникам
+# (храповики на транспорт, регистрацию маршрута, проводку экрана): локально
+# они не выполнялись НИ РАЗУ, а в CI любая заминка базы превращала их в
+# «пропущено» на зелёном прогоне.
+requires_pg = pytest.mark.skipif(
     not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -84,7 +89,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     _run(pool.execute("DELETE FROM workflow_runs"))
     _run(pool.execute("DELETE FROM workflow_definitions"))
     yield
@@ -115,6 +132,7 @@ def test_migration_creates_the_tables_the_screen_needs():
     assert "CREATE TABLE IF NOT EXISTS workflow_runs" in sql
 
 
+@requires_pg
 def test_list_and_create_work_on_real_schema(pool):
     from services import workflow_engine as we
 
@@ -127,6 +145,7 @@ def test_list_and_create_work_on_real_schema(pool):
 
 # ── три отсутствовавшие функции ──────────────────────────────────────────────
 
+@requires_pg
 def test_pause_and_resume_flip_the_same_flag_as_the_screen(pool):
     """Пауза — это is_active, ровно как в PATCH /workflows/{id}.
 
@@ -144,6 +163,7 @@ def test_pause_and_resume_flip_the_same_flag_as_the_screen(pool):
         "SELECT is_active FROM workflow_definitions WHERE id=$1", wid)) is True
 
 
+@requires_pg
 def test_pause_of_someone_elses_workflow_is_not_found(pool):
     """Чужой воркфлоу — «не найден», а не «не разрешено».
 
@@ -161,6 +181,7 @@ def test_pause_of_someone_elses_workflow_is_not_found(pool):
         "SELECT is_active FROM workflow_definitions WHERE id=$1", wid)) is True
 
 
+@requires_pg
 def test_delete_removes_workflow_and_reports_missing(pool):
     from services import workflow_engine as we
 
@@ -172,6 +193,7 @@ def test_delete_removes_workflow_and_reports_missing(pool):
         "повторное удаление обязано честно сказать «нет такого» (обработчик даст 404)")
 
 
+@requires_pg
 def test_delete_does_not_break_on_run_history(pool):
     """Удаление воркфлоу с историей прогонов не должно падать на внешнем ключе.
 
@@ -190,6 +212,7 @@ def test_delete_does_not_break_on_run_history(pool):
         f"прогон остался в статусе {st['status']} у несуществующего воркфлоу")
 
 
+@requires_pg
 def test_delete_of_someone_elses_workflow_does_nothing(pool):
     from services import workflow_engine as we
 
@@ -201,6 +224,7 @@ def test_delete_of_someone_elses_workflow_does_nothing(pool):
 
 # ── шаги не должны теряться ──────────────────────────────────────────────────
 
+@requires_pg
 def test_steps_survive_creation_and_are_counted(pool):
     """Шаги обязаны сохраниться, а total_steps — считать шаги, а не символы.
 

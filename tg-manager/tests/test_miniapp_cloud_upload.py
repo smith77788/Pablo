@@ -33,7 +33,7 @@ import pytest
 from aiohttp import ClientSession, FormData, web
 
 from services import mini_app_api as M
-from tests.miniapp_source import api_function, api_source
+from tests.miniapp_source import api_function, api_source, js_function
 from services import tg_cloud
 
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
@@ -211,9 +211,7 @@ def test_download_marks_the_type_as_final():
 # ── Мини-апп: отказ до отправки и multipart вместо base64 ────────────────────
 
 def _cloud_upload_js() -> str:
-    src = INDEX.read_text("utf-8")
-    start = src.index("async function cloudUpload(input)")
-    return src[start:src.index("\n}", start) + 2]
+    return js_function("cloudUpload")
 
 
 def test_miniapp_sends_multipart_not_base64():

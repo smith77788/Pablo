@@ -13,6 +13,8 @@ import pathlib
 
 from services import vault_service as V
 
+from tests.miniapp_source import js_function
+
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -131,8 +133,6 @@ def test_endpoint_exposes_completeness():
 
 
 def test_ui_says_when_search_was_partial():
-    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-    seg = ui[ui.index("async function vaultDoSearch"):]
-    seg = seg[:2200]
+    seg = js_function("vaultDoSearch")
     assert "d.complete === false" in seg
     assert "Просмотрено" in seg, "неполный просмотр обязан быть виден пользователю"

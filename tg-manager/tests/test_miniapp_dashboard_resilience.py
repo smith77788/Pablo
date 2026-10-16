@@ -6,6 +6,8 @@ from pathlib import Path
 
 from services import mini_app_api
 
+from tests.miniapp_source import js_function
+
 
 def test_dashboard_query_timeout_returns_fallback_value():
     async def never_finishes():
@@ -26,7 +28,6 @@ def test_home_uses_global_timeout_and_replaces_both_initial_skeletons():
     assert "const FETCH_TIMEOUT_MS" in html
     assert "new AbortController()" in html
     assert "await fetchT(path" in html
-    load_home = html[html.index("async function loadHome()"):]
-    load_home = load_home[: load_home.index("async function loadOnboarding()")]
+    load_home = js_function("loadHome")
     assert "errHtml(errRu(e), 'loadHome()')" in load_home
     assert "document.getElementById('actList').innerHTML = errorHtml" in load_home

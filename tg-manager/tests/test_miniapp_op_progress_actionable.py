@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from tests.miniapp_source import miniapp_source, source_of
+from tests.miniapp_source import js_function, miniapp_source, source_of
 
 
 def _render_op_progress() -> str:
@@ -62,7 +62,6 @@ def test_cancel_marks_the_live_row_at_once():
     """События SSE идут раз в 15 секунд — столько «отменённая» работать не может."""
     src = miniapp_source()
     assert "_opProgressMarkCancelled" in src
-    i = src.index("async function cancelOp(")
-    body = src[i:i + 700]
+    body = js_function("cancelOp")
     assert "_opProgressMarkCancelled(id)" in body, (
         "после отмены строка в панели остаётся живой до следующего события SSE")

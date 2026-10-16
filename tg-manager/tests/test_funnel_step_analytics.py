@@ -12,7 +12,7 @@ drip-цепочке («на каком шаге теряем людей») от�
 from __future__ import annotations
 
 import pathlib
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _API = api_source()
@@ -124,9 +124,7 @@ def test_endpoint_stays_owner_scoped():
 
 
 def test_ui_renders_dropoff():
-    ui = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
-    seg = ui[ui.index("function buildFunnelDetail"):]
-    seg = seg[:4000]
+    seg = js_function("buildFunnelDetail")
     assert "step_stats" in seg
     assert "отвал дальше" in seg
     assert "Итог цепочки" in seg

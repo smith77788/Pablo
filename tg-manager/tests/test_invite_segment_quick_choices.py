@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-from tests.miniapp_source import api_source, miniapp_source
+from tests.miniapp_source import api_source, js_function, miniapp_source
 API = api_source()
 # Мини-апп больше не один файл: экраны вынесены в mini_app/screens/*.js.
 # Источник берём целиком, иначе вынос экрана роняет проверку, хотя
@@ -73,11 +73,9 @@ def test_single_parser_for_segment_selection():
     """
     assert "function _inviteSegSel(" in HTML, "нет единого разбора выбора сегмента"
     # оба пути обязаны идти через него
-    aud = HTML[HTML.index("async function loadInviteAudienceSize"):]
-    aud = aud[:aud.index("async function", 1)]
+    aud = js_function("loadInviteAudienceSize")
     assert "_inviteSegSel()" in aud, "превью аудитории не через единый разбор"
-    sub = HTML[HTML.index("async function submitMassInvite"):]
-    sub = sub[:sub.index("async function", 1)]
+    sub = js_function("submitMassInvite")
     assert "_inviteSegSel()" in sub, "запуск инвайта не через единый разбор"
 
 
@@ -92,8 +90,7 @@ def test_parser_maps_fav_and_tag_and_saved():
 
 
 def test_dropdown_offers_favorites_and_tags():
-    seg = HTML[HTML.index("async function loadInviteSegments"):]
-    seg = seg[:seg.index("async function", 1)]
+    seg = js_function("loadInviteSegments")
     assert "invite/segment_options" in seg, "дропдаун не тянет быстрые срезы"
     assert 'value="fav"' in seg, "нет опции «Избранные»"
     assert 'value="tag:' in seg, "нет опций по тегу"

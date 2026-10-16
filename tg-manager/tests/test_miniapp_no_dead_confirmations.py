@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 
-from tests.miniapp_source import miniapp_source, screen_files
+from tests.miniapp_source import js_function, miniapp_source, screen_files
 
 
 def _braced(src: str, anchor: str) -> str:
@@ -85,9 +85,7 @@ def test_screens_use_ask_confirm_not_window_confirm():
 
 def test_push_refuses_to_stack_the_same_screen_twice():
     """Повторный push того же экрана — ловушка, а не переход."""
-    src = miniapp_source()
-    i = src.index("function push(sid)")
-    body = src[i:i + 1400]
+    body = js_function("push")
     assert "STACK[STACK.length - 1] === sid" in body, (
         "push снова кладёт тот же экран в стек — «назад» будет показывать его же")
 

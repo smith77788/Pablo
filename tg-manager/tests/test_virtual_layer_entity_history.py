@@ -18,6 +18,7 @@ import pytest
 from services import virtual_layer as vl
 
 
+
 def _t(a, b):
     return {"from_value": a, "to_value": b}
 
@@ -111,18 +112,16 @@ def test_route_is_registered_and_scoped():
 
 
 def test_screen_lets_you_open_the_history():
-    from tests.miniapp_source import miniapp_source
+    from tests.miniapp_source import js_function, miniapp_source
     ui = miniapp_source()
     assert "async function openVLayerEntity" in ui
-    i = ui.index("async function openVLayerEntity")
-    seg = ui[i:ui.index("\n}", i)]
+    seg = js_function("openVLayerEntity")
     assert "/api/miniapp/vlayer/entity/" in seg
     assert "encodeURIComponent" in seg, "идентификатор уходит в адрес сырым"
     assert "openVLayer()" in seg, "из истории некуда вернуться"
 
     # И горячая строка, и бот ведут внутрь.
-    j = ui.index("async function openVLayer")
-    overview = ui[j:ui.index("\n}", j)]
+    overview = js_function("openVLayer")
     assert overview.count("openVLayerEntity(") >= 2, (
         "история открывается не отовсюду, откуда она нужна")
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import re
 
+from tests.miniapp_source import js_function
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -82,27 +84,24 @@ def test_draft_buttons_do_not_share_one_narrow_row():
     Главное действие — во всю ширину, второстепенные рядом и с подписями:
     безымянный «✖️» не говорил, что он делает.
     """
-    va = _va()
-    i = va.index("function _vaDraftsHtml")
-    body = va[i:va.index("\nasync function vaDraftAct")]
+    # Кнопки рисует _vaDraftButtons. Раньше здесь был срез «от _vaDraftsHtml
+    # до vaDraftAct» (тело 1417, срез 5434): выпотрошенный _vaDraftsHtml не
+    # краснил ни одной строки файла — все три строки лежали в соседе.
+    body = js_function("_vaDraftButtons")
     assert "'publish')\">✅ Опубликовать</button>" in body.replace("\\'", "'")
     assert 'style="width:100%"' in body, "главное действие не во всю ширину"
     assert "Пропустить</button>" in body, "у кнопки отказа нет подписи"
 
 
 def test_live_draft_publish_requires_explicit_confirmation():
-    va = _va()
-    start = va.index("async function vaDraftAct")
-    body = va[start:va.index("\nasync function openVaChannel", start)]
+    body = js_function("vaDraftAct")
     assert "action === 'publish'" in body
     assert "await askConfirm(" in body
     assert body.index("await askConfirm(") < body.index("await api(")
 
 
 def test_reopening_admin_resets_channel_pagination():
-    va = _va()
-    start = va.index("async function openVaAdmin")
-    body = va[start:va.index("\nasync function _vaLoadList", start)]
+    body = js_function("openVaAdmin")
     assert "_vaListPage = 0" in body
     assert "_vaChannels = []" in body
     assert body.index("_vaListPage = 0") < body.index("await _vaLoadList()")

@@ -8,6 +8,8 @@ from services.contacts_hub import timeline
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+from tests.miniapp_source import api_source, js_function
+
 
 def _t(day):
     return dt.datetime(2026, 1, day, 12, 0, tzinfo=dt.timezone.utc)
@@ -54,7 +56,6 @@ def test_empty_inputs():
 
 
 def test_endpoint_uses_builder_and_no_duplicate_route():
-    from tests.miniapp_source import api_source
     api = api_source()
     assert "timeline.build_timeline" in api
     assert "payload->>'contact_id'" in api
@@ -63,7 +64,5 @@ def test_endpoint_uses_builder_and_no_duplicate_route():
 
 
 def test_frontend_renders_icon_title():
-    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-    i = html.index("async function openContactTimeline")
-    window = html[i:i + 1200]
+    window = js_function("openContactTimeline")
     assert "t.icon" in window and "t.title" in window and "t.ts" in window

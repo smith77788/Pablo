@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source, miniapp_source
+from tests.miniapp_source import api_source, js_function, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Весь фронт (index.html + screens/*.js), а не один файл: экраны
@@ -92,8 +92,7 @@ def test_no_english_left_on_the_screen():
 
 def test_account_statuses_from_the_live_check_are_translated():
     """cooldown и no_session возвращает check_account_status_full."""
-    i = HTML.index("function accRu(")
-    block = HTML[i:i + 900]
+    block = js_function("accRu")
     for key in ("cooldown:", "no_session:"):
         assert key in block, f"нет русской подписи для статуса {key}"
 

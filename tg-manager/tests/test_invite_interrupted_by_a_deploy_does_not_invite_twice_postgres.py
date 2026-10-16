@@ -35,7 +35,12 @@ import re
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
+# Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
+# Модульный pytestmark уносил вместе с ними и проверки по исходникам
+# (храповики на транспорт, регистрацию маршрута, проводку экрана): локально
+# они не выполнялись НИ РАЗУ, а в CI любая заминка базы превращала их в
+# «пропущено» на зелёном прогоне.
+requires_pg = pytest.mark.skipif(
     not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
 OWNER = 991782
@@ -77,7 +82,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     from services.op_worker import _INVITE_LOG_DDL
 
     def _wipe():
@@ -98,6 +115,7 @@ def dedup():
 
 # ── Главное: второй прогон не зовёт уже приглашённых ─────────────────────────
 
+@requires_pg
 def test_the_second_run_skips_everyone_already_invited(pool, dedup):
     keys = dedup.dedup_keys(group_ref="@nash_chat", channel_id=-1001234567890123)
     assert keys, "подготовка: ключи канала не собрались"
@@ -113,6 +131,7 @@ def test_the_second_run_skips_everyone_already_invited(pool, dedup):
     assert dup == 3, f"пропущенные уже приглашённые посчитаны неверно: {dup}"
 
 
+@requires_pg
 def test_any_door_sees_the_invite_made_through_another(pool, dedup):
     """Канал приходит @username, ссылкой и числовым id — человек один."""
     by_username = dedup.dedup_keys(group_ref="@nash_chat")
@@ -127,6 +146,7 @@ def test_any_door_sees_the_invite_made_through_another(pool, dedup):
         "дверь не видит приглашения, сделанного через другую форму того же канала")
 
 
+@requires_pg
 def test_the_same_person_in_another_case_is_the_same_person(pool, dedup):
     """'@Ivan' и '@ivan' — один человек; Telegram матчит username именно так."""
     keys = dedup.dedup_keys(group_ref="@nash_chat")
@@ -137,6 +157,7 @@ def test_the_same_person_in_another_case_is_the_same_person(pool, dedup):
         "человек, попавший в аудиторию с другим регистром, получил бы второй инвайт")
 
 
+@requires_pg
 def test_duplicates_inside_one_list_are_called_once(pool, dedup):
     keys = dedup.dedup_keys(group_ref="@nash_chat")
     to_call, _dup, _ = _run(dedup.filter_new(
@@ -144,6 +165,7 @@ def test_duplicates_inside_one_list_are_called_once(pool, dedup):
     assert to_call == ["@ivan"], f"один человек в списке трижды: {to_call}"
 
 
+@requires_pg
 def test_remembering_the_same_target_twice_is_not_an_error(pool, dedup):
     """Пачка переотправляется при неподтверждённой записи — запись идемпотентна."""
     keys = dedup.dedup_keys(group_ref="@nash_chat")
@@ -153,6 +175,7 @@ def test_remembering_the_same_target_twice_is_not_an_error(pool, dedup):
 
 # ── Чего журнал делать не должен ─────────────────────────────────────────────
 
+@requires_pg
 def test_one_owner_does_not_hide_people_from_another(pool, dedup):
     keys = dedup.dedup_keys(group_ref="@nash_chat")
     _run(dedup.remember(pool, OWNER, keys, ["@ivan"], op_id=1))
@@ -163,6 +186,7 @@ def test_one_owner_does_not_hide_people_from_another(pool, dedup):
         "не скоупится по owner_id")
 
 
+@requires_pg
 def test_a_person_never_invited_is_not_skipped(pool, dedup):
     """Самопроверка: иначе тесты выше прошли бы на пустом журнале сами собой."""
     keys = dedup.dedup_keys(group_ref="@nash_chat")

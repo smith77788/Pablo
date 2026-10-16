@@ -25,6 +25,8 @@ from aiohttp import ClientSession, web
 
 from services import mini_app_api as M
 
+from tests.miniapp_source import js_function
+
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
 
 UID = 809202
@@ -125,9 +127,7 @@ def test_tick_is_a_named_constant():
 # ── Клиент: одно запланированное переподключение, а не пачка ─────────────────
 
 def _open_sse_js() -> str:
-    src = INDEX.read_text("utf-8")
-    start = src.index("function openSSE() {")
-    return src[start:src.index("\n}", start) + 2]
+    return js_function("openSSE")
 
 
 def test_client_schedules_one_reconnect_at_a_time():

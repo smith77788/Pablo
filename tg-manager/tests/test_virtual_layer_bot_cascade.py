@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
 
 from services import virtual_layer as vl
+
 
 
 class _Pool:
@@ -166,9 +166,7 @@ def test_api_passes_bots_through():
 
 
 def test_screen_renders_bot_temperatures():
-    from tests.miniapp_source import miniapp_source
-    ui = miniapp_source()
-    i = ui.index("async function openVLayer")
-    seg = ui[i:ui.index("\n}", i)]
+    from tests.miniapp_source import js_function
+    seg = js_function("openVLayer")
     assert "d.bots" in seg and "Температура ботов" in seg, (
         "экран слоя не показывает, где именно греется аудитория")

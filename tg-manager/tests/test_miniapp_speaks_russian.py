@@ -16,7 +16,7 @@ import re
 
 import pytest
 
-from tests.miniapp_source import miniapp_source
+from tests.miniapp_source import js_function, miniapp_source
 
 UI = miniapp_source()
 
@@ -82,8 +82,7 @@ def test_percents_use_a_russian_comma_and_a_dash_for_nothing():
     экране оказывалось «null%».
     """
     assert re.search(r"function pctRu\s*\(", UI), "нет хелпера pctRu"
-    body = UI[UI.index("function pctRu"):]
-    body = body[:body.index("\nfunction ")]
+    body = js_function("pctRu")
     assert "'—'" in body, "нет честного прочерка вместо пустого значения"
     assert "replace('.', ',')" in body, "точка не заменяется на запятую"
     for field in ("st.conversion_pct", "p.success_rate", "v.rate"):

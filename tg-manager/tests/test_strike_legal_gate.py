@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -30,8 +30,6 @@ def test_launch_records_signed_legal_basis():
 
 
 def test_frontend_has_legal_confirmation():
-    html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-    i = html.index("async function strikeLaunch")
-    window = html[i:i + 700]
+    window = js_function("strikeLaunch")
     assert "askConfirm" in window
     assert "Правовое подтверждение" in window

@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 
 from bot.utils import tariffs
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, js_function
 
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
 
@@ -112,18 +112,14 @@ def test_miniapp_has_no_hand_written_plan_list():
 
 
 def test_billing_builds_features_from_the_server():
-    src = INDEX.read_text("utf-8")
-    fn = src[src.index("function _planLines("):]
-    fn = fn[:fn.index("\n}", fn.index("\n}") + 2) + 2]
+    fn = js_function("_planLines")
     assert "window._planMatrix" in fn
     assert "f.included" in fn, "платное и бесплатное не различаются"
 
 
 def test_billing_does_not_invent_a_list_when_the_matrix_is_missing():
     """О составе тарифа принимают решение о покупке — выдумывать его нельзя."""
-    src = INDEX.read_text("utf-8")
-    fn = src[src.index("async function openBilling()"):]
-    fn = fn[:fn.index("\n}\n")]
+    fn = js_function("openBilling")
     assert "_planLines(plan)" in fn
     assert re.search(r"if \(!feats\)", fn), (
         "нет ветки на случай, когда состав тарифа не загрузился")

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from tests.miniapp_source import api_source, miniapp_source
+from tests.miniapp_source import api_source, js_function, miniapp_source
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _API = api_source()
@@ -61,8 +61,7 @@ def test_credentials_are_not_selected():
 # ── Интерфейс ─────────────────────────────────────────────────────────────────
 
 def _render() -> str:
-    start = _UI.index("function renderAccounts")
-    return _UI[start:start + 3000]
+    return js_function("renderAccounts")
 
 
 def test_ui_shows_dead_proxy_instead_of_active():
@@ -138,6 +137,5 @@ def test_card_is_hidden_when_nothing_is_wrong():
 
 
 def test_client_side_fallback_is_also_strict():
-    seg = _UI[_UI.index("function updateAccKpi"):]
-    seg = seg[:1800]
+    seg = js_function("updateAccKpi")
     assert "a.proxy_alive === false" in seg

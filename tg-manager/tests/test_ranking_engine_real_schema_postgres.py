@@ -23,7 +23,12 @@ import os
 import pytest
 
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
-pytestmark = pytest.mark.skipif(
+# Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
+# Модульный pytestmark уносил вместе с ними и проверки по исходникам
+# (храповики на транспорт, регистрацию маршрута, проводку экрана): локально
+# они не выполнялись НИ РАЗУ, а в CI любая заминка базы превращала их в
+# «пропущено» на зелёном прогоне.
+requires_pg = pytest.mark.skipif(
     not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -106,7 +111,19 @@ def pool():
 
 
 @pytest.fixture(autouse=True)
-def _clean(pool):
+def _clean(request):
+    # Чистка нужна только проверкам, которые работают с базой. Пока эта
+    # фикстура просила `pool` сама, базу просил КАЖДЫЙ тест модуля: без
+    # INFRAGRAM_TEST_DSN фикстура пула зовёт pytest.skip, и вместе с
+    # DB-проверками молча пропадали проверки по исходникам — регистрация
+    # маршрута, скоуп по владельцу, кнопка в мини-аппе. Локально они не шли
+    # НИ РАЗУ, а в CI любая заминка базы превращала их в «пропущено» на
+    # зелёном прогоне. Пул запрашивается лениво: только если его просит сам
+    # тест.
+    if "pool" not in request.fixturenames:
+        yield
+        return
+    pool = request.getfixturevalue("pool")
     _run(pool.execute("DELETE FROM ranking_alerts"))
     _run(pool.execute("DELETE FROM search_rankings"))
     _run(pool.execute("DELETE FROM tracked_keywords"))
@@ -120,6 +137,7 @@ def _track(pool, kw="боты", region="ru", owner=OWNER, bot=BOT):
 
 # ── добавление ключа ─────────────────────────────────────────────────────────
 
+@requires_pg
 def test_tracking_a_keyword_actually_writes_a_row(pool):
     """Главное: ключ сохраняется. Раньше INSERT падал на несуществующих колонках."""
     res = _track(pool)
@@ -131,6 +149,7 @@ def test_tracking_a_keyword_actually_writes_a_row(pool):
     assert row["region"] == "ru" and row["is_active"] is True
 
 
+@requires_pg
 def test_keyword_shows_up_on_the_screen(pool):
     """Список экрана обязан вернуть добавленный ключ вместе с именем бота."""
     from services import ranking_engine as re_
@@ -141,11 +160,13 @@ def test_keyword_shows_up_on_the_screen(pool):
     assert got[0]["bot_username"] == "my_bot", "экран показывает имя бота"
 
 
+@requires_pg
 def test_someone_elses_bot_cannot_be_tracked(pool):
     res = _track(pool, owner=OTHER)
     assert not res.get("ok") and "не найден" in res.get("error", "").lower(), res
 
 
+@requires_pg
 def test_keyword_without_bot_is_refused_with_a_readable_reason(pool):
     from services import ranking_engine as re_
     res = _run(re_.track_keyword(pool, OWNER, "боты", None))
@@ -154,6 +175,7 @@ def test_keyword_without_bot_is_refused_with_a_readable_reason(pool):
         "отказ обязан объяснять, чего не хватает, а не просто 'ok: false'")
 
 
+@requires_pg
 def test_re_tracking_reactivates_instead_of_failing(pool):
     """Повторное добавление того же ключа — не ошибка, а включение обратно."""
     first = _track(pool)
@@ -166,6 +188,7 @@ def test_re_tracking_reactivates_instead_of_failing(pool):
 
 # ── позиции и тренд ──────────────────────────────────────────────────────────
 
+@requires_pg
 def test_positions_and_trend_reach_the_screen(pool):
     """Экран рисует стрелку по разнице с предыдущим замером."""
     from services import ranking_engine as re_
@@ -179,6 +202,7 @@ def test_positions_and_trend_reach_the_screen(pool):
     assert pos[kid]["last_checked"] is not None
 
 
+@requires_pg
 def test_history_is_scoped_to_the_owner(pool):
     from services import ranking_engine as re_
     kid = _track(pool)["id"]
@@ -188,6 +212,7 @@ def test_history_is_scoped_to_the_owner(pool):
         "история чужого ключа не должна отдаваться")
 
 
+@requires_pg
 def test_recording_for_someone_elses_keyword_is_refused(pool):
     from services import ranking_engine as re_
     kid = _track(pool)["id"]
@@ -198,6 +223,7 @@ def test_recording_for_someone_elses_keyword_is_refused(pool):
 
 # ── оповещения ───────────────────────────────────────────────────────────────
 
+@requires_pg
 def test_significant_move_raises_an_alert_small_one_does_not(pool):
     """Дрожание выдачи не должно засорять экран — иначе его перестают смотреть."""
     from services import ranking_engine as re_
@@ -208,6 +234,7 @@ def test_significant_move_raises_an_alert_small_one_does_not(pool):
     assert _run(re_.record_position(pool, OWNER, kid, 40))["alert"] == "dropped"
 
 
+@requires_pg
 def test_entering_and_leaving_the_results_are_their_own_events(pool):
     from services import ranking_engine as re_
     kid = _track(pool)["id"]
@@ -215,6 +242,7 @@ def test_entering_and_leaving_the_results_are_their_own_events(pool):
     assert _run(re_.record_position(pool, OWNER, kid, None))["alert"] == "lost"
 
 
+@requires_pg
 def test_alerts_carry_type_and_ready_text_for_the_screen(pool):
     from services import ranking_engine as re_
     kid = _track(pool)["id"]
@@ -229,6 +257,7 @@ def test_alerts_carry_type_and_ready_text_for_the_screen(pool):
         f"текст должен называть обе позиции: {a['message']!r}")
 
 
+@requires_pg
 def test_acknowledge_only_touches_your_own_alert(pool):
     from services import ranking_engine as re_
     kid = _track(pool)["id"]
@@ -246,6 +275,7 @@ def test_acknowledge_only_touches_your_own_alert(pool):
 
 # ── сводка в шапке ───────────────────────────────────────────────────────────
 
+@requires_pg
 def test_stats_survive_a_broken_part(pool):
     """Один упавший показатель не должен обнулять всю шапку.
 
