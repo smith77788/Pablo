@@ -140,10 +140,39 @@ _MINOR = re.compile(
     re.I,
 )
 _AGE_NUM = re.compile(r"\b([1-9]|1[0-7])\s*(?:yo|y\.?o\.?|year|лет|год)", re.I)
+# «10 лет на рынке», «гарантия 2 года», «работаем 5 лет» — это срок, а не
+# возраст. Без этого фильтра любой пост магазина белья/косметики с «работаем
+# 10 лет» блокировался как CSAM (ложное срабатывание в массовой публикации).
+_AGE_NOT_AGE_BEFORE = re.compile(
+    r"(?:гарант\w*|опыт\w*|стаж\w*|работа\w*|более|больше|свыше|уже|за|через|"
+    r"около|почти|срок\w*|течение|рынке|warranty|over|for|since)\W{0,3}$",
+    re.I,
+)
+_AGE_NOT_AGE_AFTER = re.compile(
+    r"^\w*\W{0,3}(?:опыт|работ|гарант|назад|на\s+рынке|подряд|стаж|в\s+бизнесе|"
+    r"в\s+профессии|в\s+сфере|в\s+деле|experience|warranty|ago)",
+    re.I,
+)
+
+
+def _age_hits(hay: str) -> list[re.Match]:
+    """Числовые «возрасты», кроме тех, что по контексту — срок/стаж/гарантия."""
+    out: list[re.Match] = []
+    for m in _AGE_NUM.finditer(hay):
+        before = hay[max(0, m.start() - 20):m.start()]
+        after = hay[m.end():m.end() + 25]
+        if _AGE_NOT_AGE_BEFORE.search(before) or _AGE_NOT_AGE_AFTER.search(after):
+            continue
+        out.append(m)
+    return out
+
+
 _SEXUAL = re.compile(
     r"\b(?:sex|sexy|nude|naked|nud[ie]|porn|xxx|erotic|fuck|rape|molest|"
     r"intercourse|genital|undress|stripping|"
-    r"секс|порн|голы|обнаж|интим|эроти|изнасил|совращ|раздет)\w*",
+    r"секс|порн|обнаж|интим|эроти|изнасил|совращ|раздет|"
+    # «голы» без окончания — это футбольные голы, не «голые».
+    r"гол(?:ый|ая|ое|ые|ых|ым|ой|ую|еньк|ыш))\w*",
     re.I,
 )
 
@@ -170,11 +199,16 @@ _WEAPON_MAKE = re.compile(
     r"сделать|изготов|собрать|смастер|инструкц\w*\s+по|как\s+сделать)\b",
     re.I,
 )
+# «Бомба» в рекламе — похвала («скидки — бомба!»), «бомбер» — куртка,
+# «бомбочка» — для ванны. Поэтому по-русски берём только косвенные падежи
+# («сделать бомбу», «для бомбы»), а по-английски отсекаем bath/seed bomb.
 _WEAPON_OBJ = re.compile(
-    r"\b(?:bomb|explosive|ied|detonator|c4|c-4|tatp|semtex|pipe\s?bomb|"
-    r"suicide\s?(?:vest|belt|bomb)|nerve\s?agent|sarin|anthrax|dirty\s?bomb|"
-    r"бомб|взрывчат|взрывн\w*\s+устройст|сву|детонат|пояс\s?шахид|"
-    r"отравляющ\w*\s+вещест|зарин|нервно[\s-]?паралит)\w*",
+    r"\b(?:(?<!bath\s)(?<!seed\s)bombs?\b|explosive\w*|ied\b|detonator\w*|c4\b|c-4\b|"
+    r"tatp\b|semtex\b|pipe\s?bomb\w*|"
+    r"suicide\s?(?:vest|belt|bomb)\w*|nerve\s?agent\w*|sarin\b|anthrax\b|dirty\s?bomb\w*|"
+    r"бомб(?:у|ы|ой|ам|ами|ах)?\b|самодельн\w*\s+(?:бомб|взрыв)\w*|взрывчат\w*|"
+    r"взрывн\w*\s+устройст\w*|сву\b|детонат\w*|пояс\w*\s?шахид\w*|"
+    r"отравляющ\w*\s+вещест\w*|зарин\w*|нервно[\s-]?паралит\w*)",
     re.I,
 )
 # Призывы к массовому насилию / терактам.
@@ -245,7 +279,7 @@ def scan_text(text: str | None) -> SafetyVerdict:
             sexual = list(_SEXUAL.finditer(hay))
             if not sexual:
                 continue
-            minor_hits = list(_MINOR.finditer(hay)) + list(_AGE_NUM.finditer(hay))
+            minor_hits = list(_MINOR.finditer(hay)) + _age_hits(hay)
             for m in minor_hits:
                 for s in sexual:
                     if _near(m, s, window=80):
