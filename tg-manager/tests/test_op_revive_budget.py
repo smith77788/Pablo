@@ -143,3 +143,113 @@ def test_error_retry_budget_stays_separate():
         assert "retry_count" not in body, (
             f"{name}: воскрешение не должно тратить бюджет повторов по ошибке"
         )
+
+
+# ── Одна ядовитая операция не отменяет оживление остальных ───────────────────
+#
+# Закрытие ядовитых операций стоит в обоих сторожах ПЕРЕД общим UPDATE, который
+# возвращает зависшие операции в очередь. Пока этот цикл был без защиты, одно
+# исключение на одной строке отменяло оживление ВСЕХ операций — и так на каждом
+# круге, пока ядовитая строка существует. На старте процесса это означает, что
+# после падения воркера очередь не поднимается вовсе.
+#
+# Исключению было откуда взяться: `_notify_owner_about_op` обещает «никогда не
+# бросает», но снятие отметки анти-повтора (`notify_dedup_forget`) стояло без
+# защиты — и срабатывает оно ровно в беду, когда доставка не удалась, то есть
+# когда с сетью и БД уже плохо.
+
+class _RevivePool:
+    """Пул, который отдаёт две ядовитые строки и запоминает все запросы."""
+
+    def __init__(self):
+        self.queries: list[str] = []
+
+    async def fetch(self, query, *args):
+        self.queries.append(query)
+        if "revive_count" in query and "status = 'failed'" in query:
+            return [
+                {"id": 11, "owner_id": 5, "op_type": "mass_invite", "params": "{}",
+                 "done_items": 3, "total_items": 10},
+                {"id": 12, "owner_id": 5, "op_type": "mass_invite", "params": "{}",
+                 "done_items": 1, "total_items": 10},
+            ]
+        return []
+
+    async def execute(self, query, *args):
+        self.queries.append(query)
+        return "UPDATE 2"
+
+    async def fetchrow(self, query, *args):
+        self.queries.append(query)
+        return None
+
+    async def fetchval(self, query, *args):
+        self.queries.append(query)
+        return None
+
+    def revived(self) -> bool:
+        return any("SET status = 'pending'" in q and "revive_count" in q
+                   for q in self.queries)
+
+
+def test_a_poisoned_op_that_fails_to_close_does_not_block_the_revival():
+    """Сбой закрытия одной ядовитой операции не отменяет круг оживления."""
+    import asyncio
+
+    from services import op_worker
+
+    closed: list[int] = []
+
+    async def _boom(pool, row, *, source, bot=None):
+        closed.append(int(dict(row)["id"]))
+        if int(dict(row)["id"]) == 11:
+            raise RuntimeError("БД недоступна")
+
+    orig = op_worker._finish_poisoned_op
+    op_worker._finish_poisoned_op = _boom
+    pool = _RevivePool()
+    try:
+        asyncio.run(op_worker._reset_stale_running(pool, None))
+    finally:
+        op_worker._finish_poisoned_op = orig
+
+    assert closed == [11, 12], (
+        f"сбой на первой ядовитой операции забрал вторую: закрыты {closed}")
+    assert pool.revived(), (
+        "сбой закрытия ядовитой операции отменил возврат зависших операций в "
+        "очередь — после падения воркера очередь не поднимется вовсе")
+
+
+def test_the_owner_notice_never_raises_even_when_the_dedup_write_fails():
+    """`_notify_owner_about_op` обещает «никогда не бросает» — до конца.
+
+    Снятие отметки анти-повтора делается, когда доставка НЕ удалась; падение
+    этой записи уходило вызывающему, а у него на этот случай защиты не было.
+    """
+    import asyncio
+
+    from database import db as _db
+    from services import op_worker
+
+    class _Bot:
+        async def send_message(self, *a, **k):
+            raise RuntimeError("Telegram недоступен")
+
+    async def _ok(*a, **k):
+        return True
+
+    async def _undelivered(*a, **k):
+        return False
+
+    async def _forget_boom(*a, **k):
+        raise RuntimeError("БД недоступна")
+
+    saved = (_db.notify_dedup_ok, _db.notify_if_enabled, _db.notify_dedup_forget)
+    _db.notify_dedup_ok, _db.notify_if_enabled = _ok, _undelivered
+    _db.notify_dedup_forget = _forget_boom
+    try:
+        asyncio.run(op_worker._notify_owner_about_op(
+            None, _Bot(), 5, "текст", dedup_key="poisoned:11"))
+    finally:
+        (_db.notify_dedup_ok, _db.notify_if_enabled,
+         _db.notify_dedup_forget) = saved

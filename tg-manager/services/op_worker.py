@@ -826,7 +826,18 @@ async def _notify_owner_about_op(
     # бессмысленно (заблокированный бот), сюда не попадает: notify_if_enabled
     # отвечает на него True.
     if dedup_key and _delivered is False:
-        await db.notify_dedup_forget(pool, owner_id, f"op:{dedup_key}")
+        try:
+            await db.notify_dedup_forget(pool, owner_id, f"op:{dedup_key}")
+        except Exception:
+            # Единственный незащищённый await в функции, которая обещает
+            # «никогда не бросает», — и срабатывал он ровно в беду: снимать
+            # отметку приходится, когда доставка НЕ удалась, то есть когда с
+            # сетью и БД уже плохо. Исключение отсюда уходило вызывающему, а
+            # там оно дороже всего: закрытие операции по бюджету живучести
+            # стоит в цикле ПЕРЕД общим возвратом зависших в очередь, и одно
+            # такое исключение отменяло оживление ВСЕХ операций на круге.
+            log_exc_swallow(
+                log, f"op_worker: отметка анти-повтора {dedup_key} не снята")
 
 
 
@@ -2974,7 +2985,14 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         )
         _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="startup")
         for _poisoned in poisoned_rows:
-            await _finish_poisoned_op(pool, _poisoned, source="startup", bot=bot)
+            # В своей защите: этот цикл стоит ПЕРЕД общим возвратом зависших
+            # операций в очередь, и исключение на одной строке отменяло
+            # оживление ВСЕХ остальных — на старте процесса это значит, что
+            # после падения воркера очередь не поднимается вовсе.
+            await _maintenance_step(
+                f"finish_poisoned_op:{(_poisoned or {}).get('id')}",
+                lambda r=_poisoned: _finish_poisoned_op(
+                    pool, r, source="startup", bot=bot))
     result = await _safe_execute(
             pool,
         # done_items=0: операцию подхватит воркер заново и исполнитель прогонит её
@@ -3085,7 +3103,13 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
             )
             _reliability_metric("infragram_op_poisoned_total", poisoned_n, source="watchdog")
             for _poisoned in poisoned_rows:
-                await _finish_poisoned_op(pool, _poisoned, source="watchdog", bot=bot)
+                # В своей защите — по той же причине, что на старте: ниже
+                # стоит общий возврат зависших операций в очередь, и одно
+                # исключение здесь отменяло его на каждом круге.
+                await _maintenance_step(
+                    f"finish_poisoned_op:{(_poisoned or {}).get('id')}",
+                    lambda r=_poisoned: _finish_poisoned_op(
+                        pool, r, source="watchdog", bot=bot))
 
         result = await pool.execute(
             # done_items=0 при пере-подхвате зависшей op — исполнитель прогоняет с

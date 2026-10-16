@@ -201,7 +201,6 @@ def test_busy_fleet_requeues_instead_of_failing():
 def test_claim_passes_owner_id_at_call_sites():
     src = open("services/op_worker.py", encoding="utf-8").read()
     # все исполнительные вызовы claim передают owner_id (честный дележ)
-    import re
     calls = re.findall(r"_claim_available_accounts\(op_id, [a-z_]+(, owner_id)?\)", src)
     # каждый вызов (кроме определения) должен содержать owner_id
     assert src.count("_claim_available_accounts(op_id,") >= 5
