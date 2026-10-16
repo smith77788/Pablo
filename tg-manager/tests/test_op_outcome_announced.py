@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import ast
 import os
 import re
 
@@ -176,23 +177,75 @@ def test_a_close_that_changed_nothing_does_not_report_a_second_outcome():
     успешный путь её не потерял. Проверяется порядок: результат записи
     сохранён, проверен на ноль строк и путь прерван ДО доклада об исходе.
 
-    Пишется финал ДВЕРЬЮ С ПОВТОРОМ (`_retrying_execute`): это решение о
-    судьбе операции, и блип БД на нём оставлял строку 'running' при уже
+    Разбор исходов записи живёт в общей двери `_op_closed_by_us` (она же
+    делает повтор: блип БД на финале оставлял строку 'running' при уже
     разосланном «✅ выполнена» — см.
-    tests/test_the_unsaved_outcome_is_not_reported_postgres.py.
+    tests/test_the_unsaved_outcome_is_not_reported_postgres.py). Здесь
+    проверяется ПОРЯДОК на успешном пути: закрыли, спросили дверь, и только
+    потом доклад.
     """
     body = _run_op_task_source()
-    assert "_close_res = await _retrying_execute(" in body, (
-        "результат закрывающей записи снова не сохраняется или пишется без "
-        "повтора: ноль строк (строку закрыл кто-то другой) опять неотличим от "
-        "успешной записи, а блип БД — от сохранённого исхода")
+    assert "_closed = await _op_closed_by_us(" in body, (
+        "финал пишется мимо общей двери: ноль строк (строку закрыл кто-то "
+        "другой) опять неотличим от успешной записи, а блип БД — от "
+        "сохранённого исхода")
     flat = body.replace(" ", "")
-    guard = flat.find('ifstr(_close_res or"").strip().endswith("0")'.replace(" ", ""))
-    assert guard > 0, "нет проверки «запись не изменила ни одной строки»"
-    close = flat.find("_close_res=await_retrying_execute(")
+    guard = flat.find("ifnot_closed:")
+    assert guard > 0, "нет проверки «дверь не подтвердила закрытие»"
+    close = flat.find("_closed=await_op_closed_by_us(")
     report = flat.find("await_announce_op_outcome(", close)
     assert close < guard < report, (
-        "проверка нулевой записи стоит не между закрытием и докладом об "
+        "проверка закрытия стоит не между записью финала и докладом об "
         f"исходе: {close} / {guard} / {report}")
     assert "return" in flat[guard:report], (
-        "после нулевой записи путь не прерывается — исход доложат вторым")
+        "после неподтверждённого закрытия путь не прерывается — исход доложат "
+        "вторым")
+
+
+def test_every_terminal_write_goes_through_the_one_door():
+    """Храповик: терминальный статус операции пишется ТОЛЬКО общей дверью.
+
+    Путей завершения пять (успех, падение, сбой пролога, отмена, не дождались
+    флота), и у записи финала три исхода. Пока каждый путь разбирал их сам,
+    четыре из пяти знали ровно один исход — «ноль строк», — а на
+    незаписанной записи шли докладывать владельцу об успехе, которого в БД
+    нет. Новый путь завершения, написанный по образцу соседнего, повторил бы
+    это снова, поэтому дверь одна: `_op_closed_by_us`.
+
+    Терминальной считаем запись, которая ставит `finished_at` в
+    `operation_queue`: возвраты в очередь и отложенные повторы его не трогают.
+    """
+    src = _read("services/op_worker.py")
+    tree = ast.parse(src)
+    offenders = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ("_safe_execute", "_retrying_execute")):
+            continue
+        if len(node.args) < 2:
+            continue
+        sql = ast.get_source_segment(src, node.args[1]) or ""
+        flat = re.sub(r"\s+", " ", sql)
+        if "operation_queue" in flat and "finished_at" in flat:
+            offenders.append((node.lineno, flat[:80]))
+    assert not offenders, (
+        "терминальный статус операции пишется мимо `_op_closed_by_us` — этот "
+        "путь не отличит «закрыл кто-то другой» и «запись не прошла» от "
+        f"успешной записи: {offenders}")
+
+
+def test_the_one_door_detector_bites():
+    """Самопроверка храповика: на заведомо больном тексте он обязан найти."""
+    sick = ('await _safe_execute(pool, "UPDATE operation_queue SET status=$1, '
+            'finished_at=now() WHERE id=$2", s, i)')
+    tree = ast.parse(sick)
+    found = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ("_safe_execute", "_retrying_execute")
+                and len(node.args) >= 2):
+            sql = ast.get_source_segment(sick, node.args[1]) or ""
+            flat = re.sub(r"\s+", " ", sql)
+            if "operation_queue" in flat and "finished_at" in flat:
+                found.append(node.lineno)
+    assert found, "детектор не видит запись финала мимо двери — он сломан"

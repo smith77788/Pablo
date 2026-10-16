@@ -83,7 +83,9 @@ class _FlakyPool:
         self.attempts = 0
 
     def _is_close(self, query: str) -> bool:
-        return "finished_at=now()" in query and "operation_queue" in query
+        # Терминальная запись — та, что ставит finished_at: возвраты в очередь
+        # и отложенные повторы его не трогают.
+        return "operation_queue" in query and "finished_at" in query
 
     async def execute(self, query, *args, **kw):
         if self._is_close(query):
@@ -174,3 +176,49 @@ def test_an_unsaved_outcome_is_not_announced_as_done(pool, monkeypatch):
     assert ("infragram_op_close_write_failures_total", 1.0) in metrics_seen, (
         "незаписанный финал не оставил следа, по которому человека "
         f"предупредит сторож защитных записей: {metrics_seen}")
+
+
+def test_a_cancellation_that_was_not_saved_is_not_announced(pool, monkeypatch):
+    """Та же честность на пути отмены — он результат записи не смотрел вовсе.
+
+    Отмена закрывалась одним UPDATE без проверки: и «строку закрыл кто-то
+    другой», и «запись не прошла» уходили владельцу как состоявшаяся отмена с
+    цифрами. А операция оставалась 'running', её поднимал сторож зависших — и
+    она продолжала работу, про которую владельцу уже сказали «остановлено».
+    """
+    from services import op_worker
+
+    announced, metrics_seen = _stand(monkeypatch, {})
+    op_id = _seed(pool)
+    flaky = _FlakyPool(pool, fail_times=99)
+
+    _run(op_worker._finish_cancelled_op(
+        flaky, op_id, OWNER, "contacts_sync", {}, {"ok": 2, "failed": 0}, 1.0))
+
+    assert flaky.attempts >= 2, (
+        f"запись отмены не повторили: попыток {flaky.attempts}")
+    assert not announced, (
+        "владельцу доложили об отмене, которой в БД нет: операция осталась "
+        "«работает» и продолжит работу после сторожа зависших")
+    assert _run(pool.fetchval(
+        "SELECT status FROM operation_queue WHERE id=$1", op_id)) == "running"
+    assert ("infragram_op_close_write_failures_total", 1.0) in metrics_seen, (
+        f"незаписанная отмена не оставила следа: {metrics_seen}")
+
+
+def test_a_cancellation_survives_a_blip(pool, monkeypatch):
+    """Один сбой записи — отмена всё равно сохранена и доложена один раз."""
+    from services import op_worker
+
+    announced, _metrics = _stand(monkeypatch, {})
+    op_id = _seed(pool)
+    flaky = _FlakyPool(pool, fail_times=1)
+
+    _run(op_worker._finish_cancelled_op(
+        flaky, op_id, OWNER, "contacts_sync", {}, {"ok": 2, "failed": 0}, 1.0))
+
+    assert _run(pool.fetchval(
+        "SELECT status FROM operation_queue WHERE id=$1", op_id)) == "cancelled", (
+        "блип БД потерял отмену: владелец нажал «Остановить», а операция "
+        "осталась в работе")
+    assert len(announced) == 1, f"отчёт об отмене ушёл {len(announced)} раз(а)"

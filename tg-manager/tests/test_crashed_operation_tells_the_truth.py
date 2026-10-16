@@ -189,7 +189,19 @@ def test_the_terminal_guard_survived():
 
 def test_the_zero_rows_probe_still_recognises_a_cancellation():
     """Ноль обновлённых строк = операция уже терминальна (почти всегда отмена):
-    про неё не докладываем как об ошибке. Проба обязана остаться ПОСЛЕ записи."""
+    про неё не докладываем как об ошибке. Проба обязана остаться ПОСЛЕ записи.
+
+    Сам разбор исходов записи переехал в общую дверь `_op_closed_by_us` (она
+    же отличает «ноль строк» от «запись не прошла» и делает повтор), поэтому
+    путь падения спрашивает дверь, а не строку ответа БД. Храповик на
+    единственность двери — в tests/test_op_outcome_announced.py.
+    """
     branch = _crash_branch()
-    assert 'endswith(" 0")' in branch
-    assert branch.index("UPDATE operation_queue SET status=$3") < branch.index('endswith(" 0")')
+    assert "_fail_closed = await _op_closed_by_us(" in branch, (
+        "путь падения пишет финал мимо общей двери — тогда отмена владельца "
+        "опять станет неотличима от успешной записи")
+    assert "if not _fail_closed:" in branch, (
+        "ответ двери не проверяется — об исходе, которого в БД нет, доложат")
+    assert (branch.index("_fail_closed = await _op_closed_by_us(")
+            < branch.index("if not _fail_closed:")), (
+        "проверка стоит раньше записи — она ничего не значит")

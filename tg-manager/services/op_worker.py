@@ -220,6 +220,61 @@ async def _retrying_execute(
     return "ERROR"
 
 
+async def _op_closed_by_us(
+    pool: asyncpg.Pool, op_id: int, query: str, *args, log_ctx: str = "",
+    final_status: str = "",
+) -> bool:
+    """Записать ТЕРМИНАЛЬНЫЙ статус операции. True — закрыли мы, докладывать можно.
+
+    ОДНА ДВЕРЬ НА ВСЕ ПУТИ ЗАВЕРШЕНИЯ. Таких путей пять (успех, падение, сбой
+    пролога, отмена, не дождались флота), и у записи финала три исхода, из
+    которых каждый путь разбирал РОВНО ОДИН — «ноль строк»:
+
+      * записали — дальше доклад владельцу, метрика, подписанный аудит;
+      * ноль строк — строку уже закрыл кто-то другой (сторож зависших, dead
+        letter, отмена владельцем в зазоре). Статус не переписываем и об
+        исходе не докладываем: иначе владелец получает «❌ ошибка» на то, что
+        сам минуту назад остановил, а на графике одна операция даёт два
+        разных исхода;
+      * "ERROR" — запись не прошла даже с повтором. Это НЕ ноль строк, под
+        проверку не попадало, и путь шёл докладывать: владелец получал
+        «✅ выполнена» по операции, которая в его списке осталась «работает»,
+        потом её поднимал сторож зависших и присылал тот же отчёт второй раз.
+        Теперь молчим: в БД операция честно 'running', повтор пропустит
+        сделанное по журналу целей и закроется сам, а о самом сбое человека
+        предупредит сторож защитных записей по счётчику
+        infragram_op_close_write_failures_total.
+
+    Сама запись идёт с одним повтором: финал — самое дорогое решение о судьбе
+    операции, и терять его из-за блипа БД нельзя.
+    """
+    res = await _retrying_execute(
+        pool, query, *args, log_ctx=log_ctx, where="op_close",
+        metric="infragram_op_close_write_failures_total",
+        lost="исход операции не сохранён",
+    )
+    flat = str(res or "").strip()
+    if flat == "ERROR":
+        log.error(
+            "op_worker: op=%d отработала со статусом %s, но финал не записался "
+            "— доклад и аудит пропускаем, операцию поднимет сторож зависших",
+            op_id, final_status or "?",
+        )
+        return False
+    if flat.endswith(" 0"):
+        stored = await _safe_fetchrow(
+            pool, "SELECT status FROM operation_queue WHERE id=$1", op_id,
+            log_ctx=f"[op_closed_stored op={op_id}]")
+        log.info(
+            "op_worker: op=%d уже закрыта со статусом %s, исполнитель пришёл с "
+            "%s — финал не переписываем и не докладываем",
+            op_id, (stored["status"] if stored else "строки нет"),
+            final_status or "?",
+        )
+        return False
+    return True
+
+
 async def _journal_fetch(
     pool: asyncpg.Pool, query: str, *args, log_ctx: str = "", where: str = "",
 ) -> list[asyncpg.Record]:
@@ -1265,14 +1320,19 @@ async def _finish_cancelled_op(
     """
     result = _normalize_result(result, op_type, duration_s)
     result["status"] = op_status.CANCELLED
-    await _safe_execute(
-        pool,
+    # Результат записи раньше не смотрели вовсе: и «строку закрыл кто-то
+    # другой», и «запись не прошла» уходили владельцу как состоявшаяся отмена.
+    if not await _op_closed_by_us(
+        pool, op_id,
         "UPDATE operation_queue SET status='cancelled', "
         "finished_at=COALESCE(finished_at, now()), result=$1::jsonb, "
         "acct_wait_since=NULL WHERE id=$2 AND (status='cancelled' OR status NOT IN "
         f"{op_status.sql_terminal_list()})",
         json.dumps(result, ensure_ascii=False), op_id,
-        log_ctx=f"[run_op_cancelled op={op_id}]")
+        log_ctx=f"[run_op_cancelled op={op_id}]",
+        final_status=op_status.CANCELLED,
+    ):
+        return
     log.info("op_worker: op_id=%d op_type=%s → cancelled in %.1fs (ok=%s failed=%s)",
              op_id, op_type, duration_s, result.get("ok"), result.get("failed"))
     await _announce_op_outcome(
@@ -1349,20 +1409,19 @@ async def _finish_fleet_starved_op(
         {"status": status, "ok": ok_n, "failed": failed_n,
          "reason": reason, "summary": summary},
         op_type, 0.0)
-    res = await _safe_execute(
-        pool,
+    # Ноль строк = операция уже терминальна, и почти всегда это отмена
+    # владельцем, пока она стояла в очереди. Отмену не переписываем и о провале
+    # не докладываем: иначе владелец получает «❌» на то, что сам остановил.
+    # Разбор исходов записи — в общей двери.
+    if not await _op_closed_by_us(
+        pool, op_id,
         "UPDATE operation_queue SET status=$3, finished_at=now(), error_msg=$2, "
         "result=$4::jsonb, acct_wait_since=NULL WHERE id=$1"
         f" AND status NOT IN {op_status.sql_terminal_list()}",
         op_id, reason, status, json.dumps(result, ensure_ascii=False),
-        log_ctx=f"[fleet_starved_fail op={op_id}]")
-    # Ноль строк = операция уже терминальна, и почти всегда это отмена
-    # владельцем, пока она стояла в очереди. Отмену не переписываем и о провале
-    # не докладываем: иначе владелец получает «❌» на то, что сам остановил.
-    if str(res or "").strip().endswith(" 0"):
-        log.info(
-            "op_worker: op=%d уже в терминальном статусе — провал по занятому "
-            "флоту не записываем", op_id)
+        log_ctx=f"[fleet_starved_fail op={op_id}]",
+        final_status=status,
+    ):
         return
     log.warning(
         "op_worker: op=%d op_type=%s → %s: флот был занят %d мин (ok=%d failed=%d)",
@@ -4718,8 +4777,8 @@ async def _run_op_task_guarded(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     f"⚠️ Успело {_pro_ok}, затем операция не смогла запуститься"
                     if _pro_ok else f"❌ {_pro_reason}"
                 )
-                _pro_res = await _safe_execute(
-                    pool,
+                _pro_closed = await _op_closed_by_us(
+                    pool, op_id,
                     "UPDATE operation_queue SET status=$3, finished_at=now(), "
                     "started_at=NULL, error_msg=COALESCE(error_msg, $1), "
                     "result=$4::jsonb, acct_wait_since=NULL "
@@ -4733,10 +4792,12 @@ async def _run_op_task_guarded(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                             _pro_op_type, 0.0),
                         ensure_ascii=False),
                     log_ctx=f"[run_op_prologue_fail op={op_id}]",
+                    final_status=_pro_status,
                 )
                 # Ноль строк — операция уже терминальна (почти всегда отмена
-                # владельцем). Об исходе, которого не было, не докладываем.
-                if not str(_pro_res or "").strip().endswith(" 0"):
+                # владельцем). Об исходе, которого не было, не докладываем;
+                # то же и при незаписанном финале (разбор — в общей двери).
+                if _pro_closed:
                     await _announce_op_outcome(
                         pool, op_id, row.get("owner_id"), _pro_op_type,
                         _pro_params, _pro_status, _pro_ok, _pro_failed,
@@ -5132,8 +5193,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # строка оставалась 'running', а код ниже рапортовал владельцу
             # «выполнена» — и через сторож зависших та же операция поднималась
             # заново, давая второй отчёт о той же работе.
-            _close_res = await _retrying_execute(
-                pool,
+            _closed = await _op_closed_by_us(
+                pool, op_id,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb, "
                 # Исполнитель отработал — накопленное ожидание флота больше не
                 # относится к делу. Без сброса повтор этой же операции по другой
@@ -5153,53 +5214,16 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 _err_text,
                 _done_n,
                 log_ctx=f"[run_op_done op={op_id}]",
-                where="op_close",
-                metric="infragram_op_close_write_failures_total",
-                lost="исход операции не сохранён",
+                final_status=_final_status,
             )
-            # Финал не записался даже с повтором. Молчим — и это честнее
-            # доклада: в БД операция осталась 'running', её поднимет сторож
-            # зависших, повтор пропустит сделанное по журналу целей и закроется
-            # сам. Доложив сейчас, мы дали бы владельцу «✅ выполнена» по
-            # операции, которая в его списке продолжает крутиться, а потом
-            # второй отчёт о той же работе. О самом сбое человек узнаёт:
-            # счётчик ниже разбирает _watchdog_protective_failures.
-            if str(_close_res or "").strip() == "ERROR":
-                log.error(
-                    "op_worker: op=%d отработала со статусом %s, но финал не "
-                    "записался — доклад и аудит пропускаем, операцию поднимет "
-                    "сторож зависших", op_id, _final_status,
-                )
-                return
-            # Ноль строк = строку уже закрыл кто-то другой, пока исполнитель
-            # работал: сторож зависших операций, dead letter из recovery_engine
-            # или отмена владельцем в зазоре между проверкой выше и этой
-            # записью. Статус при этом НЕ переписывается (на то и условие в
-            # WHERE), а дальше шло всё остальное завершение — и каждый шаг врал:
-            #
-            #   * владельцу уходило «✅ выполнена» по операции, которую продукт
-            #     минуту назад закрыл как частичную или отменённую;
-            #   * расписание повторяющейся операции продлевалось, хотя guard
-            #     ниже написан ровно против этого (он смотрел на вычисленный
-            #     статус, а не на сохранённый);
-            #   * исход уходил в метрики и подписанный аудит ВТОРОЙ раз: тот,
-            #     кто закрыл строку, уже отчитался своим статусом, и на графике
-            #     одна операция давала два разных исхода.
-            #
-            # Путь падения эту развилку разбирает давно, успешный — не разбирал.
-            # Поступаем так же: ничего не дописываем и не докладываем. Работа,
-            # которую исполнитель успел сделать после закрытия, не теряется —
-            # она в журнале целей, и размер повтора считается по нему.
-            if str(_close_res or "").strip().endswith(" 0"):
-                _stored_row = await _safe_fetchrow(
-                    pool,
-                    "SELECT status FROM operation_queue WHERE id=$1",
-                    op_id, log_ctx=f"[run_op_done_stored op={op_id}]")
-                log.info(
-                    "op_worker: op=%d уже закрыта со статусом %s, исполнитель "
-                    "пришёл с %s — финал не переписываем и не докладываем",
-                    op_id, (_stored_row["status"] if _stored_row else "строки нет"),
-                    _final_status)
+            # Дверь выше разобрала все три исхода записи (см. её docstring):
+            # ноль строк — строку закрыл кто-то другой, "ERROR" — финал не
+            # записался. В обоих случаях дальше идти нельзя: доклад, метрика,
+            # подписанный аудит и продление расписания работали бы по статусу,
+            # которого в БД нет, и владелец получал бы второй отчёт о той же
+            # работе. Работа не теряется — она в журнале целей, и размер
+            # повтора считается по нему.
+            if not _closed:
                 return
             # Графики, память организма и подписанный аудит — одной дверью:
             # см. _announce_op_outcome (блок был скопирован на каждый путь
@@ -5445,8 +5469,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                      "summary": (f"Операция оборвалась: {str(e)[:120]}"
                                  + (f" · успело: {_crash_ok}" if _crash_ok else ""))},
                     op_type, round(time.monotonic() - _t_start, 1))
-                _fail_res = await _safe_execute(
-                    pool,
+                _fail_closed = await _op_closed_by_us(
+                    pool, op_id,
                     "UPDATE operation_queue SET status=$3, finished_at=now(), error_msg=$1, "
                     "result=$4::jsonb, acct_wait_since=NULL "
                     f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
@@ -5455,18 +5479,16 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     _crash_status,
                     json.dumps(_crash_result, ensure_ascii=False),
                     log_ctx=f"[run_op_failed op={op_id}]",
+                    final_status=_crash_status,
                 )
                 # Ноль строк = операция уже в терминальном статусе, и почти
                 # всегда это ОТМЕНА владельцем: он нажал «Отменить», исполнитель
                 # в этот момент оборвался, и мы пришли сюда с исключением.
                 # Отмену не переписываем и не докладываем о ней как об ошибке —
                 # иначе владелец получает «❌ завершилась с ошибкой» на то, что
-                # сам только что остановил.
-                if str(_fail_res or "").strip().endswith(" 0"):
-                    log.info(
-                        "op_worker: op=%d уже в терминальном статусе (вероятно отмена) "
-                        "— провал не записываем", op_id,
-                    )
+                # сам только что остановил. Незаписанный финал — такой же стоп,
+                # и разбирает оба случая общая дверь.
+                if not _fail_closed:
                     return
                 # Метрика и подпись — как на успешном пути. Без них самая
                 # важная категория исхода (операция упала) не попадала ни на
