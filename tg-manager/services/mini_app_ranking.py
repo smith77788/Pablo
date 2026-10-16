@@ -20,9 +20,31 @@ def setup_routes(app: web.Application, pool) -> None:
     # Общие помощники живут в mini_app_api, а он импортирует этот модуль —
     # импорт сверху дал бы цикл. К моменту вызова mini_app_api уже загружен.
     from services.mini_app_api import (
-        _err, _get_uid, _json_resp, _list_limit, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, log,
     )
     from services.security import validate_integer
+
+    async def reopt_setting(request: web.Request) -> web.Response:
+        """Тумблер авто-переоптимизации ботов при падении позиции (opt-in).
+        body: {enabled: bool}. Хранится в visibility_alert_settings.auto_reoptimize."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        enabled = bool(body.get("enabled"))
+        try:
+            await pool.execute(
+                """INSERT INTO visibility_alert_settings(owner_id, auto_reoptimize, alerts_enabled)
+                   VALUES($1,$2,TRUE)
+                   ON CONFLICT(owner_id) DO UPDATE SET auto_reoptimize=$2""",
+                uid, enabled)
+        except Exception:
+            log.exception("reopt_setting uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"ok": True, "enabled": enabled})
 
     async def ranking_track(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -198,3 +220,4 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/ranking/keywords", ranking_track)
     app.router.add_get("/api/miniapp/ranking/alerts", ranking_alerts)
     app.router.add_get("/api/miniapp/ranking/stats", ranking_stats)
+    app.router.add_post("/api/miniapp/ranking/reopt_setting", reopt_setting)

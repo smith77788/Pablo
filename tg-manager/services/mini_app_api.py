@@ -3408,27 +3408,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-    async def reopt_setting(request: web.Request) -> web.Response:
-        """Тумблер авто-переоптимизации ботов при падении позиции (opt-in).
-        body: {enabled: bool}. Хранится в visibility_alert_settings.auto_reoptimize."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        enabled = bool(body.get("enabled"))
-        try:
-            await pool.execute(
-                """INSERT INTO visibility_alert_settings(owner_id, auto_reoptimize, alerts_enabled)
-                   VALUES($1,$2,TRUE)
-                   ON CONFLICT(owner_id) DO UPDATE SET auto_reoptimize=$2""",
-                uid, enabled)
-        except Exception:
-            log.exception("reopt_setting uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-        return _json_resp({"ok": True, "enabled": enabled})
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
 
@@ -4275,6 +4254,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("mass_report_submit uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    # Эти четыре ручки ОСТАЮТСЯ в монолите, хотя их блоки уже вынесены
+    # (mini_app_channels, mini_app_bots, mini_app_accounts). Они — тонкие
+    # обёртки над ОБЩИМИ замыканиями `_bulk_edit_op` и `_import_all_op`:
+    # одно ядро на каналы, ботов и профили аккаунтов, одно — на каналы и
+    # группы. Увезти обёртку значит либо увезти ядро (а его зовут ручки из
+    # трёх разных блоков), либо развести ядро по копиям — то есть завести
+    # второй источник правды там, где массовая правка и так самая дорогая
+    # ошибка. Поэтому они здесь намеренно, а не «недовынесены».
     async def channels_bulk_edit(request: web.Request) -> web.Response:
         return await _bulk_edit_op(request, "channels")
 
@@ -8057,7 +8044,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # SEO
     app.router.add_get("/api/miniapp/ai/status", ai_status)
     app.router.add_post("/api/miniapp/ai/test", ai_test)
-    app.router.add_post("/api/miniapp/ranking/reopt_setting", reopt_setting)
     # Bot Factory
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
