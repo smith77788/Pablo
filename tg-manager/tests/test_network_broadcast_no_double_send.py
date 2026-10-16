@@ -32,13 +32,27 @@ from database import db as _db
 
 
 class _FakePool:
-    def __init__(self, op_status="running"):
+    """Заглушка пула. Рассылки отдаёт ЗАВЕРШЁННЫМИ.
+
+    Операция сопровождает залп до конца (`_await_network_broadcasts`), поэтому
+    без строк рассылок исполнитель честно ждал бы и закрылся провалом. Этот
+    файл проверяет не исход, а дедуп запуска и сегменты, так что доставка здесь
+    объявляется состоявшейся; сам исход залпа проверяется на живой базе в
+    tests/test_a_launched_broadcast_is_not_an_outcome_postgres.py.
+    """
+
+    def __init__(self, op_status="running", bc_status="done"):
         self.op_status = op_status
+        self.bc_status = bc_status
         self.executed: list[tuple[str, tuple]] = []
 
     async def fetch(self, query, *args):
         if "FROM bot_users" in query:
             return [{"user_id": 100}, {"user_id": 101}]
+        if "FROM broadcasts" in query:
+            ids = list(args[0]) if args else []
+            return [{"id": int(i), "status": self.bc_status,
+                     "sent_count": 2, "failed_count": 0} for i in ids]
         return []
 
     async def fetchrow(self, query, *args):
@@ -147,6 +161,9 @@ def test_repeat_run_skips_already_launched_bots(_stubs):
     # Пропущенный бот всё равно считается запущенным: прогресс и итог не должны
     # проседать только потому, что работа сделана прошлым прогоном.
     assert res["bots_started"] == 2
+    # Сопровождение видит ОБЕ рассылки — и заведённую сейчас, и доставшуюся от
+    # прошлого прогона: иначе итог операции считался бы по половине залпа.
+    assert res["sent"] == 4, res
 
 
 def test_cancel_reaches_broadcasts_from_previous_run(_stubs):

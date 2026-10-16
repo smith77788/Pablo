@@ -10785,6 +10785,166 @@ async def _stop_broadcasts(pool: asyncpg.Pool, broadcast_ids) -> None:
     )
 
 
+async def _await_network_broadcasts(
+    pool: asyncpg.Pool, op_id: int, broadcast_ids: list, total_users: int,
+) -> dict:
+    """Сопроводить рассылки сетевого залпа до конца, отражая их ход в операции.
+
+    Одиночная рассылка так и делает, и в докстринге `_await_broadcast`
+    написано, почему это важно. Сетевая — не делала: исполнитель заводил задачи
+    по всем ботам, писал `done_items = total_items = число запущенных ботов` и
+    возвращал `done`. Операция закрывалась словами «📢 Сетевая рассылка
+    запущена, получателей: 40 000» в ту же секунду, когда не ушло ещё ни одного
+    сообщения: бот с номером N в этот момент даже не вышел из разбега
+    (`order * 2s`). Те же три следствия, и все три видит владелец:
+
+      * счётчик врал — «100%» означало «задачи созданы», а не «доставлено», и
+        `_progress_monitor` рассылал по нему бодрые отчёты;
+      * остановить сетевую рассылку было нельзя вовсе: отмена операции
+        доставала рассылки только пока шёл цикл запуска (секунды), а дальше
+        операция уже терминальна, и сообщения уходили до конца — при том что
+        именно сетевая рассылка бьёт по ВСЕЙ аудитории сети ботов;
+      * оборвавшийся залп числился успешным: операция в `done`, поэтому ни
+        сторож зависших, ни повтор её не касались, и половина аудитории молча
+        оставалась без сообщения.
+
+    Теперь операция живёт столько, сколько идёт залп: `done_items` — реально
+    обработанные получатели по всем ботам, отмена останавливает отправку (и в
+    процессе, и в базе), а итог операции — настоящий итог залпа. Аккаунтов
+    флота эта операция не держит (работа идёт через токены ботов), поэтому её
+    длительность никому не стоит ресурса.
+    """
+    from services import broadcaster
+
+    ids = [int(x) for x in (broadcast_ids or [])]
+    total = max(0, int(total_users))
+    orphan_polls = 0
+    empty_polls = 0
+    restarted = False
+    sent = failed = 0
+
+    while True:
+        rows = await _safe_fetch(
+            pool,
+            "SELECT id, status, sent_count, failed_count FROM broadcasts "
+            "WHERE id = ANY($1::bigint[])",
+            ids, log_ctx=f"[await_network op={op_id}]",
+        )
+        if rows:
+            empty_polls = 0
+            sent = sum(int(r["sent_count"] or 0) for r in rows)
+            failed = sum(int(r["failed_count"] or 0) for r in rows)
+            done_items = min(sent + failed, total) if total else sent + failed
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                done_items, op_id, log_ctx=f"[await_network_progress op={op_id}]",
+            )
+        else:
+            # Пустой ответ — это либо сбой БД (_safe_fetch глотает и отдаёт []),
+            # либо рассылок действительно нет. Отличить нельзя, поэтому ждём
+            # несколько кругов: блип БД не повод закрыть идущий залп.
+            empty_polls += 1
+            if empty_polls >= _BROADCAST_ORPHAN_POLLS:
+                return {
+                    "status": "failed",
+                    "ok": sent, "sent": sent, "failed": failed, "total": total,
+                    "summary": "⚠️ Записи рассылок не найдены — сопровождение прервано",
+                }
+
+        if await _is_cancelled(pool, op_id):
+            await _stop_broadcasts(pool, ids)
+            return {
+                "status": "cancelled",
+                "ok": sent, "sent": sent, "failed": failed, "total": total,
+                "summary": f"🛑 Сетевая рассылка остановлена: отправлено {sent} из {total}",
+            }
+
+        live = [r for r in rows if str(r["status"] or "") not in _BROADCAST_FINAL]
+        if rows and not live:
+            _by = {}
+            for r in rows:
+                _st = str(r["status"] or "")
+                _by[_st] = _by.get(_st, 0) + 1
+            if set(_by) == {"done"}:
+                return {
+                    "status": "done",
+                    "ok": sent, "sent": sent, "failed": failed, "total": total,
+                    "bots_started": len(ids),
+                    "summary": (f"📢 Сетевая рассылка завершена: доставлено {sent} "
+                                f"из {total} по {len(ids)} ботам"),
+                }
+            _tail = ", ".join(f"{k}: {v}" for k, v in sorted(_by.items()))
+            if sent > 0:
+                return {
+                    "status": "partial",
+                    "ok": sent, "sent": sent, "failed": failed, "total": total,
+                    "bots_started": len(ids),
+                    "summary": (f"📢 Сетевая рассылка завершена частично: доставлено "
+                                f"{sent}, не доставлено {failed} из {total} "
+                                f"(боты — {_tail})"),
+                }
+            return {
+                "status": "failed",
+                "ok": 0, "sent": 0, "failed": failed, "total": total,
+                "bots_started": len(ids),
+                "summary": (f"⚠️ Сетевая рассылка не выполнена: ни одного сообщения "
+                            f"из {total} (боты — {_tail})"),
+            }
+
+        # Живая рассылка без задачи в процессе — её уронил рестарт или сбой.
+        # Поднимаем теми же данными, которыми это делает старт процесса
+        # (`resume_interrupted`): журнал доставок не даст задвоить. Вторая
+        # пропажа подряд — признаём обрыв, а не ждём вечно.
+        orphans = [int(r["id"]) for r in live if not broadcaster.is_running(int(r["id"]))]
+        if orphans:
+            orphan_polls += 1
+            if orphan_polls >= _BROADCAST_ORPHAN_POLLS:
+                if restarted:
+                    return {
+                        "status": "partial" if sent else "failed",
+                        "ok": sent, "sent": sent, "failed": failed, "total": total,
+                        "bots_started": len(ids),
+                        "summary": (f"⚠️ Сетевая рассылка оборвалась: доставлено {sent} "
+                                    f"из {total}. Повтор пропустит уже доставленных."),
+                    }
+                log.warning(
+                    "network_broadcast op=%s: задачи рассылок %s исчезли — поднимаю "
+                    "повторно (журнал доставок не даст задвоить)", op_id, orphans[:10],
+                )
+                restarted = True
+                orphan_polls = 0
+                await _maintenance_step(
+                    f"restart_orphan_broadcasts:{op_id}",
+                    lambda: _restart_broadcasts(pool, set(orphans)),
+                )
+        else:
+            orphan_polls = 0
+
+        await asyncio.sleep(_BROADCAST_POLL_S)
+
+
+async def _restart_broadcasts(pool: asyncpg.Pool, wanted: set) -> None:
+    """Поднять задачи указанных рассылок данными из их же строк в БД.
+
+    Читаем тем же запросом, которым это делает старт процесса, чтобы токен,
+    сегментный список получателей и кнопки восстанавливались ровно так же: своя
+    копия этой логики разошлась бы с ней на первой же правке.
+    """
+    from services import broadcaster
+
+    rows = await db.get_interrupted_broadcasts(pool)
+    started = 0
+    for r in rows:
+        if int(r["id"]) not in wanted:
+            continue
+        broadcaster.start(
+            pool, None, r["id"], r["token"], r["bot_id"], r["message_text"] or "",
+            r.get("photo_file_id"), r.get("target_user_ids"), r.get("buttons"),
+            start_delay=started * _NB_BOT_START_DELAY_S, silent=bool(r.get("silent")),
+        )
+        started += 1
+
+
 async def _nb_launch(
     pool: asyncpg.Pool, op_id: int, owner_id: int, bot_id: int, token: str,
     text: str, ids: list, buttons, *, subset: bool, order: int,
@@ -11023,14 +11183,14 @@ async def _exec_network_broadcast(
             "summary": "⚠️ Нет пользователей в выбранном сегменте — рассылка не запущена",
         }
 
-    # Normalise progress counters to the bot-launch unit. total_items was set to
-    # len(bots) up front, but bots without an audience are skipped, so done_items
-    # (incremented per launched bot) could stay below total_items and read <100%.
-    # Per-user delivery progress is tracked separately in the broadcasts table.
+    # Единица прогресса меняется на ПОЛУЧАТЕЛЕЙ: пока шёл цикл запуска, ею были
+    # боты (`total_items=len(bots)`), а дальше операция сопровождает доставку, и
+    # «сколько сделано» — это обработанные получатели по всем ботам. Так же
+    # считает одиночная рассылка.
     await _safe_execute(
             pool,
-        "UPDATE operation_queue SET total_items=$1, done_items=$1 WHERE id=$2",
-        total_started, op_id,
+        "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2",
+        total_users, op_id,
     )
 
     segment_labels = {
@@ -11043,16 +11203,18 @@ async def _exec_network_broadcast(
         "cluster": f"Кластер «{cluster_name}» ({total_started} бот(ов))",
     }
     label = segment_labels.get(segment, segment)
-    return {
-        "status": "done",
-        "ok": total_users,
-        "bots_started": total_started,
-        "summary": (
-            f"📢 Сетевая рассылка запущена\n"
-            f"Сегмент: {label}\n"
-            f"Ботов: {total_started}, получателей: {total_users:,}"
-        ),
-    }
+
+    # Запуск задач — не исход. Операция сопровождает залп до конца: иначе она
+    # закрывалась «готово, получателей 40 000» до первого отправленного
+    # сообщения, остановить её было уже нельзя, а обрыв проходил как успех.
+    res = await _await_network_broadcasts(pool, op_id, launched_bc_ids, total_users)
+    res["bots_started"] = total_started
+    res["summary"] = (
+        f"{res.get('summary') or ''}\n"
+        f"Сегмент: {label}\n"
+        f"Ботов: {total_started}, получателей: {total_users:,}"
+    ).strip()
+    return res
 
 
 async def _exec_seed_presence_pack(
