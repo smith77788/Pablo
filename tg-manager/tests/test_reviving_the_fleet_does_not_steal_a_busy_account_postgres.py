@@ -241,3 +241,58 @@ def test_the_renewal_drift_is_not_silent(pool):
     assert ("infragram_account_lease_renew_drift_total", 1) in seen, (
         "расхождение памяти и БД о занятости флота не оставило ни следа: "
         f"записано {seen}")
+
+
+def test_a_lease_cleared_under_a_live_session_is_taken_back(pool):
+    """Аренду под живой сессией сняли — heartbeat берёт её заново, в БД.
+
+    Именно это и делает кнопка «Поднять флот» с аккаунтом, у которого аренда
+    успела истечь (например, продления не доходили до базы): флаг снят, строка
+    свободна, а задача процесса продолжает работать этой сессией. Дальше её
+    законно забирает следующая операция — AUTH_KEY_DUPLICATED. Поэтому на
+    расхождении аренда берётся заново настоящим SQL арбитра; заглушка пула
+    этого не проверяет, ей `in_operation=FALSE` в строке не мешает.
+    """
+    from services import op_worker
+
+    held_before = set(op_worker._accounts_in_use)
+    try:
+        _run(pool.execute(
+            "UPDATE tg_accounts SET in_operation=FALSE, op_lease_owner=NULL, "
+            "       op_lease_until=NULL WHERE id=$1", IN_MEMORY))
+        op_worker._accounts_in_use.clear()
+        op_worker._accounts_in_use.add(IN_MEMORY)
+        confirmed = _run(op_worker.renew_leases())
+    finally:
+        op_worker._accounts_in_use.clear()
+        op_worker._accounts_in_use.update(held_before)
+
+    row = _row(pool, IN_MEMORY)
+    assert row["op_lease_owner"] == op_worker._WORKER_ID, (
+        "аренда под живой сессией не восстановлена в БД — следующая операция "
+        f"законно заберёт этот аккаунт: owner={row['op_lease_owner']!r}")
+    assert row["in_operation"] is True, "флаг занятости не вернулся"
+    assert confirmed == 1, f"heartbeat не считает аренду своей: {confirmed}"
+
+
+def test_a_live_lease_of_a_neighbour_is_never_taken_back(pool):
+    """А вот аккаунт с живой арендой соседа heartbeat не отбирает.
+
+    Лечение расхождения обязано оставаться fail-closed: отобрать живую аренду
+    — это и есть та самая поломка, от которой защищается аренда.
+    """
+    from services import op_worker
+
+    held_before = set(op_worker._accounts_in_use)
+    try:
+        op_worker._accounts_in_use.clear()
+        op_worker._accounts_in_use.add(BUSY)
+        confirmed = _run(op_worker.renew_leases())
+    finally:
+        op_worker._accounts_in_use.clear()
+        op_worker._accounts_in_use.update(held_before)
+
+    assert confirmed == 0, f"чужая аренда зачтена как своя: {confirmed}"
+    assert _row(pool, BUSY)["op_lease_owner"] == "worker-A", (
+        "heartbeat отобрал живую аренду другой реплики — это "
+        "AUTH_KEY_DUPLICATED, а не защита от него")

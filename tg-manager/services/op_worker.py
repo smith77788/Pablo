@@ -530,7 +530,20 @@ async def renew_leases() -> int:
     прогрев стоит (день 0/14), фабрика/операции получают «все аккаунты заняты».
     Флаг без живого держателя в памяти теперь НЕ продлеваем — аренда истекает за
     TTL, и _db_claim/warmup/reconcile забирают аккаунт обратно.
-    Возвращает число продлённых строк.
+
+    РАСХОЖДЕНИЕ ЛЕЧИМ, А НЕ ТОЛЬКО ЗАПИСЫВАЕМ. Обратный случай — аккаунт в
+    памяти есть, а аренды в БД уже нет (кто-то снял `in_operation`, перебил
+    `op_lease_owner`, или наше продление не доходило до базы дольше TTL и
+    владелец разморозил флот кнопкой) — раньше заканчивался одной строкой в
+    логе. Между этой строкой и катастрофой нет ничего: сессия продолжает
+    работать без аренды, и через TTL аккаунт ЗАКОННО забирает другой
+    исполнитель — это AUTH_KEY_DUPLICATED, самая дорогая поломка продукта.
+    Поэтому на расхождении аренда берётся заново тем же арбитром (`_db_claim`,
+    fail-closed): живую аренду соседа он не отбирает, а свободную строку
+    возвращает нам, и защита восстанавливается в том же такте heartbeat.
+    Не вернулось — вот это и есть настоящий конфликт: его и записываем.
+
+    Возвращает число аккаунтов, аренда которых после такта подтверждённо наша.
     """
     if not _db_pool:
         return 0
@@ -539,32 +552,39 @@ async def renew_leases() -> int:
     if not held:
         return 0
     try:
-        res = await _db_pool.execute(
+        rows = await _db_pool.fetch(
             """UPDATE tg_accounts
                   SET op_lease_until = now() + make_interval(secs => $2)
                 WHERE op_lease_owner = $1 AND in_operation = TRUE
-                  AND id = ANY($3::int[])""",
+                  AND id = ANY($3::int[])
+             RETURNING id""",
             _WORKER_ID, float(_LEASE_TTL_S), held,
         )
-        try:
-            _renewed = int(str(res).rsplit(" ", 1)[-1])
-        except (TypeError, ValueError):
-            return 0
-        # Продлили МЕНЬШЕ, чем держим. Значит у части аккаунтов аренда уже не
-        # наша: кто-то снял in_operation или перебил op_lease_owner, а наши
-        # задачи продолжают работать этими сессиями. Через TTL такой аккаунт
-        # законно заберёт другой исполнитель — AUTH_KEY_DUPLICATED. Раньше
-        # число продлённых возвращалось и выбрасывалось вызывающим, то есть
-        # расхождение памяти и БД о флоте не оставляло ни одного следа.
-        if _renewed < len(held):
-            log.error(
-                "op_worker: аренда продлена у %d из %d занятых аккаунтов — "
-                "у остальных её снял кто-то другой, а операции ещё идут",
-                _renewed, len(held),
+        # RETURNING, а не счётчик строк: чтобы лечить расхождение, нужно знать
+        # КАКИЕ аккаунты из него выпали, а не сколько их.
+        ours = {int(r["id"]) for r in rows}
+        drifted = [a for a in held if a not in ours]
+        if not drifted:
+            return len(ours)
+
+        regained = set(await _db_claim(drifted))
+        if regained:
+            log.warning(
+                "op_worker: аренда %d занятых аккаунтов пропала из БД и взята "
+                "заново (сессии работают, второго держателя нет)", len(regained),
             )
             _reliability_metric(
-                "infragram_account_lease_renew_drift_total", len(held) - _renewed)
-        return _renewed
+                "infragram_account_lease_regained_total", len(regained))
+        lost = [a for a in drifted if a not in regained]
+        if lost:
+            log.error(
+                "op_worker: аренда %d из %d занятых аккаунтов не наша и взять "
+                "заново её не удалось — её держит кто-то другой, а операции "
+                "этими сессиями ещё идут", len(lost), len(held),
+            )
+            _reliability_metric(
+                "infragram_account_lease_renew_drift_total", len(lost))
+        return len(ours) + len(regained)
     except Exception as e:
         log.warning("op_worker: продление аренды не удалось: %s", e)
         return 0
