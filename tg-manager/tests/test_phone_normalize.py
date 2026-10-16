@@ -11,9 +11,11 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 API = api_source()
-HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+# Весь фронт, а не только index.html: нормализация номера уехала в
+# mini_app/screens/account_login.js вместе с подключением аккаунта.
+HTML = miniapp_source()
 BOT_ACC = (ROOT / "bot" / "handlers" / "accounts.py").read_text(encoding="utf-8")
 
 from services.phone_utils import normalize_phone  # лёгкий модуль без тяжёлых зависимостей

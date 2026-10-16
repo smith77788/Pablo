@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import pathlib
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 
 API = api_source()
@@ -105,7 +105,7 @@ def test_phone_resend_endpoint_surfaces_flood():
 def test_ui_has_resend_and_autorepeat():
     """UI повтора кода: кнопка одиночного повтора и автоповтор, который сам
     останавливается на флуде."""
-    html = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
+    html = miniapp_source()
     for fn in ("accPhoneResend", "accPhoneAutoToggle", "accPhoneAutoStop"):
         assert fn in html, f"нет JS-функции {fn}"
     assert "accPhoneResendBtn" in html and "accPhoneAutoBtn" in html
@@ -117,7 +117,7 @@ def test_ui_has_resend_and_autorepeat():
 def test_admin_only_resend_rate_field():
     """Поле «запросов в минуту» для автоповтора — только для админа и управляет
     темпом (интервалом) автоповтора."""
-    html = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
+    html = miniapp_source()
     assert "accPhoneRpm" in html and "accPhoneResendAdmin" in html
     assert "_accSaveRpm" in html and "_accResendDelayMs" in html
     # гейт по админу и пробрасывание темпа в цикл автоповтора
@@ -126,8 +126,11 @@ def test_admin_only_resend_rate_field():
 
 
 def test_ui_has_all_login_methods():
+    # Читаем ВЕСЬ фронт (index.html + screens/*.js), а не только index.html:
+    # подключение аккаунта вынесено в mini_app/screens/account_login.js, и
+    # привязка к одному файлу покраснела бы на любом таком выносе.
     """Мини-апп UI предлагает все способы, а не только строку сессии."""
-    html = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
+    html = miniapp_source()
     # вкладки способов входа
     assert "accSetLoginMethod" in html, "нет переключателя способов входа"
     for fn in ("accPhoneStart", "accPhoneCode", "accQrStart", "accQrPoll",
