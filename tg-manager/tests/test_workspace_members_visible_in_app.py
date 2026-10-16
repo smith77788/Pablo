@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-API = api_source()
 DB = open(os.path.join(ROOT, "database", "db.py"), encoding="utf-8").read()
 SNAPSHOT = open(os.path.join(ROOT, "tests", "miniapp_routes_snapshot.txt"),
                 encoding="utf-8").read()
@@ -42,9 +41,14 @@ def _fn(name: str) -> str:
 
 
 def _handler(name: str) -> str:
-    i = API.index(f"async def {name}(request")
-    j = API.index("\n    async def ", i + 10)
-    return API[i:j]
+    """Тело ручки по ТОЧНЫМ границам ast, в любом модуле слоя.
+
+    Раньше границу искали как «до следующего вложенного async def». Ручки
+    пространств уехали в services/mini_app_workspace.py, и последняя из них
+    осталась без «следующей» — срез упал на ValueError. api_function знает
+    границы от парсера и сам находит модуль.
+    """
+    return api_function(name)
 
 
 def _pyfn(src: str, name: str) -> str:

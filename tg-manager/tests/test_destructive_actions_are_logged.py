@@ -40,7 +40,7 @@ _ОБЯЗАНЫ = {
     "services/mini_app_networks.py": [
         "ecosystem_delete",           # уехал сюда вместе с блоком сетей
     ],
-    "services/mini_app_api.py": [
+    "services/mini_app_workspace.py": [
         "leave_workspace",            # выход участника и удаление пространства
     ],
     "services/mini_app_channels.py": [
