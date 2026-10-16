@@ -17,7 +17,7 @@ operation_queue в handler'ах («Заменяет прямые INSERT INTO ope
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,9 +49,11 @@ def test_bot_handler_uses_submit_not_raw_insert():
 
 
 def test_mini_app_handler_uses_submit_not_raw_insert():
-    src = api_source()
-    seg = src[src.index("async def mass_inviter_submit"):]
-    seg = seg[:seg.index("\n    # ── Stars Hub")]
+    # Границы функции берём у парсера, а не от комментария-маркера ниже по
+    # файлу: ручка уехала из монолита в вынесенный модуль, маркер остался в
+    # другом, и срез «до строки ── Stars Hub» перестал существовать —
+    # проверка падала с ValueError, хотя гейт на месте.
+    seg = api_function("mass_inviter_submit")
     assert "_obus.submit(" in seg, "мини-апп не вызывает operation_bus.submit"
     code_lines = [ln for ln in seg.splitlines() if not ln.lstrip().startswith("#")]
     code = "\n".join(code_lines)
