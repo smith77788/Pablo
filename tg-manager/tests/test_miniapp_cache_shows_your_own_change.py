@@ -28,6 +28,7 @@ from pathlib import Path
 from aiohttp import ClientSession, web
 
 from services import mini_app_api as M
+from tests.miniapp_source import api_source
 
 UID = 604812
 OTHER_UID = 604813
@@ -212,7 +213,9 @@ def test_drop_without_a_user_is_a_noop():
 def test_invalidation_lives_in_one_place():
     """Разослать сброс по двум десяткам мутаций — значит забыть его в двадцать
     первой. Он обязан оставаться одним middleware."""
-    src = Path(M.__file__).read_text("utf-8")
+    # Весь слой: ручки мини-аппа разъехались по services/mini_app_*.py,
+    # и чтение одного модуля ослепло бы при следующем выносе.
+    src = api_source()
     assert src.count("async def cache_invalidate_middleware") == 1
     assert src.count("_cache_drop_user(") == 2, (
         "сброс кэша зовут не из одного места — вернулась россыпь по обработчикам")

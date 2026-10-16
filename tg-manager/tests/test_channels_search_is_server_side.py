@@ -25,6 +25,7 @@ import pytest
 from aiohttp import web
 
 from services import mini_app_api as M
+from tests.miniapp_source import api_source
 
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
 UID = 809505
@@ -166,7 +167,9 @@ def test_total_respects_the_active_filter():
 
 def test_visibility_condition_has_one_source():
     """Условие видимости жило в файле дважды и начинало расходиться."""
-    src = Path(M.__file__).read_text("utf-8")
+    # Весь слой: ручки мини-аппа разъехались по services/mini_app_*.py,
+    # и чтение одного модуля ослепло бы при следующем выносе.
+    src = api_source()
     assert src.count("_CHANNELS_VISIBLE_SQL = ") == 1
     assert src.count("ecosystem_members em2") == 1, (
         "условие видимости снова размножено по файлу")

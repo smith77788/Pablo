@@ -15,6 +15,7 @@ import asyncio
 import pytest
 
 from services import mini_app_api as M
+from tests.miniapp_source import api_source
 
 
 class _Conn:
@@ -174,7 +175,9 @@ def test_startup_hook_uses_the_shared_applier():
     """Обработчик on_startup не должен снова обрастать своим циклом."""
     import ast
 
-    src = open(M.__file__, encoding="utf-8").read()
+    # Весь слой: ручки мини-аппа разъехались по services/mini_app_*.py,
+    # и чтение одного модуля ослепло бы при следующем выносе.
+    src = api_source()
     for node in ast.walk(ast.parse(src)):
         if (isinstance(node, ast.AsyncFunctionDef)
                 and node.name == "_apply_inline_migrations"):

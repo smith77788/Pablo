@@ -24,6 +24,7 @@ import inspect
 import pathlib
 
 from database import db
+from tests.miniapp_source import api_source
 
 
 def _run(coro):
@@ -127,7 +128,9 @@ def test_miniapp_preview_counts_the_same_audience():
     """
     from services import mini_app_api
 
-    src = pathlib.Path(mini_app_api.__file__).read_text()
+    # Весь слой: ручки мини-аппа разъехались по services/mini_app_*.py,
+    # и чтение одного модуля ослепло бы при следующем выносе.
+    src = api_source()
     for handler in ("create_broadcast", "broadcast_recipients"):
         start = src.index(f"async def {handler}(request")
         body = src[start: src.index("    async def ", start + 10)]

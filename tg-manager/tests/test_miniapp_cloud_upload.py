@@ -33,6 +33,7 @@ import pytest
 from aiohttp import ClientSession, FormData, web
 
 from services import mini_app_api as M
+from tests.miniapp_source import api_function, api_source
 from services import tg_cloud
 
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
@@ -153,7 +154,7 @@ def test_store_file_refuses_above_the_ceiling(monkeypatch):
 
 def test_status_tells_the_client_the_ceiling():
     """Мини-апп обязан отказать ДО чтения файла — значит, должен знать предел."""
-    src = M.__file__ and Path(M.__file__).read_text("utf-8")
+    src = api_source()
     assert "'max_upload_bytes': tg_cloud.MAX_FILE_BYTES" in src, (
         "cloud_status не отдаёт потолок одной загрузки")
 
@@ -199,9 +200,9 @@ def test_content_disposition_survives_cyrillic():
 
 
 def test_download_marks_the_type_as_final():
-    src = Path(M.__file__).read_text("utf-8")
-    block = src[src.index("async def cloud_download"):]
-    block = block[:block.index("async def cloud_delete")]
+    # api_function даёт ровно тело функции (границы из ast), поэтому обрезать
+    # его «до следующей ручки» больше не нужно — и нельзя: следующей там нет.
+    block = api_function("cloud_download")
     assert '"X-Content-Type-Options": "nosniff"' in block, (
         "Content-Type берётся из имени файла — браузеру нельзя разрешать гадать")
     assert "_content_disposition(" in block

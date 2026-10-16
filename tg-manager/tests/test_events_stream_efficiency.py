@@ -19,6 +19,7 @@ import time
 import pytest
 
 from services import mini_app_api as m
+from tests.miniapp_source import api_source
 
 
 class _FakePool:
@@ -138,7 +139,9 @@ def _events_src() -> str:
     внутри него молча становится правдой — защита выключается сама собой.
     Обработчик вложен в setup_routes, поэтому обходим всё дерево.
     """
-    src = open(m.__file__, encoding="utf-8").read()
+    # Весь слой: ручки мини-аппа разъехались по services/mini_app_*.py,
+    # и чтение одного модуля ослепло бы при следующем выносе.
+    src = api_source()
     lines = src.split("\n")
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "events":

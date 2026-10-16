@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import os
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_function, api_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -93,11 +93,13 @@ def test_cf_credentials_in_app_no_railway():
     assert "async def cf_credentials_save" in api
     assert 'add_post("/api/miniapp/cf/credentials", cf_credentials_save)' in api
     # deploy берёт доступы из БД-владельца, с фолбэком на env (не жёстко Railway)
-    seg = api[api.index("async def _cf_resolve_creds"):api.index("async def cf_pool_status")]
+    # Доступы читает отдельная функция уровня модуля: её зовут и вынесенный
+    # services/mini_app_cf.py, и сводка о прокси в монолите.
+    seg = api_function("cf_resolve_creds")
     assert "db.get_cf_credentials" in seg and 'os.getenv("CF_API_TOKEN"' in seg
     assert "from database import db" in seg  # иначе NameError в проде
     # статус не отдаёт токен наружу (только флаги)
-    st = api[api.index("async def cf_pool_status"):api.index("async def cf_credentials_save")]
+    st = api_function("cf_pool_status")
     assert "has_token" in st and "api_token" not in st.split("credentials")[1][:200]
     ui = _read("mini_app/index.html")
     assert "saveCfCreds" in ui and "/api/miniapp/cf/credentials" in ui
@@ -162,7 +164,7 @@ def test_deploy_errors_are_surfaced_not_swallowed():
               api.index('app.router.add_get("/api/miniapp/cf/pool/status"')]
     # результат/ошибки сохраняются в process-local карту, а не глотаются
     assert '_cf_deploy_last' in dep and 'res.get("errors"' in dep
-    st = api[api.index("async def cf_pool_status"):api.index("async def cf_credentials_save")]
+    st = api_function("cf_pool_status")
     assert "_cf_deploy_last" in st and '"last_deploy"' in st
     ui = _read("mini_app/index.html")
     assert "last_deploy" in ui and "Деплой не удался" in ui

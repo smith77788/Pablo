@@ -15,6 +15,7 @@ import ast
 import pytest
 
 from services import mini_app_api as M
+from tests.miniapp_source import api_source
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +27,9 @@ def _clean_counter():
 
 def _events_src() -> str:
     """Тело обработчика по границам из AST, а не по окну фиксированной длины."""
-    src = open(M.__file__, encoding="utf-8").read()
+    # Весь слой: ручки мини-аппа разъехались по services/mini_app_*.py,
+    # и чтение одного модуля ослепло бы при следующем выносе.
+    src = api_source()
     lines = src.split("\n")
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "events":

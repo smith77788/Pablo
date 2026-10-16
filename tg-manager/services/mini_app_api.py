@@ -33,6 +33,9 @@ from services import mini_app_channels
 from services import mini_app_operations
 from services import mini_app_dashboard
 from services import mini_app_dm
+from services import mini_app_cf
+from services import mini_app_cloud
+from services import mini_app_mp
 from services import mini_app_networks
 from services import mini_app_sales
 from services import mini_app_va
@@ -1325,6 +1328,25 @@ def _list_limit(request: web.Request, default: int, maximum: int) -> int:
     if raw is None:
         return default
     return min(validate_integer(raw, min_val=1, max_val=maximum) or default, maximum)
+
+
+async def cf_resolve_creds(pool, uid: int) -> dict:
+    """Доступы Cloudflare владельца: сперва из его БД (заданы в приложении,
+    шифр), иначе — из env (обратная совместимость с Railway-переменными).
+
+    На уровне модуля, а не замыканием внутри `setup_routes`: доступы читает и
+    вынесенный `services/mini_app_cf.py`, и сводка о прокси в этом файле, а
+    замыкание импортировать нельзя. Токен наружу не отдаётся — в ответ уходит
+    только `has_token`.
+    """
+    from database import db
+    creds = await db.get_cf_credentials(pool, uid) or {}
+    return {
+        "api_token": creds.get("api_token") or os.getenv("CF_API_TOKEN", ""),
+        "account_id": creds.get("account_id") or os.getenv("CF_ACCOUNT_ID", ""),
+        "subdomain": creds.get("subdomain") or os.getenv("CF_WORKERS_SUBDOMAIN", ""),
+        "has_token": bool(creds.get("has_token") or os.getenv("CF_API_TOKEN")),
+    }
 
 
 def int_field(value, title: str, *, default: int | None = None,
@@ -13279,6 +13301,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_accounts.setup_routes(app, pool)
     mini_app_sales.setup_routes(app, pool)
     mini_app_networks.setup_routes(app, pool)
+    mini_app_mp.setup_routes(app, pool)
+    mini_app_cf.setup_routes(app, pool)
+    mini_app_cloud.setup_routes(app, pool)
     mini_app_va.setup_routes(app, pool)
     # Analytics
     app.router.add_get("/api/miniapp/analytics", analytics)
@@ -13434,240 +13459,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # ── Provider Marketplace (блок 1: провайдеры + каталог) ──────────────────
     from services import provider_marketplace as _mp
 
-    async def _mp_owned_provider(uid, pid):
-        p = await _mp.get_provider(pool, pid)
-        return p if (p and int(p["owner_id"]) == int(uid)) else None
 
-    async def _mp_owned_service(uid, sid):
-        s = await _mp.get_service(pool, sid)
-        if not s:
-            return None, None
-        p = await _mp_owned_provider(uid, s["provider_id"])
-        return (s, p) if p else (None, None)
 
-    async def mp_register(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            d = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        try:
-            p = await _mp.register_provider(
-                pool, uid, d.get("name", ""), description=d.get("description", ""),
-                category=d.get("category", "other"), website=d.get("website", ""),
-                contact=d.get("contact", ""))
-            return _json_resp({"ok": True, "provider": p})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("mp_register uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_mine(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            return _json_resp({"providers": await _mp.list_providers(pool, owner_id=uid)})
-        except Exception:
-            log.exception("mp_mine uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_provider_detail(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        p = await _mp_owned_provider(uid, pid)
-        if not p:
-            return _err("Не найдено", 404)
-        return _json_resp({"provider": p,
-                           "services": await _mp.list_services(pool, pid),
-                           "api_keys": await _mp.list_api_keys(pool, pid)})
 
-    async def mp_provider_update(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _mp_owned_provider(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            p = await _mp.update_provider_profile(pool, pid, uid, **d)
-            return _json_resp({"ok": True, "provider": p})
-        except Exception:
-            log.exception("mp_provider_update uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_apikey_issue(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        if not await _mp_owned_provider(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            # api_key возвращается ОДИН раз — фронт обязан показать и попросить сохранить
-            return _json_resp({"ok": True, "key": await _mp.issue_api_key(
-                pool, pid, actor_id=uid)})
-        except Exception:
-            log.exception("mp_apikey_issue uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_apikey_revoke(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            kid = int(request.match_info["kid"])
-        except (KeyError, ValueError):
-            return _err("Неверный идентификатор", 400)
-        if not await _mp_owned_provider(uid, pid):
-            return _err("Не найдено", 404)
-        ok = await _mp.revoke_api_key(pool, pid, kid, actor_id=uid)
-        return _json_resp({"ok": ok})
 
-    async def mp_service_create(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not await _mp_owned_provider(uid, pid):
-            return _err("Не найдено", 404)
-        try:
-            price_cents = (int_field(d["price_cents"], "Цена")
-                           if d.get("price_cents") is not None
-                           else _mp.to_cents(d.get("price", "0")))
-            s = await _mp.create_service(
-                pool, pid, title=d.get("title", ""), category=d.get("category", "other"),
-                resource_kind=d.get("resource_kind", ""),
-                description=d.get("description", ""), price_cents=price_cents,
-                currency=d.get("currency", "USD"), unit=d.get("unit", "unit"),
-                min_qty=int_field(d.get("min_qty"), "Минимальный объём", default=1),
-                max_qty=int_field(d.get("max_qty"), "Максимальный объём",
-                                  default=1000000),
-                stock=int_field(d.get("stock"), "Остаток", default=-1),
-                sla_hours=int_field(d.get("sla_hours"), "Срок исполнения, часов",
-                                    default=24),
-                params_schema=d.get("params_schema") or [], actor_id=uid)
-            return _json_resp({"ok": True, "service": s})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("mp_service_create uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_service_update(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            sid = int(request.match_info["sid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        s, p = await _mp_owned_service(uid, sid)
-        if not p:
-            return _err("Не найдено", 404)
-        try:
-            if d.get("price") is not None and d.get("price_cents") is None:
-                d["price_cents"] = _mp.to_cents(d.pop("price"))
-            upd = await _mp.update_service(pool, sid, p["id"], actor_id=uid, **d)
-            return _json_resp({"ok": True, "service": upd})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("mp_service_update uid=%s sid=%s", uid, sid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_service_toggle(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            sid = int(request.match_info["sid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        s, p = await _mp_owned_service(uid, sid)
-        if not p:
-            return _err("Не найдено", 404)
-        ok = await _mp.set_service_active(pool, sid, p["id"], bool(d.get("active", True)),
-                                          actor_id=uid)
-        return _json_resp({"ok": ok})
 
-    async def mp_catalog(request):
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        q = request.query
-        try:
-            items = await _mp.browse_catalog(
-                pool, category=q.get("category") or None,
-                resource_kind=q.get("kind") or None, q=q.get("q") or None,
-                limit=_list_limit(request, 50, 200), offset=_list_offset(request))
-            return _json_resp({"items": items})
-        except Exception:
-            log.exception("mp_catalog uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_admin_status(request):
-        uid = _get_uid(request)
-        if not _is_admin(uid):
-            return _err("Раздел только для владельца платформы", 403)
-        try:
-            pid = int(request.match_info["pid"])
-            d = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        try:
-            p = await _mp.set_provider_status(
-                pool, pid, d.get("status", ""), by=uid, reason=d.get("reason", ""))
-            if not p:
-                return _err("Не найдено", 404)
-            return _json_resp({"ok": True, "provider": p})
-        except ValueError as e:
-            return _err(str(e), 400)
-        except Exception:
-            log.exception("mp_admin_status uid=%s pid=%s", uid, pid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def mp_admin_providers(request):
-        uid = _get_uid(request)
-        if not _is_admin(uid):
-            return _err("Раздел только для владельца платформы", 403)
-        return _json_resp({"providers": await _mp.list_providers(
-            pool, status=request.query.get("status") or None)})
 
-    app.router.add_post("/api/miniapp/mp/register", mp_register)
-    app.router.add_get("/api/miniapp/mp/mine", mp_mine)
-    app.router.add_get("/api/miniapp/mp/catalog", mp_catalog)
-    app.router.add_get("/api/miniapp/mp/provider/{pid}", mp_provider_detail)
-    app.router.add_patch("/api/miniapp/mp/provider/{pid}", mp_provider_update)
-    app.router.add_post("/api/miniapp/mp/provider/{pid}/apikey", mp_apikey_issue)
-    app.router.add_post("/api/miniapp/mp/provider/{pid}/apikey/{kid}/revoke", mp_apikey_revoke)
-    app.router.add_post("/api/miniapp/mp/provider/{pid}/service", mp_service_create)
-    app.router.add_patch("/api/miniapp/mp/service/{sid}", mp_service_update)
-    app.router.add_post("/api/miniapp/mp/service/{sid}/toggle", mp_service_toggle)
-    app.router.add_get("/api/miniapp/mp/admin/providers", mp_admin_providers)
-    app.router.add_post("/api/miniapp/mp/admin/provider/{pid}/status", mp_admin_status)
 
     # ── Sales Persona (сущность бота — живой менеджер по продажам) ────────────
     from services import bot_sales_persona as _bsp
@@ -14504,15 +14309,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
 
-    async def _read_upload(part, max_bytes: int) -> bytes:
-        """Прочитать multipart-part с жёстким лимитом (защита от OOM).
-
-        Один источник правды — модульный `read_upload`: тот же помощник нужен
-        модулям `services/mini_app_*.py`, а вложенная копия им недоступна.
-        `UploadTooLarge` — наследник `ValueError`, поэтому прежние обработчики
-        `except ValueError` продолжают ловить его как раньше.
-        """
-        return await read_upload(part, max_bytes)
 
 
 
@@ -14849,192 +14645,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
 
     # ── Telegram-облако (шифрованное распределённое хранилище файлов) ──────────
-    async def cloud_status(request: web.Request) -> web.Response:
-        """Доступ + квота: сколько занято/лимит, платный ли доступ, безлимит ли."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services import tg_cloud
-            q = await tg_cloud.get_quota(pool, uid)
-            limit = await tg_cloud._effective_limit(pool, uid)
-            return _json_resp({
-                'access': await tg_cloud.has_access(pool, uid),
-                'admin': tg_cloud._is_admin(uid),
-                'used_bytes': q['used_bytes'],
-                'limit_bytes': limit,          # 0 = безлимит
-                'paid': q['paid'],
-                # Потолок ОДНОЙ загрузки: мини-апп обязан отказать до чтения
-                # файла, иначе пользователь ждёт загрузку ради отказа в конце.
-                'max_upload_bytes': tg_cloud.MAX_FILE_BYTES,
-            })
-        except Exception:
-            log.exception("cloud_status")
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def cloud_list(request: web.Request) -> web.Response:
-        """Список файлов владельца (манифест + здоровье избыточности, без содержимого)."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services import tg_cloud
-            files = await tg_cloud.list_files(pool, uid)
-            for f in files:
-                try:
-                    dur = await tg_cloud.file_durability(pool, int(f['id']))
-                    f['min_replicas'] = dur['min_live']   # 0 = есть недоступный кусок
-                    f['target_replicas'] = dur['target']
-                except Exception:
-                    f['min_replicas'] = None
-            return _json_resp({'files': files, 'target_replicas': tg_cloud.REPLICAS})
-        except Exception:
-            log.exception("cloud_list")
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def cloud_heal(request: web.Request) -> web.Response:
-        """Восстановить избыточность файла (долить реплики на уцелевших хранителях)
-        после бана части флота. Доступно владельцу файла."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services import tg_cloud
-            fid = int(request.match_info['file_id'])
-            if not await tg_cloud.get_file(pool, uid, fid):
-                return _err("файл не найден", 404)
-            res = await tg_cloud.heal_file(pool, uid, fid)
-            return _json_resp(res)
-        except Exception:
-            log.exception("cloud_heal")
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def cloud_upload(request: web.Request) -> web.Response:
-        """Загрузить файл в облако.
 
-        Основной путь — multipart (поле `file`): тело читается потоком, поэтому
-        размер ограничивает ТОЛЬКО наш потолок. Путь JSON {name, data_b64}
-        оставлен для совместимости, но у него жёсткий предел сверху: aiohttp
-        буферизует такое тело целиком и рубит его на `client_max_size` (1 МБ по
-        умолчанию), а base64 раздувает файл на треть — то есть через JSON не
-        проходил файл крупнее ~750 КБ. Отказ при этом прилетал из aiohttp
-        по-английски и превращался в «внутреннюю ошибку» на экране.
-        """
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        from services import tg_cloud
-        cap_mb = tg_cloud.MAX_FILE_BYTES // (1024 * 1024)
-        too_big = f"файл больше предела одной загрузки ({cap_mb} МБ)"
-        try:
-            import base64 as _b64
-            ctype = (request.headers.get('Content-Type') or '').lower()
-            if ctype.startswith('multipart/'):
-                name, blob, got_part = '', b'', False
-                reader = await request.multipart()
-                async for part in reader:
-                    if part.name == 'name':
-                        name = (await read_upload_text(part) or '').strip()
-                    elif part.name in ('file', 'data'):
-                        got_part = True
-                        if not name:
-                            name = (part.filename or '').strip()
-                        try:
-                            blob = await _read_upload(part, tg_cloud.MAX_FILE_BYTES)
-                        except ValueError:
-                            return _err(too_big, 413)
-                if not got_part:
-                    return _err("файл не приложен (ожидалось поле file)", 400)
-            else:
-                try:
-                    d = await request.json()
-                except web.HTTPRequestEntityTooLarge:
-                    return _err(too_big, 413)
-                except Exception:
-                    return _err("не удалось разобрать запрос", 400)
-                name = (d.get('name') or '').strip()
-                raw = d.get('data_b64') or ''
-                try:
-                    # validate=True: без него base64 молча выбрасывает всё, что не
-                    # из алфавита, и битая передача превращается в укороченный
-                    # файл, который проходит проверку целостности как «целый».
-                    blob = _b64.b64decode(raw, validate=True)
-                except Exception:
-                    return _err("не удалось прочитать данные файла", 400)
-            if not blob:
-                return _err("файл пустой", 400)
-            if len(blob) > tg_cloud.MAX_FILE_BYTES:
-                return _err(too_big, 413)
-            f = await tg_cloud.store_file(pool, uid, _cloud_safe_name(name), blob)
-            return _json_resp({'file': f})
-        except tg_cloud.AccessDenied as e:
-            return _err(str(e) or "нет доступа к облаку — требуется подписка", 403)
-        except tg_cloud.QuotaExceeded as e:
-            return _err(str(e), 413)
-        except Exception:
-            log.exception("cloud_upload")
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def cloud_download(request: web.Request) -> web.Response:
-        """Скачать файл: собираем куски, расшифровываем, отдаём как поток байт."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services import tg_cloud
-            fid = int(request.match_info['file_id'])
-            meta = await tg_cloud.get_file(pool, uid, fid)
-            if not meta:
-                return _err("файл не найден", 404)
-            data = await tg_cloud.retrieve_file(pool, uid, fid)
-            fname = _cloud_safe_name(meta.get('name'))
-            # Реальный MIME по расширению: помогает нативному загрузчику Telegram
-            # назвать файл и корректно проиграть видео/аудио в предпросмотре.
-            import mimetypes
-            ctype = mimetypes.guess_type(fname)[0] or "application/octet-stream"
-            return web.Response(
-                body=data,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Type": ctype,
-                    # Тип берётся из имени файла, то есть из данных пользователя —
-                    # nosniff не даёт браузеру передумать и исполнить содержимое.
-                    "X-Content-Type-Options": "nosniff",
-                    "Content-Disposition": _content_disposition(fname),
-                })
-        except FileNotFoundError:
-            return _err("файл не найден", 404)
-        except Exception:
-            log.exception("cloud_download")
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def cloud_delete(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services import tg_cloud
-            fid = int(request.match_info['file_id'])
-            ok = await tg_cloud.delete_file(pool, uid, fid)
-            return _json_resp({'deleted': bool(ok)})
-        except Exception:
-            log.exception("cloud_delete")
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def cloud_set_paid(request: web.Request) -> web.Response:
-        """Выдать/снять платный доступ к облаку другому пользователю. Только
-        владелец платформы (админ)."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services import tg_cloud
-            if not tg_cloud._is_admin(uid):
-                return _err("только владелец платформы может выдавать доступ", 403)
-            d = await request.json()
-            target = int(d.get('owner_id') or 0)
-            if not target:
-                return _err("нужен owner_id", 400)
-            lim = d.get('limit_bytes')
-            q = await tg_cloud.set_paid(pool, target, bool(d.get('paid', True)),
-                                        limit_bytes=(int(lim) if lim else None))
-            return _json_resp({'quota': q})
-        except Exception:
-            log.exception("cloud_set_paid")
-            return _err(_INTERNAL_ERROR, 500)
 
 
 
@@ -15058,179 +14674,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/fleet/warnings", fleet_warnings)
     app.router.add_get("/api/miniapp/ab/results", ab_results)
     app.router.add_post("/api/miniapp/ab/followup", ab_followup)
-    app.router.add_get("/api/miniapp/cloud/status", cloud_status)
-    app.router.add_get("/api/miniapp/cloud/files", cloud_list)
-    app.router.add_post("/api/miniapp/cloud/upload", cloud_upload)
-    app.router.add_get("/api/miniapp/cloud/file/{file_id}/download", cloud_download)
-    app.router.add_post("/api/miniapp/cloud/file/{file_id}/delete", cloud_delete)
-    app.router.add_post("/api/miniapp/cloud/file/{file_id}/heal", cloud_heal)
-    app.router.add_post("/api/miniapp/cloud/set-paid", cloud_set_paid)
 
     # ── CF Pool Manager ──────────────────────────────────────────────────────
-    async def _cf_resolve_creds(uid: int) -> dict:
-        """Доступы CF: сперва из БД владельца (заданы в приложении, шифр),
-        иначе — из env (обратная совместимость с Railway-переменными)."""
-        from database import db
-        creds = await db.get_cf_credentials(pool, uid) or {}
-        return {
-            "api_token": creds.get("api_token") or os.getenv("CF_API_TOKEN", ""),
-            "account_id": creds.get("account_id") or os.getenv("CF_ACCOUNT_ID", ""),
-            "subdomain": creds.get("subdomain") or os.getenv("CF_WORKERS_SUBDOMAIN", ""),
-            "has_token": bool(creds.get("has_token") or os.getenv("CF_API_TOKEN")),
-        }
 
-    async def cf_pool_status(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.cf_pool_manager import get_pool_status
-            status = await get_pool_status(pool, uid)
-            c = await _cf_resolve_creds(uid)
-            # доступы — без утечки токена: только флаги/некритичные поля
-            status["credentials"] = {
-                "has_token": c["has_token"],
-                "account_id": c["account_id"],
-                "subdomain": c["subdomain"],
-                "ready": bool(c["has_token"] and c["account_id"]),
-            }
-            # последний результат фонового деплоя (running/ok/errors) — чтобы
-            # пользователь видел РЕАЛЬНУЮ причину, а не пустой результат.
-            # process-local: не переживает рестарт, не шарится между воркерами.
-            last = (request.app.get("_cf_deploy_last") or {}).get(uid)
-            if last:
-                status["last_deploy"] = last
-            return _json_resp(status)
-        except Exception:
-            log.exception("cf_pool_status uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def cf_credentials_save(request: web.Request) -> web.Response:
-        """Сохранить доступы CF в приложении (без Railway). Токен шифруется в БД.
-        body: {api_token?, account_id, subdomain}. Пустой api_token не затирает."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        account_id = validate_string(data.get("account_id"), max_len=64) or ""
-        subdomain = validate_string(data.get("subdomain"), max_len=80) or ""
-        api_token = (data.get("api_token") or "").strip()
-        if not account_id:
-            return _err("Укажите Account ID", 400)
-        try:
-            from database import db
-            await db.set_cf_credentials(pool, uid, api_token or None, account_id, subdomain)
-            return _json_resp({"ok": True})
-        except Exception:
-            log.exception("cf_credentials_save uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
-    async def cf_pool_deploy(request: web.Request) -> web.Response:
-        """Деплой пула CF Workers. Долгая операция (N×2 запросов к CF API) → НЕ
-        блокируем HTTP-запрос (иначе шлюз рвёт по таймауту → «ответ не JSON/сервис
-        недоступен»). Запускаем в ФОНЕ, отвечаем сразу; прогресс — через /status."""
-        import asyncio as _asyncio
-        import time as _time
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-        except Exception:
-            data = {}
-        raw_count = data.get('count')
-        # count не задан / 'auto' / 0 → по числу аккаунтов, которым реально нужен
-        # релей (активные без своего прокси) → изоляция 1:1 без ручного счёта.
-        if raw_count in (None, '', 'auto', 0, '0'):
-            try:
-                from services.cf_pool_manager import count_relay_targets
-                ct = await count_relay_targets(pool, uid)
-                count = ct["relay_needed"] or ct["active"] or 1
-            except Exception:
-                log.exception("cf auto-count uid=%s", uid)
-                count = 10
-        else:
-            try:
-                count = int(raw_count)
-            except (TypeError, ValueError):
-                count = 10
-        count = max(1, min(count, 100))
-        prefix = data.get('name_prefix') or f'tg-relay-{uid}'
-        c = await _cf_resolve_creds(uid)
-        if not c["api_token"] or not c["account_id"]:
-            return _err("Не заданы доступы Cloudflare (токен + Account ID). "
-                        "Впишите их в приложении или в переменных Railway.", 400)
 
-        # process-local карта последнего результата деплоя по uid (для /status).
-        # не переживает рестарт, не шарится между воркерами — только для UX-фидбэка.
-        _last = request.app.setdefault("_cf_deploy_last", {})
-        _last[uid] = {"running": True, "ok": 0, "count": count, "errors": [], "ts": int(_time.time())}
 
-        async def _bg_deploy():
-            try:
-                from services.cf_pool_manager import (deploy_pool,
-                    assign_urls_to_accounts, reconcile_pool)
-                res = await deploy_pool(count, prefix, c["api_token"], c["account_id"],
-                                        subdomain=c["subdomain"])
-                urls = res.get("urls", [])
-                if urls:
-                    await assign_urls_to_accounts(pool, uid, urls)
-                    # снести воркеры, которых больше нет в наборе (старый больший пул)
-                    try:
-                        await reconcile_pool(pool, uid, urls, c["api_token"],
-                                             c["account_id"])
-                    except Exception:
-                        log.exception("cf reconcile uid=%s", uid)
-                _last[uid] = {"running": False, "ok": len(urls), "count": count,
-                              "errors": res.get("errors", []), "ts": int(_time.time())}
-                log.info("cf deploy done uid=%s: %d/%d воркеров", uid, len(urls), count)
-            except Exception as e:
-                log.exception("cf background deploy uid=%s", uid)
-                _last[uid] = {"running": False, "ok": 0, "count": count,
-                              "errors": [str(e)[:300]], "ts": int(_time.time())}
 
-        task = _asyncio.create_task(_bg_deploy())
-        _tasks = request.app.setdefault("_cf_deploy_tasks", set())
-        _tasks.add(task)
-        task.add_done_callback(lambda t: _tasks.discard(t))
-        return _json_resp({"ok": True, "started": True, "count": count})
-
-    async def cf_pool_check(request: web.Request) -> web.Response:
-        """Пинг всех воркеров (/health) — живость + гео (colo) + реальные egress-IP.
-        Аналог «Проверить все» для прокси, но для CF-релея."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.cf_pool_manager import check_pool
-            return _json_resp(await check_pool(pool, uid))
-        except Exception:
-            log.exception("cf_pool_check uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def cf_pool_assign(request: web.Request) -> web.Response:
-        """Раздать существующий пул аккаунтам без релея (напр. добавленным после
-        деплоя) — без пересоздания воркеров. Прокси-аккаунты не трогаются."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.cf_pool_manager import sync_relay_assignment
-            return _json_resp(await sync_relay_assignment(pool, uid))
-        except Exception:
-            log.exception("cf_pool_assign uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def cf_pool_clear(request: web.Request) -> web.Response:
-        """Снести пул: удалить воркеры в CF, очистить БД, снять cf_relay_url."""
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.cf_pool_manager import clear_pool
-            c = await _cf_resolve_creds(uid)
-            return _json_resp(await clear_pool(pool, uid, c["api_token"],
-                                               c["account_id"]))
-        except Exception:
-            log.exception("cf_pool_clear uid=%s", uid)
-            return _err(_INTERNAL_ERROR, 500)
 
     async def transport_get(request: web.Request) -> web.Response:
         """Текущий способ получения IP на аккаунт: прокси / IPv6 / CF-релей / прямое.
@@ -15246,7 +14697,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
                 "AND proxy_id IS NOT NULL", uid) or 0)
             ipv6 = await db.get_ipv6_subnet(pool, uid)
-            c = await _cf_resolve_creds(uid)
+            c = await cf_resolve_creds(pool, uid)
             cf_ready = bool(c["has_token"] and c["account_id"])
             # приоритет для аккаунта без своего прокси
             if ipv6:
@@ -15304,12 +14755,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("transport_ipv6_save uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    app.router.add_get("/api/miniapp/cf/pool/status", cf_pool_status)
-    app.router.add_post("/api/miniapp/cf/pool/deploy", cf_pool_deploy)
-    app.router.add_post("/api/miniapp/cf/pool/check", cf_pool_check)
-    app.router.add_post("/api/miniapp/cf/pool/assign", cf_pool_assign)
-    app.router.add_post("/api/miniapp/cf/pool/clear", cf_pool_clear)
-    app.router.add_post("/api/miniapp/cf/credentials", cf_credentials_save)
     app.router.add_get("/api/miniapp/transport", transport_get)
     app.router.add_post("/api/miniapp/transport/ipv6", transport_ipv6_save)
 

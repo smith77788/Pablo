@@ -61,6 +61,20 @@ PIN = re.compile(
     r'|getsource\(\s*_?mini_app_api\b')
 
 
+# Третий вид — ЧЕРЕЗ `__file__` ИМПОРТИРОВАННОГО МОДУЛЯ
+# (`from services import mini_app_api as M` … `Path(M.__file__).read_text()`).
+# Это тоже чтение текста монолита, но в нём нет ни имени файла, ни точек, и
+# первые две версии измерителя его не видели: так пряталось СЕМЬ наборов,
+# каждый из которых краснел бы при выносе своего участка. Обычный импорт без
+# `__file__` под привязку не попадает — вызов ручки переезд переживает.
+def _module_file_pins(text: str) -> bool:
+    for alias in re.findall(r"from services import mini_app_api(?:\s+as\s+(\w+))?",
+                            text):
+        if re.search(re.escape(alias or "mini_app_api") + r"\.__file__", text):
+            return True
+    return False
+
+
 def _pinned() -> list[str]:
     out = []
     for path in sorted(TESTS.glob("test_*.py")):
@@ -74,7 +88,7 @@ def _pinned() -> list[str]:
                          "test_workflow_actions_go_through_the_engine.py"):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        if PIN.search(text):
+        if PIN.search(text) or _module_file_pins(text):
             out.append(path.name)
     return out
 

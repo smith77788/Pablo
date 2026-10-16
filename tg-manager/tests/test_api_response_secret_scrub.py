@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 from services.secret_masking import scrub_payload
+from tests.miniapp_source import api_source
 
 
 # ── Что закрывается ──────────────────────────────────────────────────────────
@@ -160,7 +161,9 @@ def test_json_resp_source_calls_the_scrub():
 
     from services import mini_app_api as M
 
-    src = open(M.__file__, encoding="utf-8").read()
+    # Весь слой: ручки мини-аппа разъехались по services/mini_app_*.py,
+    # и чтение одного модуля ослепло бы при следующем выносе.
+    src = api_source()
     lines = src.split("\n")
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.FunctionDef) and node.name == "_json_resp":
