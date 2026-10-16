@@ -9648,55 +9648,9 @@ let BOT_SEARCH = '';
 let BOT_FILTER = 'all';
 let _botSearchT = null;
 
-async function loadBots() {
-  try {
-    BOT_OFFSET = 0;
-    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0');
-    BOTS = d.bots||[];
-    BOT_OFFSET = BOTS.length;
-    BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
-    const cntEl = document.getElementById('bots-cnt');
-    if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
-    renderBotFilterChips();
-    renderBots();
-  } catch(e) {
-    const wrap = document.getElementById('botList');
-    if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(errRu(e),'loadBots()'); }
-  }
-}
 
-// «Загрузить ещё» догружает СЛЕДУЮЩУЮ страницу. Раньше эндпоинт не умел offset,
-// и кнопка перезапрашивала срез побольше: 500, потом 1000, потом 1500 — те же
-// строки заново, и всё это с потолком 5000, за которым боты были недостижимы.
-// Выбор хранится по bot_id, догрузка его не рвёт.
-async function loadMoreBots() {
-  if (BOT_LOADING || BOTS.length >= BOT_TOTAL) return;
-  BOT_LOADING = true;
-  const box = document.getElementById('botLoadMore');
-  if (box) box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
-  try {
-    const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=' + BOT_OFFSET);
-    const more = d.bots||[];
-    // Пустая страница (ботов удалили между запросами) — дальше идти некуда,
-    // иначе кнопка «загрузить ещё» осталась бы вечной.
-    if (!more.length) { BOT_TOTAL = BOTS.length; }
-    else {
-      const known = new Set(BOTS.map(b=>String(b.bot_id)));
-      more.forEach(b => { if (!known.has(String(b.bot_id))) BOTS.push(b); });
-      BOT_OFFSET += more.length;
-      if (d.total!=null) BOT_TOTAL = d.total;
-    }
-    const cntEl = document.getElementById('bots-cnt');
-    if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
-    renderBotFilterChips();
-    renderBots();
-    if (BOT_SEL_MODE) updateBotSelBar();
-  } catch(e) {
-    toast('⚠️ '+(errRu(e,'Ошибка').substring(0,60)));
-    // Не оставляем застрявшую крутилку: у сценария всегда есть видимый выход.
-    if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
-  } finally { BOT_LOADING = false; }
-}
+
+
 
 // Состояние бота одним словом: ok | degraded | broken | off (services/bot_health.py).
 // Старые ответы без health не должны выпадать из срезов — отсюда запасной разбор.
@@ -9716,286 +9670,31 @@ function _botsFiltered() {
     return ((b.first_name||'') + ' @' + (b.username||'') + ' ' + (b.bot_id||'')).toLowerCase().includes(q);
   });
 }
-function onBotSearch(v) {
-  BOT_SEARCH = (v||'').trim().toLowerCase();
-  clearTimeout(_botSearchT);
-  _botSearchT = setTimeout(()=>{ renderBotFilterChips(); renderBots(); }, 200);
-}
-function filterBots(mode) {
-  BOT_FILTER = mode;
-  renderBotFilterChips();
-  renderBots();
-  try { tg.HapticFeedback?.selectionChanged(); } catch(_) {}
-}
-function resetBotFilters() {
-  BOT_SEARCH = ''; BOT_FILTER = 'all';
-  const i = document.getElementById('botSearch'); if (i) i.value = '';
-  renderBotFilterChips(); renderBots();
-}
-function renderBotFilterChips() {
-  const box = document.getElementById('botFilterChips');
-  if (!box) return;
-  const by = {ok:0, problem:0, off:0};
-  BOTS.forEach(b => { const st=_botState(b); if (st==='ok') by.ok++; else if (st==='off') by.off++; else by.problem++; });
-  // Пустой срез не показываем: чип, за которым никого нет, — обещание без содержания.
-  const defs = [['all','Все',BOTS.length], ['problem','⚠️ Проблема',by.problem],
-                ['ok','🟢 Работают',by.ok], ['off','⏸ Выключены',by.off]];
-  const vis = defs.filter(([k,,n]) => k==='all' || n>0);
-  // Активный срез мог опустеть после перезагрузки — иначе список остался бы
-  // пустым, а чипа, которым это снять, на экране уже нет.
-  if (!vis.some(([k]) => k === BOT_FILTER)) BOT_FILTER = 'all';
-  if (vis.length <= 1) { box.style.display='none'; box.innerHTML=''; return; }
-  box.style.display='flex';
-  box.innerHTML = vis.map(([k,lbl,n]) =>
-    `<span class="lf-chip${BOT_FILTER===k?' on':''}" role="button" tabindex="0" aria-pressed="${BOT_FILTER===k}" onclick="filterBots('${k}')">${lbl} ${n}</span>`).join('');
-}
-// Остаток списка — честной строкой, а не молчанием.
-function renderBotLoadMore(shownCount) {
-  const box = document.getElementById('botLoadMore');
-  if (!box) return;
-  const loaded = BOTS.length;
-  if (!loaded || loaded >= BOT_TOTAL) { box.innerHTML=''; return; }
-  const filtering = !!(BOT_SEARCH || BOT_FILTER !== 'all');
-  // Поиск идёт по загруженным: «ничего не найдено» при неполном списке — не
-  // ответ, а половина ответа. Говорим, сколько именно просмотрено.
-  //
-  // Прежде здесь была и вторая строка — «больше сервер за раз не отдаёт, сузьте
-  // поиск», — которая появлялась на потолке 5000. Выполнить этот совет было
-  // нельзя: поиск шёл по тем же загруженным строкам, и остальные боты не
-  // доставались никак. Потолка больше нет, страницы идут по offset до конца.
-  const note = filtering
-    ? `Найдено ${shownCount!=null?shownCount:0} среди загруженных ${loaded} из ${BOT_TOTAL}.`
-    : '';
-  box.innerHTML = (note ? `<div class="lst-more-note">${esc(note)}</div>` : '')
-    + `<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${loaded} из ${BOT_TOTAL}</button>`;
-}
 
-// Скан флота на ботов: спрашивает @BotFather от лица каждого аккаунта.
-// Токены при этом не добываются — это отдельный диалог на каждого бота;
-// задача скана быстро показать, ЧТО есть и на каком аккаунте.
-async function scanFleetBots() {
-  if (!await askConfirm('Спросить @BotFather на каждом аккаунте флота, какие боты им принадлежат?\nЭто займёт время: обращения к BotFather разносятся, чтобы не ловить лимиты.')) return;
-  try {
-    const r = await api('/api/miniapp/bots/scan_fleet', {method:'POST', body:'{}'});
-    toast('🔍 Скан запущен' + (r.op_id ? ' · операция #'+r.op_id : ''));
-    if (r.op_id) pollOpResult(r.op_id, 'Скан флота на ботов');
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
-}
-// Подключение найденных пакетом: скан даёт username, а подключить бота можно
-// только по токену — его отдаёт сам @BotFather по кнопке «API Token».
-// Без этого список найденных был бы тупиком: видно, но сделать нельзя.
-async function connectDiscoveredBots() {
-  if (!await askConfirm('Подключить найденных ботов?\nInfragram спросит их токены у @BotFather от лица аккаунтов-владельцев. Это займёт время: обращения разносятся, чтобы не ловить лимиты.')) return;
-  try {
-    const r = await api('/api/miniapp/bots/connect_discovered', {method:'POST', body:'{}'});
-    toast('🔌 Подключение запущено' + (r.op_id ? ' · операция #'+r.op_id : ''));
-    if (r.op_id) pollOpResult(r.op_id, 'Подключение найденных ботов', loadBots);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,140)); }
-}
-// Включить режим bot-to-bot у сети — нужно для координации ботов (Bot Mesh).
-// Первый прогон делаем канарейкой на 2 ботах: разбор меню BotFather зависит от
-// локали и на живой сессии не выверен, лучше проверить на паре.
-async function enableBotMesh() {
-  const canary = await askConfirm(
-    'Включить режим bot-to-bot у сети ботов?\n\n'
-    + 'Это нужно, чтобы боты координировали задачи между собой. Включает '
-    + 'аккаунт-владелец через @BotFather.\n\n'
-    + 'РЕКОМЕНДУЕМ начать с проверки на 2 ботах: разбор меню BotFather зависит '
-    + 'от языка интерфейса. Нажмите ОК для канарейки (2 бота) или Отмена.');
-  if (!canary) return;
-  try {
-    const r = await api('/api/miniapp/bots/enable_b2b',
-      {method:'POST', body: JSON.stringify({limit: 2})});
-    toast('🕸 Включение запущено на 2 ботах' + (r.op_id ? ' · #'+r.op_id : ''));
-    if (r.op_id) pollOpResult(r.op_id, 'Включение bot-to-bot (канарейка)', loadBots);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,140)); }
-}
-// Полноценный экран, а не всплывающее окно: из списка найденных надо уметь
-// ДЕЙСТВОВАТЬ — подключить конкретного бота или открыть управление уже
-// подключённым. Раньше это был текст без единого действия.
-async function showDiscoveredBots() {
-  push('s-foundbots');
-  txt('foundBotsStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('foundBotsList','');
-  try {
-    const d = await api('/api/miniapp/bots/discovered');
-    const bots = d.bots||[];
-    const pending = (d.total||0) - (d.connected||0);
-    txt('foundBotsStats', `
-      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Найдено</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.connected,'green')}">${d.connected||0}</div><div class="kpi-lbl">Подключено</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="color:${pending?'var(--orange,#f59e0b)':'var(--hint)'}">${pending}</div><div class="kpi-lbl">Осталось</div></div>`);
-    if (!bots.length) {
-      txt('foundBotsList', empty('🤖','Найденных ботов пока нет','Запустите скан флота — Infragram спросит @BotFather на каждом аккаунте',{label:'🔍 Найти на флоте',fn:'scanFleetBots()'}));
-      return;
-    }
-    txt('foundBotsList', bots.map(b=>`
-      <div class="row" style="border-left:3px solid ${b.connected?'var(--green)':'var(--orange,#f59e0b)'}">
-        <div class="row-ico" style="background:var(--bg2)">${b.connected?'✅':'🤖'}</div>
-        <div class="row-body">
-          <div class="row-name">@${esc(b.username)}</div>
-          <div class="row-val">${b.connected?'подключён — доступно управление':'не подключён'}${b.account?' · '+esc(b.account):''}</div>
-        </div>
-        <div class="row-right">
-          ${b.connected
-            ? `<button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0" onclick="openBotByUsername('${esc(b.username)}')">⚙️ Управление</button>`
-            : `<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="connectOneBot('${esc(b.username)}')">🔌 Подключить</button>`}
-        </div>
-      </div>`).join(''));
-  } catch(e) {
-    txt('foundBotsList', empty('⚠️','Ошибка',errRu(e)));
-    txt('foundBotsStats', '');
-  }
-}
-// Подключить одного конкретного бота из найденных.
-async function connectOneBot(uname) {
-  try {
-    const r = await api('/api/miniapp/bots/connect_discovered',
-                        {method:'POST', body:JSON.stringify({usernames:[uname]})});
-    toast('🔌 Подключаю @'+uname + (r.op_id ? ' · #'+r.op_id : ''));
-    if (r.op_id) pollOpResult(r.op_id, 'Подключение @'+uname, showDiscoveredBots);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,140)); }
-}
-// Открыть меню управления уже подключённым ботом по его username.
-async function openBotByUsername(uname) {
-  try {
-    // Наполняем тот же кэш, что и экран ботов, вместе с его счётчиками: иначе
-    // следующая «загрузить ещё» пошла бы с нулевого offset и запросила бы
-    // первую страницу заново.
-    if (!BOTS || !BOTS.length) {
-      const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0');
-      BOTS = d.bots||[];
-      BOT_OFFSET = BOTS.length;
-      BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
-    }
-    const b = (BOTS||[]).find(x => String(x.username||'').toLowerCase() === String(uname).toLowerCase());
-    if (!b) { toast('⚠️ Бот ещё не появился в списке — обновите раздел «Боты»'); return; }
-    openBot(b.bot_id);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); }
-}
 
-function renderBots() {
-  const wrap = document.getElementById('botList');
-  if (!wrap) return;
-  // Пустой список ≠ «ботов нет»: боты могли быть созданы с аккаунтов флота, а
-  // скан ресурсов их никогда не находил (бот — не канал). Даём найти их, а не
-  // только вставлять токены руками по одному.
-  if (!BOTS.length) { wrap.className=''; wrap.innerHTML = empty('🤖','Нет подключённых ботов','Боты, созданные с ваших аккаунтов, можно найти сканом флота — или подключить по токену от @BotFather',{label:'🔍 Найти ботов на флоте',fn:'scanFleetBots()'}); renderBotLoadMore(0); return; }
-  const _list = _botsFiltered();
-  // Пустой результат поиска ≠ «ботов нет»: разные причины, разный выход.
-  if (!_list.length) {
-    wrap.className='';
-    wrap.innerHTML = empty('🔍','Ничего не найдено',
-      'Ни один бот не подходит под поиск и выбранный срез',
-      {label:'✖️ Сбросить поиск и срез', fn:'resetBotFilters()'});
-    renderBotLoadMore(0);
-    return;
-  }
-  wrap.className = 'bot-cards';
-  wrap.innerHTML = _list.map(b=>{
-    // Показываем ИМЯ бота (first_name) как основную подпись, @username — второй
-    // строкой (раньше выводился только @username, имя не было видно вовсе).
-    const name = b.first_name || (b.username?'@'+b.username:'Бот #'+b.bot_id);
-    const handle = (b.first_name && b.username) ? '@'+b.username : '';
-    const initials = (b.first_name||b.username||'Бот').replace('@','').slice(0,2).toUpperCase();
-    const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
-    const active = b.is_active;
-    const subs = b.subscriber_count||0;
-    const sel = BOT_SEL.has(b.bot_id);
-    const handleHtml = handle ? `<div class="bot-card-lbl" style="margin-top:-2px">${esc(handle)}</div>` : '';
-    if (BOT_SEL_MODE) {
-      return `<div class="bot-card ${sel?'sel':''}" onclick="toggleBotSel(${b.bot_id})">
-        <div class="bot-card-ava" style="background:${grad}">${initials}</div>
-        <div class="bot-card-name">${esc(name)}</div>
-        ${handleHtml}
-        <div class="bot-card-subs">${num(subs)}</div>
-        <div class="bot-card-lbl">подписчиков</div>
-        <span class="badge ${sel?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${sel?'✓ Выбран':'Выбрать'}</span>
-      </div>`;
-    }
-    // Честное состояние: бот с отозванным токеном выглядел здесь ровно как
-    // рабочий — «🟢 Активен», — пока подписчики писали ему и не получали
-    // ответа. Знал об этом только серверный лог.
-    const h = b.health || {};
-    const badge = (active && h.label && h.state && h.state!=='ok')
-      ? `<span class="badge b-gy" style="margin-top:4px;display:inline-flex;background:var(--bg2);color:${h.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(h.label)}</span>`
-      : `<span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'⏸ Убран из работы'}</span>`;
-    // Кнопка на карточке была 🗑 и обещала удаление, которого в продукте нет:
-    // и она, и «⏸ Выключить» на экране бота снимают ОДИН И ТОТ ЖЕ is_active.
-    // Корзина на уже выключенном боте вообще не делала ничего видимого —
-    // «удаляла» второй раз то, что уже убрано. Один выключатель, два
-    // направления, честная подпись.
-    return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
-      <div class="bot-card-del" title="${active?'Убрать из работы':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${esc(name)}',${!!active})">${active?'⏻':'▶️'}</div>
-      <div class="bot-card-ava" style="background:${grad}">${initials}</div>
-      <div class="bot-card-name">${esc(name)}</div>
-      ${handleHtml}
-      <div class="bot-card-subs">${num(subs)}</div>
-      <div class="bot-card-lbl">подписчиков</div>
-      ${badge}
-    </div>`;
-  }).join('');
-  renderBotLoadMore(_list.length);
-}
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ── Режим выбора ботов и массовая рассылка ──────────────
 let BOT_SEL_MODE = false;
 let BOT_SEL = new Set();
-function toggleBotSelMode() {
-  BOT_SEL_MODE = !BOT_SEL_MODE;
-  BOT_SEL.clear();
-  const btn = document.getElementById('botSelToggle');
-  if (btn) btn.textContent = BOT_SEL_MODE ? '✖️ Отмена' : '☑️ Выбрать';
-  document.getElementById('botSelBar').style.display = BOT_SEL_MODE ? '' : 'none';
-  renderBots();
-  updateBotSelBar();
-}
-function toggleBotSel(id) {
-  if (BOT_SEL.has(id)) BOT_SEL.delete(id); else BOT_SEL.add(id);
-  renderBots();
-  updateBotSelBar();
-}
-// «Все» — это все, кто сейчас в списке после поиска и среза. Раньше сюда
-// попадали все ЗАГРУЖЕННЫЕ боты, тогда как в шапке стояло полное число: при 700
-// ботах и срезе в 500 рассылка молча уходила по неполному списку.
-function botSelAll() {
-  const list = _botsFiltered();
-  list.forEach(b=>BOT_SEL.add(b.bot_id));
-  renderBots(); updateBotSelBar();
-  if (BOTS.length < BOT_TOTAL) {
-    toast(`Выбрано ${list.length} · загружено ${BOTS.length} из ${BOT_TOTAL}`);
-  }
-}
-function botSelClear() { BOT_SEL.clear(); renderBots(); updateBotSelBar(); }
-function updateBotSelBar() {
-  const el = document.getElementById('botSelCount');
-  if (el) el.textContent = 'Выбрано: '+BOT_SEL.size;
-}
-function openBotBroadcast() {
-  if (!BOT_SEL.size) { toast('❗ Выберите хотя бы одного бота'); return; }
-  document.getElementById('bbText').value='';
-  { const _b=document.getElementById('bbButtons'); if(_b) _b.value=''; }
-  document.getElementById('bbErr').textContent='';
-  document.getElementById('bbHint').textContent = `Сообщение получат подписчики ${BOT_SEL.size} ${plural(BOT_SEL.size,'выбранному боту','выбранным ботам','выбранным ботам')}.`;
-  showModal('mo-bot-broadcast');
-}
-async function submitBotBroadcast() {
-  const errEl=document.getElementById('bbErr'); errEl.textContent='';
-  const text=document.getElementById('bbText').value.trim();
-  if(!text){ errEl.textContent='Введите текст рассылки'; return; }
-  const buttons = parseInlineButtons(document.getElementById('bbButtons')?.value||'');
-  const preview = `Отправить рассылку по ${BOT_SEL.size} ${plural(BOT_SEL.size,'боту','ботам','ботам')}?\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
-    + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'');
-  if (!await askConfirm(preview)) return;
-  const btn=document.getElementById('bbBtn'); btn.disabled=true; btn.textContent='Запускаю…';
-  try {
-    const _p={text, bot_ids:[...BOT_SEL]}; if(buttons.length) _p.buttons=buttons;
-    const r=await api('/api/miniapp/network_broadcast',{method:'POST',body:JSON.stringify(_p)});
-    toast(`📢 Рассылка запущена: ${r.broadcasts_created||BOT_SEL.size} ботов, ${r.total_recipients||0} получателей`);
-    closeModal('mo-bot-broadcast'); toggleBotSelMode();
-  } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
-}
+
+
+
+
+
+
+
 
 async function submitQuickBroadcast() {
   const text=document.getElementById('quickBcText').value.trim();
@@ -10032,181 +9731,15 @@ async function submitQuickChannel() {
   } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
 }
 
-async function submitQuickBot() {
-  const token=document.getElementById('quickBotToken').value.trim();
-  const errEl=document.getElementById('quickBotErr'); errEl.textContent='';
-  if(!token){ errEl.textContent='Введите токен бота'; return; }
-  try {
-    const r=await api('/api/miniapp/bot/add',{method:'POST',body:JSON.stringify({token})});
-    // Вставленный токен уже существующего бота — это замена отозванного.
-    // Говорим об этом прямо и подчёркиваем, что аудитория цела: раньше в этом
-    // месте отвечали «уже добавлен», токен не менялся, и бот молчал дальше.
-    toast(!r.already_exists ? `✅ Бот @${r.username} добавлен!`
-          : (r.token_replaced ? `🔑 Токен @${r.username} заменён — подписчики и воронки сохранены`
-                              : `✅ Бот @${r.username} уже добавлен`));
-    document.getElementById('quickBotToken').value='';
-    loadBots();
-  } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
-}
 
-// Починка молчащего бота: ведём туда, где вставляется токен. Отдельной формы
-// не заводим — «добавить бота» теперь и есть замена токена, и раздваивать
-// путь значило бы держать две двери в одну комнату.
-function openBotTokenFix(){
-  back();
-  const inp=document.getElementById('quickBotToken');
-  if(inp){ inp.focus(); inp.scrollIntoView({behavior:'smooth', block:'center'}); }
-  toast('🔑 Получите новый токен у @BotFather и вставьте его сюда');
-}
 
-async function openBot(botId) {
-  const b = BOTS.find(x=>x.bot_id==botId);
-  const name = b?(b.username?'@'+b.username:(b.first_name||'Бот #'+botId)):'Бот';
-  CUR_BOT = {id:botId, name};
-  txt('bd-name', name);
-  txt('bd-body', '<div class="spin-wrap"><div class="spin"></div></div>');
-  push('s-botdetail');
-  try {
-    const d = await api('/api/miniapp/bot/'+botId);
-    txt('bd-body', buildBotDetail(d));
-    modernizeIcons(document.getElementById('s-botdetail'));
-  } catch(e) {
-    txt('bd-body', errHtml(errRu(e)));
-  }
-}
 
-// Убрать бота из работы или вернуть обратно. Раньше это были ДВА разных
-// действия с разными словами — «🗑 Убрать» и «⏸ Выключить», — а по факту оба
-// снимали один флаг is_active. Корзина обещала удаление, которого продукт не
-// делает: подписчики, воронки и история остаются на месте, бот просто уходит
-// из работы и из списка в боте. Обещать удаление того, что не удаляется,
-// нельзя, поэтому действие одно и подпись у него правдивая.
-async function botPowerConfirm(botId, name, isActive) {
-  if (isActive) {
-    if (!await askConfirm(`Убрать бота ${name} из работы?\n\nОн перестанет забирать обновления и пропадёт из списка в боте. Подписчики, воронки и история сохранятся — вернуть можно здесь же кнопкой «Вернуть в работу».`)) return;
-  }
-  try {
-    if (isActive) {
-      await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
-      toast('⏸ Бот убран из работы — данные сохранены');
-    } else {
-      await api('/api/miniapp/bot/'+botId+'/toggle', {method:'PUT'});
-      toast('🟢 Бот вернулся в работу');
-    }
-    loadBots();
-    if (document.getElementById('s-botdetail')?.classList.contains('show')) openBot(botId);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
-}
 
-function buildBotDetail(d) {
-  const b = d.bot;
-  const bname = b.username ? '@'+b.username : (b.first_name || 'Бот #'+b.bot_id);
-  const initials = (b.first_name||bname).replace('@','').slice(0,2).toUpperCase();
-  const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
-  const bid = b.bot_id;
-  const bn = esc(CUR_BOT.name);
 
-  // Почему бот молчит — и что с этим делать. Раньше карточка молчащего бота
-  // выглядела как карточка рабочего: «🟢 Активен», подписчики пишут, ответа
-  // нет, и объяснения нигде. Восстановление тоже не подсказывалось, а
-  // единственный доступный путь (удалить и добавить заново) стирал аудиторию.
-  const bh = b.health || {};
-  const bhBanner = (bh.state && bh.state!=='ok' && bh.hint)
-    ? `<div style="margin:8px 0;padding:11px 13px;background:var(--bg2);border-left:3px solid ${bh.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'};border-radius:8px">
-         <div style="font-weight:600;font-size:14px">${esc(bh.label)}</div>
-         <div style="font-size:12px;color:var(--hint);margin-top:5px;line-height:1.45">${esc(bh.hint)}</div>
-         ${bh.kind==='unauthorized'?`<button class="btn btn-p" style="width:100%;margin-top:9px;font-size:13px;padding:9px" onclick="openBotTokenFix()">🔑 Вставить новый токен</button>`:''}
-       </div>`
-    : '';
 
-  // Management sections as tile grids
-  const mgmtSections = [
-    { title:'Рассылки и воронки', tiles:[
-      {ico:'📢',lbl:'Рассылка',       fn:`openBcastForBot(${bid},'${bn}',${d.active_subscribers})`},
-      {ico:'🔄',lbl:'Воронки',        fn:`openBotFunnels(${bid},'${bn}')`},
-      {ico:'💬',lbl:'Авто-ответы',    fn:`openArScreen()`},
-      {ico:'🧑‍💼',lbl:'Менеджер',      fn:`openSalesManager(${bid})`},
-      {ico:'⏰',lbl:'Расписание',     fn:`openSchedule(${bid},'${bn}')`},
-      {ico:'🔀',lbl:'Авто-воронки',  fn:`openAutoFunnels()`},
-      {ico:'🎯',lbl:'Аудитория',      fn:`openAudience(${bid},'${bn}')`},
-      {ico:'🛡',lbl:'Защита от накрутки', fn:`openFloodGuard(${bid})`},
-    ]},
-    { title:'Аналитика', tiles:[
-      {ico:'📊',lbl:'Статистика',     fn:`openBotStats(${bid},'${bn}')`},
-      {ico:'👥',lbl:'Подписчики',     fn:`openBotSubs(${bid},'${bn}')`},
-      {ico:'🔥',lbl:'Активность',     fn:`openEngagement(${bid})`},
-      {ico:'🔍',lbl:'Позиции',        fn:`openKeywordsScreen()`},
-      {ico:'🧬',lbl:'ДНК аудит.',     fn:`openAudienceDna()`},
-      {ico:'🧠',lbl:'ИИ Память',      fn:`openAiMemory()`},
-    ]},
-    { title:'Инструменты', tiles:[
-      {ico:'🌐',lbl:'Глобал. поиск',  fn:`openGlobalSearch()`},
-      {ico:'💬',lbl:'Входящие',       fn:`openRelay(${bid},'${bn}')`},
-      {ico:'🔗',lbl:'Диплинки',       fn:`openDeeplinks(${bid})`},
-      {ico:'⌨️',lbl:'Команды',        fn:`openBotCommands(${bid})`},
-      {ico:'🔗',lbl:'Вебхук',        fn:`openBotWebhook(${bid},'${bn}')`},
-      {ico:'🌍',lbl:'Мультигео',      fn:`openMultigeo()`},
-      {ico:'📝',lbl:'Заметка',        fn:`openBotNote(${bid})`},
-    ]},
-  ];
 
-  const bcasts = (d.recent_broadcasts||[]).length
-    ? `<div class="bc-table">
-        <div class="bc-head"><span>Рассылка</span><span style="text-align:center">✓</span><span style="text-align:center">✕</span><span>Статус</span></div>
-        ${d.recent_broadcasts.slice(0,4).map(bc=>`<div class="bc-row">
-          <div class="bc-cell">${esc((bc.message_text||'').substring(0,28))}${(bc.message_text||'').length>28?'…':''}</div>
-          <div class="bc-num" style="color:var(--green)">${num(bc.sent_count)}</div>
-          <div class="bc-num" style="color:var(--red)">${num(bc.failed_count)}</div>
-          <div class="bc-cell"><span class="badge ${stb(bc.status)[0]}">${stb(bc.status)[1]}</span></div>
-        </div>`).join('')}
-      </div>`
-    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Рассылок ещё не было</div></div>`;
 
-  const subs = (d.recent_users||[]).length
-    ? `<div class="lst">${d.recent_users.slice(0,5).map(u=>`<div class="li" style="cursor:default">
-        <div class="ava ava-teal">👤</div>
-        <div class="li-body">
-          <div class="li-name">${esc(u.first_name||(u.username?'@'+u.username:'Пользователь '+u.user_id))}</div>
-          <div class="li-sub">${u.is_active?'🟢 Активен':'🔴 Неактивен'} · ${ago(u.last_seen)}</div>
-        </div>
-      </div>`).join('')}</div>`
-    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Подписчиков нет</div></div>`;
 
-  return `
-    <div class="bot-phdr">
-      <div class="bot-phdr-ava" style="background:${grad}">${initials}</div>
-      <div class="bot-phdr-body">
-        <div class="bot-phdr-name">${esc(bname)}</div>
-        <div class="bot-phdr-sub">${num(d.active_subscribers)} активных · ${num(d.total_subscribers)} всего</div>
-        ${(bh.state&&bh.state!=='ok')?`<span class="badge b-gy" style="background:var(--bg2);color:${bh.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(bh.label)}</span>`
-          : (b.is_active?'<span class="badge b-gr">🟢 Активен</span>':'<span class="badge b-gy">Выключен</span>')}
-      </div>
-    </div>
-    ${bhBanner}
-    <div class="kpi-bar">
-      <div class="kpi-col"><div class="kpi-val" style="color:var(--green)">${num(d.active_subscribers)}</div><div class="kpi-lbl">Активных</div></div>
-      <div class="kpi-col"><div class="kpi-val">${num(d.total_subscribers)}</div><div class="kpi-lbl">Всего подп.</div></div>
-      <div class="kpi-col"><div class="kpi-val" style="color:var(--orange)">${num(d.active_funnels)}</div><div class="kpi-lbl">Воронок</div></div>
-      <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${num(d.auto_replies)}</div><div class="kpi-lbl">Авто-отв.</div></div>
-    </div>
-    <div style="display:flex;gap:8px;padding:4px 0 4px">
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px${b.is_active?';color:var(--red)':''}" onclick="botPowerConfirm(${bid},'${bn}',${!!b.is_active})">${b.is_active?'⏸ Убрать из работы':'▶️ Вернуть в работу'}</button>
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
-    </div>
-    ${mgmtSections.map(s=>`
-      <div class="sec">${s.title}</div>
-      <div class="mgmt-grid">
-        ${s.tiles.map(t=>`<div class="mgmt-tile" onclick="${t.fn}">
-          <div class="mgmt-tile-ico">${t.ico}</div>
-          <div class="mgmt-tile-lbl">${t.lbl}</div>
-        </div>`).join('')}
-      </div>`).join('')}
-    <div class="sec" style="margin-top:8px">Последние рассылки</div>
-    ${bcasts}
-    <div class="sec" style="margin-top:8px">Последние подписчики</div>
-    ${subs}
-    <div style="height:16px"></div>`;
-}
 
 // ── Auto-replies ───────────────────────────────────────
 async function openArScreen() {
@@ -10360,29 +9893,7 @@ async function saveAutoReply() {
   } finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
 }
 
-// ── Bot Funnels ────────────────────────────────────────
-async function openBotFunnels(botId, botName) {
-  txt('bf-name', 'Воронки · '+botName);
-  txt('bfList', '<div class="spin-wrap"><div class="spin"></div></div>');
-  push('s-botfunnels');
-  try {
-    const d = await api('/api/miniapp/bot/'+botId+'/funnels');
-    const fns = d.funnels||[];
-    if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Воронка ведёт подписчика по шагам автоматически',
-      {label:'➕ Создать воронку', fn:'openFunnelModal()'})); return; }
-    txt('bfList', fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc(f.name||'Воронка')}')">
-      <div class="ava ava-orange">🔄</div>
-      <div class="li-body">
-        <div class="li-name">${esc(f.name||'Воронка')}</div>
-        <div class="li-sub">Активных: ${num(f.active_subs||0)} · Завершено: ${num(f.total_subs||0)}</div>
-      </div>
-      <div class="li-right">
-        <div class="toggle ${f.is_active?'on':'off'}" onclick="event.stopPropagation();toggleFunnel(${f.id},this)"></div>
-        <span class="chev">›</span>
-      </div>
-    </div>`).join(''));
-  } catch(e) { txt('bfList', errHtml(errRu(e))); }
-}
+
 
 async function toggleFunnel(id, el) {
   const wasOn = el.classList.contains('on');
@@ -11157,31 +10668,7 @@ async function openAccountChannels(accId) {
   } catch(e) { txt('acchanList', errHtml(errRu(e),'openAccountChannels('+accId+')')); }
 }
 
-// Боты, СОЗДАННЫЕ через этот аккаунт (managed_bots.acc_id). Боты, добавленные по
-// токену вручную, к аккаунту не привязаны и сюда не попадают — только в общий
-// раздел. Выбор → карточка бота (openBot) с управлением.
-async function openAccountBots(accId) {
-  ACC_CONSOLE_ID = accId;
-  push('s-accbots');
-  txt('accbotList', '<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const d = await api('/api/miniapp/account/'+accId+'/bots');
-    const list = d.bots || [];
-    if (!list.length) {
-      txt('accbotList', empty('🤖','У аккаунта нет ботов',
-        'Боты, созданные через этот аккаунт в фабрике, появятся здесь. Добавленные по токену вручную — в общем разделе «Боты».'));
-      return;
-    }
-    txt('accbotList', list.map(b => {
-      const name = esc(b.first_name || (b.username ? '@'+b.username : 'Бот #'+b.bot_id));
-      const sub = [b.username?'@'+esc(b.username):'', b.is_active?'🟢 активен':'⚪ выключен'].filter(Boolean).join(' · ');
-      return `<div class="li tap" onclick="openBot(${b.bot_id})">
-        <div class="row-ico" style="background:var(--bg-green-16)">🤖</div>
-        <div class="li-body"><div class="li-name">${name}</div><div class="li-sub">${sub}</div></div>
-        <div class="li-right"><span class="chev">›</span></div></div>`;
-    }).join(''));
-  } catch(e) { txt('accbotList', errHtml(errRu(e),'openAccountBots('+accId+')')); }
-}
+
 
 async function openAccountContacts(accId) {
   ACC_CONSOLE_ID = accId;
@@ -12128,32 +11615,9 @@ function openBcastPick() {
   tg.HapticFeedback?.impactOccurred('medium');
 }
 
-function openBcastForBot(botId, botName, recipCount) {
-  if (!BOTS.length) BOTS = [{bot_id:botId, username:botName.replace('@',''), subscriber_count:recipCount}];
-  fillBcastBots(botId);
-  document.getElementById('bcastText').value='';
-  { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
-  { const _bs=document.getElementById('bcastSilent'); if(_bs) _bs.checked=false; }
-  { const _sg=document.getElementById('bcastSegment'); if(_sg) _sg.value='all'; }
-  { const _sc=document.getElementById('bcastSchedule'); if(_sc) _sc.value='0'; }
-  document.getElementById('bcastLen').textContent='0';
-  document.getElementById('bcastErr').style.display='none';
-  document.getElementById('bcastBtn').disabled=false;
-  document.getElementById('bcastBtn').textContent='📢 Отправить';
-  updateBcastRecip();
-  _restoreBcastForm();
-  document.getElementById('bcastMbg').classList.add('show');
-  tg.HapticFeedback?.impactOccurred('medium');
-}
 
-function fillBcastBots(selectedId) {
-  const sel = document.getElementById('bcastBot');
-  sel.innerHTML = BOTS.map(b=>{
-    const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-    return `<option value="${b.bot_id}" data-subs="${b.subscriber_count||0}" ${b.bot_id==selectedId?'selected':''}>${esc(name)} (${num(b.subscriber_count||0)} подп.)</option>`;
-  }).join('');
-  sel.addEventListener('change', updateBcastRecip);
-}
+
+
 
 async function updateBcastRecip() {
   const sel = document.getElementById('bcastBot');
@@ -13087,44 +12551,10 @@ async function loadAnalytics() {
 // ── Bot toggle ─────────────────────────────────────────
 // ── Настройки профиля бота (имя/описание) ──────────────
 let BP_BOT_ID = null;
-function openBotProfile(botId) {
-  BP_BOT_ID = botId;
-  ['bpName','bpDesc','bpShort','bpAvatar'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  const e=document.getElementById('bpErr'); if(e) e.textContent='';
-  showModal('mo-bot-profile');
-}
-async function setBotAvatar() {
-  const url=document.getElementById('bpAvatar').value.trim();
-  const errEl=document.getElementById('bpErr'); errEl.textContent='';
-  if(!url){ errEl.textContent='Вставьте https URL картинки'; return; }
-  toast('🖼 Загружаю аватар…');
-  try {
-    const r=await api('/api/miniapp/bot/'+BP_BOT_ID+'/avatar',{method:'POST',body:JSON.stringify({photo_url:url})});
-    if(r.ok) toast('✅ Аватар обновлён'); else errEl.textContent='Не удалось поставить аватар';
-  } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
-}
-async function deleteBotAvatar() {
-  if(!await askConfirm('Удалить аватар бота?')) return;
-  try {
-    const r=await api('/api/miniapp/bot/'+BP_BOT_ID+'/avatar',{method:'DELETE'});
-    if(r.ok) toast('✅ Аватар удалён');
-  } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
-}
-async function submitBotProfile() {
-  const errEl=document.getElementById('bpErr'); errEl.textContent='';
-  const name=document.getElementById('bpName').value.trim();
-  const description=document.getElementById('bpDesc').value.trim();
-  const short_description=document.getElementById('bpShort').value.trim();
-  if(!name && !description && !short_description){ errEl.textContent='Заполните хотя бы одно поле'; return; }
-  const btn=document.getElementById('bpBtn'); btn.disabled=true; btn.textContent='Сохраняю…';
-  try {
-    const payload={}; if(name)payload.name=name; if(description)payload.description=description; if(short_description)payload.short_description=short_description;
-    const r=await api('/api/miniapp/bot/'+BP_BOT_ID+'/profile',{method:'POST',body:JSON.stringify(payload)});
-    if(r.ok){ toast('✅ Профиль бота обновлён'); closeModal('mo-bot-profile'); }
-    else { errEl.textContent='Telegram отклонил изменение (проверьте текст/лимиты)'; }
-  } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='Сохранить'; }
-}
+
+
+
+
 
 // ── Funnel Detail ──────────────────────────────────────
 let CUR_FUNNEL_ID = null;
@@ -15561,51 +14991,9 @@ let BS_BOT_ID = null;
 let BS_OFFSET = 0;
 let BS_TOTAL = 0;
 
-async function openBotSubs(botId, botName) {
-  BS_BOT_ID = botId;
-  BS_OFFSET = 0;
-  txt('bs-name', 'Подписчики · '+botName);
-  txt('bs-cnt', '');
-  txt('bsList', '<div class="spin-wrap"><div class="spin"></div></div>');
-  document.getElementById('bs-more').style.display='none';
-  push('s-botsubs');
-  await loadBotSubs(false);
-}
 
-async function loadBotSubs(append) {
-  try {
-    const d = await api('/api/miniapp/bot/'+BS_BOT_ID+'/subscribers?offset='+BS_OFFSET);
-    const subs = d.subscribers||[];
-    BS_TOTAL = d.total||0;
-    txt('bs-cnt', BS_TOTAL+' подп.');
-    if (!subs.length && !append) {
-      txt('bsList', empty('👥','Нет подписчиков','Бот ещё не получил подписчиков'));
-      return;
-    }
-    const html = subs.map(u=>{
-      const name = u.first_name||(u.username?'@'+u.username:'Пользователь '+u.user_id);
-      return `<div class="li" style="cursor:default">
-        <div class="ava ava-teal">👤</div>
-        <div class="li-body">
-          <div class="li-name">${esc(name)}${u.username?' <span style="color:var(--hint)">@'+esc(u.username)+'</span>':''}</div>
-          <div class="li-sub">${u.is_active?'🟢 Активен':'🔴 Неактивен'} · ${ago(u.last_seen)}</div>
-        </div>
-        <span class="badge ${u.is_active?'b-gr':'b-gy'}">#${u.user_id}</span>
-      </div>`;
-    }).join('');
-    if (append) {
-      document.getElementById('bsList').insertAdjacentHTML('beforeend', html);
-    } else {
-      txt('bsList', html);
-    }
-    BS_OFFSET += subs.length;
-    const moreEl = document.getElementById('bs-more');
-    moreEl.style.display = (BS_OFFSET < BS_TOTAL) ? 'block' : 'none';
-  } catch(e) {
-    if (!append) txt('bsList', errHtml(errRu(e)));
-    else toast('⚠️ '+errRu(e,'Ошибка').substring(0,60));
-  }
-}
+
+
 
 async function loadMoreSubs() {
   await loadBotSubs(true);
@@ -15692,27 +15080,7 @@ function renderCmpSegments() {
   }).join('');
 }
 
-function updateCmpTargetBot() {
-  const type = document.getElementById('cmpTargetType').value;
-  const bf = document.getElementById('cmpBotField');
-  const cf = document.getElementById('cmpCohortField');
-  const imf = document.getElementById('cmpImportField');
-  const sf = document.getElementById('cmpSegmentField');
-  const needBot = (type==='bot_users' || type==='cohort');
-  bf.style.display = needBot ? 'block' : 'none';
-  if (cf) cf.style.display = (type==='cohort') ? 'block' : 'none';
-  if (imf) imf.style.display = (type==='import_list') ? 'block' : 'none';
-  if (sf) {
-    sf.style.display = (type==='segment') ? 'block' : 'none';
-    if (type==='segment') loadCmpSegments();
-  }
-  if (needBot) {
-    document.getElementById('cmpBot').innerHTML = BOTS.length ? BOTS.map(b=>{
-      const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-      return `<option value="${b.bot_id}">${esc(name)} (${num(b.subscriber_count||0)} подп.)</option>`;
-    }).join('') : '<option value="">Нет ботов — добавьте бота</option>';
-  }
-}
+
 
 // Локальный предпросмотр Spintax: тот же {A|B} что движок разворачивает на отправке.
 function previewCmpSpintax() {
@@ -16076,10 +15444,7 @@ let NOTE_BOT_ID = null;
 // поздний ответ первого приземлялся в поле второго.
 let _noteReq = 0;   // токен запроса: чужой ответ не приземляется в открытое поле
 
-async function openBotNote(botId) {
-  push('s-botnote');
-  _botNoteLoad(botId);
-}
+
 // Повтор после сбоя вызывает ИМЕННО загрузку: push() ещё раз положил бы тот же
 // экран в стек, и «назад» пришлось бы жать дважды.
 async function _botNoteLoad(botId) {
@@ -16110,48 +15475,13 @@ async function _botNoteLoad(botId) {
       + `onclick="_botNoteLoad(${Number(botId)})">↺ Повторить</span>`;
   }
 }
-async function saveBotNote() {
-  const ta = document.getElementById('noteText');
-  const errEl = document.getElementById('noteErr');
-  // Сохранять то, чего не видели, нельзя: прошлая заметка ушла бы под запись.
-  if (!ta.dataset.loaded) {
-    errEl.textContent = 'Заметка ещё не загрузилась — сохранение затёрло бы прошлую.';
-    return;
-  }
-  const note = ta.value.trim();
-  errEl.textContent='';
-  try {
-    await api('/api/miniapp/bot/'+NOTE_BOT_ID+'/note', {method:'PUT', body:JSON.stringify({note})});
-    toast(note ? '✅ Заметка сохранена' : '🗑 Заметка удалена');
-    back();
-  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-}
+
 
 // ── Bot Commands ────────────────────────────────────────
 let CMD_BOT_ID = null;
 let CMD_LIST = [];
-async function openBotCommands(botId) {
-  CMD_BOT_ID = botId;
-  push('s-botcommands');
-  loadBotCommands();
-}
-async function loadBotCommands() {
-  txt('cmdList', '<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const d = await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands');
-    CMD_LIST = d.commands||[];
-    if (!CMD_LIST.length) { txt('cmdList', empty('⌨️','Нет команд','Добавьте первую команду')); return; }
-    txt('cmdList', CMD_LIST.map((c,i)=>`
-      <div class="row">
-        <div class="row-body">
-          <div class="row-name">/${esc(c.command)}</div>
-          <div class="row-val">${esc(c.description)}</div>
-        </div>
-        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteCmd(${i})" aria-label="Удалить">✕</button></div>
-      </div>
-    `).join(''));
-  } catch(e) { txt('cmdList', empty('⚠️','Ошибка',errRu(e))); }
-}
+
+
 function openCmdModal() {
   document.getElementById('cmdName').value='';
   document.getElementById('cmdDesc').value='';
@@ -16187,14 +15517,7 @@ async function deleteCmd(idx) {
     loadBotCommands();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
-async function clearBotCommands() {
-  if (!await askConfirm('Удалить все команды бота?')) return;
-  try {
-    await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:[]})});
-    toast('🗑 Все команды удалены');
-    loadBotCommands();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
-}
+
 
 // ── Bot Stats (detailed) ───────────────────────────────
 let BSTATS_BOT_ID = null;
@@ -16203,66 +15526,7 @@ let BSTATS_BOT_ID = null;
 // в имени бота бывают кавычки и апострофы.
 let BSTATS_BOT_NAME = '';
 let BSTATS_SUBS = 0;
-async function openBotStats(botId, botName) {
-  BSTATS_BOT_ID = botId;
-  BSTATS_BOT_NAME = botName || '';
-  txt('bstats-title', '📊 ' + (botName || 'Статистика бота'));
-  push('s-botstats');
-  txt('bstatsGrid', '<div class="spin-wrap" style="grid-column:1/-1"><div class="spin"></div></div>');
-  txt('bstatsChart', '');
-  txt('bstatsDetails', '');
-  try {
-    const d = await api('/api/miniapp/bot/'+botId+'/stats');
-    BSTATS_SUBS = d.aud_total||0;
-    // Четырнадцать чисел, из которых не нажималось ни одно: «Воронок 3» — а
-    // каких, «Рассылок 12» — а чем кончились. Каждое число ведёт туда, где
-    // стоит то, что оно посчитало.
-    const kpis = [
-      {v:num(d.aud_total),l:'Аудитория',go:'bstatsGo("subs")'},
-      {v:'+'+num(d.aud_today),l:'Новых за 24ч',go:'bstatsGo("subs")'},
-      {v:num(d.broadcasts_total),l:'Рассылок',go:'bstatsGo("bcast")'},
-      {v:num(d.broadcasts_sent),l:'Отправлено',go:'bstatsGo("bcast")'},
-      {v:num(d.active_replies),l:'Авто-ответов',go:'bstatsGo("ar")'},
-      {v:num(d.active_funnels),l:'Воронок',go:'bstatsGo("funnels")'},
-      {v:num(d.relay_sessions),l:'Диалогов',go:'bstatsGo("relay")'},
-      {v:num(d.funnel_users),l:'В воронках',go:'bstatsGo("funnels")'},
-    ];
-    txt('bstatsGrid', kpis.map(k=>`<div class="card" style="text-align:center;cursor:pointer" onclick='${k.go}' role="button" tabindex="0"><div style="font-size:22px;font-weight:700">${k.v}</div><div style="font-size:11px;color:var(--hint);margin-top:2px">${k.l} ›</div></div>`).join(''));
-    // Draw simple bar chart for daily growth
-    const daily = d.daily_growth||[];
-    if (daily.length) {
-      const maxC = Math.max(...daily.map(d2=>d2.count),1);
-      const bars = daily.map(d2=>{
-        const h = Math.max(4, Math.round(d2.count/maxC*60));
-        // ММ-ДД читалось как «10-05»: в русской записи это пятое октября,
-        // а выглядело как десятое мая. Переворачиваем в ДД.ММ.
-        const date = d2.date.slice(8,10) + '.' + d2.date.slice(5,7);
-        return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">
-          <div style="font-size:10px;color:var(--hint)">${num(d2.count)}</div>
-          <div style="width:100%;height:${h}px;background:#7c3aed;border-radius:3px"></div>
-          <div style="font-size:10px;color:var(--hint)">${date}</div>
-        </div>`;
-      }).join('');
-      txt('bstatsChart', `<div style="display:flex;align-items:flex-end;gap:4px;height:80px">${bars}</div>`);
-    } else {
-      txt('bstatsChart', '<div class="empty-inline">Пока не из чего строить график: нужны хотя бы сутки с новыми подписчиками</div>');
-    }
-    const compl = d.funnel_total_subs ? Math.round(d.funnel_completed/d.funnel_total_subs*100) : 0;
-    const dRow = (name, val, go) => `<div class="li tap" onclick='${go}' role="button" tabindex="0">
-      <div class="li-body"><div class="li-name">${name}</div></div>
-      <div class="li-right">${val}</div><span class="chev">›</span></div>`;
-    txt('bstatsDetails',
-      dRow('Входящих сообщений', num(d.msg_in), 'bstatsGo("relay")')
-      + dRow('Исходящих сообщений', num(d.msg_out), 'bstatsGo("relay")')
-      + dRow('Новых диалогов за 24ч', num(d.relay_today), 'bstatsGo("relay")')
-      + dRow('Завершили воронку', num(d.funnel_completed)+' ('+compl+'%)', 'bstatsGo("funnels")')
-      + dRow('Покинули воронку', num(d.funnel_dropped||0), 'bstatsGo("funnels")')
-      + dRow('Рост за 7 дней', '+'+num(d.aud_week), 'bstatsGo("subs")'));
-  } catch(e) {
-    txt('bstatsChart', ''); txt('bstatsDetails', '');
-    txt('bstatsGrid', `<div style="grid-column:1/-1">${errHtml(errRu(e), `openBotStats(${Number(botId)}, ${JSON.stringify(String(botName||''))})`)}</div>`);
-  }
-}
+
 
 // Куда ведёт каждое число статистики. Одной таблицей, а не строкой в onclick:
 // имя бота уходит вторым аргументом, и подставлять его в разметку опасно —
@@ -17141,22 +16405,7 @@ async function runSeoAnalyze() {
     txt('seoResult', empty('⚠️','Ошибка',errRu(e)||'Не удалось проанализировать'));
   }
 }
-// Применить рекомендацию по переоптимизации бота (имя/краткое описание) в один клик
-async function applyBotSeo(botId, btn) {
-  if (!await askConfirm('Применить рекомендацию (имя/краткое описание) к боту?')) return;
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
-  try {
-    const r = await api('/api/miniapp/seo/apply_bot', {method:'POST', body:JSON.stringify({bot_id:botId})});
-    const parts = r.applied||[];
-    const errs = (r.errors||[]).join('; ');
-    toast(parts.length ? ('✅ Применено: '+parts.join(', ')+(errs?(' · ошибки: '+errs):'')) : ('⚠️ '+(errs||'без изменений')));
-    openSeo();
-  } catch(e) {
-    toast('⚠️ '+errRu(e,'Ошибка'));
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
-  }
-}
+
 // Тумблер авто-переоптимизации ботов при падении позиции (opt-in)
 async function toggleReopt(el) {
   try {
@@ -20106,119 +19355,9 @@ function bfSetMode(mode) {
   if (btn) btn.textContent = isNew ? '🏭 Создать ботов' : '➕ Добавить бота';
 }
 
-async function openBotFactory() {
-  push('s-botfactory');
-  txt('botFactoryStats','<div class="spin-wrap"><div class="spin"></div></div>');
-  txt('botFactoryRecent','');
-  bfSetMode(_BF_MODE);
-  // Аккаунты для режима «создать новых»: каждый выбранный пишет @BotFather.
-  _renderContactAccPicker('bfAccts', []);
-  // Пока идёт запрос, в выпадашке висели экосистемы с ПРОШЛОГО открытия — и
-  // бот привязывался к той, которую человек выбрал из устаревшего списка.
-  { const _bfE = document.getElementById('bfEcosystem');
-    if (_bfE) _bfE.innerHTML = '<option value="">Загрузка экосистем…</option>'; }
-  // Load ecosystems
-  try {
-    const ecos = await api('/api/miniapp/ecosystems');
-    const sel = document.getElementById('bfEcosystem');
-    // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
-    // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
-    // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
-    // оставалось одно «Не привязывать». То есть привязать к экосистеме было
-    // нельзя, сколько бы их владелец ни создал.
-    const ecoList = Array.isArray(ecos) ? ecos : [];
-    sel.innerHTML = '<option value="">Не привязывать</option>' +
-      ecoList.map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
-  } catch(e) {
-    const sel = document.getElementById('bfEcosystem');
-    if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
-      + '<option value="" disabled>⚠️ Экосистемы не загрузились</option>';
-  }
-  // Load stats and recent
-  try {
-    const d = await api('/api/miniapp/bot_factory');
-    txt('botFactoryStats',`
-      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего ботов</div></div>
-      <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active,'green')}">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
-    `);
-    txt('m-botfactory-val',`${d.total||0} ботов · ${d.active||0} активных`);
-    const recent = d.recent||[];
-    txt('botFactoryRecent', recent.length ? recent.map(b=>`
-      <div class="row">
-        <div class="row-ico" style="background:var(--bg-green-16)">${b.is_active?'🟢':'🔴'}</div>
-        <div class="row-body">
-          <div class="row-name">@${esc(b.username||b.first_name||b.bot_id)}</div>
-          <div class="row-val">${(b.added_at||b.created_at)?new Date(b.added_at||b.created_at).toLocaleDateString('ru-RU'):''}</div>
-        </div>
-      </div>
-    `).join('') : empty('🤖','Нет ботов','Добавьте первый бот'));
-  } catch(e) {
-    txt('botFactoryStats','');
-    txt('botFactoryRecent', empty('⚠️','Ошибка',errRu(e)));
-  }
-}
 
-async function submitBotFactory() {
-  const token = document.getElementById('bfToken').value.trim();
-  const name = document.getElementById('bfName').value.trim();
-  const username = document.getElementById('bfUsername').value.trim();
-  const desc = document.getElementById('bfDesc').value.trim();
-  const shortDesc = document.getElementById('bfShortDesc').value.trim();
-  const ecosystemId = document.getElementById('bfEcosystem').value;
-  const errEl = document.getElementById('bfErr');
-  const btn = document.getElementById('bfBtn');
-  errEl.textContent = '';
-  if (!name) { errEl.textContent = 'Введите имя бота (можно спинтакс)'; return; }
 
-  // РЕЖИМ «создать новых» — реальная операция через @BotFather (как в боте).
-  if (_BF_MODE === 'new') {
-    const accts = [...document.querySelectorAll('#bfAccts .ca-acc-cb:checked')].map(cb => +cb.value);
-    const cnt = Math.max(1, parseInt(document.getElementById('bfCount').value) || 1);
-    if (!accts.length) { errEl.textContent = 'Выберите хотя бы один аккаунт для @BotFather'; return; }
-    const total = accts.length * cnt;
-    if (!await askConfirm(`Создать ${total} бот(ов) через @BotFather на ${accts.length} ${plural(accts.length,'аккаунте','аккаунтах','аккаунтах')}? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
-    btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь...';
-    try {
-      const bfNameMode = document.getElementById('bfNameMode')?.value || 'keywords';
-      const r = await api('/api/miniapp/bot_factory/create_new', {method:'POST', body:JSON.stringify({
-        account_ids: accts, count: cnt, name_template: name, uname_template: username, name_mode: bfNameMode,
-      })});
-      tg.HapticFeedback?.notificationOccurred('success');
-      toast(`🏭 Создание ${r.count || total} бот(ов) запущено · операция #${r.op_id}`);
-      if (r.op_id) pollOpResult(r.op_id, 'Фабрика ботов');
-      openBotFactory();
-    } catch(e) {
-      errEl.textContent = errRu(e);
-      tg.HapticFeedback?.notificationOccurred('error');
-    } finally { btn.disabled = false; bfSetMode(_BF_MODE); }
-    return;
-  }
 
-  // РЕЖИМ «по токену» — регистрация уже созданного бота.
-  if (!token) { errEl.textContent = 'Введите токен бота'; return; }
-  btn.disabled = true; btn.textContent = '⏳ Создание...';
-  try {
-    const r = await api('/api/miniapp/bot_factory/create', {method:'POST', body:JSON.stringify({
-      token, name, username, description: desc, short_description: shortDesc,
-      ecosystem_id: ecosystemId ? +ecosystemId : null,
-    })});
-    tg.HapticFeedback?.notificationOccurred('success');
-    // Честный итог: один бот, синхронно, с перечнем реально применённых настроек.
-    const applied = (r && r.applied_settings || []).length;
-    toast(r && r.already_exists
-      ? 'ℹ️ Бот уже был добавлен'
-      : `✅ Бот @${(r && r.username) || ''} добавлен${applied ? ` · настроек применено: ${applied}` : ''}`);
-    document.getElementById('bfToken').value = '';
-    document.getElementById('bfName').value = '';
-    document.getElementById('bfUsername').value = '';
-    document.getElementById('bfDesc').value = '';
-    document.getElementById('bfShortDesc').value = '';
-    openBotFactory();
-  } catch(e) {
-    errEl.textContent = errRu(e);
-    tg.HapticFeedback?.notificationOccurred('error');
-  } finally { btn.disabled = false; bfSetMode(_BF_MODE); }
-}
 
 // ── Persona Hub ─────────────────────────────────────────
 const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Непринуждённый',expert:'🔬 Эксперт',friendly:'🤗 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
@@ -22341,17 +21480,8 @@ function meshDropText(r) {
   if (!r) return '';
   return MESH_DROP[r] || r;
 }
-// Приёмная половина Bot Mesh была написана целиком, а НАЧАТЬ цепочку было
-// нечем: `bot_mesh.make_envelope`/`create_task` не вызывал никто. Поэтому
-// таблица всегда пустая, и экран честно показывал «Задач между ботами нет» —
-// и всегда бы показывал. Отсюда цепочка запускается.
-async function meshBots() {
-  if (!BOTS || !BOTS.length) { const d = await api('/api/miniapp/bots'); BOTS = d.bots||[]; }
-  return (BOTS||[]).filter(b => b.bot_id);
-}
-function meshBotLabel(b) {
-  return b.username ? '@'+b.username : (b.first_name || ('бот #'+b.bot_id));
-}
+
+
 
 async function meshNewTask() {
   let bots;
@@ -22409,90 +21539,13 @@ async function meshStopTask() {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 let MESH_LIMIT = 30;
-async function openBotMeshMore() { MESH_LIMIT += 200; await openBotMesh(true); }
-async function openBotMesh(keep) {
-  if (!keep) { MESH_LIMIT = 30; push('s-botmesh'); }
-  if (!keep) txt('botmeshList','<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const d = await api('/api/miniapp/mesh/tasks?limit='+MESH_LIMIT);
-    const tasks = listOf(d,'tasks');
-    const total = totalOf(d, tasks);
-    const cntLbl = total ? num(total)+' '+plural(total,'задача','задачи','задач') : '';
-    txt('botmeshCount', cntLbl);
-    txt('m-botmesh-val', cntLbl);
-    if (!tasks.length) {
-      txt('botmeshList', empty('🔗','Цепочек ещё не было',
-        'Цепочка — это задача, которую боты передают друг другу по маршруту. Запустите первую и увидите здесь, где она сейчас.',
-        {label:'+ Запустить цепочку', fn:'meshNewTask()'}));
-      return;
-    }
-    txt('botmeshList', tasks.map(t=>{
-      const [cls, lbl] = MESH_ST[t.status] || ['b-gy', t.status||''];
-      const steps = (t.route||[]).length;
-      const where = steps
-        ? `шаг ${num(Math.min((t.step||0)+1, steps))} из ${num(steps)}`
-        : 'маршрут пуст';
-      const path = (t.route||[])
-        .map(r=>esc(r.bot_name || ('бот #'+r.bot)))
-        .join(' → ');
-      const drop = t.drop_reason ? ' · '+esc(meshDropText(t.drop_reason)) : '';
-      return `<div class="li tap" onclick="openBotMeshTask('${esc(t.task_id)}')">
-        <div class="ava ava-blue">🔗</div>
-        <div class="li-body">
-          <div class="li-name">${path || 'Задача без маршрута'}</div>
-          <div class="li-sub">${esc(where)} · передач ${num(t.depth||0)}${drop}</div>
-          <div class="li-sub" style="opacity:.7">${ago(t.created_at)}</div>
-        </div>
-        <span class="badge ${cls}">${lbl}</span>
-      </div>`;
-    }).join('') + moreBtn(tasks.length, total, 'openBotMeshMore()'));
-  } catch(e) { txt('botmeshList', errHtml(errRu(e), 'openBotMesh()')); }
-}
+
+
 // Повтор без аргумента невозможен — id задачи держим рядом, как у других
 // экранов-карточек: onclick не унесёт строку в кавычках без риска.
 let _MESH_TASK_ID = null;
-function retryBotMeshTask() { if (_MESH_TASK_ID) openBotMeshTask(_MESH_TASK_ID, true); }
-async function openBotMeshTask(taskId, keep) {
-  _MESH_TASK_ID = taskId;
-  if (!keep) push('s-botmeshdetail');
-  txt('botmeshDetail','<div class="spin-wrap"><div class="spin"></div></div>');
-  try {
-    const d = await api('/api/miniapp/mesh/task/'+encodeURIComponent(taskId));
-    const [cls, lbl] = MESH_ST[d.status] || ['b-gy', d.status||''];
-    const hops = d.hops||[];
-    txt('botmeshStop', d.status === 'running'
-      ? '<button class="btn btn-d" style="padding:7px 14px;font-size:13px" onclick="meshStopTask()">Прервать</button>'
-      : '');
-    const head = `<div class="card" style="margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <span class="badge ${cls}">${lbl}</span>
-        <span style="font-size:12px;color:var(--hint)">${ago(d.created_at)}</span>
-      </div>
-      <div style="font-size:13px">Запустил: ${esc(d.origin_name || 'неизвестно')}</div>
-      <div style="font-size:13px">Передач: ${num(d.depth||0)}</div>
-      ${d.drop_reason?`<div style="font-size:13px;color:var(--orange)">Брошена: ${esc(meshDropText(d.drop_reason))}</div>`:''}
-    </div>`;
-    if (!hops.length) {
-      txt('botmeshDetail', head + empty('🔗','Передач ещё не было',
-        'Задача создана, но первый шаг пока не выполнен'));
-      return;
-    }
-    const OUT = {accepted:['b-bl','принято'], handled:['b-gr','выполнено'],
-                 dropped:['b-or','отброшено'], failed:['b-rd','ошибка']};
-    txt('botmeshDetail', head + '<div class="lst">' + hops.map(h=>{
-      const [oc, ol] = OUT[h.outcome] || ['b-gy', h.outcome||''];
-      return `<div class="li">
-        <div class="ava ava-purple">${num((h.step||0)+1)}</div>
-        <div class="li-body">
-          <div class="li-name">${esc(h.from_name)} → ${esc(h.to_name)}</div>
-          <div class="li-sub">${h.capability?esc(h.capability)+' · ':''}${ago(h.created_at)}</div>
-          ${h.reason?`<div class="li-sub" style="color:var(--orange)">${esc(meshDropText(h.reason))}</div>`:''}
-        </div>
-        <span class="badge ${oc}">${ol}</span>
-      </div>`;
-    }).join('') + '</div>');
-  } catch(e) { txt('botmeshDetail', errHtml(errRu(e), 'retryBotMeshTask()')); }
-}
+
+
 
 let NOTARY_LIMIT = 100;
 async function openNotaryMore() { NOTARY_LIMIT += 400; await openNotary(true); }
@@ -27084,28 +26137,8 @@ async function launchSelfPromo(id,btn) {
   finally { btn.disabled=false; btn.textContent='▶ Разослать'; }
 }
 
-// ── Bot Add Modal ──────────────────────────────────────
-function openBotAddModal() {
-  document.getElementById('botAddToken').value = '';
-  document.getElementById('botAddErr').textContent = '';
-  showModal('mo-bot-add');
-}
-async function submitBotAdd() {
-  const token = document.getElementById('botAddToken').value.trim();
-  const errEl = document.getElementById('botAddErr');
-  const btn = document.getElementById('botAddBtn');
-  errEl.textContent = '';
-  if (!token) { errEl.textContent = 'Введите токен'; return; }
-  btn.disabled = true; btn.textContent = 'Проверяем...';
-  try {
-    const r = await api('/api/miniapp/bot/add', {method:'POST', body:JSON.stringify({token})});
-    const name = r.username ? '@'+r.username : r.first_name || '';
-    toast(r.already_exists ? '✅ Бот '+name+' уже в вашем аккаунте' : '✅ Бот '+name+' добавлен!');
-    closeModal('mo-bot-add');
-    loadBots();
-  } catch(e) { errEl.textContent = errRu(e); }
-  finally { btn.disabled = false; btn.textContent = '➕ Добавить бота'; }
-}
+
+
 
 // ── Node Modal ─────────────────────────────────────────
 function openNodeModal() {
@@ -29460,5 +28493,9 @@ function renderAudSegChart(segments) {
 <script src="screens/shield_check.js"></script>
 <script src="screens/account_login.js"></script>
 <script src="screens/accounts_list.js"></script>
+<script src="screens/bots_list.js"></script>
+<script src="screens/bot_detail.js"></script>
+<script src="screens/bot_factory.js"></script>
+<script src="screens/bot_mesh.js"></script>
 </body>
 </html>

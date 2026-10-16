@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,7 +38,7 @@ def _handler(name: str) -> str:
 
 
 def _fn(name: str) -> str:
-    html = INDEX.read_text(encoding="utf-8")
+    html = miniapp_source()
     m = re.search(r"(?:async\s+)?function " + re.escape(name) + r"\s*\([^)]*\)\s*\{", html)
     assert m, f"{name} не найдена"
     i, depth = m.end() - 1, 0
@@ -101,7 +101,7 @@ def test_endpoint_accepts_multi_account():
 
 
 def test_ui_has_both_modes_and_real_fields():
-    html = INDEX.read_text(encoding="utf-8")
+    html = miniapp_source()
     assert 'id="bfAccts"' in html, "мультивыбор аккаунтов для @BotFather — часть реального пути"
     assert 'id="bfCount"' in html, "количество ботов реально поддерживается операцией"
     assert 'bfSetMode(' in html, "нужен явный переключатель режимов, а не одна лгущая форма"

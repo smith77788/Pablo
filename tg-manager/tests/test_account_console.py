@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = Path(__file__).resolve().parents[1]
 API = api_source()
-HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+HTML = miniapp_source()
 
 _DIV = re.compile(r"<(/?)div\b", re.I)
 

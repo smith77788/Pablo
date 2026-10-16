@@ -21,7 +21,7 @@ import ast
 import functools
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "mini_app", "index.html")
@@ -30,8 +30,7 @@ MESH = os.path.join(ROOT, "services", "bot_mesh.py")
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
-    with open(HTML, encoding="utf-8") as f:
-        return f.read()
+    return miniapp_source()
 
 
 @functools.lru_cache(maxsize=1)

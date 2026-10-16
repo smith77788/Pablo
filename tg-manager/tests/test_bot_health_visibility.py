@@ -30,11 +30,11 @@ from services import bot_health as BH
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py
 # (и ещё девять модулей mini_app_*). Одна дверь — tests/miniapp_source.
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 _API = api_source()
 _AR = (_ROOT / "services" / "auto_responder.py").read_text(encoding="utf-8")
 _DB = (_ROOT / "database" / "db.py").read_text(encoding="utf-8")
-_UI = (_ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
+_UI = miniapp_source()
 
 
 def _func_src(src: str, name: str) -> str:

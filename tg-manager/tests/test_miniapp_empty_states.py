@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.miniapp_source import miniapp_source
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "mini_app" / "index.html"
 
@@ -24,7 +26,7 @@ BASELINE_CTA = 19
 
 
 def _html() -> str:
-    return INDEX.read_text(encoding="utf-8")
+    return miniapp_source()
 
 
 def _call_args(src: str, start: int) -> list[str]:

@@ -12,7 +12,7 @@ import ast
 import functools
 import os
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_source, miniapp_source
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -26,7 +26,7 @@ def _api_src() -> str:
 
 @functools.lru_cache(maxsize=1)
 def _html() -> str:
-    return open(HTML, encoding="utf-8").read()
+    return miniapp_source()
 
 
 def _api_func(name: str) -> str:

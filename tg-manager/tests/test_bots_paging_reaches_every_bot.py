@@ -30,6 +30,8 @@ from aiohttp import web
 
 from services import mini_app_api as M
 
+from tests.miniapp_source import miniapp_source
+
 INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
 UID = 770451
 
@@ -196,7 +198,7 @@ def test_count_and_list_agree_on_the_same_column():
 
 def _fn(name: str) -> str:
     """Тело функции по балансу фигурных скобок."""
-    src = INDEX.read_text("utf-8")
+    src = miniapp_source()
     m = re.search(r"^(?:async )?function " + re.escape(name) + r"\s*\(", src, re.M)
     assert m, f"функция {name} не найдена"
     i = src.index("{", m.end() - 1)
@@ -233,14 +235,14 @@ def test_load_more_survives_an_empty_page():
 
 
 def test_no_unreachable_ceiling():
-    src = INDEX.read_text("utf-8")
+    src = miniapp_source()
     assert "BOT_MAX" not in src, (
         "вернулся потолок загрузки: боты за ним недостижимы никаким действием")
 
 
 def test_screen_does_not_advise_the_impossible():
     """«Сузьте поиск» нельзя выполнить, пока поиск идёт по загруженному."""
-    src = re.sub(r"^\s*//.*$", "", INDEX.read_text("utf-8"), flags=re.M)
+    src = re.sub(r"^\s*//.*$", "", miniapp_source(), flags=re.M)
     assert "больше сервер за раз не отдаёт" not in src, (
         "экран снова советует сузить поиск вместо того, чтобы отдать страницу")
 

@@ -12,12 +12,14 @@ from __future__ import annotations
 import os
 import re
 
+from tests.miniapp_source import miniapp_source
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = os.path.join(ROOT, "mini_app", "index.html")
 
 
 def _fn_source(name: str) -> str:
-    html = open(INDEX, encoding="utf-8").read()
+    html = miniapp_source()
     i = html.find(f"function {name}(")
     assert i != -1, f"не найдена функция {name}"
     # грубая вырезка тела функции: до следующего объявления функции верхнего уровня
@@ -36,14 +38,14 @@ def test_failure_banner_has_one_tap_retry():
 
 
 def test_success_banner_offers_next_step():
-    html = open(INDEX, encoding="utf-8").read()
+    html = miniapp_source()
     # карта следующих шагов и её применение в плашке
     assert "const _OP_NEXT" in html and "function _opNextBtn" in html
     assert "_opNextBtn(op)" in _fn_source("showOpComplete")
 
 
 def test_next_step_targets_are_real_and_guarded():
-    html = open(INDEX, encoding="utf-8").read()
+    html = miniapp_source()
     i = html.find("const _OP_NEXT")
     body = html[i:i + 500]
     fns = set(re.findall(r"fn:'([a-zA-Z0-9_]+)'", body))
@@ -57,7 +59,7 @@ def test_next_step_targets_are_real_and_guarded():
 def test_next_step_chains_match_copilot():
     """Ключи _OP_NEXT совпадают с триггерами тех же цепочек в next_actions —
     баннер не выдумывает переходы, а ускоряет уже валидированные."""
-    html = open(INDEX, encoding="utf-8").read()
+    html = miniapp_source()
     i = html.find("const _OP_NEXT")
     body = html[i:i + 500]
     keys = set(re.findall(r"^\s*([a-z_]+):\s*\{", body, re.M))
@@ -70,7 +72,7 @@ def test_next_step_chains_match_copilot():
 
 
 def test_retry_uses_existing_endpoint():
-    html = open(INDEX, encoding="utf-8").read()
+    html = miniapp_source()
     assert "/api/miniapp/operation/'+id+'/retry" in html or \
            "/api/miniapp/operation/${id}/retry" in html, \
         "retryOp не бьёт в существующий эндпоинт повтора операции"
