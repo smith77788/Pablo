@@ -14917,6 +14917,12 @@ async def _exec_community_set_staff(
     try:
         chat_id = int(node["tg_chat_id"])
         promoted = 0
+        # Провалы считаются наравне с успехами. Исход операции решает
+        # `op_status.classify_final` по счётчикам, и по тем же счётчикам судят
+        # предохранители (circuit breaker, пейсинг, детектор вспышек банов).
+        # Промоут не проходит ровно там, где у промоутера нет прав или он под
+        # ограничением, — то есть в момент, когда защита обязана увидеть сбой.
+        failed_n = 0
         _done_n = 0
         for aid in acc_ids:
             if await _is_cancelled(pool, op_id):
@@ -14929,6 +14935,7 @@ async def _exec_community_set_staff(
                 pool, "SELECT tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2", aid, owner_id)
             uid_tg = target["tg_user_id"] if target else None
             if not uid_tg:
+                failed_n += 1
                 continue
             try:
                 ok = await account_manager.promote_to_admin(
@@ -14939,11 +14946,18 @@ async def _exec_community_set_staff(
                     await nodes_engine.add_node_member(pool, node_id, aid, role)
                     promoted += 1
                     await _governed_sleep(pool, owner_id, random.uniform(10, 25))
+                else:
+                    failed_n += 1
             except Exception as e:
-                log.debug("_exec_community_set_staff op=%d acc=%s: %s", op_id, aid, e)
+                failed_n += 1
+                # Не debug: отказ промоута — это либо нет прав у промоутера,
+                # либо ограничение на аккаунте, и оба случая нужно видеть.
+                log.warning("_exec_community_set_staff op=%d acc=%s: %s", op_id, aid, e)
         await _mark_progress(pool, op_id, _done_n)
-        return {"status": "done", "promoted": promoted,
-                "summary": f"🛡 Роли ноды: назначено {promoted} ({role})"}
+        _tail = f", не удалось {failed_n}" if failed_n else ""
+        return {"status": "done", "ok": promoted, "failed": failed_n,
+                "promoted": promoted,
+                "summary": f"🛡 Роли ноды: назначено {promoted} ({role}){_tail}"}
     finally:
         await release_accounts([_claimed_acc])
 
