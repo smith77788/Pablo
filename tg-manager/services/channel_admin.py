@@ -790,6 +790,17 @@ _PREAMBLE_WORDS = re.compile(
     r"вимог|готов|ось|вот|держи|конечно|звісно|sure|here|certainly|надеюсь|сподіва)",
     re.IGNORECASE,
 )
+# Слова, с которых НАЧИНАЕТСЯ служебная реплика модели («Звісно, …», «Конечно,
+# …», «Вот …», «Ниже …», «Here …»). Для среза по горизонтальной черте требуем
+# такого зачина, иначе обычный первый абзац, где лишь ВСТРЕТИЛОСЬ слово
+# «пост/текст/готов», да ещё отбитый `---`, срезался бы целиком (ложный
+# срез — он был). Настоящая преамбула почти всегда открывается одним из этих слов.
+_PREAMBLE_OPENER = re.compile(
+    r"^[\"'«»\s]*(?:конечно|разумеется|звісно|безумовно|вот|ось|держи|тримай|"
+    r"ниже|нижче|below|here|sure|certainly|надеюсь|сподіва|готово|готовий|"
+    r"ладно|добре|гаразд|окей|ok|хорошо|так\b)",
+    re.IGNORECASE,
+)
 
 
 def _strip_ai_preamble(t: str) -> str:
@@ -803,12 +814,16 @@ def _strip_ai_preamble(t: str) -> str:
     смысловой разделитель внутри длинного текста, не трогаем.
     """
     s = t.strip()
-    # 1) Преамбула, отбитая горизонтальной чертой.
+    # 1) Преамбула, отбитая горизонтальной чертой. Срезаем, только если «шапка»
+    # ОТКРЫВАЕТСЯ служебным зачином («Звісно, …», «Вот …») И содержит мета-слово:
+    # оба условия вместе отличают реплику модели от обычного первого абзаца,
+    # где слово «пост/текст» лишь встретилось.
     m = _HR_RE.search(s)
     if m:
         head = s[:m.start()].strip()
         rest = s[m.end():].strip()
-        if rest and len(head) <= 220 and _PREAMBLE_WORDS.search(head):
+        if (rest and len(head) <= 220 and _PREAMBLE_OPENER.search(head)
+                and _PREAMBLE_WORDS.search(head)):
             return rest
     # 2) Преамбула первой строкой, оканчивающейся двоеточием («Вот пост:»).
     nl = s.find("\n")
@@ -818,6 +833,29 @@ def _strip_ai_preamble(t: str) -> str:
                 and _PREAMBLE_WORDS.search(first):
             return rest
     return s
+
+
+def sanitize_for_channel(text: str) -> str:
+    """Финальная чистка ПЕРЕД публикацией — закрывает утечку служебного текста.
+
+    Идемпотентна и безопасна для уже чистого поста: срезает только то, что НИКОГДА
+    не должно уйти в канал — код-ограждение, ведущую мета-преамбулу модели
+    («Звісно, ось чорновик поста…» + `---`) и spintax-символы {}|. В отличие от
+    clean_generated НЕ трогает кавычки/markdown: её можно звать повторно на любом
+    пути публикации, не искажая правок владельца.
+
+    Зачем отдельно от clean_generated: тот зовётся при ГЕНЕРАЦИИ (write_post), но
+    в канал пост попадает через единственную дверь publish() и другими путями —
+    автоновости, уже сохранённый ранее черновик, правка владельца. Чистка на самой
+    двери гарантирует, что преамбула не утечёт НИ ОДНИМ путём (жалоба владельца:
+    в канал ушёл текст «Звісно, ось чорновик поста, який відповідає всім вимогам»).
+    """
+    t = (text or "").strip()
+    t = _FENCE_RE.sub("", t).strip()
+    t = _strip_ai_preamble(t)
+    # Фигурные скобки и | публикация развернула бы как spintax.
+    t = t.replace("{", "(").replace("}", ")").replace("|", "/")
+    return t.strip()
 
 
 def clean_generated(text: str, max_chars: int = 4096) -> str:
@@ -1583,6 +1621,56 @@ async def _best_texts(pool, owner_id: int, channel_id: int) -> list[str]:
         return []
 
 
+_DEDUP_SYS = (
+    "Ты — выпускающий редактор Telegram-канала. Тебе дают НОВЫЙ пост и список уже "
+    "опубликованных недавно постов канала. Реши, рассказывает ли НОВЫЙ пост по "
+    "сути ту же новость или событие, что и какой-то из уже опубликованных — ДАЖЕ "
+    "если он на другом языке (украинский/русский) или переписан другими словами. "
+    "Ответь СТРОГО одним JSON без пояснений: {\"duplicate\": true|false}. true — "
+    "это та же новость (дубль, публиковать не нужно); false — это другое событие "
+    "или существенно новый поворот темы."
+)
+
+
+async def is_duplicate_of_recent(pool, owner_id: int, channel_id: int, text: str, *,
+                                 complete: Optional[Complete] = None,
+                                 within_hours: int = 36) -> bool:
+    """Это та же новость, что уже опубликована недавно (в т.ч. на другом языке)?
+
+    Жалоба владельца: один сюжет вышел дважды — по-украински и по-русски. Хэш-дедуп
+    новостей (source:message_id) кросс-язычный дубль не ловит: та же новость из
+    двух источников или двуязычный репост дают разные хэши. Ловит двуязычная
+    модель, сверяя новый текст с недавно опубликованными постами канала.
+
+    Fail-open: нет истории, сбой модели или лимит → False (НЕ блокируем публикацию
+    — редкий дубль лучше, чем заглохший канал).
+    """
+    text = (text or "").strip()
+    if len(text) < 20:
+        return False
+    try:
+        rows = await pool.fetch(
+            "SELECT body FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2 "
+            "AND body IS NOT NULL AND published_at > now() - make_interval(hours => $3) "
+            "ORDER BY published_at DESC LIMIT 8",
+            int(owner_id), str(channel_id), int(within_hours))
+    except Exception:
+        return False
+    recent = [r["body"] for r in rows or [] if (r["body"] or "").strip()]
+    if not recent:
+        return False
+    try:
+        raw = await _ask(
+            complete or _default_complete(), _DEDUP_SYS,
+            f"НОВЫЙ пост:\n{text[:1500]}\n\nУже опубликованные посты канала:\n"
+            + _fence(recent, cap=500))
+    except Exception:
+        log.debug("is_duplicate_of_recent: проверка не удалась", exc_info=True)
+        return False
+    data = _extract_json(raw)
+    return bool(isinstance(data, dict) and data.get("duplicate"))
+
+
 async def _post_context(pool, owner_id: int, channel_id: int, *,
                         plan_item: Optional[dict] = None,
                         news_events: Optional[list[dict]] = None) -> dict:
@@ -1872,6 +1960,13 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
                   media_id: int | None = None, select_media: bool = True) -> int:
     """Опубликовать пост в канал штатной операцией (mass_publish на один канал)."""
     from services import operation_bus, va_control, va_media
+
+    # Финальная защита на единственной двери публикации: ни служебная преамбула
+    # модели, ни код-ограждение, ни spintax-символы не должны уйти в канал, каким
+    # бы путём текст сюда ни пришёл (автоновости, сохранённый черновик, правка).
+    text = sanitize_for_channel(text)
+    if not text:
+        raise ChannelAdminError("После чистки текст поста оказался пустым")
 
     acc_ids = await va_control.eligible_accounts(pool, owner_id, channel_id)
     if not acc_ids:

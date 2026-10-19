@@ -80,6 +80,22 @@ async def _draft_live_news(pool, bot, admin: dict) -> bool:
     try:
         draft = await ca.write_post(pool, owner_id, channel_id,
                                     news_events=list(events), autonomous=is_auto)
+        # Кросс-язычный антидубль: одна и та же новость из двух источников (или
+        # двуязычный репост) проходит хэш-дедуп как разные сигналы. Прежде чем
+        # публиковать/слать на проверку, спрашиваем двуязычную модель, не та ли
+        # это новость, что уже вышла недавно (жалоба владельца: сюжет вышел и
+        # по-украински, и по-русски). Дубль — гасим сигнал, пост не создаём.
+        if draft.text and await ca.is_duplicate_of_recent(
+                pool, owner_id, channel_id, draft.text):
+            await pool.execute(
+                "UPDATE va_news_inbox SET status='published', claimed_at=NULL, "
+                "updated_at=now() WHERE id=ANY($1::bigint[]) AND owner_id=$2 AND channel_id=$3",
+                event_ids, owner_id, channel_id,
+            )
+            await ca.log_event(pool, owner_id, channel_id, "skip",
+                               "Новость пропущена как дубль уже опубликованной "
+                               "(в т.ч. на другом языке)")
+            return True
         sources = sorted({
             f"@{event['source_username']} · {event['published_at'].astimezone(timezone.utc).isoformat()}"
             for event in events if event.get("source_username") and event.get("published_at")
