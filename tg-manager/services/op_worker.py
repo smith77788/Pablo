@@ -426,6 +426,21 @@ _OP_STALL_MIN = _int_env("OP_STALL_MIN", 90, 10, 24 * 60)
 # индикатор.
 _OP_STALL_POLL_S = 60.0
 
+# Через сколько здоровая операция, не уложившаяся в потолок прогона, снова
+# встанет в очередь и ПРОДОЛЖИТСЯ с того же места. Небольшая пауза — чтобы слот
+# параллельности успели занять другие операции владельца (справедливость), а не
+# чтобы наказать длинную работу: для рассылки на десятки часов эти минуты
+# ничтожны. Потолок для такой операции — не провал, а граница куска.
+_OP_CEILING_RESUME_DELAY_S = _int_env("OP_CEILING_RESUME_DELAY_SEC", 120, 10, 3600)
+
+# Абсолютный предел жизни операции по времени от создания — защита в глубину от
+# патологического бесконечного продолжения. На деле недостижим для настоящих
+# исполнителей: чтобы дойти до потолка прогона, операция обязана РЕАЛЬНО двигаться
+# ~6 часов (иначе её раньше убьёт сторож застоя за 90 мин без движения), а целей
+# у неё конечное число. Порог щедрый, чтобы не задеть честную огромную рассылку.
+_OP_CEILING_MAX_LIFETIME_S = _int_env(
+    "OP_CEILING_MAX_LIFETIME_SEC", 30 * 24 * 3600, 6 * 3600, 365 * 24 * 3600)
+
 _POISON_ERROR = (
     "Операция {n} раз(а) прерывалась вместе с воркером и не дошла до конца — "
     "остановлена, чтобы не занимать флот бесконечно. Запустите её заново."
@@ -1567,6 +1582,48 @@ async def _defer_op_for_flood(
             + (f"\n\n<i>{reason[:200]}</i>" if reason else ""),
             dedup_key=f"flood-defer:{op_id}",
         )
+
+
+async def _resume_op_over_ceiling(
+    pool: "asyncpg.Pool", op_id: int, *, bot=None, owner_id: int | None = None,
+    done_so_far: int = 0, total_items: int = 0,
+) -> None:
+    """Вернуть в очередь ЗДОРОВУЮ операцию, не уложившуюся в потолок прогона.
+
+    Тот же механизм, что и у флуд-отсрочки (status='pending', слот и флот
+    освобождаются, done_items сбрасывается — прогресс пересчитается при
+    возобновлении по operation_log, исполнитель пропустит уже взятые цели),
+    но причина другая: не пауза Telegram, а честная длинная работа, которая не
+    укладывается в один прогон. Поэтому и статус остаётся рабочим, и операция
+    НЕ помечается ошибкой — для владельца это «продолжается», а не «упала».
+    """
+    delay = _OP_CEILING_RESUME_DELAY_S
+    await _safe_execute(
+        pool,
+        "UPDATE operation_queue SET status='pending', started_at=NULL, done_items=0, "
+        "acct_wait_since=NULL, last_error=$3, "
+        "scheduled_for = now() + make_interval(secs => $2) WHERE id=$1"
+        f" AND status NOT IN {op_status.sql_terminal_list()}",
+        op_id, float(delay),
+        "Длинная операция продолжается со следующего прогона (потолок времени)",
+        log_ctx=f"[ceiling_resume op={op_id}]")
+    log.info(
+        "op_worker: op=%d достигла потолка прогона на здоровом прогрессе "
+        "(%d/%d) — возвращена в очередь, продолжит с того же места",
+        op_id, done_so_far, total_items,
+    )
+    _reliability_metric("infragram_op_ceiling_resumes_total")
+    _progress = ""
+    if total_items > 0:
+        _progress = f" ({done_so_far}/{total_items})"
+    await _notify_owner_about_op(
+        pool, bot, owner_id,
+        f"⏳ <b>Операция #{op_id}</b>{_progress} идёт дольше одного прогона и "
+        f"продолжится автоматически с того же места.\n\nЭто не ошибка: большой "
+        f"рассылке/набору положено идти часами на безопасном темпе. Отменять и "
+        f"запускать заново не нужно — повтор только сбил бы прогресс.",
+        dedup_key=f"ceiling-resume:{op_id}",
+    )
 
 
 # ── Адаптивный темп по времени суток + ML ─────────────────────────────────────
@@ -4756,6 +4813,18 @@ async def _reschedule_recurring(
             "следующий запуск не удалось поставить из-за технической ошибки")
 
 
+class _OpOverCeiling(Exception):
+    """Операция ЗДОРОВА (двигалась), но не уложилась в потолок прогона.
+
+    Это не зависание и не провал: массовой рассылке положено идти часами
+    (пейсинг против банов), и 2–3 тысячи целей на безопасном темпе физически не
+    укладываются в шесть часов. Сторож застоя (90 мин без движения) сработал бы
+    РАНЬШЕ потолка, если бы операция встала; значит, дойдя до потолка с
+    ненулевым прогрессом, она здорова. Такую операцию не валим, а возвращаем в
+    очередь — она продолжится с того же места (взятые цели сохранены в журнале).
+    """
+
+
 async def _run_with_stall_guard(pool: asyncpg.Pool, coro, op_id: int, op_type: str,
                                 timeout_s: float):
     """Выполнить исполнителя с ДВУМЯ ограничениями: потолок времени и застой.
@@ -4784,6 +4853,13 @@ async def _run_with_stall_guard(pool: asyncpg.Pool, coro, op_id: int, op_type: s
         while True:
             left = deadline - time.monotonic()
             if left <= 0:
+                # Потолок прогона. Здоровую длинную операцию (двигалась в
+                # пределах окна застоя) не валим — её продолжит повтор. Если же
+                # к потолку операция подошла без прогресса (done==0: не взяла ни
+                # одной цели за все часы — скорее всего, повисла на подготовке),
+                # это настоящее зависание: обычный таймаут и честный повтор.
+                if last_done > 0 and (time.monotonic() - last_move) < stall_s:
+                    raise _OpOverCeiling
                 raise asyncio.TimeoutError
             try:
                 return await asyncio.wait_for(
@@ -5131,6 +5207,50 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         pool,
                         _handler(pool, bot, op_id, owner_id, params),
                         op_id, op_type, _timeout_s,
+                    )
+                except _OpOverCeiling:
+                    # Здоровая длинная операция (двигалась вплоть до потолка).
+                    # Не провал: возвращаем в очередь, продолжит с того же места.
+                    # Исключение — операция, живущая от создания дольше
+                    # абсолютного предела (защита в глубину): её проваливаем
+                    # обычным путём, как зависшую.
+                    _crow = await _safe_fetchrow(
+                        pool,
+                        "SELECT done_items, total_items, "
+                        "EXTRACT(EPOCH FROM (now() - created_at)) AS age_s "
+                        "FROM operation_queue WHERE id=$1",
+                        op_id, log_ctx=f"[ceiling op={op_id}]")
+                    _crow = dict(_crow) if _crow else {}
+                    try:
+                        _cdone = int(_crow.get("done_items") or 0)
+                        _ctotal = int(_crow.get("total_items") or 0)
+                    except (TypeError, ValueError):
+                        _cdone = _ctotal = 0
+                    try:
+                        _age_s = float(_crow.get("age_s") or 0.0)
+                    except (TypeError, ValueError):
+                        _age_s = 0.0
+                    if _age_s <= _OP_CEILING_MAX_LIFETIME_S:
+                        log.warning(
+                            "op_worker: op_id=%d op_type=%s достигла потолка %dс на "
+                            "здоровом прогрессе (%d/%d) — не провал, продолжит повтором",
+                            op_id, op_type, _timeout_s, _cdone, _ctotal,
+                        )
+                        await _resume_op_over_ceiling(
+                            pool, op_id, bot=bot, owner_id=owner_id,
+                            done_so_far=_cdone, total_items=_ctotal)
+                        return
+                    log.error(
+                        "op_worker: op_id=%d op_type=%s живёт %.0fс (> предела %dс) — "
+                        "прекращаем продолжения, проваливаем как застрявшую",
+                        op_id, op_type, _age_s, _OP_CEILING_MAX_LIFETIME_S,
+                    )
+                    _reliability_metric(
+                        "infragram_op_timeouts_total", op_type=op_type)
+                    raise TimeoutError(
+                        f"Операция шла дольше предельного срока и остановлена. "
+                        f"Взятые цели сохранены — запустите заново, продолжит с "
+                        f"того же места."
                     )
                 except asyncio.TimeoutError as _to:
                     # Громко: зависшая операция раньше не оставляла следа вообще.

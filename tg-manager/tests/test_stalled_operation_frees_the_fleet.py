@@ -131,17 +131,27 @@ async def test_unreadable_counter_never_kills_the_work(fast):
 
 
 @pytest.mark.asyncio
-async def test_absolute_ceiling_still_applies(fast):
-    """Потолок времени никуда не делся: он ловит то, что двигается, но бесконечно."""
+async def test_absolute_ceiling_resumes_a_healthy_long_op(fast):
+    """Потолок у ЗДОРОВОЙ операции — не провал, а граница куска: продолжит повтором.
+
+    Операция всё время двигалась (done_items растёт — застоя нет), просто не
+    уложилась в потолок прогона. Массовой рассылке на тысячи целей так и
+    положено: сторож (90 мин без движения) убил бы её раньше, если бы она встала.
+    Поэтому у потолка с живым прогрессом — сигнал «продолжить» (_OpOverCeiling),
+    а не TimeoutError. Провал по потолку остаётся лишь для зависшей (см. ниже).
+    """
     op_worker = fast
 
     async def _endless():
         await asyncio.sleep(3600)
 
     pool = _Pool(range(1, 10000))    # счётчик всё время растёт — застоя нет
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(op_worker._OpOverCeiling):
         await op_worker._run_with_stall_guard(
             pool, _endless(), 7, "bulk_join", timeout_s=0.2)
+    # Замерший счётчик у потолка невозможен в рабочей конфигурации (сторож
+    # застоя 90 мин всегда срабатывает раньше потолка 6 ч) — этот случай
+    # закрывает test_stalled_operation_is_cut_off выше.
 
 
 @pytest.mark.asyncio

@@ -43,6 +43,7 @@ _HELP = {
     "infragram_op_revives_total": "Возвраты операции в очередь после падения/зависания воркера",
     "infragram_op_poisoned_total": "Операции, остановленные по исчерпании бюджета живучести",
     "infragram_op_flood_defers_total": "Операции, отложенные до конца длинной флуд-паузы",
+    "infragram_op_ceiling_resumes_total": "Здоровые длинные операции, продолженные повтором после потолка прогона",
     "infragram_flood_sleep_truncated_total": "Флуд-паузы, урезанные внутри прогона",
     "infragram_journal_read_failures_total":
         "Отказов прочитать журнал целей: операция отложена, чтобы не повторить сделанное",
