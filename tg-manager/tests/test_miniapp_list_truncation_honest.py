@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from tests.miniapp_source import miniapp_html, source_of
+from tests.miniapp_source import miniapp_html, miniapp_source, source_of
 
 
 def _body(name: str) -> str:
@@ -71,7 +71,9 @@ def test_list_loaders_request_explicit_page():
 
 def test_lists_have_load_more_node():
     """Остаток списка виден на экране, а не только в ответе сервера."""
-    html = miniapp_html()
+    # Экран ботов вынесен в screens/*.js — разметка и вызовы остатка списка
+    # живут там, поэтому берём весь источник мини-аппа, а не только index.html.
+    html = miniapp_source()
     for node in ('id="botLoadMore"', 'id="chLoadMore"'):
         assert node in html, f"нет узла остатка {node}"
     assert "loadMoreBots()" in html and "loadMoreChannels()" in html

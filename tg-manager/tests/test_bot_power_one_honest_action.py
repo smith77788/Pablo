@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 
 from services import bot_health
-from tests.miniapp_source import miniapp_html
+from tests.miniapp_source import miniapp_source
 
 
 def _fn(src: str, name: str) -> str:
@@ -60,7 +60,7 @@ def _fn(src: str, name: str) -> str:
 
 def test_one_control_not_two_for_the_same_write():
     """Экран бота не предлагает две кнопки на одно и то же действие."""
-    html = miniapp_html()
+    html = miniapp_source()
     assert "function botPowerConfirm" in html
     # старой пары больше нет ни под каким из её прежних имён
     assert "removeBotConfirm" not in html, "осталось второе имя для того же действия"
@@ -69,7 +69,7 @@ def test_one_control_not_two_for_the_same_write():
 
 
 def test_the_single_control_works_both_ways():
-    body = _fn(miniapp_html(), "botPowerConfirm")
+    body = _fn(miniapp_source(), "botPowerConfirm")
     assert "method:'DELETE'" in body.replace(" ", ""), "нет пути «убрать»"
     assert "/toggle" in body, "нет пути «вернуть»"
     # возврат в работу — не разрушающее действие, подтверждения не требует
@@ -80,7 +80,7 @@ def test_the_single_control_works_both_ways():
 
 
 def test_no_wording_promises_a_deletion_that_never_happens():
-    body = _fn(miniapp_html(), "botPowerConfirm")
+    body = _fn(miniapp_source(), "botPowerConfirm")
     # в подтверждении и тостах — то, что правда происходит
     assert "сохранятся" in body or "сохранены" in body, (
         "подтверждение не говорит, что подписчики и воронки остаются")
@@ -90,7 +90,7 @@ def test_no_wording_promises_a_deletion_that_never_happens():
 
 
 def test_off_badge_names_the_state_instead_of_shrugging():
-    body = _fn(miniapp_html(), "renderBots")
+    body = _fn(miniapp_source(), "renderBots")
     assert "'⏸ Убран из работы'" in body, "бейдж выключенного бота ничего не объясняет"
     assert "'Выкл'" not in body, "бейдж бота — обрубок «Выкл», а не состояние"
 

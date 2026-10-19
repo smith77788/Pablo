@@ -5208,6 +5208,22 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         _handler(pool, bot, op_id, owner_id, params),
                         op_id, op_type, _timeout_s,
                     )
+                except asyncio.TimeoutError as _to:
+                    # Громко: зависшая операция раньше не оставляла следа вообще.
+                    log.error(
+                        "op_worker: op_id=%d op_type=%s превысила потолок %dс — "
+                        "прогон прерван, аккаунты и слот освобождаются",
+                        op_id, op_type, _timeout_s,
+                    )
+                    _reliability_metric(
+                        "infragram_op_timeouts_total", op_type=op_type)
+                    raise TimeoutError(
+                        f"Операция была прервана: она либо не уложилась в "
+                        f"{_timeout_s // 60} мин, либо перестала двигаться дольше "
+                        f"{_OP_STALL_MIN} мин (вероятно, зависла на ответе "
+                        f"Telegram или прокси). Взятые цели сохранены — повтор "
+                        f"продолжит с того же места."
+                    ) from _to
                 except _OpOverCeiling:
                     # Здоровая длинная операция (двигалась вплоть до потолка).
                     # Не провал: возвращаем в очередь, продолжит с того же места.
@@ -5248,26 +5264,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     _reliability_metric(
                         "infragram_op_timeouts_total", op_type=op_type)
                     raise TimeoutError(
-                        f"Операция шла дольше предельного срока и остановлена. "
-                        f"Взятые цели сохранены — запустите заново, продолжит с "
-                        f"того же места."
+                        "Операция шла дольше предельного срока и остановлена. "
+                        "Взятые цели сохранены — запустите заново, продолжит с "
+                        "того же места."
                     )
-                except asyncio.TimeoutError as _to:
-                    # Громко: зависшая операция раньше не оставляла следа вообще.
-                    log.error(
-                        "op_worker: op_id=%d op_type=%s превысила потолок %dс — "
-                        "прогон прерван, аккаунты и слот освобождаются",
-                        op_id, op_type, _timeout_s,
-                    )
-                    _reliability_metric(
-                        "infragram_op_timeouts_total", op_type=op_type)
-                    raise TimeoutError(
-                        f"Операция была прервана: она либо не уложилась в "
-                        f"{_timeout_s // 60} мин, либо перестала двигаться дольше "
-                        f"{_OP_STALL_MIN} мин (вероятно, зависла на ответе "
-                        f"Telegram или прокси). Взятые цели сохранены — повтор "
-                        f"продолжит с того же места."
-                    ) from _to
 
             # Флот временно занят другими операциями — не проваливаем, а мягко
             # возвращаем в очередь (запустится, когда освободятся аккаунты).

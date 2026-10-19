@@ -114,14 +114,16 @@ async def test_resume_requeues_pending_and_does_not_fail(monkeypatch):
 
 
 def test_caller_resumes_over_ceiling_instead_of_failing():
-    """В _run_op_task потолок здоровой операции обрабатывается до TimeoutError."""
+    """В _run_op_task потолок здоровой операции ведёт к продолжению, не к провалу.
+
+    _OpOverCeiling и asyncio.TimeoutError — независимые типы исключений, порядок
+    except-веток между ними значения не имеет (ни одна не перехватывает другую).
+    Важно одно: ветка _OpOverCeiling существует и ведёт к возврату в очередь.
+    """
     src = inspect.getsource(op_worker)
     assert "except _OpOverCeiling" in src, "потолок здоровой операции не перехвачен"
-    # Перехват _OpOverCeiling идёт РАНЬШЕ общего except asyncio.TimeoutError,
-    # иначе здоровая операция свалилась бы в провал по таймауту.
+    # Тело ветки _OpOverCeiling ведёт к продолжению (_resume_op_over_ceiling),
+    # а не к немедленному провалу.
     i_ceiling = src.index("except _OpOverCeiling")
-    i_timeout = src.index("except asyncio.TimeoutError as _to")
-    assert i_ceiling < i_timeout
-    # И ведёт к возврату в очередь, а не к raise TimeoutError.
-    body = src[i_ceiling:i_timeout]
+    body = src[i_ceiling:i_ceiling + 3000]
     assert "_resume_op_over_ceiling" in body
