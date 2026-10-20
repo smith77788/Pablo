@@ -59,6 +59,28 @@ DEFAULT_PILLARS: list[tuple[str, int]] = [
 ]
 PUBLISH_MODES = ("auto", "review")
 
+# Язык ведения канала. '' = авто (язык выводится из профиля канала, прежнее
+# поведение). Иначе — жёсткая инструкция писать строго на выбранном языке,
+# даже если данные/примеры в промпте на другом (жалоба владельца: ВА писал то
+# по-русски, то по-украински). Расширяется добавлением строки в словарь.
+VA_LANGS = {
+    "ru": "русском",
+    "uk": "украинском",
+    "en": "английском",
+}
+
+
+def lang_directive(lang: str) -> str:
+    """Жёсткая строка-указание языка для промпта поста ('' → пусто, авто-режим)."""
+    name = VA_LANGS.get((lang or "").strip().lower())
+    if not name:
+        return ""
+    return (
+        f"ЯЗЫК ПОСТА — СТРОГО {name}. Пиши ВЕСЬ пост только на {name} языке, "
+        f"даже если название канала, примеры, новости и данные ниже на другом "
+        f"языке. Не смешивай языки и не переключайся."
+    )
+
 # Границы настроек (их же проверяет CHECK в schema_v228).
 _MAX_TOPIC, _MAX_AUDIENCE, _MAX_TONE, _MAX_NOTES = 500, 300, 200, 1000
 _MAX_PROJECT, _MAX_CONTACT = 2000, 200
@@ -413,6 +435,12 @@ def validate_settings(payload: Any) -> tuple[dict, list[str]]:
             out["publish_mode"] = m
         else:
             errors.append("Режим: сам публикует или присылает на одобрение")
+    if "lang" in payload:
+        lg = str(payload.get("lang") or "").strip().lower()
+        if lg == "" or lg in VA_LANGS:
+            out["lang"] = lg
+        else:
+            errors.append("Язык канала: авто, русский, украинский или английский")
     for key in ("enabled", "intro_pending", "auto_tune"):
         if key in payload:
             out[key] = bool(payload.get(key))
@@ -564,7 +592,8 @@ _SYSTEM_POST = (
     "поделиться, укреплять доверие к бизнесу и — там, где это уместно по рубрике, — "
     "мягко вести к заявке через указанный контакт. Продающий пост продаёт через "
     "выгоду и снятие возражений, а не через крик. Правила:\n"
-    "• язык — русский, если в профиле канала не сказано иное;\n"
+    "• язык — как указано в начале задания («ЯЗЫК ПОСТА»); если там не задан — "
+    "русский, если в профиле канала не сказано иное;\n"
     "• только сам текст поста, без пояснений, без кавычек вокруг, без слова «Пост:»;\n"
     "• без Markdown (никаких **, __, #, ```); абзацы — пустой строкой;\n"
     "• не используй фигурные скобки { } и символ |;\n"
@@ -662,7 +691,14 @@ def build_post_prompt(
     hi = min(rules.max_chars, 1400)
     if hi < lo:
         lo, hi = rules.min_chars, rules.max_chars
-    lines = [
+    lines = []
+    # Язык — первой строкой и приоритетнее всего: профиль/примеры канала могут
+    # быть на другом языке, и без явного указания модель переключалась.
+    _lang_line = lang_directive(profile.get("lang") or "")
+    if _lang_line:
+        lines.append(_lang_line)
+        lines.append("")
+    lines += [
         "ПРОФИЛЬ КАНАЛА",
         f"Название: {profile.get('title') or '—'}",
         f"Тематика: {profile.get('topic') or '—'}",
@@ -773,6 +809,11 @@ def build_post_prompt(
     if feedback:
         lines.append("")
         lines.append("Прошлый вариант отклонил редактор. Исправь: " + "; ".join(feedback[:6]) + ".")
+    # Повтор языка в самом конце: примеры/история выше могут быть на другом
+    # языке, и без закрывающего напоминания модель иногда уходила в их язык.
+    if _lang_line:
+        lines.append("")
+        lines.append(_lang_line)
     return _SYSTEM_POST, "\n".join(lines)
 
 
@@ -1102,6 +1143,7 @@ def settings_public(row: Optional[dict]) -> dict:
         "window_end": int(r.get("window_end") or 21),
         "tz_offset": int(r.get("tz_offset") if r.get("tz_offset") is not None else 3),
         "publish_mode": r.get("publish_mode") or "auto",
+        "lang": r.get("lang") or "",
         "intro_pending": bool(r.get("intro_pending", True)),
         "auto_tune": bool(r.get("auto_tune", True)),
         "members_count": r.get("members_count"),
@@ -1116,7 +1158,7 @@ def settings_public(row: Optional[dict]) -> dict:
 
 _ADMIN_COLS = (
     "id, owner_id, channel_id, enabled, topic, audience, tone, notes, project_info, "
-    "lead_contact, brief, business, posts_per_day, "
+    "lead_contact, brief, business, posts_per_day, lang, "
     "window_start, window_end, tz_offset, publish_mode, intro_pending, next_post_at, "
     "last_post_at, last_error, fail_streak, setup_done, last_op_id, alerted_at, "
     "auto_tune, members_count, last_stats_at, last_report_at"
@@ -1258,8 +1300,8 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
     await pool.execute(
         "INSERT INTO va_channel_admin (owner_id, channel_id, enabled, topic, audience, tone, "
         " notes, posts_per_day, window_start, window_end, tz_offset, publish_mode, "
-        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, business, updated_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb, now()) "
+        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, business, lang, updated_at) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19, now()) "
         "ON CONFLICT (owner_id, channel_id) DO UPDATE SET enabled=EXCLUDED.enabled, "
         " topic=EXCLUDED.topic, audience=EXCLUDED.audience, tone=EXCLUDED.tone, "
         " notes=EXCLUDED.notes, posts_per_day=EXCLUDED.posts_per_day, "
@@ -1267,13 +1309,14 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
         " window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end, "
         " tz_offset=EXCLUDED.tz_offset, publish_mode=EXCLUDED.publish_mode, "
         " intro_pending=EXCLUDED.intro_pending, auto_tune=EXCLUDED.auto_tune, "
-        " next_post_at=EXCLUDED.next_post_at, business=EXCLUDED.business, updated_at=now()",
+        " next_post_at=EXCLUDED.next_post_at, business=EXCLUDED.business, "
+        " lang=EXCLUDED.lang, updated_at=now()",
         int(owner_id), int(channel_id), bool(merged["enabled"]), merged["topic"],
         merged["audience"], merged["tone"], merged["notes"], int(merged["posts_per_day"]),
         int(merged["window_start"]), int(merged["window_end"]), int(merged["tz_offset"]),
         merged["publish_mode"], bool(merged["intro_pending"]), bool(merged["auto_tune"]),
         next_at, merged["project_info"], merged["lead_contact"],
-        json.dumps(merged["business"], ensure_ascii=False),
+        json.dumps(merged["business"], ensure_ascii=False), merged.get("lang") or "",
     )
     if schedule_changed and prev:
         # Расписание сменилось — старый план не совпадает с новыми слотами.

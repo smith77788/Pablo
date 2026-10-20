@@ -868,6 +868,12 @@ function _vaChannelHtml(d) {
       _vaOpt('auto', s.publish_mode, 'Полностью сам — публикует без меня') +
       _vaOpt('review', s.publish_mode, 'Присылает пост мне на одобрение') + '</select>' +
       '<div class="field-note">В автономном режиме в канал уходят только посты, к которым у редактора нет замечаний.</div></div>' +
+    '<div class="field"><label>Язык канала</label><select id="vaLang">' +
+      _vaOpt('', s.lang || '', 'Авто — по тематике канала') +
+      _vaOpt('ru', s.lang || '', 'Русский') +
+      _vaOpt('uk', s.lang || '', 'Украинский') +
+      _vaOpt('en', s.lang || '', 'Английский') + '</select>' +
+      '<div class="field-note">Все посты будут писаться строго на выбранном языке.</div></div>' +
     '</details><details class="acc-actions" style="margin:0 0 12px;background:var(--bg3);border-radius:12px">' +
       '<summary style="cursor:pointer;font-size:14px;font-weight:500;padding:12px 12px;display:flex;align-items:center;gap:8px">' +
         '<span style="flex:1;min-width:0">📝 Как писать</span>' +
@@ -990,6 +996,7 @@ async function vaSave() {
         posts_per_day: Number(_vaVal('vaPpd')), tz_offset: Number(_vaVal('vaTz')),
         window_start: Number(_vaVal('vaWs')), window_end: Number(_vaVal('vaWe')),
         publish_mode: _vaVal('vaMode'), auto_tune: !!document.getElementById('vaTune').checked,
+        lang: _vaVal('vaLang') || '',
       }),
     }, {button:'vaSaveBtn', submitted, success:'Настройки сохранены'});
 }
