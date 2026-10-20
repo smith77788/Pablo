@@ -2758,6 +2758,34 @@ _cancel_cache: dict[int, tuple[bool, float]] = {}
 _declared_pause_until: dict[int, float] = {}
 _CANCEL_CACHE_TTL = 5.0  # seconds between DB checks in tight loops
 
+
+def declare_op_pause(op_id, seconds: float) -> None:
+    """Объявить сторожу застоя ОСОЗНАННУЮ паузу прогона (пейсинг/ночь/флуд).
+
+    Пока пауза активна, сторож (`_run_with_stall_guard`) не считает замерший
+    `done_items` застоем, а потолок прогона разрешается штатным продолжением,
+    а не ошибкой. Нужна исполнителям, которые спят в СВОЁМ цикле (напр.
+    `dm_engine.run_campaign`: тихие часы до 10ч, флуд-паузы) и потому не ходят
+    через `bounded_flood_sleep`, который объявляет паузу сам. Fail-open:
+    невалидный op_id просто игнорируется.
+    """
+    if op_id is None:
+        return
+    try:
+        _declared_pause_until[int(op_id)] = time.monotonic() + float(seconds)
+    except (TypeError, ValueError):
+        pass
+
+
+def clear_op_pause(op_id) -> None:
+    """Снять объявленную паузу (прогон снова под обычным сторожем застоя)."""
+    if op_id is None:
+        return
+    try:
+        _declared_pause_until.pop(int(op_id), None)
+    except (TypeError, ValueError):
+        pass
+
 # ETA tracking: op_id -> {start_time, start_done, last_done, last_time}
 _eta_data: dict[int, dict] = {}
 
@@ -4858,7 +4886,13 @@ async def _run_with_stall_guard(pool: asyncpg.Pool, coro, op_id: int, op_type: s
                 # к потолку операция подошла без прогресса (done==0: не взяла ни
                 # одной цели за все часы — скорее всего, повисла на подготовке),
                 # это настоящее зависание: обычный таймаут и честный повтор.
-                if last_done > 0 and (time.monotonic() - last_move) < stall_s:
+                # Исключение: прогон СЕЙЧАС в объявленной паузе (тихие часы DM,
+                # флуд) — это осознанное ожидание, а не зависание. Такую операцию
+                # продолжаем штатно, даже если до паузы она не успела ни цели
+                # (ночная рассылка легально ждёт утра). Иначе любая рассылка,
+                # упёршаяся в потолок во время ночи аккаунтов, падала «Ошибкой».
+                _in_declared_pause = _declared_pause_until.get(int(op_id), 0.0) > time.monotonic()
+                if _in_declared_pause or (last_done > 0 and (time.monotonic() - last_move) < stall_s):
                     raise _OpOverCeiling
                 raise asyncio.TimeoutError
             try:

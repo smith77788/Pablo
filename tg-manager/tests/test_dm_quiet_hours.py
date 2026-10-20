@@ -87,7 +87,11 @@ def test_night_wait_stays_cancellable():
     src = _run_campaign_src()
     night = src[src.index("accounts_awake(acc_cycle)"):]
     night = night[:2500]
-    assert "asyncio.sleep(60)" in night, "ожидание обязано дробиться, а не спать до утра одним куском"
+    # Дробление сохранено (60с кусками), но через _guarded_sleep — он объявляет
+    # паузу сторожу застоя, иначе ночное ожидание роняло бы рассылку «Ошибкой».
+    assert "_guarded_sleep(op_id, 60)" in night, (
+        "ожидание обязано дробиться по 60с И объявлять паузу сторожу застоя "
+        "(_guarded_sleep), а не спать голым asyncio.sleep — иначе ночь = «Ошибка»")
     assert "paused" in night, "пауза кампании обязана срабатывать и ночью"
     assert "cancelled" in night or "stop_requested" in night, (
         "отмена операции обязана срабатывать и ночью. Слово 'cancelled' здесь "
