@@ -2805,8 +2805,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="daUsers" rows="2" placeholder="@user1, @user2, @user3" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <textarea id="daText" rows="3" placeholder="{{Привет|Здравствуйте}}! Текст сообщения…" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="number" id="daDelay" value="30" min="5" max="600" title="Задержка между сообщениями, сек" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
-        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · спинтакс обязателен</div>
+        <input type="number" id="daDelay" value="30" min="1" max="600" title="Задержка между сообщениями, сек. 1 — максимально быстро (выше риск бана)" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="flex:1;font-size:12px;color:var(--hint);align-self:center">сек между отправками · спинтакс обязателен · <b>1 = максимально быстро</b> (риск бана; защита от флуда работает)</div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input type="number" id="daPerAcc" min="1" max="500" placeholder="—" title="Максимум сообщений с одного аккаунта за эту рассылку" style="flex:0 0 100px;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">

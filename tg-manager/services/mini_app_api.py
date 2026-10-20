@@ -4078,7 +4078,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Введите текст сообщения", 400)
         if check_sql_suspicious(text):
             return _err("Недопустимые символы в тексте", 400)
-        delay = min(max(validate_integer(data.get("delay", 30), min_val=5, max_val=600) or 30, 5), 600)
+        # Минимум 1с (не 0): «максимально быстро», но база остаётся ненулевой —
+        # губернатор флота стретчит её МУЛЬТИПЛИКАТИВНО (base × mult), и при 0 он
+        # уже ничего не затормозит. FloodWait/карантин тормозят независимо.
+        delay = min(max(validate_integer(data.get("delay", 30), min_val=1, max_val=600) or 30, 1), 600)
         # Потолок сообщений с одного аккаунта за эту рассылку. Раньше его не
         # было вовсе: 1000 получателей на двух аккаунтах = по 500 ЛС с каждого.
         per_account_cap = None

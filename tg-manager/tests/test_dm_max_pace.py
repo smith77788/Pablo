@@ -42,3 +42,15 @@ def test_both_dm_routes_accept_max():
 
 def test_ui_has_max_option():
     assert 'value="max"' in HTML and "Максимально быстро" in HTML
+
+
+def test_adhoc_delay_floor_allows_max_speed():
+    """Разовая рассылка — часть того же модуля: её минимальная задержка опущена
+    до 1с (было 5), чтобы «максимально быстро» достигалось и здесь. 1, а не 0:
+    губернатор стретчит базу МУЛЬТИПЛИКАТИВНО, при нуле он бы не тормозил."""
+    assert "min_val=1, max_val=600" in API, "порог задержки разовой рассылки должен быть 1с"
+    # UI-поле тоже должно позволять 1 (иначе ввод min=5 ограничит сверху вниз)
+    assert 'id="daDelay"' in HTML
+    import re
+    m = re.search(r'id="daDelay"[^>]*', HTML)
+    assert m and 'min="1"' in m.group(0), "поле daDelay должно допускать min=1"
