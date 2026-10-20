@@ -912,14 +912,29 @@ async def run_campaign(
     except Exception:
         log_exc_swallow(log, "dm_engine: opt-out filter failed")
 
-    total = len(targets)
+    # Уже обработанные в ПРОШЛЫХ прогонах (возобновление/повтор): _get_targets
+    # отдаёт только НЕотправленных, поэтому прогресс обязан считаться от
+    # кумулятива, иначе возобновлённая кампания показывает «0/осталось» и
+    # выглядит как начатая заново — жалоба владельца «упавшая операция не
+    # продолжается, а начинается заново». Сами отправки при этом не дублируются
+    # (цели из dm_campaign_log исключены), чинится именно прогресс.
+    already_done = int(await pool.fetchval(
+        "SELECT count(DISTINCT tg_user_id) FROM dm_campaign_log "
+        "WHERE campaign_id=$1 AND status IN ('sent','blocked','skip')",
+        campaign_id,
+    ) or 0)
+    total = already_done + len(targets)
+    # total_targets — полная аудитория кампании; на возобновлении НЕ ужимаем её
+    # до остатка (GREATEST), иначе «2800» превратилось бы в «остаток».
     await pool.execute(
-        "UPDATE dm_campaigns SET total_targets=$1 WHERE id=$2", total, campaign_id
+        "UPDATE dm_campaigns SET total_targets=GREATEST(COALESCE(total_targets,0),$1) WHERE id=$2",
+        total, campaign_id,
     )
     if op_id and total:
         try:
             await pool.execute(
-                "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+                "UPDATE operation_queue SET total_items=GREATEST(COALESCE(total_items,0),$1) "
+                "WHERE id=$2", total, op_id
             )
         except Exception as _e:
             log.warning("dm_engine: failed to set total_items for op=%s: %s", op_id, _e)
@@ -1308,7 +1323,7 @@ async def run_campaign(
                 try:
                     await pool.execute(
                         "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
-                        sent + failed,
+                        already_done + sent + failed,
                         op_id,
                     )
                 except Exception as e:
@@ -1335,12 +1350,14 @@ async def run_campaign(
                 acc["id"], "dm_campaign", False, result.get("error", "")
             )
 
-        # Sync done_items into operation_queue for progress bar in ops list
+        # Sync done_items into operation_queue for progress bar in ops list.
+        # Кумулятив (already_done + этот прогон): прогресс-бар продолжается с
+        # того места, где прервался, а не стартует с нуля на возобновлении.
         if op_id:
             try:
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
-                    sent + failed,
+                    already_done + sent + failed,
                     op_id,
                 )
             except Exception as e:
@@ -1348,7 +1365,9 @@ async def run_campaign(
 
         # Milestone progress notifications (25%, 50%, 75%)
         if total > 0:
-            _done = sent + failed
+            # Кумулятив, а не этот прогон: иначе на возобновлении проценты
+            # считались бы заново и 25/50/75 слались бы повторно.
+            _done = already_done + sent + failed
             _pct = int(_done * 100 / total)
             for _milestone in (25, 50, 75):
                 if _pct >= _milestone and _milestone not in _notified_milestones:
@@ -1362,7 +1381,7 @@ async def run_campaign(
                             owner_id,
                             "op_complete",
                             f"📨 <b>DM «{campaign['name']}»</b> — {_milestone}%\n"
-                            f"✅ {sent} отправлено · ❌ {failed} ошибок · 📊 {total} всего",
+                            f"✅ {_done} из {total} обработано",
                             dedup_key=f"dm-milestone:{campaign_id}:{_milestone}",
                         )
                     except Exception:
@@ -1380,8 +1399,10 @@ async def run_campaign(
         delay = random.uniform(_delay_min, _delay_max) * await _fleet_tempo_mult(pool, owner_id)
         await asyncio.sleep(delay)
 
-    # Учесть необработанные цели (напр., при исчерпании всех аккаунтов)
-    unprocessed = max(0, total - sent - failed)
+    # Учесть необработанные цели (напр., при исчерпании всех аккаунтов).
+    # total теперь кумулятивный (already_done + остаток), а sent/failed — только
+    # этот прогон, поэтому вычитаем и уже обработанное в прошлых прогонах.
+    unprocessed = max(0, total - already_done - sent - failed)
     if unprocessed > 0:
         failed += unprocessed
         await pool.execute(
@@ -1400,6 +1421,14 @@ async def run_campaign(
         campaign_id,
     )
 
+    # Для итога берём КУМУЛЯТИВНЫЕ счётчики кампании (sent_count/fail_count), а не
+    # этот прогон: иначе у возобновлённой кампании итог показал бы только
+    # дослано сейчас, занизив реально отправленное за всю кампанию.
+    _fin = await pool.fetchrow(
+        "SELECT sent_count, fail_count FROM dm_campaigns WHERE id=$1", campaign_id)
+    _sent_total = int((_fin and _fin["sent_count"]) or sent)
+    _fail_total = int((_fin and _fin["fail_count"]) or failed)
+
     try:
         from database import db as _db
 
@@ -1409,8 +1438,8 @@ async def run_campaign(
             owner_id,
             "op_complete",
             f"📨 <b>DM-кампания «{campaign['name']}» завершена</b>\n\n"
-            f"✅ Отправлено: <b>{sent}</b>\n"
-            f"❌ Ошибок: <b>{failed}</b>\n"
+            f"✅ Отправлено: <b>{_sent_total}</b>\n"
+            f"❌ Ошибок: <b>{_fail_total}</b>\n"
             f"📊 Всего целей: <b>{total}</b>"
             + (f"\n🚫 Пропущено по реестру «не писать»: <b>{opt_out_removed}</b>"
                if opt_out_removed else ""),
