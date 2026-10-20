@@ -199,7 +199,7 @@ def setup_routes(app: web.Application, pool) -> None:
 
         if body.get("pace") is not None:
             pace = (body.get("pace") or "normal").strip()
-            if pace not in ("slow", "normal", "fast", "auto"):
+            if pace not in ("slow", "normal", "fast", "max", "auto"):
                 return _err("Неизвестный темп", 400)
             _p["pace"] = pace
             _params_touched = True

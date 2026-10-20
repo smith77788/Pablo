@@ -56,8 +56,8 @@ def test_dm_create_accepts_auto_pace():
     m = re.search(r"async def dm_campaign_create\(.*?\n(.*?)\n    async def ", src, re.DOTALL)
     assert m, "dm_campaign_create не найден"
     body = m.group(1)
-    assert '"slow", "normal", "fast", "auto"' in body, (
-        "whitelist темпа DM должен принимать 'auto' (иначе он молча коэрсится в normal)"
+    assert '"slow", "normal", "fast", "max", "auto"' in body, (
+        "whitelist темпа DM должен принимать 'auto' и 'max' (иначе они молча коэрсятся в normal)"
     )
 
 

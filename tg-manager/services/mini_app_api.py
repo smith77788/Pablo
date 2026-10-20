@@ -5252,10 +5252,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             total_targets = 0
         # Темп рассылки (params.pace): slow безопаснее, fast быстрее (риск бана),
-        # auto — движок считает темп по состоянию флота за сегодня (flood_engine),
-        # паритет с масс-инвайтом.
+        # max — максимально быстро (минимум пауз, предохранители флуда/карантина
+        # не отключаются), auto — движок считает темп по состоянию флота за
+        # сегодня (flood_engine), паритет с масс-инвайтом.
         pace = (body.get("pace") or "normal").strip()
-        if pace not in ("slow", "normal", "fast", "auto"):
+        if pace not in ("slow", "normal", "fast", "max", "auto"):
             pace = "normal"
         _params = {"pace": pace}
         # Тихие часы: по умолчанию включены (ночная рассылка живым людям — низкий

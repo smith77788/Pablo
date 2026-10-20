@@ -77,7 +77,7 @@ def test_pace_multipliers_shared_with_send_loop():
     assert '{"slow": 2.0, "normal": 1.0, "fast": 0.5}.get(_pace)' not in src, (
         "множители темпа продублированы в send-цикле — расчёт срока разъедется"
     )
-    assert set(_PACE_MULTIPLIERS) == {"slow", "normal", "fast"}
+    assert set(_PACE_MULTIPLIERS) == {"slow", "normal", "fast", "max"}
 
 
 # ── Пауза ─────────────────────────────────────────────────────────────────────

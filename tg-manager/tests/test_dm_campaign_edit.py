@@ -63,7 +63,7 @@ def test_media_url_is_ssrf_checked_on_edit_too():
 
 def test_pace_whitelist_enforced():
     body = _body()
-    assert '("slow", "normal", "fast", "auto")' in body
+    assert '("slow", "normal", "fast", "max", "auto")' in body
 
 
 def test_per_account_limit_clamped():
