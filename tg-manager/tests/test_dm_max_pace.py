@@ -9,13 +9,17 @@
 """
 from __future__ import annotations
 
-import pathlib
+import re
 
 from services.dm_engine import _PACE_MULTIPLIERS, estimate_duration_seconds
 
-API = (pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_api.py").read_text("utf-8")
-DM = (pathlib.Path(__file__).resolve().parents[1] / "services" / "mini_app_dm.py").read_text("utf-8")
-HTML = (pathlib.Path(__file__).resolve().parents[1] / "mini_app" / "index.html").read_text("utf-8")
+from tests.miniapp_source import api_function, miniapp_html
+
+# Источник API-слоя — через api_function (тело ручки по точным границам в любом
+# из mini_app_*.py), а не чтением mini_app_api.py по пути: иначе проверка
+# краснеет при первом же выносе ручки из монолита, а не когда она ломается
+# (tests/test_tests_do_not_pin_the_monolith.py). Разметку берём из miniapp_html.
+HTML = miniapp_html()
 
 
 def test_max_is_fastest_multiplier():
@@ -34,10 +38,13 @@ def test_max_estimate_shorter_than_fast_but_positive():
 
 
 def test_both_dm_routes_accept_max():
-    # Создание рассылки (mini_app_api) и правка кампании (mini_app_dm) — оба
-    # whitelist'а должны пропускать max, иначе он молча падает в normal / 400.
-    assert '("slow", "normal", "fast", "max", "auto")' in API
-    assert '("slow", "normal", "fast", "max", "auto")' in DM
+    # Создание рассылки (dm_campaign_create) и правка кампании
+    # (dm_campaign_update) — оба whitelist'а должны пропускать max, иначе он
+    # молча падает в normal / 400. Берём тело каждой ручки отдельно: проверка
+    # «оба» обязана видеть обе, а не одну на весь слой.
+    whitelist = '("slow", "normal", "fast", "max", "auto")'
+    assert whitelist in api_function("dm_campaign_create")
+    assert whitelist in api_function("dm_campaign_update")
 
 
 def test_ui_has_max_option():
@@ -48,9 +55,9 @@ def test_adhoc_delay_floor_allows_max_speed():
     """Разовая рассылка — часть того же модуля: её минимальная задержка опущена
     до 1с (было 5), чтобы «максимально быстро» достигалось и здесь. 1, а не 0:
     губернатор стретчит базу МУЛЬТИПЛИКАТИВНО, при нуле он бы не тормозил."""
-    assert "min_val=1, max_val=600" in API, "порог задержки разовой рассылки должен быть 1с"
+    assert "min_val=1, max_val=600" in api_function("dm_adhoc_send"), \
+        "порог задержки разовой рассылки должен быть 1с"
     # UI-поле тоже должно позволять 1 (иначе ввод min=5 ограничит сверху вниз)
     assert 'id="daDelay"' in HTML
-    import re
     m = re.search(r'id="daDelay"[^>]*', HTML)
     assert m and 'min="1"' in m.group(0), "поле daDelay должно допускать min=1"
