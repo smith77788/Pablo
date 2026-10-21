@@ -4653,6 +4653,13 @@ async def cb_scan_connect(
     user_id = callback.from_user.id
     acc_id = callback_data.acc_id
 
+    # «Подключить все найденные» — тот же импорт: каналы, которые владелец
+    # удалил из системы, обратно не возвращаем.
+    to_connect = await db.skip_removed_channels(pool, user_id, to_connect)
+    if not to_connect:
+        await callback.answer("Все найденные каналы ранее удалены из системы.", show_alert=True)
+        return
+
     # Check channel limit before importing (counts across linked abuse accounts)
     from bot.utils.subscription import get_channel_limit, get_effective_channel_count
     chan_limit = await get_channel_limit(pool, user_id)

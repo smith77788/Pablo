@@ -1266,6 +1266,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<div class="mbg" id="mo-removed-channels" onclick="if(event.target===this)closeModal('mo-removed-channels')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-removed-channels')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">🗑 Удалённые и недоступные</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:10px">Эти каналы и чаты не показываются в списках и не берутся в работу. Удалённые вами не вернёт импорт с аккаунтов; недоступные вернутся сами, если аккаунт снова их увидит.</div>
+    <div class="lst" id="rmChList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ BOT DETAIL ══════════════════════ -->
 <div class="screen" id="s-botdetail">
   <div class="hdr">
@@ -1626,6 +1635,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
       <button class="btn btn-s" onclick="reclassifyChannels()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить сессиями роль в каждом канале и убрать чужие, где аккаунт только подписчик">🧹 Только мои (убрать чужие)</button>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 0 8px">
+      <button class="btn btn-s" onclick="openRemovedChannels()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Каналы и чаты, которые вы удалили из системы, и те, что пропали в Telegram (удалены или аккаунт потерял доступ). Их не берёт ни импорт, ни работа">🗑 Удалённые и недоступные</button>
     </div>
     <!-- Вход к виртуальному администратору канала. Раньше «Правила редактора»
          открывались ТОЛЬКО из экрана «Массовая публикация» — владелец, искавший
@@ -9909,12 +9921,45 @@ async function toggleFunnel(id, el) {
 
 // ── Accounts ───────────────────────────────────────────
 async function removeChannel(chId, _el) {
-  if (!await confirmDelete('Убрать из управления канал', _el, 'Сам канал в Telegram не удаляется.')) return;
+  if (!await confirmDelete('Удалить из системы канал', _el, 'Он пропадёт из списков и не будет браться в работу; импорт с аккаунтов его не вернёт. Сам канал в Telegram не удаляется. Вернуть: «🗑 Удалённые и недоступные».')) return;
   try {
     await api(`/api/miniapp/channel/${chId}`, {method:'DELETE'});
-    toast('🗑 Канал убран из управления');
+    toast('🗑 Канал удалён из системы');
     back(); loadAccounts();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+// Удалённые владельцем и пропавшие в Telegram каналы/чаты. Раньше удалённый
+// канал возвращал следующий «Импорт с аккаунтов», а канал, удалённый в самом
+// Telegram, висел в списке и брался в рассылки, пока не падал каждый раз.
+async function openRemovedChannels() {
+  showModal('mo-removed-channels');
+  const box = document.getElementById('rmChList');
+  if (!box) return;
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/channels/removed');
+    const rows = d.channels || [];
+    if (!rows.length) { box.innerHTML = empty('✅','Пусто','Удалённых и недоступных каналов нет'); return; }
+    box.innerHTML = rows.map(c => {
+      const name = c.title || (c.username ? '@'+c.username : 'Канал #'+c.channel_id);
+      const why = c.reason === 'gone'
+        ? '<span class="badge b-rd">⛔ Недоступен в Telegram</span>'
+        : '<span class="badge b-gy">🗑 Удалён вами</span>';
+      const hint = c.reason === 'gone' && c.detail ? `<div class="li-sub">${esc(c.detail)}</div>` : '';
+      return `<div class="li" style="cursor:default"><div class="li-body"><div class="li-name">${esc(name)}</div>${why}${hint}</div>
+        <button class="btn btn-s" style="padding:6px 10px;min-width:0;font-size:12px" onclick="restoreRemovedChannel(${c.channel_id}, this)">↩️ Вернуть</button></div>`;
+    }).join('');
+  } catch(e) { box.innerHTML = errHtml(errRu(e)); }
+}
+
+async function restoreRemovedChannel(chId, el) {
+  if (el) el.disabled = true;
+  try {
+    await api(`/api/miniapp/channel/${chId}/restore`, {method:'POST'});
+    toast('↩️ Канал возвращён в систему — он снова в списке каналов');
+    openRemovedChannels();
+  } catch(e) { if (el) el.disabled = false; toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 // ── Профиль аккаунта (модалка) ───────────────────────────
 let AP_ACC_ID = null;
@@ -11343,7 +11388,7 @@ function buildChDetail(d) {
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
       <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👥 Инвайтинг</button>
       <button class="btn btn-s" onclick="openParserForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📊 Собрать аудиторию</button>
-      <button class="btn btn-d" onclick="removeChannel(${c.channel_id}, this)" style="flex:1 1 auto;min-width:88px">🗑 Убрать</button>
+      <button class="btn btn-d" onclick="removeChannel(${c.channel_id}, this)" style="flex:1 1 auto;min-width:88px">🗑 Удалить</button>
     </div>
 
     <div class="sec">Информация</div>
