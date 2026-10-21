@@ -355,7 +355,7 @@ async function checkAllBots() {
   finally { if (btn) { btn.disabled = false; btn.textContent = '🩺 Проверить все'; } }
 }
 
-async function deleteSelectedBots() {
+async function bulkDeleteBots() {
   const ids = [...BOT_SEL];
   if (!ids.length) { toast('❗ Выберите хотя бы одного бота'); return; }
   if (!await askConfirm(`Удалить ПОЛНОСТЬЮ ${ids.length} ${plural(ids.length,'бота','ботов','ботов')}?\n\nЭто не «убрать из работы»: боты и их данные удаляются из системы без возврата.`)) return;
