@@ -735,6 +735,7 @@ POST /api/miniapp/channel_rankings/add
 POST /api/miniapp/channel_rankings/check
 POST /api/miniapp/channel_rankings/remove
 POST /api/miniapp/channels/bulk_create
+POST /api/miniapp/channels/bulk_delete
 POST /api/miniapp/channels/bulk_edit
 POST /api/miniapp/channels/bulk_join
 POST /api/miniapp/channels/bulk_leave

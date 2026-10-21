@@ -528,6 +528,42 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("channel_remove uid=%d ch=%d", uid, ch_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def channels_bulk_delete(request: web.Request) -> web.Response:
+        """Убрать из управления несколько каналов разом (паритет с channel_remove).
+
+        DELETE строк managed_channels по owner-скоупу. Это Infragram-side: сам
+        канал в Telegram не трогаем, лишь перестаём им управлять. Идемпотентно:
+        повтор по уже убранным = 0, а не ошибка.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Некорректный запрос", 400)
+        raw = body.get("channel_ids")
+        if not isinstance(raw, list) or not raw:
+            return _err("Не выбран ни один канал", 400)
+        try:
+            ch_ids = [int(x) for x in raw]
+        except (TypeError, ValueError):
+            return _err("Неверный идентификатор канала", 400)
+        try:
+            res = await pool.execute(
+                "DELETE FROM managed_channels WHERE channel_id = ANY($1::bigint[]) "
+                "AND owner_id=$2", ch_ids, uid)
+            deleted = int(str(res).rsplit(" ", 1)[-1]) if str(res).startswith("DELETE") else 0
+            from database.db import record_manual_action
+
+            await record_manual_action(
+                pool, uid, "channels_bulk_delete",
+                target=",".join(str(c) for c in ch_ids[:50]))
+            return _json_resp({"ok": True, "deleted": deleted, "requested": len(ch_ids)})
+        except Exception:
+            log.exception("channels_bulk_delete uid=%d n=%d", uid, len(ch_ids))
+            return _err(_INTERNAL_ERROR, 500)
+
     async def channels_bulk_create(request: web.Request) -> web.Response:
         """Массовое создание каналов аккаунтом (паритет с ботом).
 
@@ -831,4 +867,5 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
     app.router.add_post("/api/miniapp/channels/mass", channels_mass)
+    app.router.add_post("/api/miniapp/channels/bulk_delete", channels_bulk_delete)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
