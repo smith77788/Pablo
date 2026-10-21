@@ -40,6 +40,32 @@ def setup_routes(app: web.Application, pool) -> None:
     )
     from services.security import validate_string
 
+    async def _strike_has_access(uid: int) -> bool:
+        """Доступ к модулю «Массовые жалобы» — ПАРИТЕТ с ботом.
+
+        Бот (`bot.handlers.strike._has_access`) даёт доступ платформенному админу
+        и enterprise-плану БЕЗ строки в strike_access. Мини-апп же раньше смотрел
+        ТОЛЬКО таблицу strike_access — и владелец/админ, у которого в боте доступ
+        есть, получал здесь «Нет доступа к Strike». Переиспользуем ту же функцию
+        (один источник правды); при сбое импорта — безопасный фолбэк: админ по
+        `_is_admin` или строка в таблице.
+        """
+        try:
+            from bot.handlers.strike import _has_access as _bot_has_access
+            return bool(await _bot_has_access(pool, uid))
+        except Exception:
+            try:
+                from services.mini_app_api import _is_admin
+                if _is_admin(uid):
+                    return True
+            except Exception:
+                log.debug("strike access fallback: _is_admin unavailable")
+            try:
+                row = await pool.fetchrow(
+                    "SELECT 1 FROM strike_access WHERE user_id=$1", uid)
+                return row is not None
+            except Exception:
+                return False
 
     async def notary_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -342,9 +368,12 @@ def setup_routes(app: web.Application, pool) -> None:
                 )
             except Exception:
                 _email_cnt = None  # таблицы может не быть — не блокируем статус
+            has_access = await _strike_has_access(uid)
             return _json_resp({
-                "has_access": row is not None,
-                "mode": row["mode"] if row else None,
+                "has_access": has_access,
+                # mode из таблицы, если куплено; у админа/enterprise строки нет —
+                # помечаем 'admin', чтобы UI не считал доступ «пустым».
+                "mode": (row["mode"] if row else ("admin" if has_access else None)),
                 "purchased_at": row["purchased_at"].isoformat() if row and row["purchased_at"] else None,
                 "categories": categories,
                 "email_vector": {
@@ -392,11 +421,10 @@ def setup_routes(app: web.Application, pool) -> None:
             if not category:
                 return _err("Выберите категорию нарушения", 400)
 
-            # Проверяем доступ
-            row = await pool.fetchrow(
-                "SELECT mode FROM strike_access WHERE user_id=$1", uid
-            )
-            if not row:
+            # Проверяем доступ — ПАРИТЕТ с ботом: админ/enterprise проходят без
+            # строки в strike_access (раньше мини-апп требовал только таблицу, и
+            # владелец/админ упирался в 403, хотя в боте доступ у него есть).
+            if not await _strike_has_access(uid):
                 return _err("Нет доступа к Strike. Необходима лицензия.", 403)
 
             from services.strike_engine import MINI_CATEGORIES
