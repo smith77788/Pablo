@@ -1225,6 +1225,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
            друг от друга; включает только аккаунт-владелец через @BotFather. -->
       <button class="btn btn-s" onclick="enableBotMesh()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Включить режим bot-to-bot у сети ботов">🕸 Включить сеть</button>
     </div>
+    <!-- Обслуживание флота: проверить живость токена каждого бота (getMe) и
+         убрать мёртвых. «Мёртвый» = отозванный токен (401). «Неизвестные»
+         (Telegram не ответил) не удаляются — сносим только то, про что точно
+         известно, что токен отозван. -->
+    <div style="display:flex;gap:8px;padding:0 0 10px">
+      <button class="btn btn-s" id="botCheckBtn" onclick="checkAllBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить, жив ли токен каждого бота">🩺 Проверить все</button>
+      <button class="btn btn-s" id="botCleanupBtn" onclick="cleanupDeadBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Удалить всех ботов с отозванным токеном">🧹 Удалить мёртвых</button>
+    </div>
     <!-- Поиск и срезы по списку. Раньше список рисовался целиком и без единого
          фильтра: после «Фабрики ботов» это сотни карточек, и найти нужного бота
          можно было только прокруткой. Состояние бота сервер уже считает
@@ -1248,6 +1256,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="sel-bar-acts">
         <button class="mini-btn" onclick="openBotBroadcast()">📢 Рассылка выбранным</button>
+        <button class="mini-btn" onclick="deleteSelectedBots()">🗑 Удалить выбранных</button>
       </div>
     </div>
   </div>
@@ -9689,6 +9698,9 @@ function _botsFiltered() {
 // ── Режим выбора ботов и массовая рассылка ──────────────
 let BOT_SEL_MODE = false;
 let BOT_SEL = new Set();
+// Результат последней проверки живости: bot_id → 'alive'|'dead'|'unknown'.
+// Заполняет checkAllBots(), читает renderBots() для бейджа состояния.
+let BOT_CHECK = {};
 
 
 
