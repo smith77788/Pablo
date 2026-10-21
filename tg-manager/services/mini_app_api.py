@@ -1143,7 +1143,11 @@ _CHANNELS_VISIBLE_SQL = """
 
 # Какие боты человек видит: свои, из своих экосистем и из рабочих пространств.
 # Условие тоже жило в файле дважды — в выборке списка и в подсчёте общего числа.
+# Удалённый бот (deleted_at) не виден никому: ни в списке, ни по прямой ссылке —
+# в отличие от поставленного на паузу, который остаётся в списке с кнопкой
+# «Вернуть в работу». Скобки вокруг OR обязательны: AND связывает крепче.
 _BOTS_VISIBLE_SQL = """
+    mb.deleted_at IS NULL AND (
     mb.added_by=$1
     OR mb.bot_id IN (
         SELECT DISTINCT eb.bot_id FROM ecosystem_bots eb
@@ -1156,7 +1160,7 @@ _BOTS_VISIBLE_SQL = """
         JOIN workspaces w ON w.owner_id=b.added_by
         JOIN workspace_members wm ON wm.workspace_id=w.id
         WHERE wm.user_id=$1
-    )
+    ))
 """
 
 async def _user_can_use_bot(pool, uid: int, bot_id: int) -> bool:

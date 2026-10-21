@@ -294,7 +294,8 @@ async def cb_delete(
         _bot_label(row).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
     await callback.message.edit_text(
-        f"🗑 Убрать бота <b>{safe_label}</b> из списка?\n"
+        f"🗑 Удалить бота <b>{safe_label}</b> из системы?\n"
+        "Он пропадёт из всех списков и больше не будет браться в работу. "
         "Аудитория, воронки и история рассылок сохранятся: добавите бота "
         "заново тем же токеном — всё вернётся.",
         parse_mode="HTML",
@@ -310,13 +311,13 @@ async def cb_confirm_delete(
     deleted = await db.delete_bot(pool, callback_data.bot_id, callback.from_user.id)
     if deleted:
         await callback.message.edit_text(
-            "✅ <b>Бот убран из списка.</b>\n"
+            "✅ <b>Бот удалён из системы.</b>\n"
             "Данные сохранены — добавьте его заново тем же токеном, чтобы вернуть.",
             parse_mode="HTML", reply_markup=main_menu()
         )
     else:
         await callback.message.edit_text(
-            "❌ <b>Не удалось убрать бота.</b>\n\nВозможно, он уже убран из списка.",
+            "❌ <b>Не удалось удалить бота.</b>\n\nВозможно, он уже удалён.",
             parse_mode="HTML",
             reply_markup=main_menu(),
         )

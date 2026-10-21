@@ -21,8 +21,13 @@
 в самом боте, так что цена ошибки выросла: «выключил» и «убрал» — теперь одно и
 то же состояние во всём продукте.
 
-ЭТОТ ТЕСТ держит инвариант: действие одно, оба направления у него есть,
-и ни одна подпись не обещает удаления, которого не происходит.
+ОБНОВЛЕНИЕ (v253). Владелец попросил настоящее удаление: «есть только пауза».
+Теперь действий два, и у каждого одна дорога: пауза (⏸/▶️) — только
+`PUT …/toggle` с явным состоянием, удаление (🗑) — только `DELETE`, который
+ставит `deleted_at` и прячет бота из всех списков.
+
+ЭТОТ ТЕСТ держит инвариант: пауза не удаляет, удаление не притворяется паузой,
+и ни одна подпись не обещает того, чего не происходит.
 """
 from __future__ import annotations
 
@@ -68,10 +73,15 @@ def test_one_control_not_two_for_the_same_write():
         "осталась вторая кнопка того же действия (или её осиротевший код)")
 
 
-def test_the_single_control_works_both_ways():
+def test_pause_control_works_both_ways_and_never_deletes():
     body = _fn(miniapp_source(), "botPowerConfirm")
-    assert "method:'DELETE'" in body.replace(" ", ""), "нет пути «убрать»"
-    assert "/toggle" in body, "нет пути «вернуть»"
+    flat = body.replace(" ", "")
+    assert "method:'DELETE'" not in flat, (
+        "пауза снова ведёт в DELETE — удаление и пауза опять одно и то же")
+    assert "/toggle" in body, "нет пути «пауза/вернуть»"
+    assert "active:!isActive" in flat, (
+        "пауза передаёт не явное состояние, а «переключи» — устаревший экран "
+        "включит бота вместо паузы")
     # возврат в работу — не разрушающее действие, подтверждения не требует
     ask = body.index("askConfirm")
     assert "if (isActive)" in body[:ask], (
@@ -79,14 +89,24 @@ def test_the_single_control_works_both_ways():
         "на действии, которое ничего не теряет")
 
 
-def test_no_wording_promises_a_deletion_that_never_happens():
+def test_pause_wording_does_not_promise_deletion():
     body = _fn(miniapp_source(), "botPowerConfirm")
-    # в подтверждении и тостах — то, что правда происходит
     assert "сохранятся" in body or "сохранены" in body, (
         "подтверждение не говорит, что подписчики и воронки остаются")
     assert "Вернуть в работу" in body, "не сказано, как вернуть бота"
     for lie in ("удалён", "удалена", "Удалить бота", "деактивирован"):
-        assert lie not in body, f"подпись обещает «{lie}» — этого не происходит"
+        assert lie not in body, f"подпись паузы обещает «{lie}» — этого не происходит"
+
+
+def test_delete_is_a_separate_confirmed_action():
+    html = miniapp_source()
+    body = _fn(html, "botDeleteConfirm")
+    assert "method:'DELETE'" in body.replace(" ", ""), "удаление не зовёт DELETE"
+    assert "askConfirm" in body, "удаление без подтверждения"
+    assert "/toggle" not in body, "удаление подменено паузой"
+    assert "botDeleteConfirm(" in html.replace(body, ""), "кнопки удаления на экране нет"
+    # правда о данных: аудитория не стирается, вернуть — тем же токеном
+    assert "токен" in body
 
 
 def test_off_badge_names_the_state_instead_of_shrugging():

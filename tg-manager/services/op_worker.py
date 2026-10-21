@@ -13443,6 +13443,9 @@ async def _exec_channel_add(
             res.get("username") or "", res.get("access_hash") or 0,
             res.get("type") or "channel", int(res.get("members") or 0),
         )
+        # Владелец явно добавил канал — прежнее удаление больше не действует.
+        from database.db import forget_removed_channels
+        await forget_removed_channels(pool, owner_id, [res["channel_id"]])
         return {
             "status": "done",
             "channel_id": res["channel_id"],

@@ -270,16 +270,13 @@ function renderBots() {
     // рабочий — «🟢 Активен», — пока подписчики писали ему и не получали
     // ответа. Знал об этом только серверный лог.
     const h = b.health || {};
-    const badge = (active && h.label && h.state && h.state!=='ok')
+    const badge = (h.label && h.state && h.state!=='ok' && (active || h.state==='dead'))
       ? `<span class="badge b-gy" style="margin-top:4px;display:inline-flex;background:var(--bg2);color:${h.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(h.label)}</span>`
       : `<span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'⏸ Убран из работы'}</span>`;
-    // Кнопка на карточке была 🗑 и обещала удаление, которого в продукте нет:
-    // и она, и «⏸ Выключить» на экране бота снимают ОДИН И ТОТ ЖЕ is_active.
-    // Корзина на уже выключенном боте вообще не делала ничего видимого —
-    // «удаляла» второй раз то, что уже убрано. Один выключатель, два
-    // направления, честная подпись.
+    // На карточке — только пауза (⏻/▶️). Удаление из системы — на экране
+    // бота, кнопкой «🗑 Удалить», с подтверждением.
     return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
-      <div class="bot-card-del" title="${active?'Убрать из работы':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${esc(name)}',${!!active})">${active?'⏻':'▶️'}</div>
+      <div class="bot-card-del" title="${active?'Поставить на паузу':'Вернуть в работу'}" onclick="event.stopPropagation();botPowerConfirm(${b.bot_id},'${esc(name)}',${!!active})">${active?'⏻':'▶️'}</div>
       <div class="bot-card-ava" style="background:${grad}">${initials}</div>
       <div class="bot-card-name">${esc(name)}</div>
       ${handleHtml}

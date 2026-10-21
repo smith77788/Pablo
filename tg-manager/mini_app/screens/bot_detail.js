@@ -25,26 +25,30 @@ async function openBot(botId) {
   }
 }
 
-// Убрать бота из работы или вернуть обратно. Раньше это были ДВА разных
-// действия с разными словами — «🗑 Убрать» и «⏸ Выключить», — а по факту оба
-// снимали один флаг is_active. Корзина обещала удаление, которого продукт не
-// делает: подписчики, воронки и история остаются на месте, бот просто уходит
-// из работы и из списка в боте. Обещать удаление того, что не удаляется,
-// нельзя, поэтому действие одно и подпись у него правдивая.
+// Пауза и удаление — РАЗНЫЕ действия. Пауза (⏸/▶️) обратима здесь же: бот
+// остаётся в списке, перестаёт забирать обновления и не берётся в работу.
+// Удаление (🗑) убирает бота из системы: из всех списков и из работы.
+// Раньше «убрать» и «выключить» писали один флаг, поэтому удалить бота было
+// нельзя вовсе — он всегда оставался в списке с кнопкой «Вернуть в работу».
 async function botPowerConfirm(botId, name, isActive) {
   if (isActive) {
-    if (!await askConfirm(`Убрать бота ${name} из работы?\n\nОн перестанет забирать обновления и пропадёт из списка в боте. Подписчики, воронки и история сохранятся — вернуть можно здесь же кнопкой «Вернуть в работу».`)) return;
+    if (!await askConfirm(`Поставить бота ${name} на паузу?\n\nОн перестанет забирать обновления и не будет браться в работу. Подписчики, воронки и история сохранятся — вернуть можно здесь же кнопкой «Вернуть в работу».`)) return;
   }
   try {
-    if (isActive) {
-      await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
-      toast('⏸ Бот убран из работы — данные сохранены');
-    } else {
-      await api('/api/miniapp/bot/'+botId+'/toggle', {method:'PUT'});
-      toast('🟢 Бот вернулся в работу');
-    }
+    await api('/api/miniapp/bot/'+botId+'/toggle', {method:'PUT', body:JSON.stringify({active:!isActive})});
+    toast(isActive ? '⏸ Бот на паузе — данные сохранены' : '🟢 Бот вернулся в работу');
     loadBots();
     if (document.getElementById('s-botdetail')?.classList.contains('show')) openBot(botId);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+}
+
+async function botDeleteConfirm(botId, name) {
+  if (!await askConfirm(`Удалить бота ${name} из системы?\n\nОн пропадёт из всех списков и больше не будет браться в работу. Подписчики и история сохраняются в базе: чтобы вернуть бота, добавьте тот же токен заново.`)) return;
+  try {
+    await api('/api/miniapp/bot/'+botId, {method:'DELETE'});
+    toast('🗑 Бот удалён из системы');
+    if (document.getElementById('s-botdetail')?.classList.contains('show')) back();
+    loadBots();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
 }
 
@@ -140,8 +144,9 @@ function buildBotDetail(d) {
       <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${num(d.auto_replies)}</div><div class="kpi-lbl">Авто-отв.</div></div>
     </div>
     <div style="display:flex;gap:8px;padding:4px 0 4px">
-      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px${b.is_active?';color:var(--red)':''}" onclick="botPowerConfirm(${bid},'${bn}',${!!b.is_active})">${b.is_active?'⏸ Убрать из работы':'▶️ Вернуть в работу'}</button>
+      <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="botPowerConfirm(${bid},'${bn}',${!!b.is_active})">${b.is_active?'⏸ На паузу':'▶️ Вернуть в работу'}</button>
       <button class="btn btn-s" style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
+      <button class="btn btn-s" style="flex:0 0 auto;font-size:13px;padding:10px 10px;color:var(--red)" onclick="botDeleteConfirm(${bid},'${bn}')" aria-label="Удалить бота">🗑 Удалить</button>
     </div>
     ${mgmtSections.map(s=>`
       <div class="sec">${s.title}</div>

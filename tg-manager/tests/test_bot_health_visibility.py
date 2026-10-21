@@ -104,8 +104,23 @@ def test_a_passing_problem_is_shown_without_raising_alarm():
 
 
 def test_switched_off_bot_is_not_called_broken():
-    d = BH.describe({"is_active": False, "fail_streak": 9, "last_error": BH.UNAUTHORIZED})
+    d = BH.describe({"is_active": False, "fail_streak": 2, "last_error": BH.NETWORK})
     assert d["state"] == "off" and d["attention"] is False
+
+
+def test_bot_taken_out_by_dead_token_says_why():
+    """Серия 401 снимает бота из работы автоматически (v253): бот удалён в
+    @BotFather или токен перевыпущен. «⏸ Убран из работы» здесь — неправда о
+    причине, и владельцу нужно сделать шаг."""
+    d = BH.describe({"is_active": False, "fail_streak": 9, "last_error": BH.UNAUTHORIZED})
+    assert d["state"] == "dead" and d["attention"] is True
+    assert "удал" in d["label"].lower()
+    assert "токен" in d["hint"].lower()
+
+
+def test_deleted_bot_is_described_as_deleted():
+    d = BH.describe({"is_active": False, "deleted_at": "2026-10-21"})
+    assert d["state"] == "deleted" and d["attention"] is False
 
 
 def test_row_from_an_older_schema_does_not_break_the_screen():
