@@ -3965,7 +3965,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         } for b in blocked[:limit]]
         return _json_resp({"step": step, "items": items, "total": len(blocked)})
 
+    async def fleet_sweep(request: web.Request) -> web.Response:
+        """Единое обслуживание флота «сделать всё разом»: параллельно по ботам,
+        аккаунтам и каналам — проверить живость и (по желанию) удалить мёртвое.
 
+        body: {delete: bool, preview: bool}. delete=false — только проверка;
+        delete=true,preview=true — посчитать, что удалится (без удаления);
+        delete=true,preview=false — удалить мёртвое. Удаляется только то, что
+        ТОЧНО мёртвое (бот с отозванным токеном, аккаунт с терминальным
+        статусом); «не ответившие» не трогаются.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        want_delete = bool(body.get("delete"))
+        preview = bool(body.get("preview"))
+        try:
+            from services import fleet_maintenance
+            return _json_resp(await fleet_maintenance.sweep_fleet(
+                pool, uid, delete=want_delete, preview=preview))
+        except Exception:
+            log.exception("fleet_sweep uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
 
 
 
@@ -7839,6 +7864,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/onboarding", onboarding_status)
     app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
     app.router.add_get("/api/miniapp/fleet/diagnose/blocked", fleet_diagnose_blocked)
+    app.router.add_post("/api/miniapp/fleet/sweep", fleet_sweep)
     app.router.add_post("/api/miniapp/dm/preview", dm_preview)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)

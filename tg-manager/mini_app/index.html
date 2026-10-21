@@ -1092,6 +1092,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
     </div>
+    <!-- 🧹 Сделать всё разом: единое обслуживание флота. Проверить живость и
+         очистить мёртвое СРАЗУ по ботам, аккаунтам и каналам — параллельно,
+         из одного места (ручка /api/miniapp/fleet/sweep). -->
+    <div style="margin:12px 16px 0;background:var(--bg);border-radius:14px;padding:12px 14px;border:1px solid var(--sep)">
+      <div style="font-size:14px;font-weight:700;margin-bottom:2px">🧹 Обслуживание флота — всё разом</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:10px">Проверить и очистить мёртвое сразу по ботам, аккаунтам и каналам — параллельно, из одного места.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" id="fleetCheckBtn" onclick="fleetCheckAll()" style="flex:1;font-size:13px;padding:10px 6px">🩺 Проверить всё</button>
+        <button class="btn btn-s" id="fleetCleanBtn" onclick="fleetCleanupAll()" style="flex:1;font-size:13px;padding:10px 6px">🧹 Очистить мёртвое</button>
+      </div>
+      <div id="fleetSweepResult" style="display:none;margin-top:10px;font-size:12px;line-height:1.6"></div>
+    </div>
     <!-- 🚀 Онбординг: чеклист активации новичка (скрывается после активации) -->
     <div id="onboardCard" style="margin:12px 16px 0;display:none"></div>
     <!-- 🫀 Пульс организма: живой контекст + цепочки следующих действий -->
@@ -8676,6 +8688,52 @@ function loadTab(tab) {
 }
 
 // ── Home ───────────────────────────────────────────────
+// ── Обслуживание флота «всё разом» ─────────────────────────────────────────
+// Единый проход по ботам+аккаунтам+каналам параллельно (ручка fleet/sweep).
+// «Мёртвое» = бот с отозванным токеном + аккаунт с терминальным статусом;
+// «не ответившие» не удаляются. Каналам живой проверки пока нет — только счёт.
+function _fleetSweepHtml(d, cleaned) {
+  const b = d.bots||{}, a = d.accounts||{}, c = d.channels||{};
+  const del = (x) => (cleaned && x.deleted!=null) ? ` · 🗑 удалено ${x.deleted}` : '';
+  return [
+    `🤖 Боты: всего ${b.total||0} · 🔴 мёртвых ${b.dead||0} · ⚪ не ответили ${b.unknown||0}${del(b)}`,
+    `📱 Аккаунты: 🔴 мёртвых ${a.dead||0}${del(a)}`,
+    `📡 Каналы: ${c.total||0} · проверка доступности скоро`,
+  ].map(r=>`<div>${r}</div>`).join('');
+}
+function _showFleetResult(d, cleaned) {
+  const box = document.getElementById('fleetSweepResult');
+  if (box) { box.style.display=''; box.innerHTML = _fleetSweepHtml(d, cleaned); }
+}
+async function fleetCheckAll() {
+  const btn=document.getElementById('fleetCheckBtn');
+  if(btn){btn.disabled=true;btn.textContent='Проверяю…';}
+  try {
+    const d = await api('/api/miniapp/fleet/sweep', {method:'POST', body:JSON.stringify({delete:false})});
+    _showFleetResult(d, false);
+    toast(`🩺 Мёртвых во флоте: ${d.dead_total||0}`);
+  } catch(e){ toast('⚠️ '+errRu(e,'Не удалось проверить')); }
+  finally { if(btn){btn.disabled=false;btn.textContent='🩺 Проверить всё';} }
+}
+async function fleetCleanupAll() {
+  let d;
+  try { d = await api('/api/miniapp/fleet/sweep', {method:'POST', body:JSON.stringify({delete:true, preview:true})}); }
+  catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); return; }
+  _showFleetResult(d, false);
+  const n = d.dead_total||0;
+  if (!n) { toast('✅ Мёртвого во флоте не найдено 👍'); return; }
+  const b=d.bots||{}, a=d.accounts||{};
+  if (!await askConfirm(`Удалить мёртвое по всему флоту?\n\n🤖 Ботов (токен отозван): ${b.dead||0}\n📱 Аккаунтов (бан/деактивация/сессия): ${a.dead||0}\n\nБезвозвратно, только из Infragram. «Не ответившие» и рабочие не трогаем.`)) return;
+  const btn=document.getElementById('fleetCleanBtn');
+  if(btn){btn.disabled=true;btn.textContent='Чищу…';}
+  try {
+    const r = await api('/api/miniapp/fleet/sweep', {method:'POST', body:JSON.stringify({delete:true, preview:false})});
+    _showFleetResult(r, true);
+    toast(`🧹 Удалено мёртвого: ${r.deleted_total||0}`);
+    if (typeof loadHome==='function') loadHome();
+  } catch(e){ toast('⚠️ '+errRu(e,'Ошибка очистки')); }
+  finally { if(btn){btn.disabled=false;btn.textContent='🧹 Очистить мёртвое';} }
+}
 async function loadHome() {
   modernizeIcons(document.getElementById('s-home'));
   const cached = getCached('infragram_cache_home');
