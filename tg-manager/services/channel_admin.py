@@ -460,6 +460,7 @@ def next_slot(
     window_end: int,
     tz_offset: int,
     rng: Optional[random.Random] = None,
+    peak_hours: Optional[list[int]] = None,
 ) -> datetime:
     """Следующее время публикации (UTC) после now.
 
@@ -467,12 +468,17 @@ def next_slot(
     часовом поясе примерно равными интервалами, с разбросом ±20% — ровная сетка
     «каждые 6 часов минута в минуту» выдаёт автопостинг. Вне окна — начало
     следующего окна (с небольшим сдвигом).
+
+    peak_hours (необязательно) — локальные часы с лучшим охватом (services.peak_hours):
+    кандидат мягко притягивается к ближайшему из них в пределах половины интервала,
+    не выходя за окно. None/[] → прежнее поведение без изменений.
     """
     rng = rng or random.Random()
     tz = timedelta(hours=int(tz_offset))
     local = now.astimezone(timezone.utc) + tz
     span_h = max(1, int(window_end) - int(window_start))
-    interval = timedelta(hours=span_h / max(1, int(posts_per_day)))
+    interval_h = span_h / max(1, int(posts_per_day))
+    interval = timedelta(hours=interval_h)
     day0 = local.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _window(day: datetime) -> tuple[datetime, datetime]:
@@ -486,6 +492,9 @@ def next_slot(
     if cand >= end:
         nxt, _ = _window(day0 + timedelta(days=1))
         cand = nxt + interval * rng.uniform(0.0, 0.3)
+    if peak_hours:
+        cand = _snap_to_peak(cand, peak_hours, window_start=window_start,
+                             window_end=window_end, interval_h=interval_h, rng=rng)
     return cand - tz
 
 
@@ -571,6 +580,82 @@ def tune_weights(weights: dict[str, float], stats: dict[str, dict],
 
 def post_score(views: int, reactions: int, forwards: int) -> float:
     return float(views or 0) + 3.0 * float(reactions or 0) + 5.0 * float(forwards or 0)
+
+
+# ── Пиковые часы аудитории (когда внутри окна пост набирает больше охвата) ────
+# Администратор уже публикует в пределах окна владельца. КОГДА именно внутри окна
+# — учится по реальному охвату своих прошлых постов: час с лучшим средним
+# результатом притягивает слот. Это НЕ выход за окно и НЕ рост частоты — только
+# сдвиг момента внутри уже разрешённого окна, поэтому для флота безопасно.
+_PEAK_MIN_TOTAL = 12   # меньше постов с охватом — данных мало, окну доверяем как есть
+_PEAK_SHRINK = 5.0     # притяжение часа к общему среднему: мало постов → меньше доверия
+
+
+def _shrunk_mean(n: int, mean: float, prior: float, k: float = _PEAK_SHRINK) -> float:
+    """Среднее часа, подтянутое к общему среднему: мало постов → меньше доверия выбросу."""
+    return (n * mean + k * prior) / (n + k) if (n + k) else prior
+
+
+def peak_hours(posts: list[tuple[datetime, float]], tz_offset: int,
+               window_start: int, window_end: int, *,
+               min_total: int = _PEAK_MIN_TOTAL) -> list[int]:
+    """Локальные часы ВНУТРИ окна, где охват выше среднего — лучший первым.
+
+    posts — пары (момент публикации в UTC, оценка охвата post_score). Мало данных
+    → [] и расписание работает как раньше. Часы вне [window_start, window_end)
+    отбрасываются: администратор не выходит за разрешённое владельцем окно.
+    """
+    scored = [(at, float(s)) for at, s in posts if at is not None and s is not None]
+    tz = timedelta(hours=int(tz_offset))
+    ws, we = int(window_start), int(window_end)
+    # Базу сравнения считаем ТОЛЬКО по часам внутри окна: публикуем мы всегда в
+    # окне, и выброс в ненужный час (ночью) не должен занижать все дневные часы.
+    buckets: dict[int, list[float]] = {}
+    in_window: list[float] = []
+    for at, s in scored:
+        lh = (at.astimezone(timezone.utc) + tz).hour
+        if not (ws <= lh < we):
+            continue
+        buckets.setdefault(lh, []).append(s)
+        in_window.append(s)
+    if len(in_window) < max(1, int(min_total)):
+        return []
+    prior = sum(in_window) / len(in_window)
+    ranked: list[tuple[int, float]] = []
+    for h, v in buckets.items():
+        m = _shrunk_mean(len(v), sum(v) / len(v), prior)
+        if m >= prior:  # только часы не хуже среднего по окну — их и притягиваем
+            ranked.append((h, m))
+    ranked.sort(key=lambda hm: -hm[1])
+    return [h for h, _ in ranked]
+
+
+def _snap_to_peak(cand_local: datetime, peaks: list[int], *,
+                  window_start: int, window_end: int, interval_h: float,
+                  rng: random.Random) -> datetime:
+    """Подвинуть кандидата к ближайшему пиковому часу, но не дальше половины
+    интервала между постами и не выходя за окно.
+
+    Ограниченный сдвиг держит два инварианта: слоты не схлопываются в один час и
+    остаются строго по возрастанию (сдвиг < минимального зазора до соседа), а
+    проверка окна гарантирует, что мы не вынесем пост за разрешённые часы.
+    """
+    if not peaks:
+        return cand_local
+    reach = max(0.5, float(interval_h) / 2.0)
+    cand_h = cand_local.hour + cand_local.minute / 60.0
+    best: Optional[tuple[float, int]] = None
+    for h in peaks:
+        dist = abs((h + 0.5) - cand_h)  # к середине часа
+        if dist <= reach and (best is None or dist < best[0]):
+            best = (dist, h)
+    if best is None:
+        return cand_local
+    h = best[1]
+    if not (int(window_start) <= h < int(window_end)):
+        return cand_local
+    return cand_local.replace(hour=h, minute=int(rng.uniform(0, 60)),
+                              second=0, microsecond=0)
 
 
 def _fence(items: list[str], cap: int = 600) -> str:
@@ -1550,6 +1635,21 @@ def _brand_rules_dict(r: cb.BrandRules) -> dict:
     }
 
 
+async def learn_peak_hours(pool, owner_id: int, channel_id: int, *,
+                           tz_offset: int, window_start: int, window_end: int,
+                           days: int = 30) -> list[int]:
+    """Пиковые локальные часы канала по реальному охвату его постов (или [])."""
+    rows = await pool.fetch(
+        "SELECT published_at, views, reactions, forwards FROM va_channel_posts "
+        "WHERE owner_id=$1 AND channel_key=$2 AND views IS NOT NULL "
+        "AND published_at > now() - make_interval(days => $3) "
+        "ORDER BY published_at DESC LIMIT 400",
+        int(owner_id), str(channel_id), int(days))
+    posts = [(r["published_at"], post_score(r["views"], r["reactions"], r["forwards"]))
+             for r in rows or [] if r["published_at"]]
+    return peak_hours(posts, tz_offset, window_start, window_end)
+
+
 async def ensure_plan(pool, owner_id: int, channel_id: int, *,
                       complete: Optional[Complete] = None, force: bool = False,
                       now: Optional[datetime] = None) -> int:
@@ -1575,6 +1675,9 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     if not force and last_at and last_at > now + timedelta(hours=_PLAN_MIN_AHEAD_H):
         return 0
     start = max(last_at or now, now)
+    peaks = await learn_peak_hours(
+        pool, owner_id, channel_id, tz_offset=admin["tz_offset"],
+        window_start=admin["window_start"], window_end=admin["window_end"])
     slots: list[datetime] = []
     cursor = start
     if not last_at:
@@ -1586,7 +1689,7 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     while len(slots) < slot_limit:
         cursor = next_slot(cursor, posts_per_day=admin["posts_per_day"],
                            window_start=admin["window_start"], window_end=admin["window_end"],
-                           tz_offset=admin["tz_offset"])
+                           tz_offset=admin["tz_offset"], peak_hours=peaks)
         if cursor > horizon:
             break
         slots.append(cursor)
@@ -1626,8 +1729,12 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
         await pool.execute(
             "UPDATE va_channel_admin SET next_post_at=$3 WHERE owner_id=$1 AND channel_id=$2",
             int(owner_id), int(channel_id), first["s"])
+    peak_note = ""
+    if peaks:
+        hrs = ", ".join(f"{h:02d}:00" for h in sorted(peaks[:3]))
+        peak_note = f" · время под охват аудитории ({hrs})"
     await log_event(pool, owner_id, channel_id, "plan",
-                    f"Контент-план дополнен: {len(pillars)} постов вперёд")
+                    f"Контент-план дополнен: {len(pillars)} постов вперёд{peak_note}")
     return len(pillars)
 
 
