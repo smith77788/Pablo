@@ -2484,7 +2484,40 @@ async def _run_warmup_session_impl(
     total_ok = 0
     total_fail = 0
 
+    # ОСТАНОВКА ВЛАДЕЛЬЦА СПРАШИВАЕТСЯ У БАЗЫ — тот же разрыв, что в дневном
+    # прогреве плана. Пауза сессии («Прогрев» в боте) меняла только строку, а
+    # прогон шёл по ВСЕМ аккаунтам сессии и по всем шагам каждого: десятки
+    # обращений живыми аккаунтами после того, как владелец нажал паузу. Окно
+    # 5 секунд: шаги идут секундами-минутами друг от друга. Блип БД
+    # остановкой не считаем — рвать прогон из-за сетевого сбоя дороже, чем
+    # заметить паузу на следующем шаге.
+    _sess_checked_at = 0.0
+    _sess_stopped = False
+
+    async def _session_stopped_by_owner() -> bool:
+        nonlocal _sess_checked_at, _sess_stopped
+        _now = time.monotonic()
+        if _sess_stopped or _now - _sess_checked_at < 5.0:
+            return _sess_stopped
+        _sess_checked_at = _now
+        try:
+            _st = await pool.fetchval(
+                "SELECT status FROM warmup_sessions WHERE id=$1", session_id)
+        except Exception as _e:
+            log.warning(
+                "warmup_session %s: статус не прочитан (%s) — идём дальше по "
+                "прошлому ответу", session_id, _e)
+            return _sess_stopped
+        _sess_stopped = _st is None or str(_st) in (
+            "paused", "cancelled", "stopped")
+        return _sess_stopped
+
     for acc_id in account_ids:
+        if await _session_stopped_by_owner():
+            log.info(
+                "warmup_session %s остановлена владельцем — остальные аккаунты "
+                "не трогаем, сделано %d действий", session_id, total_ok)
+            break
         # Пропускаем аккаунт если он сейчас занят op_worker-операцией,
         # затем СРАЗУ клеймим его, чтобы op_worker не начал операцию во время разогрева.
         _claimed = False
@@ -2642,6 +2675,12 @@ async def _run_warmup_session_impl(
             await asyncio.wait_for(client.connect(), timeout=15)
 
             for i in range(_acc_steps):
+                if await _session_stopped_by_owner():
+                    log.info(
+                        "warmup_session %s остановлена владельцем — прекращаем "
+                        "на шаге %d из %d (acc=%s)",
+                        session_id, i + 1, _acc_steps, acc_id)
+                    break
                 action = random.choice(
                     available_actions if i < _acc_actions else _read_only
                 )
@@ -2830,8 +2869,13 @@ async def _run_warmup_session_impl(
     new_status = "completed" if completed else "active"
 
     await pool.execute(
+        # ПАУЗУ НЕ ЗАТИРАЕМ: $2 здесь это 'active'/'completed', а паузу сессии
+        # ставит владелец из бота. Безусловная запись возвращала сессию в
+        # работу в конце того же прогона — пауза жила до его финала.
         """UPDATE warmup_sessions
-           SET current_day=$1, last_run_at=NOW(), status=$2
+           SET current_day=$1, last_run_at=NOW(),
+               status=CASE WHEN status IN ('paused','cancelled','stopped')
+                           THEN status ELSE $2 END
            WHERE id=$3""",
         new_day,
         new_status,

@@ -140,3 +140,70 @@ def test_the_step_loop_asks_the_database_whether_it_was_stopped():
     assert "_plan_stopped_by_owner" in called, (
         "цикл шагов не спрашивает статус плана — пауза владельца не остановит "
         "уже идущие действия живым аккаунтом")
+
+
+# ── То же в прогоне СЕССИИ: своя строка, тот же разрыв ──────────────────────
+
+def _session_tail_query() -> str:
+    from services import account_warmer
+
+    src = inspect.getsource(account_warmer._run_warmup_session_impl)
+    m = re.search(r'"""(UPDATE warmup_sessions.*?WHERE id=\$3)"""', src, re.S)
+    assert m, "запрос обновления сессии не найден в исходнике"
+    return m.group(1)
+
+
+def _session(pool, status: str) -> int:
+    _run(pool.execute("DELETE FROM warmup_sessions WHERE owner_id=$1", OWNER))
+    return _run(pool.fetchval(
+        """INSERT INTO warmup_sessions(owner_id, account_ids, target_refs,
+                                       current_day, target_days, daily_actions,
+                                       status)
+           VALUES($1, $2::bigint[], $3::text[], 3, 14, 10, $4) RETURNING id""",
+        OWNER, [ACCOUNT], ["@somewhere"], status))
+
+
+def test_a_paused_session_is_not_revived_by_the_end_of_the_run(pool):
+    sid = _session(pool, "paused")
+    try:
+        _run(pool.execute(_session_tail_query(), 4, "active", sid))
+        row = _run(pool.fetchrow(
+            "SELECT status, current_day FROM warmup_sessions WHERE id=$1", sid))
+        assert row["status"] == "paused", (
+            "сессия вернулась в работу: пауза владельца жила до конца прогона")
+        assert row["current_day"] == 4
+    finally:
+        _run(pool.execute("DELETE FROM warmup_sessions WHERE owner_id=$1", OWNER))
+
+
+def test_an_active_session_still_advances(pool):
+    sid = _session(pool, "active")
+    try:
+        _run(pool.execute(_session_tail_query(), 14, "completed", sid))
+        row = _run(pool.fetchrow(
+            "SELECT status, current_day FROM warmup_sessions WHERE id=$1", sid))
+        assert row["status"] == "completed", "обычный путь сессии сломан"
+        assert row["current_day"] == 14
+    finally:
+        _run(pool.execute("DELETE FROM warmup_sessions WHERE owner_id=$1", OWNER))
+
+
+def test_the_session_loops_ask_the_database_whether_it_was_stopped():
+    """Сессия идёт по НЕСКОЛЬКИМ аккаунтам — спрашивать надо в обоих циклах."""
+    from services import account_warmer
+
+    path = inspect.getsourcefile(account_warmer)
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    impl = next((n for n in ast.walk(tree)
+                 if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))
+                 and n.name == "_run_warmup_session_impl"), None)
+    assert impl is not None, "исполнитель сессии прогрева не найден"
+    loops = [n for n in ast.walk(impl) if isinstance(n, ast.For)]
+    asking = [
+        n for n in loops
+        if any((getattr(c.func, "id", None) or getattr(c.func, "attr", None))
+               == "_session_stopped_by_owner"
+               for c in ast.walk(n) if isinstance(c, ast.Call))]
+    assert len(asking) >= 2, (
+        "статус сессии спрашивается не во всех циклах — пауза остановит либо "
+        "только аккаунты, либо только шаги")
