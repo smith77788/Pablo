@@ -109,11 +109,15 @@ async def update_trust_scores(pool, owner_id: int) -> int:
         'SELECT s.* FROM contact_sources s '
         'JOIN unified_contacts c ON c.id = s.contact_id '
         'WHERE c.owner_id=$1', owner_id)
-    by_contact: dict[int, list] = {}
+    by_contact: dict = {}
     for s in sources:
         by_contact.setdefault(s['contact_id'], []).append(dict(s))
 
-    ids: list[int] = []
+    # `unified_contacts.id` — UUID, а не число. Пачка писалась с
+    # `$1::bigint[]`, то есть Postgres отбивал её целиком («operator does not
+    # exist: uuid = bigint»), и пересчёт доверия МОЛЧА не делал ничего:
+    # владелец видел нули. Тип ключа здесь обязан совпадать со схемой.
+    ids: list = []
     scores: list[float] = []
     for c in contacts:
         ids.append(c['id'])
@@ -122,7 +126,7 @@ async def update_trust_scores(pool, owner_id: int) -> int:
     # запись без этой проверки — чужая строка при любой будущей ошибке выше.
     await pool.execute(
         'UPDATE unified_contacts AS u SET trust_score = v.score '
-        'FROM (SELECT * FROM unnest($1::bigint[], $2::double precision[]) '
+        'FROM (SELECT * FROM unnest($1::uuid[], $2::double precision[]) '
         '      AS t(id, score)) AS v '
         'WHERE u.id = v.id AND u.owner_id = $3',
         ids, scores, owner_id)
