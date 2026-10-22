@@ -658,6 +658,58 @@ def _snap_to_peak(cand_local: datetime, peaks: list[int], *,
                               second=0, microsecond=0)
 
 
+# ── Авточастота: сколько постов в день по откликам аудитории ─────────────────
+# Больше постов ≠ больше охвата: после насыщения каждый следующий пост в тот же
+# день собирает меньше и утомляет подписчиков. Советуем частоту по ТРЕНДУ охвата
+# на пост (свежая половина против ранней), ±1 за раз и не выше потолка. Это
+# ТОЛЬКО совет владельцу в отчёте — сами частоту не меняем (его решение).
+_FREQ_MIN_SAMPLE = 14   # постов за окно — меньше сигнал шумный, молчим
+_FREQ_UP = 1.15         # охват на пост вырос ≥15% → есть запас публиковать чаще
+_FREQ_DOWN = 0.80       # охват на пост упал ≥20% → аудитория устаёт, лучше реже
+_FREQ_CEIL = 6          # выше сами не предлагаем — защита от скатывания в спам
+
+
+def recommend_frequency(current_ppd: int, early_avg: float, recent_avg: float,
+                        sample: int, *, pmin: int = 1, pmax: int = _FREQ_CEIL
+                        ) -> Optional[dict]:
+    """Совет по числу постов в день (±1) по тренду охвата на пост. None — держать как есть."""
+    cur = int(current_ppd or 1)
+    if sample < _FREQ_MIN_SAMPLE or early_avg <= 0 or recent_avg <= 0:
+        return None
+    ratio = recent_avg / early_avg
+    if ratio >= _FREQ_UP and cur < int(pmax):
+        return {"suggested": cur + 1, "current": cur,
+                "reason": "охват на пост растёт — аудитория готова читать чаще"}
+    if ratio <= _FREQ_DOWN and cur > int(pmin):
+        return {"suggested": cur - 1, "current": cur,
+                "reason": "охват на пост снижается — реже, но сильнее держит аудиторию"}
+    return None
+
+
+async def frequency_suggestion(pool, owner_id: int, channel_id: int) -> Optional[dict]:
+    """Совет по частоте из истории охвата (va_channel_posts). Fail-soft → None."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT avg(sc) FILTER (WHERE published_at <  now() - interval '14 days') AS early, "
+            "       avg(sc) FILTER (WHERE published_at >= now() - interval '14 days') AS recent, "
+            "       count(*) AS n FROM ("
+            "  SELECT published_at, "
+            "    (coalesce(views,0)+3*coalesce(reactions,0)+5*coalesce(forwards,0))::float AS sc "
+            "  FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2 AND views IS NOT NULL "
+            "  AND published_at > now() - interval '28 days') t",
+            int(owner_id), str(channel_id))
+        ppd = await pool.fetchrow(
+            "SELECT posts_per_day FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2",
+            int(owner_id), int(channel_id))
+    except Exception:
+        log.debug("channel_admin.frequency_suggestion failed", exc_info=True)
+        return None
+    if not row or not ppd:
+        return None
+    return recommend_frequency(ppd["posts_per_day"], float(row["early"] or 0),
+                               float(row["recent"] or 0), int(row["n"] or 0))
+
+
 def _fence(items: list[str], cap: int = 600) -> str:
     """Внешний текст в огороженный блок (данные, а не инструкции)."""
     parts = []
@@ -2694,6 +2746,7 @@ async def channel_report(pool, owner_id: int, channel_id: int) -> dict:
         "members": members[-1] if members else None,
         "members_delta_7d": (members[-1] - members[0]) if len(members) >= 2 else None,
         "best_pillar": best,
+        "freq_suggestion": await frequency_suggestion(pool, owner_id, channel_id),
         "pillars": [{"name": p, "posts": s["posts"], "avg_views": s["views"]}
                     for p, s in sorted(stats.items(), key=lambda kv: -kv[1]["score"])],
     }
@@ -2861,6 +2914,19 @@ async def network_overview(pool, owner_id: int) -> dict:
     return out
 
 
+def plural_posts(n: int) -> str:
+    """Русское склонение слова «пост» по числу: 1 пост, 2 поста, 5 постов."""
+    n = abs(int(n))
+    if 11 <= n % 100 <= 14:
+        return "постов"
+    tail = n % 10
+    if tail == 1:
+        return "пост"
+    if 2 <= tail <= 4:
+        return "поста"
+    return "постов"
+
+
 def format_daily_report(items: list[tuple[str, dict]]) -> str:
     """Отчёт владельцу за сутки по всем его каналам под администратором."""
     lines = ["🧠 <b>Отчёт виртуального администратора</b>"]
@@ -2888,6 +2954,11 @@ def format_daily_report(items: list[tuple[str, dict]]) -> str:
                 s += f" ({'+' if d >= 0 else ''}{d} за неделю)"
         if r.get("best_pillar"):
             s += f"\n• лучше всего заходит: {html.escape(r['best_pillar'])}"
+        fs = r.get("freq_suggestion")
+        if fs:
+            s += (f"\n• совет по частоте: {fs['suggested']} "
+                  f"{plural_posts(fs['suggested'])} в день — {html.escape(fs['reason'])} "
+                  f"(сейчас {fs['current']})")
         if is_ai_wait(r.get("last_error")):
             s += "\n• ⏳ ждёт сброса лимита ИИ — продолжит сам"
         elif r.get("last_error"):
