@@ -84,12 +84,14 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
                 await pool.execute(
                     "INSERT INTO managed_bots(bot_id, token, username, is_active, added_by) "
                     "VALUES($1,$2,$3,TRUE,$4)", bid, tok, f"b{bid}", owner)
-            # Аккаунты владельца: рабочий, забанен, сессия отозвана, кулдаун
-            # (восстановимо — НЕ удалять). Плюс чужой забаненный.
+            # Аккаунты владельца: рабочий, забанен и деактивирован (LOST —
+            # удалять), кулдаун и session_expired (восстановимо — НЕ удалять).
+            # Плюс чужой забаненный. Проверяем, что session_expired переживает
+            # очистку: сессия переподключается, выбрасывать его нельзя.
             for aid, status, owner in [
                 (501, "active", OWNER), (502, "banned", OWNER),
-                (503, "session_expired", OWNER), (504, "cooldown", OWNER),
-                (601, "banned", OTHER)]:
+                (503, "deactivated", OWNER), (504, "cooldown", OWNER),
+                (505, "session_expired", OWNER), (601, "banned", OTHER)]:
                 await pool.execute(
                     "INSERT INTO tg_accounts(id, owner_id, phone, session_str, acc_status) "
                     "VALUES($1,$2,$3,$4,$5)", aid, owner, f"+7900{aid}", "sess", status)
@@ -124,9 +126,9 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
                                       json={"delete": True, "preview": True})
                 d = await r.json()
                 assert d["preview"] is True and d["deleted"] is False
-                assert d["dead_total"] == 3, d   # 1 бот + 2 аккаунта
+                assert d["dead_total"] == 3, d   # 1 бот + 2 аккаунта (LOST)
                 assert await pool.fetchval(
-                    "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", OWNER) == 4
+                    "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", OWNER) == 5
 
                 # 3) Удаление: только мёртвое, параллельно по типам.
                 r = await client.post("/api/miniapp/fleet/sweep", headers=hdr,
@@ -141,7 +143,8 @@ def test_sweep_checks_and_cleans_all_types(monkeypatch):
                 assert bots_left == {301, 303}, f"удалён не тот бот: {bots_left}"
                 accs_left = {r["id"] for r in await pool.fetch(
                     "SELECT id FROM tg_accounts WHERE owner_id=$1", OWNER)}
-                assert accs_left == {501, 504}, f"удалён не тот аккаунт: {accs_left}"
+                # 501 рабочий, 504 кулдаун, 505 session_expired — все восстановимы.
+                assert accs_left == {501, 504, 505}, f"удалён не тот аккаунт: {accs_left}"
 
                 # Чужое не тронуто.
                 assert await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE bot_id=401") == 1

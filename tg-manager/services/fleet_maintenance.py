@@ -4,14 +4,14 @@
 аккаунтам и каналам ПАРАЛЛЕЛЬНО и возвращает единую сводку — вместо того
 чтобы ходить по трём экранам по очереди.
 
-Что считается «мёртвым» берётся из ЕДИНЫХ определений, а не выдумывается
-заново:
+Что считается «мёртвым» берётся из ЕДИНЫХ словарей, а не выдумывается заново:
   • бот мёртв — токен отозван (getMe → 401); решение целиком в
     bot_api.check_alive, здесь только его зовём;
-  • аккаунт мёртв — терминальный acc_status из DEAD_ACCOUNT_STATUSES; тот же
-    набор, что у фильтра `dead` в mini_app_api._accounts_where (сверяется
-    тестом tests/test_fleet_sweep_dead_defs_agree.py, чтобы определения не
-    разъехались);
+  • аккаунт удаляем только БЕЗВОЗВРАТНО потерянный — account_status.LOST_STATUSES
+    (banned/deactivated/deleted). spamblock/frozen (снимаются) и
+    session_expired (сессия переподключается) НЕ трогаем: это восстановимое, и
+    выбрасывать его нельзя. Словарь один на продукт (test_dead_status_has_one_door
+    запрещает копии), поэтому берём его, а не свой список;
   • у каналов живой проверки доступности пока нет (нужна сессия управляющего
     аккаунта — отдельная операция движка), поэтому их только считаем и честно
     помечаем, что проверка не выполнялась.
@@ -25,11 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
-# Терминальные статусы аккаунта — невозвратно непригоден (бан / деактивация /
-# отозванная сессия). Должны совпадать с фильтром `dead` в
-# mini_app_api._accounts_where; расхождение ловит регресс-тест.
-DEAD_ACCOUNT_STATUSES = ("banned", "deactivated", "session_expired")
 
 log = logging.getLogger(__name__)
 
@@ -71,11 +66,17 @@ async def _scan_bots(pool, uid: int) -> dict:
 
 
 async def _scan_accounts(pool, uid: int) -> dict:
-    """Мёртвые аккаунты владельца по терминальному acc_status (без подключения)."""
+    """Безвозвратно потерянные аккаунты владельца (account_status.LOST_STATUSES).
+
+    Только LOST (banned/deactivated/deleted) — «потерян и сам не вернётся».
+    Восстановимое (spamblock/frozen/session_expired) не трогаем. Подключения
+    нет — судим по сохранённому acc_status (его ставит проверка аккаунтов).
+    """
+    from services import account_status
     rows = await pool.fetch(
         "SELECT id FROM tg_accounts WHERE owner_id=$1 "
-        "AND COALESCE(acc_status,'ok') = ANY($2::text[])",
-        uid, list(DEAD_ACCOUNT_STATUSES))
+        "AND COALESCE(acc_status,'active') = ANY($2::text[])",
+        uid, list(account_status.LOST_STATUSES))
     dead_ids = [int(r["id"]) for r in (rows or [])]
     total = await pool.fetchval(
         "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid)

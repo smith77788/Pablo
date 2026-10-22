@@ -8742,7 +8742,7 @@ async function fleetCleanupAll() {
   const n = d.dead_total||0;
   if (!n) { toast('✅ Мёртвого во флоте не найдено 👍'); return; }
   const b=d.bots||{}, a=d.accounts||{};
-  if (!await askConfirm(`Удалить мёртвое по всему флоту?\n\n🤖 Ботов (токен отозван): ${b.dead||0}\n📱 Аккаунтов (бан/деактивация/сессия): ${a.dead||0}\n\nБезвозвратно, только из Infragram. «Не ответившие» и рабочие не трогаем.`)) return;
+  if (!await askConfirm(`Удалить мёртвое по всему флоту?\n\n🤖 Ботов (токен отозван): ${b.dead||0}\n📱 Аккаунтов (бан / деактивация / удалён): ${a.dead||0}\n\nБезвозвратно, только из Infragram. Восстановимое (спам-блок, отозванная сессия, кулдаун) и «не ответившие» не трогаем.`)) return;
   const btn=document.getElementById('fleetCleanBtn');
   if(btn){btn.disabled=true;btn.textContent='Чищу…';}
   try {
