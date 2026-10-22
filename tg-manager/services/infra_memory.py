@@ -759,6 +759,11 @@ async def record_account_restriction(
 # вердикта обязано быть то же, что у гейта. Более широкое окно пульса остаётся
 # для мягких сигналов (флуды, несерьёзные ограничения) — они дают «Под риском».
 QUARANTINE_DAYS = 3
+# Пауза перед вторым чтением карантина. Один запрос на операцию, а не на
+# аккаунт, поэтому повтор ничего не стоит; близнецы этого числа —
+# op_worker._JOURNAL_READ_RETRY_DELAY_S и
+# operation_bus._CHAIN_READ_RETRY_DELAY_S, логика та же.
+_QUARANTINE_READ_RETRY_DELAY_S = 0.5
 
 _QUARANTINE_WHERE = (
     "re.created_at > NOW() - make_interval(days => $2) "
@@ -785,6 +790,15 @@ async def quarantined_accounts(pool, account_ids, *, days: int = QUARANTINE_DAYS
 
     Fail-open сохранён и здесь: ошибка → пустое множество (никого не держим).
     Anti-detection ядро не должно вставать из-за отсутствия данных пульса.
+
+    НО СНАЧАЛА ПОВТОР, И НЕ ШЁПОТОМ. Fail-open означает, что одно неудачное
+    чтение отвечает «все чисты» — и продукт берёт в работу аккаунт с
+    подтверждённым ограничением, то есть ровно тот риск, от которого гейт и
+    поставлен. Блип к базе лечится повтором, а стоит он здесь ничего: это один
+    запрос на операцию, а не на аккаунт. Если и повтор не прошёл, выбор
+    остаётся прежним (не держим флот из-за отсутствия данных), но запись об
+    этом — `error` с прямой формулировкой, а не `debug`: предохранитель,
+    который отключился молча, не отличить от предохранителя, который разрешил.
     """
     if not pool or not account_ids:
         return set()
@@ -794,14 +808,25 @@ async def quarantined_accounts(pool, account_ids, *, days: int = QUARANTINE_DAYS
         return set()
     if not ids:
         return set()
-    try:
-        rows = await pool.fetch(
-            "SELECT DISTINCT re.account_id FROM restriction_events re "
-            "JOIN tg_accounts a ON a.id = re.account_id "
-            "WHERE re.account_id = ANY($1::bigint[]) AND " + _QUARANTINE_WHERE,
-            ids, int(days))
-    except Exception:
-        log.debug("infra_memory: пакетная проверка карантина не удалась", exc_info=True)
+    rows, err = None, None
+    for _attempt in (1, 2):
+        try:
+            rows = await pool.fetch(
+                "SELECT DISTINCT re.account_id FROM restriction_events re "
+                "JOIN tg_accounts a ON a.id = re.account_id "
+                "WHERE re.account_id = ANY($1::bigint[]) AND " + _QUARANTINE_WHERE,
+                ids, int(days))
+            err = None
+            break
+        except Exception as e:
+            err = e
+            if _attempt == 1:
+                await asyncio.sleep(_QUARANTINE_READ_RETRY_DELAY_S)
+    if err is not None:
+        log.error(
+            "infra_memory: карантин НЕ ПРОВЕРЕН для %d аккаунт(ов) (%s) — гейт "
+            "ответил «все чисты», и в работу может уйти аккаунт с "
+            "подтверждённым ограничением", len(ids), err)
         return set()
     out: set[int] = set()
     for r in rows or ():
