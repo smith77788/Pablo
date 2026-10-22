@@ -111,8 +111,6 @@ def test_no_label_declines_a_noun_by_a_number_it_does_not_know():
     Рабочая форма — двоеточие: «аккаунтов: 1» верно при любом числе, и именно
     так была написана удалённая подпись.
     """
-    import re
-
     bad = []
     for path in api_files():
         src = path.read_text(encoding="utf-8")
