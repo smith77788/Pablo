@@ -71,11 +71,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps (runtime subset + test tooling; telethon is stubbed in conftest)
+      - name: Install deps (runtime subset + test tooling; telethon — отдельным шагом ниже)
         run: |
           python -m pip install --upgrade pip
           # Рантайм-зависимости, нужные для импорта хендлеров/сервисов в тестах.
-          # telethon НЕ ставим — он застаблен в tests/conftest.py (и pyaes не собирается).
+          # telethon здесь НЕ ставим: в in-process тестах он застаблен в
+          # tests/conftest.py, а подпроцессным тестам старта его ставит
+          # отдельный шаг ниже (почему отдельный — там же в комментарии).
           # anthropic обязателен: tests/test_ai_claude.py делает безусловный
           # `import anthropic`, и без пакета падает СБОР всех тестов (весь прогон
           # красный, ни один тест tg-manager не выполняется). Он уже в
@@ -88,6 +90,27 @@ jobs:
             "aiogram==3.30.0" "asyncpg==0.29.0" aiohttp openai anthropic python-dotenv \
             openpyxl pypdf python-docx pycryptodome PySocks aiohttp-socks "qrcode[pil]" \
             pytest pytest-asyncio ruff
+
+      # ЗАЧЕМ ОТДЕЛЬНЫМ ШАГОМ. Восемь тестов
+      # tests/test_startup_survives_telegram_outage.py поднимают НАСТОЯЩИЙ
+      # main.py отдельным процессом (проверяют, что мини-апп встаёт, когда
+      # Telegram недоступен) — in-process заглушка из tests/conftest.py в
+      # подпроцесс не попадает, и без пакета все восемь молча уходят в skip.
+      # До 2026-10-22 они не выполнялись НИГДЕ: ни локально, ни здесь.
+      #
+      # ПОЧЕМУ НЕ В СПИСОК ВЫШЕ. `pip` при одном упавшем пакете не ставит НИ
+      # ОДНОГО из списка — тогда прогон падает на `ModuleNotFoundError: pytest`,
+      # и на разбор пустой поломки уходит время. Здесь же `continue-on-error`:
+      # не собралось — основной набор уже стоит, прогон идёт, эти восемь снова
+      # уходят в skip честно и видно в `-rs`.
+      #
+      # На in-process тесты пакет не влияет: `_TelethonFinder` из conftest
+      # стоит в `sys.meta_path[0]` и перехватывает любой `import telethon`
+      # раньше настоящего (проверено полным прогоном с установленным
+      # telethon — тот же результат).
+      - name: Install telethon (нужен только тестам старта подпроцессом)
+        continue-on-error: true
+        run: pip install "telethon==1.45.0" pyaes rsa
 
       # Обращение к несуществующему имени — это падение при исполнении строки,
       # и синтаксис его не ловит. Набор правил и обоснование, почему сюда не
