@@ -12,6 +12,7 @@ Operation Bus — универсальный механизм постановк
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 import logging
@@ -1113,9 +1114,26 @@ def timeout_for(op_type: str, default: int) -> int:
 # чтобы обход не стал бесконечным.
 RETRY_CHAIN_MAX = 10
 RETRY_FAMILY_MAX = 50
+# Пауза перед вторым чтением цепочки. Блип к БД лечится повтором, а стоит он
+# здесь ничего: это один запрос на прогон, а не на цель. Близнец этого числа —
+# op_worker._JOURNAL_READ_RETRY_DELAY_S, у двери журнала та же логика.
+_CHAIN_READ_RETRY_DELAY_S = 0.5
 
 
-async def retry_family_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
+class RetryChainUnreadable(RuntimeError):
+    """Цепочку повторов не прочитали — состав семьи неизвестен.
+
+    Бросается только в строгом режиме (`strict=True`), которым читают ключи
+    идемпотентности: для них неполная семья означает «работы не было», то есть
+    дубль реального действия. Остальным читателям цепочки (отказ в повторе по
+    убранному журналу, список целей для точечного повтора) неполнота не
+    опасна, и для них функция по-прежнему ничего не бросает.
+    """
+
+
+async def retry_family_ids(
+    pool: asyncpg.Pool, op_id: int, *, strict: bool = False,
+) -> list[int]:
     """Операции, чей журнал относится к этой работе: сама, её предки и их потомки.
 
     ЗАЧЕМ ПРЕДКИ. Ключи идемпотентности исполнителя читают operation_log по
@@ -1130,22 +1148,49 @@ async def retry_family_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
     опубликованные первым, получали второй пост. По дереву семьи оба повтора
     видят работу друг друга.
 
-    Порядок: сама операция, затем предки снизу вверх, затем потомки. Никогда не
-    бросает: не прочитали — работаем по тому, что успели собрать, то есть как
-    раньше.
+    Порядок: сама операция, затем предки снизу вверх, затем потомки.
+
+    ЧТЕНИЕ С ПОВТОРОМ И ДВА РЕЖИМА ОТКАЗА. Каждое чтение идёт с одним
+    повтором: блип к БД лечится именно им, а стоит он здесь ничего — это один
+    запрос на прогон, а не на цель.
+
+    Что делать, если и повтор не прошёл, зависит от читателя:
+
+      • `strict=False` (по умолчанию) — работаем по тому, что успели собрать,
+        то есть как раньше. Так читают отказ в повторе по убранному журналу и
+        список целей для точечного повтора: неполная семья там означает
+        «лишний раз разрешили» или «короче список», но не дубль действия;
+      • `strict=True` — `RetryChainUnreadable`. Так читают КЛЮЧИ
+        ИДЕМПОТЕНТНОСТИ (`op_worker.journal_op_ids`): сами двери давно
+        fail-closed (`_journal_fetch` бросает, не прочитав журнал), но список
+        id, по которому они читают, собирался здесь fail-open — и неполная
+        семья давала дверям ПУСТОЙ журнал без всякой ошибки. Для повтора
+        рассылки на 380 адресатов это второе сообщение 203 людям, которые уже
+        получили первое; дверь при этом отработала честно, а ключ соврал.
     """
     family = [int(op_id)]
     seen = {int(op_id)}
     cur = int(op_id)
 
     for _ in range(RETRY_CHAIN_MAX):
-        try:
-            row = await pool.fetchrow(
-                "SELECT params->>'retry_of_op' AS src FROM operation_queue WHERE id=$1",
-                cur,
-            )
-        except Exception:
-            log.warning("operation_bus: цепочка повторов op=%s не прочитана", cur, exc_info=True)
+        row, err = None, None
+        for _attempt in (1, 2):
+            try:
+                row = await pool.fetchrow(
+                    "SELECT params->>'retry_of_op' AS src FROM operation_queue WHERE id=$1",
+                    cur,
+                )
+                err = None
+                break
+            except Exception as e:
+                err = e
+                if _attempt == 1:
+                    await asyncio.sleep(_CHAIN_READ_RETRY_DELAY_S)
+        if err is not None:
+            log.warning("operation_bus: цепочка повторов op=%s не прочитана (%s)", cur, err)
+            if strict:
+                raise RetryChainUnreadable(
+                    f"цепочка повторов op={op_id} не прочитана") from err
             return family
         if not row:
             break
@@ -1163,14 +1208,25 @@ async def retry_family_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
     for _ in range(RETRY_CHAIN_MAX):
         if not frontier or len(family) >= RETRY_FAMILY_MAX:
             break
-        try:
-            rows = await pool.fetch(
-                "SELECT id FROM operation_queue "
-                " WHERE params->>'retry_of_op' = ANY($1::text[]) ORDER BY id",
-                [str(i) for i in frontier],
-            )
-        except Exception:
-            log.warning("operation_bus: повторы op=%s не прочитаны", op_id, exc_info=True)
+        rows, err = None, None
+        for _attempt in (1, 2):
+            try:
+                rows = await pool.fetch(
+                    "SELECT id FROM operation_queue "
+                    " WHERE params->>'retry_of_op' = ANY($1::text[]) ORDER BY id",
+                    [str(i) for i in frontier],
+                )
+                err = None
+                break
+            except Exception as e:
+                err = e
+                if _attempt == 1:
+                    await asyncio.sleep(_CHAIN_READ_RETRY_DELAY_S)
+        if err is not None:
+            log.warning("operation_bus: повторы op=%s не прочитаны (%s)", op_id, err)
+            if strict:
+                raise RetryChainUnreadable(
+                    f"повторы op={op_id} не прочитаны") from err
             break
         nxt: list[int] = []
         for r in (rows or []):

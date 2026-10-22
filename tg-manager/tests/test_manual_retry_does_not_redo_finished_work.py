@@ -93,18 +93,60 @@ async def test_broken_data_cannot_loop_forever():
 
 
 @pytest.mark.asyncio
-async def test_unreadable_chain_falls_back_to_own_journal():
-    """Не прочитали цепочку — работаем как раньше, а не падаем."""
+async def test_unreadable_chain_defers_the_run_instead_of_repeating_it():
+    """Не прочитали цепочку — прогон откладывается, а не идёт по пустому журналу.
+
+    Раньше здесь был fail-open: вернуть [7], то есть «работаем по своему
+    журналу, как раньше». Для повтора «как раньше» означает ПУСТОЙ журнал, то
+    есть «ничего не сделано» — и двери идемпотентности, сами давно
+    fail-closed, получали пустоту без всякой ошибки. Это второе сообщение
+    тем, кто уже получил первое.
+
+    Прогон при этом не падает: `JournalUnreadable` классифицируется как
+    'retry' (см. test_a_blip_in_the_journal_does_not_repeat_the_work),
+    операция уходит на обычный повтор с отсрочкой.
+    """
     from services import op_worker
 
     class _Broken:
+        def __init__(self) -> None:
+            self.calls = 0
+
         async def fetchrow(self, query, *args):
+            self.calls += 1
             raise RuntimeError("база недоступна")
 
         async def fetch(self, query, *args):
             return []
 
-    assert await op_worker.journal_op_ids(_Broken(), 7) == [7]
+    broken = _Broken()
+    with pytest.raises(op_worker.JournalUnreadable):
+        await op_worker.journal_op_ids(broken, 7)
+    assert broken.calls >= 2, (
+        "у чтения цепочки должен быть повтор: блип к БД лечится именно им, "
+        f"а попыток было {broken.calls}")
+
+
+@pytest.mark.asyncio
+async def test_a_single_blip_in_the_chain_is_cured_by_the_retry():
+    """Один сбой — не причина откладывать прогон: второе чтение проходит."""
+    from services import op_worker
+
+    class _Flaky:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def fetchrow(self, query, *args):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("блип")
+            return {"src": None}
+
+        async def fetch(self, query, *args):
+            return []
+
+    flaky = _Flaky()
+    assert await op_worker.journal_op_ids(flaky, 7) == [7]
 
 
 @pytest.mark.asyncio

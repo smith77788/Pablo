@@ -4137,10 +4137,34 @@ async def journal_op_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
     видеть работу первого повтора, а не только предка.
 
     Обход и его пределы живут в operation_bus.retry_family_ids — там же, где
-    единственная функция, собирающая params повтора. Никогда не бросает: не
-    прочитали цепочку — работаем по своему журналу, то есть как раньше.
+    единственная функция, собирающая params повтора.
+
+    НЕ ПРОЧИТАЛИ ЦЕПОЧКУ — НЕ РАБОТАЕМ. Раньше здесь был fail-open: «работаем
+    по своему журналу, то есть как раньше». Но «как раньше» для повтора — это
+    ПУСТОЙ журнал, то есть «ничего не сделано», и двери идемпотентности,
+    которые сами давно fail-closed (`_journal_fetch` не отдаёт пустой список,
+    а бросает), получали пустоту без всякой ошибки: ключ врал, а дверь
+    отрабатывала честно. Цена ровно та, из-за которой эта функция и появилась:
+    203 человека получают второе одинаковое сообщение, канал — второй пост,
+    приглашённый — второе приглашение.
+
+    Поэтому читаем строгим режимом: один повтор на каждый запрос (блип лечится
+    им), а если и он не прошёл — `JournalUnreadable`. Это не падение прогона:
+    `_classify_op_error` относит его к 'retry', операция уходит на обычный
+    повтор с отсрочкой и доработает позже. Отсрочка дешевле дубля.
     """
-    return await _obus_reg.retry_family_ids(pool, op_id)
+    try:
+        return await _obus_reg.retry_family_ids(pool, op_id, strict=True)
+    except _obus_reg.RetryChainUnreadable as e:
+        report_error(e, extra={"context": f"op_worker_journal_chain op={op_id}"})
+        log.error(
+            "op_worker: цепочка повторов op=%s не прочитана (%s) — операция "
+            "уйдёт на повтор, иначе повторила бы уже сделанное", op_id, e,
+        )
+        _reliability_metric(
+            "infragram_journal_read_failures_total", where="retry_chain")
+        raise JournalUnreadable(
+            "журнал целей недоступен, прогон отложен до повтора") from e
 
 
 async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
