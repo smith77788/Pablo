@@ -208,8 +208,10 @@ async def delete_group(pool, group_id: int, owner_id: int) -> bool:
 
 
 async def bulk_merge(pool, owner_id: int, pairs: list) -> dict:
+    from services.contacts_hub import merge_engine as _merge_engine
     merged = 0
     skipped = 0
+    absorbed_log: list = []
     conn = await pool.acquire()
     try:
         for pair in pairs:
@@ -218,28 +220,26 @@ async def bulk_merge(pool, owner_id: int, pairs: list) -> dict:
             if not primary_id or not secondary_id or primary_id == secondary_id:
                 skipped += 1
                 continue
-            # Владение ОБОИМИ контактами обязано быть проверено до того, как мы
-            # тронем contact_sources/contact_history — иначе пара с чужим id
-            # даёт межарендный IDOR (см. manual_merge / AUDIT_LEDGER).
-            owned = await conn.fetchrow(
-                'SELECT COUNT(*) AS cnt FROM unified_contacts WHERE id IN ($1,$2) AND owner_id=$3',
-                primary_id, secondary_id, owner_id)
-            if not owned or owned['cnt'] != 2:
+            # Пакетное слияние идёт тем же путём, что и одиночное: перенос
+            # полей, версия основного и только потом удаление второго. Своя
+            # копия этого кода здесь уже была — и была той же ошибкой, что в
+            # merge_engine: перецепляла источники и удаляла контакт, не
+            # перенося ни одного поля, только сразу по многим парам.
+            # Владение ОБОИМИ контактами проверяет absorb_contact — ДО того,
+            # как тронет contact_sources/contact_history (межарендный IDOR,
+            # см. AUDIT_LEDGER); чужая пара возвращает None и считается
+            # пропущенной.
+            absorbed = await _merge_engine.absorb_contact(
+                conn, primary_id, secondary_id, owner_id)
+            if 'error' in absorbed:
                 skipped += 1
                 continue
-            async with conn.transaction():
-                await conn.execute(
-                    'UPDATE contact_sources SET contact_id=$1 WHERE contact_id=$2',
-                    primary_id, secondary_id)
-                await conn.execute(
-                    'UPDATE contact_history SET contact_id=$1 WHERE contact_id=$2',
-                    primary_id, secondary_id)
-                await conn.execute(
-                    'DELETE FROM unified_contacts WHERE id=$1 AND owner_id=$2',
-                    secondary_id, owner_id)
+            absorbed_log.append((primary_id, secondary_id, absorbed))
             merged += 1
     finally:
         await pool.release(conn)
+    for _pid, _sid, _abs in absorbed_log:
+        await _merge_engine._version_after_merge(pool, _pid, owner_id, _abs, _sid)
     return {'merged': merged, 'skipped': skipped}
 
 

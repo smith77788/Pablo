@@ -534,8 +534,12 @@ class TestMergeEngine:
     @pytest.mark.asyncio
     async def test_auto_merge_with_duplicates(self):
         from services.contacts_hub.merge_engine import auto_merge
+        # fetch_row — ответ на проверку владения внутри absorb_contact: с
+        # 22.10.2026 слияние сначала читает ОБА контакта (чтобы перенести их
+        # поля), а не только удаляет второй.
         pool = FakePool(
             fetch_rows=[{"telegram_user_id": 123, "ids": ["id1", "id2"], "cnt": 2}],
+            fetch_row={"id": "id1"},
             execute_val="UPDATE 1"
         )
         result = await auto_merge(pool, 123)
@@ -1260,12 +1264,16 @@ class TestBulkOpsEngine:
     async def test_bulk_merge_owned_pair_merges(self):
         # Раньше (до фикса IDOR) второй/третий execute шли БЕЗ проверки
         # владения -- сейчас перед ними обязана быть ownership-проверка.
+        # Проверка стала двумя чтениями вместо одного COUNT: слияние читает
+        # обе карточки целиком, потому что переносит поля второй в первую.
         from services.contacts_hub.bulk_ops_engine import bulk_merge
-        pool = FakePool(fetch_row={"cnt": 2}, execute_val="UPDATE 1")
+        pool = FakePool(fetch_row={"id": "a"}, execute_val="UPDATE 1")
         result = await bulk_merge(pool, 123, [{"primary_id": "a", "secondary_id": "b"}])
         assert result == {"merged": 1, "skipped": 0}
         kinds = [c[0] for c in pool._calls]
-        assert kinds == ["fetchrow", "execute", "execute", "execute"]
+        assert kinds[:2] == ["fetchrow", "fetchrow"], (
+            "слияние трогает данные до проверки владения обоими контактами")
+        assert kinds.count("execute") >= 3, kinds
 
     @pytest.mark.asyncio
     async def test_bulk_merge_foreign_pair_skipped_not_merged(self):
@@ -1273,7 +1281,15 @@ class TestBulkOpsEngine:
         # подтверждено owner_id) обязана быть пропущена, а НЕ помечена merged,
         # и contact_sources/contact_history чужого контакта не трогаются.
         from services.contacts_hub.bulk_ops_engine import bulk_merge
-        pool = FakePool(fetch_row={"cnt": 1}, execute_val="UPDATE 1")  # только 1 из 2 -- чужой
+
+        class _OwnershipPool(FakePool):
+            """Первый контакт мой, второй -- чужой (его не вернёт скоуп по владельцу)."""
+
+            async def fetchrow(self, query, *args):
+                self._calls.append(("fetchrow", query, args))
+                return {"id": "mine"} if args[0] == "mine" else None
+
+        pool = _OwnershipPool(execute_val="UPDATE 1")
         result = await bulk_merge(pool, 123, [{"primary_id": "mine", "secondary_id": "not-mine"}])
         assert result == {"merged": 0, "skipped": 1}
         assert all(call[0] == "fetchrow" for call in pool._calls)
