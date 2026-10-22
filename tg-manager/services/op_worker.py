@@ -4542,7 +4542,18 @@ async def _dispatch_create_channel(pool, bot, op_id, owner_id, params) -> dict:
 
 
 async def _dispatch_create_group(pool, bot, op_id, owner_id, params) -> dict:
-    """Group Factory: одна группа через аккаунт. params: {title, account_id, is_supergroup}."""
+    """Group Factory: одна группа через аккаунт. params: {title, account_id, is_supergroup}.
+
+    Операции этого типа больше НИКТО не создаёт: 22.10.2026 снят последний
+    отправитель — ручка /api/miniapp/group_factory/submit, у которой не было
+    двери (экран-дубль фабрики групп не значился в каталоге, а каталог — это
+    и есть боковое меню). Группы создаёт единая фабрика каналов галочкой
+    «Создавать группы», тем же `_exec_bulk_create_channels` и с SEO-именами,
+    первым постом и автопосевом. Диспетчер оставлен ради строк, которые уже
+    лежат в очереди: убрать его — значит уронить операцию, запущенную до
+    обновления. Новых не появится, так что удалять его можно, когда в
+    operations не останется create_group.
+    """
     adapted = {**params, "acc_id": params.get("account_id"),
                "prefix": params.get("title"), "count": 1, "is_group": True}
     return await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)

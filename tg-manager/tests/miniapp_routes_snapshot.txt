@@ -797,7 +797,6 @@ POST /api/miniapp/global_presence/{plan_id}/bulk_apply
 POST /api/miniapp/global_presence/{plan_id}/launch
 POST /api/miniapp/global_presence/{plan_id}/virtual_admin/retry
 POST /api/miniapp/global_search
-POST /api/miniapp/group_factory/submit
 POST /api/miniapp/groups/announce
 POST /api/miniapp/groups/import_all
 POST /api/miniapp/growth

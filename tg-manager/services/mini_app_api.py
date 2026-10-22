@@ -7064,47 +7064,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("channel_factory_recent uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    # ── Group Factory ─────────────────────────────────────────────────────────
-
-    async def group_factory_submit(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Неверное тело запроса", 400)
-        title = (body.get("title") or "").strip()
-        account_id = body.get("account_id")
-        is_supergroup = body.get("is_supergroup", True)
-        if not title:
-            return _err("Нужен заголовок")
-        if not account_id:
-            return _err("Нужен идентификатор аккаунта")
-        try:
-            acc = await pool.fetchrow(
-                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
-                int(account_id), uid,
-            )
-            if not acc:
-                return _err("Аккаунт не найден или неактивен", 404)
-            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
-            _lim = await get_channel_limit(pool, uid)
-            if await get_effective_channel_count(pool, uid) >= _lim:
-                return _err(f"Достигнут лимит каналов/групп ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
-            op_id = await _obus.submit(
-                pool, uid, "create_group",
-                {"title": title, "account_id": account_id, "is_supergroup": is_supergroup},
-                total_items=1, label=f"Создать группу: {title}")
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("group_factory_submit uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
     # ── Physics Hub ──────────────────────────────────────────────────────────
 
     async def physics_overview(request: web.Request) -> web.Response:
@@ -8133,8 +8092,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Channel Factory
     app.router.add_post("/api/miniapp/channel_factory/submit", channel_factory_submit)
     app.router.add_get("/api/miniapp/channel_factory/recent", channel_factory_recent)
-    # Group Factory
-    app.router.add_post("/api/miniapp/group_factory/submit", group_factory_submit)
     # Physics Hub
     app.router.add_get("/api/miniapp/physics", physics_overview)
     app.router.add_get("/api/miniapp/physics/{account_id}/telemetry", physics_account_telemetry)

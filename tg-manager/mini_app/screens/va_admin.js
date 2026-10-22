@@ -965,13 +965,6 @@ async function vaMediaRemove(cid, id) {
 
 function _vaVal(id) { const el = document.getElementById(id); return el ? el.value : undefined; }
 
-function _vaShowErr(e) {
-  const el = document.getElementById('vaErr');
-  if (!el) { toast('⚠️ ' + ((e && e.message) || 'Ошибка')); return; }
-  el.textContent = (e && e.message) || 'Не получилось';
-  el.style.display = 'block';
-}
-
 async function vaInstall() {
   const submitted = _vaFields(document.getElementById('s-va-ch-body'));
   await _vaMutate('/api/miniapp/va/channel/' + encodeURIComponent(_vaCid) + '/install', {

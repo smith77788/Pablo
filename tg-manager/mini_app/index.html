@@ -1643,6 +1643,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
       <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти каналы, где ваш аккаунт создатель/админ, и завести их сюда">📥 Импорт с аккаунтов</button>
+      <button class="btn btn-s" onclick="importAllResources('groups')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти группы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт групп</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
@@ -2032,6 +2033,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Пул прокси</div>
         <div class="mgmt-tile-val" id="m-proxy-pool-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openQuickPost()">
+        <div class="mgmt-tile-ico">✍️</div>
+        <div class="mgmt-tile-lbl">Быстрый пост</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- Инструменты ботов -->
@@ -2218,6 +2224,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Дашборд</div>
         <div class="mgmt-tile-val" id="m-anadash-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openSemanticMemory()">
+        <div class="mgmt-tile-ico">🧬</div>
+        <div class="mgmt-tile-lbl">Семантическая память</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCRMDeals()">
+        <div class="mgmt-tile-ico">💼</div>
+        <div class="mgmt-tile-lbl">Сделки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- Продвижение -->
@@ -2253,6 +2269,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">🌐</div>
         <div class="mgmt-tile-lbl">Гео-сеть: создать</div>
         <div class="mgmt-tile-val" id="m-gp-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openReferral()">
+        <div class="mgmt-tile-ico">🤝</div>
+        <div class="mgmt-tile-lbl">Реферальная программа</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -2444,6 +2465,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">💳</div>
         <div class="mgmt-tile-lbl">Тариф</div>
         <div class="mgmt-tile-val" id="m-billing-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNetBcModal()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Рассылка по сети ботов</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAssetTemplates()">
+        <div class="mgmt-tile-ico">📐</div>
+        <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openWorkspaces()">
+        <div class="mgmt-tile-ico">🏢</div>
+        <div class="mgmt-tile-lbl">Рабочие пространства</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -2995,28 +3031,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
-<!-- ══════════════════════ GROUP FACTORY ══════════════════════ -->
-<div class="screen" id="s-groupfactory">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">👥 Фабрика групп</div></div>
-  <div class="sub-sb">
-    <div class="sec">Создать группу</div>
-    <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <input type="text" id="gfTitle" placeholder="Название группы" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-      <select id="gfAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-        <option value="">Выберите аккаунт…</option>
-      </select>
-      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
-        <input type="checkbox" id="gfSupergroup" checked>
-        Супергруппа
-      </label>
-      <button class="btn btn-p" id="gfSubmit" style="width:100%" onclick="submitGroupFactory()">👥 Создать группу</button>
-      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="importAllResources('groups')" title="Найти группы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт групп с аккаунтов</button>
-      <div id="gfErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════ PHYSICS HUB ══════════════════════ -->
 <div class="screen" id="s-physics">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚛️ Физика</div></div>
   <div class="sub-sb">
@@ -7512,15 +7526,6 @@ function getCached(key) {
 function setCache(key, data) {
   try { localStorage.setItem(key, JSON.stringify({ts: Date.now(), data})); } catch(_) {}
 }
-function clearAllCache() {
-  ['infragram_cache_home','infragram_cache_bots','infragram_cache_accounts','infragram_cache_channels'].forEach(k=>localStorage.removeItem(k));
-}
-function forceRefresh() {
-  clearAllCache();
-  loadHome();
-  toast('🔄 Данные обновлены');
-}
-
 // Таймаут запросов объявлен ДО boot(): boot СИНХРОННО вызывает fetchT('/auth'),
 // а дефолт fetchT — ms=FETCH_TIMEOUT_MS. Если объявить его НИЖЕ boot (как было
 // после реструктуризации), const попадает в TDZ и boot падает на первой же
@@ -8383,6 +8388,13 @@ function moreCategory(cat, el) {
 // запросы «бан», «спам», «жалоба», «клон» не находили НИЧЕГО — при том что
 // модули есть (Дэшборд здоровья, Массовые жалобы, Клонер). Ключ — подпись плитки.
 const MODULE_KEYWORDS = {
+  'Быстрый пост':'опубликовать пост канал сразу публикация',
+  'Сделки':'crm воронка продаж сделка лид этап сумма',
+  'Семантическая память':'факты профиль собеседника память диалог',
+  'Реферальная программа':'реферал приглашение код партнёрка',
+  'Рабочие пространства':'воркспейс команда доступ участники контур',
+  'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
+  'Рассылка по сети ботов':'рассылка всем подписчикам сеть ботов broadcast',
   'Дэшборд здоровья':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс',
   'Аккаунты':'сессия вход логин прокси ip номер телефон',
   'Массовые жалобы':'strike страйк жалоба репорт снос бан заблокировать report abuse удалить конкурента',
@@ -8476,6 +8488,13 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
+  'Быстрый пост':'Один текст сразу в выбранные каналы',
+  'Сделки':'Сделки CRM: этапы, суммы, ответственные',
+  'Семантическая память':'Факты, которые бот запомнил о собеседниках',
+  'Реферальная программа':'Код приглашения и приведённые пользователи',
+  'Рабочие пространства':'Отдельные контуры с доступом по участникам',
+  'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
+  'Рассылка по сети ботов':'Один текст подписчикам всех ваших ботов',
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
   'Менеджер продаж':'Бот-продавец: товары, ответы на вопросы, заказы',
   'Мотор роста':'Цель роста и подобранные под неё шаги',
@@ -9680,16 +9699,6 @@ function renderAct(items) {
       <span class="badge ${stCls}">${stLbl}</span>
     </div>`;
   }).join('');
-}
-
-function updateMoreStats(d) {
-  if (d.bots!==undefined) {
-    txt('m-bots-cnt', `${num(d.bots)} бот · ${num(d.subscribers)} подп.`);
-    txt('m-acc-cnt', `${num(d.accounts)} аккаунтов`);
-    txt('m-ch-cnt', `${num(d.channels)} каналов`);
-    txt('m-ops-cnt', d.ops_running?`🟡 ${d.ops_running} работает`:'Нет активных');
-    txt('statsSum', `${num(d.bots)} бот · ${num(d.channels)} каналов · ${num(d.subscribers)} подп.`);
-  }
 }
 
 // ── Bots ───────────────────────────────────────────────
@@ -11899,17 +11908,6 @@ async function sendBcast() {
   } finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
 }
 
-function explainError(msg) {
-  if (!msg) return 'Неизвестная ошибка';
-  const m = msg.toLowerCase();
-  if (m.includes('floodwait') || m.includes('flood_wait')) return '⏳ Ожидание из-за ограничений Telegram';
-  if (m.includes('peer_flood') || m.includes('peerflood')) return '🚫 Слишком много запросов — подождите 48ч';
-  if (m.includes('channel_private')) return '🔒 Канал приватный';
-  if (m.includes('auth_key') || m.includes('session')) return '🔑 Сессия устарела — нужен ре-импорт';
-  if (m.includes('proxy')) return '🌐 Прокси недоступен';
-  return '❌ ' + msg.substring(0, 80);
-}
-
 // ── Operations ─────────────────────────────────────────
 let OPS_FILTER = null;
 // Подписи статусов очереди по-русски. Пустое состояние показывало сырое
@@ -12972,6 +12970,12 @@ async function sendNetBc() {
   const errEl = document.getElementById('netbcErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  // Рассылка по сети — массовая операция, которую не отменить одной кнопкой:
+  // она создаёт по рассылке на каждого бота, и останавливать их пришлось бы
+  // по одной. Поэтому спрашиваем до запуска, а не после.
+  if (!await askConfirm('Сообщение уйдёт подписчикам ВСЕХ ваших активных ботов. '
+      + 'Запустится по одной рассылке на каждого бота, останавливать их придётся '
+      + 'по отдельности. Запустить?')) return;
   const btn = document.getElementById('netbcBtn');
   btn.disabled=true; btn.textContent='⏳ Запуск...';
   try {
@@ -13117,9 +13121,6 @@ function openKeywordsScreen() {
   txt('kwTrackList','<div class="spin-wrap"><div class="spin"></div></div>');
   loadKeywords();
 }
-
-// Keep old openKeywords for analytics
-function openKeywords() { push('s-analytics'); loadAnalytics(); }
 
 let KW_LIMIT = 50;
 async function loadKeywords(more) {
@@ -25158,75 +25159,6 @@ async function checkChannelRanks() {
     toast('🔄 Замер запущен · операция #'+(r.op_id||''));
     if (r.op_id) pollOpResult(r.op_id, 'Замер позиций');
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
-}
-
-// ── Group Factory ───────────────────────────────────────
-// Группу создаёт АККАУНТ: без единого подключённого аккаунта здесь делать
-// нечего. Раньше экран этого не говорил — выпадашка показывала «Выберите
-// аккаунт…» и ни одного варианта, кнопка «Создать группу» оставалась активной
-// и всегда падала на «Выберите аккаунт». Тупик из трёх шагов вместо ответа на
-// первом. Теперь состояние экрана честное на каждом шаге: загрузка → список,
-// пусто или ошибка, и кнопка живёт только когда есть чем создавать.
-function _gfSetSubmit(enabled, label) {
-  const b = document.getElementById('gfSubmit');
-  if (!b) return;
-  b.disabled = !enabled;
-  b.style.opacity = enabled ? '' : '.5';
-  b.textContent = label || '👥 Создать группу';
-}
-async function openGroupFactory() {
-  push('s-groupfactory');
-  document.getElementById('gfTitle').value='';
-  _gfLoadAccounts();
-}
-// Повтор после сбоя вызывает ИМЕННО загрузку, а не открытие экрана: push() ещё
-// раз положил бы тот же экран в стек, и «назад» пришлось бы жать дважды.
-async function _gfLoadAccounts(q) {
-  document.getElementById('gfErr').textContent='';
-  accPickerSearchBox('gfAccount', _gfLoadAccounts);
-  const sel = document.getElementById('gfAccount');
-  // Пока идёт запрос, в выпадашке висели аккаунты с ПРОШЛОГО открытия экрана.
-  sel.innerHTML = '<option value="">Загрузка аккаунтов…</option>';
-  _gfSetSubmit(false, '⏳ Загрузка аккаунтов…');
-  try {
-    const r = await accPickerLoad('', q);
-    const accs = r.accs;
-    if (!accs.length) {
-      sel.innerHTML = `<option value="">${q ? 'По запросу ничего не найдено' : 'Нет подключённых аккаунтов'}</option>`;
-      accPickerSetNote('gfAccount', '');
-      if (q) { _gfSetSubmit(false, 'Уточните поиск'); return; }
-      document.getElementById('gfErr').innerHTML =
-        'Группу создаёт аккаунт, а их пока нет. '
-        + '<span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
-        + 'onclick="goTab(\'accounts\')">Подключить аккаунт</span>';
-      _gfSetSubmit(false, 'Нужен хотя бы один аккаунт');
-      return;
-    }
-    sel.innerHTML='<option value="">Выберите аккаунт…</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
-    accPickerSetNote('gfAccount', accPickerNote(r));
-    _gfSetSubmit(true);
-  } catch(e) {
-    sel.innerHTML = '<option value="">Аккаунты не загрузились</option>';
-    // Причина отказа не должна оставаться только в консоли: без неё непонятно,
-    // повторить сейчас или чинить связь.
-    document.getElementById('gfErr').innerHTML = esc(errRu(e,'Ошибка загрузки'))
-      + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="_gfLoadAccounts()">↺ Повторить</span>';
-    _gfSetSubmit(false, 'Аккаунты не загрузились');
-  }
-}
-async function submitGroupFactory() {
-  const title = document.getElementById('gfTitle').value.trim();
-  const account_id = document.getElementById('gfAccount').value;
-  const is_supergroup = document.getElementById('gfSupergroup').checked;
-  const errEl = document.getElementById('gfErr');
-  errEl.textContent='';
-  if (!title) { errEl.textContent='Укажите название'; return; }
-  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
-  try {
-    await api('/api/miniapp/group_factory/submit',{method:'POST',body:JSON.stringify({title,account_id:+account_id,is_supergroup})});
-    toast('✅ Группа будет создана в ближайшее время');
-    document.getElementById('gfTitle').value='';
-  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
 }
 
 // ── Physics Hub ────────────────────────────────────────

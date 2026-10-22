@@ -26,6 +26,7 @@ import re
 from tests.miniapp_source import (
     _skip_braces,
     js_function,
+    js_functions,
     miniapp_html,
     screen_files,
 )
@@ -85,3 +86,18 @@ def test_the_door_refuses_a_name_it_cannot_find():
     except AssertionError:
         return
     raise AssertionError("дверь молча вернула чужое тело")
+
+
+def test_the_bulk_door_agrees_with_the_single_one():
+    """js_functions — та же дверь за один проход; разъехаться им нельзя.
+
+    Проверка «на эту функцию кто-нибудь ссылается?» смотрит на все 1436 функций
+    сразу, а js_function стоит 47 мс за имя — минута с лишним на проход. Индекс
+    строится за 0.2 с, но ценой второй реализации того же, поэтому здесь они
+    сверяются имя за именем: если быстрая дверь начнёт отдавать другое тело,
+    красным станет этот файл, а не чужая проверка через полгода.
+    """
+    index = js_functions()
+    assert len(index) > 1000, f"индекс почти пуст: {len(index)}"
+    diff = [n for n, body in index.items() if js_function(n) != body]
+    assert not diff, f"две двери отдают разные тела для {diff[:5]}"
