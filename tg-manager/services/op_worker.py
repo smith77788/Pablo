@@ -8776,17 +8776,28 @@ async def _exec_gp_bulk_apply(
 
         counters = {"about": 0, "avatar": 0, "post": 0, "pin": 0, "admin": 0, "username": 0}
         failed = skipped = 0
+        # Закрытые прошлым прогоном этой же операции: в счётчики действий не
+        # идут (в этом прогоне мы их не делали), но в итог операции — идут.
+        resumed = 0
 
-        # Публикация необратима, а прогон длинный: 20–45 секунд на канал, то есть
-        # часы на сеть из сотен объектов. Любой деплой в это окно возвращает
-        # операцию в очередь (см. docstring `shutdown`), и без журнала
-        # возобновлённый прогон публикует ВТОРОЙ пост в каждом канале, который
-        # его уже получил. Тот же ключ идемпотентности, что у фабрики каналов:
-        # номер шага — здесь это устойчивый id объекта проекта.
-        _posted: set[int] = await completed_steps(pool, op_id) if action == "post_pin" else set()
-        if _posted:
-            log.info("gp_bulk_apply op=%d: повтор — %d объектов уже получили пост",
-                     op_id, len(_posted))
+        # Прогон длинный: 5–45 секунд на объект, то есть часы на сеть из сотен
+        # объектов. Возврат в очередь в это окно — штатное событие: деплой
+        # (`shutdown`), автоматический повтор, и с недавних пор потолок времени
+        # (`_resume_op_over_ceiling` — он прямо рассчитывает, что исполнитель
+        # «пропустит уже взятые цели по operation_log»).
+        #
+        # Без журнала каждый такой прогон начинал список С НАЧАЛА, и у этого две
+        # цены. Первая — повтор реального действия: второй пост в канал, который
+        # его уже получил, лишнее редактирование описания и аватара с аккаунта.
+        # Вторая хуже: прогон, который не укладывается в потолок, НИКОГДА не
+        # доходит до хвоста списка — последние объекты не получают оформления
+        # вообще, а первые переделываются каждые несколько часов, пока операция
+        # не упрётся в предел жизни. Тот же ключ идемпотентности, что у фабрики
+        # каналов: номер шага — здесь это устойчивый id объекта проекта.
+        _settled: set[int] = await completed_steps(pool, op_id)
+        if _settled:
+            log.info("gp_bulk_apply op=%d: повтор — %d объектов уже оформлены, "
+                     "идём дальше по списку", op_id, len(_settled))
 
         for target in targets:
             if await _is_cancelled(pool, op_id):
@@ -8796,6 +8807,15 @@ async def _exec_gp_bulk_apply(
                     "fail": failed,
                     "summary": f"Отменено. Применено: {sum(counters.values())}, ошибок: {failed}",
                 }
+
+            if int(target["id"]) in _settled:
+                # Объект оформлен прошлым прогоном ЭТОЙ операции — не трогаем
+                # его повторно и идём к тем, до которых прогон не дошёл.
+                resumed += 1
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
 
             acc = acc_by_id.get(target["selected_account_id"])
             if not acc or not acc.get("session_str"):
@@ -8885,12 +8905,7 @@ async def _exec_gp_bulk_apply(
                     item_failed = True
                 await asyncio.sleep(random.uniform(4, 10) * session_simulator.chaos_factor())
 
-            if action == "post_pin" and int(target["id"]) in _posted:
-                # Этот объект получил пост на прошлом прогоне этой же операции.
-                # Считаем его сделанным (как фабрика каналов считает созданный
-                # шаг) и ничего не публикуем.
-                counters["post"] += 1
-            elif action == "post_pin":
+            if action == "post_pin":
                 # Пост тоже индивидуален: одинаковый текст в 800 каналах — прямой
                 # спам-сигнал, ровно то, ради чего существует генератор.
                 text = render_pattern(post_template, dict(target)).strip() if post_template else ""
@@ -9018,6 +9033,13 @@ async def _exec_gp_bulk_apply(
 
             if item_failed:
                 failed += 1
+            elif action != "post_pin":
+                # Объект применён целиком — отмечаем, чтобы следующий прогон
+                # этой операции (потолок, деплой, повтор) его не переделывал.
+                # У поста отметка уже стоит: она ставится сразу после публикации,
+                # не дожидаясь закрепа и паузы темпа.
+                await _journal_done(
+                    pool, op_id, int(target["id"]), f"gp_{action}:{channel_id}")
             await _safe_execute(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
@@ -9033,12 +9055,17 @@ async def _exec_gp_bulk_apply(
             # Пропуски показываем отдельно от ошибок: «аккаунт в карантине» — это
             # не сбой применения, и смешивать их в одном счётчике нечестно.
             parts.append(f"пропущено: {skipped}")
+        if resumed:
+            parts.append(f"сделано прошлым прогоном: {resumed}")
         if failed:
             parts.append(f"ошибок: {failed}")
 
         return {
             "status": "done",
-            "ok": sum(counters.values()),
+            # Закрытые прошлыми прогонами входят в итог: иначе возобновлённая
+            # операция закрывается с недобором по счётчикам и объявляется
+            # частичной, хотя оформлены все объекты.
+            "ok": sum(counters.values()) + resumed,
             "fail": failed,
             "plan_id": plan_id,
             "summary": "🧰 Пакетное применение — " + ", ".join(parts),
