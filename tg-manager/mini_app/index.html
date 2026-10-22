@@ -3858,7 +3858,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <details class="acc-actions" style="margin:8px 16px 4px;background:var(--bg2);border-radius:12px">
       <summary style="cursor:pointer;font-size:14px;font-weight:500;padding:13px 14px;display:flex;align-items:center;gap:8px">
         <span style="flex:1">🧰 Инструменты контактов</span>
-        <span style="font-size:12px;color:var(--hint);font-weight:400">ещё 12</span>
+        <span style="font-size:12px;color:var(--hint);font-weight:400">ещё 13</span>
         <span class="acc-chev" style="color:var(--hint)">▾</span>
       </summary>
     <div style="display:flex;gap:6px;padding:2px 12px 12px;flex-wrap:wrap">
@@ -3874,6 +3874,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <span class="chip" style="flex:0 0 auto" onclick="openUchReminders()">⏰ Напоминания</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchExport()">📤 Экспорт</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchCleanup()">🧹 Чистка / личные</span>
+      <span class="chip" style="flex:0 0 auto" onclick="recomputeContactTrust()">🛡 Пересчитать доверие</span>
     </div>
     </details>
     <div style="padding:6px 0">
@@ -18145,6 +18146,24 @@ async function mergeAllDuplicates() {
       : `✅ Объединено пар: ${num(d.merged||0)}`);
     detectDuplicates();
   } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
+}
+
+// Доверие контакта показано в его карточке («Доверие: N%»), но писал его
+// только update_trust_scores — а зваться он мог лишь через ручку
+// /api/miniapp/uch/trust/update, которую не звал никто. То есть показатель был
+// пуст у всех контактов всегда, и строка в карточке не появлялась ни разу.
+async function recomputeContactTrust() {
+  toast('🛡 Считаю доверие…');
+  try {
+    const d = await api('/api/miniapp/uch/trust/update', {method:'POST', body:'{}'});
+    const n = Number(d.updated || 0);
+    toast(n
+      ? `✅ Доверие пересчитано · ${num(n)} ${plural(n,'контакт','контакта','контактов')}`
+      : 'Контактов пока нет — считать нечего');
+    // Карточка открытого контакта показывает старое значение, пока список не
+    // перечитан: пересчёт без обновления выглядел бы как «ничего не произошло».
+    if (typeof loadContacts === 'function') loadContacts();
+  } catch(e) { toast('⚠️ ' + errRu(e,'Не удалось пересчитать доверие')); }
 }
 
 async function detectDuplicates() {

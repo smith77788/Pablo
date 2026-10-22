@@ -91,20 +91,42 @@ async def detect_smart_duplicates(pool, owner_id: int) -> list:
 
 
 async def update_trust_scores(pool, owner_id: int) -> int:
+    """Пересчитать доверие по всем контактам владельца за три запроса.
+
+    Раньше здесь было ТРИ запроса НА КАЖДЫЙ контакт (источники, сам контакт
+    заново, UPDATE) плюс один общий: на хабе в десять тысяч контактов — за
+    тридцать тысяч обращений к базе, то есть пересчёт, который нельзя
+    запустить из приложения. Теперь: контакты, их источники и одна запись
+    пачкой. Формула (compute_trust_score) не тронута, и ей по-прежнему
+    передаются настоящие строки источников, а не их число, — иначе правка
+    формулы молча разошлась бы с этим путём.
+    """
     contacts = await pool.fetch(
-        'SELECT id FROM unified_contacts WHERE owner_id=$1', owner_id)
-    updated = 0
+        'SELECT * FROM unified_contacts WHERE owner_id=$1', owner_id)
+    if not contacts:
+        return 0
+    sources = await pool.fetch(
+        'SELECT s.* FROM contact_sources s '
+        'JOIN unified_contacts c ON c.id = s.contact_id '
+        'WHERE c.owner_id=$1', owner_id)
+    by_contact: dict[int, list] = {}
+    for s in sources:
+        by_contact.setdefault(s['contact_id'], []).append(dict(s))
+
+    ids: list[int] = []
+    scores: list[float] = []
     for c in contacts:
-        sources = await pool.fetch(
-            'SELECT * FROM contact_sources WHERE contact_id=$1', c['id'])
-        contact = await pool.fetchrow(
-            'SELECT * FROM unified_contacts WHERE id=$1', c['id'])
-        if contact:
-            score = compute_trust_score(dict(contact), [dict(s) for s in sources])
-            await pool.execute(
-                'UPDATE unified_contacts SET trust_score=$1 WHERE id=$2', score, c['id'])
-            updated += 1
-    return updated
+        ids.append(c['id'])
+        scores.append(compute_trust_score(dict(c), by_contact.get(c['id'], [])))
+    # owner_id в условии остаётся: id пришли из выборки по владельцу, но
+    # запись без этой проверки — чужая строка при любой будущей ошибке выше.
+    await pool.execute(
+        'UPDATE unified_contacts AS u SET trust_score = v.score '
+        'FROM (SELECT * FROM unnest($1::bigint[], $2::double precision[]) '
+        '      AS t(id, score)) AS v '
+        'WHERE u.id = v.id AND u.owner_id = $3',
+        ids, scores, owner_id)
+    return len(ids)
 
 
 async def get_conflicts(pool, owner_id: int) -> list:
