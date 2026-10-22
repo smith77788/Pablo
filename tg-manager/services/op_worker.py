@@ -17616,11 +17616,12 @@ async def _exec_mass_invite(
                  "(из %d админов канала)", op_id, f" ({reason})" if reason else "",
                  _demoted, len(admins))
         if _demoted:
-            await _safe_execute(
+            await _journal_write(
                 pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,0,'reconcile','ok',$2)", op_id,
                 f"сверка админов: снято право и выведено из чата {_demoted} инвайтеров "
-                "флота, оставшихся с прошлых прогонов — освобождены места админа")
+                "флота, оставшихся с прошлых прогонов — освобождены места админа",
+                log_ctx=f"mass_invite op={op_id}", where="reconcile")
         return _demoted
 
     async def _view_after_join(acc: dict) -> None:

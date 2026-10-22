@@ -5190,10 +5190,7 @@ async def view_recent_posts(
         log.debug("view_recent_posts acc=%s ch=%s: %s", (_acc or {}).get("id"), channel_ref, e)
         return {"ok": False, "viewed": viewed}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "Сбой в view_recent_posts")
+        await safe_disconnect(client)
 
 
 async def get_channel_admins(
@@ -5246,10 +5243,7 @@ async def get_channel_admins(
         log.debug("get_channel_admins ch=%s: %s", channel_ref, e)
         return []
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            log_exc_swallow(log, "Сбой в get_channel_admins")
+        await safe_disconnect(client)
 
 
 async def edit_channel_title(
