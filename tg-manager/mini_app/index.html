@@ -2033,6 +2033,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Пул прокси</div>
         <div class="mgmt-tile-val" id="m-proxy-pool-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openQuickPost()">
+        <div class="mgmt-tile-ico">✍️</div>
+        <div class="mgmt-tile-lbl">Быстрый пост</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- Инструменты ботов -->
@@ -4817,6 +4822,47 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: QUICK POST ══════════════════════ -->
+<div class="screen" id="s-quickpost">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">✍️ Быстрый пост</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Текст публикации</div>
+    <div style="padding:8px 16px">
+      <div class="preset-row" id="qpPresetRow"></div>
+      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста… Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
+      <div class="field-note">🎲 Спинтакс {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div></div>
+    </div>
+    <div class="sec">Выберите каналы</div>
+    <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="quickPostSelected" style="padding:8px 16px;color:var(--purple-light);font-size:13px"></div>
+    <div class="field">
+      <label style="font-size:13px;color:var(--hint)">Когда опубликовать</label>
+      <select id="qpSchedule" class="sel">
+        <option value="0">Сейчас</option>
+        <option value="60">Через 1 час</option>
+        <option value="180">Через 3 часа</option>
+        <option value="360">Через 6 часов</option>
+        <option value="720">Через 12 часов</option>
+        <option value="1440">Через 24 часа</option>
+      </select>
+    </div>
+    <div class="field">
+      <label style="font-size:13px;color:var(--hint)">Повтор (автопостинг)</label>
+      <select id="qpRepeat" class="sel">
+        <option value="0">Без повтора</option>
+        <option value="60">Каждый час</option>
+        <option value="360">Каждые 6 часов</option>
+        <option value="720">Каждые 12 часов</option>
+        <option value="1440">Каждый день</option>
+        <option value="10080">Каждую неделю</option>
+      </select>
+    </div>
+    <div class="field-err" id="quickPostErr"></div>
+    <button class="btn btn-p" id="quickPostBtn" onclick="submitQuickPost()" style="width:100%;margin-top:8px" disabled>📤 Опубликовать (выберите каналы)</button>
+  </div>
+</div>
 
 <!-- ══════════════════════ SCREEN: SPINTAX ══════════════════════ -->
 <div class="screen" id="s-spintax">
@@ -11828,6 +11874,28 @@ function bcastPreset(key) {
   try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
 }
 
+// Пресеты постов для «Быстрого поста» (тот же паттерн, что рассылка).
+const POST_PRESETS = [
+  {k:'announce', t:'📣 Анонс',      v:'📣 {Важный анонс|Свежая новость}! Мы {подготовили|запустили} кое-что новое. Подробности ниже 👇'},
+  {k:'tip',      t:'💡 Совет',      v:'💡 Полезный совет дня: {попробуйте|возьмите на заметку}… А как делаете вы? Делитесь в комментариях 👇'},
+  {k:'engage',   t:'🔥 Вовлечение', v:'🔥 А вы знали? {Интересный факт|Небольшой инсайт}… Ставьте реакцию, если было полезно! 🚀'},
+  {k:'promo',    t:'🎁 Промо',      v:'🎁 Специально для вас — {выгодное предложение|подарок}! Успейте {воспользоваться|забрать}, пока действует.'},
+];
+function buildQuickPostPresets() {
+  const row = document.getElementById('qpPresetRow');
+  if (!row || row.dataset.built) return;
+  row.innerHTML = POST_PRESETS.map(p =>
+    `<span class="preset-chip" onclick="qpPreset('${p.k}')">${esc(p.t)}</span>`).join('');
+  row.dataset.built = '1';
+}
+function qpPreset(key) {
+  const p = POST_PRESETS.find(x => x.k === key);
+  const ta = document.getElementById('quickPostText');
+  if (!p || !ta) return;
+  ta.value = p.v;
+  ta.focus();
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
+}
 
 // Пресеты личных сообщений (DM-композер) — личный тон (не «рассылочный»).
 const DM_PRESETS = [
@@ -16315,9 +16383,83 @@ async function submitAiComment() {
   finally { btn.disabled=false; btn.textContent='💬 Запустить ИИ-комментинг'; }
 }
 
+// ── Quick Post ───────────────────────────────────────────
+let QUICK_POST_SELECTED = new Set();
 // ── Spintax — вынесен в mini_app/screens/spintax.js (см. подключение
 // <script src="screens/spintax.js"> перед закрывающим </body>) ───────────
 
+async function openQuickPost() {
+  push('s-quickpost');
+  QUICK_POST_SELECTED = new Set();
+  buildQuickPostPresets();
+  document.getElementById('quickPostText').value='';
+  txt('quickPostSelected','Выбрано: 0 каналов');
+  txt('quickPostChannels','<div class="spin-wrap"><div class="spin"></div></div>');
+  document.getElementById('quickPostBtn').disabled=true;
+  document.getElementById('quickPostBtn').textContent='📤 Опубликовать (выберите каналы)';
+  try {
+    const d = await api('/api/miniapp/channels');
+    const chs = d.channels||[];
+    if (!chs.length) { txt('quickPostChannels', empty('📢','Нет каналов','Создайте канал в фабрике — и публикуйте прямо отсюда',{label:'📡 Фабрика каналов',fn:'openChannelFactory()'})); return; }
+    txt('quickPostChannels', chs.map(c=>`
+      <div class="row tap" onclick="toggleQpChannel(${c.id})">
+        <div class="row-ico" id="qpc-${c.id}" style="background:var(--bg-blue-16)">📢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.title||c.username||c.id)}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''} ${(c.member_count||c.members_count||0).toLocaleString('ru-RU')} подп.</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('quickPostChannels', empty('⚠️','Ошибка',errRu(e)));
+  }
+}
+function toggleQpChannel(id) {
+  const ico = document.getElementById('qpc-'+id);
+  if (QUICK_POST_SELECTED.has(id)) {
+    QUICK_POST_SELECTED.delete(id);
+    if (ico) ico.style.background='rgba(96,165,250,.16)';
+  } else {
+    QUICK_POST_SELECTED.add(id);
+    if (ico) { ico.textContent='✅'; ico.style.background='rgba(52,211,153,.16)'; }
+  }
+  const cnt = QUICK_POST_SELECTED.size;
+  txt('quickPostSelected',`Выбрано: ${cnt} каналов`);
+  const btn = document.getElementById('quickPostBtn');
+  btn.disabled = cnt===0;
+  btn.textContent = cnt>0 ? `📤 Опубликовать в ${cnt} каналов` : '📤 Опубликовать (выберите каналы)';
+}
+async function submitQuickPost() {
+  const text = document.getElementById('quickPostText').value.trim();
+  const errEl = document.getElementById('quickPostErr');
+  if (!text) { errEl.textContent='Введите текст публикации'; return; }
+  if (QUICK_POST_SELECTED.size===0) { errEl.textContent='Выберите каналы'; return; }
+    const schedMin = parseInt(document.getElementById('qpSchedule')?.value||'0')||0;
+  const repMin = parseInt(document.getElementById('qpRepeat')?.value||'0')||0;
+  // Пост уходит подписчикам и виден сразу; масштаб называем ДО нажатия, как
+  // и в «посте во все каналы аккаунта» рядом.
+  const _qpN = QUICK_POST_SELECTED.size;
+  // Срок и повтор берём подписью из самого списка («Через 6 часов», «Каждый
+  // день»), а не пересчитываем из минут: пересчёт давал «каждые 1 дн.».
+  const _qpSel = id => { const e = document.getElementById(id);
+    return e && e.selectedIndex >= 0 ? (e.options[e.selectedIndex].textContent || '').trim() : ''; };
+  const _qpWhen = schedMin>0 ? `\nКогда: ${_qpSel('qpSchedule').toLowerCase()}.` : '';
+  const _qpRep = repMin>0 ? `\nПовтор: ${_qpSel('qpRepeat').toLowerCase()}.` : '';
+  if (!await askConfirm(
+      `Опубликовать в ${num(_qpN)} ${plural(_qpN,'канал','канала','каналов')}?`
+      + _qpWhen + _qpRep)) return;
+  const btn = document.getElementById('quickPostBtn');
+  btn.disabled=true; btn.textContent='Публикую…';
+  try {
+    const payload={text,channel_ids:[...QUICK_POST_SELECTED]}; if(schedMin>0) payload.schedule_minutes=schedMin;
+    if(repMin>0) payload.repeat_interval_min=repMin;
+    const r = await api('/api/miniapp/quick_post',{method:'POST',body:JSON.stringify(payload)});
+    toast(schedMin>0 ? '⏰ Публикация запланирована' : `✍️ Публикация запущена (#${r.op_id})`);
+    errEl.textContent='';
+    back();
+  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
+  finally { btn.disabled=false; }
+}
 
 // ── SEO ──────────────────────────────────────────────────
 async function openSeo() {
