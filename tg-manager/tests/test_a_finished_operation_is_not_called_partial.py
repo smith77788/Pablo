@@ -64,11 +64,13 @@ def test_a_blip_no_longer_hides_the_coverage():
 
 def test_a_blip_no_longer_hides_the_counters():
     """То же для счётчиков успехов и провалов на путях закрытия."""
-    # fail=2: первое чтение тратит цепочка повторов (journal_op_ids, у неё
-    # свой глотатель), поэтому сбой самого счёта — только второе.
-    pool = _Pool(fail=2, row={"ok_n": 203, "failed_n": 0})
+    # fail=3: первые два чтения тратит цепочка повторов — она читается
+    # терпимо (отчёт, не дверь идемпотентности) и тоже с повтором, после чего
+    # отступает к журналу самой операции. Блип самого счёта — третье чтение,
+    # его лечит повтор, и четвёртое отдаёт цифры.
+    pool = _Pool(fail=3, row={"ok_n": 203, "failed_n": 0})
     assert _run(op_worker._journal_counters(pool, 555)) == (203, 0)
-    assert pool.reads == 3
+    assert pool.reads == 4
 
 
 def test_the_fallback_is_still_the_safe_one():

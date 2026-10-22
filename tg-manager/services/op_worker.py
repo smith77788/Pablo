@@ -1219,7 +1219,11 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
     'error', и следующий за ним 'ok' (ретрай внутри прогона) — тогда верный
     итог «успех», а не «успех и провал». Строки со статусом 'info' —
     примечания исполнителя, а не приговор цели, поэтому в счёт не идут.
-    Читаем всю цепочку повторов (journal_op_ids), как completed_targets.
+    Читаем всю цепочку повторов, как completed_targets, но ТЕРПИМО: здесь не
+    дверь идемпотентности, а отчёт. У двери неполная семья означает «работы не
+    было», то есть дубль реального действия, и она откладывает прогон
+    (`journal_op_ids` строгий). Отчёт дублей не делает: не прочитали цепочку —
+    посчитаем по журналу этой операции, что честнее отказа от цифр вообще.
 
     (0, 0) — журнала нет (этот исполнитель его не пишет) или чтение не
     удалось; вызывающий тогда остаётся при прежнем поведении.
@@ -1235,7 +1239,7 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
             + _obus_reg.REAL_TARGET_SQL +
             "           AND status IN ('ok', 'error') "
             "         GROUP BY target) t",
-            await journal_op_ids(pool, op_id),
+            await _obus_reg.retry_family_ids(pool, op_id),
             log_ctx=f"[journal_counters op={op_id}]")
     except Exception:
         log_exc_swallow(log, f"op_worker: журнал целей op={op_id} не прочитан")
