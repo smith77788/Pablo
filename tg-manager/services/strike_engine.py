@@ -3649,6 +3649,69 @@ _STRIKE_EMAIL_TARGETS: list[dict] = [
 ]
 
 
+async def _write_mini_strike_history(
+    pool, owner_id: int, target_clean: str, category: str,
+    tg_data: dict, result: dict,
+) -> bool:
+    """Записать строку мини-удара в `strike_history`: повтор, затем ГРОМКО.
+
+    Это не только история в UI. ЭТУ ЖЕ строку читает `is_strike_allowed`
+    (колонка `target`), решая, не бьём ли мы цель повторно внутри интервала.
+    Сбой записи уходил в `log.debug`, то есть следующий заход по той же цели
+    проходил как первый — и детекшн-паттерн, и лишний износ живых аккаунтов.
+    Одна повторная попытка на месте, затем `log.error` словами о последствии
+    и счётчик, рост которого сторож защитных записей доносит до владельца.
+    `False` говорит вызывающему, что интервал повтора по этой цели не лёг.
+    """
+    _hist_err: Exception | None = None
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                """INSERT INTO strike_history
+                   (owner_id, target, reason, preset, accounts_used,
+                    peer_reported, msgs_reported, msgs_fetched,
+                    pinned_reported, admins_reported, network_nodes, network_reports,
+                    blocked, verified_down, duration_s, abuse_form_ok, spambot_escalation)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
+                owner_id,
+                target_clean,
+                category,  # reason = category label
+                None,  # preset (mini-strike не использует)
+                1,  # accounts_used
+                1 if tg_data.get("peer_reported") else 0,
+                int(tg_data.get("msg_reported") or 0),
+                int(tg_data.get("msgs_fetched") or 0),
+                int(tg_data.get("pinned_reported") or 0),
+                int(tg_data.get("admins_reported") or 0),
+                0,  # network_nodes
+                0,  # network_reports
+                1 if tg_data.get("blocked") else 0,
+                None,  # verified_down
+                0.0,  # duration_s (not tracked per mini-strike)
+                bool(result.get("abuse_form", {}).get("ok")),
+                "skipped",
+            )
+            _hist_err = None
+            break
+        except Exception as e:
+            _hist_err = e
+            if _attempt == 1:
+                await asyncio.sleep(_RESTRIKE_READ_RETRY_DELAY_S)
+    if _hist_err is not None:
+        log.error(
+            "mini_strike: история удара НЕ ЗАПИСАНА target=%s (%s) — интервал "
+            "повтора эту цель не увидит, и следующий заход по ней пройдёт как "
+            "первый", target_clean, _hist_err)
+        try:
+            from services import metrics as _m
+            _m.inc("infragram_strike_history_write_failures_total",
+                   {"where": "mini_strike"})
+        except Exception:
+            pass
+        return False
+    return True
+
+
 async def execute_mini_strike(
     pool,
     session_str: str,
@@ -4016,35 +4079,10 @@ async def execute_mini_strike(
     except Exception as e:
         log.debug("mini_strike: DB save strike_reports skipped: %s", e)
 
-    # Также пишем в strike_history чтобы история в UI отображала mini-strike результаты
-    try:
-        await pool.execute(
-            """INSERT INTO strike_history
-               (owner_id, target, reason, preset, accounts_used,
-                peer_reported, msgs_reported, msgs_fetched,
-                pinned_reported, admins_reported, network_nodes, network_reports,
-                blocked, verified_down, duration_s, abuse_form_ok, spambot_escalation)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
-            owner_id,
-            target_clean,
-            category,  # reason = category label
-            None,  # preset (mini-strike не использует)
-            1,  # accounts_used
-            1 if tg_data.get("peer_reported") else 0,
-            int(tg_data.get("msg_reported") or 0),
-            int(tg_data.get("msgs_fetched") or 0),
-            int(tg_data.get("pinned_reported") or 0),
-            int(tg_data.get("admins_reported") or 0),
-            0,  # network_nodes
-            0,  # network_reports
-            1 if tg_data.get("blocked") else 0,
-            None,  # verified_down
-            0.0,  # duration_s (not tracked per mini-strike)
-            bool(result.get("abuse_form", {}).get("ok")),
-            "skipped",
-        )
-    except Exception as e:
-        log.debug("mini_strike: DB save strike_history skipped: %s", e)
+    # История удара пишется отдельным писателем: ту же строку читает интервал
+    # повтора удара, поэтому запись идёт с повтором и громким отказом.
+    await _write_mini_strike_history(
+        pool, owner_id, target_clean, category, tg_data, result)
 
     log.info(
         "mini_strike: DONE target=%s tg=%d emails=%d form=%s errors=%d",
