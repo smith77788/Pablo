@@ -714,23 +714,56 @@ async def record_account_restriction(
 
     Fail-open: вернуть False, но не ронять вызывающего. Сигнал важен, но
     операция, которая уже наткнулась на бан, не должна падать из-за записи.
+
+    ЗАТО С ПОВТОРОМ И ГРОМКО. Это ЕДИНСТВЕННЫЙ вход сигнала, и потерянная
+    запись — не неполный отчёт, а выключенный предохранитель: аккаунт не уйдёт
+    в карантин (гейт операций возьмёт его в следующую же работу), а `anti_storm`
+    не посчитает его в волне банов — то есть ровно тот разрыв, ради закрытия
+    которого функция и появилась, только для одного аккаунта. Блип к базе
+    лечится повтором, и он здесь ничего не стоит: запись идёт из хука бана, а
+    не по каждой цели. Не записали и со второго раза — `error` с прямой
+    формулировкой, как у журнала целей: предохранитель, отключившийся молча,
+    не отличить от предохранителя, которому нечего было сказать.
     """
     if not pool or not owner_id or not account_id or not event_type:
         return False
-    try:
-        res = await pool.execute(
-            "INSERT INTO restriction_events"
-            "(owner_id, account_id, event_type, severity, details) "
-            "SELECT $1, $2, $3, $4, $5::jsonb WHERE NOT EXISTS ("
-            "  SELECT 1 FROM restriction_events WHERE account_id=$2 "
-            "   AND event_type=$3 "
-            "   AND created_at > now() - make_interval(mins => $6))",
-            int(owner_id), int(account_id), event_type, severity,
-            json.dumps(details or {}, ensure_ascii=False),
-            int(max(0, dedup_minutes)))
-    except Exception:
-        log.warning("infra_memory: ограничение не записано owner=%s acc=%s type=%s",
-                    owner_id, account_id, event_type, exc_info=True)
+    res, err = None, None
+    for _attempt in (1, 2):
+        try:
+            res = await pool.execute(
+                "INSERT INTO restriction_events"
+                "(owner_id, account_id, event_type, severity, details) "
+                "SELECT $1, $2, $3, $4, $5::jsonb WHERE NOT EXISTS ("
+                "  SELECT 1 FROM restriction_events WHERE account_id=$2 "
+                "   AND event_type=$3 "
+                "   AND created_at > now() - make_interval(mins => $6))",
+                int(owner_id), int(account_id), event_type, severity,
+                json.dumps(details or {}, ensure_ascii=False),
+                int(max(0, dedup_minutes)))
+            err = None
+            break
+        except Exception as e:
+            err = e
+            if _attempt == 1:
+                # Повтор безопасен: вставка условная (NOT EXISTS в окне
+                # дедупа), а читатели считают РАЗНЫЕ аккаунты и EXISTS —
+                # лишняя строка никому не врёт.
+                await asyncio.sleep(_QUARANTINE_READ_RETRY_DELAY_S)
+    if err is not None:
+        log.error(
+            "infra_memory: ограничение НЕ ЗАПИСАНО owner=%s acc=%s type=%s (%s) — "
+            "аккаунт не уйдёт в карантин, и волна банов его не посчитает",
+            owner_id, account_id, event_type, err)
+        try:
+            # Счётчик, рост которого сторож воркера доносит до владельца
+            # словами (op_worker._PROTECTIVE_FAILURE_COUNTERS): логи он не
+            # читает, а потеря этого сигнала выключает четыре предохранителя.
+            from services import metrics as _m
+
+            _m.inc("infragram_restriction_write_failures_total",
+                   {"event": str(event_type)[:32]})
+        except Exception:
+            log.debug("infra_memory: счётчик потери сигнала не записан", exc_info=True)
         return False
     try:
         return int(str(res).rsplit(" ", 1)[-1]) > 0

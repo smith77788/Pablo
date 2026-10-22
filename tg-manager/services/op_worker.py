@@ -3707,6 +3707,9 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_budget_write_failures_total":
         "суточный счёт действий аккаунта — лимит недосчитает сделанное, и "
         "следующая операция может взять аккаунт сверх него",
+    "infragram_restriction_write_failures_total":
+        "найденное ограничение аккаунта — не записалось: аккаунт не уйдёт в "
+        "карантин и попадёт в следующую операцию, а волна банов его не посчитает",
     "infragram_notifications_undelivered_total":
         "отчёт об операции не доехал до владельца",
     "infragram_recurring_reschedule_failures_total":
