@@ -214,6 +214,17 @@ async def _prune_operation_log(pool: asyncpg.Pool) -> tuple[int, Exception | Non
          потом удаляем её строки. Прерваться между отметкой и удалением
          безопасно: повтор будет запрещён по операции, журнал которой ещё цел.
          Обратный порядок означал бы дубли реальных действий;
+      3. журнал ЗАВЕРШЁННОЙ операции, у которой есть ЖИВОЙ потомок-повтор, не
+         трогаем тоже. Идемпотентность повтора стоит на журнале ПРЕДКА
+         (`retry_family_ids`, ссылка `retry_of_op` в params), и статус у
+         предка терминальный — одного его возраста хватало, чтобы убрать
+         журнал из-под работающей операции. Срок хранения (30 суток) и
+         предельный срок жизни одной операции (столько же) — величины одного
+         порядка: кампания на 20 тысяч получателей при безопасном темпе идёт
+         НЕДЕЛЯМИ, продолжаясь через потолок прогона, и, будучи однажды
+         повторённой владельцем, доживает до уборки журнала своего предка.
+         Дальше она пишет людям, которым предок уже написал. `resubmit_one`
+         проверяет всю семью повторов — уборка обязана смотреть так же;
     Строк-сирот тут не бывает: `operation_log.op_id` ссылается на
     `operation_queue` с ON DELETE CASCADE, то есть удаление операции уносит её
     журнал само. Отдельного прохода по сиротам поэтому нет — он был бы мёртвым
@@ -221,15 +232,37 @@ async def _prune_operation_log(pool: asyncpg.Pool) -> tuple[int, Exception | Non
     этот уборщик идёт раньше.
     """
     from services import op_status
+    # Глубину обхода цепочки берём у идемпотентности, а не повторяем числом:
+    # уборка и `retry_family_ids` обязаны считать семьёй одно и то же.
+    from services.operation_bus import RETRY_CHAIN_MAX as _chain_max
 
     try:
         ids = [r["id"] for r in await pool.fetch(
-            f"""SELECT q.id FROM operation_queue q
+            f"""WITH RECURSIVE live_chain AS (
+                    SELECT q.id,
+                           CASE WHEN q.params->>'retry_of_op' ~ '^[0-9]+$'
+                                THEN (q.params->>'retry_of_op')::bigint END AS ancestor,
+                           1 AS depth
+                      FROM operation_queue q
+                     WHERE q.status NOT IN {op_status.sql_terminal_list()}
+                    UNION ALL
+                    SELECT p.id,
+                           CASE WHEN p.params->>'retry_of_op' ~ '^[0-9]+$'
+                                THEN (p.params->>'retry_of_op')::bigint END,
+                           lc.depth + 1
+                      FROM live_chain lc
+                      JOIN operation_queue p ON p.id = lc.ancestor
+                     WHERE lc.ancestor IS NOT NULL
+                       AND lc.depth < {_chain_max}
+                )
+                SELECT q.id FROM operation_queue q
                  WHERE q.journal_pruned = FALSE
                    AND q.status IN {op_status.sql_terminal_list()}
                    AND COALESCE(q.finished_at, q.created_at)
                        < NOW() - INTERVAL '{_OPERATION_LOG_RETENTION}'
                    AND EXISTS (SELECT 1 FROM operation_log ol WHERE ol.op_id = q.id)
+                   AND NOT EXISTS (SELECT 1 FROM live_chain lc
+                                    WHERE lc.ancestor = q.id)
                  ORDER BY q.id
                  LIMIT {_OPERATION_LOG_BATCH}""",
         )]
