@@ -96,6 +96,9 @@ _HELP = {
         "Потерянные строки успеха в журнале целей (повтор сделает цель второй раз)",
     "infragram_account_cooldown_write_failures_total":
         "Потерянные записи паузы аккаунта (аккаунт останется доступным сразу после флуда)",
+    "infragram_account_rest_write_failures_total":
+        "Потерянные записи отдыха аккаунта после тяжёлого прогона (после рестарта "
+        "он снова выглядит отдохнувшим)",
     "infragram_invite_dedup_write_failures_total":
         "Потерянные записи дедупа инвайта (следующий прогон может пригласить повторно)",
     "infragram_recurring_reschedule_failures_total":
