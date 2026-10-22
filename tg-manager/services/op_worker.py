@@ -8838,6 +8838,12 @@ async def _exec_gp_bulk_apply(
             access_hash = int(target.get("access_hash") or 0)
             title = target.get("planned_name") or ""
             item_failed = False
+            # Отметка в журнал ставится только за РЕАЛЬНОЕ действие. Ниже есть
+            # пути, на которых объект не трогали вовсе: шаблон пустой, аллокатор
+            # не дал имени, текст поста не собрался. Отметить такой объект
+            # «оформленным» значит соврать журналу, по которому следующий прогон
+            # решает, что пропускать, — и тогда объект не оформится никогда.
+            _acted_before = sum(counters.values())
 
             if action in ("about", "both"):
                 if about_template:
@@ -9033,7 +9039,7 @@ async def _exec_gp_bulk_apply(
 
             if item_failed:
                 failed += 1
-            elif action != "post_pin":
+            elif action != "post_pin" and sum(counters.values()) > _acted_before:
                 # Объект применён целиком — отмечаем, чтобы следующий прогон
                 # этой операции (потолок, деплой, повтор) его не переделывал.
                 # У поста отметка уже стоит: она ставится сразу после публикации,

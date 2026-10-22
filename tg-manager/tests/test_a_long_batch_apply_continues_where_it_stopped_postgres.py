@@ -174,3 +174,49 @@ def test_the_second_run_takes_the_objects_the_first_one_never_reached(
     assert int(res.get("ok") or 0) == 5, (
         f"итог возобновлённой операции: {res.get('ok')} из 5 — оформленные прошлым "
         "прогоном обязаны входить в итог, иначе операция закрывается недобором")
+
+
+def test_an_object_nobody_touched_does_not_get_a_journal_mark(
+        pool, quiet, monkeypatch):
+    """Отметка в журнале — только за реальное действие.
+
+    У пакетного применения есть пути, на которых объект не трогали вовсе:
+    аллокатор не выдал свободного имени, шаблон пустой, текст поста не
+    собрался. Если отметить такой объект оформленным, следующий прогон
+    пропустит его как сделанный — и имя не встанет НИКОГДА, причём молча:
+    в итоге операции он будет числиться среди успешных.
+    """
+    from services import account_manager, op_worker, username_engine
+
+    plan_id, op_id, _chan = _seed(pool, n=3)
+    params = {"plan_id": plan_id, "action": "username"}
+
+    class _NoFreeNames:
+        """Пространство имён исчерпано: allocate честно отдаёт None."""
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def allocate(self, templates, ctx):
+            return None
+
+        def reserve(self, name):
+            return None
+
+    applied: list[int] = []
+
+    async def _set_username(session, channel_id, name, **kw):
+        applied.append(int(channel_id))
+        return None
+
+    monkeypatch.setattr(username_engine, "UsernameAllocator", _NoFreeNames)
+    monkeypatch.setattr(account_manager, "set_channel_username", _set_username)
+
+    res = _run(op_worker._exec_gp_bulk_apply(pool, None, op_id, OWNER, params))
+
+    assert not applied, f"имя всё-таки ставилось: {applied}"
+    marked = _run(op_worker.completed_steps(pool, op_id))
+    assert not marked, (
+        f"объекты {sorted(marked)} отмечены оформленными, хотя их не трогали: "
+        f"следующий прогон пропустит их как сделанные, и имя не встанет "
+        f"никогда ({res})")
