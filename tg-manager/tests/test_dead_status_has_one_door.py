@@ -186,6 +186,9 @@ _ALLOWED: dict[str, str] = {
     "services/warmup_status.py::<module>":
         "_TERMINAL_SKIPS — причины ПРОПУСКА действия (no_session, not_found), "
         "это не значения acc_status",
+    "services/fleet_maintenance.py::<module>":
+        "DEAD_ACCOUNT_STATUSES — кого обслуживание флота УДАЛЯЕТ безвозвратно; "
+        "spamblock/frozen/deleted лечатся или проходят, удалять по ним нельзя",
     "bot/handlers/health_dashboard.py::cb_health_real_check":
         "по auth_error выключаем аккаунт — снова «сессия подтверждённо мертва»",
 }
