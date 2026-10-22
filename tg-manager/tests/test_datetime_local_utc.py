@@ -95,7 +95,13 @@ def test_no_datetime_local_field_sent_raw():
             if "localToUtcIso" in window or "toISOString()" in window:
                 continue
             # переменная может конвертироваться ниже — ищем её имя
-            var = re.search(r"(?:const|let|var)\s+(\w+)\s*=\s*document\.getElementById", html[max(0, m.start() - 80): m.end()])
+            # `const when = (document.getElementById('x').value || '').trim()`
+            # — распространённая форма чтения поля, и без необязательной
+            # открывающей скобки имя переменной здесь не находилось: гейт
+            # объявлял нарушителем поле, которое конвертируется строкой ниже
+            # (так покраснел ucWhen единой кампании), и наоборот — пропустил бы
+            # настоящего нарушителя, записанного так же.
+            var = re.search(r"(?:const|let|var)\s+(\w+)\s*=\s*\(?\s*document\.getElementById", html[max(0, m.start() - 80): m.end()])
             if var and re.search(r"localToUtcIso\(\s*" + re.escape(var.group(1)) + r"\s*\)|new Date\(\s*" + re.escape(var.group(1)), html[m.start(): m.start() + 2500]):
                 continue
             offenders.append(fid)

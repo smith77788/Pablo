@@ -3340,73 +3340,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("reporter_submit uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    # ── Quick Post ─────────────────────────────────────────────────────────────
-
-    async def quick_post_submit(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        text = validate_string(body.get("text"), max_len=4096)
-        channel_ids = body.get("channel_ids") or []
-        if not text:
-            return _err("Заполните текст поста", 400)
-        if check_sql_suspicious(text):
-            return _err("Недопустимые символы в тексте поста")
-        if not channel_ids:
-            return _err("Выберите хотя бы один канал", 400)
-        # Validate channel IDs are integers
-        try:
-            channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
-        except (TypeError, ValueError):
-            return _err("Неверные идентификаторы каналов", 400)
-        try:
-            schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
-        except (TypeError, ValueError):
-            schedule_minutes = 0
-        # Autopost v2: рекуррентная публикация (0 = разовая).
-        try:
-            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
-        except (TypeError, ValueError):
-            _rmin = 0
-        try:
-            label = f"Быстрый пост · каналов: {len(channel_ids)}"
-            _pd = {"text": text, "channel_ids": channel_ids}
-            if _rmin > 0:
-                _pd["repeat_interval_min"] = _rmin
-                _rc = body.get("repeat_count")
-                if _rc is not None:
-                    try:
-                        _pd["repeat_count"] = max(1, min(int(_rc), 1000))
-                    except (TypeError, ValueError):
-                        pass
-            if schedule_minutes > 0:
-                from datetime import datetime as _dtm, timedelta as _tdl, timezone as _tzn
-                op_id = await _obus.submit(
-                    pool, uid, "quick_post", _pd,
-                    total_items=len(channel_ids), label="⏰ " + label,
-                    scheduled_for=_dtm.now(_tzn.utc) + _tdl(minutes=schedule_minutes))
-            else:
-                op_id = await _obus.submit(
-                    pool, uid, "quick_post", _pd,
-                    total_items=len(channel_ids), label=label)
-            return _json_resp({"ok": True, "op_id": op_id, "label": label, "scheduled_minutes": schedule_minutes})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("quick_post_submit uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    # ── SEO Overview ───────────────────────────────────────────────────────────
-
-
-
-
+    # Экран «Быстрый пост» слит с единой публикацией (см.
+    # tests/test_publish_module_unified.py о том, почему он один), а эта ручка
+    # была его единственной дверью и больше ничьей: ops типа quick_post заводила
+    # только она. Сам тип операции ЖИВ — op_worker и operation_bus исполняют и
+    # показывают уже стоящие в очереди и историю; удалена только ручка.
 
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
@@ -8044,7 +7982,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/compliance_scan", compliance_scan_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
-    app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
     # SEO
     app.router.add_get("/api/miniapp/ai/status", ai_status)
     app.router.add_post("/api/miniapp/ai/test", ai_test)
