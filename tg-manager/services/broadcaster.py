@@ -27,6 +27,7 @@ import aiohttp
 import asyncpg
 from database import db
 from services import flood_sleep
+from services import op_status
 from services import bot_api
 from services import brand_injection
 from services import content_safety
@@ -51,6 +52,10 @@ _running: dict[int, asyncio.Task] = {}
 # Private users follow the global 30 msg/s limit (BROADCAST_DELAY covers that).
 # Any chat_id < 0 is a group/channel.
 _GROUP_DELAY = 3.0
+
+# Как часто рассылка переспрашивает БАЗУ, не остановил ли её владелец. Чаще
+# смысла нет: один запрос на 5 секунд против десятков сообщений в секунду.
+_STOP_CHECK_TTL_S = 5.0
 
 # ── Кэш результатов рассылок (TTL 5 мин) ──────────────────────────────────────
 _broadcast_result_cache = TTLCache(default_ttl=300.0, max_size=500)
@@ -323,11 +328,61 @@ async def run(
         if bot_api.recipient_is_gone(category):
             await db.mark_user_inactive(pool, bot_id, uid, reason=category)
 
+    # ОСТАНОВКА СПРАШИВАЕТСЯ У БАЗЫ, А НЕ У ПАМЯТИ ПРОЦЕССА.
+    # Отменить рассылку можно было только `cancel()` — снятием asyncio-задачи
+    # ЭТОГО процесса. Но запускается рассылка и из Mini App (web), и из
+    # операции (воркер), а останавливается через `op_worker._stop_broadcasts`,
+    # то есть из воркера: для рассылки, живущей в другом процессе, `cancel()`
+    # не находит задачу, пишется только строка 'cancelled' в БД — и цикл,
+    # который эту строку никогда не читал, спокойно досылал сообщения ЖИВЫМ
+    # ЛЮДЯМ до конца аудитории. Худший класс в этом продукте: владелец нажал
+    # «стоп», увидел «остановлено», а рассылка идёт.
+    # Решение отдаём общей двери `op_status.stop_requested`: пропавшая строка
+    # (рассылку удалили) — тоже стоп. Блип БД стопом НЕ считаем: рвать живую
+    # рассылку из-за сетевого сбоя опаснее, чем заметить отмену на следующей
+    # проверке.
+    # Пропавшая строка считается стопом только ПОСЛЕ того, как мы её хотя бы
+    # раз видели: иначе рассылка, запущенная без строки в `broadcasts` (ничто
+    # в `run` её наличия не требует — проверка владельца смотрит в
+    # `managed_bots`), молча не отправила бы ничего. Исчезла после того, как
+    # была, — это удаление владельцем, то есть стоп.
+    _stop_checked_at = 0.0
+    _stop_seen = False
+    _row_seen = False
+
+    async def _owner_stopped() -> bool:
+        nonlocal _stop_checked_at, _stop_seen, _row_seen
+        _now = time.monotonic()
+        if _stop_seen or _now - _stop_checked_at < _STOP_CHECK_TTL_S:
+            return _stop_seen
+        _stop_checked_at = _now
+        try:
+            _row = await pool.fetchrow(
+                "SELECT status FROM broadcasts WHERE id=$1", broadcast_id)
+        except Exception as _e:
+            logger.warning(
+                "Broadcast %d: проверка остановки не прошла (%s) — идём дальше "
+                "по прошлому ответу", broadcast_id, _e)
+            return _stop_seen
+        if _row is None and not _row_seen:
+            return False
+        _row_seen = _row_seen or _row is not None
+        _stop_seen = op_status.stop_requested(_row)
+        return _stop_seen
+
     # _loop_exc captures any exception (including CancelledError) so we can
     # always mark the broadcast final status in DB before propagating.
     _loop_exc: BaseException | None = None
+    _stopped_by_owner = False
     try:
         for uid in user_ids:
+            if await _owner_stopped():
+                _stopped_by_owner = True
+                _aborted_reason = "остановлена владельцем"
+                logger.info(
+                    "Broadcast %d: остановлена владельцем после %d отправленных",
+                    broadcast_id, sent)
+                break
             # Resume support: skip users already reached in a previous run
             if uid in already_sent:
                 continue
@@ -434,7 +489,12 @@ async def run(
     await _flush_delivery_buffer()
 
     total = user_count
-    if _loop_exc is not None:
+    if _stopped_by_owner:
+        # Честный исход: не «частично доставлено по ошибке», а остановлено.
+        # Эту же строку читает подъём прерванных рассылок после рестарта —
+        # 'cancelled' в его набор не входит, то есть воскрешения не будет.
+        final_status = "cancelled"
+    elif _loop_exc is not None:
         final_status = "partial" if sent > 0 else "failed"
     elif total == 0 or sent == total:
         final_status = "done"
