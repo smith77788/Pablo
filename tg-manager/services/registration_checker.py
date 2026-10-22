@@ -417,6 +417,24 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
 
 # ── Telethon helpers ───────────────────────────────────────────────────────────
 
+async def has_active_session(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    pool_name: str | None = None,
+) -> bool:
+    """Есть ли у владельца хоть один аккаунт, годный для Telethon-чтения."""
+    from services import resource_selector
+
+    try:
+        candidates = await resource_selector.select_all_active(
+            pool, owner_id, action_type="read", pool_name=pool_name
+        )
+    except Exception:
+        log_exc_swallow(log, "registration_checker.has_active_session")
+        return False
+    return any(a.get("session_str") for a in candidates)
+
+
 async def _get_telethon_client(
     pool: asyncpg.Pool,
     owner_id: int,
