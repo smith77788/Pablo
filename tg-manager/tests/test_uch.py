@@ -432,63 +432,20 @@ class TestCRMEngine:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_crm_stats(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
-        pool = FakePool(fetch_val=5, fetch_rows=[{"stage": "lead", "cnt": 3, "total_value": 100}])
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 5
-
-    @pytest.mark.asyncio
-    async def test_get_crm_pipeline_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_pipeline
-        pool = FakePool(fetch_rows=[])
-        result = await get_crm_pipeline(pool, 123)
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_crm_pipeline_with_deals(self):
-        from services.contacts_hub.crm_engine import get_crm_pipeline
-        rows = [
-            {"stage": "lead", "deal_count": 5, "total_value": 1000, "avg_value": 200},
-            {"stage": "proposal", "deal_count": 3, "total_value": 5000, "avg_value": 1666.67},
-        ]
-        pool = FakePool(fetch_rows=rows)
-        result = await get_crm_pipeline(pool, 123)
-        assert len(result) == 2
-        assert result[0]["stage"] == "lead"
-        assert result[0]["deal_count"] == 5
-        assert result[1]["stage"] == "proposal"
-
-    @pytest.mark.asyncio
-    async def test_get_crm_stats_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
-        pool = FakePool(fetch_val=0, fetch_rows=[], execute_val=0)
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 0
-        assert result["by_stage"] == []
-        assert result["upcoming_reminders_7d"] == 0
-
-    @pytest.mark.asyncio
-    async def test_get_crm_stats_with_data(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
-        rows = [
-            {"stage": "lead", "cnt": 10, "total_value": 5000},
-            {"stage": "proposal", "cnt": 5, "total_value": 15000},
-        ]
-        # get_crm_stats зовёт fetchval дважды: total(15) → reminders(3).
-        pool = FakePool(fetch_val=[15, 3], fetch_rows=rows, execute_val=3)
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 15
-        assert len(result["by_stage"]) == 2
-        assert result["upcoming_reminders_7d"] == 3
-
-    # Проверки четырёх дублей (get_crm_activities, create_crm_activity,
-    # update_crm_stage, get_crm_reminders) удалены вместе с кодом: их не звал
-    # никто, кроме этих же проверок, и каждый был хуже живого двойника тем,
-    # чего не делал — один писал в журнал без проверки владельца контакта,
-    # другой читал журнал без русских подписей. Живое поведение журнала —
-    # tests/test_touch_journal_writes_postgres.py, дверь и «они не вернулись» —
-    # tests/test_touch_journal_has_a_door.py.
+    async def test_the_funnel_keeps_empty_stages(self):
+        """Четыре проверки двух мёртвых воронок (get_crm_pipeline,
+        get_crm_stats) заменены одной — на живую pipeline(). Первая
+        сортировала по стадиям, каких в contact_crm не бывает ('prospect',
+        'closed_won', 'closed_lost'); вторая считала то же без порядка.
+        Живое поведение — tests/test_crm_funnel_counts_postgres.py.
+        """
+        from services.contacts_hub.crm_engine import STAGE_LABELS, pipeline
+        pool = FakePool(fetch_val=0, fetch_rows=[])
+        result = await pipeline(pool, 123)
+        assert [s["stage"] for s in result["stages"]] == list(STAGE_LABELS)
+        assert result["total"] == 0
+        assert all(s["count"] == 0 for s in result["stages"])
+        assert all(s["label"] for s in result["stages"]), "стадия без подписи"
 
     @pytest.mark.asyncio
     async def test_get_crm_reminders_empty(self):

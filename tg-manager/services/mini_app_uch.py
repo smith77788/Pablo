@@ -1188,6 +1188,17 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_identity")
             return _err(_INTERNAL_ERROR, 500)
 
+    async def uch_crm_pipeline(request: web.Request) -> web.Response:
+        """Воронка хаба: сколько контактов в каждой стадии и на какую сумму."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.crm_engine import pipeline
+            return _json_resp(await pipeline(pool, uid))
+        except Exception:
+            log.exception("uch_crm_pipeline")
+            return _err(_INTERNAL_ERROR, 500)
+
     async def uch_crm_get(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -1213,6 +1224,8 @@ def setup_routes(app: web.Application, pool) -> None:
         except ContactNotFound as nf:
             return _err(str(nf), 404)
         except ValueError as ve:
+            # BadStage — подвид ValueError: «Неизвестная стадия сделки» уходит
+            # владельцу как есть, по-русски.
             return _err(str(ve), 400)
         except Exception:
             log.exception("uch_crm_upsert uid=%s", uid)
@@ -1804,6 +1817,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/timeline", uch_timeline)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/relationships", uch_relationships)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/identity", uch_identity)
+    app.router.add_get("/api/miniapp/uch/crm/pipeline", uch_crm_pipeline)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_get)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_upsert)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity)

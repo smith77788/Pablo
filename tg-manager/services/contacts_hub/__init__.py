@@ -18,7 +18,7 @@ from .trust_engine import (
 )
 from .crm_engine import (
     get_crm_data, upsert_crm, log_crm_activity, get_crm_activity,
-    get_upcoming_reminders, get_crm_stats, get_crm_overdue,
+    get_upcoming_reminders, get_crm_overdue,
 )
 from .smart_tags_engine import (
     apply_smart_tags, get_smart_tags, get_smart_tag_rules,

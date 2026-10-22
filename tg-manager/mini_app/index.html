@@ -16584,6 +16584,30 @@ function toggleGenderFilter(g, el) {
   document.querySelectorAll('.contact-gender').forEach(x=>x.classList.toggle('on', x.dataset.g===CONTACT_GENDER));
   loadContacts();
 }
+// Числа на чипах стадий. Фильтр по стадии был, а числа — нет: чтобы понять,
+// где лежат сделки, владелец нажимал по очереди все шесть чипов. Считает их
+// сервер (одна функция crm_engine.pipeline), а подписи берутся оттуда же —
+// в разметке они статические, и расхождение поймал бы только владелец.
+async function refreshStageCounts() {
+  let d;
+  try { d = await api('/api/miniapp/uch/crm/pipeline'); }
+  catch(e) { return; }   // молчим: это украшение фильтра, а не сам фильтр
+  const by = {};
+  (d.stages||[]).forEach(s => { by[s.stage] = s; });
+  document.querySelectorAll('.contact-stage').forEach(el => {
+    const s = by[el.dataset.s];
+    if (!s) return;
+    // Ноль — не «нет данных», а честный ноль: стадию видно и пустой.
+    el.textContent = s.label + ' ' + num(Number(s.count||0));
+    const cur = Object.entries(s.by_currency||{});
+    // Суммы складываются ПО ВАЛЮТАМ: «итого» из рублей с долларами было бы
+    // красивым и неверным. Одна валюта — показываем, несколько — только счёт.
+    el.title = cur.length === 1
+      ? s.label + ': ' + num(Math.round(cur[0][1])) + ' ' + cur[0][0]
+      : (cur.length ? s.label + ': суммы в разных валютах' : s.label);
+  });
+}
+
 function toggleStageFilter(s, el) {
   CONTACT_STAGE = (CONTACT_STAGE === s) ? null : s;
   document.querySelectorAll('.contact-stage').forEach(x=>x.classList.toggle('on', x.dataset.s===CONTACT_STAGE));
@@ -17072,6 +17096,7 @@ const CONTACT_PAGE = 200;
 let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
 async function loadContacts(append=false) {
   cgRenderBanner();           // фильтр по группе виден всегда, пока он включён
+  if (!append) refreshStageCounts();   // числа на чипах стадий, не блокируя список
   const q = (document.getElementById('contactSearch')?.value||'').trim();
   if (!append) CONTACT_OFFSET = 0;
   // Единый путь: поиск КОМБИНИРУЕТСЯ с фильтрами (пол/стадия/…) и совпадает с

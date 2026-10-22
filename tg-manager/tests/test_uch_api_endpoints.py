@@ -966,15 +966,28 @@ class TestCRMEngine:
         assert result[0]["contact_name"] == "Ivan Petrov"
 
     @pytest.mark.asyncio
-    async def test_get_crm_stats(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
+    async def test_the_funnel_answers_with_every_stage(self):
+        """Проверка переставлена с удалённой get_crm_stats на живую pipeline().
+
+        Воронку считали две мёртвые функции: get_crm_stats (без порядка) и
+        get_crm_pipeline (с порядком по стадиям, каких в contact_crm не
+        бывает). Осталась одна; поведение на живой базе —
+        tests/test_crm_funnel_counts_postgres.py.
+        """
+        from services.contacts_hub.crm_engine import STAGE_LABELS, pipeline
         pool = FakePool(
-            fetch_val=5,
-            fetch_rows=[{"stage": "lead", "cnt": 3, "total_value": 100}]
+            fetch_val=0,
+            fetch_rows=[{"stage": "lead", "currency": "RUB", "cnt": 3,
+                         "total_value": 100}]
         )
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 5
-        assert len(result["by_stage"]) == 1
+        result = await pipeline(pool, 123)
+        assert [s["stage"] for s in result["stages"]] == list(STAGE_LABELS), (
+            "в воронке не все стадии или не в порядке воронки")
+        by = {s["stage"]: s for s in result["stages"]}
+        assert by["lead"]["count"] == 3
+        assert by["lead"]["by_currency"] == {"RUB": 100.0}
+        assert by["won"]["count"] == 0, "пустая стадия пропала из ответа"
+        assert result["total"] == 3
 
     @pytest.mark.asyncio
     async def test_get_crm_overdue_empty(self):

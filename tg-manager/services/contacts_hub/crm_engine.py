@@ -20,6 +20,25 @@ _TS_FIELDS = ("next_reminder_at", "last_interaction_at")
 # в журнале стояло «call» и «meeting». Список закрытый ещё и потому, что это
 # значение приходит с экрана и попадает в базу: свободная строка превращает
 # журнал в свалку, по которой потом нельзя ни сгруппировать, ни посчитать.
+# Стадии воронки — ОДИН список на весь проект. Ключи обязаны совпадать с
+# intent_sensor.VALID_STAGES и virtual_layer.STAGE_SIGNAL: мёртвый
+# get_crm_pipeline сортировал по 'prospect'/'closed_won'/'closed_lost', каких в
+# этой таблице не бывает, — такая «воронка» всегда показывала бы стадии в
+# случайном порядке. Порядок здесь — порядок воронки, а не алфавит.
+STAGE_LABELS = {
+    "lead": "Лид",
+    "contact": "Контакт",
+    "proposal": "Предложение",
+    "negotiation": "Переговоры",
+    "won": "Выиграно",
+    "lost": "Проиграно",
+}
+
+
+class BadStage(ValueError):
+    """Стадия не из списка: ошибка владельца (или клиента), а не сбой сервера."""
+
+
 ACTIVITY_LABELS = {
     "call": "Звонок",
     "message": "Сообщение",
@@ -116,6 +135,14 @@ async def upsert_crm(pool, owner_id: int, contact_id: str, data: dict) -> dict:
     # timestamptz-поля из тела запроса могут прийти строкой → привести к datetime,
     # иначе asyncpg роняет весь upsert (класс #15). ValueError пробросится вызывающему.
     data = _normalize_ts(data)
+    # Стадия приходит с экрана в свободной строке: у contact_crm.stage нет ни
+    # CHECK, ни enum. Непроверенное значение ложится в базу и тихо выпадает из
+    # всего, что о стадиях знает: сигнал виртуального слоя (STAGE_SIGNAL) на
+    # него не срабатывает, чип фильтра его не покажет, воронка посчитает его
+    # отдельной стадией без подписи.
+    if 'stage' in data and data['stage'] is not None:
+        if str(data['stage']) not in STAGE_LABELS:
+            raise BadStage("Неизвестная стадия сделки")
     await _require_contact(pool, owner_id, contact_id)
     existing = await get_crm_data(pool, owner_id, contact_id)
     if existing:
@@ -234,24 +261,6 @@ async def get_upcoming_reminders(pool, owner_id: int, limit: int = 20) -> list:
     return result
 
 
-async def get_crm_stats(pool, owner_id: int) -> dict:
-    total = await pool.fetchval(
-        'SELECT COUNT(*) FROM contact_crm WHERE owner_id=$1', owner_id)
-    by_stage = await pool.fetch(
-        '''SELECT stage, COUNT(*) as cnt, COALESCE(SUM(deal_value), 0) as total_value
-           FROM contact_crm WHERE owner_id=$1 GROUP BY stage ORDER BY cnt DESC''',
-        owner_id)
-    reminders = await pool.fetchval(
-        '''SELECT COUNT(*) FROM contact_crm
-           WHERE owner_id=$1 AND next_reminder_at IS NOT NULL AND next_reminder_at <= NOW() + INTERVAL '7 days' ''',
-        owner_id)
-    return {
-        'total_crm_contacts': total,
-        'by_stage': [dict(r) for r in by_stage],
-        'upcoming_reminders_7d': reminders,
-    }
-
-
 async def get_crm_overdue(pool, owner_id: int) -> list:
     rows = await pool.fetch(
         '''SELECT crm.*, uc.first_name, uc.last_name, uc.username
@@ -272,26 +281,63 @@ async def get_crm_overdue(pool, owner_id: int) -> list:
     return result
 
 
-async def get_crm_pipeline(pool, owner_id: int) -> list:
+async def pipeline(pool, owner_id: int) -> dict:
+    """Сколько контактов в каждой стадии и на какую сумму.
+
+    Экран хаба уже умел ФИЛЬТР по стадии (чипы «Лид», «Предложение», …), но
+    ни одного числа рядом: чтобы понять, где лежат сделки, владелец должен был
+    по очереди нажать все шесть чипов. Считает это одна функция — та же, что
+    отдаёт ручка, — и возвращает ВСЕ стадии, включая пустые: воронка с
+    пропущенной серединой читается как «там никого нет и не было».
+
+    Суммы разложены по валютам (`by_currency`). Складывать рубли с долларами в
+    одно число нельзя: получилось бы красивое, но неверное «итого».
+    """
     rows = await pool.fetch(
-        '''SELECT stage, COUNT(*) as deal_count,
-                  COALESCE(SUM(deal_value), 0) as total_value,
-                  COALESCE(AVG(deal_value), 0) as avg_value
+        '''SELECT stage, currency, COUNT(*) AS cnt,
+                  COALESCE(SUM(deal_value), 0) AS total_value
            FROM contact_crm
-           WHERE owner_id=$1
-           GROUP BY stage
-           ORDER BY
-             CASE stage
-               WHEN 'lead' THEN 1
-               WHEN 'prospect' THEN 2
-               WHEN 'proposal' THEN 3
-               WHEN 'negotiation' THEN 4
-               WHEN 'closed_won' THEN 5
-               WHEN 'closed_lost' THEN 6
-               ELSE 7
-             END''',
+           WHERE owner_id = $1
+           GROUP BY stage, currency''',
         owner_id)
-    return [dict(r) for r in rows]
+    acc: dict[str, dict] = {
+        key: {'stage': key, 'label': label, 'count': 0, 'by_currency': {}}
+        for key, label in STAGE_LABELS.items()
+    }
+    unknown: dict[str, dict] = {}
+    for r in rows:
+        key = r['stage'] or 'lead'
+        if key in acc:
+            item = acc[key]
+        else:
+            # Стадии вне списка быть не должно (на записи стоит проверка), но
+            # старые строки её содержать могут. Прятать нельзя: контакт тогда
+            # не виден ни в одной стадии, а в сумме по хабу есть.
+            item = unknown.setdefault(
+                key, {'stage': key, 'label': key, 'count': 0, 'by_currency': {}})
+        item['count'] += int(r['cnt'] or 0)
+        cur = (r['currency'] or 'USD').upper()
+        val = float(r['total_value'] or 0)
+        if val:
+            item['by_currency'][cur] = item['by_currency'].get(cur, 0.0) + val
+    overdue = await pool.fetchval(
+        "SELECT COUNT(*) FROM contact_crm "
+        "WHERE owner_id = $1 AND next_reminder_at IS NOT NULL "
+        "AND next_reminder_at <= NOW() + INTERVAL '7 days'",
+        owner_id)
+    stages = list(acc.values()) + list(unknown.values())
+    return {
+        'stages': stages,
+        'total': sum(s['count'] for s in stages),
+        'reminders_7d': int(overdue or 0),
+    }
+
+
+# Здесь лежали get_crm_pipeline и get_crm_stats — две мёртвые воронки. Первая
+# сортировала по стадиям, каких в contact_crm не бывает ('prospect',
+# 'closed_won', 'closed_lost'), то есть её «порядок воронки» был случайным;
+# вторая считала то же самое без порядка вообще. Ни одну не звал никто, кроме
+# тестов. Осталась одна, pipeline(), и её зовёт ручка GET /uch/crm/pipeline.
 
 
 # ЧЕТЫРЕ ДУБЛЯ УДАЛЕНЫ ОТСЮДА (22.10.2026). Все четыре не звал никто, кроме
