@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date as _date, datetime, timezone
 from typing import Optional
 
 import asyncpg
@@ -366,14 +366,61 @@ async def ensure_contact_by_telegram_id(
         return None
 
 
+# Поля карточки контакта, которые владелец правит и которые откат к версии
+# обязан вернуть. Список лежал в ТРЁХ местах — здесь, в rollback_to_version и
+# в сборке снимка версии, — значит поле, добавленное в одно из них, молча
+# терялось в остальных: правка проходила, а откат возвращал не всё. Список
+# один, и живёт он тут, в самом нижнем слое.
+EDITABLE_FIELDS = (
+    'first_name', 'last_name', 'username', 'display_name', 'phones', 'emails',
+    'company', 'position', 'websites', 'addresses', 'birthday', 'notes', 'tags',
+    'color_label', 'is_favorite', 'is_premium', 'importance_level', 'user_rating',
+    'custom_fields',
+)
+
+# Поля, которые уходят в jsonb-колонки и требуют json.dumps.
+_JSONB_FIELDS = ('phones', 'emails', 'websites', 'addresses', 'custom_fields')
+
+
+class BadDate(ValueError):
+    """Дата из ввода не разобралась: ошибка владельца, а не сбой сервера."""
+
+
+def coerce_date(value):
+    """None/`date` → как есть; ISO-строка → `date`; пустая строка → None.
+
+    `birthday` — это колонка DATE, и asyncpg биндит её БЕЗ каста: строка
+    роняет запрос (DataError), то есть вся правка контакта. А с экрана
+    приходит ровно строка: `<input type="date">.value` — «1990-05-01».
+    Поэтому день рождения в карточке не сохранялся никогда: владелец
+    заполнял поле, жал «Сохранить» и получал ошибку на всей правке.
+    Тот же дефект уже находили у `next_reminder_at` (см. uch_crm_reminder).
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, _date):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return _date.fromisoformat(s[:10])
+    except (TypeError, ValueError):
+        raise BadDate("Некорректная дата рождения")
+
+
 async def update_contact(pool, contact_id, owner_id, updates: dict) -> bool:
     set_clauses = []
     params = []
     idx = 1
-    for field in ('first_name','last_name','username','display_name','phones','emails','company','position','websites','addresses','birthday','notes','tags','color_label','is_favorite','is_premium','importance_level','user_rating','custom_fields'):
+    for field in EDITABLE_FIELDS:
         if field in updates:
             val = updates[field]
-            if field in ('phones','emails','websites','addresses','custom_fields'):
+            if field == 'birthday':
+                val = coerce_date(val)
+            if field in _JSONB_FIELDS:
                 set_clauses.append(f'{field} = ${idx}::jsonb')
                 params.append(json.dumps(val))
             elif field == 'tags':

@@ -25,6 +25,10 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты хранилища контактов на приложении мини-аппа."""
     from services.contacts_hub import segments as _segments
+    # На уровне setup_routes, а не внутри обработчика: `except BadDate` в
+    # обработчике вычисляется и тогда, когда до ленивого импорта дело не
+    # дошло, и неразрешённое имя превратило бы любую раннюю ошибку в NameError.
+    from services.contacts_hub.repository import BadDate
     from services.mini_app_api import (
         _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
         _safe_fetch, _safe_fetchrow, alive_accounts, log,
@@ -752,11 +756,41 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             contact_id = request.match_info['contact_id']
             data = await request.json()
-            from services.contacts_hub.repository import update_contact, log_contact_history
+            from services.contacts_hub.repository import (
+                get_contact, update_contact, log_contact_history)
+            from services.contacts_hub.versioning_engine import (
+                changed_against, create_version, snapshot_of, summary_of)
+            # Снимок ДО правки. Экран «Версии» обещает «версии создаются при
+            # изменениях», а создавал их НИКТО: create_version не звался ни
+            # отсюда, ни откуда-либо ещё в продукте, так что список версий был
+            # пуст всегда, а откату было некуда откатываться.
+            before = await get_contact(pool, contact_id, uid)
             success = await update_contact(pool, contact_id, uid, data)
             if not success: return _err("Не найдено", 404)
             await log_contact_history(pool, contact_id, uid, 'edit', source='user')
+            if before and before.get('contact'):
+                snapshot = snapshot_of(before['contact'])
+                # Только то, что правка реально меняет: экран отправляет
+                # карточку целиком, и версия, подписанная «всем, что пришло»,
+                # утверждала бы, что изменились телефоны, которых владелец не
+                # касался. Ничего не изменилось — версии и не нужно.
+                changed = changed_against(snapshot, data)
+                try:
+                    if changed:
+                        await create_version(
+                            pool, contact_id, uid, snapshot,
+                            changed_fields=changed, changed_by='user',
+                            change_summary=summary_of(changed))
+                except Exception:
+                    # Правка уже применена и подтверждена истории: ронять ответ
+                    # из-за непишущейся версии значит показать владельцу ошибку
+                    # там, где всё получилось.
+                    log.exception("uch_contact_update: версия не создана")
             return _json_resp({'ok': True})
+        except BadDate as bad:
+            # Непонятная дата — это ошибка ввода, а не сбой сервера: 500 с
+            # «внутренней ошибкой» заставлял владельца жать «Сохранить» снова.
+            return _err(str(bad), 400)
         except Exception:
             log.exception("uch_contact_update")
             return _err(_INTERNAL_ERROR, 500)

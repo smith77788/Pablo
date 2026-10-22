@@ -5,7 +5,98 @@ from typing import Optional
 
 import asyncpg
 
+# Поля, которые версия обязана нести: ровно те, что владелец правит и что
+# умеет вернуть откат. Список лежал в трёх местах — у правки, у откатчика и у
+# сборки снимка, — значит поле, добавленное в одно, молча терялось в
+# остальных. Канонический список один и живёт в репозитории.
+from services.contacts_hub.repository import (
+    EDITABLE_FIELDS as RESTORABLE_FIELDS, coerce_date)
+
 log = logging.getLogger(__name__)
+
+def snapshot_of(contact: dict) -> dict:
+    """Снимок контакта для версии: только восстановимые поля, только JSON-безопасно.
+
+    Полная строка не годится: created_at/updated_at/birthday приходят из базы
+    как datetime/date, а снимок уходит в json.dumps — он на них падает, и
+    версия не создалась бы вовсе (а правка контакта при этом прошла).
+    """
+    import datetime as _dt
+
+    out: dict = {}
+    for field in RESTORABLE_FIELDS:
+        if field not in contact:
+            continue
+        value = contact[field]
+        if isinstance(value, (_dt.date, _dt.datetime)):
+            value = value.isoformat()
+        out[field] = value
+    return out
+
+
+# Подписи полей для владельца. `change_summary` печатается прямо на экране
+# «Версии» — и печаталась именами столбцов: «first_name, last_name, phones».
+FIELD_LABELS = {
+    'first_name': 'имя',
+    'last_name': 'фамилия',
+    'username': 'имя в Telegram',
+    'display_name': 'отображаемое имя',
+    'phones': 'телефоны',
+    'emails': 'почта',
+    'company': 'компания',
+    'position': 'должность',
+    'websites': 'сайты',
+    'addresses': 'адреса',
+    'birthday': 'день рождения',
+    'notes': 'заметки',
+    'tags': 'теги',
+    'color_label': 'цветная метка',
+    'is_favorite': 'избранное',
+    'is_premium': 'премиум',
+    'importance_level': 'важность',
+    'user_rating': 'оценка',
+    'custom_fields': 'свои поля',
+}
+
+_JSONB = ('phones', 'emails', 'websites', 'addresses', 'custom_fields')
+
+
+def _norm(field: str, value):
+    """Значение в виде, в котором его можно сравнивать со вторым таким же.
+
+    Снимок приходит из базы, правка — с экрана, и одно и то же значение
+    выглядит в них по-разному: jsonb отдаётся строкой, пустое поле бывает
+    NULL, пустой строкой и пустым списком, дата — то `date`, то ISO-строкой.
+    Без приведения «изменённым» оказывалось КАЖДОЕ поле.
+    """
+    if field in _JSONB and isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            pass
+    if value is None or value == '' or value == [] or value == {}:
+        return None
+    if field == 'birthday':
+        return str(value)[:10]
+    return value
+
+
+def changed_against(snapshot: dict, updates: dict) -> list:
+    """Поля, которые правка РЕАЛЬНО меняет.
+
+    Экран отправляет карточку целиком, поэтому «всё, что пришло» — это всегда
+    все поля: версия подписывалась перечислением всей карточки и утверждала,
+    что изменились телефоны, которых владелец не касался.
+    """
+    return [f for f in RESTORABLE_FIELDS
+            if f in updates and _norm(f, updates[f]) != _norm(f, snapshot.get(f))]
+
+
+def summary_of(fields) -> Optional[str]:
+    """Подпись версии по-русски: её читает владелец, а не разработчик."""
+    if not fields:
+        return None
+    return ', '.join(FIELD_LABELS.get(f, f) for f in fields)
 
 
 async def create_version(pool, contact_id: str, owner_id: int, snapshot: dict,
@@ -58,21 +149,30 @@ async def rollback_to_version(pool, contact_id: str, owner_id: int, version_num:
     snapshot = ver['snapshot']
     if isinstance(snapshot, str):
         snapshot = json.loads(snapshot)
-    updatable = ['first_name', 'last_name', 'username', 'display_name', 'phones', 'emails',
-                 'company', 'position', 'websites', 'addresses', 'birthday', 'notes', 'tags',
-                 'color_label', 'is_favorite', 'is_premium', 'importance_level', 'user_rating',
-                 'custom_fields']
+    # Снимок ТЕКУЩЕГО состояния — до перезаписи. Версия, которую откат
+    # оставлял после себя, несла то состояние, К КОТОРОМУ откатились, то есть
+    # дубль выбранной версии: состояние ДО отката не сохранялось нигде, и сам
+    # откат отменить было нельзя — ошибочное нажатие «Откат» стирало карточку
+    # без возврата.
+    current = await pool.fetchrow(
+        'SELECT * FROM unified_contacts WHERE id=$1 AND owner_id=$2',
+        contact_id, owner_id)
+    before = snapshot_of(dict(current)) if current else {}
+    updatable = list(RESTORABLE_FIELDS)
     sets = []
     params = []
     idx = 1
     for field in updatable:
         if field in snapshot:
             val = snapshot[field]
-            if field in ('phones', 'emails', 'websites', 'addresses', 'custom_fields'):
-                if isinstance(val, str):
-                    sets.append(f'{field} = ${idx}::jsonb')
-                else:
-                    sets.append(f'{field} = ${idx}::jsonb')
+            if field == 'birthday':
+                # В снимке дата лежит ISO-строкой (json.dumps не умеет date),
+                # а колонка — DATE без каста: строка уронила бы весь откат.
+                val = coerce_date(val)
+                sets.append(f'{field} = ${idx}')
+            elif field in ('phones', 'emails', 'websites', 'addresses', 'custom_fields'):
+                sets.append(f'{field} = ${idx}::jsonb')
+                if not isinstance(val, str):
                     val = json.dumps(val)
             elif field == 'tags':
                 sets.append(f'{field} = ${idx}::text[]')
@@ -87,9 +187,10 @@ async def rollback_to_version(pool, contact_id: str, owner_id: int, version_num:
     await pool.execute(
         f'UPDATE unified_contacts SET {", ".join(sets)} WHERE id=${idx} AND owner_id=${idx+1}',
         *params)
-    await create_version(pool, contact_id, owner_id, snapshot,
+    await create_version(pool, contact_id, owner_id, before,
+                         changed_fields=sorted(before),
                          changed_by='rollback',
-                         change_summary=f'Rollback to v{version_num}')
+                         change_summary=f'Откат к v{version_num}')
     return True
 
 
