@@ -3707,6 +3707,9 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_budget_write_failures_total":
         "суточный счёт действий аккаунта — лимит недосчитает сделанное, и "
         "следующая операция может взять аккаунт сверх него",
+    "infragram_strike_history_write_failures_total":
+        "история удара — не записалась: интервал повтора эту цель не увидит, и "
+        "следующий заход по ней пойдёт как первый",
     "infragram_restriction_write_failures_total":
         "найденное ограничение аккаунта — не записалось: аккаунт не уйдёт в "
         "карантин и попадёт в следующую операцию, а волна банов его не посчитает",
@@ -10676,6 +10679,80 @@ async def _exec_bot_factory(
         await release_accounts([_claimed_acc])
 
 
+async def _write_strike_history(
+    pool: "asyncpg.Pool", op_id: int, owner_id: int, reason, preset, r
+) -> bool:
+    """Записать итог удара в `strike_history` — с повтором и без молчания.
+
+    ЭТО НЕ ТОЛЬКО ОТЧЁТ. Та же таблица — единственный источник для
+    `strike_engine.is_strike_allowed`: гейт смотрит, не бита ли цель за
+    последние часы, и не пускает повторный удар (детекшн-паттерн и лишний
+    износ живых аккаунтов). Потерянная строка выключает этот интервал для
+    конкретной цели: следующий заход по ней пройдёт как первый. Прежде сбой
+    уходил в `warning` как «не видно в History tab» — то есть последствие
+    выглядело косметическим.
+
+    Одна повторная попытка здесь же: типовая причина мгновенная (занятый пул,
+    рестарт базы на деплое). Вставка не условная, поэтому повтор после
+    потерянного подтверждения может оставить вторую строку истории — в
+    History tab это лишняя запись, а гейт смотрит EXISTS, и ему она не врёт.
+    Лишняя строка дешевле выключенного интервала.
+
+    Не бросает: удар уже сделан, и терять операцию из-за записи нельзя.
+    """
+    last: Exception | None = None
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                """INSERT INTO strike_history(
+                       owner_id, target, reason, preset,
+                       accounts_used, peer_reported, msgs_reported, msgs_fetched,
+                       pinned_reported, admins_reported, network_nodes, network_reports,
+                       blocked, verified_down, duration_s, abuse_form_ok,
+                       spambot_escalation,
+                       accounts_ok, accounts_flood, accounts_banned, accounts_failed,
+                       infra_domains, infra_apwg_sent, infra_registrar_sent)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+                          $18,$19,$20,$21,$22,$23,$24)""",
+                owner_id,
+                r.target,
+                reason,
+                preset or None,
+                r.unique_accounts,
+                r.peer_reported,
+                r.msgs_reported,
+                getattr(r, "msgs_fetched", 0),
+                r.pinned_reported,
+                r.admins_reported,
+                r.network_nodes,
+                r.network_reports,
+                r.blocked,
+                r.verified_down,
+                r.duration_s,
+                r.abuse_form_ok,
+                r.spambot_escalation,
+                getattr(r, "accounts_ok", 0),
+                getattr(r, "accounts_flood", 0),
+                getattr(r, "accounts_banned", 0),
+                getattr(r, "accounts_failed", 0),
+                len(getattr(r, "infra_domains", []) or []),
+                getattr(r, "infra_apwg_sent", 0),
+                getattr(r, "infra_registrar_sent", 0),
+            )
+            return True
+        except Exception as e:
+            last = e
+            if _attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    log.error(
+        "_exec_strike op=%d: история удара НЕ ЗАПИСАНА target=%s (%s) — интервал "
+        "повтора эту цель не увидит, и следующий заход по ней пройдёт как первый",
+        op_id, getattr(r, "target", "?"), last,
+    )
+    _reliability_metric("infragram_strike_history_write_failures_total")
+    return False
+
+
 async def _exec_strike(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -10940,50 +11017,7 @@ async def _exec_strike(
     # Queued strike (_exec_strike) не использует _strike_bg_v2, поэтому история
     # должна быть записана здесь — иначе результаты не видны в UI (History tab).
     for r in results:
-        try:
-            await pool.execute(
-                """INSERT INTO strike_history(
-                       owner_id, target, reason, preset,
-                       accounts_used, peer_reported, msgs_reported, msgs_fetched,
-                       pinned_reported, admins_reported, network_nodes, network_reports,
-                       blocked, verified_down, duration_s, abuse_form_ok,
-                       spambot_escalation,
-                       accounts_ok, accounts_flood, accounts_banned, accounts_failed,
-                       infra_domains, infra_apwg_sent, infra_registrar_sent)
-                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-                          $18,$19,$20,$21,$22,$23,$24)""",
-                owner_id,
-                r.target,
-                reason,
-                preset or None,
-                r.unique_accounts,
-                r.peer_reported,
-                r.msgs_reported,
-                getattr(r, "msgs_fetched", 0),
-                r.pinned_reported,
-                r.admins_reported,
-                r.network_nodes,
-                r.network_reports,
-                r.blocked,
-                r.verified_down,
-                r.duration_s,
-                r.abuse_form_ok,
-                r.spambot_escalation,
-                getattr(r, "accounts_ok", 0),
-                getattr(r, "accounts_flood", 0),
-                getattr(r, "accounts_banned", 0),
-                getattr(r, "accounts_failed", 0),
-                len(getattr(r, "infra_domains", []) or []),
-                getattr(r, "infra_apwg_sent", 0),
-                getattr(r, "infra_registrar_sent", 0),
-            )
-        except Exception as _he:
-            log.warning(
-                "_exec_strike op=%d: failed to write strike_history for target=%s: %s",
-                op_id,
-                r.target,
-                _he,
-            )
+        await _write_strike_history(pool, op_id, owner_id, reason, preset, r)
 
     summary_text = format_strike_summary(results)
     total_reported = sum(getattr(r, "peer_reported", 0) for r in results)

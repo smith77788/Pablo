@@ -31,7 +31,10 @@ def test_defensive_ddl_selfheals_columns():
 
 def test_exec_strike_insert_persists_infra_with_matching_placeholders():
     from services import op_worker
-    src = inspect.getsource(op_worker._exec_strike)
+    # Запись истории вынесена из `_exec_strike` в собственного писателя:
+    # ту же строку читает интервал повтора удара, поэтому запись идёт с
+    # повтором и громким отказом. Проверяем её там, где она живёт.
+    src = inspect.getsource(op_worker._write_strike_history)
     m = re.search(r"INSERT INTO strike_history\((.*?)\)\s*VALUES\((.*?)\)",
                   src, re.S)
     assert m, "не найден INSERT INTO strike_history"
