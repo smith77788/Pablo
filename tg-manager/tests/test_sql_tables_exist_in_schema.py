@@ -51,9 +51,13 @@ _CREATE_VIEW = re.compile(
     r"(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?", re.I)
 
 # Не таблицы: конструкции SQL и системные каталоги.
+# Подстановка из f-строки (`FROM {table}`): реальное имя собирается в рантайме и
+# статически неизвестно, поэтому на его месте — этот токен, и он НЕ таблица.
+# Без него `FROM {table} WHERE …` после склейки давал бы «таблицу» WHERE.
+_FMT_SUB = "__fmtsub__"
 _NOT_TABLES = {"lateral", "dual", "generate_series", "unnest",
                "jsonb_array_elements", "json_array_elements", "jsonb_each",
-               "jsonb_to_recordset", "values", "select", "only"}
+               "jsonb_to_recordset", "values", "select", "only", _FMT_SUB}
 _SYSTEM_PREFIXES = ("pg_", "information_schema", "sqlite_")
 
 # Таблицы, которые заводит не миграция. Каждая — с причиной; список не должен
@@ -77,6 +81,27 @@ def _declared_by_migrations() -> set[str]:
     return names
 
 
+def _joined_str_text(node: ast.JoinedStr) -> str:
+    """f-строку — в один текст; подстановки {..} заменяем пробелом.
+
+    ast разбирает f-строку НА ЧАСТИ: каждый кусок между `{..}` — отдельная
+    константа. Поэтому CTE, объявленный в одной части (`WITH x AS (`), не
+    покрывал ссылку на него в другой (`FROM x` после `{плейсхолдера}`), и имя
+    CTE ловилось как несуществующая таблица (так падал `live_chain` в
+    db_maintenance). Склеиваем части обратно; значение подстановки статически
+    всё равно не узнать, поэтому — пробел.
+    """
+    out = []
+    for v in node.values:
+        if isinstance(v, ast.Constant) and isinstance(v.value, str):
+            out.append(v.value)
+        else:
+            # `FROM {table}` — имя из подстановки. Пробел оставил бы следующее
+            # слово (WHERE) на месте таблицы, поэтому — игнорируемый токен.
+            out.append(f" {_FMT_SUB} ")
+    return "".join(out)
+
+
 def _sql_literals():
     """(файл, строка, текст) для строк, похожих на SQL. Докстринги пропускаем."""
     for dirpath, dirs, files in os.walk(ROOT):
@@ -93,11 +118,21 @@ def _sql_literals():
             docs = {ast.get_docstring(n, clean=False) for n in ast.walk(tree)
                     if isinstance(n, (ast.Module, ast.FunctionDef,
                                       ast.AsyncFunctionDef, ast.ClassDef))}
+            # Константы, которые являются ЧАСТЯМИ f-строк: их разбираем как целую
+            # f-строку (ниже), а по отдельности пропускаем — иначе CTE из одной
+            # части не покроет ссылку из другой.
+            fstring_parts = {id(v) for n in ast.walk(tree)
+                             if isinstance(n, ast.JoinedStr)
+                             for v in n.values if isinstance(v, ast.Constant)}
             for node in ast.walk(tree):
-                if not (isinstance(node, ast.Constant)
-                        and isinstance(node.value, str)):
+                if isinstance(node, ast.JoinedStr):
+                    sql = _joined_str_text(node)
+                elif (isinstance(node, ast.Constant)
+                        and isinstance(node.value, str)
+                        and id(node) not in fstring_parts):
+                    sql = node.value
+                else:
                     continue
-                sql = node.value
                 if sql in docs or len(sql) < 20:
                     continue
                 if not re.search(r"\b(SELECT|INSERT INTO|UPDATE|DELETE FROM)\b", sql):
@@ -210,6 +245,28 @@ def test_detector_ignores_cte_and_extract():
     left = [m.group(1).lower() for m in _REF.finditer(cleaned)
             if m.group(1).lower() not in ctes]
     assert left == [], f"ложные срабатывания: {left}"
+
+
+def test_cte_across_fstring_parts_is_not_a_table():
+    """Регресс: CTE, объявленный в одной части f-строки, покрывает ссылку из другой.
+
+    ast бьёт f-строку на части по `{..}`. Пока детектор смотрел части по
+    отдельности, `WITH RECURSIVE live_chain AS (...)` в первой части не
+    покрывал `FROM live_chain` во второй (после подстановки), и CTE ловился как
+    несуществующая таблица — так краснел db_maintenance на здоровом коде.
+    """
+    src = ('q = f"""WITH RECURSIVE live_chain AS ('
+           '  SELECT id FROM operation_queue WHERE status NOT IN {TERM} )'
+           ' SELECT id FROM live_chain lc WHERE {cond}"""')
+    tree = ast.parse(src)
+    joined = [n for n in ast.walk(tree) if isinstance(n, ast.JoinedStr)]
+    assert joined, "в примере нет f-строки"
+    sql = _joined_str_text(joined[0])
+    ctes = {m.group(1).lower() for m in _CTE.finditer(sql)}
+    refs = {m.group(1).lower() for m in _REF.finditer(sql)}
+    assert "live_chain" in ctes, "CTE не распознан в склеенной f-строке"
+    assert "live_chain" in refs, "в примере нет ссылки на CTE — проверка была бы пустой"
+    assert "live_chain" not in (refs - ctes), "CTE всё ещё считается таблицей"
 
 
 def test_runtime_created_list_stays_short():
