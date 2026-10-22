@@ -291,7 +291,6 @@ GET /api/miniapp/uch/conflicts
 GET /api/miniapp/uch/contacts
 GET /api/miniapp/uch/contacts/{contact_id}
 GET /api/miniapp/uch/contacts/{contact_id}/crm
-GET /api/miniapp/uch/contacts/{contact_id}/crm/activity
 GET /api/miniapp/uch/contacts/{contact_id}/history
 GET /api/miniapp/uch/contacts/{contact_id}/identity
 GET /api/miniapp/uch/contacts/{contact_id}/invite_history
@@ -584,7 +583,6 @@ HEAD /api/miniapp/uch/conflicts
 HEAD /api/miniapp/uch/contacts
 HEAD /api/miniapp/uch/contacts/{contact_id}
 HEAD /api/miniapp/uch/contacts/{contact_id}/crm
-HEAD /api/miniapp/uch/contacts/{contact_id}/crm/activity
 HEAD /api/miniapp/uch/contacts/{contact_id}/history
 HEAD /api/miniapp/uch/contacts/{contact_id}/identity
 HEAD /api/miniapp/uch/contacts/{contact_id}/invite_history

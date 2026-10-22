@@ -15,6 +15,26 @@ log = logging.getLogger(__name__)
 # границе: ISO-строка → tz-aware datetime; naive-время трактуем как UTC.
 _TS_FIELDS = ("next_reminder_at", "last_interaction_at")
 
+# Типы касания и их подписи. Подписи живут НА СЕРВЕРЕ: экран показывал
+# `activity_type` как есть, то есть владельцу, который не читает по-английски,
+# в журнале стояло «call» и «meeting». Список закрытый ещё и потому, что это
+# значение приходит с экрана и попадает в базу: свободная строка превращает
+# журнал в свалку, по которой потом нельзя ни сгруппировать, ни посчитать.
+ACTIVITY_LABELS = {
+    "call": "Звонок",
+    "message": "Сообщение",
+    "meeting": "Встреча",
+    "note": "Заметка",
+    "deal": "Сделка",
+    "task": "Задача",
+}
+
+
+def activity_label(activity_type: str) -> str:
+    """Подпись касания. Неизвестный тип (старые строки) показывается как есть,
+    а не прячется: пустая строка в журнале хуже английского слова."""
+    return ACTIVITY_LABELS.get(str(activity_type or ""), str(activity_type or ""))
+
 
 def _coerce_dt(value):
     """None/`datetime` → как есть; ISO-строка → aware datetime; иначе ValueError."""
@@ -185,7 +205,12 @@ async def get_crm_activity(pool, owner_id: int, contact_id: str, limit: int = 30
            WHERE owner_id=$1 AND contact_id=$2
            ORDER BY created_at DESC LIMIT $3''',
         owner_id, contact_id, limit)
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d['activity_label'] = activity_label(d.get('activity_type'))
+        out.append(d)
+    return out
 
 
 async def get_upcoming_reminders(pool, owner_id: int, limit: int = 20) -> list:
@@ -269,52 +294,15 @@ async def get_crm_pipeline(pool, owner_id: int) -> list:
     return [dict(r) for r in rows]
 
 
-async def get_crm_activities(pool, owner_id: int, contact_id: str, limit: int = 30) -> list:
-    rows = await pool.fetch(
-        '''SELECT * FROM contact_crm_activity
-           WHERE owner_id=$1 AND contact_id=$2
-           ORDER BY created_at DESC LIMIT $3''',
-        owner_id, contact_id, limit)
-    return [dict(r) for r in rows]
-
-
-async def create_crm_activity(pool, owner_id: int, contact_id: str,
-                               activity_type: str, description: str = None,
-                               metadata: dict = None) -> int:
-    activity_id = await pool.fetchval(
-        '''INSERT INTO contact_crm_activity (owner_id, contact_id, activity_type, description, metadata)
-           VALUES ($1,$2,$3,$4,$5::jsonb)
-           RETURNING id''',
-        owner_id, contact_id, activity_type, description,
-        json.dumps(metadata or {}))
-    return activity_id
-
-
-async def update_crm_stage(pool, owner_id: int, contact_id: str, new_stage: str) -> bool:
-    result = await pool.execute(
-        '''UPDATE contact_crm
-           SET stage = $1, updated_at = NOW()
-           WHERE owner_id = $2 AND contact_id = $3''',
-        new_stage, owner_id, contact_id)
-    return result == 'UPDATE 1'
-
-
-async def get_crm_reminders(pool, owner_id: int, limit: int = 20) -> list:
-    rows = await pool.fetch(
-        '''SELECT crm.*, uc.first_name, uc.last_name, uc.username
-           FROM contact_crm crm
-           JOIN unified_contacts uc ON uc.id = crm.contact_id
-           WHERE crm.owner_id=$1 AND crm.next_reminder_at IS NOT NULL
-           AND crm.next_reminder_at >= NOW()
-           ORDER BY crm.next_reminder_at ASC LIMIT $2''',
-        owner_id, limit)
-    result = []
-    for r in rows:
-        d = dict(r)
-        # username НЕ выбрасываем: он нужен, чтобы написать человеку прямо из
-        # напоминания. Раньше он исчезал всегда, когда имя непустое.
-        d['contact_name'] = (
-            f"{d.pop('first_name', '') or ''} {d.pop('last_name', '') or ''}".strip()
-            or (d.get('username') and '@' + d['username']) or '?')
-        result.append(d)
-    return result
+# ЧЕТЫРЕ ДУБЛЯ УДАЛЕНЫ ОТСЮДА (22.10.2026). Все четыре не звал никто, кроме
+# тестов, и каждый был хуже своего живого двойника ровно тем, чего не делал:
+#   * create_crm_activity — писал в журнал БЕЗ `_require_contact`, то есть по
+#     чужому contact_id, и выглядел удобнее log_crm_activity (возвращал id);
+#   * get_crm_activities — читал журнал БЕЗ русских подписей, в отличие от
+#     get_crm_activity;
+#   * update_crm_stage — не нормализовал поля и не поднимал сигнал
+#     виртуального слоя при смене стадии, в отличие от upsert_crm;
+#   * get_crm_reminders — копия get_upcoming_reminders.
+# Живой агент, подключающий CRM к экрану, выбирает по имени и подписи, а не по
+# тому, кого уже зовут: такой дубль возвращает дыру или теряет перевод.
+# Проверка «они не вернулись» — tests/test_touch_journal_has_a_door.py.

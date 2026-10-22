@@ -18026,15 +18026,46 @@ async function openContactCRM(id) {
     if (crm.next_reminder_at) {
       html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(251,191,36,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru-RU')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
     }
+    // Журнал касаний: кнопка стоит ВСЕГДА, а не только когда журнал непуст.
+    // Записывать в него было нечем — ручка POST .../crm/activity была, но её
+    // не звал ни один экран, поэтому у всех контактов журнал был пуст всегда,
+    // и секция «Активность» не показывалась ни разу.
+    html += `<div class="sec" style="margin:0 16px">📝 Журнал касаний</div>
+      <div style="padding:4px 16px 8px"><button class="btn btn-s" style="width:100%" onclick="addCrmTouch('${id}')">➕ Отметить касание</button></div>`;
     if (activity.length) {
-      html += `<div class="sec" style="margin:0 16px">📝 Активность</div><div class="lst" style="margin:0 16px">`;
+      html += `<div class="lst" style="margin:0 16px">`;
       activity.forEach(a=>{
-        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(a.activity_type)}</div><div class="li-sub">${esc(a.description||'')} · ${a.created_at?new Date(a.created_at).toLocaleString('ru-RU'):''}</div></div></div>`;
+        // Подпись считает сервер (ACTIVITY_LABELS): раньше здесь стояло
+        // `activity_type`, то есть владелец читал «call» и «meeting».
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(a.activity_label||a.activity_type)}</div><div class="li-sub">${esc(a.description||'')} · ${a.created_at?new Date(a.created_at).toLocaleString('ru-RU'):''}</div></div></div>`;
       });
       html += '</div>';
+    } else {
+      html += `<div style="padding:0 16px 8px;font-size:13px;color:var(--hint)">Пока ничего не отмечено. Звонок, встреча, сообщение — чтобы через месяц помнить, о чём договорились.</div>`;
     }
     txt('cdBody', html);
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+}
+
+async function addCrmTouch(id) {
+  const kinds = [
+    {value:'call',    label:'📞 Звонок'},
+    {value:'message', label:'✉️ Сообщение'},
+    {value:'meeting', label:'🤝 Встреча'},
+    {value:'note',    label:'📝 Заметка'},
+    {value:'deal',    label:'💼 Сделка'},
+    {value:'task',    label:'✅ Задача'},
+  ];
+  const kind = await askChoice('Что было?', kinds);
+  if (!kind) return;
+  const desc = await askPrompt('О чём коротко?', {placeholder:'например, договорились созвониться в пятницу'});
+  if (desc === null) return;   // отмена, а не пустая запись
+  try {
+    const r = await api('/api/miniapp/uch/contacts/'+id+'/crm/activity', {method:'POST',
+      body:JSON.stringify({type:kind, description:(desc||'').trim()})});
+    toast('📝 Отмечено: '+(r.label||''));
+    openContactCRM(id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 async function setCrmStage(id, stage) {

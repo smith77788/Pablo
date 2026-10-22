@@ -1225,27 +1225,25 @@ def setup_routes(app: web.Application, pool) -> None:
             cid = request.match_info['contact_id']
             data = await request.json()
             from services.contacts_hub.crm_engine import (
-                ContactNotFound, log_crm_activity,
+                ACTIVITY_LABELS, ContactNotFound, activity_label,
+                log_crm_activity,
             )
-            await log_crm_activity(pool, uid, cid, data.get('type', 'note'),
-                                   data.get('description'), data.get('metadata'))
-            return _json_resp({'ok': True})
+            kind = str(data.get('type') or 'note')
+            # Тип приходит с экрана и ложится в базу. Свободная строка
+            # превратила бы журнал в свалку, по которой нельзя ни считать, ни
+            # группировать, поэтому список закрытый — и отказ по-русски.
+            if kind not in ACTIVITY_LABELS:
+                return _err("Неизвестный тип касания", 400)
+            desc = data.get('description')
+            if desc is not None:
+                desc = validate_string(desc, max_len=500)
+            await log_crm_activity(pool, uid, cid, kind, desc,
+                                   data.get('metadata'))
+            return _json_resp({'ok': True, 'label': activity_label(kind)})
         except ContactNotFound as nf:
             return _err(str(nf), 404)
         except Exception:
             log.exception("uch_crm_activity")
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def uch_crm_activity_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            from services.contacts_hub.crm_engine import get_crm_activity
-            activity = await get_crm_activity(pool, uid, cid)
-            return _json_resp({'activity': activity})
-        except Exception:
-            log.exception("uch_crm_activity_list")
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_crm_reminder(request: web.Request) -> web.Response:
@@ -1809,7 +1807,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_get)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_upsert)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity_list)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/reminder", uch_crm_reminder)
     app.router.add_get("/api/miniapp/uch/duplicates", uch_duplicates)
     # Тот же путь: GET — что переедет, POST — слить.

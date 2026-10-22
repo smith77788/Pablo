@@ -482,62 +482,27 @@ class TestCRMEngine:
         assert len(result["by_stage"]) == 2
         assert result["upcoming_reminders_7d"] == 3
 
-    @pytest.mark.asyncio
-    async def test_get_crm_activities_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_activities
-        pool = FakePool(fetch_rows=[])
-        result = await get_crm_activities(pool, 123, "uuid-1")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_crm_activities_with_data(self):
-        from services.contacts_hub.crm_engine import get_crm_activities
-        rows = [
-            {"id": 1, "activity_type": "call", "description": "Discovery call", "created_at": "2024-01-15"},
-            {"id": 2, "activity_type": "email", "description": "Follow up", "created_at": "2024-01-16"},
-        ]
-        pool = FakePool(fetch_rows=rows)
-        result = await get_crm_activities(pool, 123, "uuid-1")
-        assert len(result) == 2
-        assert result[0]["activity_type"] == "call"
-        assert result[1]["description"] == "Follow up"
-
-    @pytest.mark.asyncio
-    async def test_create_crm_activity(self):
-        from services.contacts_hub.crm_engine import create_crm_activity
-        pool = FakePool(fetch_val=42)
-        result = await create_crm_activity(pool, 123, "uuid-1", "meeting", "Initial meeting")
-        assert result == 42
-        call = pool._calls[0]
-        assert "INSERT INTO contact_crm_activity" in call[1]
-
-    @pytest.mark.asyncio
-    async def test_update_crm_stage(self):
-        from services.contacts_hub.crm_engine import update_crm_stage
-        pool = FakePool(execute_val="UPDATE 1")
-        result = await update_crm_stage(pool, 123, "uuid-1", "proposal")
-        assert result is True
-        call = pool._calls[0]
-        assert "UPDATE contact_crm" in call[1]
-        assert call[2][0] == "proposal"
-
-    @pytest.mark.asyncio
-    async def test_update_crm_stage_not_found(self):
-        from services.contacts_hub.crm_engine import update_crm_stage
-        pool = FakePool(execute_val="UPDATE 0")
-        result = await update_crm_stage(pool, 123, "uuid-1", "proposal")
-        assert result is False
+    # Проверки четырёх дублей (get_crm_activities, create_crm_activity,
+    # update_crm_stage, get_crm_reminders) удалены вместе с кодом: их не звал
+    # никто, кроме этих же проверок, и каждый был хуже живого двойника тем,
+    # чего не делал — один писал в журнал без проверки владельца контакта,
+    # другой читал журнал без русских подписей. Живое поведение журнала —
+    # tests/test_touch_journal_writes_postgres.py, дверь и «они не вернулись» —
+    # tests/test_touch_journal_has_a_door.py.
 
     @pytest.mark.asyncio
     async def test_get_crm_reminders_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_reminders
+        # Проверки переставлены с удалённого дубля get_crm_reminders на живую
+        # get_upcoming_reminders: поведение (в том числе «@username вместо
+        # пустого имени») было одинаковым, а звали только вторую.
+        from services.contacts_hub.crm_engine import get_upcoming_reminders
         pool = FakePool(fetch_rows=[])
-        result = await get_crm_reminders(pool, 123)
+        result = await get_upcoming_reminders(pool, 123)
         assert result == []
 
     @pytest.mark.asyncio
     async def test_get_crm_reminders_with_data(self):
-        from services.contacts_hub.crm_engine import get_crm_reminders
+        from services.contacts_hub.crm_engine import get_upcoming_reminders
         rows = [
             {"first_name": "Ivan", "last_name": "Ivanov", "username": "ivan",
              "stage": "lead", "next_reminder_at": "2024-01-20", "next_reminder_text": "Follow up"},
@@ -545,7 +510,7 @@ class TestCRMEngine:
              "stage": "proposal", "next_reminder_at": "2024-01-22", "next_reminder_text": "Send proposal"},
         ]
         pool = FakePool(fetch_rows=rows)
-        result = await get_crm_reminders(pool, 123)
+        result = await get_upcoming_reminders(pool, 123)
         assert len(result) == 2
         assert result[0]["contact_name"] == "Ivan Ivanov"
         # Имени нет — показываем username с собакой: так он читается как
