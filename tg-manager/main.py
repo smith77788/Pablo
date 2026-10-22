@@ -735,6 +735,10 @@ async def main() -> None:
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_domains INT DEFAULT 0",
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_apwg_sent INT DEFAULT 0",
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_registrar_sent INT DEFAULT 0",
+        # Отметка отправленного шага воронки — её пишут ДО отправки, чтобы
+        # рестарт между отправкой и продвижением не послал тот же шаг живому
+        # человеку второй раз. Без колонки claim падал бы при лаге миграции.
+        "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS last_sent_step INT",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",

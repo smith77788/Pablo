@@ -91,25 +91,56 @@ async def _process_run(pool: asyncpg.Pool, http: aiohttp.ClientSession, run) -> 
     if step["button_text"] and step["button_url"]:
         buttons = [{"text": step["button_text"], "url": step["button_url"]}]
 
-    # Send message
-    ok = False
-    try:
-        ok = await bot_api.send_message(
-            http,
-            bot_row["token"],
-            run["user_id"],
-            step["message_text"],
-            buttons=buttons,
-        )
-    except Exception as e:
-        log.debug("Auto-Funnel: send error run %d: %s", run["id"], e)
+    # ОТМЕТКА ДО ОТПРАВКИ. Отправка шла первой, а продвижение
+    # (`next_step_num`/`next_send_at`) писалось после неё. Между этими двумя
+    # действиями процесс умирает на каждом деплое рабочей ветки: строка
+    # остаётся с тем же шагом и `next_send_at <= NOW()`, и следующий круг
+    # опроса посылает тот же шаг тому же ЖИВОМУ человеку заново. Условный
+    # UPDATE занимает шаг атомарно; не прошёл — значит шаг уже уходил, и этот
+    # заход отправку пропускает и просто двигает воронку дальше. Потерянное
+    # сообщение дешевле второго: второе человек читает как спам, а бот
+    # получает за него блокировку.
+    _claimed = await pool.fetchval(
+        """UPDATE auto_funnel_runs SET last_sent_step=$2
+            WHERE id=$1 AND COALESCE(last_sent_step, 0) < $2
+        RETURNING id""",
+        run["id"], int(step_num),
+    )
+    if _claimed is None:
+        log.info(
+            "Auto-Funnel: шаг %d воронки %s уже отправлялся (run=%s) — "
+            "пропускаем отправку, двигаем дальше",
+            step_num, funnel_id, run["id"])
+    else:
+        ok, _retry_after, _cat = False, 0, "network"
+        try:
+            ok, _retry_after, _cat = await bot_api.send_message_classified(
+                http,
+                bot_row["token"],
+                run["user_id"],
+                step["message_text"],
+                buttons=buttons,
+            )
+        except Exception as e:
+            log.debug("Auto-Funnel: send error run %d: %s", run["id"], e)
 
-    if not ok:
-        # User likely blocked the bot — stop this run
-        await pool.execute(
-            "UPDATE auto_funnel_runs SET status='stopped' WHERE id=$1", run["id"]
-        )
-        return
+        if not ok:
+            # РАЗНИЦА МЕЖДУ «ЗАБЛОКИРОВАЛ» И «НЕ ДОШЛО». Любая неудача
+            # означала здесь «User likely blocked the bot» и глушила воронку
+            # этому человеку НАВСЕГДА — то есть сетевой блип или 5xx Telegram
+            # выписывали живого подписчика из воронки. Решает та же дверь, что
+            # у рассылки (`bot_api.recipient_is_gone`): ушёл — останавливаем,
+            # не дошло — шаг потерян, но воронка идёт дальше.
+            if bot_api.recipient_is_gone(_cat):
+                await pool.execute(
+                    "UPDATE auto_funnel_runs SET status='stopped' WHERE id=$1",
+                    run["id"],
+                )
+                return
+            log.info(
+                "Auto-Funnel: шаг %d не доставлен (%s) run=%s — воронку не "
+                "обрываем, идём к следующему шагу",
+                step_num, _cat, run["id"])
 
     # Find next step
     next_step = await pool.fetchrow(
