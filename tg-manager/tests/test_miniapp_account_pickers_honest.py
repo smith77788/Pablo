@@ -37,6 +37,7 @@ PICKERS = {
     "_massOpsLoadAccs": ("mjAccounts", True),
     "_meshLoadAccs": ("mc-account", False),
     "_invLoadAccs": ("massInviteAccsWrap", True),
+    "_ucLoadAccs": ("ucAccounts", True),
 }
 
 

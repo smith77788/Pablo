@@ -2461,6 +2461,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Тариф</div>
         <div class="mgmt-tile-val" id="m-billing-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openUniCampaign()">
+        <div class="mgmt-tile-ico">🚀</div>
+        <div class="mgmt-tile-lbl">Единая кампания</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
       <div class="mgmt-tile" onclick="openNetBcModal()">
         <div class="mgmt-tile-ico">📣</div>
         <div class="mgmt-tile-lbl">Рассылка по сети ботов</div>
@@ -4301,6 +4306,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="lst">
       <div class="li tap" onclick="openBcastPick()"><div class="ava ava-purple">📢</div><div class="li-body"><div class="li-name">Подписчики бота</div><div class="li-sub">Сообщение всем, кто запустил вашего бота</div></div><span class="chev">›</span></div>
       <div class="li tap" onclick="openDmCampaigns()"><div class="ava ava-purple">✉️</div><div class="li-body"><div class="li-name">Личные сообщения (ЛС)</div><div class="li-sub">Рассылка в личку по выбранной аудитории</div></div><span class="chev">›</span></div>
+      <!-- Движок единой кампании (services/campaign_hub.py) собран и покрыт
+           тестами с самого начала, но запустить его было нельзя: ручку
+           /api/miniapp/campaign/launch не звал ни один экран. Кампания — одна
+           сущность вместо трёх-четырёх запусков по разделам. -->
+      <div class="li tap" onclick="openUniCampaign()"><div class="ava ava-purple">🚀</div><div class="li-body"><div class="li-name">Сразу по всем ресурсам</div><div class="li-sub">Одно сообщение в каналы, чаты, ботам и в ЛС — одним запуском</div></div><span class="chev">›</span></div>
     </div>
     <div class="sec">📡 Публикация в наши каналы</div>
     <div class="lst" style="padding:14px">
@@ -5220,6 +5230,102 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════ ПЛАНИРОВЩИК КАМПАНИИ (цель → план) ══════════ -->
+<div class="screen" id="s-unicampaign">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🚀 Единая кампания</div></div>
+  <div class="sub-sb">
+    <div class="sec">Сообщение</div>
+    <div class="lst" style="padding:14px">
+      <div class="field">
+        <label>Название (для истории кампаний)</label>
+        <input type="text" id="ucName" class="inp" placeholder="Напр. Весенний промо" style="width:100%;box-sizing:border-box">
+      </div>
+      <div class="field">
+        <label>Текст</label>
+        <textarea id="ucText" class="inp" rows="4" placeholder="Поддержка вариантов: {Привет|Здравствуйте}" style="width:100%;box-sizing:border-box;resize:none" oninput="ucCount()"></textarea>
+        <div class="field-note"><span id="ucLen">0</span> символов · один текст уходит во все выбранные ресурсы</div>
+      </div>
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:10px">
+        <input type="checkbox" id="ucSilent"> Без звука уведомления
+      </label>
+      <div class="field">
+        <label>Пауза между отправками, сек</label>
+        <input type="number" id="ucDelay" class="inp" value="3" min="0" max="300" style="width:100%;box-sizing:border-box">
+        <div class="field-note">Пауза бережёт аккаунты и ботов от лимитов. 0 — без паузы</div>
+      </div>
+      <div class="field">
+        <label>Запустить позже (необязательно)</label>
+        <input type="datetime-local" id="ucWhen" class="inp" style="width:100%;box-sizing:border-box">
+        <div class="field-note">Пусто — запуск сразу</div>
+      </div>
+    </div>
+
+    <div class="sec">Куда — отметьте ресурсы</div>
+    <div class="lst" style="padding:14px">
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKChannels" onchange="ucKindToggle()"> 📢 Мои каналы
+      </label>
+      <div id="ucChWrap" style="display:none;margin:0 0 14px 24px">
+        <div class="field">
+          <label>В какие каналы</label>
+          <select id="ucChScope" onchange="ucKindToggle()">
+            <option value="all" selected>Во все мои каналы</option>
+            <option value="pick">Выбрать вручную</option>
+          </select>
+        </div>
+        <div class="field" id="ucChPickWrap" style="display:none">
+          <label>Отметьте каналы (<span id="ucChCount">0</span>)</label>
+          <div id="ucChannels" class="lst" style="max-height:240px;overflow:auto;margin-top:6px"></div>
+        </div>
+      </div>
+
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKChats" onchange="ucKindToggle()"> 💬 Чаты моих аккаунтов
+      </label>
+      <div id="ucChatsWrap" style="display:none;margin:0 0 14px 24px">
+        <div class="field">
+          <label>Аккаунты (по одной операции на аккаунт)</label>
+          <div id="ucAccounts" class="lst" style="max-height:240px;overflow:auto;margin-top:6px"></div>
+        </div>
+      </div>
+
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKBots" onchange="ucKindToggle()"> 🤖 Подписчики моих ботов
+      </label>
+      <div id="ucBotsWrap" style="display:none;margin:0 0 14px 24px">
+        <div class="field">
+          <label>Кому из подписчиков</label>
+          <select id="ucBotSeg">
+            <option value="all_each" selected>Все подписчики каждого бота</option>
+            <option value="unique">Только уникальные (без повторов между ботами)</option>
+            <option value="cold_all">Остывшие — давно не заходили</option>
+            <option value="lost_all">Потерянные — ушли совсем</option>
+          </select>
+        </div>
+      </div>
+
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKDm" onchange="ucKindToggle()"> ✉️ Личные сообщения
+      </label>
+      <div id="ucDmWrap" style="display:none;margin:0 0 4px 24px">
+        <div class="field">
+          <label>Аудитория ЛС</label>
+          <select id="ucDmTarget">
+            <option value="all_bots" selected>Все боты — все подписчики</option>
+            <option value="contacts">👥 Контакты — все</option>
+          </select>
+          <div class="field-note">Когорты, сегменты, аудитория из парсера и свой список — на экране «Личные сообщения (ЛС)»: там для них есть выбор бота и списка</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:0 16px">
+      <div id="ucErr" class="field-note" style="display:none;color:var(--red);padding:0 2px 8px"></div>
+      <button class="btn btn-p" style="width:100%" id="ucBtn" onclick="launchUniCampaign()">🚀 Запустить кампанию</button>
+      <div class="field-note" style="padding:8px 2px 16px">Кампания встанет одной записью, а по каждому ресурсу — своей операцией: их видно и можно остановить в «Операциях»</div>
+    </div>
+  </div>
+</div>
+
 <div class="screen" id="s-campaign">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🎯 Планировщик кампании</div></div>
   <div class="sub-sb">
@@ -8348,6 +8454,7 @@ const MODULE_KEYWORDS = {
   'Реферальная программа':'реферал приглашение код партнёрка',
   'Рабочие пространства':'воркспейс команда доступ участники контур',
   'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
+  'Единая кампания': 'кампания единая всё сразу каналы чаты боты лс рассылка одним запуском campaign',
   'Рассылка по сети ботов':'рассылка всем подписчикам сеть ботов broadcast',
   'Дэшборд здоровья':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс',
   'Аккаунты':'сессия вход логин прокси ip номер телефон',
@@ -8448,6 +8555,7 @@ const MODULE_DESCS = {
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
   'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
+  'Единая кампания': 'Одно сообщение в каналы, чаты, ботам и в ЛС одним запуском: по каждому ресурсу встанет своя операция',
   'Рассылка по сети ботов':'Один текст подписчикам всех ваших ботов',
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
   'Менеджер продаж':'Бот-продавец: товары, ответы на вопросы, заказы',
@@ -20069,6 +20177,187 @@ function _inviteSegSel() {
 let _invPreviewT = null;
 
 
+
+// ── Единая кампания: один спек → операции по всем выбранным ресурсам ───────
+//
+// Движок (services/campaign_hub.py) был написан и покрыт тестами, а запустить
+// его было нельзя: /api/miniapp/campaign/launch не звал ни один экран. Здесь
+// собирается ровно тот спек, который понимает plan_campaign: content,
+// settings и targets по четырём видам ресурсов.
+let UC_CH_SEL = new Set();
+let UC_CH_TOTAL = 0;
+let UC_ACC_SEL = new Set();
+
+function openUniCampaign() {
+  push('s-unicampaign');
+  UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_CH_TOTAL = 0;
+  document.getElementById('ucName').value = '';
+  document.getElementById('ucText').value = '';
+  document.getElementById('ucWhen').value = '';
+  document.getElementById('ucDelay').value = '3';
+  document.getElementById('ucSilent').checked = false;
+  for (const id of ['ucKChannels','ucKChats','ucKBots','ucKDm']) document.getElementById(id).checked = false;
+  document.getElementById('ucChScope').value = 'all';
+  document.getElementById('ucErr').style.display = 'none';
+  ucCount();
+  ucKindToggle();
+}
+
+function ucCount() {
+  txt('ucLen', String((document.getElementById('ucText').value || '').length));
+}
+
+function ucKindToggle() {
+  const on = id => document.getElementById(id).checked;
+  const show = (id, vis) => { const e = document.getElementById(id); if (e) e.style.display = vis ? 'block' : 'none'; };
+  show('ucChWrap', on('ucKChannels'));
+  show('ucChatsWrap', on('ucKChats'));
+  show('ucBotsWrap', on('ucKBots'));
+  show('ucDmWrap', on('ucKDm'));
+  const pick = document.getElementById('ucChScope').value === 'pick';
+  show('ucChPickWrap', on('ucKChannels') && pick);
+  if (on('ucKChannels')) _ucLoadChannels();
+  if (on('ucKChats')) {
+    accPickerSearchBox('ucAccounts', _ucLoadAccs);
+    _ucLoadAccs('');
+  }
+}
+
+async function _ucLoadChannels() {
+  const box = document.getElementById('ucChannels');
+  if (!box || box.dataset.loaded === '1') return;
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/channels');
+    const chs = d.channels || [];
+    UC_CH_TOTAL = chs.length;
+    if (!chs.length) {
+      box.innerHTML = empty('📢','Нет каналов','Создайте канал в «Фабрике каналов» или импортируйте');
+      return;
+    }
+    box.innerHTML = chs.map(c => `
+      <div class="row tap" onclick="ucToggleChannel(${c.id})">
+        <div class="row-ico" id="ucc-${c.id}" style="background:var(--bg-blue-16)">📢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.title||c.username||c.id)}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${(c.member_count||c.members_count||0).toLocaleString('ru-RU')} подп.</div>
+        </div>
+      </div>`).join('');
+    box.dataset.loaded = '1';
+  } catch(e) {
+    box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить каналы'), 'openUniCampaign()');
+  }
+}
+
+function ucToggleChannel(id) {
+  if (UC_CH_SEL.has(id)) UC_CH_SEL.delete(id); else UC_CH_SEL.add(id);
+  const ico = document.getElementById('ucc-' + id);
+  if (ico) ico.textContent = UC_CH_SEL.has(id) ? '✅' : '📢';
+  txt('ucChCount', String(UC_CH_SEL.size));
+}
+
+// Аккаунты берём тем же помощником, что и остальные пикеры: он просит
+// серверный максимум, ищет на сервере и подписывает «показаны N из M» —
+// иначе выбор молча ограничился бы первой сотней.
+async function _ucLoadAccs(q) {
+  const box = document.getElementById('ucAccounts');
+  if (!box) return;
+  try {
+    const r = await accPickerLoad('active', q);
+    const live = r.accs;
+    box.innerHTML = live.length
+      ? live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px">
+          <input type="checkbox" class="uc-acc-cb" value="${a.id}" ${UC_ACC_SEL.has(a.id)?'checked':''} onchange="ucToggleAcc(${a.id}, this.checked)">
+          ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
+      : `<div style="font-size:13px;color:var(--hint)">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</div>`;
+    accPickerSetNote('ucAccounts', accPickerNote(r));
+  } catch(e) {
+    box.innerHTML = '<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>';
+    accPickerSetNote('ucAccounts', '');
+  }
+}
+
+function ucToggleAcc(id, on) {
+  if (on) UC_ACC_SEL.add(id); else UC_ACC_SEL.delete(id);
+}
+
+function _ucSpec() {
+  const on = id => document.getElementById(id).checked;
+  const name = (document.getElementById('ucName').value || '').trim();
+  const text = (document.getElementById('ucText').value || '').trim();
+  const when = (document.getElementById('ucWhen').value || '').trim();
+  const targets = {};
+  if (on('ucKChannels')) {
+    const t = {enabled: true};
+    // Пустой список = «во все управляемые каналы» (поведение mass_publish).
+    if (document.getElementById('ucChScope').value === 'pick') t.channel_ids = [...UC_CH_SEL];
+    targets.channels = t;
+  }
+  if (on('ucKChats')) targets.chats = {enabled: true, acc_ids: [...UC_ACC_SEL]};
+  if (on('ucKBots')) targets.bots = {enabled: true, segment: document.getElementById('ucBotSeg').value};
+  if (on('ucKDm')) targets.dm = {enabled: true, target_type: document.getElementById('ucDmTarget').value};
+  const settings = {
+    silent: on('ucSilent'),
+    delay_seconds: parseInt(document.getElementById('ucDelay').value) || 0,
+  };
+  if (when) settings.scheduled_for = new Date(when).toISOString();
+  return {name: name || 'Кампания', content: {text}, settings, targets};
+}
+
+// Что именно уйдёт — словами и числами, ДО нажатия. Экран массовой публикации
+// уже учил: подтверждение без числа адресатов — это подпись не глядя.
+function _ucSummary(spec) {
+  const out = [];
+  const t = spec.targets;
+  if (t.channels) {
+    out.push(t.channels.channel_ids
+      ? `каналы: ${t.channels.channel_ids.length} выбрано`
+      : `каналы: ВСЕ мои${UC_CH_TOTAL?' ('+UC_CH_TOTAL+')':''}`);
+  }
+  if (t.chats) out.push(`чаты аккаунтов: ${t.chats.acc_ids.length} (по операции на аккаунт)`);
+  if (t.bots) out.push('подписчики ботов: по рассылке на каждого бота');
+  if (t.dm) out.push(t.dm.target_type === 'contacts' ? 'ЛС: все контакты' : 'ЛС: подписчики всех ботов');
+  return out;
+}
+
+async function launchUniCampaign() {
+  const err = document.getElementById('ucErr');
+  const btn = document.getElementById('ucBtn');
+  err.style.display = 'none';
+  const spec = _ucSpec();
+  const fail = m => { err.textContent = m; err.style.display = 'block'; tg.HapticFeedback?.notificationOccurred('error'); };
+  if (!spec.content.text) return fail('Введите текст сообщения');
+  const kinds = Object.keys(spec.targets);
+  if (!kinds.length) return fail('Отметьте хотя бы один ресурс: каналы, чаты, боты или ЛС');
+  if (spec.targets.chats && !spec.targets.chats.acc_ids.length) return fail('Для рассылки по чатам выберите хотя бы один аккаунт');
+  if (spec.targets.channels && spec.targets.channels.channel_ids && !spec.targets.channels.channel_ids.length) return fail('Отметьте каналы или выберите «Во все мои каналы»');
+
+  const lines = _ucSummary(spec);
+  const later = spec.settings.scheduled_for ? ' Запуск отложен на выбранное время.' : '';
+  if (!await askConfirm('Кампания уйдёт по ' + lines.length + ' направлениям:\n\n• '
+      + lines.join('\n• ') + '\n\nПо каждому ресурсу встанет своя операция — '
+      + 'останавливать их придётся по отдельности в «Операциях».' + later + ' Запустить?')) return;
+
+  btn.disabled = true; btn.textContent = '⏳ Запуск...';
+  try {
+    const d = await api('/api/miniapp/campaign/launch', {method:'POST', body:JSON.stringify(spec)});
+    const started = (d.children || []).length;
+    // Отказ отдельной ветки не валит кампанию — движок копит причины в errors.
+    // Промолчать о них значит соврать, что ушло всё.
+    if (d.errors && d.errors.length) {
+      toast(`⚠️ Запущено операций: ${started}. Не ушло: ${d.errors.join('; ')}`);
+    } else {
+      tg.HapticFeedback?.notificationOccurred('success');
+      toast(`✅ Кампания запущена · операций: ${started}`);
+    }
+    LOADED['broadcasts'] = false;
+    openOps();
+  } catch(e) {
+    fail('Ошибка: ' + errRu(e));
+  } finally {
+    btn.disabled = false; btn.textContent = '🚀 Запустить кампанию';
+  }
+}
 
 // ── Планировщик кампании (цель → план по ёмкости) ───────────────────────────
 let CAMPAIGN_PLAN = null;
