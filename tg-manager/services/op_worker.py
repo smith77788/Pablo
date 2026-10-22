@@ -6643,10 +6643,12 @@ async def _exec_mass_publish(
                 # проверка идемпотентности работали вслепую. Заголовок не
                 # теряется — он уходит в message (экран деталей печатает
                 # «target — message»).
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok',$4)",
                     op_id, idx, str(dialog["id"]), _ch_title,
+                    log_ctx=f" [mass_publish op={op_id}]",
                 )
                 # Content Memory: тело реально опубликованного поста → история канала.
                 # Кормит антиповтор редактора (channel_brain.repetition_check): без неё
@@ -7194,13 +7196,15 @@ async def _exec_bulk_join_inner(
                     _infra_mem.record_account_op(
                         acc["id"], "join", success=False, error="PeerFlood"
                     )
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'error',$4)",
                         op_id,
                         step,
                         link,
                         err_str,
+                        log_ctx=f" [bulk_join op={op_id}]",
                     )
                     await _audit(
                         pool,
@@ -7224,12 +7228,14 @@ async def _exec_bulk_join_inner(
                     raise Exception(str(res["error"]))
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','joined')",
                     op_id,
                     step,
                     link,
+                    log_ctx=f" [bulk_join op={op_id}]",
                 )
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
@@ -7793,12 +7799,14 @@ async def _exec_bulk_leave(
                     raise Exception(res.get("error") or f"leave_channel failed for {channel}")
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','left')",
                     op_id,
                     step,
                     str(channel),
+                    log_ctx=f" [bulk_leave op={op_id}]",
                 )
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
@@ -9782,25 +9790,27 @@ async def _exec_bulk_create_channels_multi(
                         except Exception:
                             log_exc_swallow(log, "bulk_create_channels_multi: seed submit failed")
 
-                try:
-                    await pool.execute(
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                        " VALUES($1,$2,$3,'ok',$4)",
-                        op_id, task_i + 1, title, f"channel_id={ch_id}",
-                    )
-                except Exception:
-                    log_exc_swallow(log, "bulk_create_channels_multi: operation_log insert failed")
+                # Через дверь журнала, а не обычным execute: по ЭТОЙ отметке
+                # `completed_steps` выше решает, какие шаги повтор пропустит.
+                # Проглоченный сбой записи означал повторное создание уже
+                # созданного ресурса — действие необратимое.
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                    " VALUES($1,$2,$3,'ok',$4)",
+                    op_id, task_i + 1, title, f"channel_id={ch_id}",
+                    log_ctx=f" [bulk_create_channels_multi op={op_id}]",
+                )
                 created_count += 1
             else:
                 err_msg = str(result.get("error", result) if isinstance(result, dict) else result)[:200]
-                try:
-                    await pool.execute(
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                        " VALUES($1,$2,$3,'error',$4)",
-                        op_id, task_i + 1, title, err_msg,
-                    )
-                except Exception:
-                    log_exc_swallow(log, "bulk_create_channels_multi: operation_log error insert failed")
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                    " VALUES($1,$2,$3,'error',$4)",
+                    op_id, task_i + 1, title, err_msg,
+                    log_ctx=f" [bulk_create_channels_multi op={op_id}]",
+                )
                 failed_count += 1
 
             await pool.execute(
