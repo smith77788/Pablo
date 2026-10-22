@@ -16753,6 +16753,39 @@ async def _exec_create_chatlist_folder(
             "summary": f"📁 Папка готова — ссылка: {res.get('invite_link')}"}
 
 
+def _select_reconcile_admin_targets(
+    admins: list[dict], promoter_uid, fleet_uids: set
+) -> list[int]:
+    """Ядро сверки админов: из РЕАЛЬНОГО списка админов канала выбрать tg_user_id
+    НАШИХ инвайтеров флота, которых надо снять. Чистая функция — ни сети, ни БД,
+    поэтому тестируется изолированно (ошибка здесь = разжалование чужого админа
+    или создателя канала, это дороже обычного бага).
+
+    Возвращаем user_id, удовлетворяющий ОДНОВРЕМЕННО ВСЕМ условиям:
+      • есть в флоте владельца (fleet_uids — его tg_accounts.tg_user_id);
+      • НЕ создатель канала (is_creator) и НЕ сам промоутер (promoter_uid);
+      • носит подпись нашего промоута инвайтера: invite_users=True И при этом
+        НЕ может менять инфо (change_info) и НЕ может постить (post_messages).
+    Последнее отсекает со-админов, которых владелец назначил вручную с полными
+    правами, — их не трогаем. Создателя и чужих (не из флота) админов не
+    возвращаем никогда."""
+    pid = int(promoter_uid) if promoter_uid else 0
+    out: list[int] = []
+    for ad in admins or []:
+        if ad.get("is_creator"):
+            continue
+        uid = int(ad.get("user_id") or 0)
+        if not uid or uid == pid or uid not in fleet_uids:
+            continue
+        r = ad.get("rights") or {}
+        if not r.get("invite_users"):
+            continue
+        if r.get("change_info") or r.get("post_messages"):
+            continue
+        out.append(uid)
+    return out
+
+
 async def _exec_mass_invite(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -17484,6 +17517,132 @@ async def _exec_mass_invite(
     if _invite_method == "link":
         _auto_promote = False
         _promote_trick = False
+
+    async def _reconcile_channel_admins(reason: str = "") -> int:
+        """Свериться с РЕАЛЬНЫМ списком админов канала и снять+вывести ВЕСЬ флот,
+        оставшийся висеть в админах, — а не только места ЭТОГО прогона.
+
+        Жалоба владельца: «после каждого инвайтинга весь мой флот в списке
+        администраторов, он не покидает канал/чат и забивает ~50 мест — инвайтить
+        через админку некуда». Корень: _admin_seats живёт в памяти ОДНОГО прогона;
+        цепочка-продолжение (следующий день) и аварийно оборванный прогон
+        оставляют инвайтеров админами, а новый прогон про них ничего не знает и
+        их места не чистит — админы копятся прогонами.
+
+        Поэтому опираемся на ИСТИНУ Telegram, а не на память процесса: берём
+        реальный список админов промоутером и снимаем тех, кто ОДНОВРЕМЕННО:
+          • принадлежит флоту владельца (tg_user_id есть в его tg_accounts),
+          • НЕ создатель канала и НЕ сам промоутер,
+          • носит подпись нашего промоута инвайтера (anonymous + invite_users,
+            без change_info/post_messages) — так НЕ трогаем со-админов, которых
+            владелец назначил вручную с полными правами.
+        Права снимаем ПАЧКОЙ через промоутера (место освобождается сразу, даже
+        если аккаунт мёртв и выйти сам не сможет), затем каждый живой выходит
+        своей сессией. Best-effort: сбой сверки не роняет прогон."""
+        nonlocal _admin_seats_freed
+        if _promoter is None or _invite_method == "link":
+            return 0
+        from services import account_manager as _am_rec
+        try:
+            admins = await asyncio.wait_for(
+                _am_rec.get_channel_admins(
+                    _promoter["session_str"], group, _acc=dict(_promoter)),
+                timeout=60)
+        except Exception as _ge:
+            log.debug("mass_invite op=%d: get_channel_admins failed: %s", op_id, _ge)
+            return 0
+        if not admins:
+            return 0
+        _promoter_uid = _acc_uid.get(int(_promoter["id"]))
+        # Все user_id из реального списка админов → спрашиваем БД, кто из них наш
+        # флот (чужих админов канала НЕ трогаем ни при каких условиях).
+        _all_uids = [int(a.get("user_id") or 0) for a in admins if a.get("user_id")]
+        rows = await _safe_fetch(
+            pool, "SELECT id, tg_user_id FROM tg_accounts "
+            "WHERE owner_id=$1 AND tg_user_id = ANY($2::bigint[])",
+            owner_id, _all_uids) or []
+        fleet_by_uid = {int(r["tg_user_id"]): int(r["id"])
+                        for r in rows if r.get("tg_user_id")}
+        # Чистое ядро отбора (без сети/БД) — тестируется изолированно: именно
+        # оно решает, КОГО снять, и ошибка здесь стоила бы разжалования чужого
+        # админа или создателя.
+        targets = _select_reconcile_admin_targets(
+            admins, _promoter_uid, set(fleet_by_uid))
+        if not targets:
+            return 0
+        try:
+            res = await asyncio.wait_for(
+                _am_rec.demote_from_admin_batch(
+                    _promoter["session_str"], group, targets, _acc=dict(_promoter)),
+                timeout=120)
+            _demoted = sum(1 for v in res.values() if v)
+        except Exception as _de:
+            log.debug("mass_invite op=%d: reconcile demote failed: %s", op_id, _de)
+            _demoted = 0
+        _admin_seats_freed += _demoted
+        _leave_ids = [fleet_by_uid[u] for u in targets]
+        for _aid in _leave_ids:
+            _admin_seats.discard(_aid)  # место этого прогона больше не держат
+        # Выход из канала — своей сессией у каждого. Для аккаунтов этого прогона
+        # сессия уже в _acc_by_id; «наследных» (прошлый прогон) дочитываем и
+        # дешифруем через resource_selector.
+        _sess_map: dict[int, dict] = {
+            aid: _acc_by_id[aid] for aid in _leave_ids
+            if aid in _acc_by_id and _acc_by_id[aid].get("session_str")}
+        _need = [aid for aid in _leave_ids if aid not in _sess_map]
+        if _need:
+            try:
+                _sel = await resource_selector.select_all_active(
+                    pool, owner_id, include_ids=_need, min_trust_score=0.0,
+                    respect_cooldown=False)
+                for _s in (_sel or []):
+                    if _s.get("session_str"):
+                        _sess_map[int(_s["id"])] = _s
+            except Exception:
+                log_exc_swallow(log, f"mass_invite op={op_id}: reconcile session fetch")
+
+        async def _leave_one(_acc):
+            try:
+                await asyncio.wait_for(
+                    _am_rec.leave_channel(_acc["session_str"], group, _acc=dict(_acc)),
+                    timeout=30)
+            except Exception as _le:
+                log.debug("mass_invite op=%d acc=%s: reconcile leave failed: %s",
+                          op_id, _acc.get("id"), _le)
+        if _sess_map:
+            await asyncio.gather(*(_leave_one(a) for a in _sess_map.values()),
+                                 return_exceptions=True)
+        log.info("mass_invite op=%d: сверка админов%s — снято с %d инвайтеров флота "
+                 "(из %d админов канала)", op_id, f" ({reason})" if reason else "",
+                 _demoted, len(admins))
+        if _demoted:
+            await _safe_execute(
+                pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,0,'reconcile','ok',$2)", op_id,
+                f"сверка админов: снято право и выведено из чата {_demoted} инвайтеров "
+                "флота, оставшихся с прошлых прогонов — освобождены места админа")
+        return _demoted
+
+    async def _view_after_join(acc: dict) -> None:
+        """Оставить просмотры на последних постах сразу после вступления.
+
+        Анти-бан (решение владельца): «когда мы вступаем в канал — Telegram
+        видит, что мы не оставляем просмотров на постах, а это триггер для
+        бана». Живой человек, зайдя в канал, листает последние посты. Делаем
+        это ПОСЛЕ того, как join_channel вернулся (сессия аккаунта освобождена —
+        никакой второй связи на одном auth-key), небольшой партией постов, чтобы
+        не раздувать задержку прогона. Best-effort: сбой не влияет на инвайт."""
+        if not acc or not acc.get("session_str"):
+            return
+        try:
+            from services import account_manager as _am_v
+            await asyncio.wait_for(
+                _am_v.view_recent_posts(acc["session_str"], group, _acc=dict(acc), limit=3),
+                timeout=45)
+        except Exception as _vje:
+            log.debug("mass_invite op=%d acc=%s: view_after_join failed: %s",
+                      op_id, acc.get("id"), _vje)
+
     # Главный канал уже заполнен прошлым прогоном — раздавать в нём права и
     # вводить туда инвайтеров незачем: прогон сразу уйдёт в канал резерва, а
     # права там выдаются по ходу.
@@ -17517,6 +17676,16 @@ async def _exec_mass_invite(
                 if st.get("can_promote"):
                     _promoter = a
                     break
+        # Перед раздачей админки ЭТОМУ прогону — свериться с реальным списком
+        # админов и снять флот, оставшийся с прошлых прогонов/оборванных запусков.
+        # Освобождает места админа ДО того, как прогон начнёт промоутить свой
+        # первый круг (иначе ~50 мест забиты «наследными» инвайтерами — жалоба
+        # владельца «весь флот в админах, инвайтить через админку некуда»).
+        if _promoter is not None:
+            try:
+                await _reconcile_channel_admins("старт прогона")
+            except Exception:
+                log_exc_swallow(log, f"mass_invite op={op_id}: стартовая сверка админов")
         if _promoter is None and _admin_probe_ok:
             # Аккаунты подключились и ответили — но ни у кого нет права промоута.
             _promote_skipped_no_admin = bool(_auto_promote)
@@ -17602,6 +17771,8 @@ async def _exec_mass_invite(
                         account_manager.join_channel(a["session_str"], group, _acc=dict(a)),
                         timeout=45)
                     await asyncio.sleep(random.uniform(1.0, 2.0))
+                    # Анти-бан: оставить просмотры на постах сразу после вступления.
+                    await _view_after_join(a)
                 except Exception:
                     log.debug("mass_invite op=%d: pre-promote join acc=%s failed",
                               op_id, a.get("id"))
@@ -18519,6 +18690,8 @@ async def _exec_mass_invite(
                                 await asyncio.wait_for(
                                     _am.join_channel(acc["session_str"], group, _acc=dict(acc)),
                                     timeout=45)
+                                # Анти-бан: просмотры на постах сразу после вступления.
+                                await _view_after_join(acc)
                             except Exception as _je:
                                 log.info("mass_invite op=%d acc=%s: вступление не удалось "
                                          "(%s) — права всё равно пробуем выдать",
@@ -19489,6 +19662,16 @@ async def _exec_mass_invite(
             await _release_admin_seats_batch(list(_admin_seats))
         except Exception as _fe:
             log.debug("mass_invite op=%d: финальное освобождение админ-мест: %s", op_id, _fe)
+    # Финальная СВЕРКА с реальным списком админов: _admin_seats знает только про
+    # места ЭТОГО прогона, а в админах мог остаться флот с прошлых прогонов или с
+    # аварийно оборванного запуска (память о тех местах потеряна). Сверяемся с
+    # истиной Telegram и дочищаем — чтобы после прогона в админах гарантированно
+    # не осталось ни одного нашего инвайтера, кроме промоутера (жалоба владельца
+    # «весь флот в админах, инвайтить через админку некуда»).
+    try:
+        await _reconcile_channel_admins("конец прогона")
+    except Exception as _re:
+        log.debug("mass_invite op=%d: финальная сверка админов: %s", op_id, _re)
 
     # Шов «Инвайт → Welcome»: приветствие реально добавленным (если настроено).
     await _chain_welcome(pool, owner_id, op_id, params)

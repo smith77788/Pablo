@@ -5132,6 +5132,126 @@ async def leave_channel(
             log_exc_swallow(log, "Сбой в leave_channel")
 
 
+async def view_recent_posts(
+    session_string: str, channel_ref: int | str, _acc: dict | None = None,
+    limit: int = 8, access_hash: int = 0,
+) -> dict:
+    """Оставить ПРОСМОТРЫ на последних постах канала (анти-бан после вступления).
+
+    Решение владельца: аккаунт, вступивший в канал и не оставивший НИ ОДНОГО
+    просмотра на постах, — явный сигнал накрутки/бота для Telegram (живой человек,
+    зайдя в канал, листает ленту). Поэтому сразу после вступления инвайтер
+    «просматривает» последние посты: GetMessagesViews(increment=True) по одному
+    посту с паузами «чтения», затем ReadHistory («дочитал до конца»).
+
+    Best-effort: это защитный слой, его сбой НЕ должен ронять вступление/инвайт.
+    Возвращает {"ok": bool, "viewed": int}.
+    """
+    if not session_string or limit <= 0:
+        return {"ok": False, "viewed": 0}
+    from telethon.tl.functions.messages import GetMessagesViewsRequest
+    from telethon.tl.functions.channels import ReadHistoryRequest
+
+    client = _make_client(session_string, _acc)
+    viewed = 0
+    try:
+        await _connect_and_track(client, _acc, "view")
+        entity = await asyncio.wait_for(
+            _resolve_channel_peer(client, channel_ref, access_hash)
+            if str(channel_ref).lstrip("-").isdigit()
+            else client.get_entity(channel_ref),
+            timeout=_OP_TIMEOUT)
+        msgs = await asyncio.wait_for(
+            client.get_messages(entity, limit=max(1, min(int(limit), 20))), timeout=_OP_TIMEOUT)
+        for _m in msgs:
+            _mid = getattr(_m, "id", 0)
+            if not _mid:
+                continue
+            try:
+                # По ОДНОМУ посту: Telegram засчитывает просмотр только при
+                # индивидуальных вызовах с паузами, батч ≠ «прочитал N постов».
+                await asyncio.wait_for(
+                    client(GetMessagesViewsRequest(peer=entity, id=[_mid], increment=True)),
+                    timeout=15)
+                viewed += 1
+            except Exception as _ve:
+                if "FLOOD" in str(_ve).upper():
+                    break
+                continue
+            # Пауза «чтения» поста (имитация времени на контент).
+            await asyncio.sleep(random.betavariate(2, 3) * 2.2 + 0.6)  # ~0.6–2.8с
+        try:
+            await asyncio.wait_for(
+                client(ReadHistoryRequest(channel=entity, max_id=0)), timeout=15)
+        except Exception:
+            log_exc_swallow(log, "view_recent_posts: ReadHistory")
+        return {"ok": True, "viewed": viewed}
+    except Exception as e:
+        log.debug("view_recent_posts acc=%s ch=%s: %s", (_acc or {}).get("id"), channel_ref, e)
+        return {"ok": False, "viewed": viewed}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в view_recent_posts")
+
+
+async def get_channel_admins(
+    session_string: str, channel_ref: int | str, _acc: dict | None = None,
+    access_hash: int = 0,
+) -> list[dict]:
+    """Текущие админы канала: [{"user_id", "is_creator", "rights": {...}}].
+
+    rights — поля admin_rights (invite_users/change_info/post_messages/add_admins/
+    anonymous). Нужно, чтобы СВЕРИТЬ реальный список админов с флотом и снять+вывести
+    тех инвайтеров, что остались висеть (места админа ~50 копятся прогонами —
+    жалоба владельца «весь флот в админах»). Создателя и полноправных админов по
+    этим полям отличаем и НЕ трогаем. Best-effort → [].
+    """
+    if not session_string:
+        return []
+    from telethon.tl.functions.channels import GetParticipantsRequest
+    from telethon.tl.types import ChannelParticipantsAdmins
+
+    client = _make_client(session_string, _acc)
+    out: list[dict] = []
+    try:
+        await _connect_and_track(client, _acc, "admins")
+        entity = await asyncio.wait_for(
+            _resolve_channel_peer(client, channel_ref, access_hash)
+            if str(channel_ref).lstrip("-").isdigit()
+            else client.get_entity(channel_ref),
+            timeout=_OP_TIMEOUT)
+        res = await asyncio.wait_for(client(GetParticipantsRequest(
+            channel=entity, filter=ChannelParticipantsAdmins(),
+            offset=0, limit=200, hash=0)), timeout=_OP_TIMEOUT)
+        for p in getattr(res, "participants", []) or []:
+            uid = getattr(p, "user_id", None)
+            if uid is None:
+                continue
+            r = getattr(p, "admin_rights", None)
+            out.append({
+                "user_id": int(uid),
+                "is_creator": type(p).__name__ == "ChannelParticipantCreator",
+                "rights": {
+                    "invite_users": bool(getattr(r, "invite_users", False)),
+                    "change_info": bool(getattr(r, "change_info", False)),
+                    "post_messages": bool(getattr(r, "post_messages", False)),
+                    "add_admins": bool(getattr(r, "add_admins", False)),
+                    "anonymous": bool(getattr(r, "anonymous", False)),
+                },
+            })
+        return out
+    except Exception as e:
+        log.debug("get_channel_admins ch=%s: %s", channel_ref, e)
+        return []
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в get_channel_admins")
+
+
 async def edit_channel_title(
     session_string: str,
     channel_id: int,

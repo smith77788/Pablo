@@ -161,12 +161,20 @@ def test_final_flota_leaves_channel_releases_admin_seats():
     src = inspect.getsource(op_worker._exec_mass_invite)
     i_welcome = src.index("_chain_welcome(pool, owner_id, op_id, params)")
     # Финальный блок стоит НЕПОСРЕДСТВЕННО перед _chain_welcome (а не только в
-    # _switch_channel при ротации) — ищем его по уникальному маркеру жалобы.
-    tail = src[max(0, i_welcome - 900):i_welcome]
+    # _switch_channel при ротации). Окно расширено: между освобождением мест и
+    # welcome теперь стоит ещё и финальная СВЕРКА с реальным списком админов
+    # (дочищает наследных инвайтеров прошлых прогонов) — оба шага обязаны быть.
+    tail = src[max(0, i_welcome - 1800):i_welcome]
     assert "Отработавший флот покидает" in tail
     assert "_release_admin_seats_batch(list(_admin_seats))" in tail, (
         "в конце прогона оставшиеся админ-места инвайтеров обязаны освобождаться "
         "(demote + выход из канала), иначе места забиваются («32 администратора»)"
+    )
+    assert 'await _reconcile_channel_admins("конец прогона")' in tail, (
+        "в конце прогона обязана идти сверка с реальным списком админов — "
+        "_admin_seats знает только про места этого прогона, а наследные "
+        "инвайтеры прошлых прогонов копятся и забивают места (жалоба владельца "
+        "«весь флот в админах, инвайтить через админку некуда»)"
     )
 
 
