@@ -102,7 +102,7 @@ def _setup(promoter_stand, monkeypatch, left_after_retry):
     s = promoter_stand(lambda acc_id, refs, dry=False: _privacy_all(refs))
     s.revokes = []
 
-    async def _trick(sess, acc, group, refs):
+    async def _trick(sess, acc, group, refs, **_kw):
         return {"ok": len(refs), "failed": 0, "errors": [], "still_blocked": [],
                 "untried": [], "admins_left": list(refs[:1])}
     monkeypatch.setattr(mie, "add_via_promote", _trick)

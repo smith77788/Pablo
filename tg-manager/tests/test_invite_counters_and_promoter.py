@@ -26,7 +26,7 @@ from tests.test_invite_queue_scheduler import (  # noqa: F401 — фикстур
 
 
 def _trick_ok_all(*extra_refs):
-    async def _trick(sess, acc, group, refs):
+    async def _trick(sess, acc, group, refs, **_kw):
         return {"ok": len(refs), "failed": 0, "peer_flood": False, "flood_wait": 0,
                 "errors": [], "no_rights": False, "chat_full": False,
                 "still_blocked": [], "untried": [], "short_floods": [], "admins_left": []}
@@ -71,7 +71,7 @@ def test_promote_trick_capped_per_run_to_protect_promoter(chain, monkeypatch):
 
     seen: list = []
 
-    async def _trick(sess, acc, group, refs):
+    async def _trick(sess, acc, group, refs, **_kw):
         seen.extend(refs)
         return {"ok": len(refs), "failed": 0, "peer_flood": False, "flood_wait": 0,
                 "errors": [], "no_rights": False, "chat_full": False,

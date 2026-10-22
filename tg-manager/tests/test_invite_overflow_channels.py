@@ -35,7 +35,7 @@ def chain(stand, monkeypatch):
         s.prepared = []        # какие каналы резерва оформлены и чем
         s.marks = []
 
-        async def _invite(sess, acc, group, refs, pace_mult=1.0, bulk=None):
+        async def _invite(sess, acc, group, refs, pace_mult=1.0, bulk=None, **_kw):
             s.groups.append((group, list(refs)))
             s.calls.append((int(acc["id"]), list(refs)))
             return responder(group, list(refs))
@@ -206,7 +206,7 @@ def test_promote_trick_chat_full_marks_channel_and_requeues(chain, monkeypatch):
         return {"ok": True, "can_promote": True, "channel_id": 501, "participants": 150}
     monkeypatch.setattr(mie, "channel_admin_status", _status)
 
-    async def _trick(sess, acc, group, refs):
+    async def _trick(sess, acc, group, refs, **_kw):
         # Трюк упирается в лимит участников канала на первой же пачке.
         return {"ok": 0, "failed": 0, "peer_flood": False, "flood_wait": 0,
                 "errors": ["group error: в чате достигнут лимит участников Telegram"],

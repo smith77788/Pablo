@@ -101,6 +101,9 @@ _HELP = {
         "он снова выглядит отдохнувшим)",
     "infragram_invite_dedup_write_failures_total":
         "Потерянные записи дедупа инвайта (следующий прогон может пригласить повторно)",
+    "infragram_invite_unmark_failures_total":
+        "Не снятые предзаписи инвайта (цели помечены приглашёнными, хотя их "
+        "Telegram не рассматривал — больше их не позовут)",
     "infragram_recurring_reschedule_failures_total":
         "Повторяющиеся операции, у которых не удалось поставить следующий запуск",
     "infragram_op_owner_sem_defers_total":

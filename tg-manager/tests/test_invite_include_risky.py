@@ -83,7 +83,7 @@ def stand(monkeypatch):
 
     calls: list[int] = []
 
-    async def _invite_batch(session_str, acc, group, refs, pace_mult=1.0, bulk=None):
+    async def _invite_batch(session_str, acc, group, refs, pace_mult=1.0, bulk=None, **_kw):
         calls.append(int(acc["id"]))
         return {"ok": len(refs), "failed": 0, "errors": []}
 

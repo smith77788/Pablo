@@ -3687,6 +3687,9 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "процесса остановленная рассылка может продолжить уходить людям",
     "infragram_invite_dedup_write_failures_total":
         "дедуп инвайта — возможны повторные приглашения тем же людям",
+    "infragram_invite_unmark_failures_total":
+        "предзапись инвайта не снята — цели числятся приглашёнными, хотя "
+        "Telegram их не рассматривал, и больше не позовутся",
     "infragram_journal_write_failures_total":
         "строка успеха в журнале — повтор операции сделает действие второй раз",
     "infragram_account_cooldown_write_failures_total":
@@ -16598,6 +16601,99 @@ async def _invite_log_insert(pool, owner_id: int, group_key: str, op_id: int,
     )
 
 
+async def _premark_invite_targets(pool, owner_id: int, group_key: str, op_id: int,
+                                  targets) -> bool:
+    """Пометить цели ДО отправки: обрыв внутри пачки звал их второй раз.
+
+    Запись по ходу прогона (`_record_invited_targets` пачка за пачкой) закрыла
+    потерю ВСЕГО дедупа, но не окно внутри пачки. Движок зовёт цели по одной с
+    паузами 2–4с против банов — пятёрка идёт 10–20 секунд, по номерам дольше, и
+    до возврата пачки в журнале нет никого. SIGTERM на деплое приходит в это
+    окно штатно (пуш в рабочую ветку уезжает в прод), и следующий прогон звал
+    уже приглашённых второй раз — на самой баноопасной операции продукта.
+
+    Поэтому пачка метится ПЕРЕД сетью, а с тех, кого Telegram не рассматривал
+    (флуд, таймаут, приватность, «номер не в Telegram»), метка снимается по
+    ответу — `_unmark_untried_invites`. Цена обрыва теперь в другую сторону: до
+    batch_size целей могут остаться помеченными, не получив приглашения. Для
+    инвайта это дешевле повторного приглашения — тот же выбор, что и у
+    остальных необратимых действий: метить ДО, а не после.
+
+    Метится только главный ключ группы; алиасы кампании пишутся по факту.
+
+    Сбой записи операцию не роняет: это возврат к прежнему поведению (пачку всё
+    равно запишет подтверждение после ответа), а не потеря людей. False —
+    запись не подтверждена.
+    """
+    _keys = {str(t) for t in targets if t is not None}
+    if not _keys:
+        return True
+    for _attempt in (1, 2):
+        try:
+            await _invite_log_insert(pool, owner_id, group_key, op_id, _keys)
+            return True
+        except Exception:
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "invite dedup: ПРЕДЗАПИСЬ ПАЧКИ НЕ УДАЛАСЬ op=%s owner=%s целей=%d — "
+                "обрыв внутри этой пачки снова может позвать их второй раз",
+                op_id, owner_id, len(_keys))
+            _reliability_metric(
+                "infragram_invite_dedup_write_failures_total", op_type="mass_invite")
+            return False
+    return False
+
+
+async def _unmark_untried_invites(pool, owner_id: int, group_key: str, op_id: int,
+                                  batch, settled, *, keep=()) -> bool:
+    """Снять предзапись с тех, кого Telegram не рассматривал.
+
+    Иначе человек, на котором один раз моргнула сеть или пришёл флуд, был бы
+    помечен приглашённым и не позвался больше НИКОГДА (жалоба владельца —
+    ровно поэтому временные сбои в дедуп не писались и раньше).
+
+    Решённые цели (добавлен / уже в чате / мёртвый username) приходят поимённо
+    в `settled`, остальное из пачки — не рассмотрено. `keep` — цели, запись
+    которых этот прогон уже подтвердил: их метка не снимается.
+
+    Снимаем ТОЛЬКО свои метки (`op_id`): строку, которую записала другая
+    операция или прошлый прогон, удалять нельзя — это и было бы вторым
+    приглашением. `ON CONFLICT DO NOTHING` предзаписи чужую строку не
+    переписывает, поэтому её op_id остаётся чужим и под условие она не
+    попадает.
+
+    Сбой снятия стоит целей: они останутся помеченными. Громко и счётчиком.
+    """
+    from services.contact_opt_out import compare_key as _ck
+
+    _done = {_ck(str(x)) for x in (settled or []) if x is not None}
+    _drop = sorted({str(b) for b in batch if b is not None
+                    and _ck(str(b)) not in _done} - set(keep or ()))
+    if not _drop:
+        return True
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "DELETE FROM invite_target_log WHERE owner_id=$1 AND group_key=$2 "
+                "AND target = ANY($3::text[]) AND op_id = $4",
+                owner_id, group_key, _drop, op_id)
+            return True
+        except Exception:
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "invite dedup: СНЯТИЕ ПРЕДЗАПИСИ НЕ УДАЛОСЬ op=%s owner=%s целей=%d — "
+                "их Telegram не рассматривал, но помеченными они больше не позовутся",
+                op_id, owner_id, len(_drop))
+            _reliability_metric(
+                "infragram_invite_unmark_failures_total", op_type="mass_invite")
+            return False
+    return False
+
+
 async def _exec_contacts_push(
     pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -18322,6 +18418,20 @@ async def _exec_mass_invite(
         if await _record_invited_targets(
                 pool, owner_id, _group_key, op_id, _dedup_unconfirmed):
             _dedup_unconfirmed.clear()
+
+    async def _premark_batch(targets) -> None:
+        """Предзапись пачки перед сетью — см. `_premark_invite_targets`."""
+        if not _skip_invited:
+            return
+        await _premark_invite_targets(pool, owner_id, _group_key, op_id, targets)
+
+    async def _unmark_untried(batch, settled) -> None:
+        """Снять предзапись с нерассмотренных — см. `_unmark_untried_invites`."""
+        if not _skip_invited:
+            return
+        await _unmark_untried_invites(pool, owner_id, _group_key, op_id, batch, settled,
+                                      keep=invited_this_run)
+
     _phones_not_found = 0          # номеров не в Telegram (для честного отчёта)
     _ok_logged = 0                 # сколько успешных целей записано в лог (для CSV)
     _ok_seen: set = set()          # уже залогированные 'ok' цели (без дублей в отчёте)
@@ -18425,10 +18535,16 @@ async def _exec_mass_invite(
             out.append(q.popleft())
         return out
 
-    def _give_back(q: deque, items: list) -> None:
-        """Вернуть неотработанное в ГОЛОВУ очереди — порядок аудитории сохраняется."""
+    async def _give_back(q: deque, items: list) -> None:
+        """Вернуть неотработанное в ГОЛОВУ очереди — порядок аудитории сохраняется.
+
+        И снять с него предзапись: вернулось в очередь — значит не приглашено, а
+        помеченная цель больше не попадёт ни в один батч (её отсеет сверка перед
+        отправкой). Инвариант держится здесь, а не в семи местах возврата.
+        """
         for it in reversed(items):
             q.appendleft(it)
+        await _unmark_untried(items, [])
 
     async def _acc_budget(acc) -> int:
         """Сколько инвайтов аккаунт вправе сделать за прогон (0 = выбыл).
@@ -18559,20 +18675,26 @@ async def _exec_mass_invite(
                     # Уже приглашённые по @username/id — номер их не позовёт.
                     return await inv.invite_by_phones(
                         acc["session_str"], dict(acc), group, batch,
-                        skip_keys=_invited_keys_now() if _skip_invited else None)
+                        skip_keys=_invited_keys_now() if _skip_invited else None,
+                        on_attempt=_premark_batch)
                 if _invite_method == "admin":
                     # «Через админку»: цель промоутится в админы (добавляется в
                     # чат) → права тут же снимаются → остаётся участником.
-                    return await inv.add_via_promote(acc["session_str"], dict(acc), group, batch)
+                    return await inv.add_via_promote(
+                        acc["session_str"], dict(acc), group, batch,
+                        on_attempt=_premark_batch)
                 if _invite_method == "link":
                     # «Ссылка в ЛС»: рассылаем цель ссылку-приглашение.
                     return await inv.invite_via_link_batch(
                         acc["session_str"], dict(acc), _invite_link, batch,
-                        _link_msg, _pace_mult)
+                        _link_msg, _pace_mult, on_attempt=_premark_batch)
                 # Множитель темпа уходит ВНУТРЬ батча (см. invite_batch).
+                # Метка ДО самой отправки, по цели: обрыв процесса между
+                # приглашением и записью иначе зовёт человека второй раз
+                # (см. _premark_invite_targets).
                 return await inv.invite_batch(
                     acc["session_str"], dict(acc), group, batch, _pace_mult,
-                    bulk=_bulk_api)
+                    bulk=_bulk_api, on_attempt=_premark_batch)
             except Exception as exc:  # не BaseException: отмену операции пропускаем наверх
                 return exc
 
@@ -18646,7 +18768,7 @@ async def _exec_mass_invite(
                     from services import smart_invite as _si
                     _dec = await _si.can_invite(pool, owner_id, _group_key)
                     if not _dec.allowed:
-                        _give_back(queue, batch)
+                        await _give_back(queue, batch)
                         if _dec.abort:
                             # Ключ governor'а — от МАТЕРИ (см. _group_key): после
                             # ротации у новой дочерней истории нет, проверка увидит
@@ -18765,7 +18887,7 @@ async def _exec_mass_invite(
                 # Батч не отработан вовсе — цели возвращаем в очередь (их подберёт
                 # другой аккаунт), а этот выводим из круга, чтобы не зациклиться.
                 log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), res)
-                _give_back(queue, batch)
+                await _give_back(queue, batch)
                 retired.add(acc_id)
                 await _release_admin_seat(acc_id)
                 _noconnect_errs.append(str(res)[:160])
@@ -18779,7 +18901,7 @@ async def _exec_mass_invite(
             # круге он уже с правами). Только если промоутера нет ИЛИ выдача уже
             # была и не помогла — выводим из круга (анти-цикл), не роняя прогон.
             if res.get("no_rights"):
-                _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
+                await _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
                 _tries = int(_no_rights_on_demand.get(acc_id, 0))
                 _reason = "no_promoter"
                 # Внешний гейт обязан пропускать до САМОГО щедрого бюджета (30,
@@ -18909,6 +19031,16 @@ async def _exec_mass_invite(
             # должен о них знать, иначе адаптивный темп на них не учится, а
             # соседние операции берут аккаунт как спокойный.
             await _note_short_floods(acc_id, res.get("short_floods"))
+            # Решённые цели — те, по которым Telegram ответил поимённо. Их
+            # метка остаётся, с остальных её снимает _unmark_untried ниже.
+            if by_phone:
+                _settled = (list(res.get("invited_phones") or [])
+                            + list(res.get("invited_aliases") or [])
+                            + list(res.get("already_phones") or []))
+            elif ("added" in res) or ("dead" in res):
+                _settled = list(res.get("added") or []) + list(res.get("dead") or [])
+            else:
+                _settled = list(tried) if attempted else []
             if attempted:
                 if by_phone:
                     # Дедупим только УСПЕШНО приглашённые номера; «не в Telegram»
@@ -18916,10 +19048,7 @@ async def _exec_mass_invite(
                     # Человек записан под всеми адресами: номером, @username и
                     # id — иначе он же из очереди по @username (или следующая
                     # кампания) получил бы второе приглашение.
-                    await _remember_invited(
-                        list(res.get("invited_phones") or [])
-                        + list(res.get("invited_aliases") or [])
-                        + list(res.get("already_phones") or []))
+                    await _remember_invited(_settled)
                     _deduped += len(res.get("already_phones") or [])
                     _phones_not_found += len(res.get("not_found_phones") or [])
                 else:
@@ -18931,11 +19060,10 @@ async def _exec_mass_invite(
                     # промоут-трюк (там дедупятся по факту добавления), остальное
                     # вернётся следующим прогоном. Фолбэк для старого контракта
                     # движка (нет added/dead) — прежнее поведение по `tried`.
-                    if ("added" in res) or ("dead" in res):
-                        await _remember_invited(
-                            list(res.get("added") or []) + list(res.get("dead") or []))
-                    else:
-                        await _remember_invited(tried)
+                    await _remember_invited(_settled)
+            # Снимаем ВСЕГДА, в том числе когда не попробовали ни одной цели:
+            # иначе флуд на первой стоил бы всей пачке больше ни одного захода.
+            await _unmark_untried(batch, _settled)
             total_ok += ok_n
             total_fail += fail_n
             _chan_ok += ok_n
@@ -18986,7 +19114,7 @@ async def _exec_mass_invite(
                     op_id, attempted,
                 )
             if leftover:
-                _give_back(queue, leftover)
+                await _give_back(queue, leftover)
 
             # Цели, отклонённые приватностью — кандидаты на промоут-трюк.
             if _promoter is not None and _promote_trick:
@@ -19291,7 +19419,8 @@ async def _exec_mass_invite(
                         _tried_blocked.extend(_uniq_blocked[_ci:])
                         break
                     _tr = await _inv.add_via_promote(
-                        _promoter["session_str"], dict(_promoter), group, _part)
+                        _promoter["session_str"], dict(_promoter), group, _part,
+                        on_attempt=_premark_batch)
                     _part_ok = int(_tr.get("ok") or 0)
                     _trick_ok += _part_ok
                     _trick_tried += len(_part) - len(_tr.get("untried") or [])
@@ -19364,7 +19493,7 @@ async def _exec_mass_invite(
         # (жалоба владельца: «доинвайтить всех, кто упал по лимиту канала»). В
         # журнал приглашённых они не писались, повтор их возьмёт. Это цели из
         # username-пути (_privacy_blocked) — место им в q_users.
-        _give_back(q_users, list(_still_blocked))
+        await _give_back(q_users, list(_still_blocked))
         _still_blocked = []
     if _admins_left and _promoter is not None and not _promoter_resting():
         # Снятие сорвалось не из-за флуда промоутера (обрыв, таймаут, флуд
@@ -19440,7 +19569,8 @@ async def _exec_mass_invite(
                 _lf = await asyncio.wait_for(
                     _inv2.invite_via_link_batch(
                         _snd["session_str"], dict(_snd), _invite_link,
-                        _part, _link_msg, _pace_mult),
+                        _part, _link_msg, _pace_mult,
+                        on_attempt=_premark_batch),
                     timeout=120 + 120 * len(_part))
             except Exception as _lfe:
                 # Порцию назад НЕ возвращаем: часть ссылок могла уйти, и второй
@@ -19463,7 +19593,7 @@ async def _exec_mass_invite(
                 # основном цикле (privacy-отказ). Фолбэк переводит их из провала в
                 # успех, а не добавляет новую обработанную цель (прогресс >100%).
             if _untried_lf:
-                _give_back(_lf_queue, _untried_lf)
+                await _give_back(_lf_queue, _untried_lf)
             if _lf.get("peer_flood") or _lf.get("flood_wait"):
                 await _rest_invite_account(_sid, _lf)
                 return False

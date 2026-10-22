@@ -114,11 +114,11 @@ def _mk_stand(monkeypatch):
         return accounts if "tg_accounts" in q else []
     monkeypatch.setattr(op_worker, "_safe_fetch", _fetch)
 
-    async def _batch(session, acc, group, refs, pace_mult=1.0, bulk=None):
+    async def _batch(session, acc, group, refs, pace_mult=1.0, bulk=None, **_kw):
         return {"ok": len(refs), "failed": 0, "errors": []}
     monkeypatch.setattr(inv, "invite_batch", _batch)
 
-    async def _links(session, acc, link, refs, msg, pace_mult=1.0):
+    async def _links(session, acc, link, refs, msg, pace_mult=1.0, **_kw):
         # pace_mult: режим темпа доходит и до метода «ссылка в ЛС» — раньше он
         # спал фиксированные 2.5–5с и только после УСПЕХА.
         return {"ok": len(refs), "failed": 0, "errors": []}

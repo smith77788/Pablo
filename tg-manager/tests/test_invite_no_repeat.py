@@ -82,7 +82,7 @@ def test_overflow_channel_invitees_are_recorded_under_the_channel_too(stand, mon
 
     monkeypatch.setattr(op_worker, "_record_invited_targets", _rec)
 
-    async def _invite(sess, acc, group, refs, pace_mult=1.0, bulk=None):
+    async def _invite(sess, acc, group, refs, pace_mult=1.0, bulk=None, **_kw):
         if group == "@main":
             return {"ok": 0, "failed": 0, "untried": list(refs),
                     "errors": ["group error: в чате достигнут лимит участников Telegram"]}
