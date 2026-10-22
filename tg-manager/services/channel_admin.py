@@ -441,7 +441,7 @@ def validate_settings(payload: Any) -> tuple[dict, list[str]]:
             out["lang"] = lg
         else:
             errors.append("Язык канала: авто, русский, украинский или английский")
-    for key in ("enabled", "intro_pending", "auto_tune"):
+    for key in ("enabled", "intro_pending", "auto_tune", "cross_promote"):
         if key in payload:
             out[key] = bool(payload.get(key))
     if "business" in payload:
@@ -708,6 +708,66 @@ async def frequency_suggestion(pool, owner_id: int, channel_id: int) -> Optional
         return None
     return recommend_frequency(ppd["posts_per_day"], float(row["early"] or 0),
                                float(row["recent"] or 0), int(row["n"] or 0))
+
+
+# ── Взаимопиар каналов ОДНОГО владельца ──────────────────────────────────────
+# Самый дешёвый легальный рост сети: канал изредка советует подписчикам
+# родственный канал того же владельца. Не касается третьих лиц, не спам — выходит
+# обычным постом через редакторский гейт. Частоту держим низкой (не назойливо),
+# родственников перебираем по кругу, берём только каналы с публичным @username
+# (иначе ссылку не дать).
+CROSS_EVERY = 12  # примерно один взаимопиар на столько постов
+
+
+def should_cross_promote(post_index: int, *, every: int = CROSS_EVERY) -> bool:
+    """Пора ли на этом по счёту посту вставить взаимопиар (не на первом)."""
+    every = max(2, int(every))
+    return post_index > 0 and post_index % every == 0
+
+
+def pick_cross_sibling(siblings: list[dict], rotation: int) -> Optional[dict]:
+    """Какой родственный канал советовать (по кругу). Только с публичным @username."""
+    linkable = [s for s in siblings if str(s.get("username") or "").strip()]
+    if not linkable:
+        return None
+    return linkable[int(rotation) % len(linkable)]
+
+
+def cross_promo_topic(sibling: dict) -> str:
+    """Директива-тема для поста-рекомендации родственного канала (честно, без выдумок)."""
+    u = str(sibling.get("username") or "").strip().lstrip("@")
+    title = str(sibling.get("title") or "").strip()
+    topic = str(sibling.get("topic") or "").strip()
+    name = title or ("@" + u)
+    about = f" (тематика: {topic})" if topic else ""
+    return (f"Порекомендуй наш родственный канал {name}{about} — честно и по делу: "
+            f"кому и чем он полезен этой аудитории, без преувеличений. "
+            f"В конце дай ссылку: t.me/{u}. Не выдумывай фактов о нём — опирайся только "
+            f"на его тему.")
+
+
+async def cross_siblings(pool, owner_id: int, channel_id: int) -> list[dict]:
+    """Другие каналы владельца под администратором, годные для взаимопиара (с @username)."""
+    try:
+        rows = await pool.fetch(
+            "SELECT a.channel_id, a.topic, "
+            " (SELECT max(username) FROM managed_channels mc "
+            "  WHERE mc.owner_id=a.owner_id AND mc.channel_id=a.channel_id) AS username, "
+            " (SELECT max(title) FROM managed_channels mc "
+            "  WHERE mc.owner_id=a.owner_id AND mc.channel_id=a.channel_id) AS title "
+            "FROM va_channel_admin a "
+            "WHERE a.owner_id=$1 AND a.enabled AND a.setup_done IS NOT NULL "
+            "AND a.channel_id <> $2 ORDER BY a.channel_id",
+            int(owner_id), int(channel_id))
+    except Exception:
+        log.debug("channel_admin.cross_siblings failed", exc_info=True)
+        return []
+    out = []
+    for r in rows or []:
+        if str(r["username"] or "").strip():
+            out.append({"channel_id": int(r["channel_id"]), "username": r["username"],
+                        "title": r["title"] or "", "topic": r["topic"] or ""})
+    return out
 
 
 def _fence(items: list[str], cap: int = 600) -> str:
@@ -1283,6 +1343,7 @@ def settings_public(row: Optional[dict]) -> dict:
         "lang": r.get("lang") or "",
         "intro_pending": bool(r.get("intro_pending", True)),
         "auto_tune": bool(r.get("auto_tune", True)),
+        "cross_promote": bool(r.get("cross_promote", True)),
         "members_count": r.get("members_count"),
         "next_post_at": _iso(r.get("next_post_at")),
         "last_post_at": _iso(r.get("last_post_at")),
@@ -1298,7 +1359,7 @@ _ADMIN_COLS = (
     "lead_contact, brief, business, posts_per_day, lang, "
     "window_start, window_end, tz_offset, publish_mode, intro_pending, next_post_at, "
     "last_post_at, last_error, fail_streak, setup_done, last_op_id, alerted_at, "
-    "auto_tune, members_count, last_stats_at, last_report_at"
+    "auto_tune, cross_promote, members_count, last_stats_at, last_report_at"
 )
 
 
@@ -1437,8 +1498,9 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
     await pool.execute(
         "INSERT INTO va_channel_admin (owner_id, channel_id, enabled, topic, audience, tone, "
         " notes, posts_per_day, window_start, window_end, tz_offset, publish_mode, "
-        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, business, lang, updated_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19, now()) "
+        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, business, lang, "
+        " cross_promote, updated_at) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20, now()) "
         "ON CONFLICT (owner_id, channel_id) DO UPDATE SET enabled=EXCLUDED.enabled, "
         " topic=EXCLUDED.topic, audience=EXCLUDED.audience, tone=EXCLUDED.tone, "
         " notes=EXCLUDED.notes, posts_per_day=EXCLUDED.posts_per_day, "
@@ -1447,13 +1509,14 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
         " tz_offset=EXCLUDED.tz_offset, publish_mode=EXCLUDED.publish_mode, "
         " intro_pending=EXCLUDED.intro_pending, auto_tune=EXCLUDED.auto_tune, "
         " next_post_at=EXCLUDED.next_post_at, business=EXCLUDED.business, "
-        " lang=EXCLUDED.lang, updated_at=now()",
+        " lang=EXCLUDED.lang, cross_promote=EXCLUDED.cross_promote, updated_at=now()",
         int(owner_id), int(channel_id), bool(merged["enabled"]), merged["topic"],
         merged["audience"], merged["tone"], merged["notes"], int(merged["posts_per_day"]),
         int(merged["window_start"]), int(merged["window_end"]), int(merged["tz_offset"]),
         merged["publish_mode"], bool(merged["intro_pending"]), bool(merged["auto_tune"]),
         next_at, merged["project_info"], merged["lead_contact"],
         json.dumps(merged["business"], ensure_ascii=False), merged.get("lang") or "",
+        bool(merged.get("cross_promote", True)),
     )
     if schedule_changed and prev:
         # Расписание сменилось — старый план не совпадает с новыми слотами.
@@ -1767,10 +1830,19 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     # в канале. Отдельный запрос «придумай темы на трое суток» тратил лимит
     # бесплатных моделей впустую — темы устаревали раньше, чем доходили до
     # публикации. Новостному каналу темы наперёд не нужны вовсе.
-    for slot, pillar in zip(slots, pillars):
+    siblings = (await cross_siblings(pool, owner_id, channel_id)
+                if admin.get("cross_promote", True) else [])
+    base_idx = len(planned or [])  # сколько постов уже в плане — продолжаем счёт
+    cross_used = 0
+    for i, (slot, pillar) in enumerate(zip(slots, pillars)):
         topic = ""
         if pillar == INTRO_PILLAR:
             topic = "Знакомство с каналом: о чём он и для кого"
+        elif siblings and should_cross_promote(base_idx + i):
+            sib = pick_cross_sibling(siblings, cross_used)
+            if sib:
+                topic = cross_promo_topic(sib)
+                cross_used += 1
         await pool.execute(
             "INSERT INTO va_admin_plan(owner_id, channel_id, slot_at, pillar, topic) "
             "VALUES($1,$2,$3,$4,$5)", int(owner_id), int(channel_id), slot, pillar, topic)
@@ -1785,8 +1857,9 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     if peaks:
         hrs = ", ".join(f"{h:02d}:00" for h in sorted(peaks[:3]))
         peak_note = f" · время под охват аудитории ({hrs})"
+    cross_note = f" · взаимопиар сети: {cross_used}" if cross_used else ""
     await log_event(pool, owner_id, channel_id, "plan",
-                    f"Контент-план дополнен: {len(pillars)} постов вперёд{peak_note}")
+                    f"Контент-план дополнен: {len(pillars)} постов вперёд{peak_note}{cross_note}")
     return len(pillars)
 
 
