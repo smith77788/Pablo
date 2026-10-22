@@ -108,8 +108,21 @@ def _sql_literals():
 def unknown_tables() -> dict[str, list[str]]:
     known = _declared_by_migrations() | set(RUNTIME_CREATED)
     out: dict[str, list[str]] = {}
-    for rel, lineno, sql in _sql_literals():
-        ctes = {m.group(1).lower() for m in _CTE.finditer(sql)}
+    lits = list(_sql_literals())
+    # Имена CTE собираем по ФАЙЛУ, а не по одному литералу. Длинный запрос —
+    # это почти всегда f-строка, а в AST она распадается на куски по каждой
+    # подстановке: определение `WITH x AS (` остаётся в одном куске, а
+    # `FROM x` попадает в следующий. Имя CTE выглядело таблицей, которой нет
+    # ни в одной миграции, — то есть измеритель ловил не ошибку, а своё
+    # собственное слепое место. Послабление монотонное: оно может только
+    # снять ложную находку, но не спрятать настоящую опечатку — для этого
+    # опечатка должна в точности совпасть с именем CTE из того же файла.
+    ctes_by_file: dict[str, set[str]] = {}
+    for rel, _lineno, sql in lits:
+        ctes_by_file.setdefault(rel, set()).update(
+            m.group(1).lower() for m in _CTE.finditer(sql))
+    for rel, lineno, sql in lits:
+        ctes = ctes_by_file.get(rel, set())
         cleaned = _FOR_UPDATE.sub(" ", _EXTRACT.sub(" ", sql))
         for m in _REF.finditer(cleaned):
             name = m.group(1).lower()
@@ -157,6 +170,34 @@ def test_detector_catches_a_typo():
     sql = "UPDATE operations SET status = 'pending' WHERE id = $1"
     hits = [m.group(1).lower() for m in _REF.finditer(sql)]
     assert hits == ["operations"]
+
+
+def test_detector_ignores_a_cte_defined_in_another_fstring_piece():
+    """CTE и ссылка на него оказались в разных кусках одной f-строки.
+
+    Так выглядит в AST любой длинный запрос с подстановкой: куски между
+    подстановками — отдельные строковые константы, и определение CTE с
+    ссылкой на него в один кусок не попадают.
+    """
+    piece_with_cte = (
+        "WITH RECURSIVE live_chain AS ("
+        " SELECT q.id, 1 AS depth FROM operation_queue q WHERE q.status NOT IN ")
+    piece_with_ref = (
+        " UNION ALL SELECT p.id, lc.depth + 1 FROM live_chain lc"
+        " JOIN operation_queue p ON p.id = lc.ancestor) "
+        "SELECT q.id FROM operation_queue q WHERE NOT EXISTS ("
+        " SELECT 1 FROM live_chain lc WHERE lc.ancestor = q.id)")
+    ctes = {m.group(1).lower()
+            for piece in (piece_with_cte, piece_with_ref)
+            for m in _CTE.finditer(piece)}
+    assert "live_chain" in ctes, "определение CTE не распознано"
+    refs = {m.group(1).lower() for m in _REF.finditer(piece_with_ref)}
+    assert "live_chain" in refs, (
+        "ссылка на CTE не найдена — проверка ниже ничего не доказывает")
+    assert refs - ctes == {"operation_queue"}, (
+        f"кроме CTE измеритель видит таблицы {sorted(refs - ctes)} — имя CTE "
+        "обязано отсеиваться по набору всего файла, иначе оно выглядит "
+        "таблицей, которой нет в миграциях")
 
 
 def test_detector_ignores_cte_and_extract():
