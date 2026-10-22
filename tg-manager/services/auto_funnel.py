@@ -53,11 +53,54 @@ async def _process_due_runs(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
         try:
             await _process_run(pool, http, run)
         except Exception as e:
-            log.debug("Auto-Funnel: run %d error: %s", run["id"], e)
-            await pool.execute(
-                "UPDATE auto_funnel_runs SET status='error' WHERE id=$1",
-                run["id"],
-            )
+            # БЛИП — НЕ КОНЕЦ ВОРОНКИ. Любое исключение писало здесь
+            # `status='error'`, а само исключение уходило в `log.debug`:
+            # воронка подписчику заканчивалась молча и насовсегда. Постоянные
+            # причины `_process_run` разбирает сам (нет шага → completed, нет
+            # токена → error), поэтому наружу вылетает ровно транзиентное —
+            # блип БД, таймаут Telegram, занятый пул. Повтор дёшев и
+            # безопасен: шаг уже занят (`last_sent_step`), так что второй
+            # отправки он не сделает.
+            await _note_run_failure(pool, run, e)
+
+
+_RUN_FAIL_LIMIT = 5
+_RUN_FAIL_BACKOFF_MIN = 15
+
+
+async def _note_run_failure(pool: asyncpg.Pool, run, exc: Exception) -> None:
+    """Срыв шага: отодвинуть запуск, а бросить воронку — только по исчерпании.
+
+    Счётчик подряд идущих срывов живёт в строке (`fail_count`), потому что
+    решение обязано переживать рестарт: процесс перезапускается на каждом
+    деплое, и счёт в памяти означал бы бесконечные повторы.
+    """
+    try:
+        left = await pool.fetchval(
+            """UPDATE auto_funnel_runs
+                  SET fail_count = COALESCE(fail_count, 0) + 1,
+                      next_send_at = NOW() + make_interval(mins => $2),
+                      status = CASE WHEN COALESCE(fail_count, 0) + 1 >= $3
+                                    THEN 'error' ELSE status END
+                WHERE id = $1
+            RETURNING COALESCE(fail_count, 0)""",
+            run["id"], _RUN_FAIL_BACKOFF_MIN, _RUN_FAIL_LIMIT,
+        )
+    except Exception as write_exc:
+        log.error(
+            "Auto-Funnel: срыв шага run=%s (%s) НЕ ЗАПИСАН (%s) — счёт попыток "
+            "не двинулся, запуск придёт на следующий круг как есть",
+            run["id"], exc, write_exc)
+        return
+    if left is not None and int(left) >= _RUN_FAIL_LIMIT:
+        log.error(
+            "Auto-Funnel: воронка остановлена для run=%s — %d срывов подряд, "
+            "последний: %s", run["id"], int(left), exc)
+    else:
+        log.warning(
+            "Auto-Funnel: шаг run=%s сорвался (%s), попытка %s из %d — "
+            "переносим на %d мин, воронку не бросаем",
+            run["id"], exc, left, _RUN_FAIL_LIMIT, _RUN_FAIL_BACKOFF_MIN)
 
 
 async def _process_run(pool: asyncpg.Pool, http: aiohttp.ClientSession, run) -> None:
@@ -156,8 +199,12 @@ async def _process_run(pool: asyncpg.Pool, http: aiohttp.ClientSession, run) -> 
     # Schedule next step
     from datetime import timedelta
     next_at = datetime.now(timezone.utc) + timedelta(hours=next_step["delay_hours"])
+    # fail_count=0: счётчик считает срывы ПОДРЯД. Без обнуления воронка,
+    # которая раз в месяц спотыкается о блип, через пять месяцев получила бы
+    # 'error' на ровном месте.
     await pool.execute(
-        "UPDATE auto_funnel_runs SET next_step_num=$1, next_send_at=$2 WHERE id=$3",
+        "UPDATE auto_funnel_runs SET next_step_num=$1, next_send_at=$2, "
+        "fail_count=0 WHERE id=$3",
         next_step["step_num"], next_at, run["id"],
     )
 

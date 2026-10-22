@@ -739,6 +739,9 @@ async def main() -> None:
         # рестарт между отправкой и продвижением не послал тот же шаг живому
         # человеку второй раз. Без колонки claim падал бы при лаге миграции.
         "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS last_sent_step INT",
+        # Счётчик подряд идущих срывов шага: без него один блип БД писал
+        # воронке человека status='error' навсегда.
+        "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS fail_count INT DEFAULT 0",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",

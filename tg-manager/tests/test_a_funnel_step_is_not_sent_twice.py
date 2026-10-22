@@ -133,3 +133,61 @@ def test_the_last_step_completes_the_run(af):
     _process(af_mod, pool)
     assert sent == [101]
     assert pool.wrote("status='completed'")
+
+
+# ── Срыв шага не заканчивает воронку человеку навсегда ───────────────────────
+
+class _FailingPool(_Pool):
+    """Обработка шага падает: так выглядит блип БД или таймаут Telegram."""
+
+    def __init__(self, fail_count_before: int = 0):
+        super().__init__()
+        self.before = int(fail_count_before)
+        self.noted: list[tuple] = []
+
+    async def fetchrow(self, query, *args):
+        raise RuntimeError("соединение с БД потеряно")
+
+    async def fetchval(self, query, *args):
+        if "fail_count" in query:
+            self.noted.append(args)
+            return self.before + 1
+        return await super().fetchval(query, *args)
+
+
+def _due(af_mod, pool):
+    async def _fetch(*a, **k):
+        return [dict(_RUN)]
+    pool.fetch = _fetch
+    asyncio.run(af_mod._process_due_runs(pool, object()))
+
+
+def test_a_blip_postpones_the_run_instead_of_killing_the_funnel(af):
+    af_mod, _sent, _ = af
+    pool = _FailingPool()
+    _due(af_mod, pool)
+
+    assert not pool.wrote("status='error'"), (
+        "один блип закончил воронку человеку навсегда")
+    assert pool.noted, "срыв не записан — счёт попыток не двинулся"
+
+
+def test_the_funnel_is_dropped_only_when_the_attempts_run_out(af):
+    af_mod, _sent, _ = af
+    pool = _FailingPool(fail_count_before=af_mod._RUN_FAIL_LIMIT - 1)
+    _due(af_mod, pool)
+
+    # Решение принимает сам UPDATE (CASE по счётчику) — одним запросом, чтобы
+    # оно переживало рестарт между чтением и записью.
+    q = [a for a in pool.noted]
+    assert q, "срыв не записан"
+    assert af_mod._RUN_FAIL_LIMIT in q[0], (
+        "предел попыток не передан в запрос — решение принято не по счётчику")
+
+
+def test_a_successful_step_clears_the_failure_count(af):
+    af_mod, sent, _ = af
+    pool = _Pool()
+    _process(af_mod, pool)
+    assert pool.wrote("fail_count=0"), (
+        "счётчик считает срывы подряд, иначе воронка умрёт от редких блипов")
