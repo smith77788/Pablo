@@ -18114,6 +18114,39 @@ async function syncContacts() {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
+// Пары с последней проверки: пакетное объединение берёт их отсюда, а не
+// перечитывает экран. Ручка /api/miniapp/uch/bulk/merge была написана и
+// недостижима — объединять приходилось по одной паре, сколько бы их ни нашлось.
+let DUP_PAIRS = [];
+// Порог, ниже которого пакетное объединение не трогает ничего: решение
+// необратимо (вторая запись удаляется), поэтому пакетом идут только пары, в
+// которых движок уверен. Остальные — по одной, глазами.
+const DUP_SURE = 0.9;
+
+async function mergeAllDuplicates() {
+  const sure = DUP_PAIRS.filter(p => Number(p.confidence) >= DUP_SURE);
+  if (!sure.length) {
+    toast('Надёжных дублей нет — объедините оставшиеся по одной паре');
+    return;
+  }
+  const n = sure.length;
+  if (!await askConfirm('Объединить ' + num(n) + ' ' + plural(n,'надёжную пару','надёжные пары','надёжных пар')
+      + ' (уверенность ' + Math.round(DUP_SURE*100) + '% и выше)?\n\nВ каждой паре вторая запись будет '
+      + 'удалена, её данные перенесутся в первую. Отменить это нельзя.\n\nПары с меньшей уверенностью '
+      + 'останутся — их видно в списке и можно объединить по одной.')) return;
+  try {
+    const d = await api('/api/miniapp/uch/bulk/merge', {method:'POST',
+      body:JSON.stringify({pairs: sure.map(p => ({primary_id: p.contact_a.id, secondary_id: p.contact_b.id}))})});
+    // Движок пропускает пару, если контакт уже слит или не принадлежит
+    // владельцу. Промолчать о пропущенных значит соврать, что слилось всё.
+    const skipped = Number(d.skipped || 0);
+    toast(skipped
+      ? `✅ Объединено пар: ${num(d.merged||0)} · пропущено: ${num(skipped)}`
+      : `✅ Объединено пар: ${num(d.merged||0)}`);
+    detectDuplicates();
+  } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
+}
+
 async function detectDuplicates() {
   // Экран открывается ЗДЕСЬ, а не в вызывающем: функция служит и входом с плитки
   // «🔍 Дубликаты», и кнопкой «🔄 Проверить» внутри самого экрана. Без push плитка
@@ -18125,8 +18158,15 @@ async function detectDuplicates() {
   try {
     const d = await api('/api/miniapp/uch/duplicates');
     const dupes = d.duplicates||[];
+    DUP_PAIRS = dupes;
     if (!dupes.length) { txt('dupBody', empty('✅','Дубликатов нет','Все контакты уникальны')); return; }
     let html = `<div style="padding:12px 16px;font-size:13px;color:var(--hint)">Найдено ${dupes.length} ${plural(dupes.length,'возможный дубликат','возможных дубликата','возможных дубликатов')}</div>`;
+    // Пакетное объединение показываем только когда оно что-то сделает.
+    const sure = dupes.filter(x => Number(x.confidence) >= DUP_SURE).length;
+    if (sure > 1) {
+      html += `<div style="padding:0 16px 10px"><button class="btn btn-p" style="width:100%" onclick="mergeAllDuplicates()">🔀 Объединить ${num(sure)} ${plural(sure,'надёжную пару','надёжные пары','надёжных пар')} (≥${Math.round(DUP_SURE*100)}%)</button>
+        <div class="field-note" style="padding:6px 2px 0">Остальные останутся в списке — их видно по одной</div></div>`;
+    }
     dupes.forEach(dp=>{
       html += `<div class="li" style="margin:0 16px 8px">
         <div class="li-body"><div class="li-name">${esc(dp.contact_a.name)} ↔ ${esc(dp.contact_b.name)}</div><div class="li-sub">${Math.round(dp.confidence*100)}% · ${dp.reasons.join(', ')}</div></div>

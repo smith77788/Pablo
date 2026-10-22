@@ -875,6 +875,7 @@ POST /api/miniapp/proxy/failover
 POST /api/miniapp/proxy/rotate
 POST /api/miniapp/proxy/{proxy_id}/backup
 POST /api/miniapp/proxy/{proxy_id}/check
+POST /api/miniapp/quick_post
 POST /api/miniapp/ranking/keywords
 POST /api/miniapp/ranking/record
 POST /api/miniapp/ranking/reopt_setting

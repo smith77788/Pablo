@@ -29,8 +29,10 @@ SRC = miniapp_source()
 # Операция -> что обязано прозвучать в вопросе.
 MUST_ASK = {
     "submitProfileSetter": ["_setterScale", "askConfirm"],
-    # «Быстрый пост» удалён 22.10.2026 как дубль единой публикации; его место
-    # в этом списке занял тот экран, куда публикация переехала.
+    "submitQuickPost": ["QUICK_POST_SELECTED.size", "askConfirm"],
+    # Единая публикация спрашивает так же: 22.10.2026 «Быстрый пост» сначала
+    # удалили как её дубль, потом вернули — а она в этом списке не значилась
+    # вовсе, хотя публикует в те же каналы тем же движком.
     "sendMassPublish": ["pickedIds.length", "askConfirm"],
     "submitAiComment": ["list.length", "acc_count", "askConfirm"],
     "submitBoost": ["_bScale", "askConfirm"],
@@ -124,6 +126,7 @@ def test_scale_is_worded_by_plural_helper():
     такие подстановки тоже считаем.
     """
     for fn, extra in (("submitProfileSetter", ["_setterScale"]),
+                      ("submitQuickPost", []),
                       ("sendMassPublish", []),
                       ("submitAiComment", []),
                       ("submitBoost", ["_bScale"])):
@@ -144,13 +147,16 @@ def test_scale_is_worded_by_plural_helper():
 def test_post_repeat_is_quoted_from_the_list_not_recomputed():
     """Пересчёт минут давал «каждые 1 дн.»; подпись списка читается как речь.
 
-    Урок переехал вместе с повтором: он жил на «Быстром посте» (_qpSel), а
-    теперь — на экране публикации, где повтор и стоит.
+    Урок проверяется на ОБОИХ экранах с повтором: на «Быстром посте», где он
+    был найден, и на единой публикации, куда повтор добавлен 22.10.2026.
+    Проверка, привязанная к одному из двух, однажды уже осталась ни о чём,
+    когда экран на несколько часов удалили.
     """
-    body = _fn_body("sendMassPublish")
-    assert "options[e.selectedIndex].textContent" in body, (
-        "подпись повтора снова не читается из самого списка")
-    assert "humanDur(" not in body, "срок снова пересчитывается из минут"
+    for fn in ("submitQuickPost", "sendMassPublish"):
+        body = _fn_body(fn)
+        assert "options[e.selectedIndex].textContent" in body, (
+            f"{fn}: подпись срока или повтора снова не читается из самого списка")
+        assert "humanDur(" not in body, f"{fn}: срок снова пересчитывается из минут"
 
 
 def test_already_careful_operations_stay_careful():
