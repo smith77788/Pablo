@@ -1004,32 +1004,6 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_toggle_favorite")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_add_to_group(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            gid = int(request.match_info['group_id'])
-            from services.contacts_hub.repository import add_contact_to_group
-            ok = await add_contact_to_group(pool, cid, gid)
-            return _json_resp({'ok': ok})
-        except Exception:
-            log.exception("uch_add_to_group")
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def uch_remove_from_group(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            gid = int(request.match_info['group_id'])
-            from services.contacts_hub.repository import remove_contact_from_group
-            ok = await remove_contact_from_group(pool, cid, gid)
-            return _json_resp({'ok': ok})
-        except Exception:
-            log.exception("uch_remove_from_group")
-            return _err(_INTERNAL_ERROR, 500)
-
     async def uch_contact_history(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -1821,8 +1795,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_put("/api/miniapp/uch/groups/{group_id}", uch_group_update)
     app.router.add_delete("/api/miniapp/uch/groups/{group_id}", uch_group_delete)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/favorite", uch_toggle_favorite)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_add_to_group)
-    app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_remove_from_group)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/history", uch_contact_history)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/invite_history", uch_contact_invite_history)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/opt_out", uch_contact_opt_out)

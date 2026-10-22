@@ -446,17 +446,12 @@ async def get_contact_groups(pool, owner_id) -> list:
     return [dict(r) for r in rows]
 
 
-async def add_contact_to_group(pool, contact_id, group_id) -> bool:
-    try:
-        await pool.execute('INSERT INTO contact_group_members (group_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', group_id, contact_id)
-        return True
-    except Exception:
-        return False
-
-
-async def remove_contact_from_group(pool, contact_id, group_id) -> bool:
-    result = await pool.execute('DELETE FROM contact_group_members WHERE group_id=$1 AND contact_id=$2', group_id, contact_id)
-    return result != 'DELETE 0'
+# Состав группы у ОДНОГО контакта отдельной функции больше не имеет: это была
+# вторая реализация той же операции, и владельца в её запросах не было вообще
+# (ручки .../contacts/{id}/groups/{gid} пускали к чужой группе по перебору
+# целого id). Единственный путь — bulk_ops_engine.bulk_add_to_group /
+# bulk_remove_from_group: владельца проверяет сам запрос, и карточка контакта
+# зовёт их же списком из одного контакта.
 
 
 async def get_contact_stats(pool, owner_id) -> dict:

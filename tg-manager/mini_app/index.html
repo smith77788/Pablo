@@ -17270,6 +17270,7 @@ async function openContactDetail(id) {
     const groups = d.groups||[];
     const enr = d.enriched||{};
     window._cdContact = c; window._cdSources = sources;  // для «Написать»/«Пригласить»
+    window._cdGroups = groups;  // для «Группы»: что отмечать галочкой
     const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'';
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
@@ -17323,12 +17324,56 @@ async function openContactDetail(id) {
       <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0 0 auto">🕸 Связи</button>
       <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0 0 auto">🔑 Личность</button>
       <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0 0 auto">💼 CRM</button>
+      <button class="btn btn-s" onclick="cdEditGroups()" style="flex:0 0 auto">📂 Группы</button>
     </div>`;
     txt('cdBody', html);
     if (c.telegram_user_id || c.username || (c.phones && c.phones.length)) {
       renderContactInviteLink(id);  // screens/contact_invite_link.js — своя секция
     }
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+}
+
+// Группы ОДНОГО контакта — из его карточки, а не только через выбор в списке.
+// Состав группы менялся лишь массовым действием: чтобы переложить одного
+// человека, владелец уходил из карточки в список, включал выбор, искал там же
+// открытый контакт и отмечал его. Отдельные ручки на один контакт в API были,
+// но их не звал никто, и владельца в их запросах не было вообще — они удалены.
+// Здесь зовётся тот же /uch/bulk/group списком из одного контакта: одна
+// реализация, хозяйская проверка в самом запросе.
+async function cdEditGroups() {
+  const id = CURRENT_CONTACT_ID;
+  if (!id) return;
+  let groups = [];
+  try {
+    const d = await api('/api/miniapp/uch/groups');
+    groups = d.groups || [];
+    CONTACT_GROUPS = groups;
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); return; }
+  if (!groups.length) {
+    toast('⚠️ Групп ещё нет — создайте первую');
+    openContactGroups();
+    return;
+  }
+  const mine = new Set((window._cdGroups||[]).map(g => String(g.id)));
+  const pick = await askChoice('Группы контакта', groups.map(g => ({
+    value: String(g.id),
+    label: (mine.has(String(g.id)) ? '✅ ' : '◻️ ') + (g.name||'Без названия'),
+    sub: mine.has(String(g.id)) ? 'нажмите, чтобы убрать из группы' : 'нажмите, чтобы добавить',
+  })));
+  if (!pick) return;
+  const remove = mine.has(String(pick));
+  try {
+    const r = await api('/api/miniapp/uch/bulk/group', {method:'POST',
+      body:JSON.stringify({contact_ids:[id], group_id:Number(pick),
+                           action: remove ? 'remove' : 'add'})});
+    // Сервер отвечает числом ИЗМЕНЁННЫХ строк: ноль — значит контакт уже был
+    // (или уже не был) в группе. Молчать нельзя, иначе кажется, что кнопка не
+    // сработала.
+    const n = Number(remove ? (r.removed||0) : (r.added||0));
+    toast(n ? (remove ? '📂 Убран из группы' : '📁 Добавлен в группу')
+            : (remove ? 'Контакт и так не был в этой группе' : 'Контакт уже в этой группе'));
+    openContactDetail(id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 // ── Действия по контакту: написать в ЛС / пригласить в чат ──────────────────

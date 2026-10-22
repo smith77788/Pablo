@@ -322,33 +322,13 @@ class TestRepositoryCRUD:
         result = await get_contact_groups(pool, 123)
         assert result == []
 
-    @pytest.mark.asyncio
-    async def test_add_contact_to_group_success(self):
-        from services.contacts_hub.repository import add_contact_to_group
-        pool = FakePool(execute_val="INSERT 0 1")
-        result = await add_contact_to_group(pool, "uuid-1", 1)
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_add_contact_to_group_error(self):
-        from services.contacts_hub.repository import add_contact_to_group
-        pool = FakePool(error=Exception("FK violation"))
-        result = await add_contact_to_group(pool, "uuid-1", 1)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_remove_contact_from_group_success(self):
-        from services.contacts_hub.repository import remove_contact_from_group
-        pool = FakePool(execute_val="DELETE 1")
-        result = await remove_contact_from_group(pool, "uuid-1", 1)
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_remove_contact_from_group_not_found(self):
-        from services.contacts_hub.repository import remove_contact_from_group
-        pool = FakePool(execute_val="DELETE 0")
-        result = await remove_contact_from_group(pool, "uuid-1", 1)
-        assert result is False
+    # Шесть проверок состава группы у одного контакта отсюда убраны вместе с
+    # кодом, который они проверяли: repository.add_contact_to_group /
+    # remove_contact_from_group были второй реализацией массового пути, и
+    # владельца в их запросах не было вообще. Единственный путь теперь
+    # bulk_ops_engine.bulk_add_to_group / bulk_remove_from_group; его поведение
+    # на живой базе — tests/test_group_membership_stays_in_the_owner_postgres.py,
+    # дверь в карточке — tests/test_contact_groups_reachable.py.
 
     @pytest.mark.asyncio
     async def test_get_contact_stats(self):

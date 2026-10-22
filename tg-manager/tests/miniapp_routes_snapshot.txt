@@ -42,7 +42,6 @@ DELETE /api/miniapp/semantic_memory/{bot_id}/user/{user_id}
 DELETE /api/miniapp/stars/experiment/{exp_id}
 DELETE /api/miniapp/template/{tpl_id}
 DELETE /api/miniapp/uch/contacts/{contact_id}
-DELETE /api/miniapp/uch/contacts/{contact_id}/groups/{group_id}
 DELETE /api/miniapp/uch/groups/{group_id}
 DELETE /api/miniapp/uch/intent/rule/{rule_id}
 DELETE /api/miniapp/uch/segments/{seg_id}
@@ -932,7 +931,6 @@ POST /api/miniapp/uch/contacts/{contact_id}/crm
 POST /api/miniapp/uch/contacts/{contact_id}/crm/activity
 POST /api/miniapp/uch/contacts/{contact_id}/crm/reminder
 POST /api/miniapp/uch/contacts/{contact_id}/favorite
-POST /api/miniapp/uch/contacts/{contact_id}/groups/{group_id}
 POST /api/miniapp/uch/contacts/{contact_id}/invite
 POST /api/miniapp/uch/contacts/{contact_id}/media
 POST /api/miniapp/uch/contacts/{contact_id}/message

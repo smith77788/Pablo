@@ -150,3 +150,50 @@ def test_askchoice_helper_exists():
     assert "function askChoice" in h
     body = _js_func("askChoice")
     assert "Отмена" in body, "из диалога выбора нет выхода"
+
+
+def test_the_card_can_change_the_groups_of_one_contact():
+    """Состав группы менялся ТОЛЬКО массовым действием над выделением.
+
+    Чтобы переложить одного человека, владелец уходил из его карточки в
+    список, включал режим выбора, снова искал там этот же контакт и отмечал
+    его. В API ручки на один контакт были
+    (POST/DELETE /uch/contacts/{id}/groups/{gid}), но их не звал никто — и
+    владельца в их запросах не было вообще, то есть по перебору целого id
+    группы можно было набить чужую группу. Они удалены, а карточка зовёт тот
+    же массовый путь списком из одного контакта.
+    """
+    assert "cdEditGroups()" in _html(), "в карточке нет входа в группы контакта"
+    body = _js_func("cdEditGroups")
+    assert "/api/miniapp/uch/bulk/group" in body, (
+        "карточка зовёт не тот путь, у которого проверен владелец")
+    assert "contact_ids:[id]" in body.replace(" ", ""), (
+        "в массовую ручку уходит не этот контакт")
+    assert "'remove'" in body and "'add'" in body, (
+        "из группы нельзя убрать — только добавить")
+    assert "и так не был" in body or "уже в этой группе" in body, (
+        "ноль изменённых строк читается как «кнопка не сработала»")
+    assert "openContactDetail(id)" in body, (
+        "карточка не перечитана: галочка осталась бы прежней")
+
+
+def test_there_is_one_implementation_of_group_membership():
+    """Вторая реализация той же операции — это вторая копия той же дыры.
+
+    repository.add_contact_to_group / remove_contact_from_group делали ту же
+    работу без владельца в запросе. Возврат любой из них вернёт и дыру:
+    починили бы снова только одну.
+    """
+    import services.contacts_hub.repository as repo
+
+    for name in ("add_contact_to_group", "remove_contact_from_group"):
+        assert not hasattr(repo, name), (
+            f"{name} вернулась в репозиторий: состав группы снова меняют два "
+            "разных запроса, и владельца проверяет только один")
+    uch = os.path.join(ROOT, "services", "mini_app_uch.py")
+    with open(uch, encoding="utf-8") as f:
+        src = f.read()
+    # Именно состав у одного контакта: /uch/groups/{group_id} — это сама
+    # группа (переименовать, удалить), она жива и нужна.
+    assert "contacts/{contact_id}/groups/" not in src, (
+        "ручки состава группы на один контакт снова зарегистрированы")
