@@ -56,14 +56,19 @@ def _subprocess_can_import(mod: str) -> bool:
         return False
 
 
-pytestmark = [
-    pytest.mark.skipif(not DSN, reason="нужен живой Postgres: задайте INFRAGRAM_TEST_DSN"),
-    pytest.mark.skipif(not _subprocess_can_import("telethon"),
-                       reason="стартовому подпроцессу нужен НАСТОЯЩИЙ telethon "
-                              "(in-process заглушка conftest в подпроцесс не попадает)"),
-    pytest.mark.skipif(not _subprocess_can_import("aiogram"),
-                       reason="стартовому подпроцессу нужен aiogram"),
-]
+# Требования висят на ФИКСТУРЕ подпроцесса, а не на файле: половина тестов
+# здесь только читает исходник main.py, и без живого Postgres они уходили в
+# skip вместе с остальными — то есть храповики на порядок старта не проверялись
+# нигде, кроме прогона с базой. Тест, который не выполняется, не охраняет
+# ничего.
+def _require_subprocess_env() -> None:
+    if not DSN:
+        pytest.skip("нужен живой Postgres: задайте INFRAGRAM_TEST_DSN")
+    if not _subprocess_can_import("telethon"):
+        pytest.skip("стартовому подпроцессу нужен НАСТОЯЩИЙ telethon "
+                    "(in-process заглушка conftest в подпроцесс не попадает)")
+    if not _subprocess_can_import("aiogram"):
+        pytest.skip("стартовому подпроцессу нужен aiogram")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -90,6 +95,7 @@ def _get(url: str, timeout: float = 5.0):
 @pytest.fixture(scope="module")
 def running_app():
     """Настоящий `python main.py` с нерабочим токеном Telegram."""
+    _require_subprocess_env()
     port = _free_port()
     env = dict(os.environ)
     env.update({
@@ -309,14 +315,26 @@ def test_startup_settings_do_not_kill_the_process():
 
 
 def test_polling_is_restarted_not_fatal():
-    """Поллинг обязан перезапускаться, а не ронять процесс."""
+    """Поллинг обязан перезапускаться, а не ронять процесс.
+
+    Окно берётся ПО ЦИКЛУ, а не по числу символов: счёт символов ломался от
+    одного добавленного комментария внутри вызова и давал ложное падение
+    («нет except CancelledError», хотя он на месте десятью строками ниже).
+    """
+    import ast as _ast
+
     src = _main_src()
-    i = src.index("await dp.start_polling(")
-    head = src[max(0, i - 1800):i]
-    assert "while True:" in head and "try:" in head, (
+    loop = next(
+        (n for n in _ast.walk(_ast.parse(src))
+         if isinstance(n, _ast.While) and any(
+             isinstance(c, _ast.Call) and isinstance(c.func, _ast.Attribute)
+             and c.func.attr == "start_polling" for c in _ast.walk(n))),
+        None)
+    assert loop is not None, (
         "start_polling снова голый: ошибка сети завершит процесс вместе с "
         "HTTP-сервером")
-    tail = src[i:i + 1200]
-    assert "except asyncio.CancelledError" in tail, (
+    body = _ast.get_source_segment(src, loop) or ""
+    assert "try:" in body, "поллинг не под try — сбой сети уронит процесс"
+    assert "except asyncio.CancelledError" in body, (
         "остановку процесса нельзя путать со сбоем — иначе завершение зависнет")
-    assert "asyncio.sleep" in tail, "перезапуск без паузы задолбит Telegram"
+    assert "asyncio.sleep" in body, "перезапуск без паузы задолбит Telegram"
