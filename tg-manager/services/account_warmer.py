@@ -1928,6 +1928,9 @@ async def _run_daily_warmup_impl(
     # внутри try → UnboundLocalError вместо честного обновления плана.
     actions_ok = 0
     actions_fail = 0
+    # По той же причине ДО try: остановку владельцем читает хвост после
+    # finally, и падение в окне подготовки дало бы здесь UnboundLocalError.
+    _owner_stop = False
     # Тоже ДО try: список найденных каналов читается в finally, а исключение в
     # окне подготовки (niche/health/_make_client) случается раньше, чем до него
     # дошло бы исполнение внутри try.
@@ -2004,7 +2007,43 @@ async def _run_daily_warmup_impl(
 
         await asyncio.wait_for(client.connect(), timeout=15)
 
+        # ОСТАНОВКА ВЛАДЕЛЬЦА СПРАШИВАЕТСЯ У БАЗЫ. Пауза плана (Mini App) и
+        # отмена (бот) меняли только строку, а цикл шагов её не читал: прогон
+        # догонял все действия дня — десятки обращений живым аккаунтом, тогда
+        # как владелец жмёт паузу именно потому, что аккаунт под риском. Шаги
+        # идут секундами-минутами друг от друга, поэтому один запрос на шаг
+        # (с окном 5с) ничего не стоит. Блип БД остановкой НЕ считаем: рвать
+        # прогон из-за сетевого сбоя дороже, чем заметить паузу на следующем
+        # шаге.
+        _plan_checked_at = 0.0
+        _plan_stopped = False
+
+        async def _plan_stopped_by_owner() -> bool:
+            nonlocal _plan_checked_at, _plan_stopped
+            _now = time.monotonic()
+            if _plan_stopped or _now - _plan_checked_at < 5.0:
+                return _plan_stopped
+            _plan_checked_at = _now
+            try:
+                _st = await pool.fetchval(
+                    "SELECT status FROM account_warmup_plans WHERE id=$1", plan_id)
+            except Exception as _e:
+                log.warning(
+                    "warmup: статус плана %s не прочитан (%s) — идём дальше по "
+                    "прошлому ответу", plan_id, _e)
+                return _plan_stopped
+            _plan_stopped = _st is None or str(_st) in (
+                "paused", "cancelled", "stopped")
+            return _plan_stopped
+
         for i in range(total_steps):
+            if await _plan_stopped_by_owner():
+                _owner_stop = True
+                log.info(
+                    "warmup: план %s остановлен владельцем — прекращаем на шаге "
+                    "%d из %d, сделано %d действий",
+                    plan_id, i + 1, total_steps, actions_ok)
+                break
             # Профильно-взвешенный выбор действия. Шаги сверх дневного бюджета
             # выбираются ТОЛЬКО из читающих.
             action = _profile_weighted_action(
@@ -2250,16 +2289,30 @@ async def _run_daily_warmup_impl(
         # план прогрева НИКОГДА не обновлялся: current_day и last_action_at стояли,
         # исключение глушил gather(return_exceptions=True) в цикле — снаружи это
         # «день 0/14, хотя действия успешные». Каст чинит обновление плана.
+        # ПАУЗУ НЕ ЗАТИРАЕМ. `status=$2` писался безусловно, а $2 здесь —
+        # 'active' или 'completed'. То есть план, поставленный на паузу ПО ХОДУ
+        # этого же прогона (`_pause_plan` на бане аккаунта или на spam-
+        # ограничении — «не добивать флагнутый аккаунт»), в конце прогона
+        # возвращался в 'active', и следующий круг снова грел забаненный
+        # аккаунт. Пауза и отмена владельца (Mini App, бот) отменялись так же.
+        # День и время пишем по-прежнему: прогресс — не статус.
         """UPDATE account_warmup_plans
-           SET current_day=$1, status=$2, last_action_at=NOW(),
+           SET current_day=$1,
+               status=CASE WHEN status IN ('paused','cancelled','stopped')
+                           THEN status ELSE $2 END,
+               last_action_at=NOW(),
                last_skip_reason=$4::text,
                last_skip_at=CASE WHEN $4::text IS NULL THEN NULL ELSE NOW() END,
-               completed_at=CASE WHEN $2='completed' THEN NOW() ELSE NULL END
+               completed_at=CASE WHEN $2='completed'
+                                  AND status NOT IN ('paused','cancelled','stopped')
+                                 THEN NOW() ELSE NULL END
            WHERE id=$3""",
         new_day,
         new_status,
         plan_id,
-        None if actions_ok > 0 else "all_failed",
+        # Остановленный прогон — не «все действия провалились»: жалобу на
+        # плане владелец прочитал бы как поломку, а он сам его и остановил.
+        None if (actions_ok > 0 or _owner_stop) else "all_failed",
     )
 
     if actions_ok > 0:
