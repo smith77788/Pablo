@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_files, api_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -90,8 +90,40 @@ def test_no_english_operation_labels():
     )
 
 
-def test_quick_post_label_agrees_with_any_number():
-    src = api_source()
-    assert 'f"Quick Post в {len(channel_ids)} каналов"' not in src
-    assert "каналов: {len(channel_ids)}" in src, (
-        "подпись снова склоняет «каналов» по числу, которое заранее неизвестно")
+# Существительные, которые в подписи операции склоняют по числу, известному
+# только в рантайме. «{len(ids)} аккаунтов» читается как «1 аккаунтов».
+_COUNTED_NOUNS = (
+    "аккаунтов", "получателей", "групп", "каналов", "ботов", "чатов",
+    "сообщений", "подписчиков", "контактов", "участников",
+)
+
+
+def test_no_label_declines_a_noun_by_a_number_it_does_not_know():
+    """Подпись обязана читаться при любом числе — и при единице тоже.
+
+    Раньше эта проверка стерегла один ярлык «Быстрого поста». Экран удалили
+    как дубль единой публикации, ярлык уехал вместе с ним, и проверка
+    осталась ни о чём: `assert "каналов: {len(channel_ids)}" in src` краснел
+    не потому, что подпись сломалась, а потому, что её больше нет. Тот же
+    дефект при этом спокойно жил в семи других подписях — «Проверка 1
+    аккаунтов», «Объявление в 1 групп». Теперь проверяются ВСЕ подписи.
+
+    Рабочая форма — двоеточие: «аккаунтов: 1» верно при любом числе, и именно
+    так была написана удалённая подпись.
+    """
+    import re
+
+    bad = []
+    for path in api_files():
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(r'label=f"([^"]{0,140})"', src):
+            label = m.group(1)
+            for noun in _COUNTED_NOUNS:
+                if re.search(r"\{[^}]+\}\s+" + noun + r"\b", label):
+                    ln = src[:m.start()].count("\n") + 1
+                    bad.append(f"services/{path.name}:{ln} → {label}")
+                    break
+    assert not bad, (
+        "подпись склоняет существительное по числу, которое заранее "
+        "неизвестно: при единице получится «1 аккаунтов». Пишите «аккаунтов: "
+        "{n}»:\n  " + "\n  ".join(bad))

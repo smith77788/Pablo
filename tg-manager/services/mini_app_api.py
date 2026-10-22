@@ -2057,7 +2057,7 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
         op_id = await _obus.submit(
             pool, uid, "check_accounts_health",
             {"account_ids": ids, "check_spambot": True},
-            total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов")
+            total_items=len(ids), label=f"Проверка · аккаунтов: {len(ids)}")
         return {"ok": True, "op_id": op_id,
                 "message": f"Проверка здоровья запущена для {len(ids)} аккаунтов"}
 
@@ -3340,68 +3340,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("reporter_submit uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    # ── Quick Post ─────────────────────────────────────────────────────────────
-
-    async def quick_post_submit(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        text = validate_string(body.get("text"), max_len=4096)
-        channel_ids = body.get("channel_ids") or []
-        if not text:
-            return _err("Заполните текст поста", 400)
-        if check_sql_suspicious(text):
-            return _err("Недопустимые символы в тексте поста")
-        if not channel_ids:
-            return _err("Выберите хотя бы один канал", 400)
-        # Validate channel IDs are integers
-        try:
-            channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
-        except (TypeError, ValueError):
-            return _err("Неверные идентификаторы каналов", 400)
-        try:
-            schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
-        except (TypeError, ValueError):
-            schedule_minutes = 0
-        # Autopost v2: рекуррентная публикация (0 = разовая).
-        try:
-            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
-        except (TypeError, ValueError):
-            _rmin = 0
-        try:
-            label = f"Быстрый пост · каналов: {len(channel_ids)}"
-            _pd = {"text": text, "channel_ids": channel_ids}
-            if _rmin > 0:
-                _pd["repeat_interval_min"] = _rmin
-                _rc = body.get("repeat_count")
-                if _rc is not None:
-                    try:
-                        _pd["repeat_count"] = max(1, min(int(_rc), 1000))
-                    except (TypeError, ValueError):
-                        pass
-            if schedule_minutes > 0:
-                from datetime import datetime as _dtm, timedelta as _tdl, timezone as _tzn
-                op_id = await _obus.submit(
-                    pool, uid, "quick_post", _pd,
-                    total_items=len(channel_ids), label="⏰ " + label,
-                    scheduled_for=_dtm.now(_tzn.utc) + _tdl(minutes=schedule_minutes))
-            else:
-                op_id = await _obus.submit(
-                    pool, uid, "quick_post", _pd,
-                    total_items=len(channel_ids), label=label)
-            return _json_resp({"ok": True, "op_id": op_id, "label": label, "scheduled_minutes": schedule_minutes})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("quick_post_submit uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
     # ── SEO Overview ───────────────────────────────────────────────────────────
 
 
@@ -3735,7 +3673,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, op_type,
                 {"account_ids": acc_ids},
                 total_items=len(acc_ids),
-                label=f"Импорт {what} с {len(acc_ids)} аккаунтов",
+                label=f"Импорт {what} · аккаунтов: {len(acc_ids)}",
             )
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
@@ -4128,7 +4066,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                  "text": text, "delay": delay,
                  "per_account_cap": per_account_cap},
                 total_items=len(usernames),
-                label=f"Рассылка ЛС: {len(usernames)} получателей × {len(acc_ids)} акк.",
+                label=f"Рассылка ЛС · получателей: {len(usernames)} × акк.: {len(acc_ids)}",
             )
             return _json_resp({"ok": True, "op_id": op_id,
                                "recipients": len(usernames), "accounts": len(acc_ids),
@@ -4353,7 +4291,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, "group_announce",
                 {"acc_id": int(acc_id), "text": text},
                 total_items=int(cnt),
-                label=f"Объявление в {cnt} групп аккаунта #{acc_id}",
+                label=f"Объявление · групп: {cnt} · аккаунт #{acc_id}",
             )
             return _json_resp({"ok": True, "op_id": op_id, "groups": int(cnt)})
         except PermissionError as exc:
@@ -6321,6 +6259,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         params = {"text": text, "delay": delay, "owner_id": uid}
         if channel_ids:
             params["channel_ids"] = channel_ids
+        # Рекуррентная публикация (0 = разовая). Умел её только «Быстрый пост»,
+        # слитый в этот экран; при слиянии повтор потерялся, хотя воркер его
+        # поддерживает — после успешного прогона сам ставит следующий запуск.
+        try:
+            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            _rmin = 0
+        if _rmin > 0:
+            params["repeat_interval_min"] = _rmin
+            _rc = body.get("repeat_count")
+            if _rc is not None:
+                try:
+                    params["repeat_count"] = max(1, min(int(_rc), 1000))
+                except (TypeError, ValueError):
+                    pass
         # Рубрика поста (контент-микс редактора): только из рубрик владельца,
         # иначе история заполнится опечатками и микс перестанет что-то значить.
         _pillar = str(body.get("pillar") or "").strip()
@@ -8028,8 +7981,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/ai_comment", ai_comment_submit)
     app.router.add_post("/api/miniapp/compliance_scan", compliance_scan_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
-    # Quick Post
-    app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
     # SEO
     app.router.add_get("/api/miniapp/ai/status", ai_status)
     app.router.add_post("/api/miniapp/ai/test", ai_test)

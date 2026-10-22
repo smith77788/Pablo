@@ -800,7 +800,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 pool, uid, "bulk_post_chans",
                 {"acc_id": int(acc_id), "channel_ids": channel_ids, "text": text},
                 total_items=len(channel_ids),
-                label=f"Пост в {len(channel_ids)} каналов аккаунта #{acc_id}",
+                label=f"Пост · каналов: {len(channel_ids)} · аккаунт #{acc_id}",
             )
             return _json_resp({"ok": True, "op_id": op_id, "channels": len(channel_ids)})
         except PermissionError as exc:

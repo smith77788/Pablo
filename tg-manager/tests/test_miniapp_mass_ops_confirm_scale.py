@@ -29,7 +29,9 @@ SRC = miniapp_source()
 # Операция -> что обязано прозвучать в вопросе.
 MUST_ASK = {
     "submitProfileSetter": ["_setterScale", "askConfirm"],
-    "submitQuickPost": ["QUICK_POST_SELECTED.size", "askConfirm"],
+    # «Быстрый пост» удалён 22.10.2026 как дубль единой публикации; его место
+    # в этом списке занял тот экран, куда публикация переехала.
+    "sendMassPublish": ["pickedIds.length", "askConfirm"],
     "submitAiComment": ["list.length", "acc_count", "askConfirm"],
     "submitBoost": ["_bScale", "askConfirm"],
 }
@@ -84,7 +86,7 @@ def test_refusal_stops_the_operation():
     являясь."""
     for fn in MUST_ASK:
         body = _fn_body(fn)
-        m = re.search(r"if\s*\(\s*!\s*await askConfirm\(", body)
+        m = re.search(r"if\s*\(\s*!\s*\(?\s*await askConfirm\(", body)
         assert m, f"{fn}: результат вопроса не проверяется — «Отмена» ничего не остановит"
         assert "return" in body[m.start():m.start() + 800], f"{fn}: отказ ничего не останавливает"
 
@@ -122,7 +124,7 @@ def test_scale_is_worded_by_plural_helper():
     такие подстановки тоже считаем.
     """
     for fn, extra in (("submitProfileSetter", ["_setterScale"]),
-                      ("submitQuickPost", []),
+                      ("sendMassPublish", []),
                       ("submitAiComment", []),
                       ("submitBoost", ["_bScale"])):
         body = _fn_body(fn)
@@ -139,11 +141,16 @@ def test_scale_is_worded_by_plural_helper():
             f"{fn}: чисел {numbers}, согласованных форм {forms} — «3 каналах» проедет незамеченным")
 
 
-def test_post_schedule_is_quoted_from_the_list_not_recomputed():
-    """Пересчёт минут давал «каждые 1 дн.»; подпись списка читается как речь."""
-    body = _fn_body("submitQuickPost")
-    assert "_qpSel('qpSchedule')" in body and "_qpSel('qpRepeat')" in body
-    assert "humanDur(schedMin" not in body, "срок снова пересчитывается из минут"
+def test_post_repeat_is_quoted_from_the_list_not_recomputed():
+    """Пересчёт минут давал «каждые 1 дн.»; подпись списка читается как речь.
+
+    Урок переехал вместе с повтором: он жил на «Быстром посте» (_qpSel), а
+    теперь — на экране публикации, где повтор и стоит.
+    """
+    body = _fn_body("sendMassPublish")
+    assert "options[e.selectedIndex].textContent" in body, (
+        "подпись повтора снова не читается из самого списка")
+    assert "humanDur(" not in body, "срок снова пересчитывается из минут"
 
 
 def test_already_careful_operations_stay_careful():

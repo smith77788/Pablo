@@ -4675,6 +4675,10 @@ def _build_dispatch() -> dict:
         "clone_adapt": _exec_clone_adapt,
         "niche_growth_post": _exec_niche_growth_post,
         # quick_post переиспользует mass_publish: тот уже умеет явный channel_ids.
+        # Ручку /api/miniapp/quick_post сняли 22.10.2026 вместе с экраном-дублём:
+        # публикация в выбранные каналы (и повтор) живёт в mass_publish. Тип
+        # оставлен для строк, которые уже лежат в очереди, в том числе
+        # рекуррентных: следующий круг ставится с тем же op_type.
         "quick_post": _exec_mass_publish,
         # ── Разведка, жалобы, подарки ─────────────────────────────────────────
         "strike": _exec_strike,

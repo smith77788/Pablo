@@ -4368,6 +4368,20 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="datetime-local" id="mpSchedule">
         <div class="field-note">Пусто = опубликовать сейчас. Время — ваше локальное. Запланированное видно и отменяемо в «Очереди операций» до срабатывания.</div>
       </div>
+      <!-- Повтор вернулся сюда вместе с удалённым экраном «Быстрый пост»:
+           он был слит в эту публикацию, но повтор по дороге потерялся, хотя
+           воркер его умеет (op_worker переочередит следующий запуск сам). -->
+      <div class="field">
+        <label>🔁 Повторять (необязательно)</label>
+        <select id="mpRepeat">
+          <option value="0" selected>Без повтора</option>
+          <option value="360">Каждые 6 часов</option>
+          <option value="720">Каждые 12 часов</option>
+          <option value="1440">Каждый день</option>
+          <option value="10080">Каждую неделю</option>
+        </select>
+        <div class="field-note">Повтор уходит в ту же очередь: следующий запуск ставится после успешного предыдущего. Остановить — в «Очереди операций»</div>
+      </div>
       <!-- Совет редактора (screens/editorial.js): повтор недавнего поста и
            правила канала. Появляется на подтверждении, публикацию не блокирует. -->
       <div id="mpEditorial" style="margin-bottom:10px;font-size:13px"></div>
@@ -13923,6 +13937,15 @@ async function sendMassPublish() {
     if (_d.getTime() <= Date.now()) { errEl.textContent='Время публикации должно быть в будущем'; errEl.style.display='block'; return; }
     scheduled_for = _d.toISOString();
   }
+  // Повтор: минуты в бэк, а в подтверждение — подпись самого варианта
+  // («каждый день»): пересчёт из минут уже давал однажды «каждые 1 дн.».
+  const _repMin = parseInt(document.getElementById('mpRepeat')?.value || '0') || 0;
+  const _repLbl = (() => {
+    const e = document.getElementById('mpRepeat');
+    return (_repMin > 0 && e && e.selectedIndex >= 0)
+      ? (e.options[e.selectedIndex].textContent || '').trim().toLowerCase() : '';
+  })();
+  const _repNote = _repMin > 0 ? '\n\nПовтор: ' + _repLbl + '. Останавливается в «Очереди операций».' : '';
   // Совет редактора: повтор недавнего поста и правила канала. Это подсказка,
   // а не запрет — она дописывается в подтверждение, решает человек.
   const _edBox = document.getElementById('mpEditorial');
@@ -13953,7 +13976,7 @@ async function sendMassPublish() {
     const when = scheduled_for
       ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU')+'. До этого операцию можно отменить в «Очереди операций».'
       : '\n\nПосле старта публикацию нельзя отменить.';
-    if (!(await askConfirm(edNote+'Опубликовать в '+pickedIds.length+' '+plural(pickedIds.length,'выбранный канал','выбранных канала','выбранных каналов')+'?'+when))) return;
+    if (!(await askConfirm(edNote+'Опубликовать в '+num(pickedIds.length)+' '+plural(pickedIds.length,'выбранный канал','выбранных канала','выбранных каналов')+'?'+when+_repNote))) return;
     channel_ids = pickedIds;
   } else if (canary > 0) {
     let targets;
@@ -13978,18 +14001,18 @@ async function sendMassPublish() {
       return;
     }
     if (!(await askConfirm(edNote+'Тест-публикация в '+ids.length+' '+plural(ids.length,'канал','канала','каналов')+':\n\n'
-        + _mpChList(sample, 6) + '\n\nОстальные '+(MP_TOTAL-ids.length)+' не затронуты. Отменить публикацию после старта нельзя.'))) return;
+        + _mpChList(sample, 6) + '\n\nОстальные '+(MP_TOTAL-ids.length)+' не затронуты. Отменить публикацию после старта нельзя.'+_repNote))) return;
     channel_ids = ids;
   } else {
     const whereTo = (MP_TOTAL != null && MP_TOTAL > 0)
-      ? 'во все ваши каналы — их '+MP_TOTAL
+      ? 'во все ваши каналы — их '+num(MP_TOTAL)+' '+plural(MP_TOTAL,'канал','канала','каналов')
       : 'во ВСЕ ваши каналы (узнать их число не удалось)';
     const when = scheduled_for
       ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU')+'. До этого момента операцию можно отменить в «Очереди операций».'
       : '\n\nПосле старта публикацию нельзя отменить. Совет: сначала протестируйте на нескольких.';
     // Отложенная публикация раньше уходила вообще без подтверждения: достаточно
     // было заполнить дату — и пост уезжал во все каналы с одного нажатия.
-    if (!(await askConfirm(edNote+'Опубликовать '+whereTo+'?'+when))) return;
+    if (!(await askConfirm(edNote+'Опубликовать '+whereTo+'?'+when+_repNote))) return;
   }
   const btn = document.getElementById('mpBtn');
   btn.disabled=true; btn.textContent='⏳ Добавление в очередь...';
@@ -13998,14 +14021,17 @@ async function sendMassPublish() {
     if (channel_ids) payload.channel_ids = channel_ids;
     { const _p=document.getElementById('mpPillar'); if (_p && _p.value) payload.pillar = _p.value; }
     if (scheduled_for) payload.scheduled_for = scheduled_for;
+    if (_repMin > 0) payload.repeat_interval_min = _repMin;
     const d = await api('/api/miniapp/mass_publish', {method:'POST', body: JSON.stringify(payload)});
     document.getElementById('mpText').value='';
     document.getElementById('mpLen').textContent='0';
     { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
+    { const _r=document.getElementById('mpRepeat'); if(_r) _r.value='0'; }
     { const _e=document.getElementById('mpEditorial'); if(_e) _e.innerHTML=''; }
     tg.HapticFeedback?.notificationOccurred('success');
     const _when = scheduled_for ? (' на '+new Date(scheduled_for).toLocaleString('ru-RU')) : '';
-    toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+d.total+' '+plural(d.total,'канал','канала','каналов')+' · операция #'+d.op_id);
+    const _repToast = _repMin > 0 ? ' · 🔁 ' + _repLbl : '';
+    toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+d.total+' '+plural(d.total,'канал','канала','каналов')+' · операция #'+d.op_id+_repToast);
     { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
     renderMpCanaryNote();
     loadMpOps();

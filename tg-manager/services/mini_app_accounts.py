@@ -467,7 +467,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 _params["cross_owner"] = True
             op_id = await _obus.submit(
                 pool, uid, "check_accounts_health", _params,
-                total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов",
+                total_items=len(ids), label=f"Проверка · аккаунтов: {len(ids)}",
             )
             return _json_resp({"ok": True, "op_id": op_id, "count": len(ids)})
         except PermissionError as exc:
@@ -603,7 +603,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     _params["cross_owner"] = True
                 op_id = await _obus.submit(
                     pool, uid, "check_accounts_health", _params,
-                    total_items=n, label=f"Проверка {n} аккаунтов")
+                    total_items=n, label=f"Проверка · аккаунтов: {n}")
                 return _json_resp({"ok": True, "op_id": op_id, "count": n})
             if op == "scan":
                 op_id = await _obus.submit(

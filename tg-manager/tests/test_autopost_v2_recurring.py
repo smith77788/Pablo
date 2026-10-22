@@ -49,17 +49,43 @@ def test_op_worker_reschedules_on_done():
 
 
 def test_endpoints_accept_repeat_interval():
-    src = api_source()
-    # оба постинг-эндпойнта принимают repeat_interval_min
-    assert src.count("repeat_interval_min") >= 2
-    assert '"repeat_interval_min"' in src or "'repeat_interval_min'" in src
+    """Ручка обязана ПРОЧИТАТЬ повтор и положить его в params операции.
+
+    Счёт вхождений по всему слою мини-аппа («встречается ли слово хотя бы
+    дважды») зеленел бы и тогда, когда одна из ручек повтор читает, а в
+    params не кладёт, и расписание никогда не продлевалось бы. Поэтому
+    границы функции берутся точно.
+    """
+    from tests.miniapp_source import py_function
+
+    for module, fn in (("services/mini_app_api.py", "mass_publish"),
+                       ("services/mini_app_broadcast.py", "create_broadcast")):
+        body = py_function(module, fn)
+        assert 'body.get("repeat_interval_min")' in body, (
+            f"{fn} не читает repeat_interval_min — повтор с экрана уходит в никуда")
+        assert '["repeat_interval_min"] = _rmin' in body, (
+            f"{fn} читает повтор, но не кладёт его в params операции: "
+            "воркеру нечего переочереживать")
 
 
 def test_ui_has_repeat_control():
+    """Повтор должен быть НАЖИМАЕМ, а не только поддержан воркером.
+
+    22.10.2026: экран «Быстрый пост» удалён как дубль единой публикации, и
+    вместе с ним уехало единственное поле повтора — `id="qpRepeat"`. Воркер,
+    ручка и этот файл остались, рекуррентную публикацию в свои каналы завести
+    стало нельзя, и проверка покраснела ровно на этом. Контрол вернулся на
+    экран публикации (`id="mpRepeat"`), откуда публикация и уходит.
+    """
     from pathlib import Path
     html = (Path(op_worker.__file__).resolve().parents[1] / "mini_app" / "index.html").read_text(encoding="utf-8")
-    assert 'id="qpRepeat"' in html
-    assert "payload.repeat_interval_min=repMin" in html
+    assert 'id="mpRepeat"' in html, "поле повтора снова некуда нажать"
+    assert "payload.repeat_interval_min = _repMin" in html, (
+        "поле есть, а в бэк повтор не уходит")
+    # Рекуррентная публикация не должна выглядеть разовой: подтверждение и тост
+    # обязаны назвать повтор словами.
+    assert "_repNote" in html, "подтверждение не называет повтор"
+    assert "_repToast" in html, "тост не говорит, что публикация рекуррентная"
 
 
 def test_partial_iteration_keeps_schedule_alive():
