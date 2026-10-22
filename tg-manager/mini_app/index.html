@@ -17850,13 +17850,36 @@ async function openContactVersions(id) {
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
 }
 
+// Откат перезаписывает карточку и отменяется только ещё одним откатом.
+// Вопрос «Откатить к версии 3?» — это подпись не глядя: владелец не знал, что
+// потеряет. Сначала спрашиваем у сервера, ЧТО изменится, и называем поля.
 async function rollbackVersion(id, vnum) {
-  if (!await askConfirm('Откатить к версии '+vnum+'?')) return;
+  let prev;
+  try {
+    prev = await api('/api/miniapp/uch/contacts/'+id+'/rollback/'+vnum);
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось посмотреть, что изменится')); return; }
+  const ch = (prev && prev.changes) || [];
+  if (!ch.length) { toast('ℹ️ Версия v'+vnum+' совпадает с текущей карточкой — менять нечего'); return; }
+  const lines = ch.map(c => '• ' + c.label + ': ' + verVal(c.from) + ' → ' + verVal(c.to));
+  if (!await askConfirm(
+      'Откат к версии ' + vnum + ' изменит ' + num(ch.length) + ' '
+      + plural(ch.length, 'поле', 'поля', 'полей') + ':\n\n' + lines.join('\n')
+      + '\n\nТекущее состояние сохранится отдельной версией, так что откат можно отменить.')) return;
   try {
     await api('/api/miniapp/uch/contacts/'+id+'/rollback/'+vnum, {method:'POST'});
     toast('✅ Контакт откачен к v'+vnum);
     openContactDetail(id);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+// Значение поля одной строкой для вопроса об откате. Пустое поле называется
+// словом: «—» в списке «было → стало» читается как потерянная строка.
+function verVal(v) {
+  if (v === null || v === undefined || v === '' ) return 'пусто';
+  if (Array.isArray(v)) return v.length ? v.join(', ') : 'пусто';
+  if (typeof v === 'object') { try { v = JSON.stringify(v); } catch(_) { v = String(v); } }
+  v = String(v);
+  return v.length > 60 ? v.slice(0, 60) + '…' : v;
 }
 
 // ── Типы связи между контактами: подписи и пояснения ────────────────────────

@@ -13,6 +13,18 @@
 
 Проверяется структура, а не формулировка: перед запросом к серверу стоит
 `await askConfirm(...)`, и в его текст попадает число целей.
+
+22.10.2026 сюда добавлен откат версии контакта (`rollbackVersion`), и сам
+гейт на нём подтянули дважды — обе дыры нашлись обратным контролем, а не
+чтением:
+
+* позиция запроса бралась по ПЕРВОМУ вхождению пути, а функция имеет право
+  сходить на тот же путь до вопроса, чтобы узнать, о чём спрашивать (откат
+  сначала запрашивает предпросмотр). Теперь ищется изменяющий вызов —
+  `_mutating`;
+* `plural(ch.length, …)` возвращает СЛОВО, а не число, и вопрос «изменит
+  поля:» проезжал проверку «названо ли число». Аргументы plural( … ) из
+  текста теперь вычёркиваются до поиска.
 """
 from __future__ import annotations
 
@@ -29,7 +41,26 @@ SRC = miniapp_source()
 GUARDED = {
     "submitAccProfile": ("/api/miniapp/accounts/mass", "_massSelCount()"),
     "submitAccContMsg": ("/api/miniapp/dm/adhoc_send", "usernames.length"),
+    # Откат версии контакта перезаписывает карточку целиком, а спрашивал
+    # «Откатить к версии 3?» — число версии вместо числа того, что исчезнет.
+    "rollbackVersion": ("/api/miniapp/uch/contacts/", "ch.length"),
 }
+
+
+def _mutating(body: str, endpoint: str) -> int:
+    """Позиция ИЗМЕНЯЮЩЕГО запроса к эндпойнту, а не первого упоминания пути.
+
+    Функция имеет право сходить на тот же путь ДО вопроса — чтобы узнать, о
+    чём спрашивать: `rollbackVersion` сначала запрашивает предпросмотр
+    (GET), потом спрашивает, потом перезаписывает (POST). Сравнение с первым
+    вхождением пути объявляло бы такую функцию нарушителем, а значит толкало
+    бы к обратному — спрашивать вслепую.
+    """
+    for m in re.finditer(re.escape(endpoint), body):
+        if "method:'POST'" in body[m.end(): m.end() + 200] or \
+           "method: 'POST'" in body[m.end(): m.end() + 200]:
+            return m.start()
+    return body.find(endpoint)
 
 
 def _body(name: str) -> str:
@@ -79,7 +110,7 @@ def test_confirm_precedes_the_request():
     bad = []
     for name, (endpoint, _) in GUARDED.items():
         b = _body(name)
-        ci, ei = b.find("askConfirm("), b.find(endpoint)
+        ci, ei = b.find("askConfirm("), _mutating(b, endpoint)
         if not re.search(r"if\s*\(\s*!\s*await\s+askConfirm\(", b):
             bad.append(f"{name}(): результат askConfirm не проверяется — отказ не остановит запуск")
         elif ci > ei:
@@ -93,11 +124,16 @@ def test_confirm_names_the_scale():
     for name, (_, counter) in GUARDED.items():
         b = _body(name)
         arg = _confirm_arg(b)
+        # Склонение не заменяет число: `plural(ch.length, …)` возвращает СЛОВО
+        # («поля»), и вопрос «изменит поля:» проезжал проверку, не называя,
+        # сколько их. Поэтому аргументы plural( … ) из текста вычёркиваем и
+        # ищем число в том, что останется.
+        arg_wo_plural = re.sub(r"plural\([^)]*\)", "", arg)
         # число попадает в текст либо прямо, либо через переменную, посчитанную выше
-        direct = counter in arg
+        direct = counter in arg_wo_plural
         via_var = False
-        for v in set(re.findall(r"\+\s*([A-Za-z_]\w*)\s*\+", arg)) | set(
-            re.findall(r"\$\{\s*([A-Za-z_]\w*)", arg)
+        for v in set(re.findall(r"\+\s*([A-Za-z_]\w*)\s*\+", arg_wo_plural)) | set(
+            re.findall(r"\$\{\s*([A-Za-z_]\w*)", arg_wo_plural)
         ):
             dm = re.search(r"\b(?:const|let|var)\s+" + v + r"\s*=([^;]{0,200});", b[: b.find("askConfirm(")])
             if dm and re.escape(counter).replace(r"\(", "(").replace(r"\)", ")") in dm.group(1):

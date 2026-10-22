@@ -1105,6 +1105,27 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_contact_versions")
             return _err(_INTERNAL_ERROR, 500)
 
+    async def uch_rollback_preview(request: web.Request) -> web.Response:
+        """Что именно затрёт откат — ДО того, как владелец его подтвердит.
+
+        Экран спрашивал «Откатить к версии 3?» и больше ничего: необратимая
+        перезапись карточки предлагалась к подписи вслепую.
+        """
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            vnum = int(request.match_info['version_num'])
+            from services.contacts_hub.versioning_engine import rollback_preview
+            prev = await rollback_preview(pool, cid, uid, vnum)
+            if prev is None: return _err("Версия не найдена", 404)
+            return _json_resp(prev)
+        except ValueError:
+            return _err("Неверный номер версии", 400)
+        except Exception:
+            log.exception("uch_rollback_preview")
+            return _err(_INTERNAL_ERROR, 500)
+
     async def uch_rollback(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -1784,6 +1805,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/opt_out", uch_contact_opt_out)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/allow_invite", uch_contact_allow_invite)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/versions", uch_contact_versions)
+    # Тот же путь: GET — что изменится, POST — изменить.
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback_preview)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/timeline", uch_timeline)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/relationships", uch_relationships)

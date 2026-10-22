@@ -140,6 +140,49 @@ async def get_version_detail(pool, version_id: int, owner_id: int) -> Optional[d
     return d
 
 
+async def rollback_preview(pool, contact_id: str, owner_id: int,
+                           version_num: int) -> Optional[dict]:
+    """Что именно изменит откат к версии N — против ТЕКУЩЕЙ карточки.
+
+    `get_version_diff` отвечает на другой вопрос: что изменилось В ТОТ момент
+    (версия N против N-1). Перед необратимой перезаписью владельцу нужен не
+    этот ответ, а «что я сейчас потеряю»: экран спрашивал «Откатить к версии
+    3?» и больше ничего, то есть предлагал подписать не глядя.
+
+    Возвращает None, если такой версии нет. Пустой `changes` — законный
+    ответ: откат к версии, совпадающей с текущим состоянием, не изменит
+    ничего, и сказать это честнее, чем молча переписать строку.
+    """
+    ver = await pool.fetchrow(
+        'SELECT snapshot FROM contact_versions '
+        'WHERE contact_id=$1 AND owner_id=$2 AND version_num=$3',
+        contact_id, owner_id, version_num)
+    if not ver:
+        return None
+    snapshot = ver['snapshot']
+    if isinstance(snapshot, str):
+        snapshot = json.loads(snapshot)
+    current = await pool.fetchrow(
+        'SELECT * FROM unified_contacts WHERE id=$1 AND owner_id=$2',
+        contact_id, owner_id)
+    now = snapshot_of(dict(current)) if current else {}
+    changes = []
+    # Сравниваем ровно теми же правилами, что и правка карточки: иначе jsonb,
+    # пришедший из базы строкой, выглядел бы изменением против того же списка.
+    for field in RESTORABLE_FIELDS:
+        if field not in snapshot:
+            continue
+        if _norm(field, snapshot[field]) == _norm(field, now.get(field)):
+            continue
+        changes.append({
+            'field': field,
+            'label': FIELD_LABELS.get(field, field),
+            'from': now.get(field),
+            'to': snapshot[field],
+        })
+    return {'version_num': version_num, 'changes': changes, 'total': len(changes)}
+
+
 async def rollback_to_version(pool, contact_id: str, owner_id: int, version_num: int) -> bool:
     ver = await pool.fetchrow(
         'SELECT snapshot FROM contact_versions WHERE contact_id=$1 AND owner_id=$2 AND version_num=$3',

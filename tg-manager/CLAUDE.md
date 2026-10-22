@@ -154,9 +154,14 @@
 - **Схемные проверки можно гонять локально, а не только в CI:** в контейнере
   есть PostgreSQL 16 (`/usr/lib/postgresql/16/bin`). `initdb` от root не
   работает — поднимать из-под пользователя `postgres` в каталоге, который ему
-  доступен (например `/var/lib/postgresql/itest`), слушать 127.0.0.1:5432
-  (asyncpg игнорирует `?host=` в DSN) и запускать с
-  `INFRAGRAM_TEST_DSN=postgresql://postgres@127.0.0.1:5432/infragram_test`.
+  доступен (например `/var/lib/postgresql/itest`), и дать
+  `INFRAGRAM_TEST_DSN`. Годится и unix-сокет, и TCP, но у DSN есть ловушка,
+  проверенная экспериментом (asyncpg 0.29): если в netloc стоит хост, то
+  `?host=` и `?port=` ИГНОРИРУЮТСЯ молча — `postgresql://postgres@localhost/db
+  ?host=/nonexistent&port=5555` спокойно подключается по TCP на 5432. Писать
+  надо без хоста в netloc: `postgresql://postgres@/db?host=<каталог
+  сокета>&port=<порт>` — такой DSN честно падает FileNotFoundError, если
+  сокета нет. Либо просто `postgresql://postgres@127.0.0.1:5432/db`.
   Схему накатывает фикстура в `tests/conftest.py`. Без этого `tests/
   *_postgres.py` молча скипаются, и ошибка вроде `$1::bigint[]` против
   колонки `uuid` доезжает до CI — пересчёт доверия так падал ВСЕГДА.
