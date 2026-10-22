@@ -17,6 +17,13 @@ bulk_ops_engine.bulk_merge (пакетное слияние с экрана ду
 сегодня уже обожглись на пересчёте доверия: все проверки текста были
 зелёными, пока Postgres отбивал запрос целиком.
 
+ОБРАТНЫЕ КОНТРОЛИ. (1) absorbed_fields, возвращающий пустой словарь, то есть
+прежнее поведение, — краснеют три проверки: данные поглощённого контакта,
+версия перед слиянием, пакетное слияние. (2) Предпросмотр со своими
+правилами (как было у покойного get_merge_preview: company/position/notes и
+ничего больше) — краснеют обе проверки предпросмотра: он умалчивает о
+телефонах и тегах и обещает перенос туда, где слияние ничего не меняет.
+
 КАК ЗАПУСТИТЬ — см. докстринг tests/test_invite_e2e_postgres.py; переменная
 та же, INFRAGRAM_TEST_DSN.
 """
@@ -191,3 +198,60 @@ def test_bulk_merge_absorbs_too(pool):
         emails = json.loads(emails)
     assert sorted(emails) == ["p@one.ru", "p@two.ru"], (
         f"пакетное слияние снова теряет поля: {emails}")
+
+
+def test_the_preview_promises_exactly_what_the_merge_does(pool):
+    """Предпросмотр и слияние обязаны совпадать до значения.
+
+    Не «похожи», а совпадают: предпросмотр показывает ровно то, что потом
+    окажется в карточке. Проверяем это единственным честным способом — сначала
+    спрашиваем предпросмотр, потом сливаем и сравниваем с базой.
+    """
+    from services.contacts_hub.merge_engine import manual_merge, merge_preview
+
+    a = _mk_contact(pool, OWNER, first_name="Анна", phones=["+70000000011"])
+    b = _mk_contact(pool, OWNER, first_name="Аня", phones=["+70000000012"],
+                    company="ООО Вектор", position="директор", tags=["клиент"])
+    prev = _run(merge_preview(pool, str(a), str(b), OWNER))
+    assert 'error' not in prev, prev
+    promised = {c['field']: c['to'] for c in prev['taken']}
+    assert promised, "предпросмотр обещает, что не переедет ничего"
+    assert prev['secondary'], "не сказано, какая именно запись исчезнет"
+    # Полнота, а не только правдивость: умолчать о переезжающем поле — тот же
+    # обман, что назвать несуществующее. Телефон второй записи переедет
+    # обязательно, значит обязан быть и в обещании.
+    assert 'phones' in promised, (
+        f"предпросмотр умолчал о телефонах: {sorted(promised)}")
+    assert 'tags' in promised, f"предпросмотр умолчал о тегах: {sorted(promised)}"
+
+    _run(manual_merge(pool, str(a), str(b), OWNER))
+    row = _row(pool, a)
+    for field, value in promised.items():
+        actual = row[field]
+        if isinstance(actual, str) and field in ('phones', 'emails', 'websites',
+                                                 'addresses', 'custom_fields'):
+            actual = json.loads(actual)
+        if isinstance(actual, (list, tuple)):
+            actual = list(actual)
+        assert actual == value, (
+            f"предпросмотр обещал {field}={value!r}, а в карточке {actual!r}")
+
+
+def test_the_preview_says_nothing_moves_when_nothing_does(pool):
+    from services.contacts_hub.merge_engine import merge_preview
+
+    a = _mk_contact(pool, OWNER, first_name="Анна", company="ООО Вектор")
+    b = _mk_contact(pool, OWNER, first_name="Аня", company="Другая")
+    prev = _run(merge_preview(pool, str(a), str(b), OWNER))
+    assert prev['taken'] == [], (
+        "предпросмотр обещает перенос в заполненные поля — слияние так не делает")
+
+
+def test_the_preview_refuses_a_stranger(pool):
+    from services.contacts_hub.merge_engine import merge_preview
+
+    mine = _mk_contact(pool, OWNER, first_name="Мой")
+    theirs = _mk_contact(pool, STRANGER, first_name="Чужой", company="Секрет")
+    prev = _run(merge_preview(pool, str(mine), str(theirs), OWNER))
+    assert prev.get('error') == 'secondary_not_found', (
+        f"предпросмотр показал поля чужого контакта: {prev}")

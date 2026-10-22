@@ -1318,6 +1318,29 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_duplicates")
             return _err(_INTERNAL_ERROR, 500)
 
+    async def uch_merge_preview(request: web.Request) -> web.Response:
+        """Что переедет при слиянии — ДО подтверждения.
+
+        Тот же путь, что и само слияние: GET — что будет, POST — сделать.
+        Считает теми же правилами, что и слияние, поэтому разойтись с ним
+        не может.
+        """
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            primary_id = (request.query.get('primary_id') or '').strip()
+            secondary_id = (request.query.get('secondary_id') or '').strip()
+            if not primary_id or not secondary_id:
+                return _err("Нужны основной и дополнительный идентификаторы", 400)
+            from services.contacts_hub.merge_engine import merge_preview
+            res = await merge_preview(pool, primary_id, secondary_id, uid)
+            if 'error' in res:
+                return _err("Контакт не найден", 404)
+            return _json_resp(res)
+        except Exception:
+            log.exception("uch_merge_preview")
+            return _err(_INTERNAL_ERROR, 500)
+
     async def uch_merge(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -1817,6 +1840,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity_list)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/reminder", uch_crm_reminder)
     app.router.add_get("/api/miniapp/uch/duplicates", uch_duplicates)
+    # Тот же путь: GET — что переедет, POST — слить.
+    app.router.add_get("/api/miniapp/uch/merge", uch_merge_preview)
     app.router.add_post("/api/miniapp/uch/merge", uch_merge)
     app.router.add_get("/api/miniapp/uch/conflicts", uch_conflicts)
     app.router.add_post("/api/miniapp/uch/conflicts/{conflict_id}/resolve", uch_resolve_conflict)

@@ -235,43 +235,47 @@ async def merge_contacts_improved(pool, primary_id: str, secondary_id: str, owne
             'absorbed_fields': sorted(absorbed['taken'])}
 
 
-async def get_merge_preview(pool, contact_a_id: str, contact_b_id: str, owner_id: int) -> dict:
-    row_a = await pool.fetchrow(
+async def merge_preview(pool, primary_id: str, secondary_id: str,
+                        owner_id: int) -> dict:
+    """Что именно переедет при слиянии — ДО подтверждения.
+
+    Здесь уже лежал `get_merge_preview`: написанный, непозванный и со СВОИМИ
+    правилами слияния — восемь полей и «a или b». Правила самого слияния
+    были другими, так что показать такой предпросмотр значило бы соврать
+    точнее прежнего: человек увидел бы одно, а получил другое. Поэтому
+    предпросмотр считает ровно тем же `absorbed_fields`, что и слияние: он
+    не может разойтись с ним, потому что это он и есть.
+
+    Возвращает {'error': ...} либо {'taken': [...], 'secondary': имя}.
+    """
+    primary = await pool.fetchrow(
         'SELECT * FROM unified_contacts WHERE id=$1 AND owner_id=$2',
-        contact_a_id, owner_id)
-    row_b = await pool.fetchrow(
+        primary_id, owner_id)
+    if not primary:
+        return {'error': 'primary_not_found'}
+    secondary = await pool.fetchrow(
         'SELECT * FROM unified_contacts WHERE id=$1 AND owner_id=$2',
-        contact_b_id, owner_id)
+        secondary_id, owner_id)
+    if not secondary:
+        return {'error': 'secondary_not_found'}
 
-    if not row_a or not row_b:
-        return {'error': 'contact_not_found'}
+    from services.contacts_hub.versioning_engine import FIELD_LABELS
 
-    a = dict(row_a)
-    b = dict(row_b)
-
-    phones_a = a.get('phones') or []
-    phones_b = b.get('phones') or []
-    merged_phones = list(set(phones_a + phones_b))
-
-    emails_a = a.get('emails') or []
-    emails_b = b.get('emails') or []
-    merged_emails = list(set(emails_a + emails_b))
-
-    merged = {
-        'first_name': a.get('first_name') or b.get('first_name'),
-        'last_name': a.get('last_name') or b.get('last_name'),
-        'username': a.get('username') or b.get('username'),
-        'phones': merged_phones,
-        'emails': merged_emails,
-        'company': a.get('company') or b.get('company'),
-        'position': a.get('position') or b.get('position'),
-        'notes': a.get('notes') or b.get('notes'),
-    }
-
+    a, b = dict(primary), dict(secondary)
+    taken = absorbed_fields(a, b)
+    out = []
+    for field, value in taken.items():
+        out.append({
+            'field': field,
+            'label': FIELD_LABELS.get(field, field),
+            'from': a.get(field),
+            'to': value,
+        })
+    name = ' '.join(x for x in (b.get('first_name'), b.get('last_name')) if x)
     return {
-        'contact_a': {'id': contact_a_id, 'name': f"{a.get('first_name', '')} {a.get('last_name', '')}".strip()},
-        'contact_b': {'id': contact_b_id, 'name': f"{b.get('first_name', '')} {b.get('last_name', '')}".strip()},
-        'merged_result': merged,
+        'taken': out,
+        'total': len(out),
+        'secondary': name or b.get('username') or b.get('display_name') or '',
     }
 
 

@@ -74,3 +74,29 @@ def test_the_screen_promise_matches_what_the_engine_does():
     absorb = py_function('services/contacts_hub/merge_engine.py', 'absorb_contact')
     assert 'absorbed_fields(' in absorb and 'UPDATE unified_contacts SET' in absorb, (
         "движок снова ничего не переносит, а экран продолжает это обещать")
+
+
+def test_the_preview_is_computed_by_the_merge_itself():
+    """Предпросмотр, считающий по своим правилам, врёт точнее, чем молчание.
+
+    Здесь уже лежал `get_merge_preview`: написанный, непозванный и со своим
+    набором из восьми полей и правилом «a или b». Правила самого слияния были
+    другими. Подключить такой предпросмотр значило бы показать одно, а
+    сделать другое.
+    """
+    body = py_function('services/contacts_hub/merge_engine.py', 'merge_preview')
+    assert 'absorbed_fields(' in body, (
+        "предпросмотр снова считает по своим правилам — он разойдётся со слиянием")
+    import services.contacts_hub.merge_engine as me
+    assert not hasattr(me, 'get_merge_preview'), (
+        "второй предпросмотр со своими правилами вернулся в модуль")
+
+
+def test_the_screen_asks_what_moves_before_asking_to_merge():
+    body = js_function('mergeContacts')
+    i = body.index("'/api/miniapp/uch/merge?")
+    assert body.index('askConfirm') > i, (
+        "вопрос задаётся раньше, чем известно, что переедет")
+    assert 'c.label' in body, "подтверждение не перечисляет поля"
+    assert 'Переносить нечего' in body, (
+        "когда переносить нечего, об этом надо сказать, а не обещать перенос")

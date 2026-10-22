@@ -18133,7 +18133,22 @@ async function mergeContacts(primary, secondary) {
   // просто удалял вторую запись, не перенося ни одного поля: телефон, почта
   // и заметки второго контакта исчезали. Теперь перенос настоящий, и после
   // слияния можно сказать, что именно переехало.
-  if (!await askConfirm('Объединить два контакта в один?\n\nВторая запись будет удалена, её данные перенесутся в первую: пустые поля заполнятся, телефоны и почты объединятся. Заполненные поля первой записи не изменятся.\n\nСостояние первой записи сохранится версией — слияние можно откатить в «Версиях».')) return;
+  // Что именно переедет, спрашиваем у сервера теми же правилами, которыми
+  // слияние и работает: «данные перенесутся» без перечисления — это опять
+  // обещание, которое нечем проверить.
+  let prev = null;
+  try {
+    prev = await api('/api/miniapp/uch/merge?primary_id=' + encodeURIComponent(primary)
+      + '&secondary_id=' + encodeURIComponent(secondary));
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось посмотреть, что переедет')); return; }
+  const moving = (prev && prev.taken) || [];
+  const what = moving.length
+    ? 'Переедет ' + num(moving.length) + ' ' + plural(moving.length,'поле','поля','полей') + ':\n\n'
+      + moving.map(c => '• ' + c.label + ': ' + verVal(c.to)).join('\n')
+    : 'Переносить нечего: всё, что есть во второй записи, уже есть в первой.';
+  if (!await askConfirm('Объединить два контакта в один?\n\n' + what
+      + '\n\nВторая запись будет удалена. Заполненные поля первой не изменятся.'
+      + '\n\nСостояние первой записи сохранится версией — слияние можно откатить в «Версиях».')) return;
   try {
     const d = await api('/api/miniapp/uch/merge', {method:'POST', body:JSON.stringify({primary_id:primary, secondary_id:secondary})});
     const got = (d && d.absorbed_fields) || [];

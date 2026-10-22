@@ -309,6 +309,7 @@ GET /api/miniapp/uch/graph/stats
 GET /api/miniapp/uch/groups
 GET /api/miniapp/uch/intent/hits
 GET /api/miniapp/uch/intent/rules
+GET /api/miniapp/uch/merge
 GET /api/miniapp/uch/reminders
 GET /api/miniapp/uch/search
 GET /api/miniapp/uch/segments
@@ -601,6 +602,7 @@ HEAD /api/miniapp/uch/graph/stats
 HEAD /api/miniapp/uch/groups
 HEAD /api/miniapp/uch/intent/hits
 HEAD /api/miniapp/uch/intent/rules
+HEAD /api/miniapp/uch/merge
 HEAD /api/miniapp/uch/reminders
 HEAD /api/miniapp/uch/search
 HEAD /api/miniapp/uch/segments
