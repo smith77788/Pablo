@@ -66,6 +66,21 @@ _BOT_TIER_TTL = 600.0
 _user_map_cache = TTLCache(default_ttl=120.0, max_size=2000)
 
 
+def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
+    """Счётчик механизма надёжности. Никогда не бросает и ничего не ждёт.
+
+    Такой же, как в исполнителе операций и в движке ЛС: сбой защитного чтения
+    или записи виден на графике, а не только в логах, которые читают после
+    жалобы владельца.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.inc(name, {k: str(v) for k, v in labels.items() if v is not None}, value)
+    except Exception:
+        pass
+
+
 def _render_for_user(text: str, user_info: dict, bot_name: str = "") -> str:
     """Render {{PLACEHOLDER}} tokens for a specific user."""
     if not text or "{{" not in text:
@@ -213,17 +228,36 @@ async def run(
         return
 
     # Skip users already delivered (supports crash-resume without duplicate sends)
-    try:
-        already_sent: set[int] = await db.get_broadcast_delivered_ids(
-            pool, broadcast_id
-        )
-    except Exception as _e:
-        logger.warning(
-            "Broadcast %d: could not load delivery log, starting fresh: %s",
-            broadcast_id,
-            _e,
-        )
-        already_sent = set()
+    #
+    # Чтение ФЕЙЛИТСЯ ЗАКРЫТО. Раньше сбой базы здесь давал `set()` с подписью
+    # «starting fresh», то есть «никому ещё не отправляли» — и докатка
+    # оборвавшейся рассылки (а она запускается на КАЖДОМ рестарте процесса,
+    # то есть на каждом деплое рабочей ветки) отправляла сообщение ВСЕЙ
+    # аудитории второй раз. Это тот же выбор, что у Growth Agent и у инвайта:
+    # дедуп необратимого действия читается строго. Блип базы переживаем
+    # повторами, а не пустым списком; не прочитался совсем — рассылка остаётся
+    # в своём статусе (pending/running) и её подберёт докатка на следующем
+    # старте процесса. Отложить рассылку дешевле, чем послать её дважды.
+    already_sent: set[int] = set()
+    _dedup_read_ok = False
+    for _attempt in (1, 2, 3):
+        try:
+            already_sent = await db.get_broadcast_delivered_ids(pool, broadcast_id)
+            _dedup_read_ok = True
+            break
+        except Exception as _e:
+            if _attempt < 3:
+                await asyncio.sleep(0.5 * _attempt)
+                continue
+            logger.error(
+                "Рассылка %d: список уже доставленных НЕ прочитался (%s) — "
+                "рассылка отложена. Пустой список здесь означал бы «никому ещё "
+                "не отправляли», и вся аудитория получила бы сообщение второй раз",
+                broadcast_id, _e,
+            )
+    if not _dedup_read_ok:
+        _reliability_metric("infragram_broadcast_dedup_read_failures_total")
+        return
 
     sent = len(already_sent)
     failed = 0

@@ -33,7 +33,8 @@ _EXPECTED = (
 
 
 # Модули, которые пишут счётчики надёжности своим `_reliability_metric`.
-_EMITTERS = ("services/op_worker.py", "services/dm_engine.py")
+_EMITTERS = ("services/op_worker.py", "services/dm_engine.py",
+             "services/broadcaster.py")
 
 
 def _read(rel: str) -> str:
