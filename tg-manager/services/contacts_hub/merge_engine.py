@@ -220,20 +220,10 @@ async def manual_merge(pool, primary_id: str, secondary_id: str, owner_id: int) 
             'absorbed_fields': sorted(absorbed['taken'])}
 
 
-async def merge_contacts_improved(pool, primary_id: str, secondary_id: str, owner_id: int) -> dict:
-    conn = await pool.acquire()
-    try:
-        absorbed = await absorb_contact(conn, primary_id, secondary_id, owner_id)
-    finally:
-        await pool.release(conn)
-    if 'error' in absorbed:
-        return {'status': 'error', 'error': absorbed['error']}
-    await _version_after_merge(pool, primary_id, owner_id, absorbed, secondary_id)
-
-    log.info('Merged contact %s -> %s for owner %d', secondary_id, primary_id, owner_id)
-    return {'status': 'merged', 'primary_id': primary_id, 'removed_id': secondary_id,
-            'absorbed_fields': sorted(absorbed['taken'])}
-
+# УДАЛЕНО: merge_contacts_improved — слово в слово manual_merge (обе зовут
+# absorb_contact и _version_after_merge). Имя с суффиксом «improved» рядом с
+# рабочей функцией — это заявка на то, что следующий агент подключит к экрану
+# её, а правку внесут в другую.
 
 async def merge_preview(pool, primary_id: str, secondary_id: str,
                         owner_id: int) -> dict:
@@ -279,51 +269,15 @@ async def merge_preview(pool, primary_id: str, secondary_id: str,
     }
 
 
-async def auto_merge_with_confidence(pool, owner_id: int, threshold: float = 0.7) -> dict:
-    duplicates = await find_duplicates(pool, owner_id)
-    merged = 0
-    skipped = 0
+# УДАЛЕНО: auto_merge_with_confidence(pool, owner_id, threshold=0.7).
+# Автослияние «по уверенности», которое считало уверенность своим кодом и
+# ошибалось так же, как ошибалась оценка дублей: `set(a['phones'])` на строке
+# jsonb давало набор СИМВОЛОВ, пересечение находилось у любых двух контактов с
+# телефонами, и уверенность становилась 0.8 — выше порога по умолчанию 0.7.
+# А дальше шёл не перенос полей, а `DELETE FROM unified_contacts`: телефон,
+# почта и заметки второй записи исчезали. Живой путь — auto_merge, он группирует
+# по ТОЧНОМУ telegram_user_id и зовёт absorb_contact, то есть переносит поля.
+# Функцию не звал никто, и это единственная причина, по которой она ничего не
+# уничтожила. Понадобится автослияние по уверенности — строить на
+# compute_merge_confidence и absorb_contact, а не на второй копии правил.
 
-    for dup in duplicates:
-        ids = dup['ids']
-        primary = min(ids)
-
-        for other_id in ids:
-            if other_id == primary:
-                continue
-
-            confidence = 0.0
-            primary_row = await pool.fetchrow(
-                'SELECT telegram_user_id, username, first_name, last_name, phones, company FROM unified_contacts WHERE id=$1',
-                primary)
-            other_row = await pool.fetchrow(
-                'SELECT telegram_user_id, username, first_name, last_name, phones, company FROM unified_contacts WHERE id=$1',
-                other_id)
-
-            if primary_row and other_row:
-                a = dict(primary_row)
-                b = dict(other_row)
-                if a.get('telegram_user_id') and a['telegram_user_id'] == b.get('telegram_user_id'):
-                    confidence = 1.0
-                else:
-                    phones_a = set(a.get('phones') or [])
-                    phones_b = set(b.get('phones') or [])
-                    if phones_a & phones_b:
-                        confidence = 0.8
-                    else:
-                        confidence = 0.3
-
-            if confidence >= threshold:
-                conn = await pool.acquire()
-                try:
-                    async with conn.transaction():
-                        await conn.execute('UPDATE contact_sources SET contact_id=$1 WHERE contact_id=$2', primary, other_id)
-                        await conn.execute('UPDATE contact_history SET contact_id=$1 WHERE contact_id=$2', primary, other_id)
-                        await conn.execute('DELETE FROM unified_contacts WHERE id=$1', other_id)
-                    merged += 1
-                finally:
-                    await pool.release(conn)
-            else:
-                skipped += 1
-
-    return {'duplicates_found': len(duplicates), 'contacts_merged': merged, 'skipped': skipped}

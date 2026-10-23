@@ -146,30 +146,12 @@ async def get_relationships(pool, owner_id: int, contact_id: str) -> list:
     return result
 
 
-async def add_relationship(pool, contact_a_id: str, contact_b_id: str,
-                           relationship_type: str, strength: float = 0.5,
-                           metadata: dict = None) -> dict:
-    owner_row = await pool.fetchrow(
-        'SELECT owner_id FROM unified_contacts WHERE id=$1', contact_a_id)
-    if not owner_row:
-        return {'error': 'contact_not_found'}
-    owner_id = owner_row['owner_id']
-    await pool.execute(
-        '''INSERT INTO contact_relationships
-           (owner_id, contact_a_id, contact_b_id, relationship_type, strength, metadata)
-           VALUES ($1,$2,$3,$4,$5,$6::jsonb)
-           ON CONFLICT (owner_id, contact_a_id, contact_b_id, relationship_type)
-           DO UPDATE SET strength=EXCLUDED.strength, metadata=EXCLUDED.metadata, updated_at=NOW()''',
-        owner_id, contact_a_id, contact_b_id, relationship_type, strength,
-        json.dumps(metadata or {}))
-    return {'ok': True, 'relationship_type': relationship_type, 'strength': strength}
-
-
-async def remove_relationship(pool, relationship_id: int) -> bool:
-    result = await pool.execute(
-        'DELETE FROM contact_relationships WHERE id=$1', relationship_id)
-    return result != 'DELETE 0'
-
+# УДАЛЕНО: add_relationship / remove_relationship. Связи контакта СЧИТАЮТСЯ
+# (compute_relationships: общий телефон, похожий ник, одна компания, общий
+# аккаунт-источник, общая группа, общий канал) и показываются на экране «🕸
+# Связи». Ручных связей интерфейс не обещает нигде, двери у функций не было, а
+# рядом с вычисляемыми ручные расходятся молча: пересчёт их не видит и не
+# обновляет.
 
 async def get_graph_stats(pool, owner_id: int) -> dict:
     total_rel = await pool.fetchval(

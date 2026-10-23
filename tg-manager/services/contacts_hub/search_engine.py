@@ -625,5 +625,7 @@ async def _fuzzy_search(
 # Cache management
 # ---------------------------------------------------------------------------
 
-def clear_search_cache() -> None:
-    _cache.clear()
+# УДАЛЕНО: clear_search_cache() — сброс кэша поиска, который никто не звал.
+# Кэш живёт по TTL (_CACHE_TTL_SECONDS); ручка сброса без двери — это кнопка,
+# которой нет.
+

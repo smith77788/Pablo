@@ -49,8 +49,13 @@ def test_custom_fields_merge_key_by_key():
 
 
 def test_every_mergeable_path_goes_through_one_implementation():
+    # merge_contacts_improved удалена: она была слово в слово manual_merge.
+    # auto_merge_with_confidence тоже — она считала уверенность своим кодом
+    # (и ошибалась на jsonb-строке телефонов), а потом удаляла запись вместо
+    # переноса полей; эта проверка её бы и поймала, если бы её список путей
+    # заводился не руками. Поэтому ниже путь не только перечисляется, но и
+    # сверяется с модулем: новая функция, удаляющая контакт, краснеет сама.
     for module, fn in (('services/contacts_hub/merge_engine.py', 'manual_merge'),
-                       ('services/contacts_hub/merge_engine.py', 'merge_contacts_improved'),
                        ('services/contacts_hub/merge_engine.py', 'auto_merge'),
                        ('services/contacts_hub/bulk_ops_engine.py', 'bulk_merge')):
         body = py_function(module, fn)
@@ -58,6 +63,43 @@ def test_every_mergeable_path_goes_through_one_implementation():
             f"{fn} снова сливает контакты по-своему — поля потеряются именно там")
         assert 'DELETE FROM unified_contacts' not in body, (
             f"{fn} удаляет контакт мимо общего пути: без переноса полей и без версии")
+
+
+def test_no_other_function_deletes_a_contact_behind_the_common_path():
+    """Список путей слияния перечислен руками, и поэтому ловит не всё.
+
+    auto_merge_with_confidence была ровно таким случаем: отдельная функция со
+    своим расчётом уверенности и `DELETE FROM unified_contacts` внутри, в тот
+    же файл, где лежит общий путь, и в перечисление она не попала. Поэтому
+    теперь проверяется весь пакет: удалять контакт имеет право только
+    absorb_contact (общий перенос) и адресное удаление по запросу владельца.
+    """
+    import os
+    import re
+
+    allowed = {
+        ('merge_engine.py', 'absorb_contact'),      # общий перенос полей
+        ('repository.py', 'delete_contact'),        # владелец удалил карточку
+        ('bulk_ops_engine.py', 'bulk_delete'),      # владелец удалил отмеченных
+    }
+    pkg = 'services/contacts_hub'
+    found = set()
+    for fn in sorted(os.listdir(pkg)):
+        if not fn.endswith('.py'):
+            continue
+        src = open(os.path.join(pkg, fn), encoding='utf-8').read()
+        # владелец функции, в которой встретилось удаление
+        cur = None
+        for line in src.splitlines():
+            m = re.match(r'(?:async )?def (\w+)\(', line)
+            if m:
+                cur = m.group(1)
+            if 'DELETE FROM unified_contacts' in line and not line.lstrip().startswith('#'):
+                found.add((fn, cur))
+    extra = found - allowed
+    assert not extra, (
+        f"контакт удаляют мимо общего пути: {sorted(extra)} — поля поглощённой "
+        "записи потеряются именно там")
 
 
 def test_the_screen_promise_matches_what_the_engine_does():

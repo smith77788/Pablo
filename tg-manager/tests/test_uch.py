@@ -910,127 +910,16 @@ class TestAnalyticsDashboard:
 
 # ── Performance Engine tests ─────────────────────────────────────────────────
 
-class TestPerformanceCache:
-    """Tests for contacts_hub/performance.py cache functionality."""
+# УДАЛЕНЫ тесты services/contacts_hub/performance.py: модуль удалён целиком.
+# 188 строк, которые не импортировал НИКТО, кроме этих тестов: свой слой кэша с
+# собственным TTL рядом с уже работающим кэшем поиска, свои счётчики запросов,
+# которые никто не читает, и batch_insert/batch_update, подставляющие имя
+# таблицы и имена колонок прямо в SQL строкой. Последнее опасно именно тем, что
+# удобно: в хабе есть массовая правка полей с ИМЕНАМИ полей из запроса, и
+# первое же «удобное» применение этих помощников к ней стало бы инъекцией.
+# Понадобится кэш — брать существующий в search_engine; понадобится пакетная
+# запись — писать запрос с фиксированными колонками там, где она нужна.
 
-    @pytest.mark.asyncio
-    async def test_cache_decorator(self):
-        from services.contacts_hub.performance import cache_decorator, invalidate_cache, get_cache_stats
-
-        @cache_decorator(ttl=60, key_prefix="test_func")
-        async def my_func(x: int) -> int:
-            return x * 2
-
-        result = await my_func(5)
-        assert result == 10
-
-        stats = get_cache_stats()
-        assert stats["hits"] >= 1 or stats["sets"] >= 1
-
-        invalidate_cache("test_func")
-
-    def test_invalidate_cache(self):
-        from services.contacts_hub.performance import invalidate_cache, get_cache_stats, _cache
-
-        _cache.set("test_key_1", "value1")
-        _cache.set("test_key_2", "value2")
-        _cache.set("other_key", "value3")
-
-        removed = invalidate_cache("test_key")
-        assert removed == 2
-
-        assert _cache.get("test_key_1") is None
-        assert _cache.get("test_key_2") is None
-        assert _cache.get("other_key") == "value3"
-
-    def test_get_cache_stats(self):
-        from services.contacts_hub.performance import get_cache_stats, _cache
-
-        _cache.clear()
-        _cache.set("stat_test_1", "data")
-        _cache.set("stat_test_2", "data")
-        _ = _cache.get("stat_test_1")
-        _ = _cache.get("stat_test_1")
-        _ = _cache.get("nonexistent")
-
-        stats = get_cache_stats()
-        assert stats["size"] >= 2
-        assert stats["hits"] >= 2
-        assert stats["misses"] >= 1
-        assert stats["sets"] >= 2
-
-
-class TestPerformanceBatchOps:
-    """Tests for contacts_hub/performance.py batch operations."""
-
-    @pytest.mark.asyncio
-    async def test_batch_insert(self):
-        from services.contacts_hub.performance import batch_insert
-
-        class BatchPool:
-            def __init__(self):
-                self._calls = []
-
-            def acquire(self):
-                return self
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                pass
-
-            async def executemany(self, query, values):
-                self._calls.append((query, values))
-
-        pool = BatchPool()
-        rows = [{"id": i, "name": f"contact_{i}"} for i in range(3)]
-        result = await batch_insert(pool, "unified_contacts", ["id", "name"], rows, batch_size=2)
-        assert result == 3
-        assert len(pool._calls) == 2
-
-    @pytest.mark.asyncio
-    async def test_batch_update(self):
-        from services.contacts_hub.performance import batch_update
-
-        class SeqPool:
-            def __init__(self, responses):
-                self._responses = iter(responses)
-                self._calls = []
-
-            async def execute(self, query, *args):
-                self._calls.append(query)
-                return next(self._responses)
-
-        pool = SeqPool(["UPDATE 3", "UPDATE 2"])
-        result = await batch_update(
-            pool, "unified_contacts",
-            {"is_favorite": True},
-            "id", ["id1", "id2", "id3", "id4", "id5"],
-            batch_size=3
-        )
-        assert result == 5
-        assert len(pool._calls) == 2
-
-
-class TestPerformanceQueryStats:
-    """Tests for contacts_hub/performance.py query stats."""
-
-    def test_get_query_stats(self):
-        from services.contacts_hub.performance import get_query_stats, record_query, _query_stats
-
-        _query_stats.clear()
-        record_query("SELECT * FROM contacts", 15.5, 10)
-        record_query("INSERT INTO contacts VALUES (...)", 2.3, 0)
-
-        stats = get_query_stats()
-        assert stats["total_queries"] == 2
-        assert stats["avg_time_ms"] > 0
-        assert len(stats["slowest"]) == 2
-        assert stats["slowest"][0]["duration_ms"] >= stats["slowest"][1]["duration_ms"]
-
-
-# ── Security tests ────────────────────────────────────────────────────────────
 
 class TestSecurity:
     """Tests for services/security.py"""

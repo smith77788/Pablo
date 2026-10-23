@@ -251,47 +251,9 @@ async def get_contact_snapshot(pool, contact_id: str) -> dict:
     return d
 
 
-async def create_version_with_snapshot(pool, contact_id: str, owner_id: int,
-                                       changed_by: str = 'snapshot',
-                                       change_summary: str = None) -> Optional[int]:
-    snapshot = await get_contact_snapshot(pool, contact_id)
-    if not snapshot:
-        return None
-    return await create_version(pool, contact_id, owner_id, snapshot,
-                                changed_by=changed_by,
-                                change_summary=change_summary or 'Version snapshot')
-
-
-async def compare_versions(pool, contact_id: str, owner_id: int,
-                           version_a: int, version_b: int) -> Optional[dict]:
-    ver_a = await pool.fetchrow(
-        'SELECT version_num, snapshot, created_at FROM contact_versions '
-        'WHERE contact_id=$1 AND owner_id=$2 AND version_num=$3',
-        contact_id, owner_id, version_a)
-    ver_b = await pool.fetchrow(
-        'SELECT version_num, snapshot, created_at FROM contact_versions '
-        'WHERE contact_id=$1 AND owner_id=$2 AND version_num=$3',
-        contact_id, owner_id, version_b)
-    if not ver_a or not ver_b:
-        return None
-    snap_a = json.loads(ver_a['snapshot']) if isinstance(ver_a['snapshot'], str) else ver_a['snapshot']
-    snap_b = json.loads(ver_b['snapshot']) if isinstance(ver_b['snapshot'], str) else ver_b['snapshot']
-    all_keys = set(snap_a.keys()) | set(snap_b.keys())
-    changes = []
-    for key in sorted(all_keys):
-        val_a = snap_a.get(key)
-        val_b = snap_b.get(key)
-        if json.dumps(val_a, sort_keys=True, default=str) != json.dumps(val_b, sort_keys=True, default=str):
-            changes.append({'field': key, 'from': val_a, 'to': val_b})
-    return {
-        'version_a': version_a,
-        'version_b': version_b,
-        'created_a': ver_a['created_at'].isoformat() if ver_a['created_at'] else None,
-        'created_b': ver_b['created_at'].isoformat() if ver_b['created_at'] else None,
-        'changes': changes,
-        'total_changes': len(changes)
-    }
-
+# УДАЛЕНО: create_version_with_snapshot — обёртка над get_contact_snapshot +
+# create_version без ни одного вызова. Версии пишет правка карточки
+# (uch_contact_update), и снимок она берёт сама.
 
 async def get_version_diff(pool, contact_id: str, owner_id: int,
                            version_num: int) -> Optional[dict]:
