@@ -3725,6 +3725,12 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "следующий запуск повторяющейся операции не поставлен — она остановилась",
     "infragram_executor_lease_errors_total":
         "аренда исполнителя — правило «очередь разбирает один процесс» не проверено",
+    "infragram_growth_dedup_read_failures_total":
+        "список уже отработанных групп Growth Agent — не прочитался, и операция "
+        "отложена на повтор: так промо не уйдёт в те же группы второй раз",
+    "infragram_growth_dedup_write_failures_total":
+        "группа Growth Agent — не записалась в отработанные, и поста в неё не "
+        "было: иначе следующий запуск отправил бы туда промо второй раз",
 }
 
 # Повтор про ОДИН вид сбоя одному админу — не чаще этого окна (переживает
@@ -20585,14 +20591,33 @@ async def _exec_niche_growth_post(
         # Группы, в которые этот владелец уже заходил через Growth Agent раньше —
         # исключаем, чтобы повторные запуски не заходили и не постили повторно в
         # те же группы (лишний риск спам-флага без дополнительного охвата).
+        # ПОЧЕМУ ЭТО ЧТЕНИЕ ФЕЙЛИТСЯ ЗАКРЫТО. Пустой набор на сбое означает
+        # «владелец не был нигде»: поиск отдаст те же группы, вступление пройдёт
+        # как already_member, и промо уйдёт в группу ВТОРОЙ раз с того же
+        # аккаунта — ровно та сигнатура спама, против которой написан весь
+        # безопасный режим этой операции (5 групп за запуск, паузы в десятки
+        # минут, свой spintax-вариант на группу). Повтор — штатное событие:
+        # операция идёт часами, а деплой и сторож зависших поднимают её с
+        # done_items=0. Отложенный повтор дешевле второго поста; тот же выбор
+        # уже сделан для реестра «не писать» и для журнала сделанного.
         try:
             prior_rows = await pool.fetch(
                 "SELECT group_id FROM niche_growth_targets WHERE owner_id=$1", owner_id
             )
             exclude_ids = {int(r["group_id"]) for r in prior_rows}
         except Exception as e:
-            log.warning('prior groups query failed: %s', e)
-            exclude_ids = set()
+            log.error(
+                "niche_growth_post op=%d: список уже отработанных групп не "
+                "прочитался (%s) — операция отложена, иначе промо ушло бы в них "
+                "второй раз", op_id, e,
+            )
+            _reliability_metric("infragram_growth_dedup_read_failures_total",
+                                op_type="niche_growth_post")
+            return {
+                "status": "requeue",
+                "reason": "Не удалось прочитать список уже обработанных групп — "
+                          "повторим позже, чтобы не отправить промо дважды",
+            }
 
         # Ищем группы
         try:
@@ -20695,15 +20720,36 @@ async def _exec_niche_growth_post(
                 )
                 continue
 
-            # Запоминаем группу как уже посещённую — чтобы будущие запуски Growth
-            # Agent для этого владельца не заходили и не постили сюда повторно.
+            # НЕОБРАТИМОЕ ДЕЙСТВИЕ ОТМЕЧАЕТСЯ ДО НЕГО, И ЦЕНОЙ ЭТОГО ДЕЙСТВИЯ.
+            # Пометка стоит между вступлением и постом: не записалась — поста
+            # нет. Иначе пост уходит, а следующий запуск (или повтор этого же)
+            # видит группу неотработанной и постит в неё второй раз. Группа без
+            # id неотметима в принципе, поэтому поста для неё тоже нет:
+            # вступление обратимо и дёшево, второй промо-пост — нет.
+            _marked = False
             if grp_id:
-                await _safe_execute(
+                _marked = await _safe_execute(
                     pool,
                     "INSERT INTO niche_growth_targets(owner_id, group_id, title) "
                     "VALUES($1,$2,$3) ON CONFLICT (owner_id, group_id) DO NOTHING",
                     owner_id, grp_id, grp_title,
+                    log_ctx=f"[niche_growth_mark op={op_id}]",
+                ) != "ERROR"
+            if not _marked:
+                log.error(
+                    "niche_growth_post op=%d: группа %s (%r) не записалась в "
+                    "отработанные — поста не будет, иначе повтор отправит промо "
+                    "сюда второй раз", op_id, grp_id or join_ref, grp_title,
                 )
+                _reliability_metric("infragram_growth_dedup_write_failures_total",
+                                    op_type="niche_growth_post")
+                err_count += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
+                )
+                continue
 
             # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
             join_to_post_delay = random.uniform(180, 480)

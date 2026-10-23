@@ -104,6 +104,12 @@ _HELP = {
     "infragram_invite_unmark_failures_total":
         "Не снятые предзаписи инвайта (цели помечены приглашёнными, хотя их "
         "Telegram не рассматривал — больше их не позовут)",
+    "infragram_growth_dedup_read_failures_total":
+        "Непрочитанные списки отработанных групп Growth Agent (операция отложена "
+        "на повтор, чтобы промо не ушло в те же группы второй раз)",
+    "infragram_growth_dedup_write_failures_total":
+        "Незаписанные группы Growth Agent (поста в такую группу не было: иначе "
+        "следующий запуск отправил бы туда промо второй раз)",
     "infragram_recurring_reschedule_failures_total":
         "Повторяющиеся операции, у которых не удалось поставить следующий запуск",
     "infragram_op_owner_sem_defers_total":
