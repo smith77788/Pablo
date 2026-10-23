@@ -8,21 +8,6 @@ import asyncpg
 log = logging.getLogger(__name__)
 
 
-def compute_trust_score(contact_data: dict, sources: list) -> float:
-    score = 0.5
-    if contact_data.get('telegram_user_id'):
-        score += 0.2
-    if contact_data.get('username'):
-        score += 0.1
-    if contact_data.get('phones') and len(contact_data['phones']) > 0:
-        score += 0.1
-    if len(sources) > 1:
-        score += 0.1
-    if len(sources) >= 3:
-        score += 0.05
-    return min(score, 1.0)
-
-
 def _as_list(v) -> list:
     """Список из колонки jsonb, которая приехала строкой.
 
@@ -46,6 +31,27 @@ def _as_list(v) -> list:
             return []
         return parsed if isinstance(parsed, list) else []
     return []
+
+
+def compute_trust_score(contact_data: dict, sources: list) -> float:
+    score = 0.5
+    if contact_data.get('telegram_user_id'):
+        score += 0.2
+    if contact_data.get('username'):
+        score += 0.1
+    # `len(contact_data['phones']) > 0` на jsonb-СТРОКЕ было правдой всегда:
+    # у пустого значения строка выглядит как '[]', её длина 2, и бонус за
+    # телефон получал КАЖДЫЙ контакт — то есть признак в оценке доверия не
+    # значил ничего, а число в карточке было завышено у всех, у кого телефона
+    # нет. Тот же разбор, что и в сравнении дублей: колонка jsonb читается
+    # через _as_list, никогда напрямую.
+    if _as_list(contact_data.get('phones')):
+        score += 0.1
+    if len(sources) > 1:
+        score += 0.1
+    if len(sources) >= 3:
+        score += 0.05
+    return min(score, 1.0)
 
 
 def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
