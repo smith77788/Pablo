@@ -3727,6 +3727,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_invite_unmark_failures_total":
         "предзапись инвайта не снята — цели числятся приглашёнными, хотя "
         "Telegram их не рассматривал, и больше не позовутся",
+    "infragram_broadcast_pin_write_failures_total":
+        "id рассылки не закрепился за операцией — рассылка не запущена и "
+        "снята; без этого отказа повтор операции отправил бы сообщение всей "
+        "аудитории второй раз",
     "infragram_broadcast_dedup_read_failures_total":
         "список уже доставленных у рассылки не прочитался — рассылка отложена; "
         "без этого отказа вся аудитория получила бы сообщение второй раз",
@@ -22132,13 +22136,42 @@ async def _exec_run_broadcast(
         # всей аудитории заново — журнал доставок первой рассылки второй не
         # указ, он ведётся по её собственному id.
         params["broadcast_id"] = int(broadcast_id)
-        await _safe_execute(
-            pool,
-            "UPDATE operation_queue SET params = COALESCE(params, '{}'::jsonb) || $1::jsonb "
-            "WHERE id=$2",
-            json.dumps({"broadcast_id": int(broadcast_id)}), op_id,
-            log_ctx=f"[run_broadcast_pin op={op_id}]",
-        )
+        # Закрепление — ЦЕНА запуска, а не пометка рядом с ним. Результат этой
+        # записи раньше выбрасывался: не записалась — рассылка всё равно
+        # уходила, а следующий прогон (таймаут, воскрешение после рестарта,
+        # ручной повтор) читал params без broadcast_id и заводил ВТОРУЮ
+        # рассылку на всю аудиторию, потому что журнал доставок первой второй
+        # не указ. Поэтому: повтор, а при полной неудаче — снимаем только что
+        # созданную строку рассылки (она ещё не отправляла) и отказываем. Не
+        # отправить дешевле, чем отправить дважды.
+        _pinned = False
+        for _attempt in (1, 2):
+            if await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET params = COALESCE(params, '{}'::jsonb) || $1::jsonb "
+                "WHERE id=$2",
+                json.dumps({"broadcast_id": int(broadcast_id)}), op_id,
+                log_ctx=f"[run_broadcast_pin op={op_id}]",
+            ) != "ERROR":
+                _pinned = True
+                break
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+        if not _pinned:
+            log.error(
+                "run_broadcast op=%s: id рассылки %s НЕ закрепился в операции — "
+                "рассылку не запускаем и снимаем, иначе повторный прогон завёл "
+                "бы вторую и отправил её всей аудитории заново",
+                op_id, broadcast_id)
+            _reliability_metric("infragram_broadcast_pin_write_failures_total",
+                                op_type="run_broadcast")
+            await broadcaster.abandon_unstarted(pool, broadcast_id)
+            return {
+                "status": "failed",
+                "summary": ("⚠️ Рассылка не запущена: не удалось запомнить её за "
+                            "операцией. Запустите ещё раз — иначе повтор мог бы "
+                            "отправить сообщение всей аудитории второй раз."),
+            }
     elif _is_subset:
         # Рассылка по подмножеству: сохраняем целевой список, иначе resume после
         # рестарта отправит ВСЕЙ аудитории бота.
