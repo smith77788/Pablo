@@ -4758,7 +4758,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not node:
                 return _err("Не найдено", 404)
             threads = await pool.fetch(
-                """SELECT id, entity_type, entity_id, topic_name, status, created_at
+                """SELECT id, tg_thread_id, entity_type, entity_id, topic_name,
+                          status, created_at
                    FROM bm_node_threads WHERE node_id=$1 ORDER BY status, created_at DESC""",
                 node_id,
             )
