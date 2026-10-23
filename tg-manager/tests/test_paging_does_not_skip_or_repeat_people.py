@@ -76,13 +76,16 @@ OWNER = 992001
 #   * `mb.bot_id` — список ботов сгруппирован `GROUP BY mb.bot_id`, то есть
 #     строка выдачи одна на бота;
 #   * `user_id` — подписчики читаются при ФИКСИРОВАННОМ `bot_id=$1`, а в
-#     bot_users пара «бот+человек» уникальна.
+#     bot_users пара «бот+человек» уникальна;
+#   * `msg_id` — архив переписки читается при ФИКСИРОВАННОМ `chat_id=$2`
+#     (условие стоит в запросе всегда, не по фильтру), а msg_id — это id
+#     сообщения в этом чате.
 #
 # Список именованный, а не «любой столбец с id в названии»: `account_id` или
 # `funnel_id` в выдаче по многу строк, и добивкой они не были бы.
 _UNIQUE = ("id", "uc.id", "unified_contacts.id", "r.id", "q.id", "a.id",
            "b.id", "oq.id", "p.id", "s.id", "ba.id", "mb.bot_id",
-           "channel_id", "user_id")
+           "channel_id", "user_id", "msg_id")
 
 # Запросом со сдвигом считается ТОЛЬКО строковый литерал, в котором есть и
 # подстановка OFFSET, и свой ORDER BY. Первая мерка искала слово OFFSET где
@@ -94,43 +97,73 @@ _OFFSET = re.compile(r"\bOFFSET\s*(?:\$\d+|\$\{|\{)")
 _ORDER = re.compile(r"\bORDER BY\s+(.*?)(?=\s+LIMIT\b|\s+OFFSET\b|$)",
                     re.S | re.I)
 
+# Склейка f-строк в ИСХОДНИКЕ: запрос собран как
+# `f"... ORDER BY created_at DESC " f"LIMIT ${n} OFFSET ${m}"`, и в тексте
+# между сортировкой и LIMIT стоит `" f"`. Без этой нормализации регексп не
+# видит границу и забирает в последний ключ сортировки кусок питоновского
+# синтаксиса — `created_at DESC " f"LIMIT $3` вместо `created_at DESC`.
+# Третья по счёту правка этой мерки, и каждая находилась её же самопроверкой.
+_GLUE = re.compile(r"""['"]\s*f?\s*['"]|\\n""")
+
+
+def _normalise(lit: str) -> str:
+    """Исходник f-строки — в текст запроса: склейку считаем пробелом."""
+    return _GLUE.sub(" ", lit)
+
+
+def _string_nodes(node):
+    """Строковые литералы, НЕ заходя внутрь f-строк.
+
+    `ast.walk` выдаёт и саму f-строку, и её внутренние `Constant`-куски. Хвост
+    вида «ORDER BY … LIMIT $2 OFFSET $3» — такой кусок: в нём есть и сдвиг, и
+    сортировка, а SELECT остался в начале f-строки. Из-за этого первая версия
+    считала один запрос дважды, и один из двух «запросов» был обрывком без
+    SELECT. Обход обязан останавливаться там, где узел имеет смысл только
+    целиком.
+    """
+    import ast
+
+    if isinstance(node, ast.JoinedStr):
+        yield node
+        return
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        yield node
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _string_nodes(child)
+
+
+def _last_key(order: str) -> str:
+    keys = [k.strip() for k in order.split(",") if k.strip()]
+    if not keys:
+        return ""
+    last = keys[-1].lower()
+    last = re.sub(r"\s+(asc|desc)$", "", last)
+    last = re.sub(r"\s+nulls\s+(first|last)$", "", last).strip()
+    return last
+
 
 def order_is_total(order: str) -> bool:
     """Последний ключ сортировки обязан быть уникальным.
 
     Уникальный ключ ПОСЛЕДНИМ, а не где-нибудь: порядок задаётся слева
     направо, и `ORDER BY id, title` уникален, а `ORDER BY title, name` — нет.
+
+    Сортировка, собранная переменной (`ORDER BY {order}`), статически не
+    судится — но `ORDER BY {order_by}, id` судится: добивка здесь литерал, и
+    она последняя, что бы ни подставилось раньше.
     """
-    keys = [k.strip() for k in order.split(",") if k.strip()]
-    if not keys:
-        return False
-    last = keys[-1].lower()
-    last = re.sub(r"\s+(asc|desc)$", "", last)
-    last = re.sub(r"\s+nulls\s+(first|last)$", "", last).strip()
-    return last in _UNIQUE
+    return _last_key(order) in _UNIQUE
+
+
+def order_is_dynamic(order: str) -> bool:
+    """Последний ключ подставляется из переменной — читать надо глазами."""
+    return "{" in _last_key(order)
 
 
 def _paging_queries() -> list[tuple[str, int, str | None, str]]:
     """Запросы со сдвигом: файл, строка, их СОБСТВЕННАЯ сортировка, литерал."""
     import ast
-
-    def strings(node):
-        """Строковые литералы, НЕ заходя внутрь f-строк.
-
-        ast.walk выдаёт и саму f-строку, и её внутренние Constant-куски. Хвост
-        вида «\n ORDER BY ... LIMIT $2 OFFSET $3» — такой кусок: в нём есть и
-        сдвиг, и сортировка, а SELECT остался в начале f-строки. Из-за этого
-        первая версия считала один запрос дважды, и один из двух «запросов»
-        был обрывком без SELECT.
-        """
-        if isinstance(node, ast.JoinedStr):
-            yield node
-            return
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            yield node
-            return
-        for child in ast.iter_child_nodes(node):
-            yield from strings(child)
 
     out = []
     for p in api_files():
@@ -139,12 +172,12 @@ def _paging_queries() -> list[tuple[str, int, str | None, str]]:
             tree = ast.parse(src)
         except SyntaxError:
             continue
-        for node in strings(tree):
+        for node in _string_nodes(tree):
             lit = (node.value if isinstance(node, ast.Constant)
                    else ast.get_source_segment(src, node) or "")
             if not _OFFSET.search(lit):
                 continue
-            m = _ORDER.search(lit)
+            m = _ORDER.search(_normalise(lit))
             out.append((p.name, node.lineno,
                         " ".join(m.group(1).split()) if m else None, lit))
     return out
@@ -208,6 +241,85 @@ def test_the_contact_list_sort_carries_the_tiebreaker():
     assert "id" in m.group(1), (
         "ни одна сортировка списка контактов не добивается уникальным ключом — "
         "«Показать ещё» снова будет повторять и терять людей")
+
+
+# ── Тот же класс вне слоя мини-аппа ─────────────────────────────────────────
+#
+# Класс не про мини-апп, а про листание: параллельная сессия нашла его у себя
+# («Аудиторию инвайта читали страницами и теряли людей», op_worker.py) ровно
+# после того, как он был описан здесь. Поэтому мерка смотрит на ВЕСЬ код.
+#
+# Внутри слоя мини-аппа правило жёсткое — ноль. Снаружи — храповик: в
+# bot/handlers осталось четырнадцать таких запросов, это списки меню бота,
+# другой слой и другая сессия. Число обязано только убывать; сами находки
+# переданы владельцу того слоя.
+
+OUTSIDE_CEILING = 14
+
+# Сортировка, собранная переменной: статически не судится, проверена чтением.
+#   * contacts_hub/repository.py — order собирается из карты сортировок, и к
+#     любой из них дописано `, id` (см. get_contacts);
+#   * vault_service.py — order это `msg_date …, msg_id …`, а msg_id уникален
+#     в пределах чата, которым запрос скоупится всегда (`chat_id=$2` стоит в
+#     условии безусловно, не по фильтру).
+DYNAMIC_CEILING = 2
+
+
+def _all_paging_queries() -> list[tuple[str, int, str]]:
+    """Запросы со сдвигом по всему коду, кроме слоя мини-аппа."""
+    import ast
+    import pathlib as _pl
+
+    root = _pl.Path(__file__).resolve().parents[1]
+    out = []
+    for path in (sorted((root / "services").rglob("*.py"))
+                 + sorted((root / "bot").rglob("*.py"))):
+        if path.name.startswith("mini_app_"):
+            continue
+        src = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in _string_nodes(tree):
+            lit = (node.value if isinstance(node, ast.Constant)
+                   else ast.get_source_segment(src, node) or "")
+            if not _OFFSET.search(lit) or "SELECT" not in lit.upper():
+                continue
+            m = _ORDER.search(_normalise(lit))
+            out.append((str(path.relative_to(root)), node.lineno,
+                        " ".join(m.group(1).split()) if m else ""))
+    return out
+
+
+def test_the_rest_of_the_code_only_gets_better():
+    """Храповик: запросов без добивки вне слоя мини-аппа только меньше."""
+    rows = _all_paging_queries()
+    assert len(rows) >= 20, f"запросов со сдвигом вне слоя мало: {len(rows)}"
+    bad = [f"{w}:{ln}  ORDER BY {o}" for w, ln, o in rows
+           if not order_is_total(o) and not order_is_dynamic(o)]
+    assert len(bad) <= OUTSIDE_CEILING, (
+        f"запросов без добивки стало {len(bad)} вместо {OUTSIDE_CEILING}:"
+        + "\n  " + "\n  ".join(bad))
+    if len(bad) < OUTSIDE_CEILING:
+        raise AssertionError(
+            f"долг уменьшился до {len(bad)} — опустите OUTSIDE_CEILING тем же "
+            "коммитом, иначе храповик перестанет сторожить рост")
+    in_services = [b for b in bad if b.startswith("services/")]
+    assert not in_services, (
+        "в services/ снова появился запрос без добивки — этот слой уже чист, "
+        "и долг здесь не копится:\n  " + "\n  ".join(in_services))
+
+
+def test_dynamic_orders_are_known_and_checked_by_hand():
+    """Сортировка из переменной — та, что проверена чтением, и только она."""
+    rows = _all_paging_queries()
+    dyn = [f"{w}:{ln}" for w, ln, o in rows if order_is_dynamic(o)]
+    assert len(dyn) <= DYNAMIC_CEILING, (
+        f"запросов с сортировкой из переменной стало {len(dyn)} вместо "
+        f"{DYNAMIC_CEILING}: мерка их не судит, значит каждый надо прочитать "
+        f"глазами и записать причину здесь же.\n  " + "\n  ".join(dyn))
+    assert dyn, "ни одного — мерка перестала их различать"
 
 
 def _run(coro):

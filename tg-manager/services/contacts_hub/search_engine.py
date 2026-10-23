@@ -343,9 +343,13 @@ def _build_search_query(
     lim_idx = len(params) + 1
     params.append(limit)
     params.append(offset)
+    # `, id` в конце обязателен: выдача листается по OFFSET, а и релевантность,
+    # и first_name неуникальны. Порядок внутри равных значений Postgres не
+    # обещает, поэтому без добивки страницы повторяют и теряют людей
+    # (tests/test_paging_does_not_skip_or_repeat_people.py).
     sql = (f'SELECT *, {score_expr} as match_score FROM unified_contacts\n'
            f'            WHERE {where_clause}\n'
-           f'            ORDER BY {order_by}\n'
+           f'            ORDER BY {order_by}, id\n'
            f'            LIMIT ${lim_idx} OFFSET ${lim_idx + 1}')
     return sql, params, where_clause, where_params
 
@@ -365,7 +369,8 @@ async def search_contacts(
 
     if not tokens and not has_operators:
         rows = await pool.fetch(
-            'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name LIMIT $2 OFFSET $3',
+            'SELECT * FROM unified_contacts WHERE owner_id=$1 '
+            'ORDER BY first_name, id LIMIT $2 OFFSET $3',
             owner_id, limit, offset)
         from services.contacts_hub.repository import _parse_json_fields
         return [_parse_json_fields(dict(r)) for r in rows]
@@ -531,7 +536,8 @@ async def search_contacts_advanced(
 
     if not tokens and not has_operators:
         rows = await pool.fetch(
-            'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name LIMIT $2 OFFSET $3',
+            'SELECT * FROM unified_contacts WHERE owner_id=$1 '
+            'ORDER BY first_name, id LIMIT $2 OFFSET $3',
             owner_id, limit, offset)
         count_row = await pool.fetchrow(
             'SELECT COUNT(*) as cnt FROM unified_contacts WHERE owner_id=$1', owner_id)
