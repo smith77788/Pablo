@@ -324,7 +324,7 @@ def test_the_segment_count_matches_the_capped_list():
             await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", bot)
             await pool.execute(
                 "INSERT INTO managed_bots(bot_id, added_by, token, username)"
-                " VALUES($1,$2,'x','probe_bot')", bot, OWNER)
+                " VALUES($1,$2,'segment-probe-token','probe_bot')", bot, OWNER)
             for i in range(7):
                 await pool.execute(
                     "INSERT INTO user_activity(bot_id, user_id, message_count,"

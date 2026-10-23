@@ -3775,6 +3775,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="afsteps-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
+<!-- ══════════════════════ FUNNEL PEOPLE ══════════════════════ -->
+<div class="screen" id="s-funnelppl">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">👥 Люди воронки</div>
+    <div class="hdr-meta"><div class="hdr-user" id="fppl-title"></div></div>
+  </div>
+  <div class="sub-sb"><div id="fpplBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+</div>
+
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚙️ Диспетчер задач</div>
@@ -12766,6 +12776,9 @@ function buildFunnelDetail(d) {
   // Отвал по шагам: где именно люди уходят из цепочки — главный вопрос к любой
   // воронке. Данные копились в current_step с самого начала, но не показывались.
   const stats = d.step_stats||[];
+  // «Отвал дальше» на шаге i — это ровно те, у кого доставлено i шагов:
+  // current_step=i. Срез по шагу считает то же число, что здесь нарисовано.
+  const _fdId = Number((d.funnel||{}).id||0);
   const statFor = i => stats[i] || null;
 
   const stepsHtml = steps.length
@@ -12777,7 +12790,7 @@ function buildFunnelDetail(d) {
         const st = statFor(i);
         const statLine = st
           ? `<div class="ffstep-delay">📊 дошли: <b>${num(st.delivered)}</b> (${pctRu(st.conversion_pct)}%)${
-               st.lost_after ? ` · <span style="color:var(--red)">отвал дальше: ${num(st.lost_after)}</span>` : ''}</div>`
+               st.lost_after ? ` · <span style="color:var(--red);cursor:pointer" role="button" tabindex="0" onclick="openFunnelPeople('classic',${_fdId},'Отвал после шага ${i+1}','step=${i+1}')">отвал дальше: ${num(st.lost_after)} ›</span>` : ''}</div>`
           : '';
         return `<div class="ffstep">
           <div class="ffstep-line">
@@ -27190,6 +27203,73 @@ const AF_SEG_RU = {all:'Все подписчики', new_7d:'Новые за 7 
   new_30d:'Новые за 30 дней', inactive_30d:'Неактивные 30 дней'};
 let _AF_CUR = 0;
 
+// ── Люди за числом воронки ──────────────────────────────────────────────────
+//
+// Оба экрана воронок показывали только числа: «сошли 48», «ждут этого шага:
+// 12», «отвал дальше: 31». Кто именно ушёл и на каком шаге — главный вопрос
+// к любой цепочке, — ответа не было: маршрута за этими людьми не существовало
+// ни у одной из двух систем воронок. Теперь каждое из этих чисел — дверь, и
+// срез задаётся теми же полями, из которых число посчитано, поэтому итог
+// среза с ним совпадает.
+let _FPPL = null;
+
+function openFunnelPeople(kind, fid, title, qs) {
+  push('s-funnelppl');
+  _FPPL = {kind: kind, fid: Number(fid), title: title || '', qs: qs || ''};
+  txt('fppl-title', title || '');
+  loadFunnelPeople(100);
+}
+
+async function loadFunnelPeople(limit) {
+  if (!_FPPL) return;
+  const cap = Math.max(1, Math.min(Number(limit)||100, 500));
+  txt('fpplBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  const base = _FPPL.kind === 'auto'
+    ? `/api/miniapp/auto_funnel/${_FPPL.fid}/people`
+    : `/api/miniapp/funnel/${_FPPL.fid}/people`;
+  try {
+    const d = await api(base + '?' + (_FPPL.qs ? _FPPL.qs + '&' : '') + 'limit=' + cap);
+    const rows = d.items||[];
+    const total = Number(d.total||rows.length);
+    if (!rows.length) {
+      txt('fpplBody', empty('👥','В этом срезе никого нет',
+        'Либо число устарело, либо люди уже сдвинулись на другой шаг. Вернитесь и откройте воронку заново.'));
+      return;
+    }
+    let note = anCap(rows.length, total, 'человек', 'человека', 'человек');
+    if (total > rows.length && cap < 500) {
+      note += `<button class="btn btn-s" style="width:100%;margin:0 0 8px" onclick="loadFunnelPeople(500)">⬇️ Догрузить до 500</button>`;
+    }
+    txt('fpplBody', note + '<div class="lst">' + rows.map(r=>{
+      const who = r.name ? esc(r.name)+(r.username?' · @'+esc(r.username):'')
+                : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(String(r.user_id)));
+      const parts = [];
+      if (r.status) parts.push(esc(_FPPL_STATUS[r.status]||r.status));
+      parts.push('шаг ' + num(r.step||0));
+      if (r.fail_count) parts.push('сбоев: ' + num(r.fail_count));
+      if (r.next_send_at) parts.push('следующее ' + esc(ago(r.next_send_at)));
+      else if (r.completed) parts.push('дошёл до конца');
+      else if (r.dropped) parts.push('сошёл');
+      return `<div class="li tap" onclick="copyToClipboard('${Number(r.user_id)}','📋 Номер скопирован')" role="button" tabindex="0">
+        <div class="row-body"><div class="row-name">${who}</div>
+          <div class="li-sub wrap">${parts.join(' · ')}</div></div>
+        <span class="chev">›</span></div>`;
+    }).join('') + '</div>'
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="fpplCopyIds()">📋 Скопировать номера (${num(rows.length)}${
+          total > rows.length ? ' из ' + num(total) : ''})</button>`);
+    _FPPL_ROWS = rows;
+  } catch(e) { txt('fpplBody', errHtml(errRu(e), `loadFunnelPeople(${cap})`)); }
+}
+
+const _FPPL_STATUS = {active:'идёт', completed:'дошёл до конца',
+                      stopped:'остановлен', error:'сбой'};
+let _FPPL_ROWS = [];
+function fpplCopyIds() {
+  if (!_FPPL_ROWS.length) return;
+  copyToClipboard(_FPPL_ROWS.map(r=>String(r.user_id)).join('\n'),
+    '📋 Скопировано номеров: ' + _FPPL_ROWS.length);
+}
+
 async function openFunnelSteps(fid, fname) {
   push('s-afsteps');
   _AF_CUR = fid;
@@ -27213,10 +27293,11 @@ async function openFunnelSteps(fid, fname) {
     if (!runs.total) {
       html += `<div class="hint" style="padding:0 16px 8px">Пока никто: люди попадают в воронку сами, когда подходят под сегмент «${esc(AF_SEG_RU[f.target_segment]||f.target_segment||'')}».</div>`;
     } else {
+      const _fp = (q, t) => `openFunnelPeople('auto',${fid},'${esc(String(t))}','${q}')`;
       html += `<div style="display:flex;gap:8px;padding:0 16px 8px;flex-wrap:wrap">
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(st.active||0)}</div><div class="kpi-chip-lbl">идут</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(st.completed||0)}</div><div class="kpi-chip-lbl">дошли до конца</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val">${num((st.stopped||0)+(st.error||0))}</div><div class="kpi-chip-lbl">сошли</div></div>
+        <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=active','Идут по воронке')}"><div class="kpi-chip-val">${num(st.active||0)}</div><div class="kpi-chip-lbl">идут ›</div></div>
+        <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=completed','Дошли до конца')}"><div class="kpi-chip-val">${num(st.completed||0)}</div><div class="kpi-chip-lbl">дошли до конца ›</div></div>
+        <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=lost','Сошли с воронки')}"><div class="kpi-chip-val">${num((st.stopped||0)+(st.error||0))}</div><div class="kpi-chip-lbl">сошли ›</div></div>
       </div>`;
     }
     html += `<div class="sec">Шаги воронки (${steps.length})</div>`;
@@ -27235,7 +27316,7 @@ async function openFunnelSteps(fid, fname) {
               <div class="li-name">Шаг ${s2.step_num} · через ${s2.delay_hours} ${plural(s2.delay_hours,'час','часа','часов')}</div>
               <div class="li-sub wrap">${esc((s2.message_text||'').slice(0,110))}${(s2.message_text||'').length>110?'…':''}</div>
               ${s2.button_text?`<div class="li-sub wrap" style="color:var(--accent)">🔘 ${esc(s2.button_text)}</div>`:''}
-              ${here?`<div class="li-sub wrap">⏳ ждут этого шага: ${num(here)}</div>`:''}
+              ${here?`<div class="li-sub wrap" style="color:var(--accent);cursor:pointer" role="button" tabindex="0" onclick="event.stopPropagation();openFunnelPeople('auto',${fid},'Ждут шага ${s2.step_num}','status=active&step=${s2.step_num}')">⏳ ждут этого шага: ${num(here)} ›</div>`:''}
             </div><span class="chev">›</span>
           </div>`;
       });

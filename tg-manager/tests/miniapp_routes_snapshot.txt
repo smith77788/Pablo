@@ -89,6 +89,7 @@ GET /api/miniapp/audience_dna/{bot_id}/history
 GET /api/miniapp/audience_dna/{bot_id}/profile
 GET /api/miniapp/audit
 GET /api/miniapp/auto_funnel/{funnel_id}
+GET /api/miniapp/auto_funnel/{funnel_id}/people
 GET /api/miniapp/auto_funnels
 GET /api/miniapp/autoreg
 GET /api/miniapp/bot/{bot_id}
@@ -167,6 +168,7 @@ GET /api/miniapp/fleet/diagnose/blocked
 GET /api/miniapp/fleet/governor
 GET /api/miniapp/fleet/warnings
 GET /api/miniapp/flood/{bot_id}
+GET /api/miniapp/funnel/{funnel_id}/people
 GET /api/miniapp/funnel/{funnel_id}/steps
 GET /api/miniapp/funnels
 GET /api/miniapp/geo_presets
@@ -378,6 +380,7 @@ HEAD /api/miniapp/audience_dna/{bot_id}/history
 HEAD /api/miniapp/audience_dna/{bot_id}/profile
 HEAD /api/miniapp/audit
 HEAD /api/miniapp/auto_funnel/{funnel_id}
+HEAD /api/miniapp/auto_funnel/{funnel_id}/people
 HEAD /api/miniapp/auto_funnels
 HEAD /api/miniapp/autoreg
 HEAD /api/miniapp/bot/{bot_id}
@@ -456,6 +459,7 @@ HEAD /api/miniapp/fleet/diagnose/blocked
 HEAD /api/miniapp/fleet/governor
 HEAD /api/miniapp/fleet/warnings
 HEAD /api/miniapp/flood/{bot_id}
+HEAD /api/miniapp/funnel/{funnel_id}/people
 HEAD /api/miniapp/funnel/{funnel_id}/steps
 HEAD /api/miniapp/funnels
 HEAD /api/miniapp/geo_presets
