@@ -29,6 +29,13 @@ BC_ID = 78
 USERS = [201, 202, 203]
 
 
+def _source(rel: str) -> str:
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, rel), encoding="utf-8") as f:
+        return f.read()
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -174,3 +181,63 @@ def test_a_readable_log_lets_the_broadcast_through():
     calls, statuses, reads = _broadcast([])
     assert calls == USERS, calls
     assert reads == 1, "здоровое чтение не должно повторяться"
+
+
+# ── Журнал доставок не должен отставать от отправок ──────────────────────────
+
+def test_every_delivery_is_journalled_before_the_next_one_goes_out():
+    """Пачка по 25 держала записи в памяти процесса десятки секунд.
+
+    Рассылка идёт с паузами против лимитов Telegram, SIGTERM на деплое
+    приходит в это окно штатно — и докатка писала этим людям второй раз,
+    потому что в журнале их не было.
+    """
+    journalled: list[int] = []
+    # Снимок журнала ПЕРЕД каждой отправкой. Сравнивать итог бессмысленно: по
+    # возврату рассылка сбрасывает буфер сама, и при любой пачке итог сойдётся
+    # — ровно та ложная зелень, которой проверка «итог равен списку» и была.
+    before_each: list[tuple[int, tuple]] = []
+
+    async def _call(session, token, method, **params):
+        if method == "getMe":
+            return {"ok": True, "result": {"id": BOT_ID, "username": "b"}}
+        before_each.append((params.get("chat_id"), tuple(journalled)))
+        return {"ok": True, "result": {"message_id": 1}}
+
+    class _Pool(_FakePool):
+        async def executemany(self, query, args):
+            if "broadcast_delivery_log" in query:
+                journalled.extend(a[1] for a in args)
+            return None
+
+    with patch.object(bot_api, "_call", _call):
+        with patch("database.db.mark_user_inactive", AsyncMock()):
+            with patch("database.db.update_broadcast", AsyncMock()):
+                with patch("database.db.get_broadcast_delivered_ids",
+                           AsyncMock(return_value=set())):
+                    with patch("services.brand_injection.is_free_tier",
+                               AsyncMock(return_value=False)):
+                        _run(broadcaster.run(
+                            _Pool(), _FakeSession(), BC_ID, TOKEN, BOT_ID,
+                            "Привет", user_ids=list(USERS),
+                        ))
+
+    assert [u for u, _ in before_each] == USERS, before_each
+    for i, (uid, snapshot) in enumerate(before_each):
+        assert list(snapshot) == USERS[:i], (
+            f"перед отправкой {uid} в журнале {list(snapshot)}, а должно быть "
+            f"{USERS[:i]}: доставки копятся в памяти процесса, и обрыв в этом "
+            "окне стоит их дублей на докатке")
+    assert journalled == USERS, journalled
+
+
+def test_the_journal_is_not_batched_behind_the_sends():
+    """Храповик: возврат пачки вернёт окно дублей молча."""
+    assert broadcaster is not None
+    src = _source("services/broadcaster.py")
+    import re
+    m = re.search(r"_DELIVERY_FLUSH_INTERVAL = (\d+)", src)
+    assert m, "интервал сброса журнала доставок пропал"
+    assert int(m.group(1)) == 1, (
+        f"журнал сбрасывается раз в {m.group(1)} отправок — столько доставок "
+        "живёт только в памяти процесса, и обрыв стоит их дублей")
