@@ -77,7 +77,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       END AS role
                FROM managed_channels
                WHERE ({_CHANNELS_VISIBLE_SQL}){cond}
-               ORDER BY member_count DESC NULLS LAST
+               ORDER BY member_count DESC NULLS LAST, channel_id
                LIMIT $2 OFFSET $3""", uid, limit, offset, *extra)
         # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
         # счётчик брал DISTINCT id (первичный ключ строки). Один и тот же канал

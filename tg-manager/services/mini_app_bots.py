@@ -77,7 +77,7 @@ def setup_routes(app: web.Application, pool) -> None:
                LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
                WHERE ({visible})
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active{group}
-               ORDER BY subscriber_count DESC LIMIT $2 OFFSET $3"""
+               ORDER BY subscriber_count DESC, mb.bot_id LIMIT $2 OFFSET $3"""
         try:
             rows = await pool.fetch(
                 _BOTS_SQL.format(health=_BOT_HEALTH_COLS, visible=_BOTS_VISIBLE_SQL,
@@ -297,7 +297,7 @@ def setup_routes(app: web.Application, pool) -> None:
         rows = await _safe_fetch(pool,
             """SELECT user_id, username, first_name, last_seen, is_active, first_seen
                FROM bot_users WHERE bot_id=$1
-               ORDER BY last_seen DESC NULLS LAST
+               ORDER BY last_seen DESC NULLS LAST, user_id
                LIMIT 50 OFFSET $2""", bot_id, offset)
         total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
         return _json_resp({"subscribers": rows, "total": total, "offset": offset})

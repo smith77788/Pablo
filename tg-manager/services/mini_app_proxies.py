@@ -102,12 +102,12 @@ def setup_routes(app: web.Application, pool) -> None:
                           (SELECT COUNT(*) FROM tg_accounts a
                             WHERE a.owner_id=$1 AND a.proxy_id=user_proxies.id) AS acc_count
                    FROM user_proxies WHERE owner_id=$1
-                   ORDER BY created_at DESC LIMIT $2 OFFSET $3""", uid, limit, offset)
+                   ORDER BY created_at DESC, id LIMIT $2 OFFSET $3""", uid, limit, offset)
         except Exception:
             rows = await _safe_fetch(pool,
                 """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
                    FROM user_proxies WHERE owner_id=$1
-                   ORDER BY created_at DESC LIMIT $2 OFFSET $3""", uid, limit, offset)
+                   ORDER BY created_at DESC, id LIMIT $2 OFFSET $3""", uid, limit, offset)
             rows = [dict(r, is_backup=False, acc_count=0, latency_ms=None) for r in rows]
         # proxy_url хранится зашифрованным. Расшифровываем для показа — но
         # МАСКИРУЕМ логин и пароль: экран печатает только хост (везде стоит

@@ -444,21 +444,21 @@ def setup_routes(app: web.Application, pool) -> None:
                           tags, notes, source, created_at
                    FROM crm_contacts WHERE owner_id=$1
                      AND (first_name ILIKE $2 OR last_name ILIKE $2 OR username ILIKE $2 OR phone ILIKE $2)
-                   ORDER BY created_at DESC LIMIT 50 OFFSET $3""",
+                   ORDER BY created_at DESC, id LIMIT 50 OFFSET $3""",
                 uid, f"%{search}%", offset)
         elif tag:
             rows = await _safe_fetch(pool,
                 """SELECT id, tg_user_id, username, first_name, last_name, phone,
                           tags, notes, source, created_at
                    FROM crm_contacts WHERE owner_id=$1 AND $2=ANY(tags)
-                   ORDER BY created_at DESC LIMIT 50 OFFSET $3""",
+                   ORDER BY created_at DESC, id LIMIT 50 OFFSET $3""",
                 uid, tag, offset)
         else:
             rows = await _safe_fetch(pool,
                 """SELECT id, tg_user_id, username, first_name, last_name, phone,
                           tags, notes, source, created_at
                    FROM crm_contacts WHERE owner_id=$1
-                   ORDER BY created_at DESC LIMIT 50 OFFSET $2""",
+                   ORDER BY created_at DESC, id LIMIT 50 OFFSET $2""",
                 uid, offset)
         total = await _safe_count(pool, "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", uid)
         # Unique tags across all contacts
@@ -636,7 +636,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 f"""SELECT {cols} FROM broadcasts b
                     JOIN managed_bots mb ON mb.bot_id=b.bot_id
                     WHERE b.created_by=$1 AND lower(b.status)=$2
-                    ORDER BY b.created_at DESC LIMIT $3 OFFSET $4""",
+                    ORDER BY b.created_at DESC, b.id LIMIT $3 OFFSET $4""",
                 uid, status, limit, offset)
             shown_total = counts.get(status, len(rows) + offset)
         else:
@@ -644,7 +644,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 f"""SELECT {cols} FROM broadcasts b
                     JOIN managed_bots mb ON mb.bot_id=b.bot_id
                     WHERE b.created_by=$1
-                    ORDER BY b.created_at DESC LIMIT $2 OFFSET $3""",
+                    ORDER BY b.created_at DESC, b.id LIMIT $2 OFFSET $3""",
                 uid, limit, offset)
             shown_total = total
         return _json_resp({

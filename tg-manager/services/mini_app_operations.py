@@ -128,7 +128,7 @@ def setup_routes(app: web.Application, pool) -> None:
         rows = await _safe_fetch(pool,
             f"""SELECT {_cols}
                FROM operation_queue oq WHERE {_where}
-               ORDER BY oq.created_at DESC
+               ORDER BY oq.created_at DESC, oq.id
                LIMIT ${len(_wargs) + 1} OFFSET ${len(_wargs) + 2}""",
             *_wargs, limit, offset)
         total = await _safe_count(pool,

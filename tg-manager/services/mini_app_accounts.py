@@ -164,7 +164,7 @@ def setup_routes(app: web.Application, pool) -> None:
                       (SELECT COALESCE(p.label, p.geo_country) FROM user_proxies p
                         WHERE p.id = tg_accounts.proxy_id) AS proxy_label
                FROM tg_accounts WHERE {where}
-               ORDER BY is_active DESC, last_used DESC NULLS LAST
+               ORDER BY is_active DESC, last_used DESC NULLS LAST, id
                LIMIT ${len(args)+1} OFFSET ${len(args)+2}""", *page_args)
         # Сколько всего под текущим фильтром — для пагинации «Загрузить ещё».
         filtered_total = await _safe_count(pool,

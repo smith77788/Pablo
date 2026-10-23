@@ -179,7 +179,14 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
         'synced': 'last_synced_at DESC',
         'changed': 'last_changed_at DESC',
     }
-    order = sort_map.get(sort_by, 'first_name')
+    # Добивочный уникальный ключ обязателен: список листается по offset
+    # («Показать ещё»), а все сортировки выше НЕУНИКАЛЬНЫ — тёзки, пустые
+    # имена, одинаковые даты. Порядок внутри равных значений Postgres не
+    # обещает, и строка, изменившаяся между запросами страниц (а их пишет и
+    # синхронизация, и сам владелец), переезжает. Без добивки проход по
+    # списку показывал одного человека дважды, а другого — ни разу: проверено
+    # живьём в tests/test_paging_does_not_skip_or_repeat_people.py.
+    order = sort_map.get(sort_by, 'first_name') + ', id'
     params.extend([limit, offset])
     rows = await pool.fetch(f'SELECT * FROM unified_contacts WHERE {where} ORDER BY {order} LIMIT ${idx} OFFSET ${idx+1}', *params)
     total = await pool.fetchval(f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params[:-2])
