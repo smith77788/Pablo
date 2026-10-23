@@ -96,9 +96,17 @@ async def get_identity_graph(pool, owner_id: int, contact_id: str) -> list:
     return [dict(r) for r in rows]
 
 
-async def get_last_active(pool, contact_id: str) -> Optional[str]:
+async def get_last_active(pool, contact_id: str, owner_id: int) -> Optional[str]:
+    """«Был сегодня» для карточки — ТОЛЬКО по своему контакту.
+
+    Раньше owner_id в запросе не было: по чужому uuid функция честно отвечала,
+    когда тот человек был в сети последний раз. Обработчик карточки проверяет
+    владельца и сам, но скоуп должен держаться запросом, иначе второй вызов из
+    другого места вернёт дыру.
+    """
     row = await pool.fetchrow(
-        'SELECT last_active_at FROM unified_contacts WHERE id=$1', contact_id)
+        'SELECT last_active_at FROM unified_contacts WHERE id=$1 AND owner_id=$2',
+        contact_id, owner_id)
     if row and row['last_active_at']:
         from datetime import datetime, timezone
         delta = datetime.now(timezone.utc) - row['last_active_at']

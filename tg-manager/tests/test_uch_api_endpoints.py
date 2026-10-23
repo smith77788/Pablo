@@ -1386,7 +1386,9 @@ class TestIdentityEngine:
     async def test_get_last_active_none(self):
         from services.contacts_hub.identity_engine import get_last_active
         pool = FakePool(fetch_row={"last_active_at": None})
-        result = await get_last_active(pool, "uuid-1")
+        # owner_id обязателен: без него функция отдавала «был сегодня» по
+        # ЛЮБОМУ contact_id, в том числе чужому.
+        result = await get_last_active(pool, "uuid-1", 123)
         assert result is None
 
 

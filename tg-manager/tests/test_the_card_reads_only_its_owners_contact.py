@@ -20,8 +20,10 @@ contact_id берётся прямо из адреса, и в обоих ЧАС�
 owner_id, дописанный в каждый запрос.
 
 ОБРАТНЫЙ КОНТРОЛЬ (прогонялся):
-  1. убрать `_own_contact` из uch_timeline -> красный
-     test_a_strangers_timeline_is_not_found;
+  1. убрать `_own_contact` из uch_timeline -> красные
+     test_a_strangers_timeline_is_not_found и
+     test_a_malformed_id_is_not_a_server_error (второй падал DataError из
+     asyncpg, то есть мусорный id в адресе отвечал 500);
   2. убрать `_own_contact` из uch_identity -> красный
      test_a_strangers_identity_is_not_found;
   3. вернуть `get_last_active` без owner_id в запросе -> красный

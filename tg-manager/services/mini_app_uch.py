@@ -104,6 +104,24 @@ def setup_routes(app: web.Application, pool) -> None:
             account_id=validate_integer(request.query.get('account_id'), min_val=1),
         )
 
+    async def _own_contact(cid: str, uid: int) -> bool:
+        """Принадлежит ли контакт владельцу.
+
+        НАХОДКА. Лента карточки и граф идентичности читали ПОДТАБЛИЦЫ контакта
+        (contact_sources, contact_crm, last_active_at) по одному contact_id, без
+        owner_id вообще: по чужому uuid отдавались аккаунты-источники, стадия
+        CRM и «был сегодня». Часть запросов в тех же обработчиках владельца
+        проверяла, часть — нет, поэтому ответ выглядел правдоподобно
+        (полупустая лента), а не как отказ.
+
+        Проверка одна и ДО чтения: у подтаблиц contact_sources своего owner_id
+        нет вообще, поэтому скоуп может держать только сам контакт.
+        """
+        if not _UUID_RE.match(str(cid or '')):
+            return False
+        return bool(await pool.fetchval(
+            'SELECT 1 FROM unified_contacts WHERE id=$1 AND owner_id=$2', cid, uid))
+
     def _filters_are_set(filters: dict) -> bool:
         """Есть ли хоть один фильтр: «весь хаб» и «срез» — разные выгрузки."""
         return any(v not in (None, '', False) for v in filters.values())
@@ -1140,6 +1158,8 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = request.match_info['contact_id']
+            if not await _own_contact(cid, uid):
+                return _err("Контакт не найден", 404)
             history = await pool.fetch(
                 'SELECT field_name, old_value, new_value, created_at FROM contact_history WHERE contact_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 60',
                 cid, uid)
@@ -1198,9 +1218,11 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = request.match_info['contact_id']
+            if not await _own_contact(cid, uid):
+                return _err("Контакт не найден", 404)
             from services.contacts_hub.identity_engine import build_identity_graph, get_last_active
             graph = await build_identity_graph(pool, uid, cid)
-            last_active = await get_last_active(pool, cid)
+            last_active = await get_last_active(pool, cid, uid)
             return _json_resp({**graph, 'last_active': last_active})
         except Exception:
             log.exception("uch_identity")
