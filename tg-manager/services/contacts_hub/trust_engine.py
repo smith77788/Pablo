@@ -23,6 +23,31 @@ def compute_trust_score(contact_data: dict, sources: list) -> float:
     return min(score, 1.0)
 
 
+def _as_list(v) -> list:
+    """Список из колонки jsonb, которая приехала строкой.
+
+    НАХОДКА. asyncpg отдаёт jsonb СТРОКОЙ (кодек json на пуле нигде не
+    ставится), а сравнение дублей делало `set(contact['phones'])` — то есть
+    превращало строку `'["+79990000001"]'` в набор СИМВОЛОВ. У любых двух
+    контактов с телефонами пересекались `+`, `7`, `9`, `"`, `[`, и движок
+    ставил причину `same_phone` (+0.3) паре с совершенно разными номерами.
+    Вместе с одинаковым именем (0.15) и компанией (0.1) это 0.55, то есть выше
+    порога: экран «Дубликаты» показывал посторонних людей как одного человека и
+    писал «один телефон» — неправду, — а кнопка «Объединить» рядом удаляет
+    вторую запись. Для порога пакетного слияния (0.9) ложного признака не
+    хватает, поэтому массового разрушения не было, но одно нажатие — было.
+    """
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+        except (ValueError, TypeError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
 def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
     score = 0.0
     reasons = []
@@ -31,10 +56,17 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
         score += 0.5
         reasons.append('same_telegram_id')
 
-    phones_a = set(contact_a.get('phones') or [])
-    phones_b = set(contact_b.get('phones') or [])
+    phones_a = {str(x) for x in _as_list(contact_a.get('phones')) if x}
+    phones_b = {str(x) for x in _as_list(contact_b.get('phones')) if x}
     if phones_a and phones_b and phones_a & phones_b:
-        score += 0.3
+        # 0.4, а не 0.3. Пока телефоны сравнивались как наборы символов, вес
+        # не имел значения: признак стоял почти на каждой паре. Когда признак
+        # стал настоящим, стало видно, что его вес слишком мал: ОДИН И ТОТ ЖЕ
+        # номер плюс одинаковое имя давали 0.45, то есть настоящий двойник
+        # оставался ниже порога 0.5 и на экран не попадал. Номер опознаёт
+        # человека не хуже ника (0.25) — скорее лучше. 0.4 держит и обратное:
+        # общий номер САМ ПО СЕБЕ (семейный, рабочий) порога не берёт.
+        score += 0.4
         reasons.append('same_phone')
 
     username_a = (contact_a.get('username') or '').lower()
@@ -62,32 +94,108 @@ def compute_merge_confidence(contact_a: dict, contact_b: dict) -> dict:
     return {'confidence': min(score, 1.0), 'reasons': reasons}
 
 
-async def detect_smart_duplicates(pool, owner_id: int) -> list:
+# Названия совпадений ПО-РУССКИ. Экран дублей печатал `dp.reasons.join(', ')`,
+# то есть владелец читал `same_telegram_id, same_phone` — коды из кода. Карта
+# живёт на сервере по той же причине, что ACTIVITY_LABELS и STAGE_LABELS: две
+# карты (своя на экране и своя в боте) расходятся молча, а правило «владелец
+# читает только по-русски» нарушает любая из них.
+REASON_LABELS = {
+    'same_telegram_id': 'один Telegram ID',
+    'same_phone': 'один телефон',
+    'same_username': 'один @ник',
+    'same_name': 'одинаковое имя',
+    'same_first_name': 'одинаковое имя (без фамилии)',
+    'same_company': 'одна компания',
+}
+
+
+def reason_labels(reasons) -> list:
+    """Коды совпадений -> подписи. Неизвестный код отдаётся как есть: лучше
+    незнакомое слово, чем пропавшая причина."""
+    return [REASON_LABELS.get(r, str(r)) for r in (reasons or [])]
+
+
+# Потолок группы кандидатов. Группа — контакты с ОДНИМ ником, телефоном или
+# telegram_id; две-три записи там норма. Тысяча — это не дубликаты, а мусорное
+# значение (служебный номер, '0', один ник у пачки импортированных записей), и
+# квадратичность вернулась бы внутри такой группы. Срезанное НЕ молчит: сколько
+# групп не сравнивалось, уходит наружу вместе с результатом.
+_DUP_GROUP_CAP = 300
+
+async def detect_smart_duplicates(pool, owner_id: int) -> dict:
+    """Пары-кандидаты на слияние: {'duplicates': [...], 'skipped_groups': n}.
+
+    БЫЛО: читались ВСЕ контакты владельца и сравнивались ВСЕ пары —
+    n*(n-1)/2 вызовов compute_merge_confidence в одном запросе. На 10 000
+    контактах это ~50 млн сравнений на каждое открытие экрана дублей, то есть
+    экран не «медленный», а недоступный: запрос не возвращается, и владелец
+    видит ошибку вместо списка.
+
+    ПОЧЕМУ ОТБОР ТОЧНЫЙ, А НЕ ПРИБЛИЗИТЕЛЬНЫЙ. Порог 0.5 и веса из
+    compute_merge_confidence: без совпадения telegram_user_id (0.5), телефона
+    (0.3) или ника (0.25) максимум даёт имя (0.15) плюс компания (0.1) = 0.25.
+    Значит КАЖДАЯ пара с confidence >= 0.5 обязана совпасть хотя бы по одному
+    из этих трёх полей, и сравнение только внутри таких групп даёт тот же
+    результат, а не похожий. Это не рассуждение в комментарии: тест
+    test_duplicate_detection_is_exact_not_approximate перебирает формы пары и
+    краснеет, если добавленный признак сломает оценку сверху.
+
+    Возвращается dict, а не список: сколько групп не сравнивалось — часть
+    ответа. Молча срезанный список дублей читается как «больше дублей нет».
+    """
     contacts = await pool.fetch(
         '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
            FROM unified_contacts WHERE owner_id=$1''', owner_id)
+    rows = [dict(c) for c in contacts]
+
+    groups: dict[tuple, list[int]] = {}
+    for i, c in enumerate(rows):
+        keys = set()
+        if c.get('telegram_user_id'):
+            keys.add(('tg', str(c['telegram_user_id'])))
+        if c.get('username'):
+            keys.add(('un', str(c['username']).lower()))
+        phones = c.get('phones') or []
+        if isinstance(phones, str):
+            try:
+                phones = json.loads(phones)
+            except Exception:
+                phones = []
+        for ph in (phones or []):
+            if ph:
+                keys.add(('ph', str(ph)))
+        for k in keys:
+            groups.setdefault(k, []).append(i)
+
     duplicates = []
     seen_pairs = set()
-
-    for i in range(len(contacts)):
-        for j in range(i+1, len(contacts)):
-            a = dict(contacts[i])
-            b = dict(contacts[j])
-            key = tuple(sorted([a['id'], b['id']]))
-            if key in seen_pairs:
-                continue
-            result = compute_merge_confidence(a, b)
-            if result['confidence'] >= 0.5:
+    skipped_groups = 0
+    for idxs in groups.values():
+        if len(idxs) < 2:
+            continue
+        if len(idxs) > _DUP_GROUP_CAP:
+            skipped_groups += 1
+            continue
+        for x in range(len(idxs)):
+            for y in range(x + 1, len(idxs)):
+                a, b = rows[idxs[x]], rows[idxs[y]]
+                key = tuple(sorted([str(a['id']), str(b['id'])]))
+                if key in seen_pairs:
+                    continue
                 seen_pairs.add(key)
+                result = compute_merge_confidence(a, b)
+                if result['confidence'] < 0.5:
+                    continue
                 duplicates.append({
-                    'contact_a': {'id': a['id'], 'name': f"{a.get('first_name', '')} {a.get('last_name', '')}".strip() or a.get('username', '?')},
-                    'contact_b': {'id': b['id'], 'name': f"{b.get('first_name', '')} {b.get('last_name', '')}".strip() or b.get('username', '?')},
+                    'contact_a': {'id': a['id'], 'name': f"{a.get('first_name') or ''} {a.get('last_name') or ''}".strip() or a.get('username') or '?'},
+                    'contact_b': {'id': b['id'], 'name': f"{b.get('first_name') or ''} {b.get('last_name') or ''}".strip() or b.get('username') or '?'},
                     'confidence': result['confidence'],
                     'reasons': result['reasons'],
+                    'reason_labels': reason_labels(result['reasons']),
                 })
 
     duplicates.sort(key=lambda x: x['confidence'], reverse=True)
-    return duplicates
+    return {'duplicates': duplicates, 'skipped_groups': skipped_groups}
 
 
 async def update_trust_scores(pool, owner_id: int) -> int:
@@ -154,172 +262,19 @@ async def resolve_conflict(pool, conflict_id: int, owner_id: int,
     return result != 'UPDATE 0'
 
 
-async def compute_merge_confidence_improved(pool, owner_id: int, contact_a_id: int, contact_b_id: int) -> dict:
-    """НЕ ИСПОЛЬЗУЕТСЯ: продукт зовёт `detect_smart_duplicates` /
-    `compute_merge_confidence` (без суффикса). Эта «улучшенная» ветка —
-    параллельная реализация, на которую нет ни одной ссылки, кроме тестов.
-    Прежде чем развивать её, решите, какая из двух остаётся единственной:
-    две реализации одного правила расходятся молча."""
-    row_a = await pool.fetchrow(
-        '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
-           FROM unified_contacts WHERE id=$1 AND owner_id=$2''', contact_a_id, owner_id)
-    row_b = await pool.fetchrow(
-        '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
-           FROM unified_contacts WHERE id=$1 AND owner_id=$2''', contact_b_id, owner_id)
-    if not row_a or not row_b:
-        return {'confidence': 0.0, 'reasons': [], 'error': 'contact_not_found'}
+# УДАЛЕНО: compute_merge_confidence_improved / detect_smart_duplicates_improved.
+# Параллельная реализация того же правила с суффиксом «improved», на которую не
+# ссылался никто, кроме тестов. Опасна именно удобством: агент, подключающий
+# движок к экрану, выбирает функцию по имени и подписи, и «улучшенная» выглядит
+# предпочтительнее той, которую зовёт продукт. Её лишние признаки (source_type,
+# partial_name_overlap) сломали бы и доказательство точности отбора по группам
+# выше: оценку сверху даёт набор весов compute_merge_confidence, а не вообще
+# любой. Нужны эти признаки — добавлять их в единственную реализацию и
+# перепроверять тест точности.
 
-    a = dict(row_a)
-    b = dict(row_b)
-    base = compute_merge_confidence(a, b)
+# УДАЛЕНО: get_conflict_resolution_suggestions(pool, conflict_id). Советы по
+# разрешению конфликта полей — без owner_id ВООБЩЕ: conflict_id это обычное
+# целое, и дверь к этой функции сразу стала бы перебором чужих конфликтов.
+# Двери у неё не было, звали только тесты. Понадобится — писать заново со
+# скоупом владельца в запросе, а не в обработчике.
 
-    # Колонки source_type в contact_sources нет: этот запрос упал бы при первом
-    # же вызове (см. пометку в докстринге — ветка не подключена). Источник
-    # контакта в этой схеме — АККАУНТ, через который его увидели (account_id).
-    # Совпадение аккаунтов — тот же сигнал: одного человека видно с обеих сторон.
-    sources_a = await pool.fetch(
-        'SELECT account_id FROM contact_sources WHERE contact_id=$1', contact_a_id)
-    sources_b = await pool.fetch(
-        'SELECT account_id FROM contact_sources WHERE contact_id=$1', contact_b_id)
-    types_a = {s['account_id'] for s in sources_a if s['account_id'] is not None}
-    types_b = {s['account_id'] for s in sources_b if s['account_id'] is not None}
-    overlap = types_a & types_b
-    if len(overlap) >= 2:
-        base['confidence'] = min(base['confidence'] + 0.1, 1.0)
-        base['reasons'].append('overlapping_sources')
-
-    if a.get('telegram_user_id') and not b.get('telegram_user_id'):
-        base['confidence'] = min(base['confidence'] + 0.05, 1.0)
-        base['reasons'].append('telegram_id_transfer')
-    elif b.get('telegram_user_id') and not a.get('telegram_user_id'):
-        base['confidence'] = min(base['confidence'] + 0.05, 1.0)
-        base['reasons'].append('telegram_id_transfer')
-
-    name_a = f"{(a.get('first_name') or '').lower()} {(a.get('last_name') or '').lower()}".strip()
-    name_b = f"{(b.get('first_name') or '').lower()} {(b.get('last_name') or '').lower()}".strip()
-    if name_a and name_b and name_a != name_b:
-        parts_a = set(name_a.split())
-        parts_b = set(name_b.split())
-        shared = parts_a & parts_b
-        if shared and len(shared) >= 2:
-            base['confidence'] = min(base['confidence'] + 0.05, 1.0)
-            base['reasons'].append('partial_name_overlap')
-
-    return base
-
-
-async def detect_smart_duplicates_improved(pool, owner_id: int) -> list:
-    """НЕ ИСПОЛЬЗУЕТСЯ: продукт зовёт `detect_smart_duplicates` /
-    `compute_merge_confidence` (без суффикса). Эта «улучшенная» ветка —
-    параллельная реализация, на которую нет ни одной ссылки, кроме тестов.
-    Прежде чем развивать её, решите, какая из двух остаётся единственной:
-    две реализации одного правила расходятся молча."""
-    contacts = await pool.fetch(
-        '''SELECT id, telegram_user_id, username, first_name, last_name, phones, company
-           FROM unified_contacts WHERE owner_id=$1''', owner_id)
-    if len(contacts) < 2:
-        return []
-
-    source_map = {}
-    for c in contacts:
-        # См. compute_merge_confidence_improved: колонки source_type нет,
-        # источник контакта — аккаунт, через который его увидели.
-        sources = await pool.fetch(
-            'SELECT account_id FROM contact_sources WHERE contact_id=$1', c['id'])
-        source_map[c['id']] = {s['account_id'] for s in sources
-                               if s['account_id'] is not None}
-
-    duplicates = []
-    seen_pairs = set()
-
-    for i in range(len(contacts)):
-        for j in range(i + 1, len(contacts)):
-            a = dict(contacts[i])
-            b = dict(contacts[j])
-            key = tuple(sorted([a['id'], b['id']]))
-            if key in seen_pairs:
-                continue
-
-            base = compute_merge_confidence(a, b)
-
-            types_a = source_map.get(a['id'], set())
-            types_b = source_map.get(b['id'], set())
-            overlap = types_a & types_b
-            if len(overlap) >= 2:
-                base['confidence'] = min(base['confidence'] + 0.1, 1.0)
-                base['reasons'].append('overlapping_sources')
-
-            if base['confidence'] >= 0.45:
-                seen_pairs.add(key)
-                name_a = f"{a.get('first_name', '')} {a.get('last_name', '')}".strip() or a.get('username', '?')
-                name_b = f"{b.get('first_name', '')} {b.get('last_name', '')}".strip() or b.get('username', '?')
-                duplicates.append({
-                    'contact_a': {'id': a['id'], 'name': name_a},
-                    'contact_b': {'id': b['id'], 'name': name_b},
-                    'confidence': round(base['confidence'], 3),
-                    'reasons': base['reasons'],
-                    'source_overlap': list(overlap),
-                })
-
-    duplicates.sort(key=lambda x: x['confidence'], reverse=True)
-    return duplicates
-
-
-async def get_conflict_resolution_suggestions(pool, conflict_id: int) -> dict:
-    row = await pool.fetchrow(
-        '''SELECT c.*, uc.first_name, uc.last_name, uc.username, uc.phones, uc.company,
-                  uc.telegram_user_id
-           FROM contact_conflicts c
-           JOIN unified_contacts uc ON uc.id = c.contact_id
-           WHERE c.id=$1''', conflict_id)
-    if not row:
-        return {'error': 'conflict_not_found'}
-
-    conflict = dict(row)
-    field = conflict.get('conflict_field') or conflict.get('field')
-    suggestions = []
-
-    if field == 'phones':
-        phones = conflict.get('phones') or []
-        if len(phones) >= 2:
-            suggestions.append({'action': 'merge_phones', 'values': phones, 'rationale': 'all_phones_valid'})
-        elif phones:
-            suggestions.append({'action': 'keep_value', 'value': phones[0], 'rationale': 'single_phone'})
-    elif field == 'name' or field == 'first_name':
-        suggestions.append({
-            'action': 'keep_most_recent',
-            'value': conflict.get('first_name'),
-            'rationale': 'latest_source_wins',
-        })
-    elif field == 'username':
-        suggestions.append({
-            'action': 'keep_value',
-            'value': conflict.get('username'),
-            'rationale': 'username_unique',
-        })
-    elif field == 'company':
-        suggestions.append({
-            'action': 'keep_value',
-            'value': conflict.get('company'),
-            'rationale': 'company_singular',
-        })
-    else:
-        suggestions.append({
-            'action': 'manual_review',
-            'value': conflict.get('resolved_value'),
-            'rationale': 'unknown_field_type',
-        })
-
-    priority = 'low'
-    if conflict.get('confidence', 0) >= 0.8:
-        priority = 'high'
-    elif conflict.get('confidence', 0) >= 0.6:
-        priority = 'medium'
-
-    return {
-        'conflict_id': conflict_id,
-        'field': field,
-        'priority': priority,
-        'suggestions': suggestions,
-        'current_resolution': conflict.get('resolution'),
-    }

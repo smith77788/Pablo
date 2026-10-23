@@ -800,8 +800,11 @@ class TestTrustEngine:
     async def test_detect_smart_duplicates_empty(self):
         from services.contacts_hub.trust_engine import detect_smart_duplicates
         pool = FakePool(fetch_rows=[])
+        # Ответ стал словарём: сколько групп не сравнивалось — часть ответа,
+        # а не деталь реализации (молча срезанный список читается как «дублей
+        # больше нет»).
         result = await detect_smart_duplicates(pool, 123)
-        assert result == []
+        assert result == {'duplicates': [], 'skipped_groups': 0}
 
     @pytest.mark.asyncio
     async def test_get_conflicts_empty(self):

@@ -247,102 +247,14 @@ class TestTrustEngine:
         result = compute_merge_confidence(a, b)
         assert result["confidence"] < 0.5
 
-    @pytest.mark.asyncio
-    async def test_compute_merge_confidence_improved_high(self):
-        from services.contacts_hub.trust_engine import compute_merge_confidence_improved
-        pool = FakePool(
-            fetch_row={"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
-            # Источник контакта — АККАУНТ, через который его увидели
-            # (contact_sources.account_id). Колонки source_type в схеме нет: пока
-            # заглушка её изображала, тесты были зелёными на мёртвом запросе.
-            fetch_rows=[{"account_id": 11}, {"account_id": 22}],
-            fetch_val=None
-        )
-        result = await compute_merge_confidence_improved(pool, 123, 1, 2)
-        assert result["confidence"] >= 0.5
-        assert "same_telegram_id" in result["reasons"]
-
-    @pytest.mark.asyncio
-    async def test_compute_merge_confidence_improved_low(self):
-        from services.contacts_hub.trust_engine import compute_merge_confidence_improved
-        # row_a и row_b — РАЗНЫЕ контакты (fetchrow отдаёт их по очереди): разные
-        # username/имя/телефон/компания → низкая уверенность в слиянии.
-        pool = FakePool(
-            fetch_row=[
-                {"id": 1, "telegram_user_id": 1, "username": "alice", "first_name": "Alice", "last_name": "Smith", "phones": ["+111"], "company": "C1"},
-                {"id": 2, "telegram_user_id": 2, "username": "bob", "first_name": "Bob", "last_name": "Jones", "phones": ["+999"], "company": "C2"},
-            ],
-            fetch_rows=[{"account_id": 11}],
-            fetch_val=None
-        )
-        result = await compute_merge_confidence_improved(pool, 123, 1, 2)
-        assert result["confidence"] < 0.5
-
-    @pytest.mark.asyncio
-    async def test_detect_smart_duplicates_improved_empty(self):
-        from services.contacts_hub.trust_engine import detect_smart_duplicates_improved
-        pool = FakePool(fetch_rows=[])
-        result = await detect_smart_duplicates_improved(pool, 123)
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_detect_smart_duplicates_improved_with_duplicates(self):
-        from services.contacts_hub.trust_engine import detect_smart_duplicates_improved
-        contacts = [
-            {"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
-            {"id": 2, "telegram_user_id": 123, "username": "ivan2", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
-        ]
-        sources_map = {   # см. выше: источник — account_id, а не source_type
-            1: [{"account_id": 11}, {"account_id": 22}],
-            2: [{"account_id": 11}, {"account_id": 22}],
-        }
-        class SmartPool(FakePool):
-            def __init__(self, contacts, sources_map):
-                super().__init__(fetch_rows=contacts)
-                self._contacts = contacts
-                self._sources_map = sources_map
-
-            async def fetch(self, query, *args):
-                if "contact_sources" in query and args:
-                    contact_id = args[0]
-                    return self._sources_map.get(contact_id, [])
-                else:
-                    return self._contacts
-
-        pool = SmartPool(contacts, sources_map)
-        result = await detect_smart_duplicates_improved(pool, 123)
-        assert len(result) >= 1
-        assert result[0]["confidence"] >= 0.45
-
-    @pytest.mark.asyncio
-    async def test_get_conflict_resolution_suggestions(self):
-        from services.contacts_hub.trust_engine import get_conflict_resolution_suggestions
-        conflict_row = {
-            "id": 1,
-            "conflict_field": "phones",
-            "phones": ["+123", "+456"],
-            "first_name": "Ivan",
-            "last_name": "Ivanov",
-            "username": "ivan",
-            "company": "TestCo",
-            "telegram_user_id": 123,
-            "resolution": "pending",
-            "confidence": 0.9,
-        }
-        pool = FakePool(fetch_row=conflict_row)
-        result = await get_conflict_resolution_suggestions(pool, 1)
-        assert result["conflict_id"] == 1
-        assert result["field"] == "phones"
-        assert result["priority"] == "high"
-        assert len(result["suggestions"]) == 1
-        assert result["suggestions"][0]["action"] == "merge_phones"
-
-
-# ── Search Engine tests ───────────────────────────────────────────────────────
-
-class TestSearchEngine:
-    """Tests for contacts_hub/search_engine.py"""
-
+    # УДАЛЕНЫ тесты compute_merge_confidence_improved /
+    # detect_smart_duplicates_improved / get_conflict_resolution_suggestions:
+    # сами функции удалены из движка. Первые две были параллельной реализацией
+    # того же правила с суффиксом «improved», на которую не ссылался никто,
+    # кроме этих тестов, — и опасны именно удобством: агент, подключающий
+    # движок к экрану, выбирает по имени и подписи. Третья (советы по
+    # конфликту) работала по conflict_id вообще без owner_id, то есть дверь к
+    # ней сразу стала бы перебором чужих конфликтов.
     def test_tokenize(self):
         from services.contacts_hub.search_engine import _tokenize
         assert _tokenize("Ivan Ivanov") == ["ivan", "ivanov"]

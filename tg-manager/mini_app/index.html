@@ -18273,8 +18273,18 @@ async function detectDuplicates() {
     const d = await api('/api/miniapp/uch/duplicates');
     const dupes = d.duplicates||[];
     DUP_PAIRS = dupes;
-    if (!dupes.length) { txt('dupBody', empty('✅','Дубликатов нет','Все контакты уникальны')); return; }
+    if (!dupes.length) {
+      txt('dupBody', d.skipped_groups
+        ? empty('⚠️','Сравнение неполное','Группы контактов с одинаковым номером или ником слишком велики — в них дубли не искались')
+        : empty('✅','Дубликатов нет','Все контакты уникальны'));
+      return;
+    }
     let html = `<div style="padding:12px 16px;font-size:13px;color:var(--hint)">Найдено ${dupes.length} ${plural(dupes.length,'возможный дубликат','возможных дубликата','возможных дубликатов')}</div>`;
+    // Несравнённые группы называем вслух: срезанный список дублей читается как
+    // «больше дублей нет», и владелец закрывает экран с этим выводом.
+    if (d.skipped_groups) {
+      html += `<div class="field-note" style="padding:0 16px 8px">Не сравнивались ${num(d.skipped_groups)} ${plural(d.skipped_groups,'группа','группы','групп')} контактов с одинаковым номером или ником — слишком много записей с одним значением. Почистите такие значения, и пары из них появятся здесь.</div>`;
+    }
     // Пакетное объединение показываем только когда оно что-то сделает.
     const sure = dupes.filter(x => Number(x.confidence) >= DUP_SURE).length;
     if (sure > 1) {
@@ -18283,7 +18293,7 @@ async function detectDuplicates() {
     }
     dupes.forEach(dp=>{
       html += `<div class="li" style="margin:0 16px 8px">
-        <div class="li-body"><div class="li-name">${esc(dp.contact_a.name)} ↔ ${esc(dp.contact_b.name)}</div><div class="li-sub">${Math.round(dp.confidence*100)}% · ${dp.reasons.join(', ')}</div></div>
+        <div class="li-body"><div class="li-name">${esc(dp.contact_a.name)} ↔ ${esc(dp.contact_b.name)}</div><div class="li-sub">${Math.round(dp.confidence*100)}% · ${esc((dp.reason_labels||dp.reasons||[]).join(', '))}</div></div>
         <div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="mergeContacts('${dp.contact_a.id}','${dp.contact_b.id}')">Объединить</button></div></div>`;
     });
     txt('dupBody', html);

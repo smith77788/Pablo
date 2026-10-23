@@ -1356,8 +1356,13 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             from services.contacts_hub.trust_engine import detect_smart_duplicates
-            dupes = await detect_smart_duplicates(pool, uid)
-            return _json_resp({'duplicates': dupes, 'count': len(dupes)})
+            res = await detect_smart_duplicates(pool, uid)
+            dupes = res['duplicates']
+            # Сколько групп не сравнивалось — часть ответа, а не деталь
+            # реализации: молча срезанный список читается как «дублей больше
+            # нет», и владелец закрывает экран с этим выводом.
+            return _json_resp({'duplicates': dupes, 'count': len(dupes),
+                               'skipped_groups': res['skipped_groups']})
         except Exception:
             log.exception("uch_duplicates")
             return _err(_INTERNAL_ERROR, 500)
