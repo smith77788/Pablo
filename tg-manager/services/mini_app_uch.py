@@ -1034,6 +1034,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             gid = int(request.match_info['group_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор группы", 400)
+        try:
             data = await request.json()
             from services.contacts_hub.bulk_ops_engine import update_group
             ok = await update_group(pool, gid, uid, data.get('name'), data.get('color'))
@@ -1047,6 +1050,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             gid = int(request.match_info['group_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор группы", 400)
+        try:
             from services.contacts_hub.bulk_ops_engine import delete_group
             ok = await delete_group(pool, gid, uid)
             return _json_resp({'ok': ok})
@@ -1161,6 +1167,9 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             cid = request.match_info['contact_id']
             vnum = int(request.match_info['version_num'])
+        except (KeyError, ValueError):
+            return _err("Неверный номер версии", 400)
+        try:
             from services.contacts_hub.versioning_engine import rollback_to_version
             ok = await rollback_to_version(pool, cid, uid, vnum)
             if not ok: return _err("Версия не найдена", 404)
@@ -1422,6 +1431,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = int(request.match_info['conflict_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор конфликта", 400)
+        try:
             data = await request.json()
             from services.contacts_hub.trust_engine import resolve_conflict
             ok = await resolve_conflict(pool, cid, uid, data.get('resolution', 'accepted'),
@@ -1482,6 +1494,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             rid = int(request.match_info['rule_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор правила", 400)
+        try:
             from services.contacts_hub.smart_tags_engine import delete_smart_tag_rule
             ok = await delete_smart_tag_rule(pool, rid, uid)
             return _json_resp({'ok': ok})
@@ -1494,6 +1509,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             rid = int(request.match_info['rule_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор правила", 400)
+        try:
             from services.contacts_hub.smart_tags_engine import toggle_smart_tag_rule
             active = await toggle_smart_tag_rule(pool, rid, uid)
             return _json_resp({'ok': True, 'is_active': active})

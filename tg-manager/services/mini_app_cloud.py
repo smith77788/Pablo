@@ -86,8 +86,11 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            from services import tg_cloud
             fid = int(request.match_info['file_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор файла", 400)
+        try:
+            from services import tg_cloud
             if not await tg_cloud.get_file(pool, uid, fid):
                 return _err("файл не найден", 404)
             res = await tg_cloud.heal_file(pool, uid, fid)
@@ -166,8 +169,11 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            from services import tg_cloud
             fid = int(request.match_info['file_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор файла", 400)
+        try:
+            from services import tg_cloud
             meta = await tg_cloud.get_file(pool, uid, fid)
             if not meta:
                 return _err("файл не найден", 404)
@@ -197,8 +203,11 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            from services import tg_cloud
             fid = int(request.match_info['file_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор файла", 400)
+        try:
+            from services import tg_cloud
             ok = await tg_cloud.delete_file(pool, uid, fid)
             return _json_resp({'deleted': bool(ok)})
         except Exception:
