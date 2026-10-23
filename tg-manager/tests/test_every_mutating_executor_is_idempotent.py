@@ -26,6 +26,16 @@ joinChannel в счёт суточного лимита и давления, в�
 повторять незачем). У инвайта дверь своя и более сильная: `invite_dedup`
 переживает не только повтор, но и следующие операции.
 
+ЧЕМ ПЕРЕПИСЬ СИЛЬНА. Ровно настолько, насколько детектор узнаёт действие.
+Сначала он знал только запросы Telethon и имена aiogram — и не видел
+исполнителя, который ходит наружу через `services/account_manager` или через
+движок: пост в канал, ЛС, создание канала, выдача админки, пересылка,
+кампания. Таких в файле больше, чем прямых запросов, так что закрытой перепись
+была только на вид. Поэтому в список действий добавлены НАШИ глаголы, а в
+список дверей — те, что подсистемы ведут сами (статус цели плана, курсор
+связки, закреплённый в params id рассылки): защита у них не слабее, состояние
+переживает рестарт.
+
 Проверка по исходнику: op_worker импортирует telethon и в тестовой среде не
 поднимается — так же делают соседние тесты очереди.
 """
@@ -49,7 +59,18 @@ MUTATING_CALLS = re.compile(
     r"ImportChatInvite|InviteToChannel|AddChatUser|CreateChannel|"
     r"EditMessage|DeleteMessages|ForwardMessages|SendReport|"
     r"ReportPeer|ReportSpam|send_message|send_file|send_read_acknowledge|"
-    r"join_channel|invite_to|forward_messages|edit_message)\b"
+    r"join_channel|invite_to|forward_messages|edit_message|"
+    # Наши собственные глаголы. Перепись знала только запросы Telethon и имена
+    # aiogram, то есть НЕ ВИДЕЛА исполнителя, который ходит наружу через
+    # services/account_manager или движок: пост в канал, ЛС, создание канала,
+    # выдача админки, пересылка, кампания. Таких исполнителей в файле больше,
+    # чем прямых запросов, — перепись была закрытой только на вид.
+    r"post_to_channel|send_dm|create_channel|create_forum_supergroup|"
+    r"promote_to_admin|set_discussion_group|forward_new_posts|run_campaign|"
+    r"update_profile|EditAdminRequest|ImportContactsRequest|"
+    r"DeleteContactsRequest|invite_batch|add_via_promote|"
+    r"invite_via_link_batch|invite_by_phones)\b"
+    r"|broadcaster\.start"
 )
 
 # Двери идемпотентности. Ключ — как дверь выглядит в коде, значение — что
@@ -61,7 +82,18 @@ DOORS = {
     "settled_targets(": "цель, по которой вопрос закрыт",
     "_record_invited_targets(": "дедуп инвайта (переживает и следующие операции)",
     "invite_dedup": "дедуп инвайта",
-    "niche_growth_targets": "свои таблица уже отработанных групп",
+    "niche_growth_targets": "своя таблица уже отработанных групп",
+    # Двери, которые ведёт сама подсистема. Общими ключами они не пользуются,
+    # но защита у них не слабее: состояние живёт в своей таблице и переживает
+    # рестарт — ровно то, что от двери и требуется.
+    "global_presence_targets": "цель плана присутствия (статус на строке, "
+                               "захват через UPDATE ... WHERE status='pending')",
+    "launched_bot_ids": "уже запущенный бот сети (список в params операции)",
+    "last_msg_id": "курсор связки: двигается после КАЖДОГО пересланного поста",
+    "update_node_status(": "созданный узел связки (ref_id пишется в узел, и "
+                           "узел с ref_id повтор пропускает)",
+    'params["broadcast_id"]': "строка рассылки закрепляется в params, повтор "
+                              "подключается к ней, а не заводит вторую",
 }
 
 # Исполнители, которым повтор не вредит. Причина обязательна и проверяется:
@@ -81,6 +113,22 @@ HARMLESS = {
         "(add_node_member), «уже в чате» засчитывается как успех. Повтор может "
         "привести в ноду ЛИШНИЕ аккаунты сверх count — это ограничено "
         "потолком 50 и не создаёт ничего видимого людям",
+    "_exec_dm_campaign":
+        "сам ничего не отправляет: вся работа в dm_engine.run_campaign, и дверь "
+        "стоит там — журнал dm_campaign_log, из которого _get_targets исключает "
+        "уже отправленных, заблокированных и пропущенных. Повтор продолжает "
+        "кампанию с места обрыва, а прогресс считается от кумулятива",
+    "_exec_bulk_update_profile":
+        "ставит профилю ЗАДАННОЕ значение (имя, био, фото), а не добавляет: "
+        "второй проход приводит аккаунт в то же состояние и ничего не создаёт. "
+        "Цена повтора — лишние вызовы в счёт лимитов, не второй объект",
+    "_exec_delete_contacts":
+        "удаление идемпотентно по смыслу: повтор по уже удалённому контакту "
+        "ничего не удаляет второй раз и ничего не создаёт",
+    "_exec_community_set_staff":
+        "выдаёт админку аккаунтам СВОЕЙ ноды: повторная выдача тех же прав "
+        "людям не видна и второго объекта не создаёт (права те же). Цена "
+        "повтора — лишний EditAdmin в счёт лимитов",
 }
 
 
@@ -157,6 +205,29 @@ def test_a_harmless_entry_is_not_hiding_a_guarded_executor(execs):
     with_door = sorted(n for n in HARMLESS if _door(execs.get(n, "")))
     assert not with_door, (
         f"эти исполнители пользуются дверью, запись в HARMLESS лишняя: {with_door}")
+
+
+def test_the_census_sees_our_own_verbs(execs):
+    """Перепись, которая не узнаёт мутацию, вечно зелёная.
+
+    Проверка выше сильна ровно настолько, насколько детектор видит действия.
+    Пока он знал только запросы Telethon, исполнитель, постящий через
+    `account_manager.post_to_channel`, проходил переписью как читающий.
+    """
+    mutating = sorted(n for n, body in execs.items() if _mutates(body))
+    assert len(mutating) >= 20, (
+        f"распознано мутирующих исполнителей: {len(mutating)} — детектор сломан")
+    for name in ("_exec_niche_growth_post", "_exec_crosspost_run",
+                 "_exec_deploy_network", "_exec_dm_campaign",
+                 "_exec_global_presence_channel"):
+        assert name in mutating, f"{name} меняет внешний мир, а перепись его не видит"
+
+
+def test_no_door_token_is_dead(execs):
+    """Опечатка в токене двери не освобождает никого — и это надо заметить."""
+    src = _read()
+    dead = sorted(t for t in DOORS if t not in src)
+    assert not dead, f"эти двери не встречаются в исходнике: {dead}"
 
 
 # ── Самопроверка измерителя ──────────────────────────────────────────────────
