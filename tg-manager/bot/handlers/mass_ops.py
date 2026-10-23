@@ -1182,7 +1182,7 @@ async def cb_queue(
                 "last_error, retry_count, max_retries, finished_at, result "
                 "FROM operation_queue "
                 "WHERE owner_id=$1 AND status = ANY($4::text[]) "
-                "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                "ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
                 user_id, limit, offset, allowed_statuses,
             )
             total_count = await pool.fetchval(
@@ -1195,7 +1195,7 @@ async def cb_queue(
                 "last_error, retry_count, max_retries, finished_at, result "
                 "FROM operation_queue "
                 "WHERE owner_id=$1 "
-                "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                "ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
                 user_id, limit, offset,
             )
             total_count = await pool.fetchval(

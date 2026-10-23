@@ -389,7 +389,7 @@ async def cb_reg_history(
                       participants_count, verified, scam
                FROM reg_check_cache
                WHERE checked_by=$1
-               ORDER BY checked_at DESC
+               ORDER BY checked_at DESC, entity_type, entity_id DESC
                LIMIT $2 OFFSET $3""",
             callback.from_user.id,
             limit,
@@ -407,7 +407,7 @@ async def cb_reg_history(
                           reg_date, method, checked_at
                    FROM reg_check_cache
                    WHERE checked_by=$1
-                   ORDER BY checked_at DESC
+                   ORDER BY checked_at DESC, entity_type, entity_id DESC
                    LIMIT $2 OFFSET $3""",
                 callback.from_user.id, limit, offset,
             )

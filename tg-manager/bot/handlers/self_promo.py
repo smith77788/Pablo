@@ -681,7 +681,7 @@ async def cb_sp_history(
            FROM self_promo_runs r
            LEFT JOIN self_promo_templates t ON t.id = r.template_id
            WHERE r.initiated_by = $1
-           ORDER BY r.created_at DESC
+           ORDER BY r.created_at DESC, r.id DESC
            LIMIT $2 OFFSET $3""",
         user_id, limit, offset,
     )

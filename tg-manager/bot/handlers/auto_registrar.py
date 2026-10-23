@@ -1082,7 +1082,7 @@ async def get_registration_history(
                trust_score, added_at, proxy_id
         FROM tg_accounts
         WHERE owner_id = $1
-        ORDER BY added_at DESC
+        ORDER BY added_at DESC, id DESC
         LIMIT $2 OFFSET $3
         """,
         owner_id,
