@@ -17244,6 +17244,18 @@ async def _exec_mass_invite(
             interleave_by_source. Останавливается, когда набрано _AUD_CAP свежих
             или источник кончился; факт упора в потолок фиксируется, чтобы итог
             не врал про «это вся аудитория».
+
+            СОРТИРОВКА ИСТОЧНИКА ОБЯЗАНА БЫТЬ УНИКАЛЬНОЙ. Страницы берутся
+            сдвигом (OFFSET), а порядок внутри РАВНЫХ значений Postgres не
+            обещает: при неуникальной сортировке одна и та же строка попадает
+            на две страницы, а другая не попадает ни на одну. Для спарсенной
+            аудитории это не теория: `parsed_at DEFAULT now()` — время
+            транзакции, поэтому у всех строк одного прогона парсера оно
+            ОДИНАКОВОЕ, и ключ сортировки вырождается целиком. Повтор внутри
+            прогона съедает `_seen_keys`, а пропуск не ловит никто: человек
+            просто не получает приглашения, и итог при этом говорит, что
+            аудитория вычитана до конца. Поэтому у каждого источника здесь
+            сортировка заканчивается уникальным ключом (`id`, пара с bot_id).
             """
             nonlocal _source_exhausted
             out: list = []
@@ -17287,14 +17299,15 @@ async def _exec_mass_invite(
                 _pairs = await _page_source(
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    f"WHERE owner_id=$1 AND parse_run_id=$2{_fsql} ORDER BY parsed_at DESC",
+                    f"WHERE owner_id=$1 AND parse_run_id=$2{_fsql} "
+                    "ORDER BY parsed_at DESC, id DESC",
                     owner_id, _pr, *_fp)
             else:
                 _fsql, _fp = parsed_audience_filters(_af, base_params_count=1)
                 _pairs = await _page_source(
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    f"WHERE owner_id=$1{_fsql} ORDER BY parsed_at DESC",
+                    f"WHERE owner_id=$1{_fsql} ORDER BY parsed_at DESC, id DESC",
                     owner_id, *_fp)
             # Источник каждой цели известен (из какого канала её спарсили) —
             # раскладываем вперемешку, чтобы аккаунт не приглашал подряд сорок
@@ -17331,7 +17344,8 @@ async def _exec_mass_invite(
             _pairs = await _page_source(
                 "SELECT DISTINCT bu.user_id, bu.bot_id FROM bot_users bu "
                 "JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
-                "WHERE mb.added_by=$1 AND bu.is_active=TRUE ORDER BY bu.user_id",
+                "WHERE mb.added_by=$1 AND bu.is_active=TRUE "
+                "ORDER BY bu.user_id, bu.bot_id",
                 owner_id)
             # Разные боты — разные источники аудитории, раскладываем так же.
             user_refs = interleave_by_source(_pairs)
