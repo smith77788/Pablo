@@ -56,6 +56,33 @@ def _executors():
             yield node.name, (ast.get_source_segment(src, node) or ""), node
 
 
+def _is_retry_loop(node) -> bool:
+    """Цикл повтора записи, а не цикл по целям.
+
+    Идиома проекта: `for _attempt in (1, 2):` вокруг защитной записи — повтор
+    на случай блипа базы, две итерации без единого реального действия.
+    Детектор считал его циклом по целям, и исполнитель, у которого циклов по
+    целям нет вообще, объявлялся глухим: ложная находка ровно на том коде,
+    который добавляли ради надёжности. Признак узкий — перебор литерала из
+    чисел; `for t in targets` так не выглядит никогда.
+    """
+    if not isinstance(node, (ast.For, ast.AsyncFor)):
+        return False
+    it = node.iter
+    if isinstance(it, (ast.Tuple, ast.List)):
+        return bool(it.elts) and all(
+            isinstance(e, ast.Constant) and isinstance(e.value, int)
+            for e in it.elts)
+    return False
+
+
+def _target_loops(node):
+    """Циклы исполнителя, кроме повторов записи."""
+    return [n for n in ast.walk(node)
+            if isinstance(n, (ast.For, ast.AsyncFor, ast.While))
+            and not _is_retry_loop(n)]
+
+
 def test_no_executor_loop_ignores_the_stop_button():
     """Храповик: цикл по целям обязан спрашивать дверь отмены."""
     deaf = []
@@ -64,8 +91,7 @@ def test_no_executor_loop_ignores_the_stop_button():
         seen += 1
         if name in DELEGATED:
             continue
-        has_loop = any(isinstance(n, (ast.For, ast.AsyncFor, ast.While))
-                       for n in ast.walk(node))
+        has_loop = bool(_target_loops(node))
         if has_loop and not any(d in seg for d in CANCEL_DOORS):
             deaf.append(name)
     assert seen > 50, f"пробник не нашёл исполнителей ({seen}) — он сломан"
@@ -91,6 +117,33 @@ def test_the_deaf_executor_detector_bites():
     node2 = ast.parse(healthy).body[0]
     seg2 = ast.get_source_segment(healthy, node2) or ""
     assert any(d in seg2 for d in CANCEL_DOORS)
+
+
+def test_a_retry_loop_is_not_a_target_loop():
+    """Повтор защитной записи не делает исполнителя глухим.
+
+    Без этого различия добавление `for _attempt in (1, 2):` вокруг записи
+    превращало в находку исполнителя, у которого циклов по целям нет вовсе
+    (так и случилось с `_exec_run_broadcast`). А настоящий цикл по целям
+    детектор обязан видеть по-прежнему — вторая половина проверки про это.
+    """
+    retry = ("async def _exec_x(pool, op_id):\n"
+             "    for _attempt in (1, 2):\n"
+             "        if await _write(pool) != 'ERROR':\n"
+             "            break\n")
+    node = ast.parse(retry).body[0]
+    assert _target_loops(node) == [], (
+        "повтор записи принят за цикл по целям — детектор будет находить "
+        "глухоту там, где её нет")
+
+    real = ("async def _exec_x(pool, op_id):\n"
+            "    for _attempt in (1, 2):\n"
+            "        if await _write(pool) != 'ERROR':\n"
+            "            break\n"
+            "    for t in targets:\n"
+            "        await send(t)\n")
+    assert len(_target_loops(ast.parse(real).body[0])) == 1, (
+        "цикл по целям рядом с повтором записи перестал быть виден")
 
 
 def test_contacts_push_stops_before_touching_the_next_account(monkeypatch):
