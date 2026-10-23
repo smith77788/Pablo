@@ -99,6 +99,15 @@ _HELP = {
     "infragram_account_rest_write_failures_total":
         "Потерянные записи отдыха аккаунта после тяжёлого прогона (после рестарта "
         "он снова выглядит отдохнувшим)",
+    "infragram_dm_dedup_write_failures_total":
+        "Непоставленные метки дедупа ЛС (сообщение не отправлено, чтобы не "
+        "написать человеку второй раз)",
+    "infragram_dm_unmark_failures_total":
+        "Не снятые предзаписи ЛС (человек числится получившим сообщение, "
+        "хотя Telegram его не рассматривал)",
+    "infragram_dm_settle_write_failures_total":
+        "Незаписанные исходы ЛС (счёт по статусам кампании расходится с тем, "
+        "что реально произошло)",
     "infragram_invite_dedup_write_failures_total":
         "Потерянные записи дедупа инвайта (следующий прогон может пригласить повторно)",
     "infragram_invite_unmark_failures_total":

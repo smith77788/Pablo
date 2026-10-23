@@ -3690,6 +3690,15 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_invite_unmark_failures_total":
         "предзапись инвайта не снята — цели числятся приглашёнными, хотя "
         "Telegram их не рассматривал, и больше не позовутся",
+    "infragram_dm_dedup_write_failures_total":
+        "дедуп ЛС — сообщение не отправлено, потому что метка не записалась; "
+        "без неё следующий прогон написал бы человеку второй раз",
+    "infragram_dm_unmark_failures_total":
+        "предзапись ЛС не снята — человек числится получившим сообщение, "
+        "хотя Telegram его не рассматривал, и больше ему не напишут",
+    "infragram_dm_settle_write_failures_total":
+        "исход ЛС не записался — на экранах кампании отправка, которой не "
+        "было (или наоборот), и счёт по статусам врёт",
     "infragram_journal_write_failures_total":
         "строка успеха в журнале — повтор операции сделает действие второй раз",
     "infragram_account_cooldown_write_failures_total":
