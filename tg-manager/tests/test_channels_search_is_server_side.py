@@ -159,8 +159,13 @@ def test_total_respects_the_active_filter():
     """По total считается «загрузить ещё» — он должен быть про тот же срез."""
     pool = _Pool()
     _call(pool, kind="group")
-    totals = [q for q, _ in pool.calls if "COUNT(DISTINCT channel_id)" in q
-              and "FILTER" not in q]
+    # Ищем по СВОЙСТВУ: запрос считает и считает один раз, без разбивки по
+    # чипам. Прежний локатор знал текст `COUNT(DISTINCT channel_id)` и ослеп,
+    # когда список переехал на выборку по одной строке на канал, а счёт стал
+    # `COUNT(*)` по тому же источнику. Привязка к тексту делает не строгую
+    # проверку, а молчаливую.
+    totals = [q for q, _ in pool.calls
+              if "COUNT(" in q.upper() and "FILTER" not in q.upper()]
     assert totals, "запроса общего числа не было"
     assert "type IN ('supergroup','group','chat')" in totals[0]
 

@@ -1179,6 +1179,33 @@ async def _user_can_use_bot(pool, uid: int, bot_id: int) -> bool:
 # Группа и канал различаются полем type, владение — is_creator/is_admin.
 _CHANNEL_IS_GROUP_SQL = "type IN ('supergroup','group','chat')"
 
+# Один и тот же канал лежит в managed_channels ОТДЕЛЬНОЙ строкой у каждого
+# владельца, а условие видимости выше тянет и чужие строки — через экосистемы и
+# рабочие пространства. Поэтому список каналов показывал общий канал ДВАЖДЫ, и
+# у одной из копий были чужие название и права: экран писал владельцу «админ»
+# там, где он не админ. Проверено на живой базе: один канал, две строки.
+#
+# `SELECT DISTINCT` это не лечило и лечить не мог: он различает строки по ВСЕМУ
+# списку столбцов, а у копий отличаются и title, и is_admin, и added_at. Рядом
+# стоявший счётчик давно считал `COUNT(DISTINCT channel_id)`, то есть шапка
+# говорила «40», а список отдавал 41 строку — число и его же список расходились.
+# И сортировка `member_count DESC, channel_id` на таких копиях вырождается:
+# ключ равен у обеих, то есть страницы могли повторить канал и потерять другой.
+#
+# Здесь выбирается РОВНО ОДНА строка на канал, и своя — предпочтительнее чужой
+# (`owner_id = $1` первым в сортировке DISTINCT ON), чтобы права и название
+# были те, которые касаются смотрящего. После этого channel_id в выдаче
+# уникален, список совпадает со своим счётчиком, а сортировка полна.
+_CHANNELS_ONE_ROW_SQL = f"""
+    SELECT DISTINCT ON (channel_id)
+           channel_id, username, title,
+           COALESCE(members_count, 0) AS member_count,
+           type, added_at, is_admin, is_creator, owner_id
+      FROM managed_channels
+     WHERE ({_CHANNELS_VISIBLE_SQL})
+     ORDER BY channel_id, (owner_id = $1) DESC, id
+"""
+
 
 def _channel_filter_sql(kind: str | None, role: str | None,
                         search: str | None, next_param: int) -> tuple[str, list]:

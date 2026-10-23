@@ -26,7 +26,7 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты каналов и групп на приложении мини-аппа."""
     from services import operation_bus as _obus
     from services.mini_app_api import (
-        _CHANNEL_IS_GROUP_SQL, _CHANNELS_VISIBLE_SQL, _INTERNAL_ERROR,
+        _CHANNEL_IS_GROUP_SQL, _CHANNELS_ONE_ROW_SQL, _INTERNAL_ERROR,
         _cached_user, _channel_filter_sql, _err, _get_uid, _json_resp,
         _safe_count, _safe_fetch, _safe_fetchrow, channel_edit_worker_op, log,
     )
@@ -66,8 +66,8 @@ def setup_routes(app: web.Application, pool) -> None:
 
         cond, extra = _channel_filter_sql(kind, role, search, next_param=4)
         rows = await _safe_fetch(pool,
-            f"""SELECT DISTINCT channel_id AS id, channel_id, username, title,
-                      COALESCE(members_count, 0) AS member_count,
+            f"""WITH visible AS ({_CHANNELS_ONE_ROW_SQL})
+               SELECT channel_id AS id, channel_id, username, title, member_count,
                       type, added_at, is_admin, is_creator,
                       CASE
                           WHEN is_creator THEN 'owner'
@@ -75,8 +75,8 @@ def setup_routes(app: web.Application, pool) -> None:
                           WHEN is_admin IS FALSE THEN 'member'
                           ELSE 'unknown'
                       END AS role
-               FROM managed_channels
-               WHERE ({_CHANNELS_VISIBLE_SQL}){cond}
+               FROM visible
+               WHERE TRUE{cond}
                ORDER BY member_count DESC NULLS LAST, channel_id
                LIMIT $2 OFFSET $3""", uid, limit, offset, *extra)
         # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
@@ -92,19 +92,21 @@ def setup_routes(app: web.Application, pool) -> None:
         # ещё», и он обязан совпадать с тем, что реально отдаётся страницами.
         cond_total, extra_total = _channel_filter_sql(kind, role, search, next_param=2)
         total = await _safe_count(pool,
-            f"""SELECT COUNT(DISTINCT channel_id) FROM managed_channels
-                WHERE ({_CHANNELS_VISIBLE_SQL}){cond_total}""", uid, *extra_total)
+            f"""WITH visible AS ({_CHANNELS_ONE_ROW_SQL})
+                SELECT COUNT(*) FROM visible WHERE TRUE{cond_total}""",
+            uid, *extra_total)
         # Счётчики чипов — по ВСЕМ видимым каналам (и с учётом поиска, если он
         # есть), одним запросом вместо подсчёта загруженного на клиенте.
         cond_counts, extra_counts = _channel_filter_sql(None, None, search, next_param=2)
         crow = await _safe_fetchrow(pool,
-            f"""SELECT COUNT(DISTINCT channel_id) AS all_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE {_CHANNEL_IS_GROUP_SQL}) AS group_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE NOT {_CHANNEL_IS_GROUP_SQL}) AS channel_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE is_creator IS TRUE) AS mine_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE is_admin IS FALSE) AS foreign_n
-                  FROM managed_channels
-                 WHERE ({_CHANNELS_VISIBLE_SQL}){cond_counts}""", uid, *extra_counts)
+            f"""WITH visible AS ({_CHANNELS_ONE_ROW_SQL})
+                SELECT COUNT(*) AS all_n,
+                       COUNT(*) FILTER (WHERE {_CHANNEL_IS_GROUP_SQL}) AS group_n,
+                       COUNT(*) FILTER (WHERE NOT {_CHANNEL_IS_GROUP_SQL}) AS channel_n,
+                       COUNT(*) FILTER (WHERE is_creator IS TRUE) AS mine_n,
+                       COUNT(*) FILTER (WHERE is_admin IS FALSE) AS foreign_n
+                  FROM visible
+                 WHERE TRUE{cond_counts}""", uid, *extra_counts)
         counts = {"all": 0, "channel": 0, "group": 0, "mine": 0, "foreign": 0}
         if crow:
             counts = {"all": int(crow["all_n"] or 0),

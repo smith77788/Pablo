@@ -55,7 +55,9 @@ f-строк.
 """
 from __future__ import annotations
 
+import functools
 import os
+import pathlib
 import re
 
 import pytest
@@ -83,14 +85,19 @@ OWNER = 992001
 #
 # Список именованный, а не «любой столбец с id в названии»: `account_id` или
 # `funnel_id` в выдаче по многу строк, и добивкой они не были бы.
-#   * `oa.id` — тот же `id`, но у таблицы под алиасом в join'е;
-#   * `entity_id` — ключ reg_check_cache это ПАРА (entity_id, entity_type), и
-#     сортировка там несёт оба ключа: `… , entity_type, entity_id DESC`. Сам
-#     по себе entity_id в этой таблице не уникален, уникальна пара, которую
-#     сортировка и выписывает целиком.
+# Только то, что уникально САМО, без оглядки на запрос. `user_id`, `msg_id` и
+# `channel_id` отсюда убраны: они уникальны лишь там, где запрос закрепляет
+# остаток ключа (`bot_id=$1`, `chat_id=$2`), и этот зачёт теперь выдаётся
+# механикой — по схеме и по тексту запроса, а не по имени столбца.
+#
+# Снятие `msg_id` сразу нашло настоящую ошибку, которую имя и прикрывало:
+# поиск по архиву (`vault_service.py`, WHERE owner_id=$1 БЕЗ chat_id) листался
+# по `msg_date, msg_id`, а msg_id у одного владельца повторяется в каждом
+# чате. Оправдание из комментария относилось к ДРУГОМУ запросу того же файла,
+# где `chat_id=$2` стоит безусловно. Список имён потому и плох: он переносит
+# довод с места, где тот верен, на место, где не верен.
 _UNIQUE = ("id", "uc.id", "unified_contacts.id", "r.id", "q.id", "a.id",
-           "b.id", "oq.id", "p.id", "s.id", "ba.id", "mb.bot_id", "oa.id",
-           "channel_id", "user_id", "msg_id", "entity_id")
+           "b.id", "oq.id", "p.id", "s.id", "ba.id", "mb.bot_id")
 
 # Запросом со сдвигом считается ТОЛЬКО строковый литерал, в котором есть и
 # подстановка OFFSET, и свой ORDER BY. Первая мерка искала слово OFFSET где
@@ -148,7 +155,7 @@ def _last_key(order: str) -> str:
     return last
 
 
-def order_is_total(order: str) -> bool:
+def order_is_total(order: str, lit: str = "") -> bool:
     """Последний ключ сортировки обязан быть уникальным.
 
     Уникальный ключ ПОСЛЕДНИМ, а не где-нибудь: порядок задаётся слева
@@ -157,8 +164,181 @@ def order_is_total(order: str) -> bool:
     Сортировка, собранная переменной (`ORDER BY {order}`), статически не
     судится — но `ORDER BY {order_by}, id` судится: добивка здесь литерал, и
     она последняя, что бы ни подставилось раньше.
+    Один ключ — не единственная форма уникальности. Составной ключ
+    (`ORDER BY bu.user_id, bu.bot_id` при `PRIMARY KEY (bot_id, user_id)`)
+    задаёт порядок не хуже, а по последнему ключу выглядит нарушением: сам
+    `bot_id` в выдаче повторяется сколько угодно. Такие ключи не перечисляются
+    руками, а читаются из СХЕМЫ: добавят таблицу — мерка узнает сама. Зачёт
+    даётся только если запрос эту таблицу и называет, иначе совпадение имён
+    столбцов из чужой таблицы прикрыло бы настоящую ошибку.
     """
-    return _last_key(order) in _UNIQUE
+    if _last_key(order) in _UNIQUE:
+        return True
+    return _covers_a_composite_key(order, lit)
+
+
+@functools.lru_cache(maxsize=1)
+def _schema_unique_sets() -> dict[str, set[frozenset[str]]]:
+    """Таблица -> её составные уникальные ключи, прямо из файлов схемы."""
+    tbl = re.compile(r"CREATE TABLE[^(]*?(\w+)\s*\((.*?)\n\);", re.S | re.I)
+    key = re.compile(r"(?:PRIMARY KEY|UNIQUE)\s*\(([^)]*)\)", re.I)
+    col = re.compile(r"(\w+)\s+[\w()]+(?:\s+\w+)*?\s+(?:PRIMARY KEY|UNIQUE)\b", re.I)
+    out: dict[str, set[frozenset[str]]] = {}
+    for f in sorted(pathlib.Path(__file__).resolve().parents[1].glob("schema*.sql")):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for name, body in tbl.findall(text):
+            for cols in key.findall(body):
+                cs = frozenset(c.strip().strip('"').lower()
+                               for c in cols.split(",") if c.strip())
+                if cs:
+                    out.setdefault(name.lower(), set()).add(cs)
+        # Однословный `id BIGSERIAL PRIMARY KEY` объявлен в строке столбца, а
+        # не отдельным PRIMARY KEY (...), поэтому ловится отдельно.
+        for name, body in tbl.findall(text):
+            for line in body.splitlines():
+                m = col.match(line.strip())
+                if m:
+                    out.setdefault(name.lower(), set()).add(frozenset({m.group(1).lower()}))
+    return out
+
+
+def _bare_keys(order: str) -> set[str]:
+    """Столбцы сортировки без псевдонима таблицы и без направления."""
+    out = set()
+    for k in order.split(","):
+        k = re.sub(r"\s+(asc|desc)$", "", k.strip().lower())
+        k = re.sub(r"\s+nulls\s+(first|last)$", "", k).strip()
+        if k:
+            out.add(k.split(".")[-1])
+    return out
+
+
+# Запросы, чья сортировка полна по причине, которую статически не доказать:
+# выдача сгруппирована, или остаток ключа закреплён условием. Таких мало, и
+# довод для каждого прочитан глазами.
+#
+# Довод привязан к ОБРЫВКУ САМОГО ЗАПРОСА, а не к имени столбца, и это главное
+# в этой конструкции. Прежняя форма — имя `msg_id` в списке уникальных —
+# прикрыла настоящую ошибку: довод «msg_id уникален при фиксированном chat_id»
+# был верен для одного запроса файла и молча распространился на другой, где
+# chat_id не фиксирован вовсе. Довод, привязанный к тексту, так переехать не
+# может: изменится запрос — обрывок перестанет находиться, и проверка ниже
+# потребует перечитать запрос заново, вместо того чтобы и дальше его прощать.
+#
+# Пробовалось и отвергнуто: выводить закрепление из текста запроса регекспом.
+# `owner_id=$1` в дизъюнкции не закрепляет ничего (у списка каналов условие
+# видимости тянет и чужие строки), а `mc.owner_id=$1` внутри CTE закрепляет —
+# и отличить одно от другого без разбора SQL не выходит. Два подхода подряд
+# дали то ложную находку, то ложный зачёт. Лучше короткий список прочитанного,
+# чем мерка, которая делает вид, что понимает SQL.
+_JUSTIFIED = (
+    ("FROM bot_users WHERE bot_id=$1",
+     "подписчики одного бота: пара (bot_id, user_id) — ключ, bot_id закреплён"),
+    ("GROUP BY mc.channel_id",
+     "строка выдачи одна на канал владельца: группировка по channel_id "
+     "при mc.owner_id=$1"),
+)
+
+
+def _justification(lit: str) -> str:
+    flat = " ".join(_normalise(lit).split())
+    for fragment, reason in _JUSTIFIED:
+        if " ".join(fragment.split()) in flat:
+            return reason
+    return ""
+
+
+@functools.lru_cache(maxsize=1)
+def _sql_constants() -> dict[str, str]:
+    """Имя -> текст у строковых констант уровня модуля, по всему коду.
+
+    Запрос часто собран из куска, который лежит отдельной константой:
+    `WHERE ({_CHANNELS_VISIBLE_SQL})`, `WITH visible AS
+    ({_CHANNELS_ONE_ROW_SQL})`. В исходнике f-строки на их месте стоит ИМЯ, и
+    мерка, читающая только литерал, не видит ни обещания `DISTINCT ON`, ни
+    дизъюнкции в условии видимости. Именно на этом она дважды и ошиблась:
+    сперва не заметила, что канал в выдаче не один, потом не заметила, что
+    починено.
+
+    Константы собираются со всех файлов разом: кусок запроса живёт в одном
+    модуле, а подставляется в другом.
+    """
+    import ast
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    out: dict[str, str] = {}
+    for path in (sorted((root / "services").rglob("*.py"))
+                 + sorted((root / "bot").rglob("*.py"))):
+        src = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            t = node.targets[0]
+            if not isinstance(t, ast.Name):
+                continue
+            v = node.value
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                out.setdefault(t.id, v.value)
+            elif isinstance(v, ast.JoinedStr):
+                out.setdefault(t.id, ast.get_source_segment(src, v) or "")
+    return out
+
+
+def _expanded(lit: str) -> str:
+    """Литерал с раскрытыми подстановками констант — ТОЛЬКО как контекст.
+
+    Сортировка по-прежнему берётся из СЫРОГО литерала: у раскрытого куска
+    бывает своя `ORDER BY` (у `_CHANNELS_ONE_ROW_SQL` она есть), и первой в
+    тексте оказалась бы она, а судить надо внешнюю. Раскрытие нужно лишь
+    затем, чтобы увидеть обещания и условия, которые до него не видны.
+    """
+    out = lit
+    for _ in range(3):          # вложенность бывает: константа в константе
+        before = out
+        for name, text in _sql_constants().items():
+            token = "{" + name + "}"
+            if token in out:
+                out = out.replace(token, text)
+        if out == before:
+            break
+    return out
+
+
+def _covers_a_composite_key(order: str, lit: str) -> bool:
+    """Уникальный ключ таблицы накрыт сортировкой плюс закреплёнными столбцами.
+
+    Позиция ключей тут не важна, в отличие от правила по последнему ключу:
+    если ключ накрыт, строка им определена однозначно, и что стоит в
+    сортировке дальше, уже ни на что не влияет. Правило по последнему ключу
+    оставлено строгим нарочно — оно судит сортировки, про которые схема ничего
+    не знает, и там лучше перебдеть.
+
+    Зачёт даётся только таблице, которую запрос НАЗЫВАЕТ: иначе совпадение
+    имён столбцов с чужой таблицей прикрыло бы настоящую ошибку.
+    """
+    if not lit:
+        return False
+    have = _bare_keys(order)
+    low = _expanded(lit).lower()
+    # `SELECT DISTINCT ON (channel_id)` — обещание самого запроса: строка на
+    # каждое значение ровно одна. Если сортировка этот столбец несёт, порядок
+    # полон, и доказывать это схемой не нужно. В отличие от простого
+    # `SELECT DISTINCT`, который различает строки по ВСЕМУ списку столбцов и
+    # потому ничего об одном из них не обещает.
+    for m in re.finditer(r"distinct\s+on\s*\(([^)]*)\)", low):
+        cols = {c.strip().split(".")[-1] for c in m.group(1).split(",") if c.strip()}
+        if cols and cols <= have:
+            return True
+    for table, ksets in _schema_unique_sets().items():
+        if table not in low:
+            continue
+        if any(ks <= have for ks in ksets):
+            return True
+    return False
 
 
 def order_is_dynamic(order: str) -> bool:
@@ -166,6 +346,7 @@ def order_is_dynamic(order: str) -> bool:
     return "{" in _last_key(order)
 
 
+@functools.lru_cache(maxsize=1)
 def _paging_queries() -> list[tuple[str, int, str | None, str]]:
     """Запросы со сдвигом: файл, строка, их СОБСТВЕННАЯ сортировка, литерал."""
     import ast
@@ -204,7 +385,22 @@ def test_the_detector_knows_a_total_order_from_a_partial_one():
     assert not order_is_total("funnel_id")
     assert not order_is_total("bot_id")
     assert order_is_total("subscriber_count DESC, mb.bot_id")
-    assert order_is_total("last_seen DESC NULLS LAST, user_id")
+    # `user_id` сам по себе добивкой НЕ считается: у одного пользователя
+    # строка в каждом боте. Мерка этого и не прощает — прощает отдельный
+    # прочитанный довод, привязанный к тексту запроса.
+    assert not order_is_total("last_seen DESC NULLS LAST, user_id")
+    assert _justification(
+        "SELECT user_id FROM bot_users WHERE bot_id=$1 "
+        "ORDER BY last_seen DESC NULLS LAST, user_id")
+    # `DISTINCT ON` — обещание запроса, его мерка читает сама.
+    assert order_is_total(
+        "member_count DESC NULLS LAST, channel_id",
+        "SELECT DISTINCT ON (channel_id) channel_id FROM managed_channels "
+        "ORDER BY member_count DESC NULLS LAST, channel_id")
+    assert not order_is_total(
+        "member_count DESC NULLS LAST, channel_id",
+        "SELECT DISTINCT channel_id, title FROM managed_channels "
+        "ORDER BY member_count DESC NULLS LAST, channel_id")
 
 
 def test_the_detector_sees_the_paging_queries():
@@ -227,10 +423,10 @@ def test_the_detector_sees_the_paging_queries():
 def test_every_paged_query_has_a_tiebreaker():
     """Листание по сдвигу обязано стоять на полном порядке."""
     bad = []
-    for where, line, order, _lit in _paging_queries():
+    for where, line, order, lit in _paging_queries():
         if not order:
             bad.append(f"{where}:{line}: сдвиг без сортировки вообще")
-        elif not order_is_total(order):
+        elif not order_is_total(order, lit) and not _justification(lit):
             bad.append(f"{where}:{line}: ORDER BY {order[:80]}")
     assert not bad, (
         "Страницы могут повторять и терять записи: порядок внутри равных "
@@ -259,9 +455,6 @@ def test_the_contact_list_sort_carries_the_tiebreaker():
 # другой слой и другая сессия. Число обязано только убывать; сами находки
 # переданы владельцу того слоя.
 
-# Долг выплачен целиком: четырнадцать запросов слоя bot/handlers получили
-# добивочный ключ (см. коммит про листание в bot/handlers). Ноль значит, что
-# правило здесь теперь такое же жёсткое, как в services/.
 OUTSIDE_CEILING = 0
 
 # Сортировка, собранная переменной: статически не судится, проверена чтением.
@@ -273,7 +466,8 @@ OUTSIDE_CEILING = 0
 DYNAMIC_CEILING = 2
 
 
-def _all_paging_queries() -> list[tuple[str, int, str]]:
+@functools.lru_cache(maxsize=1)
+def _all_paging_queries() -> list[tuple[str, int, str, str]]:
     """Запросы со сдвигом по всему коду, кроме слоя мини-аппа."""
     import ast
     import pathlib as _pl
@@ -296,7 +490,7 @@ def _all_paging_queries() -> list[tuple[str, int, str]]:
                 continue
             m = _ORDER.search(_normalise(lit))
             out.append((str(path.relative_to(root)), node.lineno,
-                        " ".join(m.group(1).split()) if m else ""))
+                        " ".join(m.group(1).split()) if m else "", lit))
     return out
 
 
@@ -304,8 +498,9 @@ def test_the_rest_of_the_code_only_gets_better():
     """Храповик: запросов без добивки вне слоя мини-аппа только меньше."""
     rows = _all_paging_queries()
     assert len(rows) >= 20, f"запросов со сдвигом вне слоя мало: {len(rows)}"
-    bad = [f"{w}:{ln}  ORDER BY {o}" for w, ln, o in rows
-           if not order_is_total(o) and not order_is_dynamic(o)]
+    bad = [f"{w}:{ln}  ORDER BY {o}" for w, ln, o, lit in rows
+           if not order_is_total(o, lit) and not order_is_dynamic(o)
+           and not _justification(lit)]
     assert len(bad) <= OUTSIDE_CEILING, (
         f"запросов без добивки стало {len(bad)} вместо {OUTSIDE_CEILING}:"
         + "\n  " + "\n  ".join(bad))
@@ -322,12 +517,226 @@ def test_the_rest_of_the_code_only_gets_better():
 def test_dynamic_orders_are_known_and_checked_by_hand():
     """Сортировка из переменной — та, что проверена чтением, и только она."""
     rows = _all_paging_queries()
-    dyn = [f"{w}:{ln}" for w, ln, o in rows if order_is_dynamic(o)]
+    dyn = [f"{w}:{ln}" for w, ln, o, _l in rows if order_is_dynamic(o)]
     assert len(dyn) <= DYNAMIC_CEILING, (
         f"запросов с сортировкой из переменной стало {len(dyn)} вместо "
         f"{DYNAMIC_CEILING}: мерка их не судит, значит каждый надо прочитать "
         f"глазами и записать причину здесь же.\n  " + "\n  ".join(dyn))
     assert dyn, "ни одного — мерка перестала их различать"
+
+
+# ── Листание, разложенное по двум местам ─────────────────────────────────────
+#
+# Мерки выше требуют, чтобы сдвиг и сортировка стояли в ОДНОМ литерале. Это
+# и было их слепым пятном, причём ровно наоборот к ожиданиям: аккуратно
+# написанное листание так НЕ пишут. В services/op_worker.py оно разложено —
+# общий читатель дописывает ` LIMIT {n} OFFSET {k}` к переданному запросу, а
+# SELECT с сортировкой стоит на месте вызова. Ни один из двух литералов мерки
+# выше не задевает: в первом нет SELECT, во втором нет OFFSET. То есть мерка
+# была строже всего к самому неряшливому коду и слепа к самому аккуратному, а
+# общий читатель — это ПРАВИЛЬНАЯ форма, которая переживёт остальные.
+#
+# Нашлось это не глазами: я собирался сказать соседней сессии, что их слой уже
+# под охраной, и перед тем как сказать — проверил. Охвата не было.
+
+
+def _pagers(tree, src) -> set[str]:
+    """Функции, которые сами дописывают сдвиг к ЧУЖОМУ запросу.
+
+    Ищется свойство, а не имя: в теле есть литерал со сдвигом и БЕЗ SELECT,
+    то есть сдвиг приклеивается к запросу, пришедшему снаружи. Список
+    читателей руками не держится, поэтому следующий такой же найдётся сам.
+    """
+    import ast
+
+    out = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for sn in _string_nodes(node):
+            lit = (sn.value if isinstance(sn, ast.Constant)
+                   else ast.get_source_segment(src, sn) or "")
+            if (isinstance(lit, str) and _OFFSET.search(lit)
+                    and "SELECT" not in lit.upper()):
+                out.add(node.name)
+                break
+    return out
+
+
+def _split_paged_in(src: str) -> list[tuple[int, str]]:
+    """Строка и сортировка каждого запроса, чей сдвиг дописывает читатель."""
+    import ast
+
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    names = _pagers(tree, src)
+    if not names:
+        return []
+    out = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and node.args):
+            continue
+        f = node.func
+        nm = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
+        if nm not in names:
+            continue
+        arg = node.args[0]
+        if not isinstance(arg, (ast.Constant, ast.JoinedStr)):
+            continue
+        lit = (arg.value if isinstance(arg, ast.Constant)
+               else ast.get_source_segment(src, arg) or "")
+        if not isinstance(lit, str) or "SELECT" not in lit.upper():
+            continue
+        m = _ORDER.search(_normalise(lit))
+        order = (" ".join(m.group(1).split()).strip().strip('"\'') if m else "")
+        out.append((arg.lineno, order, lit))
+    return [(ln, o) for ln, o, _l in out]
+
+
+@functools.lru_cache(maxsize=1)
+def _split_paging_queries() -> list[tuple[str, int, str, str]]:
+    """По всему коду: файл, строка, сортировка, литерал."""
+    import ast
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    out = []
+    for path in (sorted((root / "services").rglob("*.py"))
+                 + sorted((root / "bot").rglob("*.py"))):
+        src = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        names = _pagers(tree, src)
+        if not names:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and node.args):
+                continue
+            f = node.func
+            nm = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
+            if nm not in names:
+                continue
+            arg = node.args[0]
+            if not isinstance(arg, (ast.Constant, ast.JoinedStr)):
+                continue
+            lit = (arg.value if isinstance(arg, ast.Constant)
+                   else ast.get_source_segment(src, arg) or "")
+            if not isinstance(lit, str) or "SELECT" not in lit.upper():
+                continue
+            m = _ORDER.search(_normalise(lit))
+            order = (" ".join(m.group(1).split()).strip().strip("\"'")
+                     if m else "")
+            out.append((str(path.relative_to(root)), arg.lineno, order, lit))
+    return tuple(out)
+
+
+_PAGER_SRC = (
+    "async def _page_source(sql, *args):\n"
+    "    offset = 0\n"
+    "    while True:\n"
+    "        rows = await fetch(pool, sql + f' LIMIT {_PAGE} OFFSET {offset}', *args)\n"
+    "        if not rows:\n"
+    "            return\n"
+    "        offset += len(rows)\n")
+
+
+def test_the_detector_finds_a_shared_pager_by_what_it_does():
+    """Читатель узнаётся по делу, а не по имени: иначе мерка слепа к новому."""
+    import ast
+
+    src = _PAGER_SRC
+    assert _pagers(ast.parse(src), src), (
+        "функция, приклеивающая сдвиг к чужому запросу, не распознана")
+    # А обычный запрос со сдвигом В СЕБЕ читателем не считается: иначе
+    # читателями оказались бы все, и судились бы их случайные аргументы.
+    plain = ("async def h(pool):\n"
+             "    return await pool.fetch('SELECT 1 FROM t ORDER BY id "
+             "LIMIT $1 OFFSET $2')\n")
+    assert not _pagers(ast.parse(plain), plain), (
+        "запрос со сдвигом внутри себя принят за общего читателя")
+
+
+def test_the_detector_judges_the_query_at_the_call_site():
+    """Проба на больном и на здоровом: правило ниже не может быть любым."""
+    bad = _PAGER_SRC + (
+        "async def go():\n"
+        "    await _page_source('SELECT a FROM parsed_audiences "
+        "WHERE owner_id=$1 ORDER BY parsed_at DESC', 1)\n")
+    rows = [o for _ln, o in _split_paged_in(bad)]
+    assert rows and not order_is_total(rows[0]), (
+        f"сортировка с места вызова не разобрана или сочтена полной: {rows}")
+
+    good = bad.replace("ORDER BY parsed_at DESC", "ORDER BY parsed_at DESC, id")
+    rows = [o for _ln, o in _split_paged_in(good)]
+    assert rows and order_is_total(rows[0]), (
+        f"добитая сортировка с места вызова сочтена неполной: {rows}")
+
+
+def test_the_composite_key_counts_only_for_its_own_table():
+    """Составной ключ из схемы — зачёт, но только своей таблице."""
+    lit = ("SELECT DISTINCT bu.user_id, bu.bot_id FROM bot_users bu "
+           "ORDER BY bu.user_id, bu.bot_id")
+    assert order_is_total("bu.user_id, bu.bot_id", lit), (
+        "PRIMARY KEY (bot_id, user_id) у bot_users не зачтён: по последнему "
+        "ключу такая сортировка выглядит нарушением, хотя порядок задаёт")
+    # Без литерала зачёта нет: таблицу назвать нечем.
+    assert not order_is_total("bu.user_id, bu.bot_id")
+    # И чужой таблице — тоже нет, даже при тех же именах столбцов.
+    assert not order_is_total(
+        "user_id, bot_id", "SELECT x FROM some_log ORDER BY user_id, bot_id")
+    # Пара, не накрывающая объявленный ключ, зачёта не получает: у bot_users
+    # ключ (bot_id, user_id), а здесь bot_id ни в сортировке, ни закреплён.
+    assert not order_is_total(
+        "created_at, user_id",
+        "SELECT x FROM bot_users ORDER BY created_at, user_id")
+
+
+def test_the_split_sweep_sees_the_real_code():
+    """Пустая выдача сделала бы правило ниже зелёным ни на чём."""
+    rows = _split_paging_queries()
+    assert len(rows) >= 3, f"запросов через общего читателя найдено мало: {len(rows)}"
+    assert all(o for _w, _ln, o, _l in rows), (
+        "запрос через читателя вообще без сортировки: "
+        + str([(r[0], r[1]) for r in rows if not r[2]]))
+
+
+def test_a_shared_pager_does_not_excuse_a_partial_order():
+    """Листание через общего читателя стоит на том же правиле."""
+    bad = [f"{w}:{ln}  ORDER BY {o}" for w, ln, o, lit in _split_paging_queries()
+           if not order_is_total(o, lit) and not order_is_dynamic(o)
+           and not _justification(lit)]
+    assert not bad, (
+        "сдвиг дописывает общий читатель, а сортировка на месте вызова не "
+        "полна — страницы будут повторять и терять записи:\n  "
+        + "\n  ".join(bad))
+
+
+def test_every_justification_still_matches_a_real_query():
+    """Довод, переживший свой запрос, прощает неизвестно что.
+
+    Это и есть смысл привязки к тексту: обрывок запроса перестаёт находиться,
+    как только запрос переписали, и проверка требует перечитать его заново.
+    Имя столбца так не умеет — оно продолжает прощать молча, что и случилось с
+    `msg_id`.
+    """
+    lits = ([lit for _w, _ln, _o, lit in _paging_queries()]
+            + [lit for _w, _ln, _o, lit in _all_paging_queries()]
+            + [lit for _w, _ln, _o, lit in _split_paging_queries()])
+    stale = []
+    for fragment, reason in _JUSTIFIED:
+        flat = " ".join(fragment.split())
+        if not any(flat in " ".join(_normalise(x).split()) for x in lits):
+            stale.append(f"{fragment!r} ({reason})")
+    assert not stale, (
+        "довод больше не относится ни к одному запросу со сдвигом — запрос "
+        "переписали, и довод надо перечитать, а не оставлять:\n  "
+        + "\n  ".join(stale))
+    assert len(_JUSTIFIED) <= 4, (
+        f"доводов стало {len(_JUSTIFIED)}: столько прочитанного глазами уже "
+        "не читают, и список превращается в список исключений")
 
 
 def _run(coro):

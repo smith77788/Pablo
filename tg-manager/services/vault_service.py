@@ -543,7 +543,7 @@ async def search_messages(pool, owner_id: int, query: str, limit: int = 100,
             """SELECT chat_id, msg_id, direction, text_enc, media_type, media_name,
                       peer_name, peer_username, msg_date, is_deleted, is_edited
                  FROM vault_messages WHERE owner_id=$1
-             ORDER BY msg_date DESC NULLS LAST, msg_id DESC
+             ORDER BY msg_date DESC NULLS LAST, msg_id DESC, id DESC
                 LIMIT $2 OFFSET $3""",
             owner_id, _SEARCH_PAGE, offset)
         if not rows:
