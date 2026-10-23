@@ -12,8 +12,11 @@
 """
 from __future__ import annotations
 
+import functools
 import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ROOT / "services"
@@ -46,6 +49,11 @@ def _module_files() -> dict[str, Path]:
     return mods
 
 
+# Обход читает КАЖДЫЙ .py проекта, и два правила ниже делают его одинаково.
+# Без кэша прогон тратил на это 25 + 25 секунд вместо 25: половина уходила на
+# повторное чтение того же дерева. Набор правил гоняется на каждый push, и
+# предел по времени у джоба уже однажды был достигнут молча.
+@functools.lru_cache(maxsize=1)
 def _prod_sources() -> dict[Path, str]:
     out = {}
     for p in ROOT.rglob("*.py"):
@@ -74,9 +82,11 @@ def _is_used(name: str, path: Path, sources: dict[Path, str]) -> bool:
     return any(q != path and any(r.search(s) for r in rx) for q, s in sources.items())
 
 
-def _orphans() -> set[str]:
+@functools.lru_cache(maxsize=1)
+def _orphans() -> frozenset[str]:
     sources = _prod_sources()
-    return {n for n, p in _module_files().items() if not _is_used(n, p, sources)}
+    return frozenset(n for n, p in _module_files().items()
+                     if not _is_used(n, p, sources))
 
 
 def test_orphan_list_does_not_grow():
@@ -155,3 +165,11 @@ def test_real_pacing_loop_is_closed():
     pacing = (SERVICES / "op_pacing.py").read_text(encoding="utf-8")
     assert "get_pacing_engine().record_result(" in worker, "результаты не записываются"
     assert "get_pacing_engine().get_multiplier(" in pacing, "множитель не читается"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _free_the_sources():
+    """Исходники всего проекта держатся только на время правил этого файла."""
+    yield
+    _prod_sources.cache_clear()
+    _orphans.cache_clear()
