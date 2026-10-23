@@ -1,0 +1,1135 @@
+"""Infragram Virtual Layer — вычислительный слой поверх Telegram.
+
+Telegram сообщает, ЧТО произошло (пришло сообщение, тап по кнопке). Этот слой
+определяет, ЧТО ЭТО ЗНАЧИТ: в каком состоянии находится сущность и какое
+виртуальное событие из этого следует.
+
+Организм уже дал шину и память (`organism/spine.py`). Здесь добавляется то,
+чего не было, — СОСТОЯНИЕ как динамическая величина:
+
+    не тег «interested», а
+    {value: interested, confidence: 0.74, source: bot_17, expires: 48ч, history: …}
+
+Три механики, и все, кроме записи в БД, — чистые функции (их и проверяют
+тесты; заглушка пула типы связывания не ловит — см. CLAUDE.md):
+
+* **SIGNAL → переход.** Сигнал двигает сущность по лестнице состояний. Вверх —
+  только по сигналу, вниз — распадом (тишина остужает) или явным негативом.
+* **Распад.** Состояние без подтверждения деградирует само: интерес, о котором
+  сутки ничего не слышно, — уже не интерес. Тег так не умеет, оттого и врёт.
+* **Каскад.** Много состояний уровня N рождают состояние уровня N+1: 147
+  «горячих» пользователей бота → сам бот «горячий» → кампания «горячая».
+
+На каждом РЕАЛЬНОМ переходе (значение изменилось) рождается виртуальное
+событие, которого Telegram не шлёт: PURCHASE_INTENT_DETECTED, USER_LOST_INTEREST.
+Оно уходит в spine — и существующий мозг/автоматизации реагируют на него так же,
+как на любое другое событие. Это и есть «событие → интерпретация → состояние →
+решение», а не «событие → if → действие».
+
+Осознанные границы (владелец сам отметил, что это гипотезы):
+* это НАДСТРОЙКА над unified_contacts.stage, не второй источник правды: сырой
+  тег остаётся, сюда пишется вычисленное — с уверенностью и распадом;
+* «форк реальности» (симуляция веток до действия) и маршрутизатор намерений —
+  следующие слои поверх этого ядра, не здесь;
+* координация ботов (Bot Mesh) — Telegram РЕАЛЬНО поддерживает bot-to-bot
+  (opt-in в @BotFather; в группах доставка по `/cmd@bot` или reply, в ЛС —
+  обоюдный opt-in, в бизнес-аккаунтах — только у отправителя). Гашение петель
+  Telegram НЕ делает — это на нашей стороне; ядро координации и защиты от
+  петель живёт в `services/bot_mesh.py`.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from datetime import datetime, timedelta, timezone
+
+log = logging.getLogger(__name__)
+
+# ── Уровни сущностей ───────────────────────────────────────────────────────
+USER = "user"
+CONVERSATION = "conversation"
+BOT = "bot"
+CAMPAIGN = "campaign"
+NETWORK = "network"
+
+# ── Лестница воронки (state_key = "funnel") ────────────────────────────────
+# Порядок = сила намерения. Индекс на лестнице и есть «ранг».
+LADDER = ["new", "curious", "interested", "qualified", "ready", "purchased"]
+LOST = "lost"          # терминальный негатив (отписка/явный отказ)
+_TERMINAL = {"purchased", LOST}   # не распадаются и вверх сигналом не двигаются
+
+# Виртуальное событие при ВХОДЕ в состояние (снизу). Пусто — событие не рождаем.
+ENTER_EVENT = {
+    "curious": "user_became_active",
+    "interested": "user_showed_interest",
+    "ready": "purchase_intent_detected",
+    "purchased": "purchase_confirmed",
+    LOST: "user_lost_interest",
+}
+# Виды виртуальных событий этого слоя (для фильтрации ленты в read-поверхности).
+VIRTUAL_EVENT_KINDS = list(dict.fromkeys(ENTER_EVENT.values()))
+
+# Русские подписи значений и событий — владелец не читает по-английски.
+VALUE_LABEL = {
+    "new": "Новый", "curious": "Присматривается", "interested": "Интерес",
+    "qualified": "Квалифицирован", "ready": "Готов купить",
+    "purchased": "Купил", LOST: "Потерян",
+}
+# Температуры каскада. COLD нужен как ЗАПИСЫВАЕМОЕ значение: без него вердикт
+# «уже не горячо» было нечем выразить, каскад просто возвращал None и оставлял
+# в базе прежний «🔥 Горячий». Бот, остывший месяц назад, навсегда оставался
+# самым горячим — и подсказка мозга «направьте оффер сюда» тоже навсегда.
+HOT, WARM, COLD = "hot", "warm", "cold"
+TEMPERATURE_LABEL = {HOT: "🔥 Горячий", WARM: "🌤 Тёплый", COLD: "🧊 Остыл"}
+# Значения, которые ставит каскад (а не лестница воронки). Снимать «горячо»
+# можно только с них: родителя, которого каскад ещё не трогал, не выдумываем.
+CASCADE_VALUES = (HOT, WARM, COLD)
+EVENT_LABEL = {
+    "user_became_active": "🌱 Ожил",
+    "user_showed_interest": "👀 Проявил интерес",
+    "purchase_intent_detected": "🔥 Намерение купить",
+    "purchase_confirmed": "✅ Покупка",
+    "user_lost_interest": "❄️ Остыл",
+}
+
+# Сигнал → минимальный ранг, до которого он подтягивает. Сигнал НЕ опускает
+# (кроме явных негативов ниже): опускает только распад.
+SIGNAL_TARGET = {
+    "opened": "curious",
+    "reacted": "curious",
+    "asked_question": "curious",
+    "replied": "interested",
+    "asked_price": "interested",
+    "clicked_offer": "qualified",
+    "left_contact": "qualified",
+    "added_to_cart": "ready",
+    "asked_how_to_pay": "ready",
+    "paid": "purchased",
+}
+# Явные негативные сигналы — переводят в терминальный LOST независимо от ранга.
+NEGATIVE_SIGNALS = {"unsubscribed", "blocked", "refused", "reported"}
+
+# Стадия CRM (contact_crm.stage) → сигнал этого слоя. ОДИН маппинг на все
+# двери, меняющие стадию: их две (автоматическая — сенсор намерений по тексту
+# сообщения, ручная — экран контакта в мини-аппе), и знал о слое только сенсор,
+# причём без «won». Поэтому выигранная сделка слою не сообщалась НИКАК:
+# человек оставался «Готов купить», распадом съезжал в «Интерес» и попадал в
+# список «кого дожимать первыми» — то есть дожимать предлагалось того, кто уже
+# заплатил. Терминальное «Купил» при этом было недостижимо, а виртуальное
+# событие purchase_confirmed не рождалось ни разу, и реагировать на продажу
+# автоматизациям было нечем.
+STAGE_SIGNAL = {
+    "lead": "replied",
+    "contact": "opened",
+    "proposal": "asked_price",
+    "negotiation": "asked_how_to_pay",
+    "won": "paid",
+    "lost": "refused",
+}
+
+# Срок жизни рунга до распада (часы). Чем горячее — тем короче память: «готов»,
+# о ком сутки тишина, почти наверняка уже остыл; «curious» живёт дольше.
+_TTL_HOURS = {
+    "curious": 168, "interested": 96, "qualified": 72, "ready": 24,
+}
+DEFAULT_TTL_HOURS = 96
+
+
+def _now(now: datetime | None = None) -> datetime:
+    return now or datetime.now(timezone.utc)
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def rank(value: str | None) -> int:
+    """Ранг на лестнице. Неизвестное/терминальный негатив → -1."""
+    try:
+        return LADDER.index(value)
+    except (ValueError, TypeError):
+        return -1
+
+
+def ttl_for(value: str) -> timedelta | None:
+    """Сколько живёт рунг до распада. Терминальные — бессрочно (None)."""
+    if value in _TERMINAL:
+        return None
+    return timedelta(hours=_TTL_HOURS.get(value, DEFAULT_TTL_HOURS))
+
+
+# ── SIGNAL → переход (чистая функция) ──────────────────────────────────────
+
+def apply_signal(current: dict | None, signal: str, *,
+                 confidence: float = 0.6, now: datetime | None = None) -> dict | None:
+    """current-состояние + сигнал → НОВОЕ состояние, либо None если не изменилось.
+
+    current: {"value","confidence","expires_at"} или None (состояния ещё нет).
+    Возвращаемое: {"value","confidence","expires_at","reason"} для записи.
+
+    Правила:
+    * негативный сигнал → LOST (терминально), если ещё не LOST;
+    * позитивный сигнал подтягивает до своего целевого рунга, но НЕ опускает;
+    * повтор того же рунга не меняет значение, но копит уверенность (до 0.98) —
+      это тоже переход (уверенность выросла), поэтому возвращаем его.
+    """
+    now = _now(now)
+    cur_val = (current or {}).get("value")
+    cur_conf = float((current or {}).get("confidence") or 0.0)
+    conf = max(0.0, min(1.0, float(confidence)))
+
+    if signal in NEGATIVE_SIGNALS:
+        if cur_val == LOST:
+            return None
+        return {"value": LOST, "confidence": max(conf, 0.9),
+                "expires_at": None, "reason": f"signal:{signal}"}
+
+    target = SIGNAL_TARGET.get(signal)
+    if target is None:
+        return None                          # неизвестный сигнал не трогает состояние
+    # «Заплатил» — не вывод, а факт, и он сильнее прежнего «Потерян»: человека
+    # записали в потерянные, он вернулся и купил. Это единственный сигнал,
+    # вытаскивающий из терминального состояния; из «Купил» не вытаскивает
+    # ничего (повтор ничего не меняет и возвращает None ниже).
+    if signal == "paid" and cur_val == LOST:
+        return {"value": "purchased", "confidence": max(conf, 0.9),
+                "expires_at": None, "reason": f"signal:{signal}"}
+    if cur_val in _TERMINAL:
+        return None                          # из терминального сигналом не вытащить
+
+    tr, cr = rank(target), rank(cur_val)
+    if tr > cr:
+        # Продвижение: значение растёт, уверенность = уверенность сигнала.
+        return {"value": target, "confidence": conf,
+                "expires_at": _expiry(target, now), "reason": f"signal:{signal}"}
+    if tr == cr and cr >= 0:
+        # Подтверждение того же рунга: копим уверенность, продлеваем срок.
+        new_conf = min(0.98, cur_conf + (1.0 - cur_conf) * 0.4)
+        if new_conf - cur_conf < 0.01:
+            # Уже уверены — обновим только срок (продление), значение то же.
+            return {"value": cur_val, "confidence": cur_conf,
+                    "expires_at": _expiry(cur_val, now), "reason": "reaffirm",
+                    "value_changed": False}
+        return {"value": cur_val, "confidence": new_conf,
+                "expires_at": _expiry(cur_val, now), "reason": "reaffirm",
+                "value_changed": False}
+    return None                              # сигнал слабее текущего — игнор
+
+
+def _expiry(value: str, now: datetime) -> datetime | None:
+    ttl = ttl_for(value)
+    return now + ttl if ttl else None
+
+
+# ── Распад (чистая функция) ────────────────────────────────────────────────
+
+def decay(current: dict, *, now: datetime | None = None) -> dict | None:
+    """Просроченное состояние → вниз по лестнице, либо None если распад не нужен.
+
+    Внизу лестницы (new) распадаться некуда. Терминальные не распадаются.
+    Уверенность при остывании падает на каждом рунге.
+
+    Опускаемся на СТОЛЬКО рунгов, сколько молчания накопилось, и каждый
+    следующий срок считаем от ПРЕДЫДУЩЕГО срока, а не от `now`. Раньше было
+    иначе: один рунг за проход и новый срок от момента прохода. Это значит,
+    что о человеке, молчащем месяц, слой говорил «интерес» — проход опускал
+    его с «готов» на «квалифицирован» и выдавал свежие 72 часа жизни, потом с
+    «квалифицирован» на «интерес» ещё на 96 часов, и так дальше. Полный остыв
+    занимал две недели календаря ПОСЛЕ месяца тишины, причём только если
+    проходы шли подряд: `run_decay` берёт 500 строк за редкий проход на всех
+    владельцев сразу. Ровно то, в чём слой упрекает тег («интерес, о котором
+    сутки ничего не слышно, — уже не интерес»), он делал сам.
+
+    Дойдя до дна (`new`), срок СНИМАЕМ (`expires_at=None`). Иначе строка
+    навсегда оставалась в окне выборки `run_decay` («просрочено и не NULL»),
+    распадаться ей было уже некуда, и такие строки копились, занимая лимит
+    прохода: распад переставал доходить до тех, кому он нужен. Это тот же
+    случай, когда значение не меняется, а срок снять надо, — его отдаём с
+    `value_changed=False`, чтобы вызывающий не писал историю и не шумел
+    событием о переходе, которого не было.
+    """
+    now = _now(now)
+    val = current.get("value")
+    if val in _TERMINAL:
+        return None
+    exp = _aware(current.get("expires_at"))
+    if exp is None or exp > now:
+        return None                          # ещё не пора
+    conf = float(current.get("confidence") or 0.5)
+    rungs = 0
+    while exp is not None and exp <= now:
+        r = rank(val)
+        if r <= 0:
+            exp = None                       # дно: ниже не опускаем, срок снимаем
+            break
+        val = LADDER[r - 1]
+        conf = max(0.2, conf * 0.6)
+        rungs += 1
+        if rank(val) <= 0:
+            exp = None                       # пришли на дно: срок тут не нужен
+            break
+        ttl = ttl_for(val)
+        exp = (exp + ttl) if ttl else None
+    if rungs == 0 and exp is not None:
+        return None                          # ниже new не опускаем и срок цел
+    return {"value": val, "confidence": round(conf, 3),
+            "expires_at": exp, "reason": "decay", "value_changed": rungs > 0}
+
+
+def effective(state: dict | None, *, now: datetime | None = None) -> dict | None:
+    """Состояние, каким оно ЕСТЬ сейчас: с применённым распадом, но без записи.
+
+    Запись состояния — это значение на момент записи плюс срок, до которого
+    оно верно. Все читатели слоя брали значение и срок игнорировали, а распад
+    применяет отдельный редкий проход, поэтому между проходами слой показывал
+    и СЧИТАЛ устаревшее: «готов купить» у человека, пропавшего три недели
+    назад, шёл в каскад наравне со свежим. Каскад — место, где из этого
+    получается решение («кампания горячая»), поэтому он обязан читать через
+    эту функцию, а не сырое значение.
+    """
+    if not state:
+        return None
+    out = dict(state)
+    change = decay(out, now=now)
+    if change is not None:
+        out.update({"value": change["value"],
+                    "confidence": change["confidence"],
+                    "expires_at": change["expires_at"]})
+    return out
+
+
+# ── Каскад (чистая функция) ────────────────────────────────────────────────
+
+def cascade_from_counts(counts: dict[str, int], *, hot_at: str = "ready",
+                        min_count: int = 20, min_share: float = 0.15,
+                        live: dict[str, int] | None = None) -> str | None:
+    """То же решение, но по СЧЁТЧИКАМ значений, а не по списку детей.
+
+    Каскаду нужны только два числа: сколько детей всего и сколько из них
+    горячих. Список самих значений он не использует — а именно список и
+    приходилось тащить из базы целиком (строка на каждого человека владельца,
+    на каждом сердцебиении, и дважды: на каскад аудитории и на каскад ботов).
+    С подписчиками бота в слое это растёт вместе с аудиторией без потолка,
+    поэтому запрос теперь агрегирующий, а решение считается здесь.
+
+    `live` — те же счётчики, но только по НЕ просроченным строкам. Греть
+    родителя может лишь живое состояние: просроченный рунг — это рунг, чьё
+    окно уверенности прошло, распад его снимет на ближайшем проходе, и
+    принимать его за «горячо сейчас» нельзя. В знаменатель просроченные при
+    этом входят: человек из аудитории не исчез, он остыл, и доля горячих
+    обязана это чувствовать. Не передали — считаем все строки живыми (так
+    ведёт себя чистая `cascade`, которой срок не известен).
+    """
+    total = sum(int(c) for v, c in counts.items() if v and c > 0)
+    if total == 0:
+        return None
+    threshold = rank(hot_at)
+    if threshold < 0:
+        return None
+    hot_src = counts if live is None else live
+    hot = sum(int(c) for v, c in hot_src.items()
+              if v and c > 0 and rank(v) >= threshold)
+    share = hot / total
+    if hot >= min_count and share >= min_share:
+        return "hot"
+    if hot >= max(1, min_count // 2) and share >= min_share / 2:
+        return "warm"
+    return None
+
+
+def cascade(child_values: list[str], *, hot_at: str = "ready",
+            min_count: int = 20, min_share: float = 0.15) -> str | None:
+    """Состояния детей → состояние родителя: hot | warm | None.
+
+    Родитель «горячий», когда «горячих» детей достаточно И по числу (min_count),
+    И по доле (min_share) — одно без другого лжёт: 3 из 5 это не тренд бота,
+    а 20 из 100000 — не «горячая» кампания. «Тёплый» — половина порога.
+    """
+    counts: dict[str, int] = {}
+    for v in child_values:
+        if v:
+            counts[v] = counts.get(v, 0) + 1
+    return cascade_from_counts(counts, hot_at=hot_at, min_count=min_count,
+                               min_share=min_share)
+
+
+def effective_value(value: str, expired: bool) -> str:
+    """Значение с применённым распадом, когда известна только просроченность.
+
+    Агрегирующий запрос отдаёт «значение + просрочено ли», без самого срока, а
+    распад-«нагонка» зависит от того, НАСКОЛЬКО давно срок истёк. Опускаем на
+    один рунг: распад идёт на каждом сердцебиении (15 минут), поэтому
+    просроченная строка просрочена не более чем на один шаг TTL, и один рунг —
+    это и есть её настоящее состояние. Терминальные значения срока не имеют и
+    сюда как просроченные не попадают.
+    """
+    if not expired:
+        return value
+    r = rank(value)
+    if r <= 0:
+        return value
+    return LADDER[r - 1]
+
+
+def virtual_event_for(from_value: str | None, to_value: str) -> str | None:
+    """Имя виртуального события при переходе (только при движении ВВЕРХ или в
+    LOST). Распад вниз по лестнице события не рождает, кроме ухода в LOST."""
+    if to_value == from_value:
+        return None
+    if to_value == LOST:
+        return ENTER_EVENT.get(LOST)
+    if rank(to_value) > rank(from_value):
+        return ENTER_EVENT.get(to_value)
+    return None
+
+
+# ── Персистенция (тонкая; вся логика — выше) ───────────────────────────────
+
+async def get_state(pool, owner_id: int, entity_type: str, entity_id,
+                    state_key: str = "funnel") -> dict | None:
+    """Текущее состояние. Просроченное отдаём как есть (распад — отдельный
+    проход `run_decay`); вызывающему видно по expires_at, что оно остыло."""
+    row = await pool.fetchrow(
+        "SELECT value, confidence, source, expires_at, updated_at "
+        "FROM virtual_states WHERE owner_id=$1 AND entity_type=$2 "
+        "AND entity_id=$3 AND state_key=$4",
+        owner_id, entity_type, str(entity_id), state_key)
+    return dict(row) if row else None
+
+
+async def _write(pool, owner_id: int, entity_type: str, entity_id: str,
+                 state_key: str, new: dict, source: str | None,
+                 from_value: str | None, *, history: bool = True) -> None:
+    """history=False — записать только состояние. Нужно там, где значение не
+    меняется, а поправить надо срок: строка «перехода из X в X» в истории
+    испортила бы `temporal_pattern` (он считает рисунок по переходам)."""
+    await pool.execute(
+        """INSERT INTO virtual_states
+             (owner_id, entity_type, entity_id, state_key, value, confidence,
+              source, expires_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+           ON CONFLICT (owner_id, entity_type, entity_id, state_key)
+           DO UPDATE SET value=EXCLUDED.value, confidence=EXCLUDED.confidence,
+             source=EXCLUDED.source, expires_at=EXCLUDED.expires_at,
+             updated_at=now()""",
+        owner_id, entity_type, entity_id, state_key, new["value"],
+        float(new["confidence"]), source, new.get("expires_at"))
+    if not history:
+        return
+    await pool.execute(
+        """INSERT INTO virtual_state_history
+             (owner_id, entity_type, entity_id, state_key, from_value, to_value,
+              reason, confidence)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+        owner_id, entity_type, entity_id, state_key, from_value, new["value"],
+        new.get("reason"), float(new["confidence"]))
+
+
+async def signal(pool, owner_id: int, entity_type: str, entity_id,
+                 signal_name: str, *, state_key: str = "funnel",
+                 confidence: float = 0.6, source: str | None = None,
+                 now: datetime | None = None) -> dict | None:
+    """Подать сигнал сущности. Пишет новое состояние, ведёт историю и на
+    РЕАЛЬНОМ переходе (значение изменилось) эмитит виртуальное событие в spine.
+
+    Возвращает применённое изменение или None (сигнал ничего не изменил).
+    Fail-open: сбой шины не откатывает состояние.
+    """
+    eid = str(entity_id)
+    current = await get_state(pool, owner_id, entity_type, eid, state_key)
+    change = apply_signal(current, signal_name, confidence=confidence, now=now)
+    if change is None:
+        return None
+    from_value = (current or {}).get("value")
+    await _write(pool, owner_id, entity_type, eid, state_key, change, source, from_value)
+
+    if change.get("value_changed") is False:
+        return change                        # только уверенность/срок — событие не рождаем
+    ev = virtual_event_for(from_value, change["value"])
+    if ev:
+        try:
+            from services.organism import spine
+            await spine.emit(pool, owner_id, ev, {
+                "entity_type": entity_type, "entity_id": eid,
+                "state_key": state_key, "from": from_value,
+                "to": change["value"], "confidence": change["confidence"],
+                "source": source})
+        except Exception:
+            log.debug("virtual_layer: emit failed ev=%s", ev, exc_info=True)
+    return change
+
+
+# Сигналы, по которым человека ЗАВОДЯТ в контакты, если его там ещё нет.
+#
+# Состояния слоя ключуются по `unified_contacts.id`, а подписчики бота живут в
+# `bot_users` и в контакты не попадают НИКОГДА: их туда никто не переносит, а
+# контакты наполняет только синхронизация адресных книг аккаунтов. Поэтому
+# сигналы от главного входящего канала продукта — бота — пропадали молча все
+# до единого: тап по кнопке, ответ в переписке, отказ. Лестница, распад и
+# каскад работали только по тем, кто уже был в адресной книге владельца, то
+# есть почти ни по кому. Ровно поэтому «готов купить» в продукте почти не
+# случалось: подтверждать его было нечем.
+#
+# Заводим не на всякий сигнал. «Открыл бота» (/start) и «отписался» — слабое
+# свидетельство, а подписчиков у бота бывают десятки тысяч, и превращать их
+# всех в контакты значило бы утопить CRM. Создаём на ДЕЙСТВИИ: написал,
+# спросил, тапнул, оставил контакт, заплатил — то есть на том, что двигает
+# лестницу выше дна.
+_SIGNALS_WORTH_A_CONTACT = frozenset({
+    "replied", "asked_question", "asked_price", "clicked_offer",
+    "left_contact", "added_to_cart", "asked_how_to_pay", "paid",
+})
+
+
+async def signal_for_telegram_user(pool, owner_id: int, tg_user_id,
+                                   signal_name: str, *, confidence: float = 0.6,
+                                   source: str | None = None,
+                                   identity: dict | None = None) -> dict | None:
+    """Сигнал по Telegram-id человека, а не по id контакта.
+
+    Источники сигналов живут там, где приходят обновления Telegram, и знают
+    человека по его tg-id. Состояния этого слоя ключуются по контакту
+    (unified_contacts.id) — так же, как их пишет сенсор намерений. Разводить
+    два пространства идентификаторов нельзя: один и тот же человек получил бы
+    два независимых состояния, и оба были бы неполными.
+
+    `identity` — что источник знает о человеке (username, first_name,
+    last_name). Если контакта ещё нет, а сигнал означает ДЕЙСТВИЕ (см.
+    `_SIGNALS_WORTH_A_CONTACT`), контакт заводится через единственную дверь
+    контактов. Без `identity` ничего не создаём: заводить контакт без имени и
+    юзернейма значит плодить безымянные строки.
+
+    Fail-open: сбой слоя не ломает обработку сообщения.
+    """
+    if not owner_id or not tg_user_id:
+        return None
+    try:
+        contact_id = await pool.fetchval(
+            "SELECT id FROM unified_contacts "
+            "WHERE owner_id=$1 AND telegram_user_id=$2",
+            int(owner_id), int(tg_user_id))
+    except Exception:
+        log.debug("virtual_layer: contact lookup failed owner=%s tg=%s",
+                  owner_id, tg_user_id, exc_info=True)
+        return None
+    if not contact_id and identity and signal_name in _SIGNALS_WORTH_A_CONTACT:
+        try:
+            from services.contacts_hub.repository import (
+                ensure_contact_by_telegram_id,
+            )
+            contact_id = await ensure_contact_by_telegram_id(
+                pool, int(owner_id), int(tg_user_id),
+                username=identity.get("username"),
+                first_name=identity.get("first_name"),
+                last_name=identity.get("last_name"))
+        except Exception:
+            log.debug("virtual_layer: contact create failed owner=%s tg=%s",
+                      owner_id, tg_user_id, exc_info=True)
+            return None
+    if not contact_id:
+        return None
+    try:
+        return await signal(pool, int(owner_id), USER, contact_id, signal_name,
+                            confidence=confidence, source=source)
+    except Exception:
+        log.debug("virtual_layer: signal failed owner=%s signal=%s",
+                  owner_id, signal_name, exc_info=True)
+        return None
+
+
+async def _decay_batch(pool, where: str, args: list, limit: int,
+                       now: datetime,
+                       owners_out: set[int] | None = None) -> tuple[int, int]:
+    """Одна пачка распада. Возвращает (остыло, прочитано строк).
+
+    Прочитано нужно отдельно от остывших: пачка может целиком состоять из
+    строк на дне лестницы, у которых снимается только срок. Остывших в ней
+    ноль, а работа сделана, и следующую пачку брать надо.
+    """
+    # ORDER BY expires_at — кто просрочен дольше, тот остывает первым. Без
+    # порядка лимит прохода доставался случайным строкам, и давно остывшие
+    # могли не попасть в него никогда.
+    rows = await pool.fetch(
+        f"SELECT owner_id, entity_type, entity_id, state_key, value, confidence, "
+        f"expires_at, source FROM virtual_states WHERE {where} "
+        f"ORDER BY expires_at LIMIT {int(limit)}",
+        *args)
+    n = 0
+    for r in rows:
+        cur = dict(r)
+        new = decay(cur, now=now)
+        if new is None:
+            continue
+        if new.get("value_changed") is False:
+            # Дно лестницы: значение то же, снимаем только срок, чтобы строка
+            # ушла из окна выборки и не занимала лимит следующих проходов.
+            await _write(pool, cur["owner_id"], cur["entity_type"],
+                         cur["entity_id"], cur["state_key"], new,
+                         cur.get("source"), cur["value"], history=False)
+            continue
+        await _write(pool, cur["owner_id"], cur["entity_type"], cur["entity_id"],
+                     cur["state_key"], new, cur.get("source"), cur["value"])
+        n += 1
+        if owners_out is not None and cur["owner_id"] is not None:
+            owners_out.add(int(cur["owner_id"]))
+        ev = virtual_event_for(cur["value"], new["value"])
+        if ev:
+            try:
+                from services.organism import spine
+                await spine.emit(pool, cur["owner_id"], ev, {
+                    "entity_type": cur["entity_type"], "entity_id": cur["entity_id"],
+                    "state_key": cur["state_key"], "from": cur["value"],
+                    "to": new["value"], "reason": "decay"})
+            except Exception:
+                log.debug("virtual_layer: decay emit failed", exc_info=True)
+    return n, len(rows)
+
+
+async def run_decay(pool, owner_id: int | None = None, *, limit: int = 500,
+                    batches: int = 20, now: datetime | None = None,
+                    owners_out: set[int] | None = None) -> int:
+    """Остудить просроченные состояния. Возвращает число остывших.
+    Каждый распад в LOST-переход тоже рождает виртуальное событие.
+
+    Берём пачками по `limit`, пока окно не опустеет или не кончится `batches`.
+    Раньше была ровно одна пачка на 500 строк, и звалась она редким проходом
+    организма — раз в шесть часов, на ВСЕХ владельцев сразу. То есть распад
+    обрабатывал 2000 состояний в сутки на всю платформу. У одного владельца с
+    пятью тысячами живых контактов просрочивается больше, и очередь росла
+    безвозвратно: «остыл» переставало случаться, вместе с ним не рождалось
+    событие user_lost_interest, на которое подписаны автоматизации, а
+    распределение воронки на экране считалось по значениям, которые давно
+    неверны. Механика, вокруг которой построен слой («тишина остужает»), на
+    масштабе продукта не работала.
+
+    Потолок `batches` оставлен намеренно: проход организма не должен висеть на
+    разовом всплеске неограниченно — остаток догонит следующее сердцебиение.
+
+    `owners_out` — у КОГО реально остыло. Нужен вызывающему, чтобы тут же
+    пересчитать каскад: распад только что изменил факты, а вердикт каскада
+    («аудитория горячая», «бот горячий») лежит записанным в базе и читается
+    экраном сводки, подсказками мозга и `world._vlayer`. Пересчитывался он
+    редким проходом раз в шесть часов — то есть владелец до шести часов видел
+    «горячо» про аудиторию, которая уже остыла, ровно там, где по этому
+    вердикту и принимают решение.
+    """
+    now = _now(now)
+    where = "expires_at IS NOT NULL AND expires_at <= now()"
+    args: list = []
+    if owner_id is not None:
+        where += " AND owner_id=$1"
+        args.append(owner_id)
+    total = 0
+    for _ in range(max(1, int(batches))):
+        cooled, fetched = await _decay_batch(pool, where, args, limit, now,
+                                             owners_out)
+        total += cooled
+        if fetched < limit:
+            break                            # окно опустело
+    return total
+
+
+async def _apply_cascade_verdict(pool, owner_id: int, parent_type: str, parent_id,
+                                 state_key: str, verdict: str) -> str:
+    """Записать вердикт каскада родителю и, на смене, эмитнуть событие."""
+    pid = str(parent_id)
+    current = await get_state(pool, owner_id, parent_type, pid, state_key)
+    if (current or {}).get("value") == verdict:
+        return verdict                       # без изменений — не шумим
+    new = {"value": verdict, "confidence": 0.8, "expires_at": None,
+           "reason": "cascade"}
+    await _write(pool, owner_id, parent_type, pid, state_key, new, "cascade",
+                 (current or {}).get("value"))
+    try:
+        from services.organism import spine
+        await spine.emit(pool, owner_id, f"{parent_type}_became_{verdict}", {
+            "entity_type": parent_type, "entity_id": pid, "state_key": state_key,
+            "to": verdict})
+    except Exception:
+        log.debug("virtual_layer: cascade emit failed", exc_info=True)
+    return verdict
+
+
+async def _cool_down(pool, owner_id: int, parent_type: str, parent_id,
+                     state_key: str) -> str | None:
+    """Снять с родителя прежнее «горячо/тепло», когда детей для него уже нет.
+
+    Вердикта нет — это не «ничего не делать»: в базе лежит прошлый вердикт, и
+    его читают экран сводки, подсказки мозга и `world._vlayer` («самый горячий
+    бот»). Раньше каскад в этом случае просто выходил, и значение жило вечно:
+    бот, у которого горячие контакты остыли полгода назад, оставался самым
+    горячим, а мозг продолжал советовать направить оффер именно туда.
+
+    Родителя, которого каскад ещё не трогал, не выдумываем: пишем только
+    поверх своих же значений (CASCADE_VALUES).
+    """
+    current = await get_state(pool, owner_id, parent_type, str(parent_id), state_key)
+    value = (current or {}).get("value")
+    if value not in (HOT, WARM):
+        return None
+    return await _apply_cascade_verdict(pool, owner_id, parent_type, parent_id,
+                                        state_key, COLD)
+
+
+async def recompute_cascade(pool, owner_id: int, parent_type: str, parent_id,
+                            child_type: str, *, state_key: str = "funnel",
+                            now: datetime | None = None, **kw) -> str | None:
+    """Пересчитать состояние родителя из состояний детей и записать его.
+
+    Детьми считаются все сущности `child_type` этого владельца с состоянием по
+    `state_key`. Родитель получает hot/warm по правилу `cascade`, а на остывшей
+    аудитории — COLD. Возвращает новое состояние родителя или None.
+
+    Состояния детей читаем через `effective`: просроченный рунг — это уже не
+    тот рунг, а распад применяет отдельный редкий проход. Без этого «горячая
+    кампания» держалась на людях, пропавших недели назад.
+    """
+    # Агрегат, а не строка на ребёнка: каскаду нужны только числа, а детей у
+    # владельца столько, сколько у него людей в слое (с подписчиками бота —
+    # без потолка). Группируем в базе по значению и признаку просрочки.
+    rows = await pool.fetch(
+        # Момент сравнения передаём параметром: иначе `now` у этой функции стал
+        # бы декоративным, а на нём стоят проверки распада.
+        "SELECT value, (expires_at IS NOT NULL "
+        "               AND expires_at <= COALESCE($4::timestamptz, now())) AS expired, "
+        "COUNT(*) AS c FROM virtual_states "
+        "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+        "GROUP BY value, expired", owner_id, child_type, state_key, now)
+    counts: dict[str, int] = {}
+    live: dict[str, int] = {}
+    for r in rows:
+        expired = bool(r["expired"])
+        val = effective_value(r["value"], expired)
+        counts[val] = counts.get(val, 0) + int(r["c"])
+        if not expired:
+            live[val] = live.get(val, 0) + int(r["c"])
+    verdict = cascade_from_counts(counts, live=live, **kw)
+    if verdict is None:
+        return await _cool_down(pool, owner_id, parent_type, parent_id, state_key)
+    return await _apply_cascade_verdict(pool, owner_id, parent_type, parent_id,
+                                        state_key, verdict)
+
+
+# Источник состояния записывается подателем сигнала: auto_responder ставит
+# "bot_<id>". Это и есть недостающая связь «человек → бот», из-за отсутствия
+# которой каскад до сих пор катился только на уровень всей аудитории владельца.
+_BOT_SOURCE = re.compile(r"^bot_(\d+)$")
+
+# Рунг, с которого человек считается «горячим» ДЛЯ КАСКАДА БОТА.
+#
+# Он обязан быть достижим сигналами, которые бот в принципе наблюдает. Бот
+# видит тап, ответ, /start, «стоп» и блокировку — то есть сигналы до
+# `clicked_offer` включительно, а он целит в `qualified`. Рунги выше
+# (`added_to_cart`, `asked_how_to_pay`, `paid`) ставятся только из Хранилища и
+# CRM, и строку они пишут со своим источником, не `bot_<id>`.
+#
+# Пока здесь стоял общий порог `ready`, каскад бота не мог вернуть ни «горячо»,
+# ни «тепло» НИКОГДА: он складывал ровно те строки, которые до этого рунга не
+# доходят по устройству. Владелец получал пустую температуру ботов на каждом
+# проходе, «самый горячий бот» в сводке не появлялся, а единственным действием
+# каскада оставалось остужение. Порог = верхний достижимый рунг канала, иначе
+# замер устроен так, что всегда отвечает «нет».
+BOT_HOT_AT = "qualified"
+
+
+async def recompute_bot_cascade(pool, owner_id: int, *, state_key: str = "funnel",
+                                hot_at: str = BOT_HOT_AT,
+                                min_count: int = 5, min_share: float = 0.1,
+                                now: datetime | None = None,
+                                **kw) -> dict[str, str]:
+    """Свернуть состояния людей в состояние БОТА, через которого они пришли.
+
+    Пороги ниже, чем у каскада на всю аудиторию: у отдельного бота аудитория
+    меньше на порядок, и порог «20 горячих» для него недостижим — каскад просто
+    никогда не срабатывал бы. Пять горячих из полусотни — уже разговор. Рунг
+    «горячего» — тоже свой, см. BOT_HOT_AT.
+
+    Возвращает {bot_id: вердикт} только по ботам, где вердикт есть.
+    """
+    # Агрегат по источнику: строк столько, сколько «бот × значение», а не
+    # сколько людей. Просрочка — признаком, срок в решение не входит.
+    rows = await pool.fetch(
+        "SELECT source, value, "
+        "       (expires_at IS NOT NULL "
+        "        AND expires_at <= COALESCE($4::timestamptz, now())) AS expired, "
+        "       COUNT(*) AS c FROM virtual_states "
+        "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+        "AND source IS NOT NULL "
+        "GROUP BY source, value, expired",
+        owner_id, USER, state_key, now)
+
+    by_bot: dict[str, dict[str, int]] = {}
+    live_by_bot: dict[str, dict[str, int]] = {}
+    for r in rows:
+        m = _BOT_SOURCE.match(r["source"] or "")
+        if m:
+            # Просроченный «готов» — уже не «готов»: значение едет на рунг вниз,
+            # и греть бота им нельзя вовсе (см. `live` в cascade_from_counts).
+            expired = bool(r["expired"])
+            val = effective_value(r["value"], expired)
+            counts = by_bot.setdefault(m.group(1), {})
+            counts[val] = counts.get(val, 0) + int(r["c"])
+            if not expired:
+                live = live_by_bot.setdefault(m.group(1), {})
+                live[val] = live.get(val, 0) + int(r["c"])
+
+    out: dict[str, str] = {}
+    for bot_id, counts in by_bot.items():
+        verdict = cascade_from_counts(
+            counts, hot_at=hot_at, min_count=min_count, min_share=min_share,
+            live=live_by_bot.get(bot_id, {}), **kw)
+        if verdict is None:
+            # Бот, у которого аудитория остыла, обязан остыть вместе с ней.
+            cooled = await _cool_down(pool, owner_id, BOT, bot_id, state_key)
+            if cooled:
+                out[bot_id] = cooled
+            continue
+        out[bot_id] = await _apply_cascade_verdict(
+            pool, owner_id, BOT, bot_id, state_key, verdict)
+    return out
+
+
+# ── Read-поверхность (обзор для владельца) ─────────────────────────────────
+
+# Подписи временного рисунка: по одному текущему значению его не видно, а
+# решение от него зависит. «Заходил и уходил» — это не «интерес», это привычка
+# смотреть и не покупать; таких дожимают иначе.
+PATTERN_LABEL = {
+    "climbing": "📈 Идёт вверх",
+    "bouncing": "🔁 Заходил и уходил",
+    "cooling": "❄️ Остывает",
+    "steady": "➖ Без движения",
+}
+
+
+def temporal_pattern(transitions: list[dict]) -> str:
+    """Рисунок переходов по времени: climbing | bouncing | cooling | steady.
+
+    transitions — от старых к новым, каждый с from_value/to_value.
+    """
+    ups = downs = 0
+    for t in transitions:
+        a, b = rank(t.get("from_value")), rank(t.get("to_value"))
+        if b > a:
+            ups += 1
+        elif b < a or t.get("to_value") == LOST:
+            downs += 1
+    if ups >= 2 and downs >= 1:
+        return "bouncing"
+    if downs and not ups:
+        return "cooling"
+    if ups and downs == 0:
+        return "climbing"
+    if ups > downs:
+        return "climbing"
+    if downs > ups:
+        return "cooling"
+    return "steady"
+
+
+# ── Невидимый триггер: «заходил и уходил» ──────────────────────────────────
+#
+# Telegram такого события не шлёт и прислать не может: он знает отдельные
+# сообщения, а не то, что человек третий раз подходит к покупке и отходит.
+# Это состояние вычисляется только по истории переходов — ради таких вещей
+# слой и строился.
+PATTERN_KEY = "pattern"
+BOUNCING_EVENT = "user_keeps_bouncing"
+EVENT_LABEL[BOUNCING_EVENT] = "🔁 Ходит по кругу"
+# Иначе событие не попадёт в ленту слоя: она фильтруется по этому списку, и
+# родившееся событие владелец просто не увидел бы.
+if BOUNCING_EVENT not in VIRTUAL_EVENT_KINDS:
+    VIRTUAL_EVENT_KINDS.append(BOUNCING_EVENT)
+
+
+async def detect_bouncing(pool, owner_id: int, *, entity_type: str = USER,
+                          state_key: str = "funnel", days: int = 30,
+                          min_transitions: int = 3, limit: int = 200) -> list[str]:
+    """Найти тех, кто заходит и уходит, и отметить это состоянием.
+
+    Правило рисунка — одно, `temporal_pattern`: повторять его отдельным SQL
+    нельзя, разошедшиеся копии правила в этом продукте уже обходились дорого.
+    Поэтому запрос только СУЖАЕТ круг (у кого вообще есть история), а решение
+    принимает та же функция, что и на экране.
+
+    Отметка живёт отдельным state_key="pattern": слой сам не пишет и не шумит,
+    когда значение не изменилось, — значит событие родится один раз, а не на
+    каждом проходе.
+
+    Возвращает id тех, для кого рисунок стал «bouncing» ИМЕННО СЕЙЧАС.
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT entity_id FROM virtual_state_history "
+            "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+            "AND created_at > now() - make_interval(days => $4) "
+            "GROUP BY entity_id HAVING COUNT(*) >= $5 "
+            "ORDER BY MAX(created_at) DESC LIMIT $6",
+            owner_id, entity_type, state_key, int(days),
+            int(min_transitions), int(limit))
+    except Exception:
+        log.debug("virtual_layer.detect_bouncing candidates failed owner=%s",
+                  owner_id, exc_info=True)
+        return []
+
+    ids = [r["entity_id"] for r in rows]
+    if not ids:
+        return []
+
+    try:
+        hist = await pool.fetch(
+            "SELECT entity_id, from_value, to_value, created_at "
+            "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "AND state_key=$3 AND entity_id = ANY($4::text[]) "
+            "AND created_at > now() - make_interval(days => $5) "
+            "ORDER BY created_at",
+            owner_id, entity_type, state_key, ids, int(days))
+    except Exception:
+        log.debug("virtual_layer.detect_bouncing history failed owner=%s",
+                  owner_id, exc_info=True)
+        return []
+
+    by_entity: dict[str, list[dict]] = {}
+    for r in hist:
+        by_entity.setdefault(r["entity_id"], []).append(
+            {"from_value": r["from_value"], "to_value": r["to_value"]})
+
+    fresh: list[str] = []
+    for eid, transitions in by_entity.items():
+        if temporal_pattern(transitions) != "bouncing":
+            continue
+        current = await get_state(pool, owner_id, entity_type, eid, PATTERN_KEY)
+        if (current or {}).get("value") == "bouncing":
+            continue                       # уже отмечен — не шумим повторно
+        await _write(pool, owner_id, entity_type, eid, PATTERN_KEY,
+                     {"value": "bouncing", "confidence": 0.7,
+                      "expires_at": None, "reason": "temporal"},
+                     "temporal", (current or {}).get("value"))
+        fresh.append(eid)
+        try:
+            from services.organism import spine
+            await spine.emit(pool, owner_id, BOUNCING_EVENT, {
+                "entity_type": entity_type, "entity_id": eid,
+                "state_key": PATTERN_KEY, "to": "bouncing"})
+        except Exception:
+            log.debug("virtual_layer: bouncing emit failed", exc_info=True)
+    return fresh
+
+
+async def entity_history(pool, owner_id: int, entity_type: str, entity_id,
+                         *, state_key: str = "funnel", limit: int = 30) -> dict:
+    """История переходов одной сущности + текущее состояние и рисунок.
+
+    История писалась с самого начала и не читалась никем: владелец видел
+    значение «интерес», но не видел, пришёл человек к нему впервые или уже
+    третий раз заходит и уходит. Fail-open: пустая история вместо падения.
+    """
+    eid = str(entity_id)
+    out = {"entity_type": entity_type, "entity_id": eid, "name": None,
+           "current": None, "pattern": "steady",
+           "pattern_label": PATTERN_LABEL["steady"], "transitions": []}
+    try:
+        rows = await pool.fetch(
+            "SELECT from_value, to_value, reason, confidence, created_at "
+            "FROM virtual_state_history WHERE owner_id=$1 AND entity_type=$2 "
+            "AND entity_id=$3 AND state_key=$4 "
+            "ORDER BY created_at DESC LIMIT $5",
+            owner_id, entity_type, eid, state_key, int(limit))
+    except Exception:
+        log.debug("virtual_layer.entity_history failed owner=%s", owner_id)
+        return out
+
+    chrono = list(reversed(rows))
+    out["transitions"] = [
+        {"from": r["from_value"],
+         "from_label": VALUE_LABEL.get(r["from_value"]) if r["from_value"] else None,
+         "to": r["to_value"],
+         "to_label": VALUE_LABEL.get(r["to_value"], r["to_value"]),
+         "reason": r["reason"],
+         "confidence": round(float(r["confidence"] or 0), 2),
+         "at": r["created_at"]}
+        for r in chrono]
+
+    pattern = temporal_pattern([
+        {"from_value": r["from_value"], "to_value": r["to_value"]} for r in chrono])
+    out["pattern"] = pattern
+    out["pattern_label"] = PATTERN_LABEL[pattern]
+
+    try:
+        cur = await get_state(pool, owner_id, entity_type, eid, state_key)
+        if cur:
+            out["current"] = {
+                "value": cur.get("value"),
+                "label": VALUE_LABEL.get(cur.get("value"),
+                                         TEMPERATURE_LABEL.get(cur.get("value"),
+                                                               cur.get("value"))),
+                "confidence": round(float(cur.get("confidence") or 0), 2),
+                "source": cur.get("source"),
+            }
+    except Exception:
+        log.debug("virtual_layer.entity_history state failed owner=%s", owner_id)
+
+    out["name"] = await _entity_name(pool, owner_id, entity_type, eid)
+    return out
+
+
+async def _entity_name(pool, owner_id: int, entity_type: str, eid: str):
+    """Человеческое имя сущности: контакт по имени, бот по @username."""
+    try:
+        if entity_type == USER:
+            # id контакта — uuid, а сюда приходит строка из адреса. Сравнение
+            # приводим в самом запросе: иначе asyncpg падает на связывании
+            # («invalid UUID») на любом мусоре, а мусор из адреса и приходит.
+            return await pool.fetchval(
+                "SELECT COALESCE(display_name, first_name, username) "
+                "FROM unified_contacts WHERE owner_id=$1 AND id::text=$2",
+                owner_id, eid)
+        if entity_type == BOT:
+            name = await pool.fetchval(
+                "SELECT COALESCE(username, first_name) FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id::text=$2", owner_id, eid)
+            return f"@{name}" if name and not str(name).startswith("@") else name
+    except Exception:
+        log.debug("virtual_layer._entity_name failed owner=%s", owner_id)
+    return None
+
+
+async def resolve_names(pool, owner_id: int, items: list[dict]) -> dict[str, str]:
+    """Имена пачкой для списка сущностей: {entity_id: имя}.
+
+    То же, что `_entity_name`, но одним запросом на тип. Списки на экране —
+    до полусотни строк, и запрос на каждую строку это ровно тот N+1, которым
+    экран сводки и так нагружает базу на каждом открытии.
+
+    id контакта — uuid, а в состояниях он лежит текстом, поэтому сравнение
+    приводим в самом запросе: на мусорном значении asyncpg иначе падает на
+    связывании, а мусор сюда приходит из адреса.
+    """
+    users = sorted({str(i["entity_id"]) for i in items
+                    if i.get("entity_type") == USER and i.get("entity_id")})
+    bots = sorted({str(i["entity_id"]) for i in items
+                   if i.get("entity_type") == BOT and i.get("entity_id")})
+    out: dict[str, str] = {}
+    if users:
+        try:
+            rows = await pool.fetch(
+                "SELECT id::text AS eid, "
+                "COALESCE(display_name, first_name, username) AS name "
+                "FROM unified_contacts WHERE owner_id=$1 AND id::text = ANY($2::text[])",
+                owner_id, users)
+            out.update({r["eid"]: r["name"] for r in rows if r["name"]})
+        except Exception:
+            log.debug("virtual_layer.resolve_names users failed owner=%s", owner_id)
+    if bots:
+        try:
+            rows = await pool.fetch(
+                "SELECT bot_id::text AS eid, "
+                "COALESCE(username, first_name) AS name FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id::text = ANY($2::text[])",
+                owner_id, bots)
+            for r in rows:
+                name = r["name"]
+                if name:
+                    out[r["eid"]] = (name if str(name).startswith("@")
+                                     else f"@{name}")
+        except Exception:
+            log.debug("virtual_layer.resolve_names bots failed owner=%s", owner_id)
+    return out
+
+
+async def overview(pool, owner_id: int, *, entity_type: str = USER,
+                   state_key: str = "funnel") -> dict:
+    """Сводка слоя для экрана: распределение воронки + «горячие» сущности.
+
+    Лента виртуальных событий берётся отдельно из spine (это его память),
+    поэтому здесь только состояния. Fail-open: пустая сводка вместо падения.
+    """
+    out = {"funnel": [], "hot": [], "total": 0, "audience": None, "bots": []}
+    try:
+        # Просроченность спрашиваем вместе со значением: распределение
+        # воронки считалось по СЫРОМУ value, и на том же экране получалось
+        # два несогласных числа из одной таблицы — полоска «Готов купить: 12»
+        # и пустой список «кого дожимать первыми» под ней (он просроченные
+        # отбрасывает, и правильно). Человек, пропавший три недели назад,
+        # стоял в воронке как готовый к покупке: по такой воронке планируют
+        # работу. Распад доводит строки до правды, но он идёт пачками и раз в
+        # 15 минут — экран обязан показывать правду сейчас.
+        rows = await pool.fetch(
+            "SELECT value, (expires_at IS NOT NULL AND expires_at <= now()) "
+            "       AS expired, COUNT(*) AS c FROM virtual_states "
+            "WHERE owner_id=$1 AND entity_type=$2 AND state_key=$3 "
+            "GROUP BY value, expired", owner_id, entity_type, state_key)
+    except Exception:
+        log.debug("virtual_layer.overview funnel failed owner=%s", owner_id)
+        return out
+    # Складываем через ту же дверь, что и каскад (`effective_value`): иначе
+    # воронка на экране и температура под ней считают по разным правилам.
+    dist: dict[str, int] = {}
+    for r in rows:
+        value = effective_value(r["value"], bool(r["expired"]))
+        dist[value] = dist.get(value, 0) + int(r["c"])
+    order = LADDER + [LOST]
+    out["funnel"] = [
+        {"value": v, "label": VALUE_LABEL.get(v, v), "count": dist.get(v, 0)}
+        for v in order if dist.get(v, 0) > 0
+    ]
+    out["total"] = sum(dist.values())
+    # «Горячие» сущности верхних рунгов — кого дожимать в первую очередь.
+    try:
+        hot_rows = await pool.fetch(
+            # Срок не декоративный: просроченный «готов» — это уже не «готов»,
+            # а распад применяет отдельный редкий проход. Список называется
+            # «кого дожимать первыми», и человек, пропавший три недели назад,
+            # стоял в нём первым — работать по такому списку нельзя.
+            "SELECT entity_type, entity_id, value, confidence, updated_at "
+            "FROM virtual_states WHERE owner_id=$1 AND state_key=$2 "
+            "AND value = ANY($3::text[]) "
+            "AND (expires_at IS NULL OR expires_at > now()) "
+            "ORDER BY confidence DESC, updated_at DESC "
+            "LIMIT 50", owner_id, state_key, ["ready", "qualified"])
+        out["hot"] = [
+            {"entity_type": r["entity_type"], "entity_id": r["entity_id"],
+             "value": r["value"], "label": VALUE_LABEL.get(r["value"], r["value"]),
+             "confidence": round(float(r["confidence"] or 0), 2)}
+            for r in hot_rows]
+        # Строка «Готов · #7b1f…-uuid» не говорит, КТО это, а список называется
+        # «кого дожимать первыми»: без имени по нему нельзя работать, хотя имя
+        # лежит в контактах ровно по этому идентификатору.
+        names = await resolve_names(pool, owner_id, out["hot"])
+        for h in out["hot"]:
+            name = names.get(str(h["entity_id"]))
+            if name:
+                h["name"] = name
+    except Exception:
+        log.debug("virtual_layer.overview hot failed owner=%s", owner_id)
+    # Температура аудитории (каскад): hot|warm|None.
+    try:
+        aud = await get_state(pool, owner_id, NETWORK, "audience", state_key)
+        if aud:
+            out["audience"] = aud.get("value")
+    except Exception:
+        log.debug("virtual_layer.overview audience failed owner=%s", owner_id)
+    # Температура КАЖДОГО бота (каскад «бот ← люди»). Владельцу важно не
+    # «аудитория греется», а ГДЕ именно: с каким ботом разговаривают всерьёз.
+    try:
+        bot_rows = await pool.fetch(
+            "SELECT vs.entity_id, vs.value, vs.confidence, vs.updated_at, "
+            "       COALESCE(mb.username, mb.first_name) AS bot_name "
+            "FROM virtual_states vs "
+            "LEFT JOIN managed_bots mb ON mb.bot_id::text = vs.entity_id "
+            "WHERE vs.owner_id=$1 AND vs.entity_type=$2 AND vs.state_key=$3 "
+            "ORDER BY vs.updated_at DESC LIMIT 50",
+            owner_id, BOT, state_key)
+        out["bots"] = [
+            {"bot_id": r["entity_id"],
+             "name": r["bot_name"] or f"id{r['entity_id']}",
+             "value": r["value"],
+             "label": TEMPERATURE_LABEL.get(r["value"], r["value"]),
+             "confidence": round(float(r["confidence"] or 0), 2)}
+            for r in bot_rows]
+    except Exception:
+        log.debug("virtual_layer.overview bots failed owner=%s", owner_id)
+    return out
+

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Infragram">
+  <defs>
+    <linearGradient id="gm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <!-- Полное поле (maskable): фон без скруглений, контент в центральной зоне -->
+  <rect width="512" height="512" fill="#0f172a"/>
+  <g fill="url(#gm)">
+    <rect x="171" y="288" width="40" height="86" rx="10"/>
+    <rect x="236" y="248" width="40" height="126" rx="10"/>
+    <rect x="301" y="200" width="40" height="174" rx="10"/>
+  </g>
+  <path d="M171 300 L256 252 L321 206" fill="none" stroke="#e2e8f0" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="171" cy="300" r="15" fill="#e2e8f0"/>
+  <circle cx="256" cy="252" r="15" fill="#e2e8f0"/>
+  <circle cx="321" cy="206" r="15" fill="#e2e8f0"/>
+</svg>

@@ -1,0 +1,509 @@
+from __future__ import annotations
+import json
+import logging
+import re
+import uuid
+from datetime import date as _date, datetime, timezone
+from typing import Optional
+
+import asyncpg
+
+log = logging.getLogger(__name__)
+
+# jsonb-колонки asyncpg отдаёт СТРОКОЙ (кодек jsonb не зарегистрирован), а фронт
+# ждёт массив/объект: c.phones.join(...) на строке падает «join is not a
+# function». Разбираем на границе чтения — единый контракт для всех читателей.
+_JSON_LIST_FIELDS = ('phones', 'emails', 'websites', 'addresses')
+_JSON_OBJ_FIELDS = ('custom_fields', 'digital_footprint')
+
+
+def _parse_json_fields(d: dict) -> dict:
+    for f in _JSON_LIST_FIELDS:
+        v = d.get(f)
+        if isinstance(v, str):
+            try:
+                d[f] = json.loads(v)
+            except (ValueError, TypeError):
+                d[f] = []
+        elif v is None:
+            d[f] = []
+    for f in _JSON_OBJ_FIELDS:
+        v = d.get(f)
+        if isinstance(v, str):
+            try:
+                d[f] = json.loads(v)
+            except (ValueError, TypeError):
+                d[f] = {}
+    return d
+
+
+# Условие «есть адрес, по которому до человека достать» — ОДНО на два места:
+# на плитку-счётчик (get_contact_stats) и на срез списка (_segment_where).
+# Пока они были написаны по отдельности, плитка «📱 Телефон» показывала число,
+# которое ни во что не открывалось, а разойтись им ничто не мешало: счётчик
+# считал бы одно, а срез показывал другое, и это заметил бы только владелец.
+HAS_PHONE_SQL = "phones IS NOT NULL AND phones <> '[]'::jsonb"
+HAS_USERNAME_SQL = "username IS NOT NULL AND username <> ''"
+
+
+def _segment_where(owner_id, f: dict):
+    """Единый конструктор WHERE для среза контактов — общий для списка
+    (get_contacts) и резолвера сегмента (resolve_segment/count_segment), чтобы
+    фильтр «что вижу в списке» и «на что применяю действие» ГАРАНТИРОВАННО
+    совпадали. Возвращает (where_sql, params, next_idx). Колонки неквалифицированы
+    (одна таблица unified_contacts); коррелированные подзапросы — по .id.
+    """
+    conds = ['owner_id = $1']
+    params = [owner_id]
+    idx = 2
+    # Личные/исключённые контакты не попадают в РАБОЧИЙ срез (рассылки/инвайты по
+    # сегменту). По умолчанию исключаем; просмотр списка передаёт include_excluded,
+    # а управление личными — excluded_only.
+    if f.get('excluded_only'):
+        conds.append('excluded = TRUE')
+    elif not f.get('include_excluded'):
+        conds.append('excluded = FALSE')
+    # Активность в Telegram. Жалоба владельца: «модули, которые используют
+    # контакты для работы, берут в работу тех, кто был в сети „давно“, хотя это
+    # значит, что аккаунт неактивен». Статус пишет парсер (account_manager.
+    # _classify_last_seen): online/recently/last_week/last_month — активные,
+    # берём. 'offline' с ТОЧНЫМ временем старше 30 дней — заходил давно, в
+    # РАБОЧИЙ срез (рассылки/инвайты) его не берём. Нет данных (NULL/unknown/
+    # offline без времени) — не отсекаем (fail-open: не выбрасываем контакт,
+    # про которого ничего не знаем). Просмотр списка передаёт include_inactive.
+    if not f.get('include_inactive'):
+        conds.append(
+            "NOT (last_seen_type = 'offline' AND last_seen_at IS NOT NULL "
+            "AND last_seen_at < now() - interval '30 days')")
+    if f.get('search'):
+        # Поиск по словам, а не по фразе целиком, и С ТЕГАМИ.
+        #
+        # ЧТО БЫЛО: одно условие `ILIKE '%вся фраза%'` по семи колонкам. Два
+        # следствия, оба выглядели как «контакта нет»:
+        #  * «петров иван» не находило Ивана Петрова — такой подстроки нет ни в
+        #    одной колонке (спасало только display_name, если порядок совпал);
+        #  * тег не искался вообще. Владелец помечает контакты тегом `vip`,
+        #    набирает «vip» в поиске и не находит никого, хотя поиск в БОТЕ по
+        #    тегам ищет (search_engine). Та же база, тот же тег, разный ответ.
+        #
+        # Теперь: каждое слово обязано где-то совпасть (И между словами), а
+        # совпадением считается и точный тег. Условие собирается ЗДЕСЬ, то есть
+        # остаётся общим для списка и для рабочего среза: «что вижу» и «на что
+        # применяю действие» по-прежнему считаются одним запросом.
+        #
+        # ОПЕРАТОРЫ. `@ник`, `#тег`, `company:`, `phone:` понимал только поиск
+        # БОТА (search_engine.search_contacts); список мини-аппа — нет, и
+        # подсказки о них не было ни в одном поле. Владелец, набравший `#vip` в
+        # единственном поле поиска хаба, не находил никого: тот же тег, та же
+        # база, разный ответ — ровно та жалоба, что и про теги выше, только на
+        # уровень глубже. Разбор и условия берутся из search_engine, чтобы у
+        # двух поисков было одно поведение, а не две копии правил.
+        from services.contacts_hub.search_engine import (
+            build_operator_conditions, parse_operators)
+        parsed, rest = parse_operators(str(f['search']))
+        op_conds, op_params, idx = build_operator_conditions(parsed, idx)
+        conds.extend(op_conds)
+        params.extend(op_params)
+        words = [w for w in re.split(r'\s+', rest.strip().lower()) if w]
+        for w in words:
+            conds.append(
+                f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
+                f'username ILIKE ${idx} OR display_name ILIKE ${idx} OR '
+                f'CAST(telegram_user_id AS TEXT) ILIKE ${idx} OR '
+                f'notes ILIKE ${idx} OR company ILIKE ${idx} OR '
+                f'${idx + 1} = ANY(tags))')
+            params.append(f'%{w}%')
+            params.append(w)
+            idx += 2
+    if f.get('favorite_only'):
+        conds.append('is_favorite = TRUE')
+    if f.get('premium_only'):
+        conds.append('is_premium = TRUE')
+    if f.get('mutual_only'):
+        conds.append('is_mutual = TRUE')
+    if f.get('multi_only'):
+        conds.append('(SELECT COUNT(*) FROM contact_sources WHERE contact_id = unified_contacts.id) > 1')
+    # «С телефоном» / «С ником» — то же условие, что и у одноимённых плиток.
+    if f.get('with_phone_only'):
+        conds.append('(' + HAS_PHONE_SQL + ')')
+    if f.get('with_username_only'):
+        conds.append('(' + HAS_USERNAME_SQL + ')')
+    if f.get('account_id'):
+        conds.append(f'EXISTS (SELECT 1 FROM contact_sources WHERE contact_id = unified_contacts.id AND account_id = ${idx})')
+        params.append(f['account_id']); idx += 1
+    if f.get('tag'):
+        conds.append(f'${idx} = ANY(tags)')
+        params.append(f['tag']); idx += 1
+    if f.get('group_id'):
+        conds.append(f'EXISTS (SELECT 1 FROM contact_group_members WHERE contact_id = unified_contacts.id AND group_id = ${idx})')
+        params.append(f['group_id']); idx += 1
+    # Пол: 'm'/'f' — точное совпадение; 'unknown' — не определён (NULL).
+    g = f.get('gender')
+    if g in ('m', 'f'):
+        conds.append(f'gender = ${idx}'); params.append(g); idx += 1
+    elif g == 'unknown':
+        conds.append('gender IS NULL')
+    # CRM-стадия — из отдельной таблицы contact_crm.
+    if f.get('crm_stage'):
+        conds.append(f'EXISTS (SELECT 1 FROM contact_crm cc WHERE cc.contact_id = unified_contacts.id AND cc.stage = ${idx})')
+        params.append(f['crm_stage']); idx += 1
+    return ' AND '.join(conds), params, idx
+
+
+async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
+                       favorite_only=False, premium_only=False, multi_only=False,
+                       mutual_only=False, gender=None, crm_stage=None,
+                       account_id=None, excluded_only=False,
+                       with_phone_only=False, with_username_only=False,
+                       sort_by='first_name', limit=100, offset=0) -> dict:
+    # Просмотр списка показывает ВСЕ контакты (в т.ч. личные — их надо видеть и
+    # уметь снять пометку); excluded_only — режим управления только личными.
+    filters = {'search': search, 'tag': tag, 'group_id': group_id,
+               'favorite_only': favorite_only, 'premium_only': premium_only,
+               'multi_only': multi_only, 'mutual_only': mutual_only,
+               'gender': gender, 'crm_stage': crm_stage, 'account_id': account_id,
+               'excluded_only': excluded_only,
+               'with_phone_only': with_phone_only,
+               'with_username_only': with_username_only,
+               'include_excluded': not excluded_only,
+               # Просмотр списка показывает ВСЕ контакты, в т.ч. давно
+               # неактивных — их надо видеть. Фильтр активности нужен только
+               # рабочему срезу (рассылки/инвайты через resolve_segment).
+               'include_inactive': True}
+    where, params, idx = _segment_where(owner_id, filters)
+    sort_map = {
+        'name': 'first_name, last_name',
+        'username': 'username',
+        'accounts': '(SELECT COUNT(*) FROM contact_sources WHERE contact_id = unified_contacts.id) DESC',
+        'discovered': 'discovered_at DESC',
+        'synced': 'last_synced_at DESC',
+        'changed': 'last_changed_at DESC',
+    }
+    # Добивочный уникальный ключ обязателен: список листается по offset
+    # («Показать ещё»), а все сортировки выше НЕУНИКАЛЬНЫ — тёзки, пустые
+    # имена, одинаковые даты. Порядок внутри равных значений Postgres не
+    # обещает, и строка, изменившаяся между запросами страниц (а их пишет и
+    # синхронизация, и сам владелец), переезжает. Без добивки проход по
+    # списку показывал одного человека дважды, а другого — ни разу: проверено
+    # живьём в tests/test_paging_does_not_skip_or_repeat_people.py.
+    order = sort_map.get(sort_by, 'first_name') + ', id'
+    params.extend([limit, offset])
+    rows = await pool.fetch(f'SELECT * FROM unified_contacts WHERE {where} ORDER BY {order} LIMIT ${idx} OFFSET ${idx+1}', *params)
+    total = await pool.fetchval(f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params[:-2])
+    return {'contacts': [_parse_json_fields(dict(r)) for r in rows], 'total': total}
+
+
+async def count_segment(pool, owner_id, filters: dict) -> int:
+    """Сколько контактов в срезе по фильтру (для превью до действия)."""
+    where, params, _ = _segment_where(owner_id, filters)
+    return int(await pool.fetchval(
+        f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params) or 0)
+
+
+_SEG_FILTER_KEYS = ("search", "tag", "group_id", "favorite_only", "premium_only",
+                    "multi_only", "mutual_only", "gender", "crm_stage", "account_id",
+                    "with_phone_only", "with_username_only")
+
+
+def _clean_filters(filters: dict) -> dict:
+    """Оставить только валидные ключи фильтра (то, что понимает _segment_where)."""
+    return {k: filters[k] for k in _SEG_FILTER_KEYS if filters.get(k) not in (None, "", False)}
+
+
+async def save_segment(pool, owner_id, name: str, filters: dict) -> int:
+    name = (name or "").strip()[:80] or "Сегмент"
+    import json as _json
+    return int(await pool.fetchval(
+        "INSERT INTO saved_segments(owner_id, name, filters) VALUES($1,$2,$3::jsonb) RETURNING id",
+        owner_id, name, _json.dumps(_clean_filters(filters or {}))))
+
+
+async def list_segments(pool, owner_id) -> list[dict]:
+    """Сохранённые сегменты владельца + актуальный размер каждого (live count)."""
+    import json as _json
+    rows = await pool.fetch(
+        "SELECT id, name, filters, created_at FROM saved_segments WHERE owner_id=$1 "
+        "ORDER BY created_at DESC", owner_id)
+    out = []
+    for r in rows:
+        f = r["filters"]
+        if isinstance(f, str):
+            try: f = _json.loads(f)
+            except Exception: f = {}
+        try:
+            n = await count_segment(pool, owner_id, f)
+        except Exception:
+            n = None
+        out.append({"id": int(r["id"]), "name": r["name"], "filters": f, "count": n})
+    return out
+
+
+async def get_segment_filters(pool, owner_id, segment_id: int) -> dict | None:
+    import json as _json
+    row = await pool.fetchrow(
+        "SELECT filters FROM saved_segments WHERE id=$1 AND owner_id=$2", segment_id, owner_id)
+    if not row:
+        return None
+    f = row["filters"]
+    if isinstance(f, str):
+        try: f = _json.loads(f)
+        except Exception: f = {}
+    return f or {}
+
+
+async def delete_segment(pool, owner_id, segment_id: int) -> bool:
+    res = await pool.execute(
+        "DELETE FROM saved_segments WHERE id=$1 AND owner_id=$2", segment_id, owner_id)
+    return not str(res).endswith(" 0")
+
+
+async def resolve_segment(pool, owner_id, filters: dict, limit: int = 5000) -> list:
+    """Срез контактов для массового действия: только поля, нужные для адресации
+    (username / telegram_user_id / phones). Тот же WHERE, что и у списка."""
+    where, params, idx = _segment_where(owner_id, filters)
+    params.append(limit)
+    rows = await pool.fetch(
+        'SELECT id, username, telegram_user_id, first_name, last_name, phones '
+        f'FROM unified_contacts WHERE {where} ORDER BY id LIMIT ${idx}', *params)
+    return [_parse_json_fields(dict(r)) for r in rows]
+
+
+async def get_contact(pool, contact_id, owner_id):
+    row = await pool.fetchrow('SELECT * FROM unified_contacts WHERE id=$1 AND owner_id=$2', contact_id, owner_id)
+    if not row:
+        return None
+    sources = await pool.fetch('SELECT * FROM contact_sources WHERE contact_id=$1', contact_id)
+    history = await pool.fetch('SELECT * FROM contact_history WHERE contact_id=$1 ORDER BY created_at DESC LIMIT 50', contact_id)
+    groups = await pool.fetch('SELECT g.* FROM contact_groups g JOIN contact_group_members gm ON g.id = gm.group_id WHERE gm.contact_id = $1', contact_id)
+    return {
+        'contact': _parse_json_fields(dict(row)),
+        'sources': [dict(s) for s in sources],
+        'history': [dict(h) for h in history],
+        'groups': [dict(g) for g in groups],
+    }
+
+
+async def upsert_contact(pool, owner_id, data: dict) -> str:
+    """Создать контакт или обновить существующий по telegram_user_id.
+
+    Здесь НЕТ `ON CONFLICT (owner_id, telegram_user_id)`, хотя напрашивается:
+    такого ограничения в схеме нет, есть только обычный индекс. Postgres
+    отвергает такой запрос на ИСПОЛНЕНИИ («no unique or exclusion constraint
+    matching the ON CONFLICT specification»), а не при разборе — поэтому он
+    молча падал каждый раз, сколько бы раз его ни звали. Единственный
+    вызывающий — сенсор намерений: он не мог завести ни одного контакта, а
+    значит и состояние воронки этому человеку писать было некуда.
+
+    Ограничение не заводится задним числом: в боевой базе уже могут лежать
+    пары-дубли, и создание уникального индекса на ней просто не пройдёт.
+    Порядок тот же, что в синхронизации контактов: найти, потом обновить или
+    вставить.
+    """
+    contact_id = data.get('id')
+    tg_id = data.get('telegram_user_id')
+    phones = json.dumps(data.get('phones', []))
+
+    if not contact_id and tg_id:
+        existing = await pool.fetchrow(
+            'SELECT id FROM unified_contacts '
+            'WHERE owner_id=$1 AND telegram_user_id=$2',
+            owner_id, tg_id)
+        if existing:
+            contact_id = existing['id']
+
+    if contact_id:
+        row = await pool.fetchrow(
+            'UPDATE unified_contacts SET '
+            'username = COALESCE($3, username), '
+            'first_name = COALESCE($4, first_name), '
+            'last_name = COALESCE($5, last_name), '
+            'display_name = COALESCE($6, display_name), '
+            'phones = $7::jsonb, '
+            'is_premium = $8, '
+            'last_synced_at = $9, '
+            'updated_at = NOW() '
+            'WHERE id=$1 AND owner_id=$2 '
+            'RETURNING id',
+            contact_id, owner_id, data.get('username'), data.get('first_name'),
+            data.get('last_name'), data.get('display_name'), phones,
+            data.get('is_premium', False), data.get('last_synced_at'))
+        if row:
+            return row['id']
+        # Строки с таким id у этого владельца нет — заводим новую ниже.
+
+    contact_id = contact_id or str(uuid.uuid4())
+    row = await pool.fetchrow(
+        'INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, '
+        'first_name, last_name, display_name, phones, is_premium, '
+        'discovered_at, last_synced_at) '
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11) '
+        'RETURNING id',
+        contact_id, owner_id, tg_id, data.get('username'),
+        data.get('first_name'), data.get('last_name'), data.get('display_name'),
+        phones, data.get('is_premium', False),
+        data.get('discovered_at'), data.get('last_synced_at'))
+    return row['id'] if row else contact_id
+
+
+async def ensure_contact_by_telegram_id(
+        pool, owner_id: int, tg_user_id, *, username=None, first_name=None,
+        last_name=None, display_name=None) -> str | None:
+    """Найти контакт владельца по Telegram-id или создать. Одна дверь на всех.
+
+    Контакт по tg-id искали и заводили в каждом источнике по-своему, а
+    виртуальный слой ключует состояния по `unified_contacts.id`: не нашёл
+    контакт — сигнал пропадал молча. Поэтому поиск и создание живут здесь, у
+    самих контактов, и зовутся из источников (сенсор намерений, автоответчик).
+
+    Возвращает id контакта или None, если создать не удалось (вызывающий
+    обязан быть fail-open: сигнал важен, но обработку сообщения не ломает).
+    """
+    if not pool or not owner_id or not tg_user_id:
+        return None
+    try:
+        tg_id = int(tg_user_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        row = await pool.fetchrow(
+            'SELECT id FROM unified_contacts '
+            'WHERE owner_id=$1 AND telegram_user_id=$2',
+            int(owner_id), tg_id)
+        if row:
+            return row['id']
+        name = display_name or ' '.join(
+            part for part in (first_name, last_name) if part).strip() or None
+        return await upsert_contact(pool, int(owner_id), {
+            'telegram_user_id': tg_id,
+            'username': username or None,
+            'first_name': first_name or None,
+            'last_name': last_name or None,
+            'display_name': name,
+            'discovered_at': datetime.now(timezone.utc),
+        })
+    except Exception:
+        log.debug('ensure_contact_by_telegram_id failed owner=%s tg=%s',
+                  owner_id, tg_user_id, exc_info=True)
+        return None
+
+
+# Поля карточки контакта, которые владелец правит и которые откат к версии
+# обязан вернуть. Список лежал в ТРЁХ местах — здесь, в rollback_to_version и
+# в сборке снимка версии, — значит поле, добавленное в одно из них, молча
+# терялось в остальных: правка проходила, а откат возвращал не всё. Список
+# один, и живёт он тут, в самом нижнем слое.
+EDITABLE_FIELDS = (
+    'first_name', 'last_name', 'username', 'display_name', 'phones', 'emails',
+    'company', 'position', 'websites', 'addresses', 'birthday', 'notes', 'tags',
+    'color_label', 'is_favorite', 'is_premium', 'importance_level', 'user_rating',
+    'custom_fields',
+)
+
+# Поля, которые уходят в jsonb-колонки и требуют json.dumps.
+_JSONB_FIELDS = ('phones', 'emails', 'websites', 'addresses', 'custom_fields')
+
+
+class BadDate(ValueError):
+    """Дата из ввода не разобралась: ошибка владельца, а не сбой сервера."""
+
+
+def coerce_date(value):
+    """None/`date` → как есть; ISO-строка → `date`; пустая строка → None.
+
+    `birthday` — это колонка DATE, и asyncpg биндит её БЕЗ каста: строка
+    роняет запрос (DataError), то есть вся правка контакта. А с экрана
+    приходит ровно строка: `<input type="date">.value` — «1990-05-01».
+    Поэтому день рождения в карточке не сохранялся никогда: владелец
+    заполнял поле, жал «Сохранить» и получал ошибку на всей правке.
+    Тот же дефект уже находили у `next_reminder_at` (см. uch_crm_reminder).
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, _date):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return _date.fromisoformat(s[:10])
+    except (TypeError, ValueError):
+        raise BadDate("Некорректная дата рождения")
+
+
+async def update_contact(pool, contact_id, owner_id, updates: dict) -> bool:
+    set_clauses = []
+    params = []
+    idx = 1
+    for field in EDITABLE_FIELDS:
+        if field in updates:
+            val = updates[field]
+            if field == 'birthday':
+                val = coerce_date(val)
+            if field in _JSONB_FIELDS:
+                set_clauses.append(f'{field} = ${idx}::jsonb')
+                params.append(json.dumps(val))
+            elif field == 'tags':
+                set_clauses.append(f'{field} = ${idx}::text[]')
+                params.append(val)
+            else:
+                set_clauses.append(f'{field} = ${idx}')
+                params.append(val)
+            idx += 1
+    set_clauses.append('updated_at = NOW()')
+    params.extend([contact_id, owner_id])
+    result = await pool.execute(f'UPDATE unified_contacts SET {", ".join(set_clauses)} WHERE id=${idx} AND owner_id=${idx+1}', *params)
+    return result != 'UPDATE 0'
+
+
+async def delete_contact(pool, contact_id, owner_id) -> bool:
+    result = await pool.execute('DELETE FROM unified_contacts WHERE id=$1 AND owner_id=$2', contact_id, owner_id)
+    return result != 'DELETE 0'
+
+
+async def get_contact_groups(pool, owner_id) -> list:
+    rows = await pool.fetch('SELECT g.*, COUNT(gm.contact_id) as member_count FROM contact_groups g LEFT JOIN contact_group_members gm ON g.id = gm.group_id WHERE g.owner_id = $1 GROUP BY g.id ORDER BY g.name', owner_id)
+    return [dict(r) for r in rows]
+
+
+# Состав группы у ОДНОГО контакта отдельной функции больше не имеет: это была
+# вторая реализация той же операции, и владельца в её запросах не было вообще
+# (ручки .../contacts/{id}/groups/{gid} пускали к чужой группе по перебору
+# целого id). Единственный путь — bulk_ops_engine.bulk_add_to_group /
+# bulk_remove_from_group: владельца проверяет сам запрос, и карточка контакта
+# зовёт их же списком из одного контакта.
+
+
+async def get_contact_stats(pool, owner_id) -> dict:
+    total = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1', owner_id)
+    premium = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_premium=TRUE', owner_id)
+    # Счётчик и срез берут ОДНО условие (HAS_USERNAME_SQL/HAS_PHONE_SQL):
+    # плитка открывает ровно те контакты, которые посчитала.
+    with_username = await pool.fetchval(
+        f'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND ({HAS_USERNAME_SQL})', owner_id)
+    with_phone = await pool.fetchval(
+        f'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND ({HAS_PHONE_SQL})', owner_id)
+    favorites = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_favorite=TRUE', owner_id)
+    mutual = await pool.fetchval('SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_mutual=TRUE', owner_id)
+    notes_count = await pool.fetchval("SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND notes != '' AND notes IS NOT NULL", owner_id)
+    tag_count = await pool.fetchval("SELECT COUNT(DISTINCT tag) FROM unified_contacts, unnest(tags) AS tag WHERE owner_id=$1", owner_id)
+    group_count = await pool.fetchval('SELECT COUNT(*) FROM contact_groups WHERE owner_id=$1', owner_id)
+    last_sync = await pool.fetchval('SELECT MAX(last_synced_at) FROM unified_contacts WHERE owner_id=$1', owner_id)
+    accounts = await pool.fetch('SELECT cs.account_id, COUNT(*) as cnt FROM contact_sources cs JOIN unified_contacts uc ON cs.contact_id = uc.id WHERE uc.owner_id = $1 GROUP BY cs.account_id', owner_id)
+    return {
+        'total': total, 'premium': premium, 'with_username': with_username,
+        'with_phone': with_phone, 'favorites': favorites, 'mutual': mutual, 'notes': notes_count,
+        'tags': tag_count, 'groups': group_count, 'last_sync': last_sync,
+        'by_account': [{'account_id': a['account_id'], 'count': a['cnt']} for a in accounts],
+    }
+
+
+async def log_contact_history(pool, contact_id, owner_id, action, field_name=None, old_value=None, new_value=None, source='user'):
+    await pool.execute('INSERT INTO contact_history (contact_id, owner_id, action, field_name, old_value, new_value, source) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        contact_id, owner_id, action, field_name, old_value, new_value, source)
+
+
+async def log_sync(pool, owner_id, account_id, sync_type, synced, created, updated, merged, duration_ms, error=None):
+    await pool.execute('INSERT INTO contact_sync_log (owner_id, account_id, sync_type, contacts_synced, contacts_created, contacts_updated, contacts_merged, duration_ms, error_message, finished_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())',
+        owner_id, account_id, sync_type, synced, created, updated, merged, duration_ms, error)

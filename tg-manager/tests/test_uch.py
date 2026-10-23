@@ -1,0 +1,1356 @@
+"""Tests for Unified Contacts Hub (UCH) module.
+
+Covers: repository, merge, search, trust, versioning, relationships,
+CRM, smart tags, bulk ops, export, identity, AI assistant, ranking_engine,
+network_builder, audience_analytics, analytics_dashboard.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import types
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+
+# ── FakePool helper ───────────────────────────────────────────────────────────
+
+class _AcquireContext:
+    """Async context manager for FakePool.acquire()."""
+
+    def __init__(self, pool):
+        self._pool = pool
+
+    async def __aenter__(self):
+        return self._pool
+
+    async def __aexit__(self, *args):
+        pass
+
+
+class FakePool:
+    """Minimal asyncpg pool mock for UCH tests."""
+
+    def __init__(self, fetch_val=None, fetch_row=None, fetch_rows=None, execute_val="UPDATE 1"):
+        self._fetch_val = fetch_val
+        self._fetch_row = fetch_row or {}
+        self._fetch_rows = fetch_rows or []
+        self._execute_val = execute_val
+        self._calls = []
+        # Sequential режим: если fetch_val/fetch_row — СПИСОК, значения отдаются по
+        # очереди (для функций с несколькими fetchval/fetchrow подряд, например
+        # get_crm_stats: total→reminders, compute_merge: row_a→row_b). Скаляр/dict —
+        # прежнее поведение (одно значение на все вызовы). Backward-совместимо.
+        self._fv_i = 0
+        self._fr_i = 0
+
+    async def fetchval(self, query, *args):
+        self._calls.append(("fetchval", query, args))
+        if isinstance(self._fetch_val, list):
+            v = self._fetch_val[min(self._fv_i, len(self._fetch_val) - 1)] if self._fetch_val else None
+            self._fv_i += 1
+            return v
+        return self._fetch_val
+
+    async def fetchrow(self, query, *args):
+        self._calls.append(("fetchrow", query, args))
+        if isinstance(self._fetch_row, list):
+            r = self._fetch_row[min(self._fr_i, len(self._fetch_row) - 1)] if self._fetch_row else None
+            self._fr_i += 1
+            return r
+        return self._fetch_row
+
+    async def fetch(self, query, *args):
+        self._calls.append(("fetch", query, args))
+        return self._fetch_rows
+
+    async def execute(self, query, *args):
+        self._calls.append(("execute", query, args))
+        return self._execute_val
+
+    def acquire(self):
+        return _AcquireContext(self)
+
+    async def release(self, conn):
+        pass
+
+
+class SequentialFetchPool(FakePool):
+    """FakePool для analytics_dashboard: fetch отдаёт результаты по очереди."""
+
+    def __init__(self, fetch_results):
+        super().__init__()
+        self._fetch_results = fetch_results
+        self._fetch_idx = 0
+
+    async def fetch(self, query, *args):
+        self._calls.append(("fetch", query, args))
+        if self._fetch_idx < len(self._fetch_results):
+            result = self._fetch_results[self._fetch_idx]
+            self._fetch_idx += 1
+            return result
+        return []
+
+
+# ── Repository tests ─────────────────────────────────────────────────────────
+
+class TestRepository:
+    """Tests for contacts_hub/repository.py"""
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_empty(self):
+        from services.contacts_hub.repository import get_contacts
+        pool = FakePool(fetch_rows=[], fetch_val=0)
+        result = await get_contacts(pool, owner_id=123)
+        assert result == {"contacts": [], "total": 0}
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_with_results(self):
+        from services.contacts_hub.repository import get_contacts
+        rows = [
+            {"id": "uuid-1", "first_name": "Ivan", "username": "ivan"},
+            {"id": "uuid-2", "first_name": "Petr", "username": "petr"},
+        ]
+        pool = FakePool(fetch_rows=rows, fetch_val=2)
+        result = await get_contacts(pool, owner_id=123)
+        assert len(result["contacts"]) == 2
+        assert result["total"] == 2
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_with_search(self):
+        from services.contacts_hub.repository import get_contacts
+        pool = FakePool(fetch_rows=[], fetch_val=0)
+        await get_contacts(pool, owner_id=123, search="ivan")
+        call = pool._calls[-1]
+        assert "ILIKE" in call[1]
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_with_favorite_filter(self):
+        from services.contacts_hub.repository import get_contacts
+        pool = FakePool(fetch_rows=[], fetch_val=0)
+        await get_contacts(pool, owner_id=123, favorite_only=True)
+        call = pool._calls[-1]
+        assert "is_favorite" in call[1]
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_with_multi_filter(self):
+        from services.contacts_hub.repository import get_contacts
+        pool = FakePool(fetch_rows=[], fetch_val=0)
+        await get_contacts(pool, owner_id=123, multi_only=True)
+        call = pool._calls[-1]
+        assert "contact_sources" in call[1]
+
+    @pytest.mark.asyncio
+    async def test_get_contact_detail(self):
+        from services.contacts_hub.repository import get_contact
+        pool = FakePool(
+            fetch_row={"id": "uuid-1", "first_name": "Ivan", "owner_id": 123},
+            fetch_rows=[]
+        )
+        result = await get_contact(pool, "uuid-1", 123)
+        assert result is not None
+        assert result["contact"]["first_name"] == "Ivan"
+
+    @pytest.mark.asyncio
+    async def test_get_contact_not_found(self):
+        from services.contacts_hub.repository import get_contact
+        pool = FakePool(fetch_row=None)
+        result = await get_contact(pool, "uuid-1", 123)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_delete_contact(self):
+        from services.contacts_hub.repository import delete_contact
+        pool = FakePool(execute_val="DELETE 1")
+        result = await delete_contact(pool, "uuid-1", 123)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_delete_contact_not_found(self):
+        from services.contacts_hub.repository import delete_contact
+        pool = FakePool(execute_val="DELETE 0")
+        result = await delete_contact(pool, "uuid-1", 123)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_contact_groups(self):
+        from services.contacts_hub.repository import get_contact_groups
+        pool = FakePool(fetch_rows=[{"id": 1, "name": "Clients", "member_count": 5}])
+        result = await get_contact_groups(pool, 123)
+        assert len(result) == 1
+        assert result[0]["name"] == "Clients"
+
+    @pytest.mark.asyncio
+    async def test_log_contact_history(self):
+        from services.contacts_hub.repository import log_contact_history
+        pool = FakePool()
+        await log_contact_history(pool, "uuid-1", 123, "edit", "name", "old", "new")
+        assert len(pool._calls) == 1
+        assert "INSERT INTO contact_history" in pool._calls[0][1]
+
+
+# ── Trust Engine tests ────────────────────────────────────────────────────────
+
+class TestTrustEngine:
+    """Tests for contacts_hub/trust_engine.py"""
+
+    def test_compute_trust_score_basic(self):
+        from services.contacts_hub.trust_engine import compute_trust_score
+        contact = {"telegram_user_id": 123, "username": "ivan", "phones": ["+123"]}
+        sources = [{"id": 1}, {"id": 2}]
+        score = compute_trust_score(contact, sources)
+        assert 0.5 <= score <= 1.0
+
+    def test_compute_trust_score_minimal(self):
+        from services.contacts_hub.trust_engine import compute_trust_score
+        contact = {}
+        sources = []
+        score = compute_trust_score(contact, sources)
+        assert score == 0.5
+
+    def test_compute_trust_score_full(self):
+        from services.contacts_hub.trust_engine import compute_trust_score
+        contact = {"telegram_user_id": 123, "username": "ivan", "phones": ["+123"]}
+        sources = [{"id": 1}, {"id": 2}, {"id": 3}]
+        score = compute_trust_score(contact, sources)
+        assert score >= 0.9
+
+    def test_compute_merge_confidence_same_id(self):
+        from services.contacts_hub.trust_engine import compute_merge_confidence
+        a = {"telegram_user_id": 123, "username": "ivan", "phones": [], "first_name": "Ivan", "last_name": "", "company": ""}
+        b = {"telegram_user_id": 123, "username": "ivan2", "phones": [], "first_name": "Ivan", "last_name": "", "company": ""}
+        result = compute_merge_confidence(a, b)
+        assert result["confidence"] >= 0.5
+        assert "same_telegram_id" in result["reasons"]
+
+    def test_compute_merge_confidence_same_phone(self):
+        from services.contacts_hub.trust_engine import compute_merge_confidence
+        a = {"telegram_user_id": 1, "username": "a", "phones": ["+123"], "first_name": "A", "last_name": "", "company": ""}
+        b = {"telegram_user_id": 2, "username": "b", "phones": ["+123"], "first_name": "B", "last_name": "", "company": ""}
+        result = compute_merge_confidence(a, b)
+        assert "same_phone" in result["reasons"]
+
+    def test_compute_merge_confidence_same_name(self):
+        from services.contacts_hub.trust_engine import compute_merge_confidence
+        a = {"telegram_user_id": 1, "username": "a", "phones": [], "first_name": "Ivan", "last_name": "Ivanov", "company": ""}
+        b = {"telegram_user_id": 2, "username": "b", "phones": [], "first_name": "Ivan", "last_name": "Ivanov", "company": ""}
+        result = compute_merge_confidence(a, b)
+        assert "same_name" in result["reasons"]
+
+    def test_compute_merge_confidence_low(self):
+        from services.contacts_hub.trust_engine import compute_merge_confidence
+        a = {"telegram_user_id": 1, "username": "a", "phones": ["+111"], "first_name": "A", "last_name": "X", "company": "C1"}
+        b = {"telegram_user_id": 2, "username": "b", "phones": ["+222"], "first_name": "B", "last_name": "Y", "company": "C2"}
+        result = compute_merge_confidence(a, b)
+        assert result["confidence"] < 0.5
+
+    # УДАЛЕНЫ тесты compute_merge_confidence_improved /
+    # detect_smart_duplicates_improved / get_conflict_resolution_suggestions:
+    # сами функции удалены из движка. Первые две были параллельной реализацией
+    # того же правила с суффиксом «improved», на которую не ссылался никто,
+    # кроме этих тестов, — и опасны именно удобством: агент, подключающий
+    # движок к экрану, выбирает по имени и подписи. Третья (советы по
+    # конфликту) работала по conflict_id вообще без owner_id, то есть дверь к
+    # ней сразу стала бы перебором чужих конфликтов.
+    def test_tokenize(self):
+        from services.contacts_hub.search_engine import _tokenize
+        assert _tokenize("Ivan Ivanov") == ["ivan", "ivanov"]
+        assert _tokenize("") == []
+        assert _tokenize("  ") == []
+        assert _tokenize("ab") == ["ab"]
+        assert _tokenize("a") == []
+
+    def test_tokenize_multiword(self):
+        from services.contacts_hub.search_engine import _tokenize
+        tokens = _tokenize("ivan的工作 developer")
+        assert len(tokens) >= 1
+
+    @pytest.mark.asyncio
+    async def test_search_contacts_empty_query(self):
+        from services.contacts_hub.search_engine import search_contacts
+        pool = FakePool(fetch_rows=[])
+        result = await search_contacts(pool, 123, "")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_search_contacts_single_token(self):
+        from services.contacts_hub.search_engine import search_contacts
+        pool = FakePool(fetch_rows=[{"id": "1", "first_name": "Ivan"}])
+        result = await search_contacts(pool, 123, "ivan")
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_search_contacts_multi_token(self):
+        from services.contacts_hub.search_engine import search_contacts
+        pool = FakePool(fetch_rows=[{"id": "1", "first_name": "Ivan"}])
+        result = await search_contacts(pool, 123, "ivan petrov")
+        assert len(result) == 1
+
+
+# ── Versioning Engine tests ───────────────────────────────────────────────────
+
+class TestVersioningEngine:
+    """Tests for contacts_hub/versioning_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_get_versions_empty(self):
+        from services.contacts_hub.versioning_engine import get_versions
+        pool = FakePool(fetch_rows=[])
+        result = await get_versions(pool, "uuid-1", 123)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_version_detail_not_found(self):
+        from services.contacts_hub.versioning_engine import get_version_detail
+        pool = FakePool(fetch_row=None)
+        result = await get_version_detail(pool, 999, 123)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_rollback_to_version_not_found(self):
+        from services.contacts_hub.versioning_engine import rollback_to_version
+        pool = FakePool(fetch_row=None)
+        result = await rollback_to_version(pool, "uuid-1", 123, 1)
+        assert result is False
+
+
+# ── CRM Engine tests ──────────────────────────────────────────────────────────
+
+class TestCRMEngine:
+    """Tests for contacts_hub/crm_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_get_crm_data_none(self):
+        from services.contacts_hub.crm_engine import get_crm_data
+        pool = FakePool(fetch_row=None)
+        result = await get_crm_data(pool, 123, "uuid-1")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_crm_data_exists(self):
+        from services.contacts_hub.crm_engine import get_crm_data
+        pool = FakePool(fetch_row={"id": 1, "stage": "lead", "custom_fields": "{}"})
+        result = await get_crm_data(pool, 123, "uuid-1")
+        assert result["stage"] == "lead"
+
+    @pytest.mark.asyncio
+    async def test_get_upcoming_reminders_empty(self):
+        from services.contacts_hub.crm_engine import get_upcoming_reminders
+        pool = FakePool(fetch_rows=[])
+        result = await get_upcoming_reminders(pool, 123)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_the_funnel_keeps_empty_stages(self):
+        """Четыре проверки двух мёртвых воронок (get_crm_pipeline,
+        get_crm_stats) заменены одной — на живую pipeline(). Первая
+        сортировала по стадиям, каких в contact_crm не бывает ('prospect',
+        'closed_won', 'closed_lost'); вторая считала то же без порядка.
+        Живое поведение — tests/test_crm_funnel_counts_postgres.py.
+        """
+        from services.contacts_hub.crm_engine import STAGE_LABELS, pipeline
+        pool = FakePool(fetch_val=0, fetch_rows=[])
+        result = await pipeline(pool, 123)
+        assert [s["stage"] for s in result["stages"]] == list(STAGE_LABELS)
+        assert result["total"] == 0
+        assert all(s["count"] == 0 for s in result["stages"])
+        assert all(s["label"] for s in result["stages"]), "стадия без подписи"
+
+    @pytest.mark.asyncio
+    async def test_get_crm_reminders_empty(self):
+        # Проверки переставлены с удалённого дубля get_crm_reminders на живую
+        # get_upcoming_reminders: поведение (в том числе «@username вместо
+        # пустого имени») было одинаковым, а звали только вторую.
+        from services.contacts_hub.crm_engine import get_upcoming_reminders
+        pool = FakePool(fetch_rows=[])
+        result = await get_upcoming_reminders(pool, 123)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_crm_reminders_with_data(self):
+        from services.contacts_hub.crm_engine import get_upcoming_reminders
+        rows = [
+            {"first_name": "Ivan", "last_name": "Ivanov", "username": "ivan",
+             "stage": "lead", "next_reminder_at": "2024-01-20", "next_reminder_text": "Follow up"},
+            {"first_name": "", "last_name": "", "username": "petr",
+             "stage": "proposal", "next_reminder_at": "2024-01-22", "next_reminder_text": "Send proposal"},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_upcoming_reminders(pool, 123)
+        assert len(result) == 2
+        assert result[0]["contact_name"] == "Ivan Ivanov"
+        # Имени нет — показываем username с собакой: так он читается как
+        # username и по нему можно написать прямо из напоминания. Раньше
+        # username выбрасывался всегда, когда имя непустое.
+        assert result[1]["contact_name"] == "@petr"
+
+
+# ── Smart Tags Engine tests ───────────────────────────────────────────────────
+
+class TestSmartTagsEngine:
+    """Tests for contacts_hub/smart_tags_engine.py"""
+
+    def test_check_condition_eq(self):
+        from services.contacts_hub.smart_tags_engine import _check_condition
+        assert _check_condition({"is_premium": True}, {"field": "is_premium", "op": "eq", "value": True}) is True
+        assert _check_condition({"is_premium": False}, {"field": "is_premium", "op": "eq", "value": True}) is False
+
+    def test_check_condition_not_empty(self):
+        from services.contacts_hub.smart_tags_engine import _check_condition
+        assert _check_condition({"phones": ["+123"]}, {"field": "phones", "op": "not_empty"}) is True
+        assert _check_condition({"phones": []}, {"field": "phones", "op": "not_empty"}) is False
+        assert _check_condition({"notes": "hello"}, {"field": "notes", "op": "not_empty"}) is True
+        assert _check_condition({"notes": ""}, {"field": "notes", "op": "not_empty"}) is False
+
+    def test_check_condition_gte(self):
+        from services.contacts_hub.smart_tags_engine import _check_condition
+        assert _check_condition({"count": 5}, {"field": "count", "op": "gte", "value": 3}) is True
+        assert _check_condition({"count": 2}, {"field": "count", "op": "gte", "value": 3}) is False
+
+    def test_check_condition_contains(self):
+        from services.contacts_hub.smart_tags_engine import _check_condition
+        assert _check_condition({"notes": "important client"}, {"field": "notes", "op": "contains", "value": "client"}) is True
+
+    @pytest.mark.asyncio
+    async def test_get_smart_tags_empty(self):
+        from services.contacts_hub.smart_tags_engine import get_smart_tags
+        pool = FakePool(fetch_rows=[])
+        result = await get_smart_tags(pool, 123)
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_smart_tag_rules_includes_builtin(self):
+        from services.contacts_hub.smart_tags_engine import get_smart_tag_rules
+        pool = FakePool(fetch_rows=[])
+        result = await get_smart_tag_rules(pool, 123)
+        assert len(result) >= 7  # Built-in rules
+
+
+# ── Bulk Ops Engine tests ─────────────────────────────────────────────────────
+
+class TestBulkOpsEngine:
+    """Tests for contacts_hub/bulk_ops_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete(self):
+        from services.contacts_hub.bulk_ops_engine import bulk_delete
+        pool = FakePool(execute_val="DELETE 3")
+        result = await bulk_delete(pool, 123, ["id1", "id2", "id3"])
+        assert result["deleted"] == 3
+
+    @pytest.mark.asyncio
+    async def test_bulk_set_favorite(self):
+        from services.contacts_hub.bulk_ops_engine import bulk_set_favorite
+        pool = FakePool(execute_val="UPDATE 2")
+        result = await bulk_set_favorite(pool, 123, ["id1", "id2"], True)
+        assert result["updated"] == 2
+
+    @pytest.mark.asyncio
+    async def test_create_group(self):
+        from services.contacts_hub.bulk_ops_engine import create_group
+        pool = FakePool(fetch_val=42)
+        result = await create_group(pool, 123, "Clients")
+        assert result == 42
+
+    @pytest.mark.asyncio
+    async def test_delete_group(self):
+        from services.contacts_hub.bulk_ops_engine import delete_group
+        pool = FakePool(execute_val="DELETE 1")
+        result = await delete_group(pool, 1, 123)
+        assert result is True
+
+
+# ── Export Engine tests ───────────────────────────────────────────────────────
+
+class TestExportEngine:
+    """Tests for contacts_hub/export_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_export_csv_empty(self):
+        from services.contacts_hub.export_engine import export_csv
+        pool = FakePool(fetch_rows=[])
+        result = await export_csv(pool, 123)
+        assert "ID,Telegram User ID" in result
+
+    @pytest.mark.asyncio
+    async def test_export_csv_with_data(self):
+        from services.contacts_hub.export_engine import export_csv
+        pool = FakePool(fetch_rows=[
+            {"id": "uuid-1", "telegram_user_id": 123, "username": "ivan",
+             "first_name": "Ivan", "last_name": "Ivanov", "display_name": "Ivan Ivanov",
+             "phones": '["+123"]', "emails": "[]", "company": "TestCo",
+             "position": "Dev", "websites": "[]", "birthday": None,
+             "notes": "test", "tags": "{vip}", "color_label": "#3b82f6",
+             "is_favorite": True, "is_premium": False, "importance_level": None,
+             "user_rating": None, "discovered_at": None, "last_synced_at": None,
+             "created_at": None}
+        ])
+        result = await export_csv(pool, 123)
+        assert "Ivan" in result
+        assert "TestCo" in result
+
+    @pytest.mark.asyncio
+    async def test_export_vcf_empty(self):
+        from services.contacts_hub.export_engine import export_vcf
+        pool = FakePool(fetch_rows=[])
+        result = await export_vcf(pool, 123)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_export_vcf_with_data(self):
+        from services.contacts_hub.export_engine import export_vcf
+        pool = FakePool(fetch_rows=[
+            {"id": "uuid-1", "telegram_user_id": 123, "username": "ivan",
+             "first_name": "Ivan", "last_name": "Ivanov", "company": "TestCo",
+             "position": "Dev", "phones": '["+123"]', "emails": "[]",
+             "websites": "[]", "notes": "test"}
+        ])
+        result = await export_vcf(pool, 123)
+        assert "BEGIN:VCARD" in result
+        assert "Ivan" in result
+
+    @pytest.mark.asyncio
+    async def test_export_json(self):
+        from services.contacts_hub.export_engine import export_json
+        pool = FakePool(fetch_rows=[
+            {"id": "uuid-1", "first_name": "Ivan", "phones": "[]", "emails": "[]",
+             "websites": "[]", "addresses": "[]", "custom_fields": "{}",
+             "digital_footprint": "{}", "created_at": None, "updated_at": None,
+             "discovered_at": None, "last_synced_at": None, "last_changed_at": None}
+        ])
+        result = await export_json(pool, 123)
+        data = json.loads(result)
+        assert len(data) == 1
+        assert data[0]["first_name"] == "Ivan"
+
+    @pytest.mark.asyncio
+    async def test_a_single_contact_exports_as_a_vcard(self):
+        """Пять проверок удалённого кода заменены одной на живой путь.
+
+        export_vcard (визитка ОДНОГО контакта), export_csv_streaming и
+        get_export_stats удалены: их не звал никто, а поля они собирали своим
+        кодом, то есть «визитка» и «поток» могли расходиться с настоящей
+        выгрузкой. Визитку одного контакта делает тот же export_vcf со
+        списком из одного id — кнопка «📇 Визитка» в карточке.
+        """
+        from services.contacts_hub.export_engine import export_vcf
+        pool = FakePool(fetch_rows=[{
+            "id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
+            "company": "TestCo", "position": "Dev", "phones": '["+123", "+456"]',
+            "emails": '["ivan@test.com"]', "websites": '["https://ivan.com"]',
+            "username": "ivan", "telegram_user_id": 123,
+            "birthday": "1990-01-01", "notes": "test",
+        }])
+        result = await export_vcf(pool, 123, ["uuid-1"])
+        assert "BEGIN:VCARD" in result and "END:VCARD" in result
+        for part in ("Ivan", "Ivanov", "TestCo", "Dev", "+123", "+456",
+                     "ivan@test.com", "URL:https://ivan.com", "BDAY:1990-01-01"):
+            assert part in result, f"в визитке нет {part}"
+        # URL и BDAY отдавала удалённая export_vcard, а export_vcf — нет:
+        # «одна реализация» без переноса полей означала бы потерю данных.
+        # Запрос ушёл со списком id, а не за всем хабом.
+        kind, query, args = pool._calls[0]
+        assert "id IN (" in query and args[1] == "uuid-1"
+
+
+# ── Identity Engine tests ─────────────────────────────────────────────────────
+
+class TestIdentityEngine:
+    """Tests for contacts_hub/identity_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_build_identity_graph_not_found(self):
+        from services.contacts_hub.identity_engine import build_identity_graph
+        pool = FakePool(fetch_row=None)
+        result = await build_identity_graph(pool, 123, "uuid-1")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_identity_graph_empty(self):
+        from services.contacts_hub.identity_engine import get_identity_graph
+        pool = FakePool(fetch_rows=[])
+        result = await get_identity_graph(pool, 123, "uuid-1")
+        assert result == []
+
+
+# ── Relationship Engine tests ─────────────────────────────────────────────────
+
+class TestRelationshipEngine:
+    """Tests for contacts_hub/relationship_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_compute_relationships_empty(self):
+        from services.contacts_hub.relationship_engine import compute_relationships
+        pool = FakePool(fetch_rows=[])
+        result = await compute_relationships(pool, 123)
+        assert result["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_relationships_empty(self):
+        from services.contacts_hub.relationship_engine import get_relationships
+        pool = FakePool(fetch_rows=[])
+        result = await get_relationships(pool, 123, "uuid-1")
+        assert result == []
+
+
+# ── AI Assistant tests ────────────────────────────────────────────────────────
+
+class TestAIAssistant:
+    """Tests for contacts_hub/ai_assistant.py"""
+
+    def test_match_query_count(self):
+        from services.contacts_hub.ai_assistant import _match_query
+        result = _match_query("сколько контактов")
+        assert result is not None
+        assert result["handler"] == "count_all"
+
+    def test_match_query_premium(self):
+        from services.contacts_hub.ai_assistant import _match_query
+        result = _match_query("сколько контактов с premium")
+        assert result is not None
+        # "сколько контактов" matches count_all first, which is correct behavior
+        assert result["handler"] in ("count_premium", "count_all")
+
+    def test_match_query_duplicates(self):
+        from services.contacts_hub.ai_assistant import _match_query
+        result = _match_query("покажи дубликаты")
+        assert result is not None
+        assert result["handler"] == "find_duplicates"
+
+    def test_match_query_favorites(self):
+        from services.contacts_hub.ai_assistant import _match_query
+        result = _match_query("избранные")
+        assert result is not None
+        assert result["handler"] == "favorites"
+
+    def test_match_query_reminders(self):
+        from services.contacts_hub.ai_assistant import _match_query
+        result = _match_query("напоминания")
+        assert result is not None
+        assert result["handler"] == "reminders"
+
+    def test_match_query_stats(self):
+        from services.contacts_hub.ai_assistant import _match_query
+        result = _match_query("статистика")
+        assert result is not None
+        assert result["handler"] == "stats"
+
+    def test_match_query_unknown(self):
+        from services.contacts_hub.ai_assistant import _match_query
+        result = _match_query("привет мир")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_process_ai_query_count(self):
+        from services.contacts_hub.ai_assistant import process_ai_query
+        pool = FakePool(fetch_val=42)
+        result = await process_ai_query(pool, 123, "сколько контактов")
+        assert "42" in result["answer"]
+        assert result["type"] == "count"
+
+    @pytest.mark.asyncio
+    async def test_process_ai_query_empty(self):
+        from services.contacts_hub.ai_assistant import process_ai_query
+        pool = FakePool()
+        result = await process_ai_query(pool, 123, "абракадабра")
+        assert result["type"] == "help"
+
+
+# ── Merge Engine tests ────────────────────────────────────────────────────────
+
+class TestMergeEngine:
+    """Tests for contacts_hub/merge_engine.py"""
+
+    @pytest.mark.asyncio
+    async def test_find_duplicates_empty(self):
+        from services.contacts_hub.merge_engine import find_duplicates
+        pool = FakePool(fetch_rows=[])
+        result = await find_duplicates(pool, 123)
+        assert result == []
+
+
+# ── Ranking Engine tests ──────────────────────────────────────────────────────
+
+class TestRankingEngine:
+    """ranking_engine на модели «бот + ключевое слово».
+
+    ПОЧЕМУ ЭТИ ТЕСТЫ ПЕРЕПИСАНЫ. Прежние работали по несуществующей модели
+    «владелец + канал» и были ЗЕЛЁНЫМИ, пока раздел «Рейтинг» был полностью
+    мёртв: заглушка пула не выполняет SQL, поэтому запрос к несуществующим
+    колонкам здесь «успешен». Сквозная проверка на настоящей схеме —
+    tests/test_ranking_engine_real_schema_postgres.py; здесь остаётся быстрая
+    проверка контракта и того, что запросы называют РЕАЛЬНЫЕ колонки.
+    """
+
+    @pytest.mark.asyncio
+    async def test_track_keyword(self):
+        from services.ranking_engine import track_keyword
+        pool = FakePool(fetch_val=1, fetch_row={"id": 1})
+        result = await track_keyword(pool, 123, "telegram channels", bot_id=555)
+        assert result["ok"] is True
+        assert result["id"] == 1
+        sql = " ".join(c[1] for c in pool._calls)
+        assert "bot_id" in sql and "channel_id" not in sql, (
+            "запрос обязан идти по настоящей схеме (bot_id), а не по выдуманной")
+
+    @pytest.mark.asyncio
+    async def test_track_keyword_requires_a_bot(self):
+        """Без бота считать позицию не для кого — отказ обязан это назвать."""
+        from services.ranking_engine import track_keyword
+        pool = FakePool()
+        result = await track_keyword(pool, 123, "telegram channels")
+        assert result["ok"] is False and "бот" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_record_position_reports_previous(self):
+        from services.ranking_engine import record_position
+        pool = FakePool(fetch_val=None,
+                        fetch_row={"id": 1, "bot_id": 555, "keyword": "kw"},
+                        execute_val="INSERT 0 1")
+        result = await record_position(pool, 123, 1, 5)
+        assert result["ok"] is True
+        assert result["previous_position"] is None
+        assert result["alert"] == "entered", "первое появление в выдаче — событие"
+
+    @pytest.mark.asyncio
+    async def test_get_position_history(self):
+        from services.ranking_engine import get_position_history
+        rows = [
+            {"position": 1, "checked_at": "2024-01-02"},
+            {"position": 3, "checked_at": "2024-01-01"},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_position_history(pool, 123, 1)
+        assert [r["position"] for r in result] == [1, 3]
+        sql = pool._calls[0][1]
+        assert "tk.owner_id" in sql, "история обязана быть ограничена владельцем"
+
+    @pytest.mark.asyncio
+    async def test_get_ranking_stats(self):
+        from services.ranking_engine import get_ranking_stats
+        pool = FakePool(fetch_val=[5, 42, 3.5, 2])
+        result = await get_ranking_stats(pool, 123)
+        assert result["total_tracked"] == 5
+        assert result["total_checks"] == 42
+        assert result["avg_position_7d"] == 3.5
+        assert result["alerts_pending"] == 2
+
+
+# ── Network Builder tests ─────────────────────────────────────────────────────
+
+class TestNetworkBuilder:
+    """Tests for network_builder.py"""
+
+    @pytest.mark.asyncio
+    async def test_create_template(self):
+        from services.network_builder import create_template
+        pool = FakePool(fetch_row={"id": 1})
+        result = await create_template(pool, 123, "My Template", "Description")
+        assert result["ok"] is True
+        assert result["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_templates(self):
+        from services.network_builder import get_templates
+        rows = [
+            {"id": 1, "name": "Template 1", "owner_id": 123},
+            {"id": 2, "name": "Template 2", "owner_id": 123},
+        ]
+        pool = FakePool(fetch_rows=rows)
+        result = await get_templates(pool, 123)
+        assert len(result) == 2
+        assert result[0]["name"] == "Template 1"
+
+    @pytest.mark.asyncio
+    async def test_create_instance(self):
+        from services.network_builder import create_instance
+        pool = FakePool(fetch_row=[
+            {"id": 1, "nodes": "[]", "edges": "[]", "owner_id": 123},
+            {"id": 10},
+        ])
+        result = await create_instance(pool, 123, 1, "My Instance")
+        assert result["ok"] is True
+        assert result["id"] == 10
+
+    @pytest.mark.asyncio
+    async def test_add_node(self):
+        from services.network_builder import add_node
+        pool = FakePool(fetch_row={"id": 5})
+        result = await add_node(pool, 1, "channel", "My Channel")
+        assert result["ok"] is True
+        assert result["id"] == 5
+
+    @pytest.mark.asyncio
+    async def test_add_edge(self):
+        from services.network_builder import add_edge
+        pool = FakePool(fetch_row={"id": 3})
+        result = await add_edge(pool, 1, 1, 2, "admin")
+        assert result["ok"] is True
+        assert result["id"] == 3
+
+    @pytest.mark.asyncio
+    async def test_get_network_stats(self):
+        from services.network_builder import get_network_stats
+        pool = FakePool(fetch_val=[3, 5, 12, 8])
+        result = await get_network_stats(pool, 123)
+        assert result["templates"] == 3
+        assert result["instances"] == 5
+        assert result["total_nodes"] == 12
+        assert result["total_edges"] == 8
+
+
+# ── Audience Analytics tests ──────────────────────────────────────────────────
+
+class TestAudienceAnalytics:
+    """Tests for audience_analytics.py"""
+
+    @pytest.mark.asyncio
+    async def test_analyze_audience(self):
+        from services.audience_analytics import analyze_audience
+        pool = FakePool(
+            fetch_row=[
+                {"cnt": 1000},
+                {"cnt": 500},
+                {"total_users": 1000, "retained_users": 400},
+                {"total_users": 1000, "retained_users": 300},
+                {"avg_duration": 15.5},
+            ],
+            fetch_rows=[{"hour": 14, "dow": 3, "cnt": 100}],
+        )
+        result = await analyze_audience(pool, 123, -100)
+        assert result is not None
+        assert result.total_subscribers == 1000
+        assert result.active_users == 500
+        assert result.active_rate == 50.0
+        assert result.avg_session_duration_min == 15.5
+
+    @pytest.mark.asyncio
+    async def test_segment_audience(self):
+        """Сегменты приходят одним запросом со счётчиками.
+
+        Прежняя версия теста кормила заглушку строками подписчиков и ответом
+        «60 взаимодействий», после чего проверяла, что появился сегмент
+        Champions. Такого ответа продукт получить не мог: взаимодействия
+        считались как число строк user_activity на пару «бот + человек», а
+        строка там одна. Тест был зелёным на данных, которых не бывает.
+        """
+        from services.audience_analytics import segment_audience
+
+        class _OneRowPool:
+            def __init__(self, row):
+                self.row = row
+                self.calls = 0
+
+            async def fetchrow(self, sql, *args):
+                self.calls += 1
+                return self.row
+
+        pool = _OneRowPool({
+            "total": 50,
+            "leaders": 4, "leaders_msgs": 90.0,
+            "regulars": 6, "regulars_msgs": 25.0,
+            "at_risk": 5, "at_risk_msgs": 7.0,
+            "dormant": 30,
+            "newcomers": 5, "newcomers_msgs": 1.0,
+        })
+        result = await segment_audience(pool, 123, -100)
+        assert pool.calls == 1, "сегментация снова ходит в базу за каждым человеком"
+        names = [s.name for s in result]
+        assert "Лидеры" in names and "Спящие" in names, names
+
+
+# ── Analytics Dashboard tests ─────────────────────────────────────────────────
+
+class TestAnalyticsDashboard:
+    """Tests for analytics_dashboard.py"""
+
+    @pytest.mark.asyncio
+    async def test_get_dashboard_stats(self):
+        from services.analytics_dashboard import get_dashboard_stats
+        now = datetime.now(timezone.utc)
+        pool = SequentialFetchPool([
+            [{"total": 5, "active": 3, "banned": 1, "spamblock": 1}],
+            [{"total": 10, "success": 8, "failed": 2}],
+            [{"running": 1}],
+            [{"total_users": 500, "new_24h": 10, "new_7d": 50}],
+            [{"avg_trust": 0.75, "at_risk": 1}],
+            [{"total_usd": 150.0}],
+        ])
+        result = await get_dashboard_stats(pool, 123)
+        assert result["accounts"]["total"] == 5
+        assert result["accounts"]["active"] == 3
+        assert result["operations_24h"]["total"] == 10
+        assert result["operations_24h"]["success"] == 8
+        assert result["operations_24h"]["running"] == 1
+        assert result["audience"]["total_users"] == 500
+        assert result["health"]["avg_trust"] == 0.75
+        assert result["revenue_30d_usd"] == 150.0
+
+    @pytest.mark.asyncio
+    async def test_get_realtime_metrics(self):
+        from services.analytics_dashboard import get_realtime_metrics
+        now = datetime.now(timezone.utc)
+        pool = SequentialFetchPool([
+            [{"id": 1, "op_type": "mass_send", "status": "running", "started_at": now, "params": "{}"}],
+            [{"id": 1, "action": "send", "result": "success", "target": "chat_1", "occurred_at": now}],
+            [{"status": "active", "cnt": 3}, {"status": "banned", "cnt": 1}],
+            [{"op_type": "mass_send", "cnt": 2}],
+        ])
+        result = await get_realtime_metrics(pool, 123)
+        assert len(result["active_operations"]) == 1
+        assert result["active_operations"][0]["type"] == "mass_send"
+        assert len(result["recent_events"]) == 1
+        assert result["recent_events"][0]["action"] == "send"
+        assert result["account_status"]["active"] == 3
+        assert result["queue_depth"]["mass_send"] == 2
+
+
+# ── Performance Engine tests ─────────────────────────────────────────────────
+
+# УДАЛЕНЫ тесты services/contacts_hub/performance.py: модуль удалён целиком.
+# 188 строк, которые не импортировал НИКТО, кроме этих тестов: свой слой кэша с
+# собственным TTL рядом с уже работающим кэшем поиска, свои счётчики запросов,
+# которые никто не читает, и batch_insert/batch_update, подставляющие имя
+# таблицы и имена колонок прямо в SQL строкой. Последнее опасно именно тем, что
+# удобно: в хабе есть массовая правка полей с ИМЕНАМИ полей из запроса, и
+# первое же «удобное» применение этих помощников к ней стало бы инъекцией.
+# Понадобится кэш — брать существующий в search_engine; понадобится пакетная
+# запись — писать запрос с фиксированными колонками там, где она нужна.
+
+
+class TestSecurity:
+    """Tests for services/security.py"""
+
+    # ── sanitize_input ─────────────────────────────────────────────────────
+
+    def test_sanitize_input_normal(self):
+        from services.security import sanitize_input
+        result = sanitize_input("Hello World")
+        assert result == "Hello World"
+
+    def test_sanitize_input_xss(self):
+        from services.security import sanitize_input
+        result = sanitize_input('<script>alert("xss")</script>')
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result
+
+    def test_sanitize_input_sql(self):
+        from services.security import sanitize_input
+        result = sanitize_input("'; DROP TABLE users; --")
+        assert "DROP TABLE" in result
+
+    # ── validate_email ─────────────────────────────────────────────────────
+
+    def test_validate_email_valid(self):
+        from services.security import validate_email
+        assert validate_email("user@example.com") is True
+        assert validate_email("test.user+tag@domain.co") is True
+
+    def test_validate_email_invalid(self):
+        from services.security import validate_email
+        assert validate_email("not-an-email") is False
+        assert validate_email("@domain.com") is False
+        assert validate_email("user@") is False
+        assert validate_email("") is False
+
+    # ── validate_phone ─────────────────────────────────────────────────────
+
+    def test_validate_phone_valid(self):
+        from services.security import validate_phone
+        assert validate_phone("+14155552671") is True
+        assert validate_phone("+79161234567") is True
+        assert validate_phone("+1 415-555-2671") is True
+
+    def test_validate_phone_invalid(self):
+        from services.security import validate_phone
+        assert validate_phone("12345") is False
+        assert validate_phone("not-a-phone") is False
+        assert validate_phone("14155552671") is False
+        assert validate_phone("") is False
+
+    # ── validate_url ───────────────────────────────────────────────────────
+
+    def test_validate_url_valid(self):
+        from services.security import validate_url
+        assert validate_url("https://example.com") is True
+        assert validate_url("https://sub.domain.org/path?q=1") is True
+
+    def test_validate_url_invalid(self):
+        from services.security import validate_url
+        assert validate_url("http://example.com") is False
+        assert validate_url("ftp://example.com") is False
+        assert validate_url("not-a-url") is False
+        assert validate_url("https://localhost") is False
+        assert validate_url("") is False
+
+    # ── CSRF ───────────────────────────────────────────────────────────────
+
+    def test_generate_csrf_token(self):
+        import services.security as sec
+        with patch.object(sec, "_CSRF_SECRET", "test_secret_for_csrf"):
+            from services.security import generate_csrf_token
+            token = generate_csrf_token(123)
+            assert isinstance(token, str)
+            assert ":" in token
+
+    def test_verify_csrf_token(self):
+        import services.security as sec
+        with patch.object(sec, "_CSRF_SECRET", "test_secret_for_csrf"):
+            from services.security import generate_csrf_token, verify_csrf_token
+            token = generate_csrf_token(123)
+            assert verify_csrf_token(token, 123) is True
+            assert verify_csrf_token(token, 456) is False
+            assert verify_csrf_token("invalid_token", 123) is False
+
+
+# ── Broadcaster Optimization tests ────────────────────────────────────────────
+
+class TestBroadcasterOptimizations:
+    """Tests for broadcaster caching and async processing optimizations."""
+
+    def test_broadcaster_caching(self):
+        from services.cache import TTLCache
+
+        cache = TTLCache(default_ttl=60.0, max_size=100)
+        cache.set("broadcast:1", {"status": "done", "sent": 100})
+        cache.set("broadcast:2", {"status": "running", "sent": 50})
+
+        assert cache.get("broadcast:1") == {"status": "done", "sent": 100}
+        assert cache.get("broadcast:2") == {"status": "running", "sent": 50}
+        assert cache.get("broadcast:999") is None
+
+        stats = cache.stats()
+        assert stats["hits"] >= 2
+        assert stats["size"] == 2
+
+    @pytest.mark.asyncio
+    async def test_broadcaster_async_processing(self):
+        from services.broadcaster import cancel, is_running, _running
+
+        _running.clear()
+
+        assert is_running(999) is False
+        assert cancel(999) is False
+
+        async def _dummy():
+            await asyncio.sleep(10)
+
+        task = asyncio.create_task(_dummy())
+        _running[777] = task
+
+        assert is_running(777) is True
+        result = cancel(777)
+        assert result is True
+        assert not is_running(777) or task.cancelled()
+
+        _running.clear()
+
+    def test_broadcaster_caching_ttl_expiry(self):
+        import time
+        from services.cache import TTLCache
+
+        cache = TTLCache(default_ttl=0.05, max_size=100)
+        cache.set("bc:ttl", {"status": "done"})
+
+        assert cache.get("bc:ttl") == {"status": "done"}
+
+        time.sleep(0.1)
+        assert cache.get("bc:ttl") is None
+
+    def test_broadcaster_caching_eviction(self):
+        from services.cache import TTLCache
+
+        cache = TTLCache(default_ttl=300.0, max_size=3)
+        cache.set("k1", "v1")
+        cache.set("k2", "v2")
+        cache.set("k3", "v3")
+        cache.set("k4", "v4")
+
+        assert cache.get("k1") is None
+        assert cache.get("k4") == "v4"
+
+    def test_broadcaster_user_map_cache(self):
+        from services.broadcaster import _user_map_cache
+
+        _user_map_cache.clear()
+        _user_map_cache.set("um:123:1", {"username": "ivan", "first_name": "Ivan"})
+        result = _user_map_cache.get("um:123:1")
+        assert result is not None
+        assert result["username"] == "ivan"
+        _user_map_cache.clear()
+
+    def test_broadcaster_render_for_user(self):
+        from services.broadcaster import _render_for_user
+
+        text = "Привет, {{FIRST_NAME}}!"
+        user = {"first_name": "Иван", "last_name": "Иванов", "username": "ivan"}
+        result = _render_for_user(text, user)
+        assert "Иван" in result
+        assert "{{FIRST_NAME}}" not in result
+
+    def test_broadcaster_render_for_user_no_placeholders(self):
+        from services.broadcaster import _render_for_user
+
+        text = "Обычное сообщение без плейсхолдеров"
+        result = _render_for_user(text, {})
+        assert result == text
+
+    def test_broadcaster_render_for_user_empty(self):
+        from services.broadcaster import _render_for_user
+
+        assert _render_for_user("", {}) == ""
+        assert _render_for_user(None, {}) is None
+
+    def test_broadcaster_on_broadcast_done(self):
+        from services.broadcaster import _on_broadcast_done, _running
+
+        _running.clear()
+        task = MagicMock()
+        task.cancelled.return_value = False
+        task.exception.return_value = None
+
+        _on_broadcast_done(555, task)
+        assert 555 not in _running
+
+    def test_broadcaster_on_broadcast_done_with_exception(self):
+        from services.broadcaster import _on_broadcast_done, _running
+        import logging
+
+        _running.clear()
+        _running[666] = MagicMock()
+
+        task = MagicMock()
+        task.cancelled.return_value = False
+        task.exception.return_value = RuntimeError("boom")
+
+        with patch("services.broadcaster.logger") as mock_log:
+            _on_broadcast_done(666, task)
+            mock_log.error.assert_called_once()
+
+        assert 666 not in _running
+
+    def test_proxy_selector_caching(self):
+        from services.cache import proxy_cache
+
+        proxy_cache.clear()
+        proxy_cache.set("proxy:1.2.3.4", {"score": 0.85, "status": "good"})
+        result = proxy_cache.get("proxy:1.2.3.4")
+        assert result is not None
+        assert result["score"] == 0.85
+        assert result["status"] == "good"
+        proxy_cache.clear()
+
+    def test_proxy_selector_caching_miss(self):
+        from services.cache import proxy_cache
+
+        proxy_cache.clear()
+        assert proxy_cache.get("nonexistent_proxy_key") is None
+        proxy_cache.clear()
+
+
+# ── Broadcaster Security tests ────────────────────────────────────────────────
+
+class TestBroadcasterSecurity:
+    """Tests for broadcaster input validation and access checks."""
+
+    def test_broadcaster_input_validation_sql_suspicious(self):
+        from services.security import check_sql_suspicious
+
+        assert check_sql_suspicious("Hello World") is False
+        assert check_sql_suspicious("'; DROP TABLE users; --") is True
+        assert check_sql_suspicious("1' OR '1'='1") is True
+        assert check_sql_suspicious("UNION SELECT * FROM users") is True
+        assert check_sql_suspicious("") is False
+        assert check_sql_suspicious("Привет мир") is False
+
+    def test_broadcaster_input_validation_string(self):
+        from services.security import validate_string
+
+        assert validate_string("Hello") == "Hello"
+        assert validate_string(None) is None
+        assert validate_string("") is None
+        assert validate_string("  trimmed  ") == "trimmed"
+        assert validate_string("x" * 2000, max_len=100) == "x" * 100
+        assert validate_string("", required=False) == ""
+
+    def test_broadcaster_input_validation_sanitize(self):
+        from services.security import sanitize_input
+
+        assert "<script>" not in sanitize_input('<script>alert("xss")</script>')
+        assert sanitize_input(None) == ""
+        assert sanitize_input("hello   world") == "hello world"
+
+    def test_broadcaster_input_validation_escape_html(self):
+        from services.security import escape_html
+
+        result = escape_html('<b>bold</b>')
+        assert "&lt;b&gt;" in result
+        assert "&lt;/b&gt;" in result
+        assert escape_html("normal text") == "normal text"
+
+    @pytest.mark.asyncio
+    async def test_broadcaster_access_check_not_found(self):
+        from services.broadcaster import get_broadcast_analytics
+        pool = FakePool(fetch_row=None, fetch_rows=[])
+        result = await get_broadcast_analytics(pool, 123, 999)
+        assert result["ok"] is False
+        assert "not found" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_broadcaster_access_check_wrong_owner(self):
+        from services.broadcaster import get_broadcast_analytics
+        pool = FakePool(fetch_row=None, fetch_rows=[])
+        result = await get_broadcast_analytics(pool, 999, 1)
+        assert result["ok"] is False
+
+    @pytest.mark.asyncio
+    async def test_broadcaster_access_check_authorized(self):
+        from services.broadcaster import get_broadcast_analytics
+        now = datetime.now(timezone.utc)
+        bc_row = {
+            "id": 1, "bot_id": 10, "message_text": "Test",
+            "status": "done", "sent_count": 100, "failed_count": 5,
+            "total_users": 105, "created_at": now, "buttons": None,
+            "silent": False, "bot_username": "testbot",
+        }
+        delivery_log = [{"user_id": 1, "sent_at": now}]
+        pool = FakePool(fetch_row=bc_row, fetch_rows=delivery_log)
+        result = await get_broadcast_analytics(pool, 123, 1)
+        assert result["ok"] is True
+        assert result["broadcast_id"] == 1
+        assert result["sent_count"] == 100
+        assert result["failed_count"] == 5
+        assert result["delivery_rate_pct"] == 95.2
+
+
+# ── Proxy Selector Security tests ─────────────────────────────────────────────
+
+class TestProxySelectorSecurity:
+    """Tests for proxy_selector URL validation and SSRF protection."""
+
+    def test_proxy_selector_url_validation_valid(self):
+        from services.security import validate_url
+
+        assert validate_url("https://proxy.example.com:1080") is True
+        assert validate_url("https://1.2.3.4:8080") is True
+
+    def test_proxy_selector_url_validation_http_rejected(self):
+        from services.security import validate_url
+
+        assert validate_url("http://proxy.example.com:1080") is False
+
+    def test_proxy_selector_url_validation_localhost_rejected(self):
+        from services.security import validate_url
+
+        assert validate_url("https://localhost:1080") is False
+        assert validate_url("https://0.0.0.0:1080") is False
+
+    def test_proxy_selector_url_validation_empty(self):
+        from services.security import validate_url
+
+        assert validate_url("") is False
+        assert validate_url(None) is False
+
+    def test_proxy_selector_ssrf_protection_valid(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://example.com/avatar.jpg") is True
+        assert is_safe_public_url("https://cdn.telegram.org/x.png") is True
+
+    def test_proxy_selector_ssrf_protection_http(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("http://example.com/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_localhost(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://localhost/a.jpg") is False
+        assert is_safe_public_url("https://127.0.0.1/a.jpg") is False
+        assert is_safe_public_url("https://0.0.0.0/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_private_ranges(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://10.0.0.5/a.jpg") is False
+        assert is_safe_public_url("https://192.168.1.1/a.jpg") is False
+        assert is_safe_public_url("https://172.16.0.1/a.jpg") is False
+        assert is_safe_public_url("https://172.31.255.1/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_internal_tlds(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://service.internal/a.jpg") is False
+        assert is_safe_public_url("https://box.local/a.jpg") is False
+
+    def test_proxy_selector_ssrf_protection_garbage(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("") is False
+        assert is_safe_public_url(None) is False
+        assert is_safe_public_url("not a url") is False
+
+    def test_proxy_selector_ssrf_protection_public_172(self):
+        from services.mini_app_api import is_safe_public_url
+
+        assert is_safe_public_url("https://172.15.0.1/a.jpg") is True
+        assert is_safe_public_url("https://172.32.0.1/a.jpg") is True
+
+    def test_proxy_selector_ip_diversity_valid(self):
+        from services.proxy_selector import validate_ip_diversity
+
+        with patch("services.proxy_selector.extract_ip_from_proxy", side_effect=lambda u: "1.2.3.4" if "1.2.3.4" in (u or "") else "5.6.7.8"):
+            accounts = [
+                {"id": 1, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 2, "proxy_url": "socks5://u:p@5.6.7.8:1080"},
+            ]
+            result = validate_ip_diversity(accounts, max_per_ip=1)
+            assert result["valid"] is True
+            assert len(result["warnings"]) == 0
+
+    def test_proxy_selector_ip_diversity_violation(self):
+        from services.proxy_selector import validate_ip_diversity
+
+        with patch("services.proxy_selector.extract_ip_from_proxy", side_effect=lambda u: "1.2.3.4"):
+            accounts = [
+                {"id": 1, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 2, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 3, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+                {"id": 4, "proxy_url": "socks5://u:p@1.2.3.4:1080"},
+            ]
+            result = validate_ip_diversity(accounts, max_per_ip=3)
+            assert result["valid"] is False
+            assert len(result["warnings"]) == 1
+
+    def test_proxy_selector_is_datacenter_ip(self):
+        from services.proxy_selector import is_datacenter_ip
+
+        is_dc, provider = is_datacenter_ip("52.10.0.1")
+        assert is_dc is True
+        assert provider == "AWS"
+
+        is_dc, _ = is_datacenter_ip("8.8.8.8")
+        assert is_dc is False
+
+    def test_proxy_selector_is_datacenter_ip_invalid(self):
+        from services.proxy_selector import is_datacenter_ip
+
+        is_dc, provider = is_datacenter_ip("not-an-ip")
+        assert is_dc is False
+        assert provider == ""
+
+    def test_proxy_selector_extract_ip_from_proxy(self):
+        from services.proxy_selector import extract_ip_from_proxy
+
+        with patch("services.token_vault.decrypt_token", side_effect=lambda t: t):
+            result = extract_ip_from_proxy("socks5://user:pass@1.2.3.4:1080")
+            assert result == "1.2.3.4"
+
+    def test_proxy_selector_extract_ip_from_proxy_empty(self):
+        from services.proxy_selector import extract_ip_from_proxy
+
+        assert extract_ip_from_proxy("") is None
+        assert extract_ip_from_proxy(None) is None
