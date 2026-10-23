@@ -235,3 +235,53 @@ def test_no_handler_swallows_a_broken_body_as_a_server_fault():
         "`bad_body_response`: битое или пустое тело снова будет показано "
         "владельцу как поломка сервера, с неверным советом повторить:\n  "
         + "\n  ".join(bad))
+
+
+# ── Сообщение обязано доходить до глаз владельца ────────────────────────────
+
+def test_the_message_survives_the_whole_way_to_the_screen():
+    """Русский текст с сервера обязан дойти до экрана, а не быть заменён.
+
+    Сообщение проходит три звена, и каждое может его молча потерять: сервер
+    кладёт текст под СВОИМ ключом, `api()` читает из ОПРЕДЕЛЁННЫХ ключей, а
+    `errRu` подменяет всё, в чём нет кириллицы, общей фразой «Что-то пошло не
+    так, попробуйте ещё раз». Разойдись ключи — и вся работа этого файла
+    выродится в ту же самую общую фразу, причём незаметно: ответ по-прежнему
+    400, в тестах сервера всё зелено, а владелец читает прежний неверный
+    совет. Поэтому звенья сверяются здесь, а `errRu` не грепается, а
+    ПРОГОНЯЕТСЯ в node.
+    """
+    import json
+    import pathlib
+    import re
+    import subprocess
+
+    from tests.miniapp_source import api_function, js_functions
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    server = api_function("_err")
+    key = re.search(r"body\s*=\s*\{\s*[\"'](\w+)[\"']\s*:", server)
+    assert key, "в `_err` больше не видно ключа, под которым уходит текст"
+
+    ui = (root / "mini_app" / "index.html").read_text(encoding="utf-8")
+    reads = re.search(r"msg\s*=\s*((?:_j\.\w+\s*\|\|\s*)+_j\.\w+)", ui)
+    assert reads, "в `api()` больше не видно, из каких ключей читается текст"
+    assert key.group(1) in reads.group(1), (
+        f"сервер кладёт текст под ключом {key.group(1)!r}, а приложение читает "
+        f"из {reads.group(1)!r}: сообщение потеряется, и владелец увидит общую "
+        "фразу вместо объяснения")
+
+    # И последнее звено: кириллица обязана проходить как есть.
+    script = js_functions()["errRu"] + """
+console.log(JSON.stringify({
+  ru: errRu(new Error('Запрос не разобран: приложение отправило неполные данные.')),
+  en: errRu(new Error("Cannot read properties of undefined")),
+}));
+"""
+    out = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert "Запрос не разобран" in got["ru"], (
+        f"русское сообщение сервера подменено: {got['ru']!r}")
+    assert "Cannot read" not in got["en"], (
+        "английский текст исключения показывается владельцу как есть")
