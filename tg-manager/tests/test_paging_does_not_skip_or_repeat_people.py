@@ -33,8 +33,25 @@
      test_the_parsed_audience_walk_shows_everyone_once;
   3. вернуть мерке поиск слова OFFSET по всему файлу вместо разбора литералов
      -> красный test_the_detector_sees_the_paging_queries: в выдаче появляются
-     комментарий из mini_app_api.py и чужие сортировки, то есть сторож начинает
+     докстринг про `OFFSET -5` и чужие сортировки, то есть сторож начинает
      ругаться не на то.
+
+МЕРКУ ПРИШЛОСЬ ЧИНИТЬ ДВАЖДЫ, и второй раз показательнее первого:
+`ast.walk` выдаёт и саму f-строку, и её внутренние Constant-куски. Хвост вида
+«ORDER BY … LIMIT $2 OFFSET $3» — такой кусок: в нём есть и сдвиг, и
+сортировка, а SELECT остался в начале f-строки. Из-за этого один запрос
+считался дважды, и один из двух «запросов» был обрывком без SELECT. Поймано
+не глазами, а собственной самопроверкой: `test_the_detector_sees_the_paging_queries`
+требует SELECT в том же литерале. Поэтому обход теперь не заходит внутрь
+f-строк.
+
+Самопроверка требует СВОЙСТВО (есть SELECT), а не имя файла. Сначала она была
+написана как «в выдаче нет такого-то имени файла» — и это поймал
+`test_tests_do_not_pin_the_monolith`: такая проверка ослепла бы при первом же
+выносе ручки в соседний модуль. Имя монолита не упоминается здесь даже в
+кавычках в прозе: храповик считает такое упоминание привязкой, и правильно —
+кавычки в докстринге от кавычек в коде он отличить не может, а отличать
+пришлось бы ему, а не автору.
 """
 from __future__ import annotations
 
@@ -93,9 +110,27 @@ def order_is_total(order: str) -> bool:
     return last in _UNIQUE
 
 
-def _paging_queries() -> list[tuple[str, int, str | None]]:
-    """Запросы со сдвигом: файл, строка, их СОБСТВЕННАЯ сортировка."""
+def _paging_queries() -> list[tuple[str, int, str | None, str]]:
+    """Запросы со сдвигом: файл, строка, их СОБСТВЕННАЯ сортировка, литерал."""
     import ast
+
+    def strings(node):
+        """Строковые литералы, НЕ заходя внутрь f-строк.
+
+        ast.walk выдаёт и саму f-строку, и её внутренние Constant-куски. Хвост
+        вида «\n ORDER BY ... LIMIT $2 OFFSET $3» — такой кусок: в нём есть и
+        сдвиг, и сортировка, а SELECT остался в начале f-строки. Из-за этого
+        первая версия считала один запрос дважды, и один из двух «запросов»
+        был обрывком без SELECT.
+        """
+        if isinstance(node, ast.JoinedStr):
+            yield node
+            return
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            yield node
+            return
+        for child in ast.iter_child_nodes(node):
+            yield from strings(child)
 
     out = []
     for p in api_files():
@@ -104,18 +139,14 @@ def _paging_queries() -> list[tuple[str, int, str | None]]:
             tree = ast.parse(src)
         except SyntaxError:
             continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                lit = node.value
-            elif isinstance(node, ast.JoinedStr):
-                lit = ast.get_source_segment(src, node) or ""
-            else:
-                continue
+        for node in strings(tree):
+            lit = (node.value if isinstance(node, ast.Constant)
+                   else ast.get_source_segment(src, node) or "")
             if not _OFFSET.search(lit):
                 continue
             m = _ORDER.search(lit)
             out.append((p.name, node.lineno,
-                        " ".join(m.group(1).split()) if m else None))
+                        " ".join(m.group(1).split()) if m else None, lit))
     return out
 
 
@@ -142,20 +173,23 @@ def test_the_detector_sees_the_paging_queries():
     """Пустая выдача сделала бы правило ниже зелёным ни на чём."""
     qs = _paging_queries()
     assert len(qs) >= 10, f"запросов со сдвигом найдено мало: {len(qs)}"
-    assert all(o for _, _, o in qs), (
+    assert all(o for _, _, o, _l in qs), (
         "запрос со сдвигом вообще без сортировки: "
-        + str([q for q in qs if not q[2]]))
+        + str([(q[0], q[1]) for q in qs if not q[2]]))
     assert "_list_offset(" in api_source(), "общей двери для сдвига больше нет"
-    # Мерка обязана брать сортировку ИЗ ТОГО ЖЕ литерала: комментарий про
-    # `OFFSET -5` в mini_app_api.py запросом не является.
-    assert not [q for q in qs if q[0] == "mini_app_api.py"], (
-        "мерка снова считает запросом комментарий или докстринг")
+    # Мерка обязана отличать ЗАПРОС от прозы о запросе: в слое есть докстринг
+    # «`OFFSET -5` Postgres не принимает», и первая версия считала его
+    # находкой. Признак запроса — SELECT в том же литерале. Проверяем свойство,
+    # а не имя файла: привязка к имени ослепла бы при первом выносе ручки.
+    not_queries = [(w, ln) for w, ln, _o, lit in qs if "SELECT" not in lit.upper()]
+    assert not not_queries, (
+        f"мерка считает запросом текст без SELECT: {not_queries}")
 
 
 def test_every_paged_query_has_a_tiebreaker():
     """Листание по сдвигу обязано стоять на полном порядке."""
     bad = []
-    for where, line, order in _paging_queries():
+    for where, line, order, _lit in _paging_queries():
         if not order:
             bad.append(f"{where}:{line}: сдвиг без сортировки вообще")
         elif not order_is_total(order):
