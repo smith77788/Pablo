@@ -8433,6 +8433,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неизвестный сегмент", 400)
         limit = _list_limit(request, 100, 500)
         rows = await _aa.segment_members(pool, uid, key, limit)
+        # Экран существует, чтобы забрать номера сегмента для рассылки. Без
+        # полного числа и список, и кнопка «Скопировать номера» молчали о
+        # потолке: в буфер уезжала первая сотня из тысячи с лишним.
+        total = await _aa.segment_member_count(pool, uid, key)
         ids = [int(r["user_id"]) for r in rows if r.get("user_id") is not None]
         names: dict[int, dict] = {}
         if ids:
@@ -8459,7 +8463,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "last_seen": r["last_seen"].isoformat() if r.get("last_seen") else None,
             })
         return _json_resp({"key": key, "name": _aa.SEGMENT_NAMES.get(key, key),
-                           "items": items, "shown": len(items)})
+                           "items": items, "shown": len(items),
+                           "total": total, "limit": limit})
 
 
 

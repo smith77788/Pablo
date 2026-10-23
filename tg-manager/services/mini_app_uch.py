@@ -1806,12 +1806,18 @@ def setup_routes(app: web.Application, pool) -> None:
         limit = _list_limit(request, default=50, maximum=200)
         try:
             from services.contacts_hub.relationship_engine import (
-                RELATIONSHIP_TYPES, get_pairs_by_type)
+                RELATIONSHIP_TYPES, count_pairs_by_type, get_pairs_by_type)
             pairs = await get_pairs_by_type(pool, uid, rel_type, limit)
+            # Предыдущий экран показал число связей этого типа. Если список
+            # обрезан потолком, экран обязан сказать это сам, иначе число и
+            # список противоречат друг другу молча.
+            total = await count_pairs_by_type(pool, uid, rel_type)
             return _json_resp({
                 'type': rel_type,
                 'type_label': RELATIONSHIP_TYPES.get(rel_type, rel_type),
                 'pairs': pairs,
+                'total': total,
+                'limit': limit,
             })
         except Exception:
             log.exception("uch_graph_pairs")

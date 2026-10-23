@@ -19485,6 +19485,9 @@ async function openUchGraphType(relType) {
     let html = `<div style="padding:12px 16px">
       <div class="hint" style="margin-bottom:10px">${esc(uchRelHint(relType)||uchRelRu(relType))}. Нажмите на имя — откроется карточка контакта.</div>`;
     pairs.forEach(r=>{ html += _uchPairRow(r); });
+    // Предыдущий экран назвал число связей этого типа. Список приезжает с
+    // потолком, и без этой строки экран противоречил бы тому числу молча.
+    html += anCap(pairs.length, d.total, 'пара', 'пары', 'пар');
     html += '</div>';
     txt('grtBody', html);
   } catch(e) { txt('grtBody', errHtml(errRu(e), `openUchGraphType('${relType}')`)); }
@@ -21203,6 +21206,10 @@ async function openGhostDetail(id) {
           <div class="li-sub wrap">${esc(l.result_ru||l.result||'')}${l.target?' · '+esc(String(l.target)):''}${l.error_msg?' · '+esc(String(l.error_msg).slice(0,120)):''} · ${ago(l.executed_at)}</div>
         </div></div>`;
       }).join('') + '</div>';
+      // Журнал приезжает последними тридцатью. Без этой строки владелец,
+      // который открыл экран проверить, на чём призрак спотыкается, принимал
+      // тридцать записей за весь журнал.
+      h += anCap(logs.length, d.log_total, 'запись', 'записи', 'записей');
     }
     h += `<div style="padding:12px 0"><button class="btn btn-d" style="width:100%" onclick="deleteGhost(${id}, this)">🗑 Удалить профиль</button></div></div>`;
     txt('ghdBody', h);
@@ -26277,11 +26284,22 @@ function _meshWhen(iso) {
 
 // Очередь репостов (mesh_queue) с самого начала хранит, что ушло, что ждёт и
 // что упало с текстом ошибки. Экран показывал из этого одно число.
-async function openMeshDetail(meshId) {
+// Чипы «ждут · ушли · с ошибкой» считали всю очередь, а список под ними был
+// последними тридцатью записями по времени: при сорока восьми ошибках среди
+// тысяч отправок в списке не было ни одной, и узнать, почему репост не дошёл,
+// было негде. Поэтому чип стал дверью в срез очереди, а список говорит, сколько
+// в срезе всего.
+async function openMeshDetail(meshId, status) {
   push('s-meshdetail');
+  loadMeshDetail(meshId, status);
+}
+
+async function loadMeshDetail(meshId, status) {
+  const st = ['pending','sent','error'].includes(status) ? status : '';
   txt('mdBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api(`/api/miniapp/content_mesh/${meshId}`);
+    const d = await api(`/api/miniapp/content_mesh/${meshId}`
+      + (st ? '?status=' + encodeURIComponent(st) : ''));
     const m = d.mesh||{};
     const q = d.queue||{};
     const targets = d.targets||[];
@@ -26293,9 +26311,9 @@ async function openMeshDetail(meshId) {
         <div class="li-sub wrap">Источник ${esc(m.source_channel||'не указан')} · задержка ${m.delay_minutes} ${plural(m.delay_minutes,'минута','минуты','минут')}${m.append_text?' · подпись «'+esc(String(m.append_text).slice(0,60))+'»':''}</div>
       </div></div>
       <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(q.pending||0)}</div><div class="kpi-chip-lbl">ждут</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(q.sent||0)}</div><div class="kpi-chip-lbl">ушли</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val" style="color:${(q.error||0)?'var(--red)':'inherit'}">${num(q.error||0)}</div><div class="kpi-chip-lbl">с ошибкой</div></div>
+        ${_meshChip(meshId, st, 'pending', q.pending||0, 'ждут', '')}
+        ${_meshChip(meshId, st, 'sent', q.sent||0, 'ушли', '')}
+        ${_meshChip(meshId, st, 'error', q.error||0, 'с ошибкой', (q.error||0)?'var(--red)':'')}
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button class="btn ${m.enabled?'btn-s':'btn-p'}" style="flex:1" onclick="toggleMeshFrom(${meshId})">${m.enabled?'⏸ Выключить':'▶️ Включить'}</button>
@@ -26318,21 +26336,36 @@ async function openMeshDetail(meshId) {
         </div></div>`).join('') + '</div>';
       h += `<div style="padding:8px 0"><button class="btn btn-s" style="width:100%" onclick="openMeshTargets(${meshId},'${esc(String(m.name||'').replace(/'/g,''))}')">+ Добавить канал-получатель</button></div>`;
     }
-    h += '<div class="sec" style="margin-top:8px">Последние репосты</div>';
+    h += `<div class="sec" style="margin-top:8px">${st?esc(MESH_Q_RU[st]||st)+' — записи очереди':'Последние репосты'}${
+      st?` · <span style="color:var(--accent);cursor:pointer" onclick="loadMeshDetail(${meshId})" role="button" tabindex="0">показать все</span>`:''}</div>`;
     if (!recent.length) {
-      h += empty('🕐','Репостов ещё не было',
-        m.enabled ? 'Сеть ждёт новый пост в источнике — как появится, он встанет в очередь.'
-                  : 'Сеть выключена, поэтому ничего не репостится.');
+      h += st
+        ? empty('🕐','В этом срезе записей нет',
+            'Нажмите «показать все» — и список снова покажет всю очередь.')
+        : empty('🕐','Репостов ещё не было',
+            m.enabled ? 'Сеть ждёт новый пост в источнике — как появится, он встанет в очередь.'
+                      : 'Сеть выключена, поэтому ничего не репостится.');
     } else {
       h += '<div class="lst">' + recent.map(r=>`
         <div class="li"><div class="li-body">
           <div class="li-name">${esc(MESH_Q_RU[r.status]||r.status)} → ${esc(r.target_channel||'канал удалён')}</div>
           <div class="li-sub wrap">Пост №${r.source_msg_id}${r.error_msg?' · '+esc(String(r.error_msg).slice(0,120)):''} · ${r.status==='pending'?_meshWhen(r.scheduled_at):ago(r.sent_at||r.scheduled_at)}</div>
         </div></div>`).join('') + '</div>';
+      h += anCap(recent.length, d.recent_total, 'запись', 'записи', 'записей');
     }
     h += `<div style="padding:12px 0"><button class="btn btn-d" style="width:100%" onclick="deleteMesh(${meshId}, this)">🗑 Удалить сеть</button></div></div>`;
     txt('mdBody', h);
-  } catch(e) { txt('mdBody', errHtml(errRu(e), `openMeshDetail(${Number(meshId)})`)); }
+  } catch(e) { txt('mdBody', errHtml(errRu(e), `loadMeshDetail(${Number(meshId)},'${st}')`)); }
+}
+
+// Чип очереди — дверь в срез по состоянию. Нажатый чип подсвечен и ведёт
+// обратно ко всей очереди, иначе из среза было бы не выйти.
+function _meshChip(meshId, cur, key, val, label, color) {
+  const on = cur === key;
+  return `<div class="kpi-chip" style="cursor:pointer${on?';outline:2px solid var(--accent)':''}" role="button" tabindex="0"
+    onclick="loadMeshDetail(${meshId}${on?'':`,'${key}'`})">
+    <div class="kpi-chip-val"${color?` style="color:${color}"`:''}>${num(val)}</div>
+    <div class="kpi-chip-lbl">${label}${on?' ·':''}</div></div>`;
 }
 
 async function toggleMeshFrom(meshId) {
@@ -28947,21 +28980,44 @@ function renderAudSegments(segments) {
 let _AUDSEG_ROWS = [];
 // Кто в сегменте: имя, сколько писал и когда был последний раз. Номера можно
 // забрать целиком — «1 240 спящих» нужны не для любования, а для рассылки.
+// Экран сегмента нужен, чтобы забрать людей сегмента: посмотреть, кто это, и
+// скопировать номера для рассылки. Сервер отдаёт первую сотню, а сегмент
+// «Спящие» — это тысяча двести человек. Ни список, ни кнопка «Скопировать
+// номера (100)» об этом не говорили: владелец уносил в буфере восемь процентов
+// сегмента и считал, что унёс сегмент. Отсюда и запрошенный потолок, и строка
+// об обрезке, и возможность догрузить до пятисот.
+let _AUDSEG = null;
 async function openAudSegment(i) {
   const seg = _AUD_SEGMENTS[i];
   if (!seg || !seg.key) return;
   push('s-audseg');
   txt('audseg-title', seg.name||'');
+  _AUDSEG = {key: seg.key, name: seg.name||''};
+  loadAudSegment(100);
+}
+
+async function loadAudSegment(limit) {
+  if (!_AUDSEG) return;
+  const cap = Math.max(1, Math.min(Number(limit)||100, 500));
   txt('audsegBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/audience_analytics/segment?key='+encodeURIComponent(seg.key));
+    const d = await api('/api/miniapp/audience_analytics/segment?key='
+      + encodeURIComponent(_AUDSEG.key) + '&limit=' + cap);
     _AUDSEG_ROWS = d.items||[];
+    _AUDSEG_TOTAL = Number(d.total||_AUDSEG_ROWS.length);
     if (!_AUDSEG_ROWS.length) {
       txt('audsegBody', empty('👥','В сегменте пусто',
         'Записанной активности по этим подписчикам нет'));
       return;
     }
-    txt('audsegBody',
+    let note = anCap(_AUDSEG_ROWS.length, _AUDSEG_TOTAL,
+                     'человек', 'человека', 'человек');
+    if (_AUDSEG_TOTAL > _AUDSEG_ROWS.length) {
+      note += cap < 500
+        ? `<button class="btn btn-s" style="width:100%;margin:0 0 8px" onclick="loadAudSegment(500)">⬇️ Догрузить до 500</button>`
+        : `<div class="lst-more-note">Больше 500 человек за раз экран не отдаёт. Сузьте сегмент по боту или берите номера рассылкой по сегменту.</div>`;
+    }
+    txt('audsegBody', note +
       `<div class="lst">` + _AUDSEG_ROWS.map(r=>{
         const who = r.name ? esc(r.name)+(r.username?' · @'+esc(r.username):'')
                   : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(String(r.user_id)));
@@ -28971,13 +29027,17 @@ async function openAudSegment(i) {
               r.last_seen?' · был(а) '+esc(ago(r.last_seen)):' · активности не было'}</div></div>
           <span class="chev">›</span></div>`;
       }).join('') + `</div>`
-      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="audSegCopyIds()">📋 Скопировать номера (${num(_AUDSEG_ROWS.length)})</button>`);
-  } catch(e) { txt('audsegBody', errHtml(errRu(e),'openAudSegment('+i+')')); }
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="audSegCopyIds()">📋 Скопировать номера (${num(_AUDSEG_ROWS.length)}${
+          _AUDSEG_TOTAL > _AUDSEG_ROWS.length ? ' из ' + num(_AUDSEG_TOTAL) : ''})</button>`);
+  } catch(e) { txt('audsegBody', errHtml(errRu(e),'loadAudSegment('+cap+')')); }
 }
+let _AUDSEG_TOTAL = 0;
 function audSegCopyIds() {
   if (!_AUDSEG_ROWS.length) return;
+  const partial = _AUDSEG_TOTAL > _AUDSEG_ROWS.length
+    ? ' из ' + _AUDSEG_TOTAL + ' — остальные не загружены' : '';
   copyToClipboard(_AUDSEG_ROWS.map(r=>String(r.user_id)).join('\n'),
-    '📋 Скопировано номеров: ' + _AUDSEG_ROWS.length);
+    '📋 Скопировано номеров: ' + _AUDSEG_ROWS.length + partial);
 }
 function renderAudInsights(insights) {
   if (!insights.length) {

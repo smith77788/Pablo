@@ -208,3 +208,22 @@ async def get_pairs_by_type(pool, owner_id: int, rel_type: str,
         d['metadata'] = meta or {}
         out.append(d)
     return out
+
+
+async def count_pairs_by_type(pool, owner_id: int, rel_type: str) -> int:
+    """Сколько всего пар этого типа — то же условие, что и у выборки.
+
+    Экран графа показывает «Совпадение телефона — 420 связей», по нажатию
+    открывается список из пятидесяти пар, и ни слова о том, что остальные
+    триста семьдесят просто не приехали. Число берётся тем же условием, с
+    теми же соединениями по владельцу, иначе итог разошёлся бы со списком:
+    пара, у которой одна сторона принадлежит другому владельцу, в список не
+    попадает и в итоге считаться не должна.
+    """
+    n = await pool.fetchval(
+        '''SELECT COUNT(*) FROM contact_relationships r
+           JOIN unified_contacts uc1 ON uc1.id = r.contact_a_id AND uc1.owner_id = $1
+           JOIN unified_contacts uc2 ON uc2.id = r.contact_b_id AND uc2.owner_id = $1
+           WHERE r.owner_id = $1 AND r.relationship_type = $2''',
+        owner_id, rel_type)
+    return int(n or 0)

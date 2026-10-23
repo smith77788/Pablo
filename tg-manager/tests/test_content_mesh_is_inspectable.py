@@ -87,15 +87,19 @@ def test_mesh_row_opens_a_card():
     assert 'id="s-meshdetail"' in HTML
 
 
+# Рисует карточку теперь loadMeshDetail: openMeshDetail остался дверью
+# (push + загрузка), потому что чип очереди перезагружает УЖЕ открытый экран
+# срезом по состоянию, а не открывает его заново. Проверки содержимого
+# смотрят на рисующую функцию, проверка двери — на зовущий список.
 def test_card_shows_queue_and_errors():
-    body = _fn("openMeshDetail")
+    body = _fn("loadMeshDetail")
     assert "d.queue" in body and "d.recent" in body, "очередь и история не показаны"
     assert "error_msg" in body, "причина ошибки не выводится"
     assert "MESH_Q_RU" in body, "статусы очереди уходят на экран по-английски"
 
 
 def test_card_can_edit_pause_and_delete():
-    body = _fn("openMeshDetail")
+    body = _fn("loadMeshDetail")
     for call in ("editMesh(", "toggleMeshFrom(", "deleteMesh(", "toggleMeshTarget("):
         assert call in body, f"на карточке нет действия: {call}"
     assert "async function deleteMesh(" in HTML
@@ -106,7 +110,7 @@ def test_a_mesh_without_targets_says_so():
     lst = _fn("openContentMesh")
     assert "без получателей сеть ничего не делает" in lst, \
         "сеть без целей выглядит рабочей"
-    card = _fn("openMeshDetail")
+    card = _fn("loadMeshDetail")
     assert "читает источник впустую" in card
 
 
@@ -117,6 +121,6 @@ def test_russian_labels():
 
 
 def test_errors_offer_a_retry():
-    for name in ("openContentMesh", "openMeshDetail", "loadMeshTargets"):
+    for name in ("openContentMesh", "loadMeshDetail", "loadMeshTargets"):
         assert re.search(r"errHtml\(errRu\(e\)\s*,", _fn(name)), \
             f"{name}: ошибка без «Повторить»"

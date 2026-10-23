@@ -147,11 +147,18 @@ def setup_routes(app: web.Application, pool) -> None:
             today = await _safe_count(pool,
                 "SELECT COUNT(*) FROM ghost_action_log WHERE ghost_profile_id=$1 "
                 "AND result='ok' AND executed_at >= date_trunc('day', now())", profile_id)
+            limit = _list_limit(request, 30, 200)
             logs = await _safe_fetch(pool,
                 """SELECT action_type, target, result, error_msg, executed_at
                      FROM ghost_action_log WHERE ghost_profile_id=$1
                     ORDER BY executed_at DESC LIMIT $2""",
-                profile_id, _list_limit(request, 30, 200))
+                profile_id, limit)
+            # Журнал приезжает последними тридцатью записями. Владелец открывает
+            # его, чтобы проверить, работает ли призрак и на чём спотыкается, —
+            # значит экран обязан сказать, что видит не весь журнал.
+            log_total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM ghost_action_log WHERE ghost_profile_id=$1",
+                profile_id)
             prof = dict(row)
             for key in ("created_at", "updated_at"):
                 if prof.get(key):
@@ -159,6 +166,8 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({
                 "profile": prof,
                 "today_actions": int(today or 0),
+                "log_total": int(log_total or 0),
+                "limit": limit,
                 "log": [{
                     "action_type": r["action_type"],
                     "action_ru": _GHOST_ACTION_RU.get(r["action_type"], r["action_type"]),

@@ -191,14 +191,25 @@ def setup_routes(app: web.Application, pool) -> None:
             counts = await _safe_fetch(pool,
                 "SELECT status, COUNT(*) AS cnt FROM mesh_queue WHERE mesh_id=$1 "
                 "GROUP BY status", mesh_id)
+            # Чипы над списком считают ВСЮ очередь («с ошибкой 48»), а список
+            # приезжал последними тридцатью записями по времени — те сорок
+            # восемь ошибок могли не попасть в него ни одной. Отсюда срез по
+            # состоянию (чип стал нажимаемым) и настоящий итог среза.
+            status = (request.query.get("status") or "").strip().lower()
+            if status not in ("pending", "sent", "error"):
+                status = ""
+            limit = _list_limit(request, 30, 200)
             recent = await _safe_fetch(pool,
                 """SELECT q.id, q.source_msg_id, q.status, q.scheduled_at, q.sent_at,
                           q.error_msg, t.target_channel
                      FROM mesh_queue q
                      LEFT JOIN mesh_targets t ON t.id = q.target_id
-                    WHERE q.mesh_id=$1
+                    WHERE q.mesh_id=$1 AND ($3::text IS NULL OR q.status=$3)
                  ORDER BY COALESCE(q.sent_at, q.scheduled_at) DESC LIMIT $2""",
-                mesh_id, _list_limit(request, 30, 200))
+                mesh_id, limit, status or None)
+            recent_total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM mesh_queue WHERE mesh_id=$1 "
+                "AND ($2::text IS NULL OR status=$2)", mesh_id, status or None)
             m = dict(mesh)
             for key in ("created_at", "updated_at"):
                 if m.get(key):
@@ -207,6 +218,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 "mesh": m,
                 "targets": [dict(t) for t in (targets or [])],
                 "queue": {r["status"]: int(r["cnt"]) for r in (counts or [])},
+                "recent_total": int(recent_total or 0),
+                "status": status,
+                "limit": limit,
                 "recent": [{
                     "id": r["id"], "source_msg_id": r["source_msg_id"],
                     "status": r["status"], "target_channel": r["target_channel"],
