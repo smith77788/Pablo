@@ -16881,9 +16881,19 @@ async def _exec_contacts_sync(
     try:
         res = await asyncio.wait_for(sync_all_accounts(pool, owner_id), timeout=1200)
     except asyncio.TimeoutError:
-        await _safe_execute(
-            pool, "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id)
-        return {"status": "done", "ok": 0, "failed": 0,
+        # 'partial', а не 'done'. Работа была, но не доведена — ровно для этого
+        # случая существует отдельный терминальный статус (см. его разбор выше).
+        # С 'done' синхронизация стояла в списке операций как успешная, и о
+        # срыве владелец узнавал только если открывал текст итога; всё, что
+        # считает неудачи по статусу (сводки, здоровье, разбор «что не доехало»),
+        # срыва не видело вовсе. Прогресс тоже больше не дописывается до конца:
+        # до конца он не дошёл, а N из N — это обещание, которого не было.
+        log.warning(
+            "contacts_sync op=%d owner=%s: прервана по таймауту (20 мин) — "
+            "часть контактов сохранена, операция закрывается как неполная",
+            op_id, owner_id)
+        _reliability_metric("infragram_op_timeouts_total", op_type="contacts_sync")
+        return {"status": "partial", "ok": 0, "failed": 0,
                 "summary": "⏳ Синхронизация прервана по таймауту (20 мин) — часть "
                            "контактов сохранена. Запустите ещё раз, чтобы дособрать."}
     synced = int(res.get("total_synced", 0) or 0)
