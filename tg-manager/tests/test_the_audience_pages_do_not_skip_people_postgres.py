@@ -138,34 +138,55 @@ def test_a_row_changing_between_pages_costs_nobody_their_invite(pool):
         f"аудитория вычитана до конца: {missing}")
 
 
-def test_the_bench_would_notice_a_degenerate_sort(pool):
-    """Проверка выше имеет смысл только если стенд ловит вырожденный ключ."""
+def test_paging_over_a_degenerate_key_loses_people(pool):
+    """Почему добивка обязательна: без неё СОРТИРОВКА НЕ ПОЛНАЯ.
+
+    Прежняя версия этой проверки правила строку между страницами и ждала, что
+    порядок поедет сам. На живой базе он едет не всегда: правка неиндексируемого
+    столбца часто проходит как HOT-обновление, строка остаётся на своём месте в
+    странице, и обход выходит ровным. Проверка от этого краснела в CI, хотя
+    чинить было нечего — то есть мерила удачу, а не свойство.
+
+    Свойство же простое и проверяется без фокусов с физическим размещением:
+    при равных ключах Postgres НЕ обещает порядок, поэтому любая перестановка
+    равных строк — законный ответ на тот же запрос. Берём две страницы в двух
+    законных порядках (это и значит «порядок не обещан») и смотрим, что обход
+    теряет людей. Вот от чего защищает добивочный ключ: он делает ответ
+    единственным, и выбирать плану становится нечего.
+    """
     _run(_seed(pool))
-    sql = ("SELECT id, tg_user_id FROM parsed_audiences "
-           "WHERE owner_id=$1 AND parse_run_id=555 ORDER BY parsed_at DESC ")
+    base = ("SELECT tg_user_id FROM parsed_audiences "
+            "WHERE owner_id=$1 AND parse_run_id=555 ORDER BY parsed_at DESC")
 
     async def _walk() -> list[int]:
         seen: list[int] = []
         offset = 0
-        while True:
-            rows = await pool.fetch(sql + f"LIMIT {_PAGE} OFFSET {offset}", OWNER)
+        # Законные порядки внутри равных значений: как их отдаст план, нам не
+        # известно, поэтому чередуем два возможных.
+        # Оба порядка законны, и ни один из них не «обратный» другому: взаимно
+        # обратные порядки на ровных страницах случайно складываются в полный
+        # обход, и проверка выходила зелёной, ничего не показав. Второй порядок
+        # — произвольная перестановка равных строк, устойчивая между прогонами
+        # (считается от tg_user_id, а не от id: id выдаёт последовательность, и
+        # он разный в каждом прогоне).
+        ties = (", tg_user_id ASC", ", (tg_user_id % 5), tg_user_id")
+        while offset < _ROWS:
+            rows = await pool.fetch(
+                base + ties[(offset // _PAGE) % 2] + f" LIMIT {_PAGE} OFFSET {offset}",
+                OWNER)
             if not rows:
                 break
             seen.extend(int(r["tg_user_id"]) for r in rows)
             offset += len(rows)
-            if rows:
-                await pool.execute(
-                    "UPDATE parsed_audiences SET first_name = first_name || 'x' "
-                    "WHERE id = $1", int(rows[0]["id"]))
-            if len(rows) < _PAGE:
-                break
         return seen
 
     seen = _run(_walk())
-    broke = (len(set(seen)) != _ROWS) or (len(seen) != _ROWS)
-    assert broke, (
-        "без добивочного ключа обход прошёл ровно — значит стенд не "
-        "воспроизводит сдвиг порядка, и проверка выше ничего не стережёт"
+    missing = sorted(set(range(1001, 1001 + _ROWS)) - set(seen))
+    dupes = sorted({x for x in seen if seen.count(x) > 1})
+    assert missing and dupes, (
+        "обход по вырожденному ключу прошёл ровно — значит стенд не "
+        f"воспроизводит разные законные порядки (пропущено {missing}, "
+        f"дважды {dupes})"
     )
 
 
