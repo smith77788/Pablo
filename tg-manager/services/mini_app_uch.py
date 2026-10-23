@@ -21,6 +21,12 @@ import time
 
 from aiohttp import web
 
+# id контакта — UUID. Проверяем форму ДО запроса: asyncpg биндит uuid без
+# каста, и одна некорректная строка в списке роняет весь запрос, то есть всю
+# выгрузку, а не одну строку.
+_UUID_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+                      r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+
 
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты хранилища контактов на приложении мини-аппа."""
@@ -63,31 +69,49 @@ def setup_routes(app: web.Application, pool) -> None:
     async def _alive_accounts(uid: int, wanted: list[int] | None = None) -> list[int]:
         return await alive_accounts(pool, uid, wanted)
 
-    async def uch_contacts(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        search = request.query.get('search', '')
-        tag = request.query.get('tag')
-        favorite = request.query.get('favorite') == '1'
-        premium = request.query.get('premium') == '1'
-        multi = request.query.get('multi') == '1'
-        mutual = request.query.get('mutual') == '1'
-        # Плитки «📱 Телефон» и «С ником» показывали числа, которые ни во что не
-        # открывались: срез существовал только в счётчике.
-        with_phone = request.query.get('with_phone') == '1'
-        with_username = request.query.get('with_username') == '1'
+    def _contact_filters(request: web.Request) -> dict:
+        """Фильтры списка контактов — ОДИН разбор на список и на экспорт.
+
+        Экспорт умел только «все контакты», хотя у хаба богатый фильтр: стадия,
+        тег, группа, аккаунт, пол, личные. Владелец, собравший нужный срез, не
+        мог выгрузить именно его. Если бы экспорт разбирал параметры своим
+        кодом, «вижу одно — выгружаю другое» появилось бы на первой же правке
+        фильтра, поэтому разбор здесь общий.
+        """
         gender = request.query.get('gender') or None       # 'm' | 'f' | 'unknown'
         if gender not in ('m', 'f', 'unknown'):
             gender = None
-        crm_stage = (request.query.get('crm_stage') or '').strip()[:40] or None
-        excluded_only = request.query.get('excluded_only') == '1'  # только личные (управление)
-        # Фильтр по группе контактов: репозиторий его умел, а список не читал,
-        # поэтому группы было некуда открыть.
-        group_id = validate_integer(request.query.get('group_id'), min_val=1)
-        # Фильтр «контакты этого аккаунта»: фронт его отправлял, репозиторий
-        # умел, а список не читал — экран обещал контакты одного аккаунта и
-        # показывал весь справочник (тот же класс, что срез «Прокси мёртв»).
-        account_id = validate_integer(request.query.get('account_id'), min_val=1)
+        return dict(
+            search=request.query.get('search', ''),
+            tag=request.query.get('tag'),
+            favorite_only=request.query.get('favorite') == '1',
+            premium_only=request.query.get('premium') == '1',
+            multi_only=request.query.get('multi') == '1',
+            mutual_only=request.query.get('mutual') == '1',
+            # Плитки «📱 Телефон» и «С ником» показывали числа, которые ни во
+            # что не открывались: срез существовал только в счётчике.
+            with_phone_only=request.query.get('with_phone') == '1',
+            with_username_only=request.query.get('with_username') == '1',
+            gender=gender,
+            crm_stage=(request.query.get('crm_stage') or '').strip()[:40] or None,
+            excluded_only=request.query.get('excluded_only') == '1',
+            # Фильтр по группе контактов: репозиторий его умел, а список не
+            # читал, поэтому группы было некуда открыть.
+            group_id=validate_integer(request.query.get('group_id'), min_val=1),
+            # Фильтр «контакты этого аккаунта»: фронт его отправлял, репозиторий
+            # умел, а список не читал — экран обещал контакты одного аккаунта и
+            # показывал весь справочник (тот же класс, что срез «Прокси мёртв»).
+            account_id=validate_integer(request.query.get('account_id'), min_val=1),
+        )
+
+    def _filters_are_set(filters: dict) -> bool:
+        """Есть ли хоть один фильтр: «весь хаб» и «срез» — разные выгрузки."""
+        return any(v not in (None, '', False) for v in filters.values())
+
+    async def uch_contacts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        filters = _contact_filters(request)
         # Пагинация: без неё список молча обрезался дефолтным limit=100 — при 2.9к+
         # контактов пользователь видел «лишь десятки» и не мог долистать до
         # остальных. limit зажат, offset — для «Показать ещё».
@@ -101,14 +125,8 @@ def setup_routes(app: web.Application, pool) -> None:
             offset = 0
         try:
             from services.contacts_hub.repository import get_contacts
-            result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
-                                        tag=tag, premium_only=premium, multi_only=multi,
-                                        mutual_only=mutual, gender=gender, crm_stage=crm_stage,
-                                        excluded_only=excluded_only, group_id=group_id,
-                                        account_id=account_id,
-                                        with_phone_only=with_phone,
-                                        with_username_only=with_username,
-                                        limit=limit, offset=offset)
+            result = await get_contacts(pool, uid, limit=limit, offset=offset,
+                                        **filters)
             result['offset'] = offset
             result['limit'] = limit
             return _json_resp(result)
@@ -1602,23 +1620,10 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_bulk_merge")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_bulk_export(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-            contact_ids = data.get('contact_ids', [])
-            fmt = data.get('format', 'json')
-            from services.contacts_hub.bulk_ops_engine import bulk_export
-            result = await bulk_export(pool, uid, contact_ids, fmt)
-            content_types = {'csv': 'text/csv', 'vcf': 'text/vcard', 'json': 'application/json'}
-            return web.Response(
-                body=result['data'], content_type=content_types.get(fmt, 'application/json'),
-                headers={'Content-Disposition': f'attachment; filename="contacts.{fmt}"'})
-        except Exception:
-            log.exception("uch_bulk_export")
-            return _err(_INTERNAL_ERROR, 500)
-
+    # Ручка POST /uch/bulk/export удалена: выгрузка выбранных идёт тем же
+    # GET /uch/export/{fmt}?ids=…, что и весь хаб и текущий срез. Она была
+    # второй реализацией той же выгрузки, и её не звал ни один экран —
+    # «выгрузить отмеченных» в интерфейсе просто не было.
     async def uch_bulk_importance(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -1647,40 +1652,79 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_bulk_rating")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_export_csv(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.contacts_hub.export_engine import export_csv
-            csv_data = await export_csv(pool, uid)
-            return web.Response(body=csv_data, content_type='text/csv',
-                                headers={'Content-Disposition': 'attachment; filename="contacts.csv"'})
-        except Exception:
-            log.exception("uch_export_csv")
-            return _err(_INTERNAL_ERROR, 500)
+    _EXPORT_FORMATS = {
+        'csv': ('text/csv', 'contacts.csv'),
+        'vcf': ('text/vcard', 'contacts.vcf'),
+        'json': ('application/json', 'contacts.json'),
+    }
+    # Сколько контактов выгружаем срезом за один раз. Выгрузка молча обрезанного
+    # среза — это файл, в котором чего-то нет, и владелец об этом не узнает;
+    # поэтому на превышении приходит отказ с числом, а не усечённый файл.
+    _EXPORT_SLICE_CAP = 5000
 
-    async def uch_export_vcf(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.contacts_hub.export_engine import export_vcf
-            vcf_data = await export_vcf(pool, uid)
-            return web.Response(body=vcf_data, content_type='text/vcard',
-                                headers={'Content-Disposition': 'attachment; filename="contacts.vcf"'})
-        except Exception:
-            log.exception("uch_export_vcf")
-            return _err(_INTERNAL_ERROR, 500)
+    async def _export_target_ids(request: web.Request, uid: int):
+        """Кого выгружаем: (ids | None, ошибка | None).
 
-    async def uch_export_json(request: web.Request) -> web.Response:
+        None означает «весь хаб» — прежнее и единственное поведение экспорта.
+        Список id приходит либо прямо (`ids=` — выбранные галочками, и так же
+        выгружается один контакт из карточки), либо считается по ТЕМ ЖЕ
+        фильтрам, что у списка (`_contact_filters`), то есть «выгрузить то, что
+        вижу».
+        """
+        raw = (request.query.get('ids') or '').strip()
+        if raw:
+            ids = [x for x in (s.strip() for s in raw.split(',')) if x]
+            if len(ids) > _EXPORT_SLICE_CAP:
+                return None, f"За раз выгружается не больше {_EXPORT_SLICE_CAP} контактов"
+            for x in ids:
+                # id контакта — UUID; что угодно другое уронило бы запрос
+                # целиком (asyncpg биндит uuid без каста).
+                if not _UUID_RE.match(x):
+                    return None, "Неверный идентификатор контакта"
+            return ids, None
+        filters = _contact_filters(request)
+        if not _filters_are_set(filters):
+            return None, None
+        from services.contacts_hub.repository import get_contacts
+        res = await get_contacts(pool, uid, limit=_EXPORT_SLICE_CAP, offset=0,
+                                 **filters)
+        rows = res.get('contacts') or []
+        total = int(res.get('total') or len(rows))
+        if total > _EXPORT_SLICE_CAP:
+            return None, (
+                f"В срезе {total} контактов, за раз выгружается "
+                f"{_EXPORT_SLICE_CAP}. Сузьте фильтр или выгрузите весь хаб.")
+        return [str(r['id']) for r in rows], None
+
+    async def uch_export(request: web.Request) -> web.Response:
+        """Экспорт контактов: весь хаб, текущий срез или выбранные.
+
+        Раньше здесь лежали три почти одинаковых обработчика, и каждый умел
+        ровно одно — «все контакты». Фильтр хаба (стадия, тег, группа,
+        аккаунт, пол, личные) на экспорт не влиял никак, то есть владелец,
+        собравший срез, выгружал вместо него весь справочник.
+        """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
+        fmt = (request.match_info.get('fmt') or 'csv').lower()
+        if fmt not in _EXPORT_FORMATS:
+            return _err("Неизвестный формат выгрузки", 400)
+        content_type, filename = _EXPORT_FORMATS[fmt]
         try:
-            from services.contacts_hub.export_engine import export_json
-            json_data = await export_json(pool, uid)
-            return web.Response(body=json_data, content_type='application/json',
-                                headers={'Content-Disposition': 'attachment; filename="contacts.json"'})
+            ids, err = await _export_target_ids(request, uid)
+            if err:
+                return _err(err, 400)
+            if ids is not None and not ids:
+                return _err("В этом срезе нет контактов", 400)
+            from services.contacts_hub import export_engine as _ex
+            fn = {'csv': _ex.export_csv, 'vcf': _ex.export_vcf,
+                  'json': _ex.export_json}[fmt]
+            data = await fn(pool, uid, ids)
+            return web.Response(
+                body=data, content_type=content_type,
+                headers={'Content-Disposition': f'attachment; filename="{filename}"'})
         except Exception:
-            log.exception("uch_export_json")
+            log.exception("uch_export fmt=%s", fmt)
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_reminders(request: web.Request) -> web.Response:
@@ -1818,6 +1862,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/relationships", uch_relationships)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/identity", uch_identity)
     app.router.add_get("/api/miniapp/uch/crm/pipeline", uch_crm_pipeline)
+    app.router.add_get("/api/miniapp/uch/export/{fmt}", uch_export)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_get)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_upsert)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity)
@@ -1844,12 +1889,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/uch/filter/delete", uch_filter_delete)
     app.router.add_post("/api/miniapp/uch/bulk/group", uch_bulk_group)
     app.router.add_post("/api/miniapp/uch/bulk/merge", uch_bulk_merge)
-    app.router.add_post("/api/miniapp/uch/bulk/export", uch_bulk_export)
     app.router.add_post("/api/miniapp/uch/bulk/importance", uch_bulk_importance)
     app.router.add_post("/api/miniapp/uch/bulk/rating", uch_bulk_rating)
-    app.router.add_get("/api/miniapp/uch/export/csv", uch_export_csv)
-    app.router.add_get("/api/miniapp/uch/export/vcf", uch_export_vcf)
-    app.router.add_get("/api/miniapp/uch/export/json", uch_export_json)
     app.router.add_get("/api/miniapp/uch/reminders", uch_reminders)
     app.router.add_get("/api/miniapp/uch/graph/stats", uch_graph_stats)
     app.router.add_get("/api/miniapp/uch/graph/pairs", uch_graph_pairs)

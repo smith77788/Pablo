@@ -99,14 +99,47 @@ def test_the_json_export_is_valid_json_for_every_column(pool):
 
 def test_the_other_exports_work_too(pool):
     """CSV и vCard идут из той же таблицы — их тоже проверяем с данными."""
-    from services.contacts_hub.export_engine import (
-        export_csv, export_vcf, get_export_stats,
-    )
+    from services.contacts_hub.export_engine import export_csv, export_vcf
 
     csv_text = _run(export_csv(pool, OWNER))
     assert "exportme" in csv_text
     vcf = _run(export_vcf(pool, OWNER))
     assert "BEGIN:VCARD" in vcf and "Иван" in vcf
-    stats = _run(get_export_stats(pool, OWNER))
-    assert stats["total_contacts"] == 1
-    assert stats["with_phone"] == 1, f"телефон не посчитан: {stats}"
+    # (get_export_stats отсюда убран вместе с кодом: его не звала ни одна
+    # ручка и ни один экран, а числа о контактах владелец видит в /uch/stats.)
+
+
+def test_exporting_a_chosen_few_really_filters(pool):
+    """Выгрузка СПИСКА id — это «выгрузить отмеченных» и «визитка» в карточке.
+
+    Проверка именно на живой базе: id контакта — uuid, а в запрос он уходит
+    строкой. asyncpg биндит uuid без каста, и на заглушке такая выгрузка
+    выглядела бы работающей, пока Postgres отбивал бы её целиком — ровно так
+    уже обожглись на пересчёте доверия.
+    """
+    import json as _json
+
+    from services.contacts_hub.export_engine import export_json, export_vcf
+
+    second = _run(pool.fetchval(
+        "INSERT INTO unified_contacts (owner_id, first_name, username) "
+        "VALUES ($1,'Пётр','petr') RETURNING id", OWNER))
+    only = _run(export_json(pool, OWNER, [str(second)]))
+    rows = _json.loads(only)
+    assert len(rows) == 1, "в выгрузку попали не только выбранные"
+    assert rows[0]["username"] == "petr"
+    card = _run(export_vcf(pool, OWNER, [str(second)]))
+    assert card.count("BEGIN:VCARD") == 1, "визитка одного контакта — не одна"
+
+
+def test_a_stranger_cannot_export_my_contact_by_id(pool):
+    """id знать мало: выгрузка ограничена владельцем в самом запросе."""
+    import json as _json
+
+    from services.contacts_hub.export_engine import export_json
+
+    mine = _run(pool.fetchval(
+        "SELECT id FROM unified_contacts WHERE owner_id=$1 LIMIT 1", OWNER))
+    assert mine is not None
+    stolen = _run(export_json(pool, OWNER + 1, [str(mine)]))
+    assert _json.loads(stolen) == [], "чужой контакт выгрузился по id"

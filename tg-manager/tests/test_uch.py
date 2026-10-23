@@ -615,95 +615,33 @@ class TestExportEngine:
         assert data[0]["first_name"] == "Ivan"
 
     @pytest.mark.asyncio
-    async def test_export_vcard_single_contact(self):
-        from services.contacts_hub.export_engine import export_vcard
-        pool = FakePool(fetch_row={
-            "id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
-            "company": "TestCo", "position": "Dev", "phones": '["+123"]',
-            "emails": '["ivan@test.com"]', "websites": "[]", "username": "ivan",
-            "telegram_user_id": 123, "birthday": "1990-01-01", "notes": "test"
-        })
-        result = await export_vcard(pool, 123, "uuid-1")
-        assert "BEGIN:VCARD" in result
-        assert "Ivan" in result
-        assert "Ivanov" in result
-        assert "TestCo" in result
-        assert "Dev" in result
-        assert "+123" in result
-        assert "ivan@test.com" in result
-        assert "@ivan" in result
-        assert "1990-01-01" in result
-        assert "test" in result
+    async def test_a_single_contact_exports_as_a_vcard(self):
+        """Пять проверок удалённого кода заменены одной на живой путь.
 
-    @pytest.mark.asyncio
-    async def test_export_vcard_with_all_fields(self):
-        from services.contacts_hub.export_engine import export_vcard
-        pool = FakePool(fetch_row={
+        export_vcard (визитка ОДНОГО контакта), export_csv_streaming и
+        get_export_stats удалены: их не звал никто, а поля они собирали своим
+        кодом, то есть «визитка» и «поток» могли расходиться с настоящей
+        выгрузкой. Визитку одного контакта делает тот же export_vcf со
+        списком из одного id — кнопка «📇 Визитка» в карточке.
+        """
+        from services.contacts_hub.export_engine import export_vcf
+        pool = FakePool(fetch_rows=[{
             "id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
             "company": "TestCo", "position": "Dev", "phones": '["+123", "+456"]',
-            "emails": '["ivan@test.com", "ivan2@test.com"]', "websites": '["https://ivan.com"]',
-            "username": "ivan", "telegram_user_id": 123, "birthday": "1990-01-01", "notes": "test"
-        })
-        result = await export_vcard(pool, 123, "uuid-1")
-        assert "BEGIN:VCARD" in result
-        assert "END:VCARD" in result
-        assert "+123" in result
-        assert "+456" in result
-        assert "ivan@test.com" in result
-        assert "ivan2@test.com" in result
-        assert "https://ivan.com" in result
-
-    @pytest.mark.asyncio
-    async def test_export_csv_streaming_empty(self):
-        from services.contacts_hub.export_engine import export_csv_streaming
-        pool = FakePool(fetch_rows=[])
-        results = []
-        async for chunk in export_csv_streaming(pool, 123):
-            results.append(chunk)
-        assert len(results) == 1
-        assert results[0][0] == "ID"
-
-    @pytest.mark.asyncio
-    async def test_export_csv_streaming_with_data(self):
-        from services.contacts_hub.export_engine import export_csv_streaming
-
-        # export_csv_streaming использует keyset-пагинацию (while rows: ...).
-        # Обычный FakePool всегда возвращает те же строки → бесконечный цикл
-        # (и зависание всего набора тестов). Нужен мок, моделирующий исчерпание:
-        # строки на первом fetch, затем пусто.
-        class _ExhaustPool:
-            def __init__(self, rows):
-                self._rows = rows
-                self._served = False
-
-            async def fetch(self, query, *args):
-                if self._served:
-                    return []
-                self._served = True
-                return self._rows
-
-        pool = _ExhaustPool([
-            {"id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
-             "phones": '["+123"]', "emails": "[]", "websites": "[]", "tags": "{vip}"}
-        ])
-        results = []
-        async for chunk in export_csv_streaming(pool, 123):
-            results.append(chunk)
-        assert len(results) == 2
-        assert results[0][0] == "ID"
-        assert "Ivan" in results[1]
-        assert "Ivanov" in results[1]
-
-    @pytest.mark.asyncio
-    async def test_get_export_stats(self):
-        from services.contacts_hub.export_engine import get_export_stats
-        pool = FakePool(fetch_val=10)
-        result = await get_export_stats(pool, 123)
-        assert result["total_contacts"] == 10
-        assert result["with_phone"] == 10
-        assert result["with_email"] == 10
-        assert result["favorites"] == 10
-        assert result["premium"] == 10
+            "emails": '["ivan@test.com"]', "websites": '["https://ivan.com"]',
+            "username": "ivan", "telegram_user_id": 123,
+            "birthday": "1990-01-01", "notes": "test",
+        }])
+        result = await export_vcf(pool, 123, ["uuid-1"])
+        assert "BEGIN:VCARD" in result and "END:VCARD" in result
+        for part in ("Ivan", "Ivanov", "TestCo", "Dev", "+123", "+456",
+                     "ivan@test.com", "URL:https://ivan.com", "BDAY:1990-01-01"):
+            assert part in result, f"в визитке нет {part}"
+        # URL и BDAY отдавала удалённая export_vcard, а export_vcf — нет:
+        # «одна реализация» без переноса полей означала бы потерю данных.
+        # Запрос ушёл со списком id, а не за всем хабом.
+        kind, query, args = pool._calls[0]
+        assert "id IN (" in query and args[1] == "uuid-1"
 
 
 # ── Identity Engine tests ─────────────────────────────────────────────────────

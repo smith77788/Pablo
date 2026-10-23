@@ -17092,16 +17092,14 @@ function lastSeenLabel(t, at) {
   }
   return '';
 }
-const CONTACT_PAGE = 200;
-let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
-async function loadContacts(append=false) {
-  cgRenderBanner();           // фильтр по группе виден всегда, пока он включён
-  if (!append) refreshStageCounts();   // числа на чипах стадий, не блокируя список
-  const q = (document.getElementById('contactSearch')?.value||'').trim();
-  if (!append) CONTACT_OFFSET = 0;
-  // Единый путь: поиск КОМБИНИРУЕТСЯ с фильтрами (пол/стадия/…) и совпадает с
-  // резолвером сегмента — «вижу одно, действую по тому же». Одна пагинация.
+// Фильтры списка одной строкой запроса — и для списка, и для выгрузки.
+// Экспорт умел только «все контакты»: владелец, собравший срез (стадия, тег,
+// группа, аккаунт, пол), выгружал вместо него весь справочник. Если бы экспорт
+// собирал параметры своим кодом, «вижу одно — выгружаю другое» вернулось бы на
+// первой правке фильтра.
+function contactFilterParams() {
   const params = new URLSearchParams();
+  const q = (document.getElementById('contactSearch')?.value||'').trim();
   if (q) params.set('search', q);
   if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
   if (CONTACT_FILTER === 'premium') params.set('premium', '1');
@@ -17113,6 +17111,19 @@ async function loadContacts(append=false) {
   if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
   if (CONTACT_GROUP) params.set('group_id', CONTACT_GROUP.id);
   if (CONTACT_ACCOUNT) params.set('account_id', CONTACT_ACCOUNT.id);
+  return params;
+}
+
+const CONTACT_PAGE = 200;
+let CONTACT_SLICE_TOTAL = null;   // размер последнего загруженного среза
+let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
+async function loadContacts(append=false) {
+  cgRenderBanner();           // фильтр по группе виден всегда, пока он включён
+  if (!append) refreshStageCounts();   // числа на чипах стадий, не блокируя список
+  if (!append) CONTACT_OFFSET = 0;
+  // Единый путь: поиск КОМБИНИРУЕТСЯ с фильтрами (пол/стадия/…) и совпадает с
+  // резолвером сегмента — «вижу одно, действую по тому же». Одна пагинация.
+  const params = contactFilterParams();
   params.set('limit', CONTACT_PAGE);
   params.set('offset', CONTACT_OFFSET);
   const url = '/api/miniapp/uch/contacts?' + params.toString();
@@ -17121,6 +17132,7 @@ async function loadContacts(append=false) {
     const d = await api(url);
     const contacts = d.results||d.contacts||[];
     const total = (d.total!=null) ? d.total : contacts.length;
+    CONTACT_SLICE_TOTAL = total;   // для выгрузки: «сколько выгружу» = «сколько вижу»
     if (!append && !contacts.length) { txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки')); return; }
     const rowsHtml = contacts.map(c=>{
       const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
@@ -17350,6 +17362,7 @@ async function openContactDetail(id) {
       <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0 0 auto">🔑 Личность</button>
       <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0 0 auto">💼 CRM</button>
       <button class="btn btn-s" onclick="cdEditGroups()" style="flex:0 0 auto">📂 Группы</button>
+      <button class="btn btn-s" onclick="cdExportVcard()" style="flex:0 0 auto">📇 Визитка</button>
     </div>`;
     txt('cdBody', html);
     if (c.telegram_user_id || c.username || (c.phones && c.phones.length)) {
@@ -18637,6 +18650,7 @@ async function bulkMoreSelected() {
     {value:'imp',     label:'❗ Важность',          sub:'обычный, важный, ключевой'},
     {value:'rating',  label:'⭐ Оценка',            sub:'от 1 до 5, или снять'},
     {value:'ungroup', label:'📁 Убрать из группы',  sub:'состав группы, сами контакты останутся'},
+    {value:'export',  label:'📤 Выгрузить',          sub:'файл только с отмеченными'},
   ];
   const pick = await askChoice(`Что сделать с ${n} ${plural(n,'контактом','контактами','контактами')}?`, opts);
   if (!pick) return;
@@ -18644,6 +18658,19 @@ async function bulkMoreSelected() {
   if (pick === 'imp')     return bulkImportanceSelected();
   if (pick === 'rating')  return bulkRatingSelected();
   if (pick === 'ungroup') return bulkUngroupSelected();
+  if (pick === 'export')  return bulkExportSelected();
+}
+
+// Выгрузить ТОЛЬКО отмеченных. Раньше экспорт умел «все контакты», и отобрать
+// нужных можно было лишь вручную в уже скачанном файле.
+async function bulkExportSelected() {
+  const fmt = await askChoice('В каком формате?', [
+    {value:'csv',  label:'📄 CSV',     sub:'таблица: Excel, Google Sheets'},
+    {value:'vcf',  label:'📇 VCF',     sub:'визитки: телефонная книга'},
+    {value:'json', label:'{ } JSON',   sub:'для переноса и скриптов'},
+  ]);
+  if (!fmt) return;
+  uchExportSelected(fmt);
 }
 
 // Итог массового действия: снять выбор и перечитать список. Ноль изменённых —
@@ -18938,20 +18965,63 @@ async function applySmartTags() {
 // Ссылки на выгрузку уходили новой вкладкой БЕЗ заголовка Authorization и
 // возвращали 401: три кнопки не работали. Токен в query — тот же способ, что
 // у выгрузки разобранной аудитории (exportAudience).
-function uchExport(fmt) {
+// Выгрузка: весь хаб, текущий срез, выбранные галочками или один контакт.
+// Умела она только первое: фильтр хаба на выгрузку не влиял никак, и владелец,
+// собравший срез, получал вместо него весь справочник. Срез считает сервер по
+// ТЕМ ЖЕ параметрам, что список (contactFilterParams), — «выгружаю то, что вижу».
+const UCH_EXPORT_CAP = 5000;
+function uchExport(fmt, opts) {
   const f = (fmt === 'vcf' || fmt === 'json') ? fmt : 'csv';
-  const url = '/api/miniapp/uch/export/' + f + '?token=' + encodeURIComponent(TK);
+  opts = opts || {};
+  const params = (opts.slice ? contactFilterParams() : new URLSearchParams());
+  if (opts.ids && opts.ids.length) {
+    if (opts.ids.length > UCH_EXPORT_CAP) {
+      toast('⚠️ За раз выгружается не больше ' + num(UCH_EXPORT_CAP) + ' контактов');
+      return;
+    }
+    params.set('ids', opts.ids.join(','));
+  }
+  // Отказ сервера открылся бы в браузере как JSON — поэтому про слишком
+  // большой срез говорим здесь, числом, которое владелец только что видел.
+  if (opts.slice && CONTACT_SLICE_TOTAL != null && CONTACT_SLICE_TOTAL > UCH_EXPORT_CAP) {
+    toast('⚠️ В срезе ' + num(CONTACT_SLICE_TOTAL) + ' контактов, за раз выгружается ' + num(UCH_EXPORT_CAP) + '. Сузьте фильтр.');
+    return;
+  }
+  params.set('token', TK);
+  const url = '/api/miniapp/uch/export/' + f + '?' + params.toString();
   if (tg?.openLink) tg.openLink(location.origin + url); else window.open(url, '_blank');
+}
+
+function uchExportSelected(fmt) {
+  const ids = [...CONTACT_SELECTED];
+  if (!ids.length) { toast('⚠️ Никто не выбран'); return; }
+  uchExport(fmt, {ids});
+}
+
+function cdExportVcard() {
+  if (!CURRENT_CONTACT_ID) return;
+  uchExport('vcf', {ids: [CURRENT_CONTACT_ID]});
 }
 
 async function openUchExport() {
   push('s-uchexport');
+  const n = CONTACT_SLICE_TOTAL;
   let html = `<div style="padding:16px">
-    <div class="sec">Экспорт всех контактов</div>
+    <div class="sec">Текущий срез${n!=null?' · '+num(n):''}</div>
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:4px 0 8px">
+      То, что сейчас в списке: поиск, фильтр, стадия, группа, аккаунт. Выгрузка
+      считается теми же условиями, что и список.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('csv',{slice:true})">📄 CSV</button>
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('vcf',{slice:true})">📇 VCF</button>
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('json',{slice:true})">{ } JSON</button>
+    </div>
+    <div class="sec" style="margin-top:16px">Все контакты</div>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn btn-p" style="flex:1" onclick="uchExport('csv')">📄 CSV</button>
-      <button class="btn btn-p" style="flex:1" onclick="uchExport('vcf')">📇 VCF</button>
-      <button class="btn btn-p" style="flex:1" onclick="uchExport('json')">{ } JSON</button>
+      <button class="btn btn-s" style="flex:1" onclick="uchExport('csv')">📄 CSV</button>
+      <button class="btn btn-s" style="flex:1" onclick="uchExport('vcf')">📇 VCF</button>
+      <button class="btn btn-s" style="flex:1" onclick="uchExport('json')">{ } JSON</button>
     </div>
   </div>`;
   txt('expBody', html);

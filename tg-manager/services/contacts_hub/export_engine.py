@@ -73,67 +73,9 @@ async def export_csv(pool, owner_id: int, contact_ids: list = None) -> str:
     return output.getvalue()
 
 
-async def export_vcard(pool, owner_id: int, contact_id: int) -> str:
-    row = await pool.fetchrow(
-        'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id=$2',
-        owner_id, contact_id)
-    if not row:
-        return ''
-
-    d = dict(row)
-    lines = ['BEGIN:VCARD', 'VERSION:3.0']
-
-    name = d.get('last_name', '') or ''
-    first = d.get('first_name', '') or ''
-    lines.append(f'N:{name};{first};;;')
-    lines.append(f'FN:{first} {name}'.strip())
-
-    if d.get('company'):
-        lines.append(f'ORG:{d["company"]}')
-    if d.get('position'):
-        lines.append(f'TITLE:{d["position"]}')
-
-    phones = d.get('phones', [])
-    if isinstance(phones, str):
-        try:
-            phones = json.loads(phones)
-        except (json.JSONDecodeError, TypeError):
-            phones = []
-    for p in phones:
-        if p:
-            lines.append(f'TEL;TYPE=CELL:{p}')
-
-    emails = d.get('emails', [])
-    if isinstance(emails, str):
-        try:
-            emails = json.loads(emails)
-        except (json.JSONDecodeError, TypeError):
-            emails = []
-    for e in emails:
-        if e:
-            lines.append(f'EMAIL:{e}')
-
-    websites = d.get('websites', [])
-    if isinstance(websites, str):
-        try:
-            websites = json.loads(websites)
-        except (json.JSONDecodeError, TypeError):
-            websites = []
-    for w in websites:
-        if w:
-            lines.append(f'URL:{w}')
-
-    if d.get('username'):
-        lines.append(f'X-TELEGRAM:@{d["username"]}')
-    if d.get('telegram_user_id'):
-        lines.append(f'X-TELEGRAM-ID:{d["telegram_user_id"]}')
-    if d.get('birthday'):
-        lines.append(f'BDAY:{d["birthday"]}')
-    if d.get('notes'):
-        lines.append(f'NOTE:{d["notes"]}')
-
-    lines.append('END:VCARD')
-    return '\n'.join(lines)
+# export_vcard (визитка ОДНОГО контакта) удалён: её не звал никто, а делает её
+# теперь тот же export_vcf со списком из одного id — кнопка «📇 Визитка» в
+# карточке. Второй формат визитки рядом с первым разошёлся бы с ним полями.
 
 
 async def export_vcf(pool, owner_id: int, contact_ids: list = None) -> str:
@@ -182,6 +124,23 @@ async def export_vcf(pool, owner_id: int, contact_ids: list = None) -> str:
         for e in emails:
             if e:
                 lines.append(f'EMAIL:{e}')
+
+        # Сайты и день рождения: их отдавала удалённая export_vcard (визитка
+        # одного контакта), а эта выгрузка — нет. Две визитки с разным набором
+        # полей и были причиной свести их в одну; поля перенесены сюда, иначе
+        # «одна реализация» означала бы молча потерянные данные.
+        websites = d.get('websites', [])
+        if isinstance(websites, str):
+            try:
+                websites = json.loads(websites)
+            except (json.JSONDecodeError, TypeError):
+                websites = []
+        for w in websites or []:
+            if w:
+                lines.append(f'URL:{w}')
+
+        if d.get('birthday'):
+            lines.append(f'BDAY:{d["birthday"]}')
 
         if d.get('username'):
             lines.append(f'X-TELEGRAM:@{d["username"]}')
@@ -232,46 +191,10 @@ async def export_json(pool, owner_id: int, contact_ids: list = None) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 
-async def export_csv_streaming(pool, owner_id: int, contact_ids: list = None):
-    header = ['ID', 'Telegram User ID', 'Username', 'First Name', 'Last Name',
-              'Display Name', 'Phones', 'Emails', 'Company', 'Position',
-              'Websites', 'Birthday', 'Notes', 'Tags', 'Color Label',
-              'Is Favorite', 'Is Premium', 'Importance Level', 'User Rating',
-              'Discovered At', 'Last Synced At', 'Created At']
-    yield header
-
-    if contact_ids:
-        batch_size = 500
-        for i in range(0, len(contact_ids), batch_size):
-            batch = contact_ids[i:i + batch_size]
-            placeholders = ','.join([f'${j+2}' for j in range(len(batch))])
-            params = [owner_id] + batch
-            rows = await pool.fetch(
-                f'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id IN ({placeholders}) ORDER BY first_name',
-                *params)
-            for r in rows:
-                yield _contact_to_csv_row(r)
-    else:
-        # Keyset-пагинация ДОЛЖНА сортировать по той же колонке, что и фильтр
-        # курсора (id). Раньше было ORDER BY first_name при WHERE id > cursor —
-        # колонки не совпадали: курсор-id не монотонен в порядке first_name,
-        # из-за чего пагинация могла пропускать строки или зацикливаться
-        # (last-row id не растёт → те же строки перечитываются бесконечно).
-        cursor = None
-        while True:
-            if cursor:
-                rows = await pool.fetch(
-                    'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id > $2 ORDER BY id LIMIT 500',
-                    owner_id, cursor)
-            else:
-                rows = await pool.fetch(
-                    'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY id LIMIT 500',
-                    owner_id)
-            if not rows:
-                break
-            for r in rows:
-                yield _contact_to_csv_row(r)
-            cursor = dict(rows[-1])['id']
+# export_csv_streaming удалён: его не звал никто, а поля он собирал своим
+# кодом — то есть выгрузка «как в CSV, только потоком» могла отличаться от
+# самого CSV. Если памяти на больших хабах станет мало, стримить надо ОДНУ
+# выгрузку (в обработчике), а не держать вторую.
 
 
 def _contact_to_csv_row(record) -> list:
@@ -316,36 +239,5 @@ def _contact_to_csv_row(record) -> list:
     ]
 
 
-async def get_export_stats(pool, owner_id: int) -> dict:
-    total = await pool.fetchval(
-        'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1', owner_id)
-    with_phone = await pool.fetchval(
-        # phones — jsonb: сравнение с '' валило запрос ('' не json), и счётчик
-        # контактов с phones всегда возвращал ошибку вместо числа.
-        "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 "
-        "AND jsonb_typeof(phones) = 'array' AND jsonb_array_length(phones) > 0",
-        owner_id)
-    with_email = await pool.fetchval(
-        # emails — jsonb: сравнение с '' валило запрос ('' не json), и счётчик
-        # контактов с emails всегда возвращал ошибку вместо числа.
-        "SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 "
-        "AND jsonb_typeof(emails) = 'array' AND jsonb_array_length(emails) > 0",
-        owner_id)
-    favorites = await pool.fetchval(
-        'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_favorite=true',
-        owner_id)
-    premium = await pool.fetchval(
-        'SELECT COUNT(*) FROM unified_contacts WHERE owner_id=$1 AND is_premium=true',
-        owner_id)
-    last_sync = await pool.fetchval(
-        'SELECT MAX(last_synced_at) FROM unified_contacts WHERE owner_id=$1',
-        owner_id)
-
-    return {
-        'total_contacts': total or 0,
-        'with_phone': with_phone or 0,
-        'with_email': with_email or 0,
-        'favorites': favorites or 0,
-        'premium': premium or 0,
-        'last_synced': str(last_sync) if last_sync else None,
-    }
+# get_export_stats удалён: ни одна ручка и ни один экран его не звали, а числа
+# о контактах владелец видит в статистике хаба (/uch/stats).

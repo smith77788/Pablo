@@ -243,18 +243,10 @@ async def bulk_merge(pool, owner_id: int, pairs: list) -> dict:
     return {'merged': merged, 'skipped': skipped}
 
 
-async def bulk_export(pool, owner_id: int, contact_ids: list, format: str = 'json') -> dict:
-    if format == 'csv':
-        from services.contacts_hub.export_engine import export_csv
-        data = await export_csv(pool, owner_id, contact_ids)
-        return {'format': 'csv', 'data': data}
-    if format == 'vcf':
-        from services.contacts_hub.export_engine import export_vcf
-        data = await export_vcf(pool, owner_id, contact_ids)
-        return {'format': 'vcf', 'data': data}
-    from services.contacts_hub.export_engine import export_json
-    data = await export_json(pool, owner_id, contact_ids)
-    return {'format': 'json', 'data': data}
+# bulk_export удалён: он только выбирал формат и звал export_engine, то есть
+# был вторым входом в ту же выгрузку. Единственный вход — ручка
+# GET /api/miniapp/uch/export/{fmt}, она же обслуживает «весь хаб», «текущий
+# срез» и «выбранные».
 
 
 async def bulk_add_tags(pool, owner_id: int, contact_ids: list, tags: list) -> dict:

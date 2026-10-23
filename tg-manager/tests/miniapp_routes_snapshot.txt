@@ -300,9 +300,7 @@ GET /api/miniapp/uch/contacts/{contact_id}/timeline
 GET /api/miniapp/uch/contacts/{contact_id}/versions
 GET /api/miniapp/uch/crm/pipeline
 GET /api/miniapp/uch/duplicates
-GET /api/miniapp/uch/export/csv
-GET /api/miniapp/uch/export/json
-GET /api/miniapp/uch/export/vcf
+GET /api/miniapp/uch/export/{fmt}
 GET /api/miniapp/uch/graph/pairs
 GET /api/miniapp/uch/graph/stats
 GET /api/miniapp/uch/groups
@@ -593,9 +591,7 @@ HEAD /api/miniapp/uch/contacts/{contact_id}/timeline
 HEAD /api/miniapp/uch/contacts/{contact_id}/versions
 HEAD /api/miniapp/uch/crm/pipeline
 HEAD /api/miniapp/uch/duplicates
-HEAD /api/miniapp/uch/export/csv
-HEAD /api/miniapp/uch/export/json
-HEAD /api/miniapp/uch/export/vcf
+HEAD /api/miniapp/uch/export/{fmt}
 HEAD /api/miniapp/uch/graph/pairs
 HEAD /api/miniapp/uch/graph/stats
 HEAD /api/miniapp/uch/groups
@@ -916,7 +912,6 @@ POST /api/miniapp/transport/ipv6
 POST /api/miniapp/uch/ai
 POST /api/miniapp/uch/bulk/delete
 POST /api/miniapp/uch/bulk/exclude
-POST /api/miniapp/uch/bulk/export
 POST /api/miniapp/uch/bulk/favorite
 POST /api/miniapp/uch/bulk/group
 POST /api/miniapp/uch/bulk/importance

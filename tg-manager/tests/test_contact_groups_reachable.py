@@ -99,9 +99,13 @@ def test_group_filter_reaches_the_list():
     """Открыть группу = увидеть её контакты. Иначе группа — пустая витрина."""
     body = _js_func("loadContacts")
     assert "group_id" in body, "список контактов не умеет фильтр по группе"
+    # Разбор параметров списка вынесен в общую _contact_filters: её же читает
+    # экспорт, чтобы «вижу одно — выгружаю другое» не появилось на правке.
+    filters = _api_func("_contact_filters")
+    assert "group_id=validate_integer" in filters, (
+        "фильтр по группе не разбирается")
     fn = _api_func("uch_contacts")
-    assert "group_id" in fn, "маршрут списка не читает group_id"
-    assert "group_id=group_id" in fn, "прочитал, но не передал в репозиторий"
+    assert "**filters" in fn, "прочитал, но не передал в репозиторий"
 
 
 def test_active_group_filter_is_visible():

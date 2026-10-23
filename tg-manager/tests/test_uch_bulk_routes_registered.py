@@ -55,7 +55,8 @@ def test_uch_bulk_handlers_specifically_registered():
     src = _load_source()
     for path, handler in (
         ("/api/miniapp/uch/bulk/merge", "uch_bulk_merge"),
-        ("/api/miniapp/uch/bulk/export", "uch_bulk_export"),
+        # /uch/bulk/export удалён: выгрузка отмеченных идёт тем же
+        # GET /uch/export/{fmt}?ids=…, что и весь хаб и текущий срез.
         ("/api/miniapp/uch/bulk/importance", "uch_bulk_importance"),
         ("/api/miniapp/uch/bulk/rating", "uch_bulk_rating"),
     ):

@@ -1295,12 +1295,10 @@ class TestBulkOpsEngine:
         assert result == {"merged": 0, "skipped": 1}
         assert pool._calls == []
 
-    @pytest.mark.asyncio
-    async def test_bulk_export_json_delegates(self):
-        from services.contacts_hub.bulk_ops_engine import bulk_export
-        pool = FakePool(fetch_rows=[])
-        result = await bulk_export(pool, 123, ["id1"], "json")
-        assert result["format"] == "json"
+    # Проверка bulk_export удалена вместе с ним: он только выбирал формат и
+    # звал export_engine, то есть был вторым входом в ту же выгрузку, и его не
+    # звал ни один экран. Единственный вход — GET /uch/export/{fmt}, он же
+    # обслуживает «весь хаб», «текущий срез» и «выбранных».
 
     @pytest.mark.asyncio
     async def test_bulk_set_importance(self):
