@@ -97,8 +97,13 @@ def test_groups_can_be_created_renamed_deleted():
 
 def test_group_filter_reaches_the_list():
     """Открыть группу = увидеть её контакты. Иначе группа — пустая витрина."""
-    body = _js_func("loadContacts")
+    # Экран собирает параметры среза в ОДНОМ месте (contactFilterParams), и её
+    # зовут и список, и выгрузка: искать их в loadContacts значит проверять
+    # место, где их больше нет.
+    body = _js_func("contactFilterParams")
     assert "group_id" in body, "список контактов не умеет фильтр по группе"
+    assert "contactFilterParams()" in _js_func("loadContacts"), (
+        "список перестал брать общий срез")
     # Разбор параметров списка вынесен в общую _contact_filters: её же читает
     # экспорт, чтобы «вижу одно — выгружаю другое» не появилось на правке.
     filters = _api_func("_contact_filters")

@@ -72,7 +72,9 @@ def test_contacts_list_unified_search_with_filters():
     fn = js_function("loadContacts")
     # список всегда идёт через uch/contacts (search как параметр), без ветки на /uch/search
     assert "/api/miniapp/uch/contacts?" in fn
-    assert "params.set('search', q)" in fn
+    # Параметры среза собираются в contactFilterParams: одна сборка на список и
+    # на выгрузку. Самой ручки /uch/search больше нет — это был дубль фильтра.
+    assert "params.set('search', q)" in js_function("contactFilterParams")
     assert "/api/miniapp/uch/search?q=" not in fn   # разветвление убрано
 
 

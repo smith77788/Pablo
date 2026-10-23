@@ -291,7 +291,6 @@ GET /api/miniapp/uch/conflicts
 GET /api/miniapp/uch/contacts
 GET /api/miniapp/uch/contacts/{contact_id}
 GET /api/miniapp/uch/contacts/{contact_id}/crm
-GET /api/miniapp/uch/contacts/{contact_id}/history
 GET /api/miniapp/uch/contacts/{contact_id}/identity
 GET /api/miniapp/uch/contacts/{contact_id}/invite_history
 GET /api/miniapp/uch/contacts/{contact_id}/relationships
@@ -308,7 +307,6 @@ GET /api/miniapp/uch/intent/hits
 GET /api/miniapp/uch/intent/rules
 GET /api/miniapp/uch/merge
 GET /api/miniapp/uch/reminders
-GET /api/miniapp/uch/search
 GET /api/miniapp/uch/segments
 GET /api/miniapp/uch/smart-tags
 GET /api/miniapp/uch/smart-tags/rules
@@ -582,7 +580,6 @@ HEAD /api/miniapp/uch/conflicts
 HEAD /api/miniapp/uch/contacts
 HEAD /api/miniapp/uch/contacts/{contact_id}
 HEAD /api/miniapp/uch/contacts/{contact_id}/crm
-HEAD /api/miniapp/uch/contacts/{contact_id}/history
 HEAD /api/miniapp/uch/contacts/{contact_id}/identity
 HEAD /api/miniapp/uch/contacts/{contact_id}/invite_history
 HEAD /api/miniapp/uch/contacts/{contact_id}/relationships
@@ -599,7 +596,6 @@ HEAD /api/miniapp/uch/intent/hits
 HEAD /api/miniapp/uch/intent/rules
 HEAD /api/miniapp/uch/merge
 HEAD /api/miniapp/uch/reminders
-HEAD /api/miniapp/uch/search
 HEAD /api/miniapp/uch/segments
 HEAD /api/miniapp/uch/smart-tags
 HEAD /api/miniapp/uch/smart-tags/rules

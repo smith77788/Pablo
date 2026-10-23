@@ -844,17 +844,46 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_contact_delete")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_search(request: web.Request) -> web.Response:
+    # ОТБОР СПИСКА — один, в фильтре списка. Здесь лежала ручка
+    # GET /uch/search: те же семь колонок и теги, что у фильтра списка, но
+    # своим условием и без пагинации, и её не звал ни один экран. Операторы
+    # (@ник, #тег, company:, phone:), которые раньше знал только поиск бота,
+    # теперь разбираются в repository._segment_where, поэтому работают в
+    # списке, в срезе для массовых действий и в выгрузке — одним кодом.
+    # Второй экран поиска НЕ заводить: он вернул бы расхождение «вижу одно —
+    # применяю к другому», закрытое в выгрузке.
+
+    async def uch_spotlight(request: web.Request) -> web.Response:
+        """Подсказки по мере набора: ПРЫЖОК к контакту, а не отбор списка.
+
+        Это не дубль фильтра: search_contacts_spotlight прощает опечатку
+        (fuzzy-близость по имени/нику/компании) и ранжирует попадания — больше
+        такого в продукте нет нигде. Ручка висела без двери, то есть
+        устойчивость к опечаткам была написана и недоступна.
+
+        Расхождения «вижу одно — применяю к другому» здесь не возникает:
+        подсказка открывает ОДНУ карточку, а не задаёт срез, к которому
+        применяются массовые действия.
+        """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
-        query = request.query.get('q', '')
-        if not query: return _err("Нужен поисковый запрос", 400)
+        q = request.query.get('q', '').strip()
+        if not q: return _json_resp({'results': []})
         try:
-            from services.contacts_hub.search_engine import search_contacts
-            results = await search_contacts(pool, uid, query)
-            return _json_resp({'results': results, 'total': len(results)})
+            from services.contacts_hub.search_engine import search_contacts_spotlight
+            results = await search_contacts_spotlight(pool, uid, q, limit=8)
+            out = [{'id': str(r.get('id')),
+                    'name': (' '.join(x for x in (r.get('first_name'),
+                                                  r.get('last_name')) if x)
+                             or r.get('display_name') or r.get('username')
+                             or 'Без имени'),
+                    'username': r.get('username'),
+                    'company': r.get('company'),
+                    'tags': list(r.get('tags') or [])[:3]}
+                   for r in results]
+            return _json_resp({'results': out, 'total': len(out)})
         except Exception:
-            log.exception("uch_search")
+            log.exception("uch_spotlight")
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_stats(request: web.Request) -> web.Response:
@@ -1040,22 +1069,12 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_toggle_favorite")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_contact_history(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            rows = await pool.fetch(
-                'SELECT * FROM contact_history WHERE contact_id=$1 AND owner_id=$2 '
-                'ORDER BY created_at DESC LIMIT $3',
-                cid, uid, _list_limit(request, 100, 2000))
-            total = await _safe_count(pool,
-                'SELECT COUNT(*) FROM contact_history WHERE contact_id=$1 AND owner_id=$2',
-                cid, uid)
-            return _json_resp({'history': [dict(r) for r in rows], 'total': total})
-        except Exception:
-            log.exception("uch_contact_history")
-            return _err(_INTERNAL_ERROR, 500)
+    # СПИСОК ПРАВОК КОНТАКТА отдельной ручкой больше не отдаётся: ручка
+    # GET /uch/contacts/{id}/history была строгим подмножеством ленты
+    # /timeline (та читает тот же contact_history и склеивает его с
+    # источниками, событиями организма и стадией CRM), и её не звал ни один
+    # экран. Две ленты истории расходились бы по скоупу: /timeline проверяет
+    # владельца через _own_contact, а здесь владелец был только в WHERE.
 
     async def uch_contact_invite_history(request: web.Request) -> web.Response:
         """Кому/куда/когда пытались пригласить этот контакт (по всем группам).
@@ -1829,19 +1848,6 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_ai_query")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_spotlight(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        q = request.query.get('q', '').strip()
-        if not q: return _json_resp({'results': []})
-        try:
-            from services.contacts_hub.search_engine import search_contacts_spotlight
-            results = await search_contacts_spotlight(pool, uid, q)
-            return _json_resp({'results': results, 'total': len(results)})
-        except Exception:
-            log.exception("uch_spotlight")
-            return _err(_INTERNAL_ERROR, 500)
-
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
@@ -1863,7 +1869,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/intent/hits", uch_intent_hits)
     app.router.add_post("/api/miniapp/uch/intent/seed", uch_intent_seed)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
-    app.router.add_get("/api/miniapp/uch/search", uch_search)
+    app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
     app.router.add_get("/api/miniapp/uch/sync_center", uch_sync_center)
@@ -1872,7 +1878,6 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_put("/api/miniapp/uch/groups/{group_id}", uch_group_update)
     app.router.add_delete("/api/miniapp/uch/groups/{group_id}", uch_group_delete)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/favorite", uch_toggle_favorite)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/history", uch_contact_history)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/invite_history", uch_contact_invite_history)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/opt_out", uch_contact_opt_out)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/allow_invite", uch_contact_allow_invite)
@@ -1919,4 +1924,3 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/uch/graph/compute", uch_graph_compute)
     app.router.add_post("/api/miniapp/uch/trust/update", uch_trust_update)
     app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
-    app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)

@@ -12,10 +12,16 @@
 мёртв», который молча превращался во весь флот.
 
 Поэтому проверка здесь ВЫЧИСЛЯЕТСЯ, а не перечисляется руками: берём все
-параметры фильтра, которые фронт реально умеет отправить из `loadContacts`, и
-требуем, чтобы каждый читался обработчиком и доходил до репозитория. Добавят
-седьмую плитку и забудут про сервер — красный тест, а не число, которое никуда
-не ведёт.
+параметры фильтра, которые фронт реально умеет отправить, и требуем, чтобы
+каждый читался сервером и доходил до репозитория. Добавят седьмую плитку и
+забудут про сервер — красный тест, а не число, которое никуда не ведёт.
+
+ИЗМЕРИТЕЛЬ ПЕРЕНАВЕДЁН (23.10.2026). Параметры среза собираются теперь в ОДНОМ
+месте с двух сторон: на экране `contactFilterParams()` (её зовут и список, и
+выгрузка), на сервере `_contact_filters()`. Пока измеритель читал
+`loadContacts` и тело обработчика `uch_contacts`, он видел ноль фильтров — то
+есть собственный пробник его и поймал, а не находку в коде. Детектор, который
+перестал видеть заведомо живой пример, сломан сам: правится он, а не код.
 """
 from __future__ import annotations
 
@@ -51,8 +57,8 @@ def _js_function(src: str, name: str) -> str:
 
 
 def _filter_params(src: str) -> dict[str, str]:
-    """{параметр запроса: значение CONTACT_FILTER} из loadContacts."""
-    body = _js_function(src, "loadContacts")
+    """{параметр запроса: значение CONTACT_FILTER} из contactFilterParams."""
+    body = _js_function(src, "contactFilterParams")
     out = {}
     for m in re.finditer(
             r"CONTACT_FILTER === '(\w+)'\)\s*params\.set\('(\w+)'", body):
@@ -61,15 +67,15 @@ def _filter_params(src: str) -> dict[str, str]:
 
 
 def _handler(src: str, name: str) -> str:
-    i = src.index("async def " + name + "(")
-    nxt = re.search(r"\n    async def \w+\(", src[i:])
+    i = src.index("def " + name + "(")
+    nxt = re.search(r"\n    (?:async )?def \w+\(", src[i:])
     return src[i:i + nxt.start()] if nxt else src[i:]
 
 
 # ─── Пробники: измеритель должен видеть заведомо плохой пример ───
 
 _BAD_JS = """
-async function loadContacts(append=false) {
+function contactFilterParams() {
   const params = new URLSearchParams();
   if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
   if (CONTACT_FILTER === 'beard') params.set('with_beard', '1');
@@ -88,7 +94,7 @@ def test_probe_reads_the_filters_the_front_can_send():
 
 
 def test_probe_cuts_the_function_by_the_next_definition():
-    body = _js_function(_BAD_JS, "loadContacts")
+    body = _js_function(_BAD_JS, "contactFilterParams")
     assert "with_beard" in body and "function other" not in body
 
 
@@ -96,7 +102,7 @@ def test_probe_cuts_the_function_by_the_next_definition():
 
 def test_every_filter_the_front_sends_is_read_by_the_list_handler():
     api = _api_src()
-    handler = _handler(api, "uch_contacts")
+    handler = _handler(api, "_contact_filters")
     for param, filt in sorted(_filter_params(_read("mini_app/index.html")).items()):
         assert f"request.query.get('{param}')" in handler, (
             f"фронт отправляет {param}=1 (плитка/чип «{filt}»), а обработчик "
@@ -106,11 +112,16 @@ def test_every_filter_the_front_sends_is_read_by_the_list_handler():
 def test_account_slice_is_not_silently_the_whole_vault():
     """Фильтр по аккаунту: фронт отправлял, сервер игнорировал."""
     api = _api_src()
-    handler = _handler(api, "uch_contacts")
+    handler = _handler(api, "_contact_filters")
     assert "request.query.get('account_id')" in handler, (
         "срез «контакты этого аккаунта» снова молча отдаёт весь справочник")
-    assert "account_id=account_id" in handler, (
-        "параметр прочитан, но в репозиторий не передан")
+    assert "account_id=validate_integer" in handler, (
+        "параметр прочитан, но в срез не передан")
+    # И срез обязан доехать до репозитория целиком, а не по одному полю.
+    lst = _handler(api, "uch_contacts")
+    assert "**filters" in lst, (
+        "обработчик списка собирает фильтры своим кодом — он разойдётся с "
+        "выгрузкой, которая зовёт тот же _contact_filters")
 
 
 def test_segment_where_knows_the_new_slices():

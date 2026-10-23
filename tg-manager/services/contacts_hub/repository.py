@@ -90,7 +90,21 @@ def _segment_where(owner_id, f: dict):
         # совпадением считается и точный тег. Условие собирается ЗДЕСЬ, то есть
         # остаётся общим для списка и для рабочего среза: «что вижу» и «на что
         # применяю действие» по-прежнему считаются одним запросом.
-        words = [w for w in re.split(r'\s+', str(f['search']).strip().lower()) if w]
+        #
+        # ОПЕРАТОРЫ. `@ник`, `#тег`, `company:`, `phone:` понимал только поиск
+        # БОТА (search_engine.search_contacts); список мини-аппа — нет, и
+        # подсказки о них не было ни в одном поле. Владелец, набравший `#vip` в
+        # единственном поле поиска хаба, не находил никого: тот же тег, та же
+        # база, разный ответ — ровно та жалоба, что и про теги выше, только на
+        # уровень глубже. Разбор и условия берутся из search_engine, чтобы у
+        # двух поисков было одно поведение, а не две копии правил.
+        from services.contacts_hub.search_engine import (
+            build_operator_conditions, parse_operators)
+        parsed, rest = parse_operators(str(f['search']))
+        op_conds, op_params, idx = build_operator_conditions(parsed, idx)
+        conds.extend(op_conds)
+        params.extend(op_params)
+        words = [w for w in re.split(r'\s+', rest.strip().lower()) if w]
         for w in words:
             conds.append(
                 f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '

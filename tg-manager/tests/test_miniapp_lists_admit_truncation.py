@@ -33,7 +33,9 @@ OWNER_BUILT_LISTS = [
     # История — тот же случай: «последние 30» выдавались за всю историю.
     "parser_runs", "reg_check_history", "clone_adapt_history",
     "channel_factory_recent", "relay_session_messages", "semantic_memory_bot",
-    "uch_contact_history",
+    # uch_contact_history удалена: это было строгое подмножество ленты
+    # /timeline (тот же contact_history), без двери и с другим скоупом. Сама
+    # лента про усечение говорит полем `truncated`.
 ]
 
 # Экранные функции, где кнопка «Показать ещё» обязана быть.

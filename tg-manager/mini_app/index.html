@@ -3873,7 +3873,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     </details>
     <div style="padding:6px 0">
-      <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов…" oninput="searchContacts()" class="inp">
+      <input type="text" id="contactSearch" placeholder="🔍 Поиск: слова, @ник, #тег, company:, phone:" oninput="searchContacts()" class="inp">
     </div>
     <div class="seg" id="contactFilterSeg">
       <div class="seg-opt on" data-f="all" onclick="filterContacts(null,this)">Все</div>
@@ -17133,7 +17133,25 @@ async function loadContacts(append=false) {
     const contacts = d.results||d.contacts||[];
     const total = (d.total!=null) ? d.total : contacts.length;
     CONTACT_SLICE_TOTAL = total;   // для выгрузки: «сколько выгружу» = «сколько вижу»
-    if (!append && !contacts.length) { txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки')); return; }
+    if (!append && !contacts.length) {
+      // Пустой список врал: на любом пустом ответе он предлагал
+      // «Синхронизируйте аккаунты» — в том числе владельцу с тысячами
+      // контактов, который просто набрал запрос с опечаткой или сузил фильтр.
+      // Теперь причина называется та, которая есть.
+      const q = (document.getElementById('contactSearch')?.value||'').trim();
+      const other = contactFilterParams(); other.delete('search');
+      if (q) {
+        txt('contactsList', empty('🔍','Ничего не найдено',
+          'Поиск понимает @ник, #тег, company: и phone:'));
+        contactSuggest(q);
+      } else if ([...other.keys()].length) {
+        txt('contactsList', empty('🔍','В этом срезе нет контактов',
+          'Снимите фильтр или выберите другой'));
+      } else {
+        txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки'));
+      }
+      return;
+    }
     const rowsHtml = contacts.map(c=>{
       const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
       const sub = [c.username?'@'+c.username:'', c.phones&&c.phones.length?c.phones[0]:'', c.company||''].filter(Boolean).join(' · ');
@@ -17171,6 +17189,39 @@ async function loadContacts(append=false) {
 }
 
 async function searchContacts() { loadContacts(); }
+
+// Подсказки по опечатке. Движок (uch/spotlight) считает fuzzy-близость по
+// имени, нику и компании и ранжирует попадания — больше такого в продукте нет
+// нигде, и до этого экрана он не был подключён НИ К ЧЕМУ: набрав «Птеров»,
+// владелец видел пустой список и вывод «контактов нет».
+//
+// Подсказка открывает ОДНУ карточку, а не задаёт срез: расхождения «вижу одно
+// — применяю массовое действие к другому» здесь не возникает, поэтому второго
+// фильтра у списка не появляется.
+async function contactSuggest(q) {
+  if (!q || q.length < 2) return;
+  try {
+    const d = await api('/api/miniapp/uch/spotlight?q=' + encodeURIComponent(q));
+    const rows = d.results || [];
+    if (!rows.length) return;
+    const html = rows.map(r => {
+      const sub = [r.username ? '@' + r.username : '', r.company || '',
+                   (r.tags || []).map(x => '#' + x).join(' ')]
+                  .filter(Boolean).join(' · ');
+      return `<div class="li tap" onclick="openContactDetail('${esc(r.id)}')">
+        <div class="ava" style="background:rgba(96,165,250,.16);color:var(--text)">👤</div>
+        <div class="li-body">
+          <div class="li-name">${esc(r.name)}</div>
+          ${sub ? `<div class="li-sub">${esc(sub)}</div>` : ''}
+        </div>
+        <div class="li-right"><span class="chev">›</span></div>
+      </div>`;
+    }).join('');
+    const el = document.getElementById('contactsList');
+    if (el) el.insertAdjacentHTML('beforeend',
+      `<div style="margin-top:10px"><div class="muted" style="padding:4px 2px">Похожие контакты</div>${html}</div>`);
+  } catch(e) { /* подсказка не обязана мешать списку */ }
+}
 
 // Пояснения к неочевидным фильтрам — чтобы «взаимных всего 2» не читалось как баг.
 const CONTACT_FILTER_HINTS = {

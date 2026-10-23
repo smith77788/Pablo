@@ -103,7 +103,7 @@ def test_contact_stats_rows_lead_to_contacts():
 
 
 def test_contacts_can_be_filtered_by_source_account():
-    body = _js_func("loadContacts")
+    body = _js_func("contactFilterParams")   # общая сборка среза: список + выгрузка
     assert "account_id" in body, "список контактов не умеет срез по аккаунту-источнику"
     banner = _js_func("cgRenderBanner")
     assert "CONTACT_ACCOUNT" in banner, "срез по аккаунту не виден в полосе фильтра"
