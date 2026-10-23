@@ -1316,6 +1316,91 @@ def parse_plan_topics(raw: str, n: int) -> list[str]:
     return out
 
 
+# ── Нативные опросы: слой генерации (вопрос + варианты) ───────────────────────
+# Опрос — один из сильнейших ЛЕГАЛЬНЫХ двигателей вовлечения и охвата в Telegram.
+# Здесь ТОЛЬКО генерация и валидация под лимиты Telegram (чистые функции, без сети
+# и БД). Публикация опроса в живой канал — отдельный следующий срез (действие
+# записи через account_manager + mass_publish с канарейкой).
+_POLL_Q_MAX = 300    # жёсткий лимит Telegram на вопрос
+_POLL_OPT_MAX = 100  # жёсткий лимит Telegram на вариант
+_POLL_MIN_OPTS = 2
+_POLL_MAX_OPTS = 10
+
+_SYSTEM_POLL = (
+    "Ты — администратор Telegram-канала. Составь ВОВЛЕКАЮЩИЙ опрос для аудитории "
+    "канала: один вопрос и короткие варианты ответа. Опрос провоцирует мнение и "
+    "голосование, а не проверяет знания. Ответь СТРОГО одним JSON без пояснений: "
+    "{\"question\": \"...\", \"options\": [\"...\", \"...\"]}. Правила: вопрос — до "
+    "280 символов; 2–4 варианта, каждый до 90 символов, короткие и РАЗНЫЕ; язык — "
+    "как у канала; без Markdown и фигурных скобок в тексте; не выдумывай фактов, "
+    "цифр и имён; не добавляй вариант-заглушку «другое/свой вариант», если без него "
+    "смысл не теряется."
+)
+
+
+def build_poll_prompt(profile: dict, *, topic_hint: str = "") -> tuple[str, str]:
+    """Промпт на опрос → (system, user). Опирается на тему и аудиторию канала."""
+    lines: list[str] = []
+    ld = lang_directive(profile.get("lang") or "")
+    if ld:
+        lines += [ld, ""]
+    lines += [
+        "ПРОФИЛЬ КАНАЛА",
+        f"Тематика: {profile.get('topic') or '—'}",
+        f"Аудитория: {profile.get('audience') or '—'}",
+        f"Голос и тон: {profile.get('tone') or 'живой, по делу, без канцелярита'}",
+    ]
+    if topic_hint:
+        lines.append(f"Тема опроса: {topic_hint}")
+    lines.append("Составь один опрос по теме канала, который хочется пройти и обсудить.")
+    return _SYSTEM_POLL, "\n".join(lines)
+
+
+def parse_poll(raw: str) -> Optional[dict]:
+    """Ответ ИИ → {question, options:[str]} (сырьё для валидации) или None."""
+    d = _extract_json(raw)
+    if not isinstance(d, dict):
+        return None
+    q = d.get("question") or d.get("q") or d.get("вопрос") or ""
+    opts = d.get("options") or d.get("answers") or d.get("variants") or d.get("варианты") or []
+    if not isinstance(q, str) or not isinstance(opts, list):
+        return None
+    return {"question": q, "options": [o for o in opts if isinstance(o, str)]}
+
+
+def validate_poll(question: Any, options: Any) -> tuple[Optional[dict], list[str]]:
+    """Опрос под лимиты Telegram: обрезка длины, схлопывание пробелов, дедуп (без
+    регистра), 2..10 непустых разных вариантов. Возвращает (чистый|None, ошибки)."""
+    errors: list[str] = []
+    q = " ".join(str(question or "").split())[:_POLL_Q_MAX]
+    seen: set[str] = set()
+    clean: list[str] = []
+    for o in options or []:
+        t = " ".join(str(o or "").split())[:_POLL_OPT_MAX]
+        key = t.lower()
+        if t and key not in seen:
+            seen.add(key)
+            clean.append(t)
+        if len(clean) >= _POLL_MAX_OPTS:
+            break
+    if not q:
+        errors.append("пустой вопрос")
+    if len(clean) < _POLL_MIN_OPTS:
+        errors.append("нужно минимум два разных варианта")
+    if errors:
+        return None, errors
+    return {"question": q, "options": clean}, []
+
+
+def clean_poll(raw: str) -> Optional[dict]:
+    """Сырой ответ ИИ → готовый опрос под лимиты Telegram или None."""
+    p = parse_poll(raw)
+    if not p:
+        return None
+    clean, _ = validate_poll(p["question"], p["options"])
+    return clean
+
+
 def settings_public(row: Optional[dict]) -> dict:
     """Строка va_channel_admin → JSON настроек для Mini App (умолчания без строки)."""
     r = row or {}
