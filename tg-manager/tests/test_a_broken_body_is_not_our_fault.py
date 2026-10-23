@@ -251,7 +251,6 @@ def test_the_message_survives_the_whole_way_to_the_screen():
     совет. Поэтому звенья сверяются здесь, а `errRu` не грепается, а
     ПРОГОНЯЕТСЯ в node.
     """
-    import json
     import pathlib
     import re
     import subprocess
