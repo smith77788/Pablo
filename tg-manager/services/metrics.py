@@ -107,6 +107,9 @@ _HELP = {
     "infragram_growth_dedup_read_failures_total":
         "Непрочитанные списки отработанных групп Growth Agent (операция отложена "
         "на повтор, чтобы промо не ушло в те же группы второй раз)",
+    "infragram_protective_alerts_no_recipient_total":
+        "Оповещения о сбое защитных записей, которые отправлять некому "
+        "(ADMIN_IDS пуст) — о поломке защиты не узнаёт никто",
     "infragram_growth_dedup_write_failures_total":
         "Незаписанные группы Growth Agent (поста в такую группу не было: иначе "
         "следующий запуск отправил бы туда промо второй раз)",

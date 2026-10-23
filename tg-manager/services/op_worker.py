@@ -3785,7 +3785,17 @@ async def _watchdog_protective_failures(
         log.debug("admin_ids fallback: returning empty set")
         admin_ids = set()
     if not admin_ids:
-        # Никому не ушло — база отсчёта не двигается, сообщение вернётся.
+        # Никому не ушло — база отсчёта не двигается, сообщение вернётся. Но
+        # «вернётся» здесь означает «не доедет никогда»: получателя нет, и
+        # следующий круг пройдёт так же. Поэтому сам факт недоставки — счётчик,
+        # а не только строка в логе: иначе полный отказ оповещений о защите
+        # виден лишь тому, кто читает лог воркера.
+        log.critical(
+            "op_worker: о сбое защитных записей сообщить НЕКОМУ (ADMIN_IDS "
+            "пуст) — %s", [n for n, _w, _d, _t in grown],
+        )
+        _reliability_metric("infragram_protective_alerts_no_recipient_total",
+                            where="watchdog")
         return
 
     delivered: set = set()
@@ -3848,6 +3858,27 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     сетевого блипа останавливает ВСЕ операции продукта.
     """
     log.info("Operation worker started (parallel mode, max=%d)", _MAX_PARALLEL)
+    # ПОЧЕМУ ЭТО КРИЧИТ НА СТАРТЕ. Защитные счётчики (дедуп инвайта, журнал
+    # сделанного, пауза аккаунта, предзаписи) доходят до человека ровно одним
+    # путём: сообщением админам из ADMIN_IDS. Переменная пустая — сторож
+    # защитных сбоев молча возвращается КАЖДЫЙ круг, и о том, что защита от
+    # повторного реального действия перестала писаться, не узнаёт никто. Это
+    # тот самый класс «механизм исправен и при этом не выполняется ни разу»:
+    # счётчики растут, отчёты пишутся, адресата нет.
+    try:
+        from bot.utils.subscription import _admin_ids as _aids_check
+
+        if not _aids_check():
+            log.critical(
+                "ADMIN_IDS пуст: оповещения о сбое защитных записей (дедуп "
+                "инвайта, журнал сделанного, пауза аккаунта) отправлять НЕКОМУ "
+                "— они останутся только в логах, которых никто не читает. "
+                "Укажите ADMIN_IDS в переменных окружения."
+            )
+            _reliability_metric("infragram_protective_alerts_no_recipient_total",
+                                where="startup")
+    except Exception:
+        log_exc_swallow(log, "op_worker: проверка получателя защитных алертов")
     _role = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
     _did_startup_reset = False
     _lease_denied_log_at = 0.0
