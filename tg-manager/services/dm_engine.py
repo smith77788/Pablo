@@ -1238,6 +1238,12 @@ async def run_campaign(
     acc_idx = 0
     sent = 0
     failed = 0
+    # Цели, которым не поставилась метка дедупа: сообщение им не отправлялось,
+    # и в этом прогоне они не обработаны. Не 'failed': следующий прогон возьмёт
+    # их снова (в журнале их нет), а счёт неудач кампании иначе врал бы в обе
+    # стороны — сначала посчитал бы их навсегда провалившимися, потом ещё раз
+    # при повторе. Их подберёт учёт необработанных в конце прогона.
+    deferred = 0
     _notified_milestones: set[int] = set()  # 25, 50, 75
 
     for target in targets:
@@ -1343,7 +1349,9 @@ async def run_campaign(
         # уходит, и человек остаётся в кампании: он получит сообщение в
         # следующем прогоне, а не два сообщения.
         if not await _premark_dm_target(pool, campaign_id, acc["id"], user_id):
-            failed += 1
+            deferred += 1
+            # Пауза: при недоступной базе цикл иначе прошёл бы всю аудиторию
+            # вплотную, добивая её же запросами.
             await _guarded_sleep(op_id, 1.0)
             continue
         t0_dm = time.monotonic()
@@ -1562,6 +1570,11 @@ async def run_campaign(
     # Учесть необработанные цели (напр., при исчерпании всех аккаунтов).
     # total теперь кумулятивный (already_done + остаток), а sent/failed — только
     # этот прогон, поэтому вычитаем и уже обработанное в прошлых прогонах.
+    if deferred:
+        log.error(
+            "dm_engine campaign=%s: %d целей пропущено из-за несработавшей "
+            "метки дедупа — сообщения им не отправлялись, их возьмёт следующий "
+            "прогон", campaign_id, deferred)
     unprocessed = max(0, total - already_done - sent - failed)
     if unprocessed > 0:
         failed += unprocessed

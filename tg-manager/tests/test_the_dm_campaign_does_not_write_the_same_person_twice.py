@@ -186,16 +186,25 @@ def test_every_undelivered_outcome_returns_the_target_to_the_campaign():
         "кампании навсегда: " + str(body.count("_unmark_dm_target(")))
 
 
-def test_a_message_that_was_not_sent_is_not_counted_as_sent():
-    """Пропуск по несработавшей метке обязан попасть в счёт неудач."""
+def test_a_message_that_was_not_sent_is_counted_as_unprocessed():
+    """Пропущенная цель не должна исчезнуть из отчёта кампании.
+
+    Ни 'отправлено' (сообщения не было), ни 'провалено' (следующий прогон
+    возьмёт её снова, и счёт неудач посчитал бы её дважды): она не обработана,
+    и это ровно то, что считает учёт необработанных в конце прогона.
+    """
     body = _func_src("services/dm_engine.py", "run_campaign")
     m = re.search(r"if not await _premark_dm_target\([^)]*\):\s*\n(.+?)\n\s*t0_dm",
                   body, re.S)
     assert m, "вызов предзаписи в кампании не найден"
     branch = m.group(1)
-    assert "failed += 1" in branch, (
-        "иначе кампания закончится «успешно», не написав никому")
+    assert "deferred += 1" in branch, (
+        "иначе цель не попадёт ни в один счёт и кампания закончится "
+        "«успешно», не написав никому")
+    assert "sent += 1" not in branch and "failed += 1" not in branch
     assert "continue" in branch, "после пропуска цели отправлять нельзя"
+    assert "total - already_done - sent - failed" in body, (
+        "пропущенные цели подбирает именно этот учёт необработанных")
 
 
 def test_the_detector_reads_the_real_function():
