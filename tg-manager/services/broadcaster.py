@@ -353,10 +353,16 @@ async def run(
                 [(broadcast_id, uid) for uid in batch],
             )
         except Exception as _e:
-            logger.warning(
-                "Broadcast %d: batch delivery log failed (%d users): %s",
+            # Громко и в метрику: потерянная строка журнала означает, что
+            # докатка напишет этим людям второй раз. Тихий warning сюда и
+            # приводил — узнать об этом можно было только из жалобы.
+            logger.error(
+                "Рассылка %d: журнал доставок не записался (%d получателей: "
+                "%s) — докатка может написать им второй раз",
                 broadcast_id, len(batch), _e,
             )
+            _reliability_metric("infragram_journal_write_failures_total",
+                                len(batch), where="broadcast")
 
     # Причины недоставки: по ним видно, что «829 ошибок» — это заблокировавшие
     # бота, а не поломка.

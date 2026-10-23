@@ -241,3 +241,44 @@ def test_the_journal_is_not_batched_behind_the_sends():
     assert int(m.group(1)) == 1, (
         f"журнал сбрасывается раз в {m.group(1)} отправок — столько доставок "
         "живёт только в памяти процесса, и обрыв стоит их дублей")
+
+
+def test_a_lost_journal_row_is_counted_not_swallowed():
+    """Потерянная строка журнала = дубль на докатке; знать об этом надо сразу."""
+    before = _total("infragram_journal_write_failures_total")
+
+    async def _call(session, token, method, **params):
+        if method == "getMe":
+            return {"ok": True, "result": {"id": BOT_ID, "username": "b"}}
+        return {"ok": True, "result": {"message_id": 1}}
+
+    class _Pool(_FakePool):
+        async def executemany(self, query, args):
+            if "broadcast_delivery_log" in query:
+                raise RuntimeError("база отклонила запись")
+            return None
+
+    sent_to: list[int] = []
+
+    async def _counting(session, token, method, **params):
+        if method != "getMe":
+            sent_to.append(params.get("chat_id"))
+        return await _call(session, token, method, **params)
+
+    with patch.object(bot_api, "_call", _counting):
+        with patch("database.db.mark_user_inactive", AsyncMock()):
+            with patch("database.db.update_broadcast", AsyncMock()):
+                with patch("database.db.get_broadcast_delivered_ids",
+                           AsyncMock(return_value=set())):
+                    with patch("services.brand_injection.is_free_tier",
+                               AsyncMock(return_value=False)):
+                        _run(broadcaster.run(
+                            _Pool(), _FakeSession(), BC_ID, TOKEN, BOT_ID,
+                            "Привет", user_ids=list(USERS),
+                        ))
+
+    assert _total("infragram_journal_write_failures_total") > before, (
+        "сбой журнала виден только в логе — о дублях узнаем из жалобы")
+    assert sent_to == USERS, (
+        "сбой журнала оборвал рассылку: отправленного не отменить, и терять "
+        "из-за записи в базу остаток аудитории незачем")
