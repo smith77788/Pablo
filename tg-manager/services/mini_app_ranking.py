@@ -20,7 +20,8 @@ def setup_routes(app: web.Application, pool) -> None:
     # Общие помощники живут в mini_app_api, а он импортирует этот модуль —
     # импорт сверху дал бы цикл. К моменту вызова mini_app_api уже загружен.
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, log,
+        _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, log,
+        bad_body_response,
     )
     from services.security import validate_integer
 
@@ -60,7 +61,10 @@ def setup_routes(app: web.Application, pool) -> None:
             if not result.get('ok'):
                 return _err(result.get('error') or 'Не удалось добавить', 400)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("ranking_track uid=%s", uid)
             return _err("Не удалось поставить слово на слежение", 500)
 
@@ -80,7 +84,10 @@ def setup_routes(app: web.Application, pool) -> None:
             if not result.get('ok'):
                 return _err('Ключевое слово не найдено', 404)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("ranking_untrack uid=%s", uid)
             return _err("Не удалось снять слово со слежения", 500)
 

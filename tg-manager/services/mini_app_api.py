@@ -754,6 +754,65 @@ def _json_resp(data: Any, status: int = 200) -> web.Response:
 # Подробности уходят в лог, наружу — одна русская фраза.
 _INTERNAL_ERROR = "Внутренняя ошибка сервера. Повторите позже."
 
+# Нечитаемое тело запроса — вина клиента, и отвечать на неё надо 400.
+#
+# Тело читают около 250 изменяющих ручек, и ни одна не разбирает ошибку
+# разбора: `await request.json()` на мусоре или на ПУСТОМ теле бросает
+# JSONDecodeError, и дальше это ловит либо общий `except` ручки, либо слой
+# ниже — в обоих случаях владелец получает «Что-то пошло не так, попробуйте
+# ещё раз». Совет неверный: повтор того же запроса даст то же самое. Плюс на
+# каждый такой заход в журнал уезжает полная трассировка, и настоящие
+# пятисотки тонут среди чужих опечаток. И 500 для клиента значит «повтори
+# позже», а 400 — «не повторяй».
+#
+# Чинить это в 250 ручках нельзя: класс останется открытым для 251-й.
+# Поэтому решение стоит слоем — там же, где уже стоит страховка от
+# необработанных исключений.
+#
+# Отличить вину клиента от своей обязательно, и на глаз это не делается:
+# JSONDecodeError прилетает и изнутри — из jsonb-поля базы, из ответа чужого
+# API. Ответить на это «ты прислал мусор» значило бы соврать. Признак точный:
+# исключение ВЫЛЕТЕЛО ИЗ разбора тела, то есть его трассировка проходит через
+# `Request.json`/`Request.post` самого aiohttp. Тело при этом не перечитывается:
+# перечитывание в обработчике исключения — лишний ввод-вывод на пути ошибки.
+_BAD_BODY = ("Запрос не разобран: приложение отправило неполные данные. "
+             "Закройте и откройте мини-апп, затем повторите.")
+
+_BODY_READERS = ("json", "post")
+
+
+def bad_body_response(request, exc: BaseException):
+    """Ответ 400, если тело прислано сломанным; иначе None.
+
+    Ручек, читающих тело, около 250, и у многих свой общий `except`, который
+    перехватывает ошибку раньше страховочного слоя. Поэтому решение зовут и
+    оттуда — но текст сообщения и журнальный след лежат ЗДЕСЬ, в одном месте:
+    иначе 28 копий разойдутся, и часть из них начнёт писать в журнал тело
+    запроса, в котором бывают токены.
+
+    В журнал уходит метод и путь, без трассировки: сломан запрос, а не сервер,
+    и трассировка тут лишь прячет настоящие пятисотки.
+    """
+    if not body_came_broken_from_the_client(exc):
+        return None
+    log.warning("API: нечитаемое тело запроса %s %s",
+                request.method, request.rel_url.path)
+    return _err(_BAD_BODY, 400)
+
+
+def body_came_broken_from_the_client(exc: BaseException) -> bool:
+    """Исключение вылетело из разбора ТЕЛА запроса, а не из наших данных."""
+    if not isinstance(exc, (ValueError, UnicodeDecodeError)):
+        return False
+    tb = exc.__traceback__
+    while tb is not None:
+        code = tb.tb_frame.f_code
+        if (code.co_name in _BODY_READERS
+                and "web_request" in code.co_filename):
+            return True
+        tb = tb.tb_next
+    return False
+
 
 def _err(msg: str, status: int = 400) -> web.Response:
     # Единственная дверь наружу для текста ошибки, а текст этот чаще всего —
@@ -2216,7 +2275,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return await handler(request)
         except (web.HTTPException, asyncio.CancelledError):
             raise
-        except Exception:
+        except Exception as exc:
+            bad = bad_body_response(request, exc)
+            if bad is not None:
+                return bad
             log.exception("API: необработанное исключение в %s %s",
                           request.method, request.rel_url.path)
             try:
@@ -6671,6 +6733,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
             return _json_resp({"ok": True})
         except Exception as e:
+            _bad = bad_body_response(request, e)
+            if _bad is not None:
+                return _bad
             log.warning("user_settings_save uid=%d: %s", uid, e)
             return _err("Не удалось сохранить", 500)
 
@@ -8602,7 +8667,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # внутри import_sessions.
             result = await import_sessions(pool, uid, raw, proxy, proxy_id=proxy_id)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             # Раньше сырой текст исключения уходил клиенту и никуда не писался:
             # пользователю — непонятная внутренняя строка, разработчику — ничего.
             log.exception("import_sessions uid=%s", uid)

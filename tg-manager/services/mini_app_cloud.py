@@ -25,8 +25,9 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты Telegram-облака на приложении мини-аппа."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _cloud_safe_name, _content_disposition, _err,
+        _BAD_BODY, _INTERNAL_ERROR, _cloud_safe_name, _content_disposition, _err,
         _get_uid, _is_admin, _json_resp, log, read_upload, read_upload_text,
+        bad_body_response,
     )
 
     async def _read_upload(part, max_bytes: int) -> bytes:
@@ -160,7 +161,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err(str(e) or "нет доступа к облаку — требуется подписка", 403)
         except tg_cloud.QuotaExceeded as e:
             return _err(str(e), 413)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("cloud_upload")
             return _err(_INTERNAL_ERROR, 500)
 

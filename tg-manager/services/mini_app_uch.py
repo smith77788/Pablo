@@ -36,9 +36,10 @@ def setup_routes(app: web.Application, pool) -> None:
     # дошло, и неразрешённое имя превратило бы любую раннюю ошибку в NameError.
     from services.contacts_hub.repository import BadDate
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
         _safe_fetch, _safe_fetchrow, alive_accounts, log,
         read_upload, read_upload_text, UploadTooLarge,
+        bad_body_response,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
@@ -827,7 +828,10 @@ def setup_routes(app: web.Application, pool) -> None:
             # Непонятная дата — это ошибка ввода, а не сбой сервера: 500 с
             # «внутренней ошибкой» заставлял владельца жать «Сохранить» снова.
             return _err(str(bad), 400)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_contact_update")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1025,7 +1029,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import create_group
             gid = await create_group(pool, uid, data.get('name', ''), data.get('color'))
             return _json_resp({'ok': True, 'id': gid})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_group_create")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1041,7 +1048,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import update_group
             ok = await update_group(pool, gid, uid, data.get('name'), data.get('color'))
             return _json_resp({'ok': ok})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_group_update")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1112,7 +1122,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contact_invite_link import opt_out_contact
             stored = await opt_out_contact(pool, uid, cid, reason=reason)
             return _json_resp({'ok': bool(stored), 'targets': stored})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_contact_opt_out")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1323,7 +1336,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({'ok': True, 'label': activity_label(kind)})
         except ContactNotFound as nf:
             return _err(str(nf), 404)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_crm_activity")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1356,7 +1372,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({'ok': True})
         except ContactNotFound as nf:
             return _err(str(nf), 404)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_crm_reminder uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1411,7 +1430,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.merge_engine import manual_merge
             result = await manual_merge(pool, primary_id, secondary_id, uid)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_merge")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1439,7 +1461,10 @@ def setup_routes(app: web.Application, pool) -> None:
             ok = await resolve_conflict(pool, cid, uid, data.get('resolution', 'accepted'),
                                         data.get('value'), uid)
             return _json_resp({'ok': ok})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_resolve_conflict")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1485,7 +1510,10 @@ def setup_routes(app: web.Application, pool) -> None:
             rid = await create_smart_tag_rule(pool, uid, data.get('name', ''),
                                               data.get('tag', ''), data.get('conditions', {}))
             return _json_resp({'ok': True, 'id': rid})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_smart_tag_rule_create")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1527,7 +1555,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_tag
             result = await bulk_tag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_tag")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1539,7 +1570,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_untag
             result = await bulk_untag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_untag")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1551,7 +1585,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_favorite
             result = await bulk_set_favorite(pool, uid, data.get('contact_ids', []), data.get('is_favorite', True))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_favorite")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1563,7 +1600,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_delete
             result = await bulk_delete(pool, uid, data.get('contact_ids', []))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_delete")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1577,7 +1617,10 @@ def setup_routes(app: web.Application, pool) -> None:
             result = await set_excluded(pool, uid, data.get('contact_ids', []),
                                         bool(data.get('excluded', True)))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_exclude")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1607,7 +1650,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 pool, uid, country=(d.get('country') or None),
                 tag=(d.get('tag') or None), account_id=acc_id)
             return _json_resp({'count': n})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_filter_preview")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1626,7 +1672,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 country=(d.get('country') or None), tag=(d.get('tag') or None),
                 account_id=acc_id)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_filter_exclude")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1647,7 +1696,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 tag=(d.get('tag') or None),
                 account_id=(int(d['account_id']) if d.get('account_id') else None))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_filter_delete")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1666,7 +1718,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 from services.contacts_hub.bulk_ops_engine import bulk_remove_from_group
                 result = await bulk_remove_from_group(pool, uid, data.get('contact_ids', []), gid)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_group")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1680,7 +1735,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_merge
             result = await bulk_merge(pool, uid, pairs)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_merge")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1698,7 +1756,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_importance
             result = await bulk_set_importance(pool, uid, contact_ids, level)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_importance")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1712,7 +1773,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_rating
             result = await bulk_set_rating(pool, uid, contact_ids, rating)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_rating")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1873,7 +1937,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.ai_assistant import process_ai_query
             result = await process_ai_query(pool, uid, query)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_ai_query")
             return _err(_INTERNAL_ERROR, 500)
 
