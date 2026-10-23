@@ -140,6 +140,7 @@ from bot.handlers import nodes_hub as nodes_handler
 from bot.handlers import spintax as spintax_handler
 from bot.handlers import about as about_handler
 from bot.handlers import fleet_pulse as fleet_pulse_handler
+from services import bg_tasks
 from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
@@ -1421,6 +1422,15 @@ async def main() -> None:
             await op_worker.shutdown(pool)
         except Exception:
             log.warning("Корректная остановка воркера операций не удалась", exc_info=True)
+        # Затем — фоновые записи, запущенные через spawn (телеметрия физики,
+        # журнал соответствия, конверсии). Удержание ссылки спасает их от
+        # сборщика мусора, но не от конца процесса: без ожидания они умирали
+        # на полпути («Task was destroyed but it is pending!»), а закрытый
+        # поверх них пул ронял их запросы. Ждём коротко и до pool.close().
+        try:
+            await bg_tasks.drain(5.0)
+        except Exception:
+            log.warning("Сворачивание фоновых записей не удалось", exc_info=True)
         await pool.close()
         await http.close()
         await bot.session.close()
