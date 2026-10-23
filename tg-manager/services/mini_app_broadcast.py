@@ -438,29 +438,31 @@ def setup_routes(app: web.Application, pool) -> None:
             offset = max(0, int(request.query.get("offset", 0)))
         except (TypeError, ValueError):
             offset = 0
+        # Срез и счётчик обязаны стоять на ОДНОМ условии. Раньше `total` считал
+        # контакты без фильтра, и при поиске шапка писала «240 контактов» над
+        # тремя найденными, а кнопка «Показать ещё» (её фронт показывает, пока
+        # offset < total) не исчезала никогда: следующая страница отфильтрованной
+        # выборки пуста, список не растёт, кнопка стоит. Поэтому условие
+        # собирается ОДИН раз и подставляется в оба запроса — разойтись им негде.
+        cond = ["owner_id=$1"]
+        args: list = [uid]
         if search:
-            rows = await _safe_fetch(pool,
-                """SELECT id, tg_user_id, username, first_name, last_name, phone,
-                          tags, notes, source, created_at
-                   FROM crm_contacts WHERE owner_id=$1
-                     AND (first_name ILIKE $2 OR last_name ILIKE $2 OR username ILIKE $2 OR phone ILIKE $2)
-                   ORDER BY created_at DESC, id LIMIT 50 OFFSET $3""",
-                uid, f"%{search}%", offset)
+            args.append(f"%{search}%")
+            n = len(args)
+            cond.append(f"(first_name ILIKE ${n} OR last_name ILIKE ${n} "
+                        f"OR username ILIKE ${n} OR phone ILIKE ${n})")
         elif tag:
-            rows = await _safe_fetch(pool,
-                """SELECT id, tg_user_id, username, first_name, last_name, phone,
-                          tags, notes, source, created_at
-                   FROM crm_contacts WHERE owner_id=$1 AND $2=ANY(tags)
-                   ORDER BY created_at DESC, id LIMIT 50 OFFSET $3""",
-                uid, tag, offset)
-        else:
-            rows = await _safe_fetch(pool,
-                """SELECT id, tg_user_id, username, first_name, last_name, phone,
-                          tags, notes, source, created_at
-                   FROM crm_contacts WHERE owner_id=$1
-                   ORDER BY created_at DESC, id LIMIT 50 OFFSET $2""",
-                uid, offset)
-        total = await _safe_count(pool, "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", uid)
+            args.append(tag)
+            cond.append(f"${len(args)}=ANY(tags)")
+        where = " AND ".join(cond)
+        rows = await _safe_fetch(pool,
+            f"""SELECT id, tg_user_id, username, first_name, last_name, phone,
+                       tags, notes, source, created_at
+                FROM crm_contacts WHERE {where}
+                ORDER BY created_at DESC, id LIMIT 50 OFFSET ${len(args) + 1}""",
+            *args, offset)
+        total = await _safe_count(
+            pool, f"SELECT COUNT(*) FROM crm_contacts WHERE {where}", *args)
         # Unique tags across all contacts
         tags_row = await _safe_fetch(pool,
             "SELECT DISTINCT unnest(tags) AS tag FROM crm_contacts WHERE owner_id=$1 ORDER BY tag", uid)
