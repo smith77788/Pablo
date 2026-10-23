@@ -988,6 +988,43 @@ def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
         pass
 
 
+# Буфер объявленной паузы сверх самого сна: сторож застоя опрашивает раз в
+# минуту, а `done_items` после паузы двинется только по завершении следующей
+# цели. Без буфера тик сторожа, попавший в этот зазор, обрывал здоровый прогон.
+_PAUSE_WATCHDOG_BUFFER_S = 90.0
+
+
+async def cancellable_pause(
+    pool: "asyncpg.Pool", op_id: int | None, seconds: float, where: str = "",
+) -> float:
+    """Пауза СВОЕГО цикла исполнителя, которая замечает отмену владельца.
+
+    Исполнители, спящие не через `bounded_flood_sleep` (кампания ЛС: пейсинг,
+    тихие часы, флуд-паузы), объявляли паузу сторожу застоя и дальше спали
+    одним `asyncio.sleep`. Отмена доходит опросом на витке цикла, поэтому
+    владелец, нажавший «Отменить», всю паузу видел операцию работающей, а
+    флот — занятым арендованными аккаунтами. Ровно тот разрыв, который для
+    пауз ВНУТРИ прогона уже закрыт `_pause_watching_for_cancel`; здесь он
+    закрыт для пауз МЕЖДУ целями.
+
+    Прерывать такую паузу безопасно только там, где следом идёт виток цикла
+    (он начинается с проверки отмены) или явная проверка на месте — то же
+    условие, что и у `_pause_watching_for_cancel`.
+
+    Возвращает фактически проспанное: меньше заказанного — пауза прервана
+    отменой.
+    """
+    if op_id is None or not seconds or seconds <= 0:
+        return 0.0
+    declare_op_pause(op_id, float(seconds) + _PAUSE_WATCHDOG_BUFFER_S)
+    try:
+        return await _pause_watching_for_cancel(pool, int(op_id), float(seconds), where)
+    finally:
+        # `_pause_watching_for_cancel` снимает объявление за собой, поэтому
+        # буфер на один виток сторожа объявляем заново.
+        declare_op_pause(op_id, _PAUSE_WATCHDOG_BUFFER_S)
+
+
 async def bounded_flood_sleep(
     seconds: float, where: str = "", *, pool=None, op_id: int | None = None,
 ) -> float:

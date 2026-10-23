@@ -534,25 +534,48 @@ _PACE_MULTIPLIERS: dict[str, float] = {
 }
 
 
-async def _guarded_sleep(op_id: int | None, seconds: float) -> None:
-    """asyncio.sleep + объявление паузы сторожу застоя op_worker.
+async def _guarded_sleep(op_id: int | None, seconds: float, pool=None) -> None:
+    """Пауза кампании: объявлена сторожу застоя и замечает отмену владельца.
 
     Кампания спит в СВОЁМ цикле (пейсинг, тихие часы до 10ч, флуд-паузы), а не
     через op_worker.bounded_flood_sleep, поэтому эти паузы НЕ двигают done_items
     и, не будучи объявленными, выглядели для сторожа застоя (90 мин) зависанием.
     Итог: любая многочасовая рассылка, попавшая в ночь аккаунтов, падала
     «Ошибкой» (op была прервана). Объявляем паузу — сторож её уважает, а потолок
-    прогона разрешается штатным продолжением. Fail-open: без op_id/op_worker
-    просто спим.
+    прогона разрешается штатным продолжением.
+
+    С `pool` пауза ещё и дробная (`op_worker.cancellable_pause`): отмена
+    доходит до кампании опросом на витке цикла, а сон был один и целиком, и
+    владелец, нажавший «Отменить», всю паузу — до пяти минут на флуде —
+    видел рассылку работающей, а аккаунты оставались арендованными. Выйти
+    раньше здесь безопасно: за каждой такой паузой идёт виток цикла, а он
+    начинается с проверки отмены.
+
+    Fail-open: без op_id, без pool или без op_worker просто спим.
     """
     if op_id is not None and seconds and seconds > 0:
         try:
             from services import op_worker
-            # Буфер сверх сна покрывает период опроса сторожа (60с) + джиттер,
-            # чтобы окно не закрылось за миг до следующего витка.
-            op_worker.declare_op_pause(op_id, float(seconds) + 90.0)
         except Exception:
-            pass
+            op_worker = None
+        if op_worker is not None:
+            if pool is not None:
+                try:
+                    await op_worker.cancellable_pause(
+                        pool, int(op_id), float(seconds), "dm_campaign")
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Дробная пауза не удалась — пересиживаем как раньше.
+                    # Укоротить паузу здесь нельзя: на флуде она и есть защита.
+                    log_exc_swallow(log, "dm_engine: дробная пауза не удалась")
+            try:
+                # Буфер сверх сна покрывает период опроса сторожа (60с) + джиттер,
+                # чтобы окно не закрылось за миг до следующего витка.
+                op_worker.declare_op_pause(op_id, float(seconds) + 90.0)
+            except Exception:
+                pass
     await asyncio.sleep(seconds)
 
 
@@ -1302,7 +1325,7 @@ async def run_campaign(
                 if _slept == 0:
                     log.info("dm_engine campaign=%d: у всех аккаунтов ночь — ждём утра",
                              campaign_id)
-                await _guarded_sleep(op_id, 60)
+                await _guarded_sleep(op_id, 60, pool=pool)
                 _slept += 60
                 _cur = await pool.fetchrow(
                     "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id)
@@ -1352,7 +1375,7 @@ async def run_campaign(
             deferred += 1
             # Пауза: при недоступной базе цикл иначе прошёл бы всю аудиторию
             # вплотную, добивая её же запросами.
-            await _guarded_sleep(op_id, 1.0)
+            await _guarded_sleep(op_id, 1.0, pool=pool)
             continue
         t0_dm = time.monotonic()
         result = await send_dm(
@@ -1403,7 +1426,7 @@ async def run_campaign(
                 reason="dm flood_wait", bump_flood_count=True)
             # Убрать аккаунт из цикла временно и подождать
             if wait <= 60:
-                await _guarded_sleep(op_id, min(wait, 60))
+                await _guarded_sleep(op_id, min(wait, 60), pool=pool)
             else:
                 # Для долгих флуд-вейтов — убираем аккаунт из ротации, продолжаем другими
                 acc_cycle_without = [a for a in acc_cycle if a["id"] != acc["id"]]
@@ -1415,7 +1438,7 @@ async def run_campaign(
                         len(acc_cycle),
                     )
                 else:
-                    await _guarded_sleep(op_id, min(wait, 300))
+                    await _guarded_sleep(op_id, min(wait, 300), pool=pool)
             infra_memory.record_account_op(
                 acc["id"], "dm_campaign", False, "flood_wait"
             )
@@ -1493,7 +1516,7 @@ async def run_campaign(
                     )
                 except Exception as e:
                     log_exc_swallow(log, "run_campaign: update operation")
-            await _guarded_sleep(op_id, random.uniform(_delay_min, _delay_max))
+            await _guarded_sleep(op_id, random.uniform(_delay_min, _delay_max), pool=pool)
             continue
         else:
             # retry — логируем как ошибку
@@ -1565,7 +1588,7 @@ async def run_campaign(
         # флуды и баны от других операций. Telegram смотрит на аккаунты как на
         # группу — не замедлиться здесь значило добивать уже просевший флот.
         delay = random.uniform(_delay_min, _delay_max) * await _fleet_tempo_mult(pool, owner_id)
-        await _guarded_sleep(op_id, delay)
+        await _guarded_sleep(op_id, delay, pool=pool)
 
     # Учесть необработанные цели (напр., при исчерпании всех аккаунтов).
     # total теперь кумулятивный (already_done + остаток), а sent/failed — только

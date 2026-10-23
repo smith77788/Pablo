@@ -89,9 +89,16 @@ def test_night_wait_stays_cancellable():
     night = night[:2500]
     # Дробление сохранено (60с кусками), но через _guarded_sleep — он объявляет
     # паузу сторожу застоя, иначе ночное ожидание роняло бы рассылку «Ошибкой».
-    assert "_guarded_sleep(op_id, 60)" in night, (
+    assert "_guarded_sleep(op_id, 60" in night, (
         "ожидание обязано дробиться по 60с И объявлять паузу сторожу застоя "
         "(_guarded_sleep), а не спать голым asyncio.sleep — иначе ночь = «Ошибка»")
+    # Привязка к ЦЕЛОМУ вызову была ложной точностью: добавление `pool=pool`
+    # (дробная пауза замечает отмену внутри сна) ломало проверку, хотя
+    # свойство, которое она стережёт, только усилилось. Сам `pool` обязателен
+    # и проверяется отдельным храповиком — см.
+    # tests/test_the_campaign_notices_the_cancel_during_its_pause.py.
+    assert "pool=pool" in night[night.index("_guarded_sleep(op_id, 60"):][:80], (
+        "ночное ожидание спит без pool — отмена внутри куска не замечается")
     assert "paused" in night, "пауза кампании обязана срабатывать и ночью"
     assert "cancelled" in night or "stop_requested" in night, (
         "отмена операции обязана срабатывать и ночью. Слово 'cancelled' здесь "
