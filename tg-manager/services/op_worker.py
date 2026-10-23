@@ -3731,6 +3731,10 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "id рассылки не закрепился за операцией — рассылка не запущена и "
         "снята; без этого отказа повтор операции отправил бы сообщение всей "
         "аудитории второй раз",
+    "infragram_broadcast_subset_write_failures_total":
+        "список получателей рассылки не сохранился — рассылка не запущена и "
+        "снята; без этого отказа докатка после перезапуска отправила бы её "
+        "всей аудитории бота",
     "infragram_broadcast_dedup_read_failures_total":
         "список уже доставленных у рассылки не прочитался — рассылка отложена; "
         "без этого отказа вся аудитория получила бы сообщение второй раз",
@@ -22184,12 +22188,42 @@ async def _exec_run_broadcast(
         # аудитории: люди, уже получившие исходное сообщение, получали его
         # второй раз. Ровно от этого `resend_undelivered` отказывается, когда у
         # исходной рассылки вычищен журнал доставки.
-        try:
-            await _safe_execute(pool,
+        #
+        # Эта запись — тоже ЦЕНА запуска, и по той же причине, что закрепление
+        # id выше. Её результат выбрасывался на пол (а `except` здесь к тому же
+        # мёртвый: `_safe_execute` не бросает), то есть при сбое базы рассылка
+        # уходила с ПУСТЫМ списком в строке. В самом прогоне список есть — он
+        # передан в broadcaster.start, — но докатка после рестарта читает
+        # именно строку, и на ближайшем деплое рассылка догонялась ВСЕЙ
+        # аудиторией бота: люди, уже получившие исходное сообщение, получали
+        # его второй раз. Повтор, а при полной неудаче — не запускаем.
+        _subset_saved = False
+        for _attempt in (1, 2):
+            if await _safe_execute(
+                pool,
                 "UPDATE broadcasts SET target_user_ids=$1::jsonb WHERE id=$2",
-                json.dumps(user_ids), broadcast_id)
-        except Exception:
-            log.warning("run_broadcast: не удалось сохранить target_user_ids подмножества op=%s", op_id)
+                json.dumps(user_ids), broadcast_id,
+                log_ctx=f"[run_broadcast_subset op={op_id}]",
+            ) != "ERROR":
+                _subset_saved = True
+                break
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+        if not _subset_saved:
+            log.error(
+                "run_broadcast op=%s: список получателей рассылки %s НЕ "
+                "сохранился — рассылку не запускаем и снимаем, иначе докатка "
+                "после рестарта отправила бы её всей аудитории бота",
+                op_id, broadcast_id)
+            _reliability_metric("infragram_broadcast_subset_write_failures_total",
+                                op_type="run_broadcast")
+            await broadcaster.abandon_unstarted(pool, broadcast_id)
+            return {
+                "status": "failed",
+                "summary": ("⚠️ Рассылка не запущена: не удалось сохранить список "
+                            "получателей. Запустите ещё раз — иначе после "
+                            "перезапуска она могла бы уйти всей аудитории бота."),
+            }
 
     # Повторный прогон этой же операции (таймаут, воскрешение после рестарта)
     # НЕ должен запускать вторую задачу на тот же broadcast_id: два цикла
