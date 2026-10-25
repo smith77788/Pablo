@@ -110,3 +110,92 @@ def test_the_number_of_pinned_test_files_only_shrinks():
         raise AssertionError(
             f"долг уменьшился до {len(pinned)} — опустите CEILING в этом файле "
             f"тем же коммитом, иначе потолок перестанет сторожить рост")
+
+
+# ── Тот же долг на экранном слое ─────────────────────────────────────────────
+#
+# Экраны уехали из `mini_app/index.html` в `mini_app/screens/*.js` — сейчас
+# девятнадцать модулей. Проверка, которая ищет экранный код в index.html,
+# после выноса экрана ведёт себя двояко. Утверждение «такое-то имя есть»
+# покраснеет, и его починят. Утверждение ОТРИЦАТЕЛЬНОЕ или подсчёт останутся
+# зелёными, глядя не туда, — и это тот же самый дорогой случай, что и у
+# храповика про ручки: защита цела на вид и мертва на деле.
+#
+# Правило поэтому механическое: если набор упоминает имя, которое живёт ТОЛЬКО
+# в экранном модуле, он обязан читать и экранный слой — `screens/*.js` напрямую
+# или через `tests.miniapp_source`. Читать при этом index.html совершенно
+# законно: в нём остаётся отпечаток экрана (тег `<script src="screens/…">` и
+# его порядок), и это проверяют отдельно.
+_SCREEN_GLUE = ("miniapp_source", "screen_files", "source_of",
+                "js_function", "js_functions")
+
+# Путь к экранному модулю собирают и по частям: `os.path.join(ROOT,
+# "mini_app", "screens", "cmdcenter.js")`. Первая версия этого правила искала
+# только склеенный `screens/` и выдала ровно одну находку — и та оказалась
+# ложной: `test_cmdcenter_numbers_lead_somewhere` читает модуль именно
+# через join. Та же ошибка, что описана выше про путь к монолиту, повторённая
+# на экранах, и снова её поймала проверка измерителя, а не прогон.
+_READS_SCREENS = re.compile(r'screens/|["\']screens["\']')
+
+
+def _screen_only_names() -> dict[str, str]:
+    """Имена, объявленные в экранных модулях и отсутствующие в index.html."""
+    mini = ROOT / "mini_app"
+    index = (mini / "index.html").read_text(encoding="utf-8", errors="replace")
+    out: dict[str, str] = {}
+    for path in sorted((mini / "screens").glob("*.js")):
+        src = path.read_text(encoding="utf-8", errors="replace")
+        for name in re.findall(r"\b(?:function|const|let|var)\s+(_?[A-Za-z][\w$]{3,})",
+                               src):
+            if name not in index:
+                out.setdefault(name, path.name)
+    return out
+
+
+def _blind_to_the_screens(texts: dict[str, str] | None = None) -> list[str]:
+    """Наборы, судящие экранный код по одному index.html."""
+    names = _screen_only_names()
+    if texts is None:
+        texts = {p.name: p.read_text(encoding="utf-8", errors="replace")
+                 for p in sorted(TESTS.glob("test_*.py"))}
+    out = []
+    for fname, text in sorted(texts.items()):
+        if fname == pathlib.Path(__file__).name or "index.html" not in text:
+            continue
+        if _READS_SCREENS.search(text) or any(g in text for g in _SCREEN_GLUE):
+            continue
+        hit = sorted(n for n in names if re.search(r"[\"']" + re.escape(n), text))
+        if hit:
+            out.append(f"{fname}: {', '.join(hit[:4])} (экран {names[hit[0]]})")
+    return out
+
+
+def test_the_screen_rule_sees_the_screen_names():
+    """Пустой список имён сделал бы правило ниже зелёным ни на чём."""
+    names = _screen_only_names()
+    assert len(names) >= 100, (
+        f"имён, живущих только в экранных модулях, найдено {len(names)}: "
+        "правило ниже сторожит пустоту")
+
+
+def test_the_screen_rule_is_red_on_a_set_that_judges_by_one_file():
+    """Обратный контроль: иначе зелёный ниже не значит ничего."""
+    name = next(iter(_screen_only_names()))
+    bad = _blind_to_the_screens({"test_fake.py": (
+        f'html = _read("mini_app/index.html")\nassert "{name}" not in html\n')})
+    assert bad, (
+        "правило не видит набора, который ищет экранное имя в одном index.html")
+    good = _blind_to_the_screens({"test_fake.py": (
+        f'html = _read("mini_app/index.html")\n'
+        f'js = _read("mini_app/screens/dashboard.js")\n'
+        f'assert "{name}" in js\n')})
+    assert not good, "правило ругается на набор, который читает экранный слой"
+
+
+def test_no_test_judges_screen_code_by_index_html_alone():
+    blind = _blind_to_the_screens()
+    assert not blind, (
+        "набор ищет в `mini_app/index.html` имя, которое живёт только в "
+        "`mini_app/screens/*.js`: после выноса экрана такая проверка не "
+        "краснеет, а слепнет — берите источник из tests.miniapp_source "
+        "или читайте сам экранный модуль:\n  " + "\n  ".join(blind))

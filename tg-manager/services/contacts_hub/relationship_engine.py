@@ -146,30 +146,12 @@ async def get_relationships(pool, owner_id: int, contact_id: str) -> list:
     return result
 
 
-async def add_relationship(pool, contact_a_id: str, contact_b_id: str,
-                           relationship_type: str, strength: float = 0.5,
-                           metadata: dict = None) -> dict:
-    owner_row = await pool.fetchrow(
-        'SELECT owner_id FROM unified_contacts WHERE id=$1', contact_a_id)
-    if not owner_row:
-        return {'error': 'contact_not_found'}
-    owner_id = owner_row['owner_id']
-    await pool.execute(
-        '''INSERT INTO contact_relationships
-           (owner_id, contact_a_id, contact_b_id, relationship_type, strength, metadata)
-           VALUES ($1,$2,$3,$4,$5,$6::jsonb)
-           ON CONFLICT (owner_id, contact_a_id, contact_b_id, relationship_type)
-           DO UPDATE SET strength=EXCLUDED.strength, metadata=EXCLUDED.metadata, updated_at=NOW()''',
-        owner_id, contact_a_id, contact_b_id, relationship_type, strength,
-        json.dumps(metadata or {}))
-    return {'ok': True, 'relationship_type': relationship_type, 'strength': strength}
-
-
-async def remove_relationship(pool, relationship_id: int) -> bool:
-    result = await pool.execute(
-        'DELETE FROM contact_relationships WHERE id=$1', relationship_id)
-    return result != 'DELETE 0'
-
+# УДАЛЕНО: add_relationship / remove_relationship. Связи контакта СЧИТАЮТСЯ
+# (compute_relationships: общий телефон, похожий ник, одна компания, общий
+# аккаунт-источник, общая группа, общий канал) и показываются на экране «🕸
+# Связи». Ручных связей интерфейс не обещает нигде, двери у функций не было, а
+# рядом с вычисляемыми ручные расходятся молча: пересчёт их не видит и не
+# обновляет.
 
 async def get_graph_stats(pool, owner_id: int) -> dict:
     total_rel = await pool.fetchval(
@@ -226,3 +208,22 @@ async def get_pairs_by_type(pool, owner_id: int, rel_type: str,
         d['metadata'] = meta or {}
         out.append(d)
     return out
+
+
+async def count_pairs_by_type(pool, owner_id: int, rel_type: str) -> int:
+    """Сколько всего пар этого типа — то же условие, что и у выборки.
+
+    Экран графа показывает «Совпадение телефона — 420 связей», по нажатию
+    открывается список из пятидесяти пар, и ни слова о том, что остальные
+    триста семьдесят просто не приехали. Число берётся тем же условием, с
+    теми же соединениями по владельцу, иначе итог разошёлся бы со списком:
+    пара, у которой одна сторона принадлежит другому владельцу, в список не
+    попадает и в итоге считаться не должна.
+    """
+    n = await pool.fetchval(
+        '''SELECT COUNT(*) FROM contact_relationships r
+           JOIN unified_contacts uc1 ON uc1.id = r.contact_a_id AND uc1.owner_id = $1
+           JOIN unified_contacts uc2 ON uc2.id = r.contact_b_id AND uc2.owner_id = $1
+           WHERE r.owner_id = $1 AND r.relationship_type = $2''',
+        owner_id, rel_type)
+    return int(n or 0)

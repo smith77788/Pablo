@@ -451,7 +451,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 f"""SELECT tg_user_id, username, first_name, last_name, is_premium,
                            is_bot, is_active, phone, source_title, source_type, parsed_at
                     FROM parsed_audiences WHERE owner_id=$1{filt_sql}
-                    ORDER BY parsed_at DESC LIMIT ${len(filt_params)+2} OFFSET ${len(filt_params)+3}""",
+                    ORDER BY parsed_at DESC, id LIMIT ${len(filt_params)+2} OFFSET ${len(filt_params)+3}""",
                 uid, *filt_params, limit, offset,
             )
             total = await pool.fetchval(

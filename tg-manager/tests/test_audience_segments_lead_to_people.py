@@ -87,7 +87,9 @@ def test_route_is_registered_and_checks_the_key():
 def test_segment_row_opens_its_people():
     r = _fn("renderAudSegments")
     assert "openAudSegment(" in r, "сегмент никуда не ведёт"
-    o = _fn("openAudSegment")
+    # Рисует список теперь loadAudSegment: openAudSegment остался дверью,
+    # потому что «Догрузить до 500» перезагружает уже открытый экран.
+    o = _fn("loadAudSegment")
     assert "audience_analytics/segment?key=" in o
     assert "audSegCopyIds(" in o, "номера нельзя забрать"
     assert "Пользователь " in o, "вместо имени останется голый номер"

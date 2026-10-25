@@ -273,6 +273,15 @@ function renderBots() {
     const badge = (h.label && h.state && h.state!=='ok' && (active || h.state==='dead'))
       ? `<span class="badge b-gy" style="margin-top:4px;display:inline-flex;background:var(--bg2);color:${h.attention?'var(--red,#ef4444)':'var(--orange,#f59e0b)'}">${esc(h.label)}</span>`
       : `<span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'⏸ Убран из работы'}</span>`;
+    // Бейдж последней проверки живости (checkAllBots): мёртвый = токен отозван.
+    const chk = BOT_CHECK[b.bot_id];
+    const chkBadge = chk===BOT_STATUS_DEAD
+        ? `<span class="badge b-gy" style="margin-top:4px;display:inline-flex;background:var(--bg2);color:var(--red,#ef4444)">🔴 Токен отозван</span>`
+      : chk===BOT_STATUS_UNKNOWN
+        ? `<span class="badge b-gy" style="margin-top:4px;display:inline-flex">⚪ Не ответил</span>`
+      : chk===BOT_STATUS_ALIVE
+        ? `<span class="badge b-gr" style="margin-top:4px;display:inline-flex">✅ Жив</span>`
+      : '';
     // На карточке — только пауза (⏻/▶️). Удаление из системы — на экране
     // бота, кнопкой «🗑 Удалить», с подтверждением.
     return `<div class="bot-card" ${h.attention?'style="border-color:var(--red,#ef4444)"':''} onclick="openBot(${b.bot_id})">
@@ -283,6 +292,7 @@ function renderBots() {
       <div class="bot-card-subs">${num(subs)}</div>
       <div class="bot-card-lbl">подписчиков</div>
       ${badge}
+      ${chkBadge}
     </div>`;
   }).join('');
   renderBotLoadMore(_list.length);
@@ -321,6 +331,50 @@ function botSelClear() { BOT_SEL.clear(); renderBots(); updateBotSelBar(); }
 function updateBotSelBar() {
   const el = document.getElementById('botSelCount');
   if (el) el.textContent = 'Выбрано: '+BOT_SEL.size;
+}
+
+// ── Проверка живости и полное удаление ботов ───────────────────────────────
+// «Полное удаление» ≠ «убрать из работы» (is_active=FALSE): здесь удаляется
+// сама строка бота. «Мёртвый» = отозванный токен (getMe → 401). Статусы
+// обязаны совпадать со services/bot_api.py.
+const BOT_STATUS_ALIVE = 'alive', BOT_STATUS_DEAD = 'dead', BOT_STATUS_UNKNOWN = 'unknown';
+
+async function checkAllBots() {
+  const btn = document.getElementById('botCheckBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
+  try {
+    const r = await api('/api/miniapp/bots/check_all', {method:'POST', body:'{}'});
+    BOT_CHECK = {};
+    (r.bots||[]).forEach(b => { BOT_CHECK[b.bot_id] = b.status; });
+    renderBots();
+    toast(`🩺 Жив: ${r.alive||0} · отозван токен: ${r.dead||0} · не ответил: ${r.unknown||0}`);
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось проверить')); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🩺 Проверить все'; } }
+}
+
+async function bulkDeleteBots() {
+  const ids = [...BOT_SEL];
+  if (!ids.length) { toast('❗ Выберите хотя бы одного бота'); return; }
+  if (!await askConfirm(`Удалить ПОЛНОСТЬЮ ${ids.length} ${plural(ids.length,'бота','ботов','ботов')}?\n\nЭто не «убрать из работы»: боты и их данные удаляются из системы без возврата.`)) return;
+  try {
+    const r = await api('/api/miniapp/bots/bulk_delete', {method:'POST', body:JSON.stringify({bot_ids:ids})});
+    toast(`🗑 Удалено: ${r.deleted||0} из ${r.requested||ids.length}`);
+    toggleBotSelMode();
+    await loadBots();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось удалить')); }
+}
+
+async function cleanupDeadBots() {
+  if (!await askConfirm('Проверить всех ботов и удалить тех, у кого отозван токен?\n\nБоты, до которых Telegram сейчас не достучался, затронуты не будут.')) return;
+  const btn = document.getElementById('botCleanupBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
+  try {
+    const r = await api('/api/miniapp/bots/cleanup_dead', {method:'POST', body:'{}'});
+    toast(`🧹 Проверено: ${r.checked||0} · удалено мёртвых: ${r.deleted||0} · не ответили: ${r.unknown||0}`);
+    BOT_CHECK = {};
+    await loadBots();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось очистить')); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🧹 Удалить мёртвых'; } }
 }
 
 function openBotBroadcast() {

@@ -123,7 +123,7 @@ def test_executor_records_phone_invitee_under_all_addresses(stand, monkeypatch):
                                                "errors": [], "untried": []})
     seen_skip: list = []
 
-    async def _phones(sess, acc, group, phones, skip_keys=None):
+    async def _phones(sess, acc, group, phones, skip_keys=None, **_kw):
         seen_skip.append(set(skip_keys or ()))
         return {"ok": len(phones), "failed": 0, "errors": [], "untried": [],
                 "invited_phones": list(phones), "invited_aliases": ["@Ivan", "111"],

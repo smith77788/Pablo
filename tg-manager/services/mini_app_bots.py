@@ -77,7 +77,7 @@ def setup_routes(app: web.Application, pool) -> None:
                LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
                WHERE ({visible})
                GROUP BY mb.bot_id, mb.username, mb.first_name, mb.is_active{group}
-               ORDER BY subscriber_count DESC LIMIT $2 OFFSET $3"""
+               ORDER BY subscriber_count DESC, mb.bot_id LIMIT $2 OFFSET $3"""
         try:
             rows = await pool.fetch(
                 _BOTS_SQL.format(health=_BOT_HEALTH_COLS, visible=_BOTS_VISIBLE_SQL,
@@ -297,7 +297,7 @@ def setup_routes(app: web.Application, pool) -> None:
         rows = await _safe_fetch(pool,
             """SELECT user_id, username, first_name, last_seen, is_active, first_seen
                FROM bot_users WHERE bot_id=$1
-               ORDER BY last_seen DESC NULLS LAST
+               ORDER BY last_seen DESC NULLS LAST, user_id
                LIMIT 50 OFFSET $2""", bot_id, offset)
         total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
         return _json_resp({"subscribers": rows, "total": total, "offset": offset})
@@ -1321,7 +1321,142 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("create_schedule bot=%d uid=%d", bot_id, uid)
             return _err("Не удалось создать расписание", 500)
 
+    async def bots_check_all(request: web.Request) -> web.Response:
+        """Проверить живость всех ботов владельца: getMe по каждому токену.
+
+        Только чтение, ничего не удаляет. Возвращает статус каждого бота
+        (alive/dead/unknown), чтобы владелец видел, кого можно снести.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(
+            pool,
+            "SELECT bot_id, username, first_name, token FROM managed_bots "
+            "WHERE added_by=$1 ORDER BY bot_id", uid)
+        rows = rows or []
+        if not rows:
+            return _json_resp({"bots": [], "alive": 0, "dead": 0, "unknown": 0})
+        from services import bot_api
+        import aiohttp as _aio
+        tokens = [r["token"] for r in rows]
+        try:
+            async with _aio.ClientSession() as sess:
+                statuses = await bot_api.batch_check_alive(sess, tokens)
+        except Exception:
+            log.exception("bots_check_all uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        out = []
+        counts = {bot_api.BOT_ALIVE: 0, bot_api.BOT_DEAD: 0, bot_api.BOT_UNKNOWN: 0}
+        for r, st in zip(rows, statuses):
+            counts[st] = counts.get(st, 0) + 1
+            out.append({"bot_id": int(r["bot_id"]), "username": r["username"],
+                        "first_name": r["first_name"], "status": st})
+        return _json_resp({"bots": out,
+                           "alive": counts[bot_api.BOT_ALIVE],
+                           "dead": counts[bot_api.BOT_DEAD],
+                           "unknown": counts[bot_api.BOT_UNKNOWN]})
+
+    def _parse_bot_ids(raw) -> list[int] | None:
+        """Список bot_id из тела запроса, либо None при негодном вводе."""
+        if not isinstance(raw, list) or not raw:
+            return None
+        try:
+            return [int(x) for x in raw]
+        except (TypeError, ValueError):
+            return None
+
+    def _deleted_count(res) -> int:
+        """Число строк из тега asyncpg «DELETE N» (0 при любом другом ответе)."""
+        s = str(res)
+        if not s.startswith("DELETE"):
+            return 0
+        try:
+            return int(s.rsplit(" ", 1)[-1])
+        except (ValueError, IndexError):
+            return 0
+
+    async def bots_bulk_delete(request: web.Request) -> web.Response:
+        """Полностью удалить выбранных ботов владельца (одного или нескольких).
+
+        В отличие от «убрать из работы» (is_active=FALSE) — это DELETE строки
+        managed_bots; связанные записи уходят по ON DELETE CASCADE. Скоуп —
+        только свои боты (added_by). Идемпотентно: повтор по уже удалённым = 0.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Некорректный запрос", 400)
+        bot_ids = _parse_bot_ids(body.get("bot_ids"))
+        if bot_ids is None:
+            return _err("Не выбран ни один бот", 400)
+        try:
+            res = await pool.execute(
+                "DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
+                bot_ids, uid)
+            from database.db import record_manual_action
+            await record_manual_action(
+                pool, uid, "bots_bulk_delete",
+                target=",".join(str(b) for b in bot_ids[:50]))
+            return _json_resp({"ok": True, "deleted": _deleted_count(res),
+                               "requested": len(bot_ids)})
+        except Exception:
+            log.exception("bots_bulk_delete uid=%d n=%d", uid, len(bot_ids))
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def bots_cleanup_dead(request: web.Request) -> web.Response:
+        """Проверить всех ботов владельца и удалить ТОЛЬКО мёртвых (401).
+
+        Боты со статусом unknown (сеть/Telegram недоступны) НЕ удаляются:
+        удалять можно лишь то, про что точно известно, что токен отозван.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(
+            pool, "SELECT bot_id, token FROM managed_bots WHERE added_by=$1", uid)
+        rows = rows or []
+        if not rows:
+            return _json_resp({"checked": 0, "deleted": 0, "dead": 0,
+                               "unknown": 0, "alive": 0, "deleted_ids": []})
+        from services import bot_api
+        import aiohttp as _aio
+        tokens = [r["token"] for r in rows]
+        try:
+            async with _aio.ClientSession() as sess:
+                statuses = await bot_api.batch_check_alive(sess, tokens)
+        except Exception:
+            log.exception("bots_cleanup_dead check uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+        dead_ids = [int(r["bot_id"]) for r, st in zip(rows, statuses)
+                    if st == bot_api.BOT_DEAD]
+        unknown = sum(1 for st in statuses if st == bot_api.BOT_UNKNOWN)
+        alive = sum(1 for st in statuses if st == bot_api.BOT_ALIVE)
+        deleted = 0
+        if dead_ids:
+            try:
+                res = await pool.execute(
+                    "DELETE FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2",
+                    dead_ids, uid)
+                deleted = _deleted_count(res)
+                from database.db import record_manual_action
+                await record_manual_action(
+                    pool, uid, "bots_cleanup_dead",
+                    target=",".join(str(b) for b in dead_ids[:50]))
+            except Exception:
+                log.exception("bots_cleanup_dead delete uid=%d", uid)
+                return _err(_INTERNAL_ERROR, 500)
+        return _json_resp({"checked": len(rows), "deleted": deleted,
+                           "dead": len(dead_ids), "unknown": unknown,
+                           "alive": alive, "deleted_ids": dead_ids})
+
     app.router.add_get("/api/miniapp/bots", bots)
+    app.router.add_post("/api/miniapp/bots/check_all", bots_check_all)
+    app.router.add_post("/api/miniapp/bots/bulk_delete", bots_bulk_delete)
+    app.router.add_post("/api/miniapp/bots/cleanup_dead", bots_cleanup_dead)
     app.router.add_post("/api/miniapp/bot/add", bot_add)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)
     app.router.add_get("/api/miniapp/bot/{bot_id}", bot_detail)

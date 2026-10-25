@@ -263,13 +263,13 @@ def promoter_stand(stand, monkeypatch):
             return "https://t.me/+x"
         monkeypatch.setattr(mie, "export_group_invite_link", _link)
 
-        async def _trick(sess, acc, group, refs):
+        async def _trick(sess, acc, group, refs, **_kw):
             s.trick_calls.append((int(acc["id"]), list(refs)))
             return {"ok": 0, "failed": len(refs), "errors": [],
                     "still_blocked": list(refs), "untried": []}
         monkeypatch.setattr(mie, "add_via_promote", _trick)
 
-        async def _via_link(sess, acc, link, refs, msg=None, pace=1.0):
+        async def _via_link(sess, acc, link, refs, msg=None, pace=1.0, **_kw):
             s.link_calls.append((int(acc["id"]), list(refs)))
             if link_answer:
                 return link_answer(int(acc["id"]), list(refs))

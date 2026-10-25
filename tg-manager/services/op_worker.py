@@ -988,6 +988,43 @@ def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
         pass
 
 
+# Буфер объявленной паузы сверх самого сна: сторож застоя опрашивает раз в
+# минуту, а `done_items` после паузы двинется только по завершении следующей
+# цели. Без буфера тик сторожа, попавший в этот зазор, обрывал здоровый прогон.
+_PAUSE_WATCHDOG_BUFFER_S = 90.0
+
+
+async def cancellable_pause(
+    pool: "asyncpg.Pool", op_id: int | None, seconds: float, where: str = "",
+) -> float:
+    """Пауза СВОЕГО цикла исполнителя, которая замечает отмену владельца.
+
+    Исполнители, спящие не через `bounded_flood_sleep` (кампания ЛС: пейсинг,
+    тихие часы, флуд-паузы), объявляли паузу сторожу застоя и дальше спали
+    одним `asyncio.sleep`. Отмена доходит опросом на витке цикла, поэтому
+    владелец, нажавший «Отменить», всю паузу видел операцию работающей, а
+    флот — занятым арендованными аккаунтами. Ровно тот разрыв, который для
+    пауз ВНУТРИ прогона уже закрыт `_pause_watching_for_cancel`; здесь он
+    закрыт для пауз МЕЖДУ целями.
+
+    Прерывать такую паузу безопасно только там, где следом идёт виток цикла
+    (он начинается с проверки отмены) или явная проверка на месте — то же
+    условие, что и у `_pause_watching_for_cancel`.
+
+    Возвращает фактически проспанное: меньше заказанного — пауза прервана
+    отменой.
+    """
+    if op_id is None or not seconds or seconds <= 0:
+        return 0.0
+    declare_op_pause(op_id, float(seconds) + _PAUSE_WATCHDOG_BUFFER_S)
+    try:
+        return await _pause_watching_for_cancel(pool, int(op_id), float(seconds), where)
+    finally:
+        # `_pause_watching_for_cancel` снимает объявление за собой, поэтому
+        # буфер на один виток сторожа объявляем заново.
+        declare_op_pause(op_id, _PAUSE_WATCHDOG_BUFFER_S)
+
+
 async def bounded_flood_sleep(
     seconds: float, where: str = "", *, pool=None, op_id: int | None = None,
 ) -> float:
@@ -1219,7 +1256,11 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
     'error', и следующий за ним 'ok' (ретрай внутри прогона) — тогда верный
     итог «успех», а не «успех и провал». Строки со статусом 'info' —
     примечания исполнителя, а не приговор цели, поэтому в счёт не идут.
-    Читаем всю цепочку повторов (journal_op_ids), как completed_targets.
+    Читаем всю цепочку повторов, как completed_targets, но ТЕРПИМО: здесь не
+    дверь идемпотентности, а отчёт. У двери неполная семья означает «работы не
+    было», то есть дубль реального действия, и она откладывает прогон
+    (`journal_op_ids` строгий). Отчёт дублей не делает: не прочитали цепочку —
+    посчитаем по журналу этой операции, что честнее отказа от цифр вообще.
 
     (0, 0) — журнала нет (этот исполнитель его не пишет) или чтение не
     удалось; вызывающий тогда остаётся при прежнем поведении.
@@ -1235,7 +1276,7 @@ async def _journal_counters(pool: "asyncpg.Pool", op_id: int) -> "tuple[int, int
             + _obus_reg.REAL_TARGET_SQL +
             "           AND status IN ('ok', 'error') "
             "         GROUP BY target) t",
-            await journal_op_ids(pool, op_id),
+            await _obus_reg.retry_family_ids(pool, op_id),
             log_ctx=f"[journal_counters op={op_id}]")
     except Exception:
         log_exc_swallow(log, f"op_worker: журнал целей op={op_id} не прочитан")
@@ -3683,10 +3724,36 @@ _PROTECTIVE_FAILURE_COUNTERS = {
         "процесса остановленная рассылка может продолжить уходить людям",
     "infragram_invite_dedup_write_failures_total":
         "дедуп инвайта — возможны повторные приглашения тем же людям",
+    "infragram_invite_unmark_failures_total":
+        "предзапись инвайта не снята — цели числятся приглашёнными, хотя "
+        "Telegram их не рассматривал, и больше не позовутся",
+    "infragram_broadcast_pin_write_failures_total":
+        "id рассылки не закрепился за операцией — рассылка не запущена и "
+        "снята; без этого отказа повтор операции отправил бы сообщение всей "
+        "аудитории второй раз",
+    "infragram_broadcast_subset_write_failures_total":
+        "список получателей рассылки не сохранился — рассылка не запущена и "
+        "снята; без этого отказа докатка после перезапуска отправила бы её "
+        "всей аудитории бота",
+    "infragram_broadcast_dedup_read_failures_total":
+        "список уже доставленных у рассылки не прочитался — рассылка отложена; "
+        "без этого отказа вся аудитория получила бы сообщение второй раз",
+    "infragram_dm_dedup_write_failures_total":
+        "дедуп ЛС — сообщение не отправлено, потому что метка не записалась; "
+        "без неё следующий прогон написал бы человеку второй раз",
+    "infragram_dm_unmark_failures_total":
+        "предзапись ЛС не снята — человек числится получившим сообщение, "
+        "хотя Telegram его не рассматривал, и больше ему не напишут",
+    "infragram_dm_settle_write_failures_total":
+        "исход ЛС не записался — на экранах кампании отправка, которой не "
+        "было (или наоборот), и счёт по статусам врёт",
     "infragram_journal_write_failures_total":
         "строка успеха в журнале — повтор операции сделает действие второй раз",
     "infragram_account_cooldown_write_failures_total":
         "пауза аккаунта — флуд-пауза могла не лечь, это риск бана",
+    "infragram_account_rest_write_failures_total":
+        "отдых аккаунта после тяжёлого прогона — после рестарта аккаунт "
+        "выглядит отдохнувшим и может уйти во второй удар сразу",
     "infragram_invite_dedup_read_failures_total":
         "журнал приглашений — не прочитался, и на том прогоне операция могла "
         "позвать людей, которых уже приглашала: это главный риск бана",
@@ -3703,12 +3770,24 @@ _PROTECTIVE_FAILURE_COUNTERS = {
     "infragram_budget_write_failures_total":
         "суточный счёт действий аккаунта — лимит недосчитает сделанное, и "
         "следующая операция может взять аккаунт сверх него",
+    "infragram_strike_history_write_failures_total":
+        "история удара — не записалась: интервал повтора эту цель не увидит, и "
+        "следующий заход по ней пойдёт как первый",
+    "infragram_restriction_write_failures_total":
+        "найденное ограничение аккаунта — не записалось: аккаунт не уйдёт в "
+        "карантин и попадёт в следующую операцию, а волна банов его не посчитает",
     "infragram_notifications_undelivered_total":
         "отчёт об операции не доехал до владельца",
     "infragram_recurring_reschedule_failures_total":
         "следующий запуск повторяющейся операции не поставлен — она остановилась",
     "infragram_executor_lease_errors_total":
         "аренда исполнителя — правило «очередь разбирает один процесс» не проверено",
+    "infragram_growth_dedup_read_failures_total":
+        "список уже отработанных групп Growth Agent — не прочитался, и операция "
+        "отложена на повтор: так промо не уйдёт в те же группы второй раз",
+    "infragram_growth_dedup_write_failures_total":
+        "группа Growth Agent — не записалась в отработанные, и поста в неё не "
+        "было: иначе следующий запуск отправил бы туда промо второй раз",
 }
 
 # Повтор про ОДИН вид сбоя одному админу — не чаще этого окна (переживает
@@ -3763,7 +3842,17 @@ async def _watchdog_protective_failures(
         log.debug("admin_ids fallback: returning empty set")
         admin_ids = set()
     if not admin_ids:
-        # Никому не ушло — база отсчёта не двигается, сообщение вернётся.
+        # Никому не ушло — база отсчёта не двигается, сообщение вернётся. Но
+        # «вернётся» здесь означает «не доедет никогда»: получателя нет, и
+        # следующий круг пройдёт так же. Поэтому сам факт недоставки — счётчик,
+        # а не только строка в логе: иначе полный отказ оповещений о защите
+        # виден лишь тому, кто читает лог воркера.
+        log.critical(
+            "op_worker: о сбое защитных записей сообщить НЕКОМУ (ADMIN_IDS "
+            "пуст) — %s", [n for n, _w, _d, _t in grown],
+        )
+        _reliability_metric("infragram_protective_alerts_no_recipient_total",
+                            where="watchdog")
         return
 
     delivered: set = set()
@@ -3826,6 +3915,27 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     сетевого блипа останавливает ВСЕ операции продукта.
     """
     log.info("Operation worker started (parallel mode, max=%d)", _MAX_PARALLEL)
+    # ПОЧЕМУ ЭТО КРИЧИТ НА СТАРТЕ. Защитные счётчики (дедуп инвайта, журнал
+    # сделанного, пауза аккаунта, предзаписи) доходят до человека ровно одним
+    # путём: сообщением админам из ADMIN_IDS. Переменная пустая — сторож
+    # защитных сбоев молча возвращается КАЖДЫЙ круг, и о том, что защита от
+    # повторного реального действия перестала писаться, не узнаёт никто. Это
+    # тот самый класс «механизм исправен и при этом не выполняется ни разу»:
+    # счётчики растут, отчёты пишутся, адресата нет.
+    try:
+        from bot.utils.subscription import _admin_ids as _aids_check
+
+        if not _aids_check():
+            log.critical(
+                "ADMIN_IDS пуст: оповещения о сбое защитных записей (дедуп "
+                "инвайта, журнал сделанного, пауза аккаунта) отправлять НЕКОМУ "
+                "— они останутся только в логах, которых никто не читает. "
+                "Укажите ADMIN_IDS в переменных окружения."
+            )
+            _reliability_metric("infragram_protective_alerts_no_recipient_total",
+                                where="startup")
+    except Exception:
+        log_exc_swallow(log, "op_worker: проверка получателя защитных алертов")
     _role = (os.getenv("INFRAGRAM_ROLE") or "all").strip().lower()
     _did_startup_reset = False
     _lease_denied_log_at = 0.0
@@ -4137,10 +4247,34 @@ async def journal_op_ids(pool: asyncpg.Pool, op_id: int) -> list[int]:
     видеть работу первого повтора, а не только предка.
 
     Обход и его пределы живут в operation_bus.retry_family_ids — там же, где
-    единственная функция, собирающая params повтора. Никогда не бросает: не
-    прочитали цепочку — работаем по своему журналу, то есть как раньше.
+    единственная функция, собирающая params повтора.
+
+    НЕ ПРОЧИТАЛИ ЦЕПОЧКУ — НЕ РАБОТАЕМ. Раньше здесь был fail-open: «работаем
+    по своему журналу, то есть как раньше». Но «как раньше» для повтора — это
+    ПУСТОЙ журнал, то есть «ничего не сделано», и двери идемпотентности,
+    которые сами давно fail-closed (`_journal_fetch` не отдаёт пустой список,
+    а бросает), получали пустоту без всякой ошибки: ключ врал, а дверь
+    отрабатывала честно. Цена ровно та, из-за которой эта функция и появилась:
+    203 человека получают второе одинаковое сообщение, канал — второй пост,
+    приглашённый — второе приглашение.
+
+    Поэтому читаем строгим режимом: один повтор на каждый запрос (блип лечится
+    им), а если и он не прошёл — `JournalUnreadable`. Это не падение прогона:
+    `_classify_op_error` относит его к 'retry', операция уходит на обычный
+    повтор с отсрочкой и доработает позже. Отсрочка дешевле дубля.
     """
-    return await _obus_reg.retry_family_ids(pool, op_id)
+    try:
+        return await _obus_reg.retry_family_ids(pool, op_id, strict=True)
+    except _obus_reg.RetryChainUnreadable as e:
+        report_error(e, extra={"context": f"op_worker_journal_chain op={op_id}"})
+        log.error(
+            "op_worker: цепочка повторов op=%s не прочитана (%s) — операция "
+            "уйдёт на повтор, иначе повторила бы уже сделанное", op_id, e,
+        )
+        _reliability_metric(
+            "infragram_journal_read_failures_total", where="retry_chain")
+        raise JournalUnreadable(
+            "журнал целей недоступен, прогон отложен до повтора") from e
 
 
 async def completed_targets(pool: asyncpg.Pool, op_id: int) -> set[str]:
@@ -4542,7 +4676,18 @@ async def _dispatch_create_channel(pool, bot, op_id, owner_id, params) -> dict:
 
 
 async def _dispatch_create_group(pool, bot, op_id, owner_id, params) -> dict:
-    """Group Factory: одна группа через аккаунт. params: {title, account_id, is_supergroup}."""
+    """Group Factory: одна группа через аккаунт. params: {title, account_id, is_supergroup}.
+
+    Операции этого типа больше НИКТО не создаёт: 22.10.2026 снят последний
+    отправитель — ручка /api/miniapp/group_factory/submit, у которой не было
+    двери (экран-дубль фабрики групп не значился в каталоге, а каталог — это
+    и есть боковое меню). Группы создаёт единая фабрика каналов галочкой
+    «Создавать группы», тем же `_exec_bulk_create_channels` и с SEO-именами,
+    первым постом и автопосевом. Диспетчер оставлен ради строк, которые уже
+    лежат в очереди: убрать его — значит уронить операцию, запущенную до
+    обновления. Новых не появится, так что удалять его можно, когда в
+    operations не останется create_group.
+    """
     adapted = {**params, "acc_id": params.get("account_id"),
                "prefix": params.get("title"), "count": 1, "is_group": True}
     return await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)
@@ -6591,10 +6736,12 @@ async def _exec_mass_publish(
                 # проверка идемпотентности работали вслепую. Заголовок не
                 # теряется — он уходит в message (экран деталей печатает
                 # «target — message»).
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok',$4)",
                     op_id, idx, str(dialog["id"]), _ch_title,
+                    log_ctx=f" [mass_publish op={op_id}]",
                 )
                 # Content Memory: тело реально опубликованного поста → история канала.
                 # Кормит антиповтор редактора (channel_brain.repetition_check): без неё
@@ -7142,13 +7289,15 @@ async def _exec_bulk_join_inner(
                     _infra_mem.record_account_op(
                         acc["id"], "join", success=False, error="PeerFlood"
                     )
-                    await pool.execute(
+                    await _journal_write(
+                        pool,
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'error',$4)",
                         op_id,
                         step,
                         link,
                         err_str,
+                        log_ctx=f" [bulk_join op={op_id}]",
                     )
                     await _audit(
                         pool,
@@ -7172,12 +7321,14 @@ async def _exec_bulk_join_inner(
                     raise Exception(str(res["error"]))
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','joined')",
                     op_id,
                     step,
                     link,
+                    log_ctx=f" [bulk_join op={op_id}]",
                 )
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
@@ -7741,12 +7892,14 @@ async def _exec_bulk_leave(
                     raise Exception(res.get("error") or f"leave_channel failed for {channel}")
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','left')",
                     op_id,
                     step,
                     str(channel),
+                    log_ctx=f" [bulk_leave op={op_id}]",
                 )
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
@@ -8776,17 +8929,28 @@ async def _exec_gp_bulk_apply(
 
         counters = {"about": 0, "avatar": 0, "post": 0, "pin": 0, "admin": 0, "username": 0}
         failed = skipped = 0
+        # Закрытые прошлым прогоном этой же операции: в счётчики действий не
+        # идут (в этом прогоне мы их не делали), но в итог операции — идут.
+        resumed = 0
 
-        # Публикация необратима, а прогон длинный: 20–45 секунд на канал, то есть
-        # часы на сеть из сотен объектов. Любой деплой в это окно возвращает
-        # операцию в очередь (см. docstring `shutdown`), и без журнала
-        # возобновлённый прогон публикует ВТОРОЙ пост в каждом канале, который
-        # его уже получил. Тот же ключ идемпотентности, что у фабрики каналов:
-        # номер шага — здесь это устойчивый id объекта проекта.
-        _posted: set[int] = await completed_steps(pool, op_id) if action == "post_pin" else set()
-        if _posted:
-            log.info("gp_bulk_apply op=%d: повтор — %d объектов уже получили пост",
-                     op_id, len(_posted))
+        # Прогон длинный: 5–45 секунд на объект, то есть часы на сеть из сотен
+        # объектов. Возврат в очередь в это окно — штатное событие: деплой
+        # (`shutdown`), автоматический повтор, и с недавних пор потолок времени
+        # (`_resume_op_over_ceiling` — он прямо рассчитывает, что исполнитель
+        # «пропустит уже взятые цели по operation_log»).
+        #
+        # Без журнала каждый такой прогон начинал список С НАЧАЛА, и у этого две
+        # цены. Первая — повтор реального действия: второй пост в канал, который
+        # его уже получил, лишнее редактирование описания и аватара с аккаунта.
+        # Вторая хуже: прогон, который не укладывается в потолок, НИКОГДА не
+        # доходит до хвоста списка — последние объекты не получают оформления
+        # вообще, а первые переделываются каждые несколько часов, пока операция
+        # не упрётся в предел жизни. Тот же ключ идемпотентности, что у фабрики
+        # каналов: номер шага — здесь это устойчивый id объекта проекта.
+        _settled: set[int] = await completed_steps(pool, op_id)
+        if _settled:
+            log.info("gp_bulk_apply op=%d: повтор — %d объектов уже оформлены, "
+                     "идём дальше по списку", op_id, len(_settled))
 
         for target in targets:
             if await _is_cancelled(pool, op_id):
@@ -8796,6 +8960,15 @@ async def _exec_gp_bulk_apply(
                     "fail": failed,
                     "summary": f"Отменено. Применено: {sum(counters.values())}, ошибок: {failed}",
                 }
+
+            if int(target["id"]) in _settled:
+                # Объект оформлен прошлым прогоном ЭТОЙ операции — не трогаем
+                # его повторно и идём к тем, до которых прогон не дошёл.
+                resumed += 1
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
 
             acc = acc_by_id.get(target["selected_account_id"])
             if not acc or not acc.get("session_str"):
@@ -8818,6 +8991,12 @@ async def _exec_gp_bulk_apply(
             access_hash = int(target.get("access_hash") or 0)
             title = target.get("planned_name") or ""
             item_failed = False
+            # Отметка в журнал ставится только за РЕАЛЬНОЕ действие. Ниже есть
+            # пути, на которых объект не трогали вовсе: шаблон пустой, аллокатор
+            # не дал имени, текст поста не собрался. Отметить такой объект
+            # «оформленным» значит соврать журналу, по которому следующий прогон
+            # решает, что пропускать, — и тогда объект не оформится никогда.
+            _acted_before = sum(counters.values())
 
             if action in ("about", "both"):
                 if about_template:
@@ -8885,12 +9064,7 @@ async def _exec_gp_bulk_apply(
                     item_failed = True
                 await asyncio.sleep(random.uniform(4, 10) * session_simulator.chaos_factor())
 
-            if action == "post_pin" and int(target["id"]) in _posted:
-                # Этот объект получил пост на прошлом прогоне этой же операции.
-                # Считаем его сделанным (как фабрика каналов считает созданный
-                # шаг) и ничего не публикуем.
-                counters["post"] += 1
-            elif action == "post_pin":
+            if action == "post_pin":
                 # Пост тоже индивидуален: одинаковый текст в 800 каналах — прямой
                 # спам-сигнал, ровно то, ради чего существует генератор.
                 text = render_pattern(post_template, dict(target)).strip() if post_template else ""
@@ -9018,6 +9192,13 @@ async def _exec_gp_bulk_apply(
 
             if item_failed:
                 failed += 1
+            elif action != "post_pin" and sum(counters.values()) > _acted_before:
+                # Объект применён целиком — отмечаем, чтобы следующий прогон
+                # этой операции (потолок, деплой, повтор) его не переделывал.
+                # У поста отметка уже стоит: она ставится сразу после публикации,
+                # не дожидаясь закрепа и паузы темпа.
+                await _journal_done(
+                    pool, op_id, int(target["id"]), f"gp_{action}:{channel_id}")
             await _safe_execute(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
@@ -9033,12 +9214,17 @@ async def _exec_gp_bulk_apply(
             # Пропуски показываем отдельно от ошибок: «аккаунт в карантине» — это
             # не сбой применения, и смешивать их в одном счётчике нечестно.
             parts.append(f"пропущено: {skipped}")
+        if resumed:
+            parts.append(f"сделано прошлым прогоном: {resumed}")
         if failed:
             parts.append(f"ошибок: {failed}")
 
         return {
             "status": "done",
-            "ok": sum(counters.values()),
+            # Закрытые прошлыми прогонами входят в итог: иначе возобновлённая
+            # операция закрывается с недобором по счётчикам и объявляется
+            # частичной, хотя оформлены все объекты.
+            "ok": sum(counters.values()) + resumed,
             "fail": failed,
             "plan_id": plan_id,
             "summary": "🧰 Пакетное применение — " + ", ".join(parts),
@@ -9697,25 +9883,27 @@ async def _exec_bulk_create_channels_multi(
                         except Exception:
                             log_exc_swallow(log, "bulk_create_channels_multi: seed submit failed")
 
-                try:
-                    await pool.execute(
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                        " VALUES($1,$2,$3,'ok',$4)",
-                        op_id, task_i + 1, title, f"channel_id={ch_id}",
-                    )
-                except Exception:
-                    log_exc_swallow(log, "bulk_create_channels_multi: operation_log insert failed")
+                # Через дверь журнала, а не обычным execute: по ЭТОЙ отметке
+                # `completed_steps` выше решает, какие шаги повтор пропустит.
+                # Проглоченный сбой записи означал повторное создание уже
+                # созданного ресурса — действие необратимое.
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                    " VALUES($1,$2,$3,'ok',$4)",
+                    op_id, task_i + 1, title, f"channel_id={ch_id}",
+                    log_ctx=f" [bulk_create_channels_multi op={op_id}]",
+                )
                 created_count += 1
             else:
                 err_msg = str(result.get("error", result) if isinstance(result, dict) else result)[:200]
-                try:
-                    await pool.execute(
-                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
-                        " VALUES($1,$2,$3,'error',$4)",
-                        op_id, task_i + 1, title, err_msg,
-                    )
-                except Exception:
-                    log_exc_swallow(log, "bulk_create_channels_multi: operation_log error insert failed")
+                await _journal_write(
+                    pool,
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                    " VALUES($1,$2,$3,'error',$4)",
+                    op_id, task_i + 1, title, err_msg,
+                    log_ctx=f" [bulk_create_channels_multi op={op_id}]",
+                )
                 failed_count += 1
 
             await pool.execute(
@@ -10601,6 +10789,80 @@ async def _exec_bot_factory(
         await release_accounts([_claimed_acc])
 
 
+async def _write_strike_history(
+    pool: "asyncpg.Pool", op_id: int, owner_id: int, reason, preset, r
+) -> bool:
+    """Записать итог удара в `strike_history` — с повтором и без молчания.
+
+    ЭТО НЕ ТОЛЬКО ОТЧЁТ. Та же таблица — единственный источник для
+    `strike_engine.is_strike_allowed`: гейт смотрит, не бита ли цель за
+    последние часы, и не пускает повторный удар (детекшн-паттерн и лишний
+    износ живых аккаунтов). Потерянная строка выключает этот интервал для
+    конкретной цели: следующий заход по ней пройдёт как первый. Прежде сбой
+    уходил в `warning` как «не видно в History tab» — то есть последствие
+    выглядело косметическим.
+
+    Одна повторная попытка здесь же: типовая причина мгновенная (занятый пул,
+    рестарт базы на деплое). Вставка не условная, поэтому повтор после
+    потерянного подтверждения может оставить вторую строку истории — в
+    History tab это лишняя запись, а гейт смотрит EXISTS, и ему она не врёт.
+    Лишняя строка дешевле выключенного интервала.
+
+    Не бросает: удар уже сделан, и терять операцию из-за записи нельзя.
+    """
+    last: Exception | None = None
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                """INSERT INTO strike_history(
+                       owner_id, target, reason, preset,
+                       accounts_used, peer_reported, msgs_reported, msgs_fetched,
+                       pinned_reported, admins_reported, network_nodes, network_reports,
+                       blocked, verified_down, duration_s, abuse_form_ok,
+                       spambot_escalation,
+                       accounts_ok, accounts_flood, accounts_banned, accounts_failed,
+                       infra_domains, infra_apwg_sent, infra_registrar_sent)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+                          $18,$19,$20,$21,$22,$23,$24)""",
+                owner_id,
+                r.target,
+                reason,
+                preset or None,
+                r.unique_accounts,
+                r.peer_reported,
+                r.msgs_reported,
+                getattr(r, "msgs_fetched", 0),
+                r.pinned_reported,
+                r.admins_reported,
+                r.network_nodes,
+                r.network_reports,
+                r.blocked,
+                r.verified_down,
+                r.duration_s,
+                r.abuse_form_ok,
+                r.spambot_escalation,
+                getattr(r, "accounts_ok", 0),
+                getattr(r, "accounts_flood", 0),
+                getattr(r, "accounts_banned", 0),
+                getattr(r, "accounts_failed", 0),
+                len(getattr(r, "infra_domains", []) or []),
+                getattr(r, "infra_apwg_sent", 0),
+                getattr(r, "infra_registrar_sent", 0),
+            )
+            return True
+        except Exception as e:
+            last = e
+            if _attempt == 1:
+                await asyncio.sleep(_JOURNAL_READ_RETRY_DELAY_S)
+    log.error(
+        "_exec_strike op=%d: история удара НЕ ЗАПИСАНА target=%s (%s) — интервал "
+        "повтора эту цель не увидит, и следующий заход по ней пройдёт как первый",
+        op_id, getattr(r, "target", "?"), last,
+    )
+    _reliability_metric("infragram_strike_history_write_failures_total")
+    return False
+
+
 async def _exec_strike(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -10865,50 +11127,7 @@ async def _exec_strike(
     # Queued strike (_exec_strike) не использует _strike_bg_v2, поэтому история
     # должна быть записана здесь — иначе результаты не видны в UI (History tab).
     for r in results:
-        try:
-            await pool.execute(
-                """INSERT INTO strike_history(
-                       owner_id, target, reason, preset,
-                       accounts_used, peer_reported, msgs_reported, msgs_fetched,
-                       pinned_reported, admins_reported, network_nodes, network_reports,
-                       blocked, verified_down, duration_s, abuse_form_ok,
-                       spambot_escalation,
-                       accounts_ok, accounts_flood, accounts_banned, accounts_failed,
-                       infra_domains, infra_apwg_sent, infra_registrar_sent)
-                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-                          $18,$19,$20,$21,$22,$23,$24)""",
-                owner_id,
-                r.target,
-                reason,
-                preset or None,
-                r.unique_accounts,
-                r.peer_reported,
-                r.msgs_reported,
-                getattr(r, "msgs_fetched", 0),
-                r.pinned_reported,
-                r.admins_reported,
-                r.network_nodes,
-                r.network_reports,
-                r.blocked,
-                r.verified_down,
-                r.duration_s,
-                r.abuse_form_ok,
-                r.spambot_escalation,
-                getattr(r, "accounts_ok", 0),
-                getattr(r, "accounts_flood", 0),
-                getattr(r, "accounts_banned", 0),
-                getattr(r, "accounts_failed", 0),
-                len(getattr(r, "infra_domains", []) or []),
-                getattr(r, "infra_apwg_sent", 0),
-                getattr(r, "infra_registrar_sent", 0),
-            )
-        except Exception as _he:
-            log.warning(
-                "_exec_strike op=%d: failed to write strike_history for target=%s: %s",
-                op_id,
-                r.target,
-                _he,
-            )
+        await _write_strike_history(pool, op_id, owner_id, reason, preset, r)
 
     summary_text = format_strike_summary(results)
     total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
@@ -13571,6 +13790,9 @@ async def _exec_check_accounts_health(
     deactivated = 0
     reactivated = 0
     errors = 0
+    # Сколько вердиктов НЕ записано в базу (ошибка связи, нет сессии, сессия без
+    # подтверждения): плитки экрана «Аккаунты» их не увидят — см. итог ниже.
+    unchanged = 0
     # Разбивка спам-блока на временный/вечный (из spambot-ответа), чтобы
     # результат проверки показывал их раздельно — как отдельные счётчики/папки
     # «Временный/Вечный спамблок» в панели. Общий status остаётся 'spamblock'.
@@ -13578,13 +13800,15 @@ async def _exec_check_accounts_health(
     spamblock_perm = 0
 
     # Читаемые подписи статусов — используются и для per-account лога (секция
-    # «📋 Лог» в деталях операции), и для итоговой сводки ниже.
+    # «📋 Лог» в деталях операции), и для итоговой сводки ниже. Порядок ключей —
+    # порядок в итоге: от здоровых к проблемным, ошибки проверки в конце.
     _STATUS_LABELS = {
         "active": "✅ активен",
         "spamblock": "🚫 спам-блок",
-        "banned": "❌ заблокирован",
         "cooldown": "⏳ FloodWait",
-        "session_expired": "🔑 сессия истекла",
+        "banned": "❌ заблокирован",
+        "session_expired": "🔑 сессия отозвана",
+        "deactivated": "❌ аккаунт удалён",
         "no_session": "⚪ нет сессии",
         "unknown": "❓ ошибка проверки",
     }
@@ -13638,8 +13862,16 @@ async def _exec_check_accounts_health(
                             acc["id"], e)
 
         if result.get("auth_error"):
+            # Вместе с выключением пишем и сам вердикт. Раньше ставился только
+            # is_active=FALSE, а acc_status оставался прежним: аккаунт выпадал из
+            # «Активных», но не попадал ни в «Мёртвые», ни в «Заблокированы» —
+            # плитки экрана «Аккаунты» переставали сходиться с «Все», а итог
+            # проверки называл одно, список показывал другое.
             try:
-                await pool.execute("UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"])
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE, acc_status=$2, "
+                    "status_reason=$3, status_checked_at=now() WHERE id=$1",
+                    acc["id"], status, result.get("reason", ""))
                 deactivated += 1
             except Exception as e:
                 log.warning("check_accounts_health: deactivate acc %s failed: %s", acc["id"], e)
@@ -13670,6 +13902,8 @@ async def _exec_check_accounts_health(
                 await _db.update_acc_status(pool, acc["id"], status, result.get("reason", ""))
             except Exception as e:
                 log.warning("check_accounts_health: update_acc_status for acc %s failed: %s", acc["id"], e)
+        else:
+            unchanged += 1
 
         # Per-account запись в лог операции — чтобы секция «📋 Лог» в деталях
         # (mini-app) показывала вердикт по каждому аккаунту, а не пустоту.
@@ -13688,17 +13922,30 @@ async def _exec_check_accounts_health(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
-    parts = [f"{_STATUS_LABELS.get(s, s)}: {c}" for s, c in sorted(status_counts.items())]
-    # Уточняем строку спам-блока разбивкой врем./вечный, если она была.
-    if spamblock_temp or spamblock_perm:
-        parts = [
-            p + f" (врем.: {spamblock_temp}, вечн.: {spamblock_perm})"
-            if p.startswith(_STATUS_LABELS["spamblock"]) else p
-            for p in parts
-        ]
+    # Вся раскладка — ОДНОЙ строкой и в порядке важности, а не по алфавиту
+    # кодов. Плашка исхода показывает первые строки итога; при раскладке
+    # «строка на статус» по алфавиту спам-блок и ошибки проверки уходили за
+    # обрез: владелец видел «активен 46, сессия истекла 1» из 52 и не мог
+    # понять, куда делись ещё пять (жалоба «несоответствие в данных»).
+    _ORDER = list(_STATUS_LABELS)
+    parts = []
+    for s in sorted(status_counts, key=lambda k: (_ORDER.index(k) if k in _ORDER else len(_ORDER), k)):
+        p = f"{_STATUS_LABELS.get(s, s)}: {status_counts[s]}"
+        # Уточняем спам-блок разбивкой врем./вечный, если она была.
+        if s == "spamblock" and (spamblock_temp or spamblock_perm):
+            p += f" (врем.: {spamblock_temp}, вечн.: {spamblock_perm})"
+        parts.append(p)
+    # Итог проверки — это живой ответ Telegram, а плитки «Аккаунты» — то, что
+    # записано в базу. Ошибка связи и отсутствие сессии статус в базе НЕ меняют
+    # (иначе сбой прокси объявил бы аккаунт мёртвым), поэтому там такой аккаунт
+    # остаётся в прежней плитке, обычно в «Активных». Говорим об этом прямо,
+    # чтобы 46 здесь и 49 там не читались как ошибка счёта.
+    unchanged_note = (f"\nℹ️ Без подтверждения: {unchanged} — в списке аккаунтов их "
+                      f"статус не менялся" if unchanged else "")
     deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""
     react_note = f"\n🔄 Восстановлено: {reactivated}" if reactivated else ""
-    summary = f"🔍 Проверено {n} аккаунтов\n" + "\n".join(parts) + deact_note + react_note
+    summary = (f"🔍 Проверено {n} аккаунтов\n" + " · ".join(parts)
+               + unchanged_note + deact_note + react_note)
 
     # Persist health snapshots immediately so health_dashboard trends show current data
     # without waiting for the hourly run_health_check_loop cycle.
@@ -13715,6 +13962,7 @@ async def _exec_check_accounts_health(
         "deactivated": deactivated,
         "reactivated": reactivated,
         "status_counts": status_counts,
+        "unchanged": unchanged,
         "spamblock_temp": spamblock_temp,
         "spamblock_perm": spamblock_perm,
         "summary": summary,
@@ -16479,6 +16727,99 @@ async def _invite_log_insert(pool, owner_id: int, group_key: str, op_id: int,
     )
 
 
+async def _premark_invite_targets(pool, owner_id: int, group_key: str, op_id: int,
+                                  targets) -> bool:
+    """Пометить цели ДО отправки: обрыв внутри пачки звал их второй раз.
+
+    Запись по ходу прогона (`_record_invited_targets` пачка за пачкой) закрыла
+    потерю ВСЕГО дедупа, но не окно внутри пачки. Движок зовёт цели по одной с
+    паузами 2–4с против банов — пятёрка идёт 10–20 секунд, по номерам дольше, и
+    до возврата пачки в журнале нет никого. SIGTERM на деплое приходит в это
+    окно штатно (пуш в рабочую ветку уезжает в прод), и следующий прогон звал
+    уже приглашённых второй раз — на самой баноопасной операции продукта.
+
+    Поэтому пачка метится ПЕРЕД сетью, а с тех, кого Telegram не рассматривал
+    (флуд, таймаут, приватность, «номер не в Telegram»), метка снимается по
+    ответу — `_unmark_untried_invites`. Цена обрыва теперь в другую сторону: до
+    batch_size целей могут остаться помеченными, не получив приглашения. Для
+    инвайта это дешевле повторного приглашения — тот же выбор, что и у
+    остальных необратимых действий: метить ДО, а не после.
+
+    Метится только главный ключ группы; алиасы кампании пишутся по факту.
+
+    Сбой записи операцию не роняет: это возврат к прежнему поведению (пачку всё
+    равно запишет подтверждение после ответа), а не потеря людей. False —
+    запись не подтверждена.
+    """
+    _keys = {str(t) for t in targets if t is not None}
+    if not _keys:
+        return True
+    for _attempt in (1, 2):
+        try:
+            await _invite_log_insert(pool, owner_id, group_key, op_id, _keys)
+            return True
+        except Exception:
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "invite dedup: ПРЕДЗАПИСЬ ПАЧКИ НЕ УДАЛАСЬ op=%s owner=%s целей=%d — "
+                "обрыв внутри этой пачки снова может позвать их второй раз",
+                op_id, owner_id, len(_keys))
+            _reliability_metric(
+                "infragram_invite_dedup_write_failures_total", op_type="mass_invite")
+            return False
+    return False
+
+
+async def _unmark_untried_invites(pool, owner_id: int, group_key: str, op_id: int,
+                                  batch, settled, *, keep=()) -> bool:
+    """Снять предзапись с тех, кого Telegram не рассматривал.
+
+    Иначе человек, на котором один раз моргнула сеть или пришёл флуд, был бы
+    помечен приглашённым и не позвался больше НИКОГДА (жалоба владельца —
+    ровно поэтому временные сбои в дедуп не писались и раньше).
+
+    Решённые цели (добавлен / уже в чате / мёртвый username) приходят поимённо
+    в `settled`, остальное из пачки — не рассмотрено. `keep` — цели, запись
+    которых этот прогон уже подтвердил: их метка не снимается.
+
+    Снимаем ТОЛЬКО свои метки (`op_id`): строку, которую записала другая
+    операция или прошлый прогон, удалять нельзя — это и было бы вторым
+    приглашением. `ON CONFLICT DO NOTHING` предзаписи чужую строку не
+    переписывает, поэтому её op_id остаётся чужим и под условие она не
+    попадает.
+
+    Сбой снятия стоит целей: они останутся помеченными. Громко и счётчиком.
+    """
+    from services.contact_opt_out import compare_key as _ck
+
+    _done = {_ck(str(x)) for x in (settled or []) if x is not None}
+    _drop = sorted({str(b) for b in batch if b is not None
+                    and _ck(str(b)) not in _done} - set(keep or ()))
+    if not _drop:
+        return True
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "DELETE FROM invite_target_log WHERE owner_id=$1 AND group_key=$2 "
+                "AND target = ANY($3::text[]) AND op_id = $4",
+                owner_id, group_key, _drop, op_id)
+            return True
+        except Exception:
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "invite dedup: СНЯТИЕ ПРЕДЗАПИСИ НЕ УДАЛОСЬ op=%s owner=%s целей=%d — "
+                "их Telegram не рассматривал, но помеченными они больше не позовутся",
+                op_id, owner_id, len(_drop))
+            _reliability_metric(
+                "infragram_invite_unmark_failures_total", op_type="mass_invite")
+            return False
+    return False
+
+
 async def _exec_contacts_push(
     pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -16580,9 +16921,19 @@ async def _exec_contacts_sync(
     try:
         res = await asyncio.wait_for(sync_all_accounts(pool, owner_id), timeout=1200)
     except asyncio.TimeoutError:
-        await _safe_execute(
-            pool, "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id)
-        return {"status": "done", "ok": 0, "failed": 0,
+        # 'partial', а не 'done'. Работа была, но не доведена — ровно для этого
+        # случая существует отдельный терминальный статус (см. его разбор выше).
+        # С 'done' синхронизация стояла в списке операций как успешная, и о
+        # срыве владелец узнавал только если открывал текст итога; всё, что
+        # считает неудачи по статусу (сводки, здоровье, разбор «что не доехало»),
+        # срыва не видело вовсе. Прогресс тоже больше не дописывается до конца:
+        # до конца он не дошёл, а N из N — это обещание, которого не было.
+        log.warning(
+            "contacts_sync op=%d owner=%s: прервана по таймауту (20 мин) — "
+            "часть контактов сохранена, операция закрывается как неполная",
+            op_id, owner_id)
+        _reliability_metric("infragram_op_timeouts_total", op_type="contacts_sync")
+        return {"status": "partial", "ok": 0, "failed": 0,
                 "summary": "⏳ Синхронизация прервана по таймауту (20 мин) — часть "
                            "контактов сохранена. Запустите ещё раз, чтобы дособрать."}
     synced = int(res.get("total_synced", 0) or 0)
@@ -16754,6 +17105,39 @@ async def _exec_create_chatlist_folder(
 
     return {"status": "done", "invite_link": res.get("invite_link"),
             "summary": f"📁 Папка готова — ссылка: {res.get('invite_link')}"}
+
+
+def _select_reconcile_admin_targets(
+    admins: list[dict], promoter_uid, fleet_uids: set
+) -> list[int]:
+    """Ядро сверки админов: из РЕАЛЬНОГО списка админов канала выбрать tg_user_id
+    НАШИХ инвайтеров флота, которых надо снять. Чистая функция — ни сети, ни БД,
+    поэтому тестируется изолированно (ошибка здесь = разжалование чужого админа
+    или создателя канала, это дороже обычного бага).
+
+    Возвращаем user_id, удовлетворяющий ОДНОВРЕМЕННО ВСЕМ условиям:
+      • есть в флоте владельца (fleet_uids — его tg_accounts.tg_user_id);
+      • НЕ создатель канала (is_creator) и НЕ сам промоутер (promoter_uid);
+      • носит подпись нашего промоута инвайтера: invite_users=True И при этом
+        НЕ может менять инфо (change_info) и НЕ может постить (post_messages).
+    Последнее отсекает со-админов, которых владелец назначил вручную с полными
+    правами, — их не трогаем. Создателя и чужих (не из флота) админов не
+    возвращаем никогда."""
+    pid = int(promoter_uid) if promoter_uid else 0
+    out: list[int] = []
+    for ad in admins or []:
+        if ad.get("is_creator"):
+            continue
+        uid = int(ad.get("user_id") or 0)
+        if not uid or uid == pid or uid not in fleet_uids:
+            continue
+        r = ad.get("rights") or {}
+        if not r.get("invite_users"):
+            continue
+        if r.get("change_info") or r.get("post_messages"):
+            continue
+        out.append(uid)
+    return out
 
 
 async def _exec_mass_invite(
@@ -16959,6 +17343,18 @@ async def _exec_mass_invite(
             interleave_by_source. Останавливается, когда набрано _AUD_CAP свежих
             или источник кончился; факт упора в потолок фиксируется, чтобы итог
             не врал про «это вся аудитория».
+
+            СОРТИРОВКА ИСТОЧНИКА ОБЯЗАНА БЫТЬ УНИКАЛЬНОЙ. Страницы берутся
+            сдвигом (OFFSET), а порядок внутри РАВНЫХ значений Postgres не
+            обещает: при неуникальной сортировке одна и та же строка попадает
+            на две страницы, а другая не попадает ни на одну. Для спарсенной
+            аудитории это не теория: `parsed_at DEFAULT now()` — время
+            транзакции, поэтому у всех строк одного прогона парсера оно
+            ОДИНАКОВОЕ, и ключ сортировки вырождается целиком. Повтор внутри
+            прогона съедает `_seen_keys`, а пропуск не ловит никто: человек
+            просто не получает приглашения, и итог при этом говорит, что
+            аудитория вычитана до конца. Поэтому у каждого источника здесь
+            сортировка заканчивается уникальным ключом (`id`, пара с bot_id).
             """
             nonlocal _source_exhausted
             out: list = []
@@ -17002,14 +17398,15 @@ async def _exec_mass_invite(
                 _pairs = await _page_source(
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    f"WHERE owner_id=$1 AND parse_run_id=$2{_fsql} ORDER BY parsed_at DESC",
+                    f"WHERE owner_id=$1 AND parse_run_id=$2{_fsql} "
+                    "ORDER BY parsed_at DESC, id DESC",
                     owner_id, _pr, *_fp)
             else:
                 _fsql, _fp = parsed_audience_filters(_af, base_params_count=1)
                 _pairs = await _page_source(
                     "SELECT username, tg_user_id, source_username, source_id "
                     "FROM parsed_audiences "
-                    f"WHERE owner_id=$1{_fsql} ORDER BY parsed_at DESC",
+                    f"WHERE owner_id=$1{_fsql} ORDER BY parsed_at DESC, id DESC",
                     owner_id, *_fp)
             # Источник каждой цели известен (из какого канала её спарсили) —
             # раскладываем вперемешку, чтобы аккаунт не приглашал подряд сорок
@@ -17046,7 +17443,8 @@ async def _exec_mass_invite(
             _pairs = await _page_source(
                 "SELECT DISTINCT bu.user_id, bu.bot_id FROM bot_users bu "
                 "JOIN managed_bots mb ON mb.bot_id = bu.bot_id "
-                "WHERE mb.added_by=$1 AND bu.is_active=TRUE ORDER BY bu.user_id",
+                "WHERE mb.added_by=$1 AND bu.is_active=TRUE "
+                "ORDER BY bu.user_id, bu.bot_id",
                 owner_id)
             # Разные боты — разные источники аудитории, раскладываем так же.
             user_refs = interleave_by_source(_pairs)
@@ -17487,6 +17885,133 @@ async def _exec_mass_invite(
     if _invite_method == "link":
         _auto_promote = False
         _promote_trick = False
+
+    async def _reconcile_channel_admins(reason: str = "") -> int:
+        """Свериться с РЕАЛЬНЫМ списком админов канала и снять+вывести ВЕСЬ флот,
+        оставшийся висеть в админах, — а не только места ЭТОГО прогона.
+
+        Жалоба владельца: «после каждого инвайтинга весь мой флот в списке
+        администраторов, он не покидает канал/чат и забивает ~50 мест — инвайтить
+        через админку некуда». Корень: _admin_seats живёт в памяти ОДНОГО прогона;
+        цепочка-продолжение (следующий день) и аварийно оборванный прогон
+        оставляют инвайтеров админами, а новый прогон про них ничего не знает и
+        их места не чистит — админы копятся прогонами.
+
+        Поэтому опираемся на ИСТИНУ Telegram, а не на память процесса: берём
+        реальный список админов промоутером и снимаем тех, кто ОДНОВРЕМЕННО:
+          • принадлежит флоту владельца (tg_user_id есть в его tg_accounts),
+          • НЕ создатель канала и НЕ сам промоутер,
+          • носит подпись нашего промоута инвайтера (anonymous + invite_users,
+            без change_info/post_messages) — так НЕ трогаем со-админов, которых
+            владелец назначил вручную с полными правами.
+        Права снимаем ПАЧКОЙ через промоутера (место освобождается сразу, даже
+        если аккаунт мёртв и выйти сам не сможет), затем каждый живой выходит
+        своей сессией. Best-effort: сбой сверки не роняет прогон."""
+        nonlocal _admin_seats_freed
+        if _promoter is None or _invite_method == "link":
+            return 0
+        from services import account_manager as _am_rec
+        try:
+            admins = await asyncio.wait_for(
+                _am_rec.get_channel_admins(
+                    _promoter["session_str"], group, _acc=dict(_promoter)),
+                timeout=60)
+        except Exception as _ge:
+            log.debug("mass_invite op=%d: get_channel_admins failed: %s", op_id, _ge)
+            return 0
+        if not admins:
+            return 0
+        _promoter_uid = _acc_uid.get(int(_promoter["id"]))
+        # Все user_id из реального списка админов → спрашиваем БД, кто из них наш
+        # флот (чужих админов канала НЕ трогаем ни при каких условиях).
+        _all_uids = [int(a.get("user_id") or 0) for a in admins if a.get("user_id")]
+        rows = await _safe_fetch(
+            pool, "SELECT id, tg_user_id FROM tg_accounts "
+            "WHERE owner_id=$1 AND tg_user_id = ANY($2::bigint[])",
+            owner_id, _all_uids) or []
+        fleet_by_uid = {int(r["tg_user_id"]): int(r["id"])
+                        for r in rows if r.get("tg_user_id")}
+        # Чистое ядро отбора (без сети/БД) — тестируется изолированно: именно
+        # оно решает, КОГО снять, и ошибка здесь стоила бы разжалования чужого
+        # админа или создателя.
+        targets = _select_reconcile_admin_targets(
+            admins, _promoter_uid, set(fleet_by_uid))
+        if not targets:
+            return 0
+        try:
+            res = await asyncio.wait_for(
+                _am_rec.demote_from_admin_batch(
+                    _promoter["session_str"], group, targets, _acc=dict(_promoter)),
+                timeout=120)
+            _demoted = sum(1 for v in res.values() if v)
+        except Exception as _de:
+            log.debug("mass_invite op=%d: reconcile demote failed: %s", op_id, _de)
+            _demoted = 0
+        _admin_seats_freed += _demoted
+        _leave_ids = [fleet_by_uid[u] for u in targets]
+        for _aid in _leave_ids:
+            _admin_seats.discard(_aid)  # место этого прогона больше не держат
+        # Выход из канала — своей сессией у каждого. Для аккаунтов этого прогона
+        # сессия уже в _acc_by_id; «наследных» (прошлый прогон) дочитываем и
+        # дешифруем через resource_selector.
+        _sess_map: dict[int, dict] = {
+            aid: _acc_by_id[aid] for aid in _leave_ids
+            if aid in _acc_by_id and _acc_by_id[aid].get("session_str")}
+        _need = [aid for aid in _leave_ids if aid not in _sess_map]
+        if _need:
+            try:
+                _sel = await resource_selector.select_all_active(
+                    pool, owner_id, include_ids=_need, min_trust_score=0.0,
+                    respect_cooldown=False)
+                for _s in (_sel or []):
+                    if _s.get("session_str"):
+                        _sess_map[int(_s["id"])] = _s
+            except Exception:
+                log_exc_swallow(log, f"mass_invite op={op_id}: reconcile session fetch")
+
+        async def _leave_one(_acc):
+            try:
+                await asyncio.wait_for(
+                    _am_rec.leave_channel(_acc["session_str"], group, _acc=dict(_acc)),
+                    timeout=30)
+            except Exception as _le:
+                log.debug("mass_invite op=%d acc=%s: reconcile leave failed: %s",
+                          op_id, _acc.get("id"), _le)
+        if _sess_map:
+            await asyncio.gather(*(_leave_one(a) for a in _sess_map.values()),
+                                 return_exceptions=True)
+        log.info("mass_invite op=%d: сверка админов%s — снято с %d инвайтеров флота "
+                 "(из %d админов канала)", op_id, f" ({reason})" if reason else "",
+                 _demoted, len(admins))
+        if _demoted:
+            await _journal_write(
+                pool, "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,0,'reconcile','ok',$2)", op_id,
+                f"сверка админов: снято право и выведено из чата {_demoted} инвайтеров "
+                "флота, оставшихся с прошлых прогонов — освобождены места админа",
+                log_ctx=f"mass_invite op={op_id}", where="reconcile")
+        return _demoted
+
+    async def _view_after_join(acc: dict) -> None:
+        """Оставить просмотры на последних постах сразу после вступления.
+
+        Анти-бан (решение владельца): «когда мы вступаем в канал — Telegram
+        видит, что мы не оставляем просмотров на постах, а это триггер для
+        бана». Живой человек, зайдя в канал, листает последние посты. Делаем
+        это ПОСЛЕ того, как join_channel вернулся (сессия аккаунта освобождена —
+        никакой второй связи на одном auth-key), небольшой партией постов, чтобы
+        не раздувать задержку прогона. Best-effort: сбой не влияет на инвайт."""
+        if not acc or not acc.get("session_str"):
+            return
+        try:
+            from services import account_manager as _am_v
+            await asyncio.wait_for(
+                _am_v.view_recent_posts(acc["session_str"], group, _acc=dict(acc), limit=3),
+                timeout=45)
+        except Exception as _vje:
+            log.debug("mass_invite op=%d acc=%s: view_after_join failed: %s",
+                      op_id, acc.get("id"), _vje)
+
     # Главный канал уже заполнен прошлым прогоном — раздавать в нём права и
     # вводить туда инвайтеров незачем: прогон сразу уйдёт в канал резерва, а
     # права там выдаются по ходу.
@@ -17520,6 +18045,16 @@ async def _exec_mass_invite(
                 if st.get("can_promote"):
                     _promoter = a
                     break
+        # Перед раздачей админки ЭТОМУ прогону — свериться с реальным списком
+        # админов и снять флот, оставшийся с прошлых прогонов/оборванных запусков.
+        # Освобождает места админа ДО того, как прогон начнёт промоутить свой
+        # первый круг (иначе ~50 мест забиты «наследными» инвайтерами — жалоба
+        # владельца «весь флот в админах, инвайтить через админку некуда»).
+        if _promoter is not None:
+            try:
+                await _reconcile_channel_admins("старт прогона")
+            except Exception:
+                log_exc_swallow(log, f"mass_invite op={op_id}: стартовая сверка админов")
         if _promoter is None and _admin_probe_ok:
             # Аккаунты подключились и ответили — но ни у кого нет права промоута.
             _promote_skipped_no_admin = bool(_auto_promote)
@@ -17605,6 +18140,8 @@ async def _exec_mass_invite(
                         account_manager.join_channel(a["session_str"], group, _acc=dict(a)),
                         timeout=45)
                     await asyncio.sleep(random.uniform(1.0, 2.0))
+                    # Анти-бан: оставить просмотры на постах сразу после вступления.
+                    await _view_after_join(a)
                 except Exception:
                     log.debug("mass_invite op=%d: pre-promote join acc=%s failed",
                               op_id, a.get("id"))
@@ -18031,6 +18568,20 @@ async def _exec_mass_invite(
         if await _record_invited_targets(
                 pool, owner_id, _group_key, op_id, _dedup_unconfirmed):
             _dedup_unconfirmed.clear()
+
+    async def _premark_batch(targets) -> None:
+        """Предзапись пачки перед сетью — см. `_premark_invite_targets`."""
+        if not _skip_invited:
+            return
+        await _premark_invite_targets(pool, owner_id, _group_key, op_id, targets)
+
+    async def _unmark_untried(batch, settled) -> None:
+        """Снять предзапись с нерассмотренных — см. `_unmark_untried_invites`."""
+        if not _skip_invited:
+            return
+        await _unmark_untried_invites(pool, owner_id, _group_key, op_id, batch, settled,
+                                      keep=invited_this_run)
+
     _phones_not_found = 0          # номеров не в Telegram (для честного отчёта)
     _ok_logged = 0                 # сколько успешных целей записано в лог (для CSV)
     _ok_seen: set = set()          # уже залогированные 'ok' цели (без дублей в отчёте)
@@ -18134,10 +18685,16 @@ async def _exec_mass_invite(
             out.append(q.popleft())
         return out
 
-    def _give_back(q: deque, items: list) -> None:
-        """Вернуть неотработанное в ГОЛОВУ очереди — порядок аудитории сохраняется."""
+    async def _give_back(q: deque, items: list) -> None:
+        """Вернуть неотработанное в ГОЛОВУ очереди — порядок аудитории сохраняется.
+
+        И снять с него предзапись: вернулось в очередь — значит не приглашено, а
+        помеченная цель больше не попадёт ни в один батч (её отсеет сверка перед
+        отправкой). Инвариант держится здесь, а не в семи местах возврата.
+        """
         for it in reversed(items):
             q.appendleft(it)
+        await _unmark_untried(items, [])
 
     async def _acc_budget(acc) -> int:
         """Сколько инвайтов аккаунт вправе сделать за прогон (0 = выбыл).
@@ -18268,20 +18825,26 @@ async def _exec_mass_invite(
                     # Уже приглашённые по @username/id — номер их не позовёт.
                     return await inv.invite_by_phones(
                         acc["session_str"], dict(acc), group, batch,
-                        skip_keys=_invited_keys_now() if _skip_invited else None)
+                        skip_keys=_invited_keys_now() if _skip_invited else None,
+                        on_attempt=_premark_batch)
                 if _invite_method == "admin":
                     # «Через админку»: цель промоутится в админы (добавляется в
                     # чат) → права тут же снимаются → остаётся участником.
-                    return await inv.add_via_promote(acc["session_str"], dict(acc), group, batch)
+                    return await inv.add_via_promote(
+                        acc["session_str"], dict(acc), group, batch,
+                        on_attempt=_premark_batch)
                 if _invite_method == "link":
                     # «Ссылка в ЛС»: рассылаем цель ссылку-приглашение.
                     return await inv.invite_via_link_batch(
                         acc["session_str"], dict(acc), _invite_link, batch,
-                        _link_msg, _pace_mult)
+                        _link_msg, _pace_mult, on_attempt=_premark_batch)
                 # Множитель темпа уходит ВНУТРЬ батча (см. invite_batch).
+                # Метка ДО самой отправки, по цели: обрыв процесса между
+                # приглашением и записью иначе зовёт человека второй раз
+                # (см. _premark_invite_targets).
                 return await inv.invite_batch(
                     acc["session_str"], dict(acc), group, batch, _pace_mult,
-                    bulk=_bulk_api)
+                    bulk=_bulk_api, on_attempt=_premark_batch)
             except Exception as exc:  # не BaseException: отмену операции пропускаем наверх
                 return exc
 
@@ -18355,7 +18918,7 @@ async def _exec_mass_invite(
                     from services import smart_invite as _si
                     _dec = await _si.can_invite(pool, owner_id, _group_key)
                     if not _dec.allowed:
-                        _give_back(queue, batch)
+                        await _give_back(queue, batch)
                         if _dec.abort:
                             # Ключ governor'а — от МАТЕРИ (см. _group_key): после
                             # ротации у новой дочерней истории нет, проверка увидит
@@ -18474,7 +19037,7 @@ async def _exec_mass_invite(
                 # Батч не отработан вовсе — цели возвращаем в очередь (их подберёт
                 # другой аккаунт), а этот выводим из круга, чтобы не зациклиться.
                 log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), res)
-                _give_back(queue, batch)
+                await _give_back(queue, batch)
                 retired.add(acc_id)
                 await _release_admin_seat(acc_id)
                 _noconnect_errs.append(str(res)[:160])
@@ -18488,7 +19051,7 @@ async def _exec_mass_invite(
             # круге он уже с правами). Только если промоутера нет ИЛИ выдача уже
             # была и не помогла — выводим из круга (анти-цикл), не роняя прогон.
             if res.get("no_rights"):
-                _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
+                await _give_back(queue, batch)  # цели вернуть — их возьмёт кто-то с правами
                 _tries = int(_no_rights_on_demand.get(acc_id, 0))
                 _reason = "no_promoter"
                 # Внешний гейт обязан пропускать до САМОГО щедрого бюджета (30,
@@ -18522,6 +19085,8 @@ async def _exec_mass_invite(
                                 await asyncio.wait_for(
                                     _am.join_channel(acc["session_str"], group, _acc=dict(acc)),
                                     timeout=45)
+                                # Анти-бан: просмотры на постах сразу после вступления.
+                                await _view_after_join(acc)
                             except Exception as _je:
                                 log.info("mass_invite op=%d acc=%s: вступление не удалось "
                                          "(%s) — права всё равно пробуем выдать",
@@ -18616,6 +19181,16 @@ async def _exec_mass_invite(
             # должен о них знать, иначе адаптивный темп на них не учится, а
             # соседние операции берут аккаунт как спокойный.
             await _note_short_floods(acc_id, res.get("short_floods"))
+            # Решённые цели — те, по которым Telegram ответил поимённо. Их
+            # метка остаётся, с остальных её снимает _unmark_untried ниже.
+            if by_phone:
+                _settled = (list(res.get("invited_phones") or [])
+                            + list(res.get("invited_aliases") or [])
+                            + list(res.get("already_phones") or []))
+            elif ("added" in res) or ("dead" in res):
+                _settled = list(res.get("added") or []) + list(res.get("dead") or [])
+            else:
+                _settled = list(tried) if attempted else []
             if attempted:
                 if by_phone:
                     # Дедупим только УСПЕШНО приглашённые номера; «не в Telegram»
@@ -18623,10 +19198,7 @@ async def _exec_mass_invite(
                     # Человек записан под всеми адресами: номером, @username и
                     # id — иначе он же из очереди по @username (или следующая
                     # кампания) получил бы второе приглашение.
-                    await _remember_invited(
-                        list(res.get("invited_phones") or [])
-                        + list(res.get("invited_aliases") or [])
-                        + list(res.get("already_phones") or []))
+                    await _remember_invited(_settled)
                     _deduped += len(res.get("already_phones") or [])
                     _phones_not_found += len(res.get("not_found_phones") or [])
                 else:
@@ -18638,11 +19210,10 @@ async def _exec_mass_invite(
                     # промоут-трюк (там дедупятся по факту добавления), остальное
                     # вернётся следующим прогоном. Фолбэк для старого контракта
                     # движка (нет added/dead) — прежнее поведение по `tried`.
-                    if ("added" in res) or ("dead" in res):
-                        await _remember_invited(
-                            list(res.get("added") or []) + list(res.get("dead") or []))
-                    else:
-                        await _remember_invited(tried)
+                    await _remember_invited(_settled)
+            # Снимаем ВСЕГДА, в том числе когда не попробовали ни одной цели:
+            # иначе флуд на первой стоил бы всей пачке больше ни одного захода.
+            await _unmark_untried(batch, _settled)
             total_ok += ok_n
             total_fail += fail_n
             _chan_ok += ok_n
@@ -18693,7 +19264,7 @@ async def _exec_mass_invite(
                     op_id, attempted,
                 )
             if leftover:
-                _give_back(queue, leftover)
+                await _give_back(queue, leftover)
 
             # Цели, отклонённые приватностью — кандидаты на промоут-трюк.
             if _promoter is not None and _promote_trick:
@@ -18998,7 +19569,8 @@ async def _exec_mass_invite(
                         _tried_blocked.extend(_uniq_blocked[_ci:])
                         break
                     _tr = await _inv.add_via_promote(
-                        _promoter["session_str"], dict(_promoter), group, _part)
+                        _promoter["session_str"], dict(_promoter), group, _part,
+                        on_attempt=_premark_batch)
                     _part_ok = int(_tr.get("ok") or 0)
                     _trick_ok += _part_ok
                     _trick_tried += len(_part) - len(_tr.get("untried") or [])
@@ -19071,7 +19643,7 @@ async def _exec_mass_invite(
         # (жалоба владельца: «доинвайтить всех, кто упал по лимиту канала»). В
         # журнал приглашённых они не писались, повтор их возьмёт. Это цели из
         # username-пути (_privacy_blocked) — место им в q_users.
-        _give_back(q_users, list(_still_blocked))
+        await _give_back(q_users, list(_still_blocked))
         _still_blocked = []
     if _admins_left and _promoter is not None and not _promoter_resting():
         # Снятие сорвалось не из-за флуда промоутера (обрыв, таймаут, флуд
@@ -19147,7 +19719,8 @@ async def _exec_mass_invite(
                 _lf = await asyncio.wait_for(
                     _inv2.invite_via_link_batch(
                         _snd["session_str"], dict(_snd), _invite_link,
-                        _part, _link_msg, _pace_mult),
+                        _part, _link_msg, _pace_mult,
+                        on_attempt=_premark_batch),
                     timeout=120 + 120 * len(_part))
             except Exception as _lfe:
                 # Порцию назад НЕ возвращаем: часть ссылок могла уйти, и второй
@@ -19170,7 +19743,7 @@ async def _exec_mass_invite(
                 # основном цикле (privacy-отказ). Фолбэк переводит их из провала в
                 # успех, а не добавляет новую обработанную цель (прогресс >100%).
             if _untried_lf:
-                _give_back(_lf_queue, _untried_lf)
+                await _give_back(_lf_queue, _untried_lf)
             if _lf.get("peer_flood") or _lf.get("flood_wait"):
                 await _rest_invite_account(_sid, _lf)
                 return False
@@ -19492,6 +20065,16 @@ async def _exec_mass_invite(
             await _release_admin_seats_batch(list(_admin_seats))
         except Exception as _fe:
             log.debug("mass_invite op=%d: финальное освобождение админ-мест: %s", op_id, _fe)
+    # Финальная СВЕРКА с реальным списком админов: _admin_seats знает только про
+    # места ЭТОГО прогона, а в админах мог остаться флот с прошлых прогонов или с
+    # аварийно оборванного запуска (память о тех местах потеряна). Сверяемся с
+    # истиной Telegram и дочищаем — чтобы после прогона в админах гарантированно
+    # не осталось ни одного нашего инвайтера, кроме промоутера (жалоба владельца
+    # «весь флот в админах, инвайтить через админку некуда»).
+    try:
+        await _reconcile_channel_admins("конец прогона")
+    except Exception as _re:
+        log.debug("mass_invite op=%d: финальная сверка админов: %s", op_id, _re)
 
     # Шов «Инвайт → Welcome»: приветствие реально добавленным (если настроено).
     await _chain_welcome(pool, owner_id, op_id, params)
@@ -20152,14 +20735,33 @@ async def _exec_niche_growth_post(
         # Группы, в которые этот владелец уже заходил через Growth Agent раньше —
         # исключаем, чтобы повторные запуски не заходили и не постили повторно в
         # те же группы (лишний риск спам-флага без дополнительного охвата).
+        # ПОЧЕМУ ЭТО ЧТЕНИЕ ФЕЙЛИТСЯ ЗАКРЫТО. Пустой набор на сбое означает
+        # «владелец не был нигде»: поиск отдаст те же группы, вступление пройдёт
+        # как already_member, и промо уйдёт в группу ВТОРОЙ раз с того же
+        # аккаунта — ровно та сигнатура спама, против которой написан весь
+        # безопасный режим этой операции (5 групп за запуск, паузы в десятки
+        # минут, свой spintax-вариант на группу). Повтор — штатное событие:
+        # операция идёт часами, а деплой и сторож зависших поднимают её с
+        # done_items=0. Отложенный повтор дешевле второго поста; тот же выбор
+        # уже сделан для реестра «не писать» и для журнала сделанного.
         try:
             prior_rows = await pool.fetch(
                 "SELECT group_id FROM niche_growth_targets WHERE owner_id=$1", owner_id
             )
             exclude_ids = {int(r["group_id"]) for r in prior_rows}
         except Exception as e:
-            log.warning('prior groups query failed: %s', e)
-            exclude_ids = set()
+            log.error(
+                "niche_growth_post op=%d: список уже отработанных групп не "
+                "прочитался (%s) — операция отложена, иначе промо ушло бы в них "
+                "второй раз", op_id, e,
+            )
+            _reliability_metric("infragram_growth_dedup_read_failures_total",
+                                op_type="niche_growth_post")
+            return {
+                "status": "requeue",
+                "reason": "Не удалось прочитать список уже обработанных групп — "
+                          "повторим позже, чтобы не отправить промо дважды",
+            }
 
         # Ищем группы
         try:
@@ -20262,15 +20864,36 @@ async def _exec_niche_growth_post(
                 )
                 continue
 
-            # Запоминаем группу как уже посещённую — чтобы будущие запуски Growth
-            # Agent для этого владельца не заходили и не постили сюда повторно.
+            # НЕОБРАТИМОЕ ДЕЙСТВИЕ ОТМЕЧАЕТСЯ ДО НЕГО, И ЦЕНОЙ ЭТОГО ДЕЙСТВИЯ.
+            # Пометка стоит между вступлением и постом: не записалась — поста
+            # нет. Иначе пост уходит, а следующий запуск (или повтор этого же)
+            # видит группу неотработанной и постит в неё второй раз. Группа без
+            # id неотметима в принципе, поэтому поста для неё тоже нет:
+            # вступление обратимо и дёшево, второй промо-пост — нет.
+            _marked = False
             if grp_id:
-                await _safe_execute(
+                _marked = await _safe_execute(
                     pool,
                     "INSERT INTO niche_growth_targets(owner_id, group_id, title) "
                     "VALUES($1,$2,$3) ON CONFLICT (owner_id, group_id) DO NOTHING",
                     owner_id, grp_id, grp_title,
+                    log_ctx=f"[niche_growth_mark op={op_id}]",
+                ) != "ERROR"
+            if not _marked:
+                log.error(
+                    "niche_growth_post op=%d: группа %s (%r) не записалась в "
+                    "отработанные — поста не будет, иначе повтор отправит промо "
+                    "сюда второй раз", op_id, grp_id or join_ref, grp_title,
                 )
+                _reliability_metric("infragram_growth_dedup_write_failures_total",
+                                    op_type="niche_growth_post")
+                err_count += 1
+                await _safe_execute(
+                    pool,
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
+                )
+                continue
 
             # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
             join_to_post_delay = random.uniform(180, 480)
@@ -21549,13 +22172,42 @@ async def _exec_run_broadcast(
         # всей аудитории заново — журнал доставок первой рассылки второй не
         # указ, он ведётся по её собственному id.
         params["broadcast_id"] = int(broadcast_id)
-        await _safe_execute(
-            pool,
-            "UPDATE operation_queue SET params = COALESCE(params, '{}'::jsonb) || $1::jsonb "
-            "WHERE id=$2",
-            json.dumps({"broadcast_id": int(broadcast_id)}), op_id,
-            log_ctx=f"[run_broadcast_pin op={op_id}]",
-        )
+        # Закрепление — ЦЕНА запуска, а не пометка рядом с ним. Результат этой
+        # записи раньше выбрасывался: не записалась — рассылка всё равно
+        # уходила, а следующий прогон (таймаут, воскрешение после рестарта,
+        # ручной повтор) читал params без broadcast_id и заводил ВТОРУЮ
+        # рассылку на всю аудиторию, потому что журнал доставок первой второй
+        # не указ. Поэтому: повтор, а при полной неудаче — снимаем только что
+        # созданную строку рассылки (она ещё не отправляла) и отказываем. Не
+        # отправить дешевле, чем отправить дважды.
+        _pinned = False
+        for _attempt in (1, 2):
+            if await _safe_execute(
+                pool,
+                "UPDATE operation_queue SET params = COALESCE(params, '{}'::jsonb) || $1::jsonb "
+                "WHERE id=$2",
+                json.dumps({"broadcast_id": int(broadcast_id)}), op_id,
+                log_ctx=f"[run_broadcast_pin op={op_id}]",
+            ) != "ERROR":
+                _pinned = True
+                break
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+        if not _pinned:
+            log.error(
+                "run_broadcast op=%s: id рассылки %s НЕ закрепился в операции — "
+                "рассылку не запускаем и снимаем, иначе повторный прогон завёл "
+                "бы вторую и отправил её всей аудитории заново",
+                op_id, broadcast_id)
+            _reliability_metric("infragram_broadcast_pin_write_failures_total",
+                                op_type="run_broadcast")
+            await broadcaster.abandon_unstarted(pool, broadcast_id)
+            return {
+                "status": "failed",
+                "summary": ("⚠️ Рассылка не запущена: не удалось запомнить её за "
+                            "операцией. Запустите ещё раз — иначе повтор мог бы "
+                            "отправить сообщение всей аудитории второй раз."),
+            }
     elif _is_subset:
         # Рассылка по подмножеству: сохраняем целевой список, иначе resume после
         # рестарта отправит ВСЕЙ аудитории бота.
@@ -21568,12 +22220,42 @@ async def _exec_run_broadcast(
         # аудитории: люди, уже получившие исходное сообщение, получали его
         # второй раз. Ровно от этого `resend_undelivered` отказывается, когда у
         # исходной рассылки вычищен журнал доставки.
-        try:
-            await _safe_execute(pool,
+        #
+        # Эта запись — тоже ЦЕНА запуска, и по той же причине, что закрепление
+        # id выше. Её результат выбрасывался на пол (а `except` здесь к тому же
+        # мёртвый: `_safe_execute` не бросает), то есть при сбое базы рассылка
+        # уходила с ПУСТЫМ списком в строке. В самом прогоне список есть — он
+        # передан в broadcaster.start, — но докатка после рестарта читает
+        # именно строку, и на ближайшем деплое рассылка догонялась ВСЕЙ
+        # аудиторией бота: люди, уже получившие исходное сообщение, получали
+        # его второй раз. Повтор, а при полной неудаче — не запускаем.
+        _subset_saved = False
+        for _attempt in (1, 2):
+            if await _safe_execute(
+                pool,
                 "UPDATE broadcasts SET target_user_ids=$1::jsonb WHERE id=$2",
-                json.dumps(user_ids), broadcast_id)
-        except Exception:
-            log.warning("run_broadcast: не удалось сохранить target_user_ids подмножества op=%s", op_id)
+                json.dumps(user_ids), broadcast_id,
+                log_ctx=f"[run_broadcast_subset op={op_id}]",
+            ) != "ERROR":
+                _subset_saved = True
+                break
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+        if not _subset_saved:
+            log.error(
+                "run_broadcast op=%s: список получателей рассылки %s НЕ "
+                "сохранился — рассылку не запускаем и снимаем, иначе докатка "
+                "после рестарта отправила бы её всей аудитории бота",
+                op_id, broadcast_id)
+            _reliability_metric("infragram_broadcast_subset_write_failures_total",
+                                op_type="run_broadcast")
+            await broadcaster.abandon_unstarted(pool, broadcast_id)
+            return {
+                "status": "failed",
+                "summary": ("⚠️ Рассылка не запущена: не удалось сохранить список "
+                            "получателей. Запустите ещё раз — иначе после "
+                            "перезапуска она могла бы уйти всей аудитории бота."),
+            }
 
     # Повторный прогон этой же операции (таймаут, воскрешение после рестарта)
     # НЕ должен запускать вторую задачу на тот же broadcast_id: два цикла

@@ -209,6 +209,35 @@ def segment_members_sql(key: str, limit: int) -> str:
               f" LIMIT {int(limit)}")
 
 
+def segment_member_count_sql(key: str) -> str:
+    """Сколько всего людей в сегменте — по тому же условию, что и выборка.
+
+    Экран сегмента показывает первые сто человек и кнопку «Скопировать
+    номера». Без этого числа и список, и кнопка молчали о потолке: в сегменте
+    «Спящие» тысяча двести человек, в буфер уезжало сто, и владелец считал,
+    что забрал сегмент целиком. Число берётся тем же условием, что и выборка,
+    иначе итог и список разошлись бы.
+    """
+    cond = SEGMENT_PREDICATES[key]
+    for ph, val in _SEG_PARAM_VALUES.items():
+        cond = cond.replace(ph, str(int(val)))
+    return _SEGMENTS_BASE + f"SELECT COUNT(*) FROM u WHERE ({cond})"
+
+
+async def segment_member_count(pool, owner_id: int, key: str,
+                               bot_id: int | None = None) -> int:
+    """Число людей в сегменте. Ноль, если ключ неизвестен или запрос не вышел."""
+    if key not in SEGMENT_PREDICATES:
+        return 0
+    try:
+        n = await pool.fetchval(segment_member_count_sql(key), owner_id, bot_id)
+    except Exception as exc:
+        log.warning("segment_member_count failed owner=%s key=%s: %s",
+                    owner_id, key, exc)
+        return 0
+    return int(n or 0)
+
+
 async def segment_members(pool, owner_id: int, key: str, limit: int = 100,
                           bot_id: int | None = None) -> list[dict]:
     """Кто именно в сегменте. Пустой список, если ключ неизвестен.

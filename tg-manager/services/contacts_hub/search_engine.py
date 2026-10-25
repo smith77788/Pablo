@@ -46,7 +46,20 @@ _OPERATOR_RE = re.compile(
 )
 
 
-def _parse_operators(query: str) -> ParsedQuery:
+def parse_operators(query: str) -> tuple[ParsedQuery, str]:
+    """Операторы запроса и остаток строки — ОДИН разбор на бота и на хаб.
+
+    Операторы (`@ник`, `#тег`, `company:`, `phone:`) понимал только поиск
+    бота; список мини-аппа собирал условие своим кодом и о них не знал, то
+    есть набранный в единственном поле поиска `#vip` не находил никого.
+    Теперь разбор здесь, а условия строит `build_operator_conditions` — обе
+    стороны зовут одно и то же, иначе «в боте ищет, в приложении нет»
+    вернётся на первой же правке.
+
+    Остаток строки отдаётся СЫРЫМ: список бьёт его на слова своим правилом
+    (у него проходят и односимвольные), и менять ему матчинг заодно с
+    операторами значит менять две вещи одной правкой.
+    """
     parsed = ParsedQuery()
     remaining = query
 
@@ -62,7 +75,8 @@ def _parse_operators(query: str) -> ParsedQuery:
 
     remaining = _OPERATOR_RE.sub('', remaining).strip()
     parsed.free_text = _tokenize(remaining)
-    return parsed
+    return parsed, remaining
+
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +190,7 @@ def _page(limit: Any, offset: Any) -> tuple[int, int]:
     return max(1, min(lim, _PAGINATION_MAX_LIMIT)), max(0, min(off, 10_000_000))
 
 
-def _build_operator_conditions(parsed: ParsedQuery, param_offset: int) -> tuple[list[str], list[Any], int]:
+def build_operator_conditions(parsed: ParsedQuery, param_offset: int) -> tuple[list[str], list[Any], int]:
     conditions: list[str] = []
     params: list[Any] = []
     idx = param_offset
@@ -294,7 +308,7 @@ def _build_search_query(
     params: list[Any] = [owner_id]
     idx = 2
 
-    op_conditions, op_params, idx = _build_operator_conditions(parsed, idx)
+    op_conditions, op_params, idx = build_operator_conditions(parsed, idx)
     all_conditions.extend(op_conditions)
     params.extend(op_params)
 
@@ -329,9 +343,13 @@ def _build_search_query(
     lim_idx = len(params) + 1
     params.append(limit)
     params.append(offset)
+    # `, id` в конце обязателен: выдача листается по OFFSET, а и релевантность,
+    # и first_name неуникальны. Порядок внутри равных значений Postgres не
+    # обещает, поэтому без добивки страницы повторяют и теряют людей
+    # (tests/test_paging_does_not_skip_or_repeat_people.py).
     sql = (f'SELECT *, {score_expr} as match_score FROM unified_contacts\n'
            f'            WHERE {where_clause}\n'
-           f'            ORDER BY {order_by}\n'
+           f'            ORDER BY {order_by}, id\n'
            f'            LIMIT ${lim_idx} OFFSET ${lim_idx + 1}')
     return sql, params, where_clause, where_params
 
@@ -344,14 +362,15 @@ async def search_contacts(
     offset: int = 0,
 ) -> list[dict]:
     limit, offset = _page(limit, offset)
-    parsed = _parse_operators(query)
+    parsed = parse_operators(query)[0]
     has_operators = any([parsed.username, parsed.tag, parsed.company, parsed.phone])
 
     tokens = parsed.free_text
 
     if not tokens and not has_operators:
         rows = await pool.fetch(
-            'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name LIMIT $2 OFFSET $3',
+            'SELECT * FROM unified_contacts WHERE owner_id=$1 '
+            'ORDER BY first_name, id LIMIT $2 OFFSET $3',
             owner_id, limit, offset)
         from services.contacts_hub.repository import _parse_json_fields
         return [_parse_json_fields(dict(r)) for r in rows]
@@ -381,7 +400,7 @@ async def search_contacts_spotlight(
     query: str,
     limit: int = 30,
 ) -> list[dict]:
-    parsed = _parse_operators(query)
+    parsed = parse_operators(query)[0]
     tokens = parsed.free_text
     has_operators = any([parsed.username, parsed.tag, parsed.company, parsed.phone])
 
@@ -397,7 +416,7 @@ async def search_contacts_spotlight(
     params: list[Any] = [owner_id]
     idx = 2
 
-    op_conditions, op_params, idx = _build_operator_conditions(parsed, idx)
+    op_conditions, op_params, idx = build_operator_conditions(parsed, idx)
     all_conditions.extend(op_conditions)
     params.extend(op_params)
 
@@ -511,13 +530,14 @@ async def search_contacts_advanced(
     fuzzy_threshold: float = _FUZZY_THRESHOLD,
 ) -> dict:
     limit, offset = _page(limit, offset)
-    parsed = _parse_operators(query)
+    parsed = parse_operators(query)[0]
     tokens = parsed.free_text
     has_operators = any([parsed.username, parsed.tag, parsed.company, parsed.phone])
 
     if not tokens and not has_operators:
         rows = await pool.fetch(
-            'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name LIMIT $2 OFFSET $3',
+            'SELECT * FROM unified_contacts WHERE owner_id=$1 '
+            'ORDER BY first_name, id LIMIT $2 OFFSET $3',
             owner_id, limit, offset)
         count_row = await pool.fetchrow(
             'SELECT COUNT(*) as cnt FROM unified_contacts WHERE owner_id=$1', owner_id)
@@ -611,5 +631,7 @@ async def _fuzzy_search(
 # Cache management
 # ---------------------------------------------------------------------------
 
-def clear_search_cache() -> None:
-    _cache.clear()
+# УДАЛЕНО: clear_search_cache() — сброс кэша поиска, который никто не звал.
+# Кэш живёт по TTL (_CACHE_TTL_SECONDS); ручка сброса без двери — это кнопка,
+# которой нет.
+

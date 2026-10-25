@@ -28,7 +28,11 @@ def test_endpoint_accepts_mutual_param():
 
     src = api_source()
     assert "request.query.get('mutual')" in src
-    assert "mutual_only=mutual" in src
+    # Разбор параметров среза живёт в ОДНОМ месте (`_contact_filters`), и его
+    # зовут и список, и выгрузка: отдельного `mutual_only=mutual` на вызове
+    # обработчика больше нет и быть не должно — две сборки фильтров разошлись
+    # бы, и выгрузка отдала бы не то, что видно в списке.
+    assert "mutual_only=request.query.get('mutual') == '1'" in src
 
 
 def test_schema_and_selfheal_add_is_mutual():

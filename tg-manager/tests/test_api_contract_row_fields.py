@@ -15,6 +15,15 @@
 
 Оба раза поломка молчала: пустое значение неотличимо от отсутствия данных.
 
+Третья поломка нашлась, когда гейт научился ВЫВОДИТЬ форму из запроса. Ответы
+вида `[dict(r) for r in rows]` и `[{**dict(r), 'created_at': …} …]` считались
+динамическими и не сравнивались вовсе — а имена полей у них не динамические:
+их задаёт список выборки, который лежит в той же функции. Сравнимых ключей
+стало 21 вместо 11, и в новой трети обнаружилось, что «Топики узла» рисуют
+`#${t.tg_thread_id}`, а запрос этой колонки не выбирал: справа в каждой строке
+стояла одинокая решётка. Колонка в таблице есть (`bm_node_threads.tg_thread_id`),
+и именно по ней топик находят в группе, — поэтому починка на стороне запроса.
+
 **Точность важнее полноты.** Проверяем только строго сопоставимые пары: ответ
 собран как литеральный список литеральных словарей (`"key": [ {...} for r in
 rows ]`), а фронт делает `d.key` и сразу `.map(v => ...)`. Всё динамическое
@@ -27,7 +36,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
-from tests.miniapp_source import api_source
+from tests.miniapp_source import api_files, api_source
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 _API_SRC = api_source()
@@ -70,6 +79,178 @@ def _literal_item_keys(node: ast.AST) -> set[str] | None:
     return keys or None
 
 
+def _sql_text(node: ast.AST) -> str:
+    """Текст запроса, собранный ПО ДЕРЕВУ. `\x00` — место подстановки.
+
+    Резать исходник нельзя: `ast.walk` выдаёт и f-строку, и её внутренние
+    куски по отдельности, а запрос бывает склеен через `+` из двух выражений.
+    Обе ошибки эта мерка уже совершала в других файлах (см. CLAUDE.md).
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else "\x00"
+    if isinstance(node, ast.JoinedStr):
+        return "".join(_sql_text(v) for v in node.values)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _sql_text(node.left) + _sql_text(node.right)
+    return "\x00"
+
+
+def _split_top_level(text: str) -> list[str]:
+    """Разбить по запятым ВЕРХНЕГО уровня: `COALESCE(a, b)` — один элемент."""
+    out: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in text:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if "".join(cur).strip():
+        out.append("".join(cur))
+    return out
+
+
+def _select_list_names(sql: str) -> set[str] | None:
+    """Имена колонок выдачи, или None — если хоть одно не определяется точно.
+
+    Имя колонки в ответе задаёт Postgres, и угадывать его за него нельзя:
+    `AS x` — это `x`, `t.col` — это `col`, одинокое `col` — это `col`, а вот
+    выражение без псевдонима (`COUNT(*)`, `a || b`) имя получает по своим
+    правилам. Такой запрос мерка не разбирает вовсе — лучше не сравнить, чем
+    обвинить фронт в чужом имени.
+    """
+    text = " ".join(sql.split())
+    if "\x00" in text:
+        return None                     # подстановка: списка выборки не видно
+    # Последний SELECT вне скобок: после CTE форму задаёт именно он.
+    start = None
+    for m in re.finditer(r"(?i)\bselect\b", text):
+        head = text[:m.start()]
+        if head.count("(") == head.count(")"):
+            start = m
+    if start is None:
+        return None
+    rest = text[start.end():]
+    rest = re.sub(r"(?i)^\s*distinct\s+on\s*\([^)]*\)", "", rest)
+    rest = re.sub(r"(?i)^\s*distinct\b", "", rest)
+    depth = 0
+    end = None
+    for i, ch in enumerate(rest):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif depth == 0 and rest[i:i + 6].upper() == " FROM ":
+            end = i
+            break
+    if end is None:
+        return None
+    names = set()
+    for item in _split_top_level(rest[:end]):
+        it = item.strip()
+        if not it or it == "*" or it.endswith(".*"):
+            return None                 # SELECT * — форму задаёт таблица
+        alias = re.search(r"(?i)\s+AS\s+\"?([a-z_]\w*)\"?$", it)
+        if alias:
+            names.add(alias.group(1).lower())
+        elif re.fullmatch(r"[A-Za-z_]\w*\.([A-Za-z_]\w*)", it):
+            names.add(it.split(".")[1].lower())
+        elif re.fullmatch(r"[A-Za-z_]\w*", it):
+            names.add(it.lower())
+        else:
+            return None
+    return names or None
+
+
+def _rows_query(fn: ast.AST, var: str) -> str | None:
+    """Запрос, которым в этой функции получена переменная `var`."""
+    for node in ast.walk(fn):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        target = node.targets[0]
+        if not (isinstance(target, ast.Name) and target.id == var):
+            continue
+        call = node.value
+        if isinstance(call, ast.Await):
+            call = call.value
+        if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "fetch" and call.args):
+            return _sql_text(call.args[0])
+    return None
+
+
+def _sql_item_keys(fn: ast.AST, node: ast.AST) -> set[str] | None:
+    """Поля элемента для `[dict(r) for r in rows]` и `[{**dict(r), …} …]`.
+
+    Эти две формы гейт раньше считал динамическими и не сравнивал вообще — а
+    имена полей у них не динамические: их задаёт список выборки запроса,
+    который лежит в той же функции. Так из-под защиты выпадала треть
+    списочных ручек, и ровно в этой трети нашлась ещё одна «#» без номера.
+    """
+    if not (isinstance(node, ast.ListComp) and len(node.generators) == 1):
+        return None
+    elt, gen = node.elt, node.generators[0]
+    if not isinstance(gen.iter, ast.Name) or gen.ifs:
+        return None
+
+    def is_dict_of_row(call: ast.AST) -> bool:
+        return (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                and call.func.id == "dict" and len(call.args) == 1
+                and isinstance(call.args[0], ast.Name))
+
+    extra: set[str] = set()
+    if isinstance(elt, ast.Dict):
+        spreads = 0
+        for key, value in zip(elt.keys, elt.values):
+            if key is None:
+                if not is_dict_of_row(value):
+                    return None
+                spreads += 1
+            elif isinstance(key, ast.Constant) and isinstance(key.value, str):
+                extra.add(key.value)
+            else:
+                return None
+        if spreads != 1:
+            return None
+    elif not is_dict_of_row(elt):
+        return None
+
+    sql = _rows_query(fn, gen.iter.id)
+    if not sql:
+        return None
+    names = _select_list_names(sql)
+    return (names | extra) if names else None
+
+
+def _answers() -> list[tuple[ast.AST, ast.Dict]]:
+    """Пары «функция — словарь ответа», где функция — САМАЯ внутренняя.
+
+    Ручки объявлены внутри `setup_routes`, и обход сверху видел бы каждый
+    ответ дважды — в том числе в области, где нужного запроса нет.
+    """
+    out: list[tuple[ast.AST, ast.Dict]] = []
+
+    def walk(node: ast.AST, fn: ast.AST | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk(child, child)
+                continue
+            if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                    and child.func.id == "_json_resp" and child.args
+                    and isinstance(child.args[0], ast.Dict) and fn is not None):
+                out.append((fn, child.args[0]))
+            walk(child, fn)
+
+    for path in api_files():
+        walk(ast.parse(path.read_text(encoding="utf-8")), None)
+    return out
+
+
 def _response_item_shapes() -> dict[str, set[str]]:
     """`ключ ответа` → множество полей элемента, для литеральных форм.
 
@@ -80,25 +261,18 @@ def _response_item_shapes() -> dict[str, set[str]]:
     из-за этой коллизии. Поэтому ключ участвует, только если КАЖДЫЙ его
     производитель литеральный: тогда множество полей полное и сравнимое.
     """
-    literal: dict[str, set[str]] = {}
+    known: dict[str, set[str]] = {}
     dynamic: set[str] = set()
-    tree = ast.parse(_API_SRC)
-    for n in ast.walk(tree):
-        if not (isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Name)
-                and n.func.id == "_json_resp"):
-            continue
-        if not n.args or not isinstance(n.args[0], ast.Dict):
-            continue
-        for k, v in zip(n.args[0].keys, n.args[0].values):
+    for fn, answer in _answers():
+        for k, v in zip(answer.keys, answer.values):
             if not (isinstance(k, ast.Constant) and isinstance(k.value, str)):
                 continue
-            keys = _literal_item_keys(v)
+            keys = _literal_item_keys(v) or _sql_item_keys(fn, v)
             if keys:
-                literal.setdefault(k.value, set()).update(keys)
+                known.setdefault(k.value, set()).update(keys)
             else:
                 dynamic.add(k.value)
-    return {k: v for k, v in literal.items() if k not in dynamic}
+    return {k: v for k, v in known.items() if k not in dynamic}
 
 
 def _callback_body(src: str, arrow_end: int) -> str:
@@ -175,12 +349,14 @@ def test_frontend_reads_only_item_fields_backend_puts_there():
 def test_the_gate_actually_compares_something():
     """Если разбор перестанет находить пары, гейт станет зелёным навсегда.
 
-    Порог низкий осознанно: однозначных (без омонимов) списочных ключей в файле
-    всего 11 — это цена точности, а не слабость разбора."""
+    Порог низкий осознанно: однозначных (без омонимов) списочных ключей всего 21
+    — это цена точности, а не слабость разбора. Числа ниже — замер, а не
+    пожелание: 21 ключ и 12 сопоставленных пар. Упало — значит разбор ответа
+    или JS сломался, и гейт зеленеет ни на чём."""
     shapes = _response_item_shapes()
-    assert len(shapes) >= 8, f"разобрано лишь {len(shapes)} списочных ответов"
+    assert len(shapes) >= 18, f"разобрано лишь {len(shapes)} списочных ответов"
     compared = sum(1 for k in shapes if _fields_read_on(k))
-    assert compared >= 5, f"сопоставлено лишь {compared} пар — разбор JS сломался"
+    assert compared >= 10, f"сопоставлено лишь {compared} пар — разбор JS сломался"
 
 
 # ── Проверка самого измерителя ─────────────────────────────────────────────
@@ -264,3 +440,53 @@ def test_ad_intel_rows_use_the_real_contract():
         assert dead not in render, (
             f"экран «Разведка рекламы» снова читает несуществующее поле {dead}"
         )
+
+
+def test_gate_derives_item_fields_from_the_select_list():
+    """Вывод формы из запроса — и там, где имя колонки задаёт Postgres, молчок.
+
+    Вторая половина важнее первой. Выражение без псевдонима (`COUNT(*)`,
+    `a || b`) имя получает по правилам Postgres, и угадывать его за него —
+    прямой путь обвинить фронт в чужом имени. Такой запрос мерка не разбирает
+    вовсе: лучше не сравнить, чем соврать.
+    """
+    def keys_of(src: str):
+        fn = ast.parse(src).body[0]
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "_json_resp"):
+                return _sql_item_keys(fn, n.args[0].values[0])
+        raise AssertionError("ответ не найден в примере")
+
+    plain = """
+async def h(request):
+    rows = await pool.fetch("SELECT id, tg_thread_id, t.topic_name FROM x WHERE a=$1")
+    return _json_resp({"threads": [dict(r) for r in rows]})
+"""
+    assert keys_of(plain) == {"id", "tg_thread_id", "topic_name"}
+
+    spread = """
+async def h(request):
+    rows = await pool.fetch("SELECT id, created_at AS made FROM x")
+    return _json_resp({"threads": [{**dict(r), "when": r["created_at"]} for r in rows]})
+"""
+    assert keys_of(spread) == {"id", "made", "when"}
+
+    for silent, why in (
+        ("""
+async def h(request):
+    rows = await pool.fetch("SELECT * FROM x")
+    return _json_resp({"threads": [dict(r) for r in rows]})
+""", "SELECT * — форму задаёт таблица"),
+        ("""
+async def h(request):
+    rows = await pool.fetch("SELECT COUNT(*), id FROM x GROUP BY id")
+    return _json_resp({"threads": [dict(r) for r in rows]})
+""", "выражение без псевдонима — имя за Postgres"),
+        ("""
+async def h(request):
+    rows = await pool.fetch(f"SELECT {cols} FROM x")
+    return _json_resp({"threads": [dict(r) for r in rows]})
+""", "подстановка вместо списка выборки"),
+    ):
+        assert keys_of(silent) is None, f"мерка разобрала то, что не должна: {why}"

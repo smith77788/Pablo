@@ -389,7 +389,7 @@ async def cb_reg_history(
                       participants_count, verified, scam
                FROM reg_check_cache
                WHERE checked_by=$1
-               ORDER BY checked_at DESC
+               ORDER BY checked_at DESC, entity_type, entity_id DESC
                LIMIT $2 OFFSET $3""",
             callback.from_user.id,
             limit,
@@ -407,7 +407,7 @@ async def cb_reg_history(
                           reg_date, method, checked_at
                    FROM reg_check_cache
                    WHERE checked_by=$1
-                   ORDER BY checked_at DESC
+                   ORDER BY checked_at DESC, entity_type, entity_id DESC
                    LIMIT $2 OFFSET $3""",
                 callback.from_user.id, limit, offset,
             )
@@ -960,13 +960,17 @@ async def _show_result(
     peer = auto_resolve_peer or (username if username else rc.canonical_peer_id(entity_id))
     from services.bg_tasks import spawn  # strong-ссылка (класс #14)
     spawn(
-        _enrich_metadata(sent, pool, entity_id, entity_type, name, username, peer, kb, reg_pool_name)
+        _enrich_metadata(
+            sent, pool, message.from_user.id, entity_id, entity_type,
+            name, username, peer, kb, reg_pool_name,
+        )
     )
 
 
 async def _enrich_metadata(
     sent_msg: Message | None,
     pool: asyncpg.Pool,
+    owner_id: int,
     entity_id: int,
     entity_type: str,
     name: str | None,
@@ -975,25 +979,36 @@ async def _enrich_metadata(
     kb=None,
     pool_name: str | None = None,
 ) -> None:
-    """Фоновое обогащение: Telethon → обновляет уже отправленное сообщение через edit_text."""
-    if sent_msg is None:
+    """Фоновое обогащение: Telethon → обновляет уже отправленное сообщение через edit_text.
+
+    owner_id передаётся явно: sent_msg — сообщение самого бота, его from_user —
+    бот, а не владелец флота. Раньше аккаунты искали по id бота и всегда
+    получали «нет активных аккаунтов с сессией».
+    """
+    if sent_msg is None or not owner_id:
         return
     try:
-        owner_id = sent_msg.from_user.id if sent_msg.from_user else (sent_msg.chat.id if sent_msg.chat else None)
-        if not owner_id:
-            return
         full_info = await rc.get_entity_full_info(pool, owner_id, peer, pool_name=pool_name)
         if not full_info and entity_type in ("channel", "supergroup", "group"):
             full_info = await _bot_api_channel_info(sent_msg.bot, entity_id, username or peer)
         if not full_info:
             # Нет данных — сообщаем пользователю причину
             pool_hint = f" в пуле «{html.escape(pool_name)}»" if pool_name else ""
-            no_data_suffix = (
-                f"\n\n⚠️ <i>Telethon-проверка недоступна{pool_hint}. "
-                "Нет активных аккаунтов с сессией. "
-                "Добавьте аккаунты в разделе <b>Аккаунты</b> "
-                "или выберите другой пул в <b>⚙️ Настройки пула</b>.</i>"
-            )
+            if await rc.has_active_session(pool, owner_id, pool_name=pool_name):
+                # Аккаунты есть — Telegram не отдал данные (приватный объект,
+                # флуд-лимит, таймаут). Не врём про пустой флот.
+                no_data_suffix = (
+                    f"\n\n⚠️ <i>Telethon-проверка{pool_hint} не дала данных: "
+                    "Telegram не вернул сведения об объекте (скрыт, недоступен "
+                    "или временный лимит). Попробуйте позже.</i>"
+                )
+            else:
+                no_data_suffix = (
+                    f"\n\n⚠️ <i>Telethon-проверка недоступна{pool_hint}. "
+                    "Нет активных аккаунтов с сессией. "
+                    "Добавьте аккаунты в разделе <b>Аккаунты</b> "
+                    "или выберите другой пул в <b>⚙️ Настройки пула</b>.</i>"
+                )
             try:
                 old_text = sent_msg.text or sent_msg.caption or ""
                 if "⚠️" not in old_text:

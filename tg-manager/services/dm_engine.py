@@ -534,25 +534,48 @@ _PACE_MULTIPLIERS: dict[str, float] = {
 }
 
 
-async def _guarded_sleep(op_id: int | None, seconds: float) -> None:
-    """asyncio.sleep + объявление паузы сторожу застоя op_worker.
+async def _guarded_sleep(op_id: int | None, seconds: float, pool=None) -> None:
+    """Пауза кампании: объявлена сторожу застоя и замечает отмену владельца.
 
     Кампания спит в СВОЁМ цикле (пейсинг, тихие часы до 10ч, флуд-паузы), а не
     через op_worker.bounded_flood_sleep, поэтому эти паузы НЕ двигают done_items
     и, не будучи объявленными, выглядели для сторожа застоя (90 мин) зависанием.
     Итог: любая многочасовая рассылка, попавшая в ночь аккаунтов, падала
     «Ошибкой» (op была прервана). Объявляем паузу — сторож её уважает, а потолок
-    прогона разрешается штатным продолжением. Fail-open: без op_id/op_worker
-    просто спим.
+    прогона разрешается штатным продолжением.
+
+    С `pool` пауза ещё и дробная (`op_worker.cancellable_pause`): отмена
+    доходит до кампании опросом на витке цикла, а сон был один и целиком, и
+    владелец, нажавший «Отменить», всю паузу — до пяти минут на флуде —
+    видел рассылку работающей, а аккаунты оставались арендованными. Выйти
+    раньше здесь безопасно: за каждой такой паузой идёт виток цикла, а он
+    начинается с проверки отмены.
+
+    Fail-open: без op_id, без pool или без op_worker просто спим.
     """
     if op_id is not None and seconds and seconds > 0:
         try:
             from services import op_worker
-            # Буфер сверх сна покрывает период опроса сторожа (60с) + джиттер,
-            # чтобы окно не закрылось за миг до следующего витка.
-            op_worker.declare_op_pause(op_id, float(seconds) + 90.0)
         except Exception:
-            pass
+            op_worker = None
+        if op_worker is not None:
+            if pool is not None:
+                try:
+                    await op_worker.cancellable_pause(
+                        pool, int(op_id), float(seconds), "dm_campaign")
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Дробная пауза не удалась — пересиживаем как раньше.
+                    # Укоротить паузу здесь нельзя: на флуде она и есть защита.
+                    log_exc_swallow(log, "dm_engine: дробная пауза не удалась")
+            try:
+                # Буфер сверх сна покрывает период опроса сторожа (60с) + джиттер,
+                # чтобы окно не закрылось за миг до следующего витка.
+                op_worker.declare_op_pause(op_id, float(seconds) + 90.0)
+            except Exception:
+                pass
     await asyncio.sleep(seconds)
 
 
@@ -846,6 +869,118 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
     return []
 
 
+def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
+    """Счётчик механизма надёжности. Никогда не бросает и ничего не ждёт.
+
+    Такой же, как в исполнителе операций: сбой защитной записи виден на
+    графике, а не только в логах, которые читают после жалобы владельца.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.inc(name, {k: str(v) for k, v in labels.items() if v is not None}, value)
+    except Exception:
+        pass
+
+
+async def _premark_dm_target(pool, campaign_id: int, acc_id, user_id: int) -> bool:
+    """Пометить цель в журнале ДО отправки ЛС.
+
+    Строка «отправлено» писалась ПОСЛЕ ответа Telegram, и между доставленным
+    сообщением и записью было окно. Пауза между целями 2–4с, SIGTERM на
+    деплое приходит в это окно штатно (пуш в рабочую ветку уезжает в прод), и
+    следующий прогон кампании писал тому же человеку ВТОРОЕ такое же
+    сообщение. Повторная ЛС от незнакомого аккаунта — первая причина жалобы
+    на спам, то есть бан аккаунта. Тот же выбор уже сделан для инвайта
+    (`_premark_invite_targets` в исполнителе операций): метка ставится до
+    необратимого действия, а с тех, кого Telegram не рассматривал, снимается
+    по ответу (`_unmark_dm_target`).
+
+    Цена обрыва теперь в другую сторону: одна цель может остаться помеченной,
+    не получив сообщения. Для ЛС это дешевле дубля — ровно тот же выбор, что
+    и у остальных необратимых действий.
+
+    Частичный уникальный индекс `idx_dm_log_dedup` (только status='sent')
+    делает повторную метку безвредной.
+
+    False — метка не подтверждена, и тогда ЛС не отправляется: дедуп
+    необратимого действия пишется ДО действия и является его ценой.
+    """
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status) "
+                "VALUES ($1,$2,$3,'sent') ON CONFLICT DO NOTHING",
+                campaign_id, acc_id, user_id,
+            )
+            return True
+        except Exception as e:
+            if _attempt == 1:
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "dm dedup: ПРЕДЗАПИСЬ НЕ УДАЛАСЬ campaign=%s target=%s (%s) — "
+                "сообщение не отправляем, иначе следующий прогон мог бы "
+                "написать этому человеку второй раз",
+                campaign_id, user_id, str(e)[:120])
+            _reliability_metric("infragram_dm_dedup_write_failures_total",
+                                op_type="dm_campaign")
+    return False
+
+
+async def _unmark_dm_target(pool, campaign_id: int, user_id: int) -> None:
+    """Снять метку с цели, которую Telegram не рассматривал.
+
+    Флуд-пауза, мёртвая сессия, флаг спама на аккаунте, сетевой сбой — это
+    отказ НАШЕЙ стороны, человек сообщения не получил. Метка, оставшаяся на
+    такой цели, вычла бы её из кампании навсегда: сообщение не придёт никогда,
+    и владелец об этом не узнает.
+    """
+    try:
+        await pool.execute(
+            "DELETE FROM dm_campaign_log "
+            " WHERE campaign_id=$1 AND tg_user_id=$2 AND status='sent'",
+            campaign_id, user_id,
+        )
+    except Exception as e:
+        log.error(
+            "dm dedup: метка с неотправленной цели НЕ снялась campaign=%s "
+            "target=%s (%s) — этот человек выпал из кампании",
+            campaign_id, user_id, str(e)[:120])
+        _reliability_metric("infragram_dm_unmark_failures_total",
+                            op_type="dm_campaign")
+
+
+async def _settle_dm_target(pool, campaign_id: int, acc_id, user_id: int,
+                            status: str, error_msg: str = "") -> None:
+    """Перевести предзапись в реальный исход (не 'sent') одним запросом.
+
+    Цель, которую Telegram рассмотрел и отказал окончательно (закрытая личка,
+    удалённый аккаунт), повторять незачем — она остаётся вычтенной из
+    кампании. Но в журнале она обязана стоять своим статусом: иначе экраны
+    кампании показали бы владельцу отправку, которой не было.
+    """
+    try:
+        _res = await pool.execute(
+            "UPDATE dm_campaign_log SET status=$3, error_msg=$4 "
+            " WHERE campaign_id=$1 AND tg_user_id=$2 AND status='sent'",
+            campaign_id, user_id, status, (error_msg or "")[:200],
+        )
+        if isinstance(_res, str) and _res.strip().endswith(" 0"):
+            # Предзаписи не было (потеряна, или это строка прошлых прогонов) —
+            # пишем исход обычной вставкой, как до появления предзаписи.
+            await pool.execute(
+                "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
+                "VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+                campaign_id, acc_id, user_id, status, (error_msg or "")[:200],
+            )
+    except Exception as e:
+        log.error("dm dedup: исход цели не записался campaign=%s target=%s "
+                  "status=%s (%s)", campaign_id, user_id, status, str(e)[:120])
+        _reliability_metric("infragram_dm_settle_write_failures_total",
+                            op_type="dm_campaign")
+
+
 async def run_campaign(
     pool: asyncpg.Pool,
     bot: Bot,
@@ -1126,6 +1261,12 @@ async def run_campaign(
     acc_idx = 0
     sent = 0
     failed = 0
+    # Цели, которым не поставилась метка дедупа: сообщение им не отправлялось,
+    # и в этом прогоне они не обработаны. Не 'failed': следующий прогон возьмёт
+    # их снова (в журнале их нет), а счёт неудач кампании иначе врал бы в обе
+    # стороны — сначала посчитал бы их навсегда провалившимися, потом ещё раз
+    # при повторе. Их подберёт учёт необработанных в конце прогона.
+    deferred = 0
     _notified_milestones: set[int] = set()  # 25, 50, 75
 
     for target in targets:
@@ -1184,7 +1325,7 @@ async def run_campaign(
                 if _slept == 0:
                     log.info("dm_engine campaign=%d: у всех аккаунтов ночь — ждём утра",
                              campaign_id)
-                await _guarded_sleep(op_id, 60)
+                await _guarded_sleep(op_id, 60, pool=pool)
                 _slept += 60
                 _cur = await pool.fetchrow(
                     "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id)
@@ -1227,6 +1368,15 @@ async def run_campaign(
         # Персонализация ДО spintax: иначе spintax-движок увидит `{name}` как
         # группу из одного варианта и подставит голое слово «name».
         text = expand_spintax(personalize(template, target, _name_fallback))
+        # Метка ДО отправки: см. _premark_dm_target. Не подтвердилась — ЛС не
+        # уходит, и человек остаётся в кампании: он получит сообщение в
+        # следующем прогоне, а не два сообщения.
+        if not await _premark_dm_target(pool, campaign_id, acc["id"], user_id):
+            deferred += 1
+            # Пауза: при недоступной базе цикл иначе прошёл бы всю аудиторию
+            # вплотную, добивая её же запросами.
+            await _guarded_sleep(op_id, 1.0, pool=pool)
+            continue
         t0_dm = time.monotonic()
         result = await send_dm(
             acc["session_str"], user_id, text, _acc=acc, username=username,
@@ -1246,13 +1396,9 @@ async def run_campaign(
         if status == "sent":
             sent += 1
             _sent_by_acc[int(acc["id"])] = _sent_by_acc.get(int(acc["id"]), 0) + 1
-            await pool.execute(
-                "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status) "
-                "VALUES ($1,$2,$3,'sent') ON CONFLICT DO NOTHING",
-                campaign_id,
-                acc["id"],
-                user_id,
-            )
+            # Строка журнала уже стоит: её поставила предзапись ДО отправки
+            # (_premark_dm_target). Повторная вставка была бы лишним
+            # round-trip'ом на каждую цель и ничего бы не добавила.
             await pool.execute(
                 "UPDATE dm_campaigns SET sent_count=sent_count+1 WHERE id=$1",
                 campaign_id,
@@ -1261,6 +1407,9 @@ async def run_campaign(
                 acc["id"], "dm_campaign", True, duration_s=time.monotonic() - t0_dm
             )
         elif status == "flood":
+            # Человек сообщения не получил — снимаем предзапись, иначе он
+            # выпал бы из кампании навсегда.
+            await _unmark_dm_target(pool, campaign_id, user_id)
             wait = result.get("wait") or _FLOOD_PAUSE
             log.info(
                 "dm_engine: flood wait %ds acc=%d (campaign %d)",
@@ -1277,7 +1426,7 @@ async def run_campaign(
                 reason="dm flood_wait", bump_flood_count=True)
             # Убрать аккаунт из цикла временно и подождать
             if wait <= 60:
-                await _guarded_sleep(op_id, min(wait, 60))
+                await _guarded_sleep(op_id, min(wait, 60), pool=pool)
             else:
                 # Для долгих флуд-вейтов — убираем аккаунт из ротации, продолжаем другими
                 acc_cycle_without = [a for a in acc_cycle if a["id"] != acc["id"]]
@@ -1289,7 +1438,7 @@ async def run_campaign(
                         len(acc_cycle),
                     )
                 else:
-                    await _guarded_sleep(op_id, min(wait, 300))
+                    await _guarded_sleep(op_id, min(wait, 300), pool=pool)
             infra_memory.record_account_op(
                 acc["id"], "dm_campaign", False, "flood_wait"
             )
@@ -1300,15 +1449,25 @@ async def run_campaign(
                 "dm_engine: acc %d target %d status %s", acc["id"], user_id, status
             )
             failed += 1
-            await pool.execute(
-                "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
-                "VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-                campaign_id,
-                acc["id"],
-                user_id,
-                status,
-                result.get("error", "")[:200],
-            )
+            if status == "blocked":
+                # Telegram цель рассмотрел и отказал окончательно: метка
+                # остаётся, но переводится в свой статус.
+                await _settle_dm_target(pool, campaign_id, acc["id"], user_id,
+                                        status, result.get("error", ""))
+            else:
+                # peer_flood/auth — отказ НАШЕЙ стороны: цель обязана вернуться
+                # в кампанию, поэтому метку снимаем, а исход пишем строкой,
+                # которая следующий прогон не ограничивает.
+                await _unmark_dm_target(pool, campaign_id, user_id)
+                await pool.execute(
+                    "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
+                    "VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+                    campaign_id,
+                    acc["id"],
+                    user_id,
+                    status,
+                    result.get("error", "")[:200],
+                )
             await pool.execute(
                 "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
                 campaign_id,
@@ -1342,14 +1501,10 @@ async def run_campaign(
             log.debug(
                 "dm_engine: user %d blocked/deactivated, skipping silently", user_id
             )
-            await pool.execute(
-                "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
-                "VALUES ($1,$2,$3,'skip',$4) ON CONFLICT DO NOTHING",
-                campaign_id,
-                acc["id"],
-                user_id,
-                result.get("error", "")[:200],
-            )
+            # Цель рассмотрена и окончательно недоступна: предзапись
+            # переводится в 'skip', повторять её не нужно.
+            await _settle_dm_target(pool, campaign_id, acc["id"], user_id,
+                                    "skip", result.get("error", ""))
             # Не считаем как fail — пользователь просто недоступен.
             # Применяем задержку, чтобы не спамить API при большом числе неактивных.
             if op_id:
@@ -1361,10 +1516,13 @@ async def run_campaign(
                     )
                 except Exception as e:
                     log_exc_swallow(log, "run_campaign: update operation")
-            await _guarded_sleep(op_id, random.uniform(_delay_min, _delay_max))
+            await _guarded_sleep(op_id, random.uniform(_delay_min, _delay_max), pool=pool)
             continue
         else:
             # retry — логируем как ошибку
+            # Сообщение не доставлено: предзапись снимаем, иначе цель выпала
+            # бы из кампании, так и не получив ЛС.
+            await _unmark_dm_target(pool, campaign_id, user_id)
             failed += 1
             await pool.execute(
                 "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
@@ -1430,11 +1588,16 @@ async def run_campaign(
         # флуды и баны от других операций. Telegram смотрит на аккаунты как на
         # группу — не замедлиться здесь значило добивать уже просевший флот.
         delay = random.uniform(_delay_min, _delay_max) * await _fleet_tempo_mult(pool, owner_id)
-        await _guarded_sleep(op_id, delay)
+        await _guarded_sleep(op_id, delay, pool=pool)
 
     # Учесть необработанные цели (напр., при исчерпании всех аккаунтов).
     # total теперь кумулятивный (already_done + остаток), а sent/failed — только
     # этот прогон, поэтому вычитаем и уже обработанное в прошлых прогонах.
+    if deferred:
+        log.error(
+            "dm_engine campaign=%s: %d целей пропущено из-за несработавшей "
+            "метки дедупа — сообщения им не отправлялись, их возьмёт следующий "
+            "прогон", campaign_id, deferred)
     unprocessed = max(0, total - already_done - sent - failed)
     if unprocessed > 0:
         failed += unprocessed

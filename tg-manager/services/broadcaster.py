@@ -27,6 +27,7 @@ import aiohttp
 import asyncpg
 from database import db
 from services import flood_sleep
+from services import op_status
 from services import bot_api
 from services import brand_injection
 from services import content_safety
@@ -52,6 +53,10 @@ _running: dict[int, asyncio.Task] = {}
 # Any chat_id < 0 is a group/channel.
 _GROUP_DELAY = 3.0
 
+# Как часто рассылка переспрашивает БАЗУ, не остановил ли её владелец. Чаще
+# смысла нет: один запрос на 5 секунд против десятков сообщений в секунду.
+_STOP_CHECK_TTL_S = 5.0
+
 # ── Кэш результатов рассылок (TTL 5 мин) ──────────────────────────────────────
 _broadcast_result_cache = TTLCache(default_ttl=300.0, max_size=500)
 # bot_id → timestamp — кэш проверки is_free_tier (TTL 10 мин)
@@ -59,6 +64,21 @@ _bot_tier_cache: dict[int, tuple[bool, float]] = {}
 _BOT_TIER_TTL = 600.0
 # Кэш user_map для placeholder-рендеринга по bot_id (TTL 2 мин)
 _user_map_cache = TTLCache(default_ttl=120.0, max_size=2000)
+
+
+def _reliability_metric(name: str, value: float = 1.0, **labels) -> None:
+    """Счётчик механизма надёжности. Никогда не бросает и ничего не ждёт.
+
+    Такой же, как в исполнителе операций и в движке ЛС: сбой защитного чтения
+    или записи виден на графике, а не только в логах, которые читают после
+    жалобы владельца.
+    """
+    try:
+        from services import metrics as _m
+
+        _m.inc(name, {k: str(v) for k, v in labels.items() if v is not None}, value)
+    except Exception:
+        pass
 
 
 def _render_for_user(text: str, user_info: dict, bot_name: str = "") -> str:
@@ -208,27 +228,59 @@ async def run(
         return
 
     # Skip users already delivered (supports crash-resume without duplicate sends)
-    try:
-        already_sent: set[int] = await db.get_broadcast_delivered_ids(
-            pool, broadcast_id
-        )
-    except Exception as _e:
-        logger.warning(
-            "Broadcast %d: could not load delivery log, starting fresh: %s",
-            broadcast_id,
-            _e,
-        )
-        already_sent = set()
+    #
+    # Чтение ФЕЙЛИТСЯ ЗАКРЫТО. Раньше сбой базы здесь давал `set()` с подписью
+    # «starting fresh», то есть «никому ещё не отправляли» — и докатка
+    # оборвавшейся рассылки (а она запускается на КАЖДОМ рестарте процесса,
+    # то есть на каждом деплое рабочей ветки) отправляла сообщение ВСЕЙ
+    # аудитории второй раз. Это тот же выбор, что у Growth Agent и у инвайта:
+    # дедуп необратимого действия читается строго. Блип базы переживаем
+    # повторами, а не пустым списком; не прочитался совсем — рассылка остаётся
+    # в своём статусе (pending/running) и её подберёт докатка на следующем
+    # старте процесса. Отложить рассылку дешевле, чем послать её дважды.
+    already_sent: set[int] = set()
+    _dedup_read_ok = False
+    for _attempt in (1, 2, 3):
+        try:
+            already_sent = await db.get_broadcast_delivered_ids(pool, broadcast_id)
+            _dedup_read_ok = True
+            break
+        except Exception as _e:
+            if _attempt < 3:
+                await asyncio.sleep(0.5 * _attempt)
+                continue
+            logger.error(
+                "Рассылка %d: список уже доставленных НЕ прочитался (%s) — "
+                "рассылка отложена. Пустой список здесь означал бы «никому ещё "
+                "не отправляли», и вся аудитория получила бы сообщение второй раз",
+                broadcast_id, _e,
+            )
+    if not _dedup_read_ok:
+        _reliability_metric("infragram_broadcast_dedup_read_failures_total")
+        return
 
     sent = len(already_sent)
     failed = 0
     # How often to flush progress to DB so the UI shows real-time progress.
     # 50 means every 50 successful sends we update sent_count in broadcasts table.
     _PROGRESS_FLUSH_INTERVAL = 50
-    # Батч-логирование доставок: собираем user_ids и вставляем одним INSERT.
-    # Это снижает количество round-trips к БД с 1 до ~N/50.
+    # Журнал доставок пишется ПОСЛЕ КАЖДОЙ отправки, а не пачками.
+    #
+    # Пачка по 25 была оптимизацией round-trip'ов, и стоила она дублей: записи
+    # 25 доставок жили только в памяти процесса, а рассылка идёт с паузами
+    # против лимитов Telegram, то есть десятки секунд. SIGTERM на деплое
+    # приходит в это окно штатно, и докатка писала этим людям второй раз,
+    # потому что в журнале их не было. Выигрыш был мнимый: одна вставка на
+    # отправку — это ~30 запросов в секунду при темпе рассылки, тогда как
+    # сама отправка в Telegram на порядок дороже.
+    #
+    # Окно не закрыто полностью: метка по-прежнему ставится ПОСЛЕ отправки,
+    # поэтому обрыв ровно между ответом Telegram и вставкой стоит одного
+    # дубля. Полное закрытие — предзапись пачки ДО отправки, как у инвайта, —
+    # меняет цену в другую сторону (до пачки подписчиков не получат ничего), и
+    # для рассылки бота по своим подписчикам этот обмен не очевиден.
     _delivery_buffer: list[int] = []
-    _DELIVERY_FLUSH_INTERVAL = 25
+    _DELIVERY_FLUSH_INTERVAL = 1
     _since_last_flush = 0
     try:
         await db.update_broadcast(pool, broadcast_id, sent, 0, "running")
@@ -301,10 +353,16 @@ async def run(
                 [(broadcast_id, uid) for uid in batch],
             )
         except Exception as _e:
-            logger.warning(
-                "Broadcast %d: batch delivery log failed (%d users): %s",
+            # Громко и в метрику: потерянная строка журнала означает, что
+            # докатка напишет этим людям второй раз. Тихий warning сюда и
+            # приводил — узнать об этом можно было только из жалобы.
+            logger.error(
+                "Рассылка %d: журнал доставок не записался (%d получателей: "
+                "%s) — докатка может написать им второй раз",
                 broadcast_id, len(batch), _e,
             )
+            _reliability_metric("infragram_journal_write_failures_total",
+                                len(batch), where="broadcast")
 
     # Причины недоставки: по ним видно, что «829 ошибок» — это заблокировавшие
     # бота, а не поломка.
@@ -323,11 +381,61 @@ async def run(
         if bot_api.recipient_is_gone(category):
             await db.mark_user_inactive(pool, bot_id, uid, reason=category)
 
+    # ОСТАНОВКА СПРАШИВАЕТСЯ У БАЗЫ, А НЕ У ПАМЯТИ ПРОЦЕССА.
+    # Отменить рассылку можно было только `cancel()` — снятием asyncio-задачи
+    # ЭТОГО процесса. Но запускается рассылка и из Mini App (web), и из
+    # операции (воркер), а останавливается через `op_worker._stop_broadcasts`,
+    # то есть из воркера: для рассылки, живущей в другом процессе, `cancel()`
+    # не находит задачу, пишется только строка 'cancelled' в БД — и цикл,
+    # который эту строку никогда не читал, спокойно досылал сообщения ЖИВЫМ
+    # ЛЮДЯМ до конца аудитории. Худший класс в этом продукте: владелец нажал
+    # «стоп», увидел «остановлено», а рассылка идёт.
+    # Решение отдаём общей двери `op_status.stop_requested`: пропавшая строка
+    # (рассылку удалили) — тоже стоп. Блип БД стопом НЕ считаем: рвать живую
+    # рассылку из-за сетевого сбоя опаснее, чем заметить отмену на следующей
+    # проверке.
+    # Пропавшая строка считается стопом только ПОСЛЕ того, как мы её хотя бы
+    # раз видели: иначе рассылка, запущенная без строки в `broadcasts` (ничто
+    # в `run` её наличия не требует — проверка владельца смотрит в
+    # `managed_bots`), молча не отправила бы ничего. Исчезла после того, как
+    # была, — это удаление владельцем, то есть стоп.
+    _stop_checked_at = 0.0
+    _stop_seen = False
+    _row_seen = False
+
+    async def _owner_stopped() -> bool:
+        nonlocal _stop_checked_at, _stop_seen, _row_seen
+        _now = time.monotonic()
+        if _stop_seen or _now - _stop_checked_at < _STOP_CHECK_TTL_S:
+            return _stop_seen
+        _stop_checked_at = _now
+        try:
+            _row = await pool.fetchrow(
+                "SELECT status FROM broadcasts WHERE id=$1", broadcast_id)
+        except Exception as _e:
+            logger.warning(
+                "Broadcast %d: проверка остановки не прошла (%s) — идём дальше "
+                "по прошлому ответу", broadcast_id, _e)
+            return _stop_seen
+        if _row is None and not _row_seen:
+            return False
+        _row_seen = _row_seen or _row is not None
+        _stop_seen = op_status.stop_requested(_row)
+        return _stop_seen
+
     # _loop_exc captures any exception (including CancelledError) so we can
     # always mark the broadcast final status in DB before propagating.
     _loop_exc: BaseException | None = None
+    _stopped_by_owner = False
     try:
         for uid in user_ids:
+            if await _owner_stopped():
+                _stopped_by_owner = True
+                _aborted_reason = "остановлена владельцем"
+                logger.info(
+                    "Broadcast %d: остановлена владельцем после %d отправленных",
+                    broadcast_id, sent)
+                break
             # Resume support: skip users already reached in a previous run
             if uid in already_sent:
                 continue
@@ -434,7 +542,12 @@ async def run(
     await _flush_delivery_buffer()
 
     total = user_count
-    if _loop_exc is not None:
+    if _stopped_by_owner:
+        # Честный исход: не «частично доставлено по ошибке», а остановлено.
+        # Эту же строку читает подъём прерванных рассылок после рестарта —
+        # 'cancelled' в его набор не входит, то есть воскрешения не будет.
+        final_status = "cancelled"
+    elif _loop_exc is not None:
         final_status = "partial" if sent > 0 else "failed"
     elif total == 0 or sent == total:
         final_status = "done"

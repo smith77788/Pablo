@@ -2873,23 +2873,53 @@ async def generate_strike_report(pool, operation_id: int) -> dict:
     return report
 
 
+# Пауза перед вторым чтением истории ударов. Близнецы этого числа —
+# op_worker._JOURNAL_READ_RETRY_DELAY_S, operation_bus._CHAIN_READ_RETRY_DELAY_S
+# и infra_memory._QUARANTINE_READ_RETRY_DELAY_S: логика у всех одна.
+_RESTRIKE_READ_RETRY_DELAY_S = 0.5
+
+
 async def is_strike_allowed(pool, target_id, min_interval_hours: int = 4) -> bool:
-    # ПРИМЕЧАНИЕ: функция сейчас не вызывается (dead code). strike_history хранит
-    # цель в колонке `target` (TEXT), а НЕ `target_id` — прежний запрос падал
-    # `column "target_id" does not exist` (маскировалось except→return True, т.е.
-    # ограничение интервала молча не работало бы при подключении). Исправлено.
-    try:
-        row = await pool.fetchrow(
-            """SELECT 1 FROM strike_history
-               WHERE target=$1 AND created_at > NOW() - INTERVAL '1 hour' * $2
-               LIMIT 1""",
-            str(target_id),
-            min_interval_hours,
-        )
-        return row is None
-    except Exception as e:
-        log.warning("is_strike_allowed: %s", e)
+    """Можно ли бить эту цель прямо сейчас — или удар был слишком недавно.
+
+    Гейт живой: его зовёт `op_worker._exec_strike` перед каждым ударом (кроме
+    сознательного `params.force`). Прежнее примечание «функция не вызывается»
+    устарело и сбивало с толку — по нему выходило, что интервал не
+    соблюдается вообще. `strike_history` хранит цель в колонке `target`
+    (TEXT), а не `target_id`; старый запрос падал на несуществующей колонке, и
+    это маскировалось `except → return True`, то есть гейт молча разрешал всё.
+
+    ПОВТОР, И ОТКАЗ НЕ ШЁПОТОМ. Fail-open здесь сохранён сознательно: удар — не
+    необратимая рассылка, и отказ из-за отсутствия данных стоил бы владельцу
+    операции. Но решал гейт ОДИН запрос, и блип к базе разрешал повторный удар
+    по той же цели внутри интервала — а это и детекшн-паттерн, и лишний износ
+    живых аккаунтов. Блип лечится повтором (один запрос на операцию, не на
+    аккаунт), а если и он не прошёл — fail-open остаётся, но записью уровня
+    error: гейт, отключившийся молча, не отличить от гейта, который разрешил.
+    """
+    row, err = None, None
+    for _attempt in (1, 2):
+        try:
+            row = await pool.fetchrow(
+                """SELECT 1 FROM strike_history
+                   WHERE target=$1 AND created_at > NOW() - INTERVAL '1 hour' * $2
+                   LIMIT 1""",
+                str(target_id),
+                min_interval_hours,
+            )
+            err = None
+            break
+        except Exception as e:
+            err = e
+            if _attempt == 1:
+                await asyncio.sleep(_RESTRIKE_READ_RETRY_DELAY_S)
+    if err is not None:
+        log.error(
+            "is_strike_allowed: интервал повтора НЕ ПРОВЕРЕН для target=%s (%s) — "
+            "гейт разрешил удар, он может оказаться повторным внутри %dч",
+            target_id, err, min_interval_hours)
         return True
+    return row is None
 
 
 def _build_vector_diagnostics(r: StrikeResult) -> list[str]:
@@ -3619,6 +3649,69 @@ _STRIKE_EMAIL_TARGETS: list[dict] = [
 ]
 
 
+async def _write_mini_strike_history(
+    pool, owner_id: int, target_clean: str, category: str,
+    tg_data: dict, result: dict,
+) -> bool:
+    """Записать строку мини-удара в `strike_history`: повтор, затем ГРОМКО.
+
+    Это не только история в UI. ЭТУ ЖЕ строку читает `is_strike_allowed`
+    (колонка `target`), решая, не бьём ли мы цель повторно внутри интервала.
+    Сбой записи уходил в `log.debug`, то есть следующий заход по той же цели
+    проходил как первый — и детекшн-паттерн, и лишний износ живых аккаунтов.
+    Одна повторная попытка на месте, затем `log.error` словами о последствии
+    и счётчик, рост которого сторож защитных записей доносит до владельца.
+    `False` говорит вызывающему, что интервал повтора по этой цели не лёг.
+    """
+    _hist_err: Exception | None = None
+    for _attempt in (1, 2):
+        try:
+            await pool.execute(
+                """INSERT INTO strike_history
+                   (owner_id, target, reason, preset, accounts_used,
+                    peer_reported, msgs_reported, msgs_fetched,
+                    pinned_reported, admins_reported, network_nodes, network_reports,
+                    blocked, verified_down, duration_s, abuse_form_ok, spambot_escalation)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
+                owner_id,
+                target_clean,
+                category,  # reason = category label
+                None,  # preset (mini-strike не использует)
+                1,  # accounts_used
+                1 if tg_data.get("peer_reported") else 0,
+                int(tg_data.get("msg_reported") or 0),
+                int(tg_data.get("msgs_fetched") or 0),
+                int(tg_data.get("pinned_reported") or 0),
+                int(tg_data.get("admins_reported") or 0),
+                0,  # network_nodes
+                0,  # network_reports
+                1 if tg_data.get("blocked") else 0,
+                None,  # verified_down
+                0.0,  # duration_s (not tracked per mini-strike)
+                bool(result.get("abuse_form", {}).get("ok")),
+                "skipped",
+            )
+            _hist_err = None
+            break
+        except Exception as e:
+            _hist_err = e
+            if _attempt == 1:
+                await asyncio.sleep(_RESTRIKE_READ_RETRY_DELAY_S)
+    if _hist_err is not None:
+        log.error(
+            "mini_strike: история удара НЕ ЗАПИСАНА target=%s (%s) — интервал "
+            "повтора эту цель не увидит, и следующий заход по ней пройдёт как "
+            "первый", target_clean, _hist_err)
+        try:
+            from services import metrics as _m
+            _m.inc("infragram_strike_history_write_failures_total",
+                   {"where": "mini_strike"})
+        except Exception:
+            pass
+        return False
+    return True
+
+
 async def execute_mini_strike(
     pool,
     session_str: str,
@@ -3986,35 +4079,10 @@ async def execute_mini_strike(
     except Exception as e:
         log.debug("mini_strike: DB save strike_reports skipped: %s", e)
 
-    # Также пишем в strike_history чтобы история в UI отображала mini-strike результаты
-    try:
-        await pool.execute(
-            """INSERT INTO strike_history
-               (owner_id, target, reason, preset, accounts_used,
-                peer_reported, msgs_reported, msgs_fetched,
-                pinned_reported, admins_reported, network_nodes, network_reports,
-                blocked, verified_down, duration_s, abuse_form_ok, spambot_escalation)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
-            owner_id,
-            target_clean,
-            category,  # reason = category label
-            None,  # preset (mini-strike не использует)
-            1,  # accounts_used
-            1 if tg_data.get("peer_reported") else 0,
-            int(tg_data.get("msg_reported") or 0),
-            int(tg_data.get("msgs_fetched") or 0),
-            int(tg_data.get("pinned_reported") or 0),
-            int(tg_data.get("admins_reported") or 0),
-            0,  # network_nodes
-            0,  # network_reports
-            1 if tg_data.get("blocked") else 0,
-            None,  # verified_down
-            0.0,  # duration_s (not tracked per mini-strike)
-            bool(result.get("abuse_form", {}).get("ok")),
-            "skipped",
-        )
-    except Exception as e:
-        log.debug("mini_strike: DB save strike_history skipped: %s", e)
+    # История удара пишется отдельным писателем: ту же строку читает интервал
+    # повтора удара, поэтому запись идёт с повтором и громким отказом.
+    await _write_mini_strike_history(
+        pool, owner_id, target_clean, category, tg_data, result)
 
     log.info(
         "mini_strike: DONE target=%s tg=%d emails=%d form=%s errors=%d",

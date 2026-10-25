@@ -321,7 +321,7 @@ async def cb_adi_top_channels(
                    views_avg, er_rate, ad_price_est, quality_score, ad_posts_count
             FROM ad_placements
             WHERE owner_id = $1
-            ORDER BY quality_score DESC
+            ORDER BY quality_score DESC, id DESC
             LIMIT $2 OFFSET $3
             """,
             callback.from_user.id,
@@ -653,7 +653,7 @@ async def cb_adi_advertisers(
             FROM ad_advertisers
             WHERE owner_id=$1
               AND last_seen_at >= NOW() - INTERVAL '30 days'
-            ORDER BY placements_count DESC, last_seen_at DESC
+            ORDER BY placements_count DESC, last_seen_at DESC, id DESC
             LIMIT $2 OFFSET $3
             """,
             callback.from_user.id,

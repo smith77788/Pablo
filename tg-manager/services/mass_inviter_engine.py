@@ -402,7 +402,23 @@ _BULK_FATAL_NAMES = frozenset({
 })
 
 
-async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
+# Крючок «пометь ДО действия». Необратимое действие (приглашение, промоут,
+# ссылка в ЛС) помечается у вызывающего ПЕРЕД отправкой: обрыв процесса между
+# действием и записью иначе зовёт человека второй раз, а это самый баноопасный
+# путь продукта. Вызывающий сам решает, что делать с пометкой по ответу —
+# движок лишь честно говорит «вот эти цели сейчас уходят в сеть».
+async def _attempt(on_attempt, refs) -> None:
+    """Сообщить вызывающему, что по этим целям сейчас будет действие."""
+    if on_attempt is None:
+        return
+    try:
+        await on_attempt([r for r in refs if r is not None])
+    except Exception as _e:   # пометка не обязана ломать инвайт
+        log.warning("invite: пометка перед действием не удалась (%s)", str(_e)[:80])
+
+
+async def _try_bulk_invite(client, group, user_refs: list, note,
+                           on_attempt=None) -> dict | None:
     """Одним запросом добавить весь батч. None — пакет не подошёл, нужен поштучный.
 
     Возвращает None ТОЛЬКО когда ошибка относится к одной цели: тогда вызывающий
@@ -455,6 +471,8 @@ async def _try_bulk_invite(client, group, user_refs: list, note) -> dict | None:
 
     try:
         try:
+            # Один запрос на всех — значит в риске все разом.
+            await _attempt(on_attempt, [r for r, _ in resolved])
             res = await _send()
         except Exception as first:
             # Короткий флуд поштучный путь просто пережидает и продолжает.
@@ -547,6 +565,8 @@ async def invite_batch(
     user_refs: list[str | int],
     pace_mult: float = 1.0,
     bulk: bool | None = None,
+    *,
+    on_attempt=None,
 ) -> dict[str, Any]:
     """Добавить список пользователей (ID или @username) в группу.
 
@@ -622,7 +642,8 @@ async def invite_batch(
 
         _use_bulk = _BULK_DEFAULT if bulk is None else bool(bulk)
         if _use_bulk and len(user_refs) > 1:
-            _bulk = await _try_bulk_invite(client, group, user_refs, _note)
+            _bulk = await _try_bulk_invite(client, group, user_refs, _note,
+                                           on_attempt=on_attempt)
             if _bulk is not None:
                 ok += _bulk["ok"]
                 failed += _bulk["failed"]
@@ -651,6 +672,7 @@ async def invite_batch(
             try:
                 user = await asyncio.wait_for(
                     client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
+                await _attempt(on_attempt, [ref])
                 _res = await asyncio.wait_for(
                     client(InviteToChannelRequest(channel=group, users=[user])),
                     timeout=_ACTION_TIMEOUT,
@@ -939,7 +961,8 @@ async def check_membership_and_admin(session_string: str, _acc: dict | None,
 
 
 async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str,
-                          user_refs: list[str | int]) -> dict[str, Any]:
+                          user_refs: list[str | int],
+                          *, on_attempt=None) -> dict[str, Any]:
     """«Промоут-трюк»: добавить пользователя, выдав ему админку и тут же сняв.
 
     Когда прямой InviteToChannel блокируется приватностью, аккаунт-АДМИН с правом
@@ -1004,6 +1027,7 @@ async def add_via_promote(session_string: str, _acc: dict | None, group_ref: str
                 user = await asyncio.wait_for(
                     client.get_entity(_coerce_user_ref(ref)), timeout=_ACTION_TIMEOUT)
                 # Выдать минимальную админку → человек добавлен в чат…
+                await _attempt(on_attempt, [ref])
                 await asyncio.wait_for(
                     client(EditAdminRequest(channel=group, user_id=user,
                                             admin_rights=_grant, rank="")),
@@ -1229,7 +1253,8 @@ DEFAULT_LINK_INVITE_TEXT = "Привет! Приглашаю в наш чат: {
 async def invite_via_link_batch(session_string: str, _acc: dict | None,
                                 invite_link: str, user_refs: list[str | int],
                                 message_text: str | None = None,
-                                pace_mult: float = 1.0) -> dict[str, Any]:
+                                pace_mult: float = 1.0,
+                                *, on_attempt=None) -> dict[str, Any]:
     """«Мягкий» инвайт: разослать пользователям ссылку-приглашение в ЛС.
 
     Не добавляет насильно — отправляет каждому цель ссылку на вступление, человек
@@ -1282,6 +1307,7 @@ async def invite_via_link_batch(session_string: str, _acc: dict | None,
         ref = user_refs[_i]
         text = expand_spintax(_tpl_masked).replace(_LINK_SLOT, invite_link)
         try:
+            await _attempt(on_attempt, [ref])
             res = await asyncio.wait_for(
                 send_dm(session_string, str(ref), text, _acc=_acc), timeout=45)
         except Exception as e:
@@ -1362,6 +1388,8 @@ async def invite_by_phones(
     group_ref: str,
     phones: list[str],
     skip_keys=None,
+    *,
+    on_attempt=None,
 ) -> dict[str, Any]:
     """Добавить список номеров телефонов в группу.
 
@@ -1453,6 +1481,7 @@ async def invite_by_phones(
             _fl_retried = False
             while True:
                 try:
+                    await _attempt(on_attempt, [_ph] if _ph else _al)
                     await asyncio.wait_for(
                         client(InviteToChannelRequest(channel=group, users=[user])),
                         timeout=_ACTION_TIMEOUT,

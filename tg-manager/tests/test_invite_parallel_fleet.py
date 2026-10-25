@@ -66,7 +66,8 @@ class _ConcurrencyStand:
         self.expected = expected
         self._gate = asyncio.Event()
 
-    async def invite_batch(self, session_str, acc, group, refs, pace_mult=1.0, bulk=None):
+    async def invite_batch(self, session_str, acc, group, refs, pace_mult=1.0,
+                           bulk=None, **_kw):
         self.calls.append(int(acc["id"]))
         self.inflight += 1
         self.max_inflight = max(self.max_inflight, self.inflight)
@@ -79,7 +80,7 @@ class _ConcurrencyStand:
         self.inflight -= 1
         return {"ok": len(refs), "failed": 0, "errors": []}
 
-    async def invite_by_phones(self, session_str, acc, group, refs):
+    async def invite_by_phones(self, session_str, acc, group, refs, **_kw):
         return await self.invite_batch(session_str, acc, group, refs)
 
 

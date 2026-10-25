@@ -686,6 +686,50 @@ async def batch_get_me(
     }
 
 
+# ── Liveness (жив / мёртв / неизвестно) ─────────────────────────────────────
+#
+# Для очистки флота «мёртв» и «временно недоступен» — РАЗНЫЕ исходы, и смешивать
+# их нельзя: по первому бота удаляют, по второму не трогают. `get_me` для этого
+# не годится — он отдаёт None и на отозванный токен, и на обрыв сети, то есть
+# одна сетевая ошибка пометила бы живой флот на снос. Отличить можно только по
+# коду: 401 (Unauthorized) — токен отозван / бот удалён, лечения нет; всё
+# прочее не-ОК (сеть/Telegram лежит, 429, 5xx) — состояние НЕИЗВЕСТНО. Тот же
+# fail-open, что у is_account_quarantined: сомнение — значит «не удалять».
+BOT_ALIVE = "alive"
+BOT_DEAD = "dead"
+BOT_UNKNOWN = "unknown"
+
+
+async def check_alive(session: aiohttp.ClientSession, token: str) -> str:
+    """Статус бота по getMe: 'alive' | 'dead' (401) | 'unknown' (сеть/5xx/429).
+
+    Только 'dead' пригоден для удаления. 'unknown' не удаляют никогда —
+    иначе недоступность Telegram унесла бы живых ботов.
+    """
+    data = await _call(session, token, "getMe")
+    if data.get("ok"):
+        return BOT_ALIVE
+    code = data.get("error_code", 0)
+    desc = str(data.get("description") or "").lower()
+    if code == 401 or "unauthorized" in desc:
+        return BOT_DEAD
+    return BOT_UNKNOWN
+
+
+async def batch_check_alive(
+    session: aiohttp.ClientSession, tokens: list[str]
+) -> list[str]:
+    """check_alive по многим ботам разом. Список статусов в порядке tokens.
+
+    Исключение исполнителя — это не «мёртв», а 'unknown': упавшую проверку
+    нельзя трактовать как разрешение на удаление.
+    """
+    results = await asyncio.gather(
+        *(check_alive(session, t) for t in tokens), return_exceptions=True
+    )
+    return [BOT_UNKNOWN if isinstance(r, Exception) else r for r in results]
+
+
 # ── Commands ──────────────────────────────────────────────────────────────
 
 

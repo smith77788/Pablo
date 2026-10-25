@@ -35,8 +35,9 @@ from services import operation_bus as _obus
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты жалоб, фиксации нарушений и флуд-меток."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
         _safe_fetch, _safe_fetchrow, log,
+        bad_body_response,
     )
     from services.security import validate_string
 
@@ -509,7 +510,10 @@ def setup_routes(app: web.Application, pool) -> None:
             # Ban Weather (ImmunityBlockedError) — это НЕ сбой: честный 403 с
             # причиной вместо сырого 500 с внутренним текстом.
             return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("strike_launch uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 

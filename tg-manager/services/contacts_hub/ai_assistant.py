@@ -86,7 +86,7 @@ async def process_ai_query(pool, owner_id: int, query: str) -> dict:
 
         elif handler == 'find_duplicates':
             from services.contacts_hub.trust_engine import detect_smart_duplicates
-            dupes = await detect_smart_duplicates(pool, owner_id)
+            dupes = (await detect_smart_duplicates(pool, owner_id))['duplicates']
             if not dupes:
                 return {'answer': '✅ Дубликатов не найдено', 'contacts': [], 'type': 'list'}
             lines = [f"🔍 Найдено {len(dupes)} возможных дубликатов:"]

@@ -270,7 +270,7 @@ async def get_recent(
                 LEFT JOIN operation_queue q
                        ON q.id = a.op_id AND q.owner_id = a.user_id
                 WHERE {where}
-                ORDER BY a.created_at DESC
+                ORDER BY a.created_at DESC, a.id
                 LIMIT $2 OFFSET $3""",
             *args,
         )

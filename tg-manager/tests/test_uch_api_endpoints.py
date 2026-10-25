@@ -322,33 +322,13 @@ class TestRepositoryCRUD:
         result = await get_contact_groups(pool, 123)
         assert result == []
 
-    @pytest.mark.asyncio
-    async def test_add_contact_to_group_success(self):
-        from services.contacts_hub.repository import add_contact_to_group
-        pool = FakePool(execute_val="INSERT 0 1")
-        result = await add_contact_to_group(pool, "uuid-1", 1)
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_add_contact_to_group_error(self):
-        from services.contacts_hub.repository import add_contact_to_group
-        pool = FakePool(error=Exception("FK violation"))
-        result = await add_contact_to_group(pool, "uuid-1", 1)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_remove_contact_from_group_success(self):
-        from services.contacts_hub.repository import remove_contact_from_group
-        pool = FakePool(execute_val="DELETE 1")
-        result = await remove_contact_from_group(pool, "uuid-1", 1)
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_remove_contact_from_group_not_found(self):
-        from services.contacts_hub.repository import remove_contact_from_group
-        pool = FakePool(execute_val="DELETE 0")
-        result = await remove_contact_from_group(pool, "uuid-1", 1)
-        assert result is False
+    # Шесть проверок состава группы у одного контакта отсюда убраны вместе с
+    # кодом, который они проверяли: repository.add_contact_to_group /
+    # remove_contact_from_group были второй реализацией массового пути, и
+    # владельца в их запросах не было вообще. Единственный путь теперь
+    # bulk_ops_engine.bulk_add_to_group / bulk_remove_from_group; его поведение
+    # на живой базе — tests/test_group_membership_stays_in_the_owner_postgres.py,
+    # дверь в карточке — tests/test_contact_groups_reachable.py.
 
     @pytest.mark.asyncio
     async def test_get_contact_stats(self):
@@ -534,8 +514,12 @@ class TestMergeEngine:
     @pytest.mark.asyncio
     async def test_auto_merge_with_duplicates(self):
         from services.contacts_hub.merge_engine import auto_merge
+        # fetch_row — ответ на проверку владения внутри absorb_contact: с
+        # 22.10.2026 слияние сначала читает ОБА контакта (чтобы перенести их
+        # поля), а не только удаляет второй.
         pool = FakePool(
             fetch_rows=[{"telegram_user_id": 123, "ids": ["id1", "id2"], "cnt": 2}],
+            fetch_row={"id": "id1"},
             execute_val="UPDATE 1"
         )
         result = await auto_merge(pool, 123)
@@ -816,8 +800,11 @@ class TestTrustEngine:
     async def test_detect_smart_duplicates_empty(self):
         from services.contacts_hub.trust_engine import detect_smart_duplicates
         pool = FakePool(fetch_rows=[])
+        # Ответ стал словарём: сколько групп не сравнивалось — часть ответа,
+        # а не деталь реализации (молча срезанный список читается как «дублей
+        # больше нет»).
         result = await detect_smart_duplicates(pool, 123)
-        assert result == []
+        assert result == {'duplicates': [], 'skipped_groups': 0}
 
     @pytest.mark.asyncio
     async def test_get_conflicts_empty(self):
@@ -982,15 +969,28 @@ class TestCRMEngine:
         assert result[0]["contact_name"] == "Ivan Petrov"
 
     @pytest.mark.asyncio
-    async def test_get_crm_stats(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
+    async def test_the_funnel_answers_with_every_stage(self):
+        """Проверка переставлена с удалённой get_crm_stats на живую pipeline().
+
+        Воронку считали две мёртвые функции: get_crm_stats (без порядка) и
+        get_crm_pipeline (с порядком по стадиям, каких в contact_crm не
+        бывает). Осталась одна; поведение на живой базе —
+        tests/test_crm_funnel_counts_postgres.py.
+        """
+        from services.contacts_hub.crm_engine import STAGE_LABELS, pipeline
         pool = FakePool(
-            fetch_val=5,
-            fetch_rows=[{"stage": "lead", "cnt": 3, "total_value": 100}]
+            fetch_val=0,
+            fetch_rows=[{"stage": "lead", "currency": "RUB", "cnt": 3,
+                         "total_value": 100}]
         )
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 5
-        assert len(result["by_stage"]) == 1
+        result = await pipeline(pool, 123)
+        assert [s["stage"] for s in result["stages"]] == list(STAGE_LABELS), (
+            "в воронке не все стадии или не в порядке воронки")
+        by = {s["stage"]: s for s in result["stages"]}
+        assert by["lead"]["count"] == 3
+        assert by["lead"]["by_currency"] == {"RUB": 100.0}
+        assert by["won"]["count"] == 0, "пустая стадия пропала из ответа"
+        assert result["total"] == 3
 
     @pytest.mark.asyncio
     async def test_get_crm_overdue_empty(self):
@@ -1260,12 +1260,16 @@ class TestBulkOpsEngine:
     async def test_bulk_merge_owned_pair_merges(self):
         # Раньше (до фикса IDOR) второй/третий execute шли БЕЗ проверки
         # владения -- сейчас перед ними обязана быть ownership-проверка.
+        # Проверка стала двумя чтениями вместо одного COUNT: слияние читает
+        # обе карточки целиком, потому что переносит поля второй в первую.
         from services.contacts_hub.bulk_ops_engine import bulk_merge
-        pool = FakePool(fetch_row={"cnt": 2}, execute_val="UPDATE 1")
+        pool = FakePool(fetch_row={"id": "a"}, execute_val="UPDATE 1")
         result = await bulk_merge(pool, 123, [{"primary_id": "a", "secondary_id": "b"}])
         assert result == {"merged": 1, "skipped": 0}
         kinds = [c[0] for c in pool._calls]
-        assert kinds == ["fetchrow", "execute", "execute", "execute"]
+        assert kinds[:2] == ["fetchrow", "fetchrow"], (
+            "слияние трогает данные до проверки владения обоими контактами")
+        assert kinds.count("execute") >= 3, kinds
 
     @pytest.mark.asyncio
     async def test_bulk_merge_foreign_pair_skipped_not_merged(self):
@@ -1273,7 +1277,15 @@ class TestBulkOpsEngine:
         # подтверждено owner_id) обязана быть пропущена, а НЕ помечена merged,
         # и contact_sources/contact_history чужого контакта не трогаются.
         from services.contacts_hub.bulk_ops_engine import bulk_merge
-        pool = FakePool(fetch_row={"cnt": 1}, execute_val="UPDATE 1")  # только 1 из 2 -- чужой
+
+        class _OwnershipPool(FakePool):
+            """Первый контакт мой, второй -- чужой (его не вернёт скоуп по владельцу)."""
+
+            async def fetchrow(self, query, *args):
+                self._calls.append(("fetchrow", query, args))
+                return {"id": "mine"} if args[0] == "mine" else None
+
+        pool = _OwnershipPool(execute_val="UPDATE 1")
         result = await bulk_merge(pool, 123, [{"primary_id": "mine", "secondary_id": "not-mine"}])
         assert result == {"merged": 0, "skipped": 1}
         assert all(call[0] == "fetchrow" for call in pool._calls)
@@ -1286,12 +1298,10 @@ class TestBulkOpsEngine:
         assert result == {"merged": 0, "skipped": 1}
         assert pool._calls == []
 
-    @pytest.mark.asyncio
-    async def test_bulk_export_json_delegates(self):
-        from services.contacts_hub.bulk_ops_engine import bulk_export
-        pool = FakePool(fetch_rows=[])
-        result = await bulk_export(pool, 123, ["id1"], "json")
-        assert result["format"] == "json"
+    # Проверка bulk_export удалена вместе с ним: он только выбирал формат и
+    # звал export_engine, то есть был вторым входом в ту же выгрузку, и его не
+    # звал ни один экран. Единственный вход — GET /uch/export/{fmt}, он же
+    # обслуживает «весь хаб», «текущий срез» и «выбранных».
 
     @pytest.mark.asyncio
     async def test_bulk_set_importance(self):
@@ -1379,7 +1389,9 @@ class TestIdentityEngine:
     async def test_get_last_active_none(self):
         from services.contacts_hub.identity_engine import get_last_active
         pool = FakePool(fetch_row={"last_active_at": None})
-        result = await get_last_active(pool, "uuid-1")
+        # owner_id обязателен: без него функция отдавала «был сегодня» по
+        # ЛЮБОМУ contact_id, в том числе чужому.
+        result = await get_last_active(pool, "uuid-1", 123)
         assert result is None
 
 

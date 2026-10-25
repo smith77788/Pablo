@@ -76,7 +76,7 @@ def env():
     async def fast(x):
         return await _sleep(0)
 
-    async def fake_add_via_promote(session, acc, group, refs):
+    async def fake_add_via_promote(session, acc, group, refs, **_kw):
         state["promote_calls"].append((int(acc["id"]), list(refs)))
         return {"ok": len(refs), "failed": 0, "peer_flood": False,
                 "flood_wait": 0, "errors": [], "no_rights": False}

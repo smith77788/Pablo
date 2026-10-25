@@ -111,6 +111,15 @@ def test_bulk_dm_adhoc_reports_skipped_quarantine(monkeypatch):
     # уходит в настоящий пул, которого в этом тесте нет.
     monkeypatch.setattr(op_worker, "_journal_fetch", _fetch)
     monkeypatch.setattr(op_worker, "_journal_write", _exec)
+
+    # Состав семьи повторов двери тоже читают строго: не прочитали — прогон
+    # откладывается, иначе журнал выглядел бы пустым и рассылка пошла бы
+    # второй раз. Этот тест про карантин и БД не поднимает, поэтому семья
+    # здесь — одна операция.
+    async def _own_family(_pool, op_id):
+        return [int(op_id)]
+
+    monkeypatch.setattr(op_worker, "journal_op_ids", _own_family)
     # Реестр «не писать» в путях отправки читается строго: без БД он честно
     # откажется работать, а этот тест про карантин и БД не поднимает.
     from services import contact_opt_out as _coo_stub

@@ -247,102 +247,14 @@ class TestTrustEngine:
         result = compute_merge_confidence(a, b)
         assert result["confidence"] < 0.5
 
-    @pytest.mark.asyncio
-    async def test_compute_merge_confidence_improved_high(self):
-        from services.contacts_hub.trust_engine import compute_merge_confidence_improved
-        pool = FakePool(
-            fetch_row={"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
-            # Источник контакта — АККАУНТ, через который его увидели
-            # (contact_sources.account_id). Колонки source_type в схеме нет: пока
-            # заглушка её изображала, тесты были зелёными на мёртвом запросе.
-            fetch_rows=[{"account_id": 11}, {"account_id": 22}],
-            fetch_val=None
-        )
-        result = await compute_merge_confidence_improved(pool, 123, 1, 2)
-        assert result["confidence"] >= 0.5
-        assert "same_telegram_id" in result["reasons"]
-
-    @pytest.mark.asyncio
-    async def test_compute_merge_confidence_improved_low(self):
-        from services.contacts_hub.trust_engine import compute_merge_confidence_improved
-        # row_a и row_b — РАЗНЫЕ контакты (fetchrow отдаёт их по очереди): разные
-        # username/имя/телефон/компания → низкая уверенность в слиянии.
-        pool = FakePool(
-            fetch_row=[
-                {"id": 1, "telegram_user_id": 1, "username": "alice", "first_name": "Alice", "last_name": "Smith", "phones": ["+111"], "company": "C1"},
-                {"id": 2, "telegram_user_id": 2, "username": "bob", "first_name": "Bob", "last_name": "Jones", "phones": ["+999"], "company": "C2"},
-            ],
-            fetch_rows=[{"account_id": 11}],
-            fetch_val=None
-        )
-        result = await compute_merge_confidence_improved(pool, 123, 1, 2)
-        assert result["confidence"] < 0.5
-
-    @pytest.mark.asyncio
-    async def test_detect_smart_duplicates_improved_empty(self):
-        from services.contacts_hub.trust_engine import detect_smart_duplicates_improved
-        pool = FakePool(fetch_rows=[])
-        result = await detect_smart_duplicates_improved(pool, 123)
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_detect_smart_duplicates_improved_with_duplicates(self):
-        from services.contacts_hub.trust_engine import detect_smart_duplicates_improved
-        contacts = [
-            {"id": 1, "telegram_user_id": 123, "username": "ivan", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
-            {"id": 2, "telegram_user_id": 123, "username": "ivan2", "first_name": "Ivan", "last_name": "Ivanov", "phones": ["+123"], "company": "TestCo"},
-        ]
-        sources_map = {   # см. выше: источник — account_id, а не source_type
-            1: [{"account_id": 11}, {"account_id": 22}],
-            2: [{"account_id": 11}, {"account_id": 22}],
-        }
-        class SmartPool(FakePool):
-            def __init__(self, contacts, sources_map):
-                super().__init__(fetch_rows=contacts)
-                self._contacts = contacts
-                self._sources_map = sources_map
-
-            async def fetch(self, query, *args):
-                if "contact_sources" in query and args:
-                    contact_id = args[0]
-                    return self._sources_map.get(contact_id, [])
-                else:
-                    return self._contacts
-
-        pool = SmartPool(contacts, sources_map)
-        result = await detect_smart_duplicates_improved(pool, 123)
-        assert len(result) >= 1
-        assert result[0]["confidence"] >= 0.45
-
-    @pytest.mark.asyncio
-    async def test_get_conflict_resolution_suggestions(self):
-        from services.contacts_hub.trust_engine import get_conflict_resolution_suggestions
-        conflict_row = {
-            "id": 1,
-            "conflict_field": "phones",
-            "phones": ["+123", "+456"],
-            "first_name": "Ivan",
-            "last_name": "Ivanov",
-            "username": "ivan",
-            "company": "TestCo",
-            "telegram_user_id": 123,
-            "resolution": "pending",
-            "confidence": 0.9,
-        }
-        pool = FakePool(fetch_row=conflict_row)
-        result = await get_conflict_resolution_suggestions(pool, 1)
-        assert result["conflict_id"] == 1
-        assert result["field"] == "phones"
-        assert result["priority"] == "high"
-        assert len(result["suggestions"]) == 1
-        assert result["suggestions"][0]["action"] == "merge_phones"
-
-
-# ── Search Engine tests ───────────────────────────────────────────────────────
-
-class TestSearchEngine:
-    """Tests for contacts_hub/search_engine.py"""
-
+    # УДАЛЕНЫ тесты compute_merge_confidence_improved /
+    # detect_smart_duplicates_improved / get_conflict_resolution_suggestions:
+    # сами функции удалены из движка. Первые две были параллельной реализацией
+    # того же правила с суффиксом «improved», на которую не ссылался никто,
+    # кроме этих тестов, — и опасны именно удобством: агент, подключающий
+    # движок к экрану, выбирает по имени и подписи. Третья (советы по
+    # конфликту) работала по conflict_id вообще без owner_id, то есть дверь к
+    # ней сразу стала бы перебором чужих конфликтов.
     def test_tokenize(self):
         from services.contacts_hub.search_engine import _tokenize
         assert _tokenize("Ivan Ivanov") == ["ivan", "ivanov"]
@@ -432,112 +344,34 @@ class TestCRMEngine:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_crm_stats(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
-        pool = FakePool(fetch_val=5, fetch_rows=[{"stage": "lead", "cnt": 3, "total_value": 100}])
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 5
-
-    @pytest.mark.asyncio
-    async def test_get_crm_pipeline_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_pipeline
-        pool = FakePool(fetch_rows=[])
-        result = await get_crm_pipeline(pool, 123)
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_crm_pipeline_with_deals(self):
-        from services.contacts_hub.crm_engine import get_crm_pipeline
-        rows = [
-            {"stage": "lead", "deal_count": 5, "total_value": 1000, "avg_value": 200},
-            {"stage": "proposal", "deal_count": 3, "total_value": 5000, "avg_value": 1666.67},
-        ]
-        pool = FakePool(fetch_rows=rows)
-        result = await get_crm_pipeline(pool, 123)
-        assert len(result) == 2
-        assert result[0]["stage"] == "lead"
-        assert result[0]["deal_count"] == 5
-        assert result[1]["stage"] == "proposal"
-
-    @pytest.mark.asyncio
-    async def test_get_crm_stats_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
-        pool = FakePool(fetch_val=0, fetch_rows=[], execute_val=0)
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 0
-        assert result["by_stage"] == []
-        assert result["upcoming_reminders_7d"] == 0
-
-    @pytest.mark.asyncio
-    async def test_get_crm_stats_with_data(self):
-        from services.contacts_hub.crm_engine import get_crm_stats
-        rows = [
-            {"stage": "lead", "cnt": 10, "total_value": 5000},
-            {"stage": "proposal", "cnt": 5, "total_value": 15000},
-        ]
-        # get_crm_stats зовёт fetchval дважды: total(15) → reminders(3).
-        pool = FakePool(fetch_val=[15, 3], fetch_rows=rows, execute_val=3)
-        result = await get_crm_stats(pool, 123)
-        assert result["total_crm_contacts"] == 15
-        assert len(result["by_stage"]) == 2
-        assert result["upcoming_reminders_7d"] == 3
-
-    @pytest.mark.asyncio
-    async def test_get_crm_activities_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_activities
-        pool = FakePool(fetch_rows=[])
-        result = await get_crm_activities(pool, 123, "uuid-1")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_crm_activities_with_data(self):
-        from services.contacts_hub.crm_engine import get_crm_activities
-        rows = [
-            {"id": 1, "activity_type": "call", "description": "Discovery call", "created_at": "2024-01-15"},
-            {"id": 2, "activity_type": "email", "description": "Follow up", "created_at": "2024-01-16"},
-        ]
-        pool = FakePool(fetch_rows=rows)
-        result = await get_crm_activities(pool, 123, "uuid-1")
-        assert len(result) == 2
-        assert result[0]["activity_type"] == "call"
-        assert result[1]["description"] == "Follow up"
-
-    @pytest.mark.asyncio
-    async def test_create_crm_activity(self):
-        from services.contacts_hub.crm_engine import create_crm_activity
-        pool = FakePool(fetch_val=42)
-        result = await create_crm_activity(pool, 123, "uuid-1", "meeting", "Initial meeting")
-        assert result == 42
-        call = pool._calls[0]
-        assert "INSERT INTO contact_crm_activity" in call[1]
-
-    @pytest.mark.asyncio
-    async def test_update_crm_stage(self):
-        from services.contacts_hub.crm_engine import update_crm_stage
-        pool = FakePool(execute_val="UPDATE 1")
-        result = await update_crm_stage(pool, 123, "uuid-1", "proposal")
-        assert result is True
-        call = pool._calls[0]
-        assert "UPDATE contact_crm" in call[1]
-        assert call[2][0] == "proposal"
-
-    @pytest.mark.asyncio
-    async def test_update_crm_stage_not_found(self):
-        from services.contacts_hub.crm_engine import update_crm_stage
-        pool = FakePool(execute_val="UPDATE 0")
-        result = await update_crm_stage(pool, 123, "uuid-1", "proposal")
-        assert result is False
+    async def test_the_funnel_keeps_empty_stages(self):
+        """Четыре проверки двух мёртвых воронок (get_crm_pipeline,
+        get_crm_stats) заменены одной — на живую pipeline(). Первая
+        сортировала по стадиям, каких в contact_crm не бывает ('prospect',
+        'closed_won', 'closed_lost'); вторая считала то же без порядка.
+        Живое поведение — tests/test_crm_funnel_counts_postgres.py.
+        """
+        from services.contacts_hub.crm_engine import STAGE_LABELS, pipeline
+        pool = FakePool(fetch_val=0, fetch_rows=[])
+        result = await pipeline(pool, 123)
+        assert [s["stage"] for s in result["stages"]] == list(STAGE_LABELS)
+        assert result["total"] == 0
+        assert all(s["count"] == 0 for s in result["stages"])
+        assert all(s["label"] for s in result["stages"]), "стадия без подписи"
 
     @pytest.mark.asyncio
     async def test_get_crm_reminders_empty(self):
-        from services.contacts_hub.crm_engine import get_crm_reminders
+        # Проверки переставлены с удалённого дубля get_crm_reminders на живую
+        # get_upcoming_reminders: поведение (в том числе «@username вместо
+        # пустого имени») было одинаковым, а звали только вторую.
+        from services.contacts_hub.crm_engine import get_upcoming_reminders
         pool = FakePool(fetch_rows=[])
-        result = await get_crm_reminders(pool, 123)
+        result = await get_upcoming_reminders(pool, 123)
         assert result == []
 
     @pytest.mark.asyncio
     async def test_get_crm_reminders_with_data(self):
-        from services.contacts_hub.crm_engine import get_crm_reminders
+        from services.contacts_hub.crm_engine import get_upcoming_reminders
         rows = [
             {"first_name": "Ivan", "last_name": "Ivanov", "username": "ivan",
              "stage": "lead", "next_reminder_at": "2024-01-20", "next_reminder_text": "Follow up"},
@@ -545,7 +379,7 @@ class TestCRMEngine:
              "stage": "proposal", "next_reminder_at": "2024-01-22", "next_reminder_text": "Send proposal"},
         ]
         pool = FakePool(fetch_rows=rows)
-        result = await get_crm_reminders(pool, 123)
+        result = await get_upcoming_reminders(pool, 123)
         assert len(result) == 2
         assert result[0]["contact_name"] == "Ivan Ivanov"
         # Имени нет — показываем username с собакой: так он читается как
@@ -693,95 +527,33 @@ class TestExportEngine:
         assert data[0]["first_name"] == "Ivan"
 
     @pytest.mark.asyncio
-    async def test_export_vcard_single_contact(self):
-        from services.contacts_hub.export_engine import export_vcard
-        pool = FakePool(fetch_row={
-            "id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
-            "company": "TestCo", "position": "Dev", "phones": '["+123"]',
-            "emails": '["ivan@test.com"]', "websites": "[]", "username": "ivan",
-            "telegram_user_id": 123, "birthday": "1990-01-01", "notes": "test"
-        })
-        result = await export_vcard(pool, 123, "uuid-1")
-        assert "BEGIN:VCARD" in result
-        assert "Ivan" in result
-        assert "Ivanov" in result
-        assert "TestCo" in result
-        assert "Dev" in result
-        assert "+123" in result
-        assert "ivan@test.com" in result
-        assert "@ivan" in result
-        assert "1990-01-01" in result
-        assert "test" in result
+    async def test_a_single_contact_exports_as_a_vcard(self):
+        """Пять проверок удалённого кода заменены одной на живой путь.
 
-    @pytest.mark.asyncio
-    async def test_export_vcard_with_all_fields(self):
-        from services.contacts_hub.export_engine import export_vcard
-        pool = FakePool(fetch_row={
+        export_vcard (визитка ОДНОГО контакта), export_csv_streaming и
+        get_export_stats удалены: их не звал никто, а поля они собирали своим
+        кодом, то есть «визитка» и «поток» могли расходиться с настоящей
+        выгрузкой. Визитку одного контакта делает тот же export_vcf со
+        списком из одного id — кнопка «📇 Визитка» в карточке.
+        """
+        from services.contacts_hub.export_engine import export_vcf
+        pool = FakePool(fetch_rows=[{
             "id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
             "company": "TestCo", "position": "Dev", "phones": '["+123", "+456"]',
-            "emails": '["ivan@test.com", "ivan2@test.com"]', "websites": '["https://ivan.com"]',
-            "username": "ivan", "telegram_user_id": 123, "birthday": "1990-01-01", "notes": "test"
-        })
-        result = await export_vcard(pool, 123, "uuid-1")
-        assert "BEGIN:VCARD" in result
-        assert "END:VCARD" in result
-        assert "+123" in result
-        assert "+456" in result
-        assert "ivan@test.com" in result
-        assert "ivan2@test.com" in result
-        assert "https://ivan.com" in result
-
-    @pytest.mark.asyncio
-    async def test_export_csv_streaming_empty(self):
-        from services.contacts_hub.export_engine import export_csv_streaming
-        pool = FakePool(fetch_rows=[])
-        results = []
-        async for chunk in export_csv_streaming(pool, 123):
-            results.append(chunk)
-        assert len(results) == 1
-        assert results[0][0] == "ID"
-
-    @pytest.mark.asyncio
-    async def test_export_csv_streaming_with_data(self):
-        from services.contacts_hub.export_engine import export_csv_streaming
-
-        # export_csv_streaming использует keyset-пагинацию (while rows: ...).
-        # Обычный FakePool всегда возвращает те же строки → бесконечный цикл
-        # (и зависание всего набора тестов). Нужен мок, моделирующий исчерпание:
-        # строки на первом fetch, затем пусто.
-        class _ExhaustPool:
-            def __init__(self, rows):
-                self._rows = rows
-                self._served = False
-
-            async def fetch(self, query, *args):
-                if self._served:
-                    return []
-                self._served = True
-                return self._rows
-
-        pool = _ExhaustPool([
-            {"id": "uuid-1", "first_name": "Ivan", "last_name": "Ivanov",
-             "phones": '["+123"]', "emails": "[]", "websites": "[]", "tags": "{vip}"}
-        ])
-        results = []
-        async for chunk in export_csv_streaming(pool, 123):
-            results.append(chunk)
-        assert len(results) == 2
-        assert results[0][0] == "ID"
-        assert "Ivan" in results[1]
-        assert "Ivanov" in results[1]
-
-    @pytest.mark.asyncio
-    async def test_get_export_stats(self):
-        from services.contacts_hub.export_engine import get_export_stats
-        pool = FakePool(fetch_val=10)
-        result = await get_export_stats(pool, 123)
-        assert result["total_contacts"] == 10
-        assert result["with_phone"] == 10
-        assert result["with_email"] == 10
-        assert result["favorites"] == 10
-        assert result["premium"] == 10
+            "emails": '["ivan@test.com"]', "websites": '["https://ivan.com"]',
+            "username": "ivan", "telegram_user_id": 123,
+            "birthday": "1990-01-01", "notes": "test",
+        }])
+        result = await export_vcf(pool, 123, ["uuid-1"])
+        assert "BEGIN:VCARD" in result and "END:VCARD" in result
+        for part in ("Ivan", "Ivanov", "TestCo", "Dev", "+123", "+456",
+                     "ivan@test.com", "URL:https://ivan.com", "BDAY:1990-01-01"):
+            assert part in result, f"в визитке нет {part}"
+        # URL и BDAY отдавала удалённая export_vcard, а export_vcf — нет:
+        # «одна реализация» без переноса полей означала бы потерю данных.
+        # Запрос ушёл со списком id, а не за всем хабом.
+        kind, query, args = pool._calls[0]
+        assert "id IN (" in query and args[1] == "uuid-1"
 
 
 # ── Identity Engine tests ─────────────────────────────────────────────────────
@@ -1138,127 +910,16 @@ class TestAnalyticsDashboard:
 
 # ── Performance Engine tests ─────────────────────────────────────────────────
 
-class TestPerformanceCache:
-    """Tests for contacts_hub/performance.py cache functionality."""
+# УДАЛЕНЫ тесты services/contacts_hub/performance.py: модуль удалён целиком.
+# 188 строк, которые не импортировал НИКТО, кроме этих тестов: свой слой кэша с
+# собственным TTL рядом с уже работающим кэшем поиска, свои счётчики запросов,
+# которые никто не читает, и batch_insert/batch_update, подставляющие имя
+# таблицы и имена колонок прямо в SQL строкой. Последнее опасно именно тем, что
+# удобно: в хабе есть массовая правка полей с ИМЕНАМИ полей из запроса, и
+# первое же «удобное» применение этих помощников к ней стало бы инъекцией.
+# Понадобится кэш — брать существующий в search_engine; понадобится пакетная
+# запись — писать запрос с фиксированными колонками там, где она нужна.
 
-    @pytest.mark.asyncio
-    async def test_cache_decorator(self):
-        from services.contacts_hub.performance import cache_decorator, invalidate_cache, get_cache_stats
-
-        @cache_decorator(ttl=60, key_prefix="test_func")
-        async def my_func(x: int) -> int:
-            return x * 2
-
-        result = await my_func(5)
-        assert result == 10
-
-        stats = get_cache_stats()
-        assert stats["hits"] >= 1 or stats["sets"] >= 1
-
-        invalidate_cache("test_func")
-
-    def test_invalidate_cache(self):
-        from services.contacts_hub.performance import invalidate_cache, get_cache_stats, _cache
-
-        _cache.set("test_key_1", "value1")
-        _cache.set("test_key_2", "value2")
-        _cache.set("other_key", "value3")
-
-        removed = invalidate_cache("test_key")
-        assert removed == 2
-
-        assert _cache.get("test_key_1") is None
-        assert _cache.get("test_key_2") is None
-        assert _cache.get("other_key") == "value3"
-
-    def test_get_cache_stats(self):
-        from services.contacts_hub.performance import get_cache_stats, _cache
-
-        _cache.clear()
-        _cache.set("stat_test_1", "data")
-        _cache.set("stat_test_2", "data")
-        _ = _cache.get("stat_test_1")
-        _ = _cache.get("stat_test_1")
-        _ = _cache.get("nonexistent")
-
-        stats = get_cache_stats()
-        assert stats["size"] >= 2
-        assert stats["hits"] >= 2
-        assert stats["misses"] >= 1
-        assert stats["sets"] >= 2
-
-
-class TestPerformanceBatchOps:
-    """Tests for contacts_hub/performance.py batch operations."""
-
-    @pytest.mark.asyncio
-    async def test_batch_insert(self):
-        from services.contacts_hub.performance import batch_insert
-
-        class BatchPool:
-            def __init__(self):
-                self._calls = []
-
-            def acquire(self):
-                return self
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                pass
-
-            async def executemany(self, query, values):
-                self._calls.append((query, values))
-
-        pool = BatchPool()
-        rows = [{"id": i, "name": f"contact_{i}"} for i in range(3)]
-        result = await batch_insert(pool, "unified_contacts", ["id", "name"], rows, batch_size=2)
-        assert result == 3
-        assert len(pool._calls) == 2
-
-    @pytest.mark.asyncio
-    async def test_batch_update(self):
-        from services.contacts_hub.performance import batch_update
-
-        class SeqPool:
-            def __init__(self, responses):
-                self._responses = iter(responses)
-                self._calls = []
-
-            async def execute(self, query, *args):
-                self._calls.append(query)
-                return next(self._responses)
-
-        pool = SeqPool(["UPDATE 3", "UPDATE 2"])
-        result = await batch_update(
-            pool, "unified_contacts",
-            {"is_favorite": True},
-            "id", ["id1", "id2", "id3", "id4", "id5"],
-            batch_size=3
-        )
-        assert result == 5
-        assert len(pool._calls) == 2
-
-
-class TestPerformanceQueryStats:
-    """Tests for contacts_hub/performance.py query stats."""
-
-    def test_get_query_stats(self):
-        from services.contacts_hub.performance import get_query_stats, record_query, _query_stats
-
-        _query_stats.clear()
-        record_query("SELECT * FROM contacts", 15.5, 10)
-        record_query("INSERT INTO contacts VALUES (...)", 2.3, 0)
-
-        stats = get_query_stats()
-        assert stats["total_queries"] == 2
-        assert stats["avg_time_ms"] > 0
-        assert len(stats["slowest"]) == 2
-        assert stats["slowest"][0]["duration_ms"] >= stats["slowest"][1]["duration_ms"]
-
-
-# ── Security tests ────────────────────────────────────────────────────────────
 
 class TestSecurity:
     """Tests for services/security.py"""

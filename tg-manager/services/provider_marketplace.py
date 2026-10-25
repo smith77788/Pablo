@@ -188,7 +188,7 @@ async def list_providers(pool, *, owner_id: int | None = None,
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     args.extend([max(1, min(500, limit)), max(0, offset)])
     rows = await pool.fetch(
-        f"SELECT * FROM mp_providers {where} ORDER BY created_at DESC "
+        f"SELECT * FROM mp_providers {where} ORDER BY created_at DESC, id "
         f"LIMIT ${len(args)-1} OFFSET ${len(args)}", *args)
     return [dict(r) for r in rows]
 
@@ -397,7 +397,7 @@ async def list_services(pool, provider_id: int, *, include_inactive: bool = True
     cond = "" if include_inactive else "AND is_active=TRUE"
     rows = await pool.fetch(
         f"SELECT * FROM mp_services WHERE provider_id=$1 {cond} "
-        f"ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        f"ORDER BY created_at DESC, id LIMIT $2 OFFSET $3",
         provider_id, max(1, min(500, limit)), max(0, offset))
     return [dict(r) for r in rows]
 
@@ -422,7 +422,7 @@ async def browse_catalog(pool, *, category: str | None = None,
                    p.rating AS provider_rating, p.success_rate AS provider_success_rate
             FROM mp_services s JOIN mp_providers p ON p.id=s.provider_id
             WHERE {' AND '.join(conds)}
-            ORDER BY p.rating DESC, s.price_cents ASC
+            ORDER BY p.rating DESC, s.price_cents ASC, s.id
             LIMIT ${len(args)-1} OFFSET ${len(args)}""", *args)
     return [dict(r) for r in rows]
 

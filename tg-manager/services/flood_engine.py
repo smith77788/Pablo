@@ -925,19 +925,30 @@ async def apply_post_action_cooldown(
     account_id: int,
     cooldown_seconds: int,
     action_type: str = "default",
-) -> None:
+) -> bool:
     """Apply a protective cooldown after a heavy but SUCCESSFUL action (e.g. a strike).
 
     Unlike record_flood this does NOT inflate flood/risk counters — it just
     parks the account so it can't be re-used for another heavy op too soon.
     This is the per-account rate-limit (Survival Contract §4/§6): a strike does
     100+ write actions, so the same account must rest before the next one.
+
+    ПОТЕРЮ ЗАПИСИ НЕ ГЛОТАЕМ — по той же причине, что в `apply_cooldown` выше.
+    Отдых в памяти процесса (`state.cooldown_until`) живёт только до рестарта,
+    а аккаунты следующей операции выбираются по `tg_accounts` в базе. Значит
+    потерянная запись — это аккаунт, который после рестарта выглядит
+    отдохнувшим и уходит во второй тяжёлый прогон сразу, без положенных часов
+    отдыха; для удара (100+ действий записи) это прямой путь к бану. Одна
+    повторная попытка на месте, затем log.error и счётчик; `False` говорит
+    вызывающему, что отдых в базе не лёг.
     """
     now = time.monotonic()
     state = get_account_state(account_id)
     # Only extend the cooldown, never shorten an existing (e.g. flood) cooldown.
     state.cooldown_until = max(state.cooldown_until, now + cooldown_seconds)
-    if pool is not None:
+    if pool is None:
+        return True
+    for _attempt in (1, 2):
         try:
             await pool.execute(
                 """UPDATE tg_accounts
@@ -957,8 +968,27 @@ async def apply_post_action_cooldown(
                 account_id,
                 f"rest after {action_type}",
             )
-        except Exception as e:
-            log.warning("flood_engine apply_post_action_cooldown DB write failed: %s", e)
+            return True
+        except Exception as exc:
+            if _attempt == 1:
+                log.warning(
+                    "flood_engine: отдых аккаунта acc=%s после %s не записан (%s), "
+                    "повторяю", account_id, action_type, str(exc)[:120])
+                await asyncio.sleep(0.5)
+                continue
+            log.error(
+                "flood_engine: ОТДЫХ НЕ ЗАПИСАН acc=%s на %.0fс после %s — после "
+                "рестарта аккаунт выглядит отдохнувшим и может уйти во второй "
+                "тяжёлый прогон сразу",
+                account_id, float(cooldown_seconds), action_type)
+            try:
+                from services import metrics as _m
+                _m.inc("infragram_account_rest_write_failures_total",
+                       {"action": str(action_type or "default")[:40]})
+            except Exception:
+                pass
+            return False
+    return False
 
 
 async def record_success(account_id: int, action_type: str = "default") -> None:

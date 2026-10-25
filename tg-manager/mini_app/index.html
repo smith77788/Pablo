@@ -1092,6 +1092,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
       <div class="kpi-chip sk" style="min-width:90px;height:72px"></div>
     </div>
+    <!-- 🧹 Сделать всё разом: единое обслуживание флота. Проверить живость и
+         очистить мёртвое СРАЗУ по ботам, аккаунтам и каналам — параллельно,
+         из одного места (ручка /api/miniapp/fleet/sweep). -->
+    <div style="margin:12px 16px 0;background:var(--bg);border-radius:14px;padding:12px 14px;border:1px solid var(--sep)">
+      <div style="font-size:14px;font-weight:700;margin-bottom:2px">🧹 Обслуживание флота — всё разом</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:10px">Проверить и очистить мёртвое сразу по ботам, аккаунтам и каналам — параллельно, из одного места.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" id="fleetCheckBtn" onclick="fleetCheckAll()" style="flex:1;font-size:13px;padding:10px 6px">🩺 Проверить всё</button>
+        <button class="btn btn-s" id="fleetCleanBtn" onclick="fleetCleanupAll()" style="flex:1;font-size:13px;padding:10px 6px">🧹 Очистить мёртвое</button>
+      </div>
+      <div id="fleetSweepResult" style="display:none;margin-top:10px;font-size:12px;line-height:1.6"></div>
+    </div>
     <!-- 🚀 Онбординг: чеклист активации новичка (скрывается после активации) -->
     <div id="onboardCard" style="margin:12px 16px 0;display:none"></div>
     <!-- 🫀 Пульс организма: живой контекст + цепочки следующих действий -->
@@ -1225,6 +1237,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
            друг от друга; включает только аккаунт-владелец через @BotFather. -->
       <button class="btn btn-s" onclick="enableBotMesh()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Включить режим bot-to-bot у сети ботов">🕸 Включить сеть</button>
     </div>
+    <!-- Обслуживание флота: проверить живость токена каждого бота (getMe) и
+         убрать мёртвых. «Мёртвый» = отозванный токен (401). «Неизвестные»
+         (Telegram не ответил) не удаляются — сносим только то, про что точно
+         известно, что токен отозван. -->
+    <div style="display:flex;gap:8px;padding:0 0 10px">
+      <button class="btn btn-s" id="botCheckBtn" onclick="checkAllBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Проверить, жив ли токен каждого бота">🩺 Проверить все</button>
+      <button class="btn btn-s" id="botCleanupBtn" onclick="cleanupDeadBots()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Удалить всех ботов с отозванным токеном">🧹 Удалить мёртвых</button>
+    </div>
     <!-- Поиск и срезы по списку. Раньше список рисовался целиком и без единого
          фильтра: после «Фабрики ботов» это сотни карточек, и найти нужного бота
          можно было только прокруткой. Состояние бота сервер уже считает
@@ -1248,6 +1268,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="sel-bar-acts">
         <button class="mini-btn" onclick="openBotBroadcast()">📢 Рассылка выбранным</button>
+        <button class="mini-btn" onclick="bulkDeleteBots()">🗑 Удалить выбранных</button>
       </div>
     </div>
   </div>
@@ -1631,6 +1652,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" id="chSelToggle" onclick="toggleChSelMode()" style="flex:1 1 auto;font-size:13px;padding:10px 6px">☑️ Выбрать каналы</button>
       <button class="btn btn-s" onclick="importAllResources('channels')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти каналы, где ваш аккаунт создатель/админ, и завести их сюда">📥 Импорт с аккаунтов</button>
+      <button class="btn btn-s" onclick="importAllResources('groups')" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Найти группы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт групп</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 8px">
       <button class="btn btn-s" onclick="refreshChannelsMeta()" style="flex:1 1 auto;font-size:13px;padding:10px 6px" title="Подтянуть из Telegram имя, ссылку и число участников — на случай, если канал меняли не через Infragram. Ничего не удаляет">🔄 Обновить данные</button>
@@ -1672,6 +1694,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="mini-btn" onclick="openChMass('about')">✏️ Описание</button>
         <button class="mini-btn" onclick="openChMass('username')">🔗 Юзернейм</button>
         <button class="mini-btn" onclick="runChMass('promote')">👑 Админы</button>
+        <button class="mini-btn" style="color:var(--red);background:rgba(248,113,113,.18)" onclick="bulkDeleteChannels()" title="Убрать выбранные каналы из управления (в Telegram канал не трогаем)">🗑 Убрать выбранные</button>
       </div>
     </div>
   </div>
@@ -2208,6 +2231,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-lbl">Дашборд</div>
         <div class="mgmt-tile-val" id="m-anadash-val"></div>
       </div>
+      <div class="mgmt-tile" onclick="openSemanticMemory()">
+        <div class="mgmt-tile-ico">🧬</div>
+        <div class="mgmt-tile-lbl">Семантическая память</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openCRMDeals()">
+        <div class="mgmt-tile-ico">💼</div>
+        <div class="mgmt-tile-lbl">Сделки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
     </div>
 
     <!-- Продвижение -->
@@ -2243,6 +2276,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">🌐</div>
         <div class="mgmt-tile-lbl">Гео-сеть: создать</div>
         <div class="mgmt-tile-val" id="m-gp-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openReferral()">
+        <div class="mgmt-tile-ico">🤝</div>
+        <div class="mgmt-tile-lbl">Реферальная программа</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -2434,6 +2472,26 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">💳</div>
         <div class="mgmt-tile-lbl">Тариф</div>
         <div class="mgmt-tile-val" id="m-billing-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openUniCampaign()">
+        <div class="mgmt-tile-ico">🚀</div>
+        <div class="mgmt-tile-lbl">Единая кампания</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNetBcModal()">
+        <div class="mgmt-tile-ico">📣</div>
+        <div class="mgmt-tile-lbl">Рассылка по сети ботов</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openAssetTemplates()">
+        <div class="mgmt-tile-ico">📐</div>
+        <div class="mgmt-tile-lbl">Шаблоны ассетов</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openWorkspaces()">
+        <div class="mgmt-tile-ico">🏢</div>
+        <div class="mgmt-tile-lbl">Рабочие пространства</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -2985,28 +3043,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
-<!-- ══════════════════════ GROUP FACTORY ══════════════════════ -->
-<div class="screen" id="s-groupfactory">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">👥 Фабрика групп</div></div>
-  <div class="sub-sb">
-    <div class="sec">Создать группу</div>
-    <div class="lst" style="margin:0 16px 12px;padding:14px">
-      <input type="text" id="gfTitle" placeholder="Название группы" style="width:100%;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-      <select id="gfAccount" style="width:100%;background-color:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
-        <option value="">Выберите аккаунт…</option>
-      </select>
-      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
-        <input type="checkbox" id="gfSupergroup" checked>
-        Супергруппа
-      </label>
-      <button class="btn btn-p" id="gfSubmit" style="width:100%" onclick="submitGroupFactory()">👥 Создать группу</button>
-      <button class="btn btn-s" style="width:100%;margin-top:8px" onclick="importAllResources('groups')" title="Найти группы, где состоят ваши аккаунты, и завести их сюда">📥 Импорт групп с аккаунтов</button>
-      <div id="gfErr" style="color:var(--red);font-size:13px;margin-top:6px"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════ PHYSICS HUB ══════════════════════ -->
 <div class="screen" id="s-physics">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚛️ Физика</div></div>
   <div class="sub-sb">
@@ -3751,6 +3787,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="afsteps-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
+<!-- ══════════════════════ FUNNEL PEOPLE ══════════════════════ -->
+<div class="screen" id="s-funnelppl">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">👥 Люди воронки</div>
+    <div class="hdr-meta"><div class="hdr-user" id="fppl-title"></div></div>
+  </div>
+  <div class="sub-sb"><div id="fpplBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+</div>
+
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
 <div class="screen" id="s-ops">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">⚙️ Диспетчер задач</div>
@@ -3829,7 +3875,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <details class="acc-actions" style="margin:8px 16px 4px;background:var(--bg2);border-radius:12px">
       <summary style="cursor:pointer;font-size:14px;font-weight:500;padding:13px 14px;display:flex;align-items:center;gap:8px">
         <span style="flex:1">🧰 Инструменты контактов</span>
-        <span style="font-size:12px;color:var(--hint);font-weight:400">ещё 12</span>
+        <span style="font-size:12px;color:var(--hint);font-weight:400">ещё 13</span>
         <span class="acc-chev" style="color:var(--hint)">▾</span>
       </summary>
     <div style="display:flex;gap:6px;padding:2px 12px 12px;flex-wrap:wrap">
@@ -3845,10 +3891,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <span class="chip" style="flex:0 0 auto" onclick="openUchReminders()">⏰ Напоминания</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchExport()">📤 Экспорт</span>
       <span class="chip" style="flex:0 0 auto" onclick="openUchCleanup()">🧹 Чистка / личные</span>
+      <span class="chip" style="flex:0 0 auto" onclick="recomputeContactTrust()">🛡 Пересчитать доверие</span>
     </div>
     </details>
     <div style="padding:6px 0">
-      <input type="text" id="contactSearch" placeholder="🔍 Поиск контактов…" oninput="searchContacts()" class="inp">
+      <input type="text" id="contactSearch" placeholder="🔍 Поиск: слова, @ник, #тег, company:, phone:" oninput="searchContacts()" class="inp">
     </div>
     <div class="seg" id="contactFilterSeg">
       <div class="seg-opt on" data-f="all" onclick="filterContacts(null,this)">Все</div>
@@ -4282,6 +4329,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="lst">
       <div class="li tap" onclick="openBcastPick()"><div class="ava ava-purple">📢</div><div class="li-body"><div class="li-name">Подписчики бота</div><div class="li-sub">Сообщение всем, кто запустил вашего бота</div></div><span class="chev">›</span></div>
       <div class="li tap" onclick="openDmCampaigns()"><div class="ava ava-purple">✉️</div><div class="li-body"><div class="li-name">Личные сообщения (ЛС)</div><div class="li-sub">Рассылка в личку по выбранной аудитории</div></div><span class="chev">›</span></div>
+      <!-- Движок единой кампании (services/campaign_hub.py) собран и покрыт
+           тестами с самого начала, но запустить его было нельзя: ручку
+           /api/miniapp/campaign/launch не звал ни один экран. Кампания — одна
+           сущность вместо трёх-четырёх запусков по разделам. -->
+      <div class="li tap" onclick="openUniCampaign()"><div class="ava ava-purple">🚀</div><div class="li-body"><div class="li-name">Сразу по всем ресурсам</div><div class="li-sub">Одно сообщение в каналы, чаты, ботам и в ЛС — одним запуском</div></div><span class="chev">›</span></div>
     </div>
     <div class="sec">📡 Публикация в наши каналы</div>
     <div class="lst" style="padding:14px">
@@ -4306,6 +4358,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div id="mpTargets" style="margin-bottom:12px;font-size:13px;color:var(--hint);line-height:1.45"></div>
       <div class="field" style="margin-bottom:12px">
         <label>Текст поста</label>
+        <div class="preset-row" id="mpPresetRow"></div>
         <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации… Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)."></textarea>
         <div class="field-note"><span id="mpLen">0</span>/4096 · 🎲 Спинтакс {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('mpText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div>
       </div>
@@ -4332,7 +4385,28 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field">
         <label>📅 Запланировать (необязательно)</label>
         <input type="datetime-local" id="mpSchedule">
+        <div class="preset-row" style="margin-top:6px">
+          <span class="preset-chip" onclick="mpSchedIn(60)">через 1 ч</span>
+          <span class="preset-chip" onclick="mpSchedIn(180)">через 3 ч</span>
+          <span class="preset-chip" onclick="mpSchedIn(360)">через 6 ч</span>
+          <span class="preset-chip" onclick="mpSchedIn(1440)">через сутки</span>
+          <span class="preset-chip" onclick="mpSchedIn(0)">сейчас</span>
+        </div>
         <div class="field-note">Пусто = опубликовать сейчас. Время — ваше локальное. Запланированное видно и отменяемо в «Очереди операций» до срабатывания.</div>
+      </div>
+      <!-- Повтор вернулся сюда вместе с удалённым экраном «Быстрый пост»:
+           он был слит в эту публикацию, но повтор по дороге потерялся, хотя
+           воркер его умеет (op_worker переочередит следующий запуск сам). -->
+      <div class="field">
+        <label>🔁 Повторять (необязательно)</label>
+        <select id="mpRepeat">
+          <option value="0" selected>Без повтора</option>
+          <option value="360">Каждые 6 часов</option>
+          <option value="720">Каждые 12 часов</option>
+          <option value="1440">Каждый день</option>
+          <option value="10080">Каждую неделю</option>
+        </select>
+        <div class="field-note">Повтор уходит в ту же очередь: следующий запуск ставится после успешного предыдущего. Остановить — в «Очереди операций»</div>
       </div>
       <!-- Совет редактора (screens/editorial.js): повтор недавнего поста и
            правила канала. Появляется на подтверждении, публикацию не блокирует. -->
@@ -4788,49 +4862,6 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: QUICK POST ══════════════════════ -->
-<div class="screen" id="s-quickpost">
-  <div class="hdr">
-    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
-    <div class="hdr-title">✍️ Быстрый пост</div>
-  </div>
-  <div class="sub-sb">
-    <div class="sec">Текст публикации</div>
-    <div style="padding:8px 16px">
-      <div class="preset-row" id="qpPresetRow"></div>
-      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста… Поддержка спинтакса: {Привет|Здравствуйте}! — каждый канал получит свой вариант (меньше палева)." style="width:100%;resize:vertical;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px"></textarea>
-      <div class="field-note">🎲 Спинтакс {A|B} — уникальный текст на канал · <a href="#" onclick="openTemplates('quickPostText');return false" style="color:var(--accent);display:inline-block;padding:7px 4px;margin:-7px -4px">📝 Вставить шаблон</a></div></div>
-    </div>
-    <div class="sec">Выберите каналы</div>
-    <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div id="quickPostSelected" style="padding:8px 16px;color:var(--purple-light);font-size:13px"></div>
-    <div class="field">
-      <label style="font-size:13px;color:var(--hint)">Когда опубликовать</label>
-      <select id="qpSchedule" class="sel">
-        <option value="0">Сейчас</option>
-        <option value="60">Через 1 час</option>
-        <option value="180">Через 3 часа</option>
-        <option value="360">Через 6 часов</option>
-        <option value="720">Через 12 часов</option>
-        <option value="1440">Через 24 часа</option>
-      </select>
-    </div>
-    <div class="field">
-      <label style="font-size:13px;color:var(--hint)">Повтор (автопостинг)</label>
-      <select id="qpRepeat" class="sel">
-        <option value="0">Без повтора</option>
-        <option value="60">Каждый час</option>
-        <option value="360">Каждые 6 часов</option>
-        <option value="720">Каждые 12 часов</option>
-        <option value="1440">Каждый день</option>
-        <option value="10080">Каждую неделю</option>
-      </select>
-    </div>
-    <div class="field-err" id="quickPostErr"></div>
-    <button class="btn btn-p" id="quickPostBtn" onclick="submitQuickPost()" style="width:100%;margin-top:8px" disabled>📤 Опубликовать (выберите каналы)</button>
-  </div>
-</div>
-
-<!-- ══════════════════════ SCREEN: SPINTAX ══════════════════════ -->
 <div class="screen" id="s-spintax">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
@@ -5242,6 +5273,102 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════ ПЛАНИРОВЩИК КАМПАНИИ (цель → план) ══════════ -->
+<div class="screen" id="s-unicampaign">
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🚀 Единая кампания</div></div>
+  <div class="sub-sb">
+    <div class="sec">Сообщение</div>
+    <div class="lst" style="padding:14px">
+      <div class="field">
+        <label>Название (для истории кампаний)</label>
+        <input type="text" id="ucName" class="inp" placeholder="Напр. Весенний промо" style="width:100%;box-sizing:border-box">
+      </div>
+      <div class="field">
+        <label>Текст</label>
+        <textarea id="ucText" class="inp" rows="4" placeholder="Поддержка вариантов: {Привет|Здравствуйте}" style="width:100%;box-sizing:border-box;resize:none" oninput="ucCount()"></textarea>
+        <div class="field-note"><span id="ucLen">0</span> символов · один текст уходит во все выбранные ресурсы</div>
+      </div>
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:10px">
+        <input type="checkbox" id="ucSilent"> Без звука уведомления
+      </label>
+      <div class="field">
+        <label>Пауза между отправками, сек</label>
+        <input type="number" id="ucDelay" class="inp" value="3" min="0" max="300" style="width:100%;box-sizing:border-box">
+        <div class="field-note">Пауза бережёт аккаунты и ботов от лимитов. 0 — без паузы</div>
+      </div>
+      <div class="field">
+        <label>Запустить позже (необязательно)</label>
+        <input type="datetime-local" id="ucWhen" class="inp" style="width:100%;box-sizing:border-box">
+        <div class="field-note">Пусто — запуск сразу</div>
+      </div>
+    </div>
+
+    <div class="sec">Куда — отметьте ресурсы</div>
+    <div class="lst" style="padding:14px">
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKChannels" onchange="ucKindToggle()"> 📢 Мои каналы
+      </label>
+      <div id="ucChWrap" style="display:none;margin:0 0 14px 24px">
+        <div class="field">
+          <label>В какие каналы</label>
+          <select id="ucChScope" onchange="ucKindToggle()">
+            <option value="all" selected>Во все мои каналы</option>
+            <option value="pick">Выбрать вручную</option>
+          </select>
+        </div>
+        <div class="field" id="ucChPickWrap" style="display:none">
+          <label>Отметьте каналы (<span id="ucChCount">0</span>)</label>
+          <div id="ucChannels" class="lst" style="max-height:240px;overflow:auto;margin-top:6px"></div>
+        </div>
+      </div>
+
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKChats" onchange="ucKindToggle()"> 💬 Чаты моих аккаунтов
+      </label>
+      <div id="ucChatsWrap" style="display:none;margin:0 0 14px 24px">
+        <div class="field">
+          <label>Аккаунты (по одной операции на аккаунт)</label>
+          <div id="ucAccounts" class="lst" style="max-height:240px;overflow:auto;margin-top:6px"></div>
+        </div>
+      </div>
+
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKBots" onchange="ucKindToggle()"> 🤖 Подписчики моих ботов
+      </label>
+      <div id="ucBotsWrap" style="display:none;margin:0 0 14px 24px">
+        <div class="field">
+          <label>Кому из подписчиков</label>
+          <select id="ucBotSeg">
+            <option value="all_each" selected>Все подписчики каждого бота</option>
+            <option value="unique">Только уникальные (без повторов между ботами)</option>
+            <option value="cold_all">Остывшие — давно не заходили</option>
+            <option value="lost_all">Потерянные — ушли совсем</option>
+          </select>
+        </div>
+      </div>
+
+      <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-bottom:8px">
+        <input type="checkbox" id="ucKDm" onchange="ucKindToggle()"> ✉️ Личные сообщения
+      </label>
+      <div id="ucDmWrap" style="display:none;margin:0 0 4px 24px">
+        <div class="field">
+          <label>Аудитория ЛС</label>
+          <select id="ucDmTarget">
+            <option value="all_bots" selected>Все боты — все подписчики</option>
+            <option value="contacts">👥 Контакты — все</option>
+          </select>
+          <div class="field-note">Когорты, сегменты, аудитория из парсера и свой список — на экране «Личные сообщения (ЛС)»: там для них есть выбор бота и списка</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:0 16px">
+      <div id="ucErr" class="field-note" style="display:none;color:var(--red);padding:0 2px 8px"></div>
+      <button class="btn btn-p" style="width:100%" id="ucBtn" onclick="launchUniCampaign()">🚀 Запустить кампанию</button>
+      <div class="field-note" style="padding:8px 2px 16px">Кампания встанет одной записью, а по каждому ресурсу — своей операцией: их видно и можно остановить в «Операциях»</div>
+    </div>
+  </div>
+</div>
+
 <div class="screen" id="s-campaign">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🎯 Планировщик кампании</div></div>
   <div class="sub-sb">
@@ -7502,15 +7629,6 @@ function getCached(key) {
 function setCache(key, data) {
   try { localStorage.setItem(key, JSON.stringify({ts: Date.now(), data})); } catch(_) {}
 }
-function clearAllCache() {
-  ['infragram_cache_home','infragram_cache_bots','infragram_cache_accounts','infragram_cache_channels'].forEach(k=>localStorage.removeItem(k));
-}
-function forceRefresh() {
-  clearAllCache();
-  loadHome();
-  toast('🔄 Данные обновлены');
-}
-
 // Таймаут запросов объявлен ДО boot(): boot СИНХРОННО вызывает fetchT('/auth'),
 // а дефолт fetchT — ms=FETCH_TIMEOUT_MS. Если объявить его НИЖЕ boot (как было
 // после реструктуризации), const попадает в TDZ и boot падает на первой же
@@ -8124,8 +8242,13 @@ function showOpComplete(op) {
   // Честный итог: сначала summary операции, иначе причина ошибки, иначе счётчик.
   // Пустой плашки быть не должно — «завершилась» без результата это тот же
   // тихий успех, только в новом месте.
-  const body = (op.summary || op.error_msg || `${op.done || 0}/${op.total || 0}`)
-    .toString().trim().split('\n').slice(0, 3).join('\n');
+  // Плашка короткая — показываем первые строки, но обрез НЕ молчаливый: без
+  // пометки владелец принимал видимую часть итога за весь итог («из 52
+  // проверенных активны 46 и одна сессия — а остальные где?»).
+  const _lines = (op.summary || op.error_msg || `${op.done || 0}/${op.total || 0}`)
+    .toString().trim().split('\n');
+  const body = _lines.slice(0, 3).join('\n')
+    + (_lines.length > 3 ? `\n… ещё ${_lines.length - 3} — в деталях` : '');
   // Плашка исхода — точка действия, а не тупик: при ошибке даём ПОВТОР в один
   // тап прямо здесь (без похода в «Операции» → меньше переходов). Кнопки со
   // stopPropagation, чтобы не открывать детали случайно.
@@ -8373,6 +8496,13 @@ function moreCategory(cat, el) {
 // запросы «бан», «спам», «жалоба», «клон» не находили НИЧЕГО — при том что
 // модули есть (Дэшборд здоровья, Массовые жалобы, Клонер). Ключ — подпись плитки.
 const MODULE_KEYWORDS = {
+  'Сделки':'crm воронка продаж сделка лид этап сумма',
+  'Семантическая память':'факты профиль собеседника память диалог',
+  'Реферальная программа':'реферал приглашение код партнёрка',
+  'Рабочие пространства':'воркспейс команда доступ участники контур',
+  'Шаблоны ассетов':'шаблон аватар описание оформление ассет',
+  'Единая кампания': 'кампания единая всё сразу каналы чаты боты лс рассылка одним запуском campaign',
+  'Рассылка по сети ботов':'рассылка всем подписчикам сеть ботов broadcast',
   'Дэшборд здоровья':'бан риск блокировка спамблок флуд заморозка ограничение здоровье пульс',
   'Аккаунты':'сессия вход логин прокси ip номер телефон',
   'Массовые жалобы':'strike страйк жалоба репорт снос бан заблокировать report abuse удалить конкурента',
@@ -8466,6 +8596,13 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
+  'Сделки':'Сделки CRM: этапы, суммы, ответственные',
+  'Семантическая память':'Факты, которые бот запомнил о собеседниках',
+  'Реферальная программа':'Код приглашения и приведённые пользователи',
+  'Рабочие пространства':'Отдельные контуры с доступом по участникам',
+  'Шаблоны ассетов':'Заготовки аватара, описания и первого поста',
+  'Единая кампания': 'Одно сообщение в каналы, чаты, ботам и в ЛС одним запуском: по каждому ресурсу встанет своя операция',
+  'Рассылка по сети ботов':'Один текст подписчикам всех ваших ботов',
   'Хранилище':'История переписки: удалённые и изменённые сообщения',
   'Менеджер продаж':'Бот-продавец: товары, ответы на вопросы, заказы',
   'Мотор роста':'Цель роста и подобранные под неё шаги',
@@ -8487,7 +8624,7 @@ const MODULE_DESCS = {
   'Прокси':'Свои SOCKS5/HTTP-прокси и IP-изоляция','Пул прокси':'Общий пул прокси с авто-подбором',
   'Фабрика ботов':'Массовое создание ботов по шаблонам','Создать ботов':'Массовое создание ботов','Фабрика каналов':'Массовое создание каналов',
   'Создать каналы':'Массовое создание каналов','Фабрика групп':'Массовое создание групп',
-  'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом','Быстрый пост':'Быстрый пост в один клик',
+  'Массовая публикация':'Пост во все каналы/аккаунты разом','Массопубликация':'Пост во все каналы/аккаунты разом',
   'Массовый инвайт':'Приглашение пользователей в каналы/группы','Парсер':'Сбор аудитории из чатов и каналов',
   'SEO':'Оптимизация под поиск Telegram','Позиции':'Отслеживание позиций в поиске','Топ поиска':'Позиции и вывод в топ поиска','Рейтинг':'Рейтинг ресурсов в поиске',
   'Конкуренты':'Мониторинг конкурентов','Разведка рекламы':'Анализ рекламы и каналов','Самопиар':'Автопродвижение ваших ресурсов',
@@ -8678,6 +8815,52 @@ function loadTab(tab) {
 }
 
 // ── Home ───────────────────────────────────────────────
+// ── Обслуживание флота «всё разом» ─────────────────────────────────────────
+// Единый проход по ботам+аккаунтам+каналам параллельно (ручка fleet/sweep).
+// «Мёртвое» = бот с отозванным токеном + аккаунт с терминальным статусом;
+// «не ответившие» не удаляются. Каналам живой проверки пока нет — только счёт.
+function _fleetSweepHtml(d, cleaned) {
+  const b = d.bots||{}, a = d.accounts||{}, c = d.channels||{};
+  const del = (x) => (cleaned && x.deleted!=null) ? ` · 🗑 удалено ${x.deleted}` : '';
+  return [
+    `🤖 Боты: всего ${b.total||0} · 🔴 мёртвых ${b.dead||0} · ⚪ не ответили ${b.unknown||0}${del(b)}`,
+    `📱 Аккаунты: 🔴 мёртвых ${a.dead||0}${del(a)}`,
+    `📡 Каналы: ${c.total||0} · проверка доступности скоро`,
+  ].map(r=>`<div>${r}</div>`).join('');
+}
+function _showFleetResult(d, cleaned) {
+  const box = document.getElementById('fleetSweepResult');
+  if (box) { box.style.display=''; box.innerHTML = _fleetSweepHtml(d, cleaned); }
+}
+async function fleetCheckAll() {
+  const btn=document.getElementById('fleetCheckBtn');
+  if(btn){btn.disabled=true;btn.textContent='Проверяю…';}
+  try {
+    const d = await api('/api/miniapp/fleet/sweep', {method:'POST', body:JSON.stringify({delete:false})});
+    _showFleetResult(d, false);
+    toast(`🩺 Мёртвых во флоте: ${d.dead_total||0}`);
+  } catch(e){ toast('⚠️ '+errRu(e,'Не удалось проверить')); }
+  finally { if(btn){btn.disabled=false;btn.textContent='🩺 Проверить всё';} }
+}
+async function fleetCleanupAll() {
+  let d;
+  try { d = await api('/api/miniapp/fleet/sweep', {method:'POST', body:JSON.stringify({delete:true, preview:true})}); }
+  catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); return; }
+  _showFleetResult(d, false);
+  const n = d.dead_total||0;
+  if (!n) { toast('✅ Мёртвого во флоте не найдено 👍'); return; }
+  const b=d.bots||{}, a=d.accounts||{};
+  if (!await askConfirm(`Удалить мёртвое по всему флоту?\n\n🤖 Ботов (токен отозван): ${b.dead||0}\n📱 Аккаунтов (бан / деактивация / удалён): ${a.dead||0}\n\nБезвозвратно, только из Infragram. Восстановимое (спам-блок, отозванная сессия, кулдаун) и «не ответившие» не трогаем.`)) return;
+  const btn=document.getElementById('fleetCleanBtn');
+  if(btn){btn.disabled=true;btn.textContent='Чищу…';}
+  try {
+    const r = await api('/api/miniapp/fleet/sweep', {method:'POST', body:JSON.stringify({delete:true, preview:false})});
+    _showFleetResult(r, true);
+    toast(`🧹 Удалено мёртвого: ${r.deleted_total||0}`);
+    if (typeof loadHome==='function') loadHome();
+  } catch(e){ toast('⚠️ '+errRu(e,'Ошибка очистки')); }
+  finally { if(btn){btn.disabled=false;btn.textContent='🧹 Очистить мёртвое';} }
+}
 async function loadHome() {
   modernizeIcons(document.getElementById('s-home'));
   const cached = getCached('infragram_cache_home');
@@ -9626,16 +9809,6 @@ function renderAct(items) {
   }).join('');
 }
 
-function updateMoreStats(d) {
-  if (d.bots!==undefined) {
-    txt('m-bots-cnt', `${num(d.bots)} бот · ${num(d.subscribers)} подп.`);
-    txt('m-acc-cnt', `${num(d.accounts)} аккаунтов`);
-    txt('m-ch-cnt', `${num(d.channels)} каналов`);
-    txt('m-ops-cnt', d.ops_running?`🟡 ${d.ops_running} работает`:'Нет активных');
-    txt('statsSum', `${num(d.bots)} бот · ${num(d.channels)} каналов · ${num(d.subscribers)} подп.`);
-  }
-}
-
 // ── Bots ───────────────────────────────────────────────
 const BOT_GRADS = [
   'linear-gradient(135deg,#60a5fa,#1d4ed8)',
@@ -9701,6 +9874,9 @@ function _botsFiltered() {
 // ── Режим выбора ботов и массовая рассылка ──────────────
 let BOT_SEL_MODE = false;
 let BOT_SEL = new Set();
+// Результат последней проверки живости: bot_id → 'alive'|'dead'|'unknown'.
+// Заполняет checkAllBots(), читает renderBots() для бейджа состояния.
+let BOT_CHECK = {};
 
 
 
@@ -11325,6 +11501,19 @@ async function submitChMass() {
   } catch(e){ errEl.textContent=errRu(e,'Ошибка'); }
   finally { btn.disabled=false; btn.textContent='Применить'; }
 }
+// Убрать из управления несколько каналов разом (Infragram-side: сам канал в
+// Telegram не трогаем). Паритет с одиночным «убрать канал».
+async function bulkDeleteChannels() {
+  const ids = [...CH_SEL];
+  if (!ids.length) { toast('❗ Выберите хотя бы один канал'); return; }
+  if (!await askConfirm(`Убрать ${ids.length} ${plural(ids.length,'канал','канала','каналов')} из управления?\n\nСам канал в Telegram не трогаем — Infragram просто перестаёт им управлять. Вернуть можно повторным добавлением.`)) return;
+  try {
+    const r = await api('/api/miniapp/channels/bulk_delete', {method:'POST', body:JSON.stringify({channel_ids:ids})});
+    toast(`🗑 Убрано из управления: ${r.deleted||0} из ${r.requested||ids.length}`);
+    toggleChSelMode();
+    loadChannels();
+  } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
+}
 async function runChMass(op) {
   if (!CH_SEL.size) { toast('❗ Выберите хотя бы один канал'); return; }
   if (op==='promote' && !await askConfirm(`Назначить аккаунты администраторами в ${CH_SEL.size} ${plural(CH_SEL.size,'канале','каналах','каналах')}?`)) return;
@@ -11718,26 +11907,47 @@ function bcastPreset(key) {
   try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
 }
 
-// Пресеты постов для «Быстрого поста» (тот же паттерн, что рассылка).
+// Пресеты постов для единой публикации (тот же паттерн, что рассылка).
+// Жили на экране «Быстрый пост»; при его слиянии с единой публикацией уехали
+// бы вместе с ним — это и была единственная причина возвращать тот экран.
 const POST_PRESETS = [
   {k:'announce', t:'📣 Анонс',      v:'📣 {Важный анонс|Свежая новость}! Мы {подготовили|запустили} кое-что новое. Подробности ниже 👇'},
   {k:'tip',      t:'💡 Совет',      v:'💡 Полезный совет дня: {попробуйте|возьмите на заметку}… А как делаете вы? Делитесь в комментариях 👇'},
   {k:'engage',   t:'🔥 Вовлечение', v:'🔥 А вы знали? {Интересный факт|Небольшой инсайт}… Ставьте реакцию, если было полезно! 🚀'},
   {k:'promo',    t:'🎁 Промо',      v:'🎁 Специально для вас — {выгодное предложение|подарок}! Успейте {воспользоваться|забрать}, пока действует.'},
 ];
-function buildQuickPostPresets() {
-  const row = document.getElementById('qpPresetRow');
+function buildMpPresets() {
+  const row = document.getElementById('mpPresetRow');
   if (!row || row.dataset.built) return;
   row.innerHTML = POST_PRESETS.map(p =>
-    `<span class="preset-chip" onclick="qpPreset('${p.k}')">${esc(p.t)}</span>`).join('');
+    `<span class="preset-chip" onclick="mpPreset('${p.k}')">${esc(p.t)}</span>`).join('');
   row.dataset.built = '1';
 }
-function qpPreset(key) {
+function mpPreset(key) {
   const p = POST_PRESETS.find(x => x.k === key);
-  const ta = document.getElementById('quickPostText');
+  const ta = document.getElementById('mpText');
   if (!p || !ta) return;
   ta.value = p.v;
   ta.focus();
+  const len = document.getElementById('mpLen'); if (len) len.textContent = p.v.length;
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
+}
+
+// Быстрый срок: «через 3 часа» заполняет ТО ЖЕ поле даты, а не заводит второй
+// механизм расписания. На удалённом экране «Быстрый пост» срок был отдельным
+// списком минут (schedule_minutes), и это был второй путь к той же очереди —
+// со своим подтверждением и своими ошибками. Здесь один путь: поле даты.
+function mpSchedIn(minutes) {
+  const el = document.getElementById('mpSchedule');
+  if (!el) return;
+  if (!minutes) { el.value = ''; return; }
+  const d = new Date(Date.now() + minutes * 60000);
+  // datetime-local показывает ЛОКАЛЬНОЕ время, поэтому и кладём локальное;
+  // в UTC его переводит отправка (sendMassPublish). Через toISOString() здесь
+  // поле съехало бы на смещение часового пояса.
+  const pad = n => String(n).padStart(2, '0');
+  el.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   try { tg.HapticFeedback?.impactOccurred('light'); } catch(_){}
 }
 
@@ -11858,17 +12068,6 @@ async function sendBcast() {
     errEl.textContent='Ошибка: '+errRu(e); errEl.style.display='block';
     tg.HapticFeedback?.notificationOccurred('error');
   } finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
-}
-
-function explainError(msg) {
-  if (!msg) return 'Неизвестная ошибка';
-  const m = msg.toLowerCase();
-  if (m.includes('floodwait') || m.includes('flood_wait')) return '⏳ Ожидание из-за ограничений Telegram';
-  if (m.includes('peer_flood') || m.includes('peerflood')) return '🚫 Слишком много запросов — подождите 48ч';
-  if (m.includes('channel_private')) return '🔒 Канал приватный';
-  if (m.includes('auth_key') || m.includes('session')) return '🔑 Сессия устарела — нужен ре-импорт';
-  if (m.includes('proxy')) return '🌐 Прокси недоступен';
-  return '❌ ' + msg.substring(0, 80);
 }
 
 // ── Operations ─────────────────────────────────────────
@@ -12627,6 +12826,9 @@ function buildFunnelDetail(d) {
   // Отвал по шагам: где именно люди уходят из цепочки — главный вопрос к любой
   // воронке. Данные копились в current_step с самого начала, но не показывались.
   const stats = d.step_stats||[];
+  // «Отвал дальше» на шаге i — это ровно те, у кого доставлено i шагов:
+  // current_step=i. Срез по шагу считает то же число, что здесь нарисовано.
+  const _fdId = Number((d.funnel||{}).id||0);
   const statFor = i => stats[i] || null;
 
   const stepsHtml = steps.length
@@ -12638,7 +12840,7 @@ function buildFunnelDetail(d) {
         const st = statFor(i);
         const statLine = st
           ? `<div class="ffstep-delay">📊 дошли: <b>${num(st.delivered)}</b> (${pctRu(st.conversion_pct)}%)${
-               st.lost_after ? ` · <span style="color:var(--red)">отвал дальше: ${num(st.lost_after)}</span>` : ''}</div>`
+               st.lost_after ? ` · <span style="color:var(--red);cursor:pointer" role="button" tabindex="0" onclick="openFunnelPeople('classic',${_fdId},'Отвал после шага ${i+1}','step=${i+1}')">отвал дальше: ${num(st.lost_after)} ›</span>` : ''}</div>`
           : '';
         return `<div class="ffstep">
           <div class="ffstep-line">
@@ -12933,6 +13135,12 @@ async function sendNetBc() {
   const errEl = document.getElementById('netbcErr');
   errEl.style.display='none';
   if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  // Рассылка по сети — массовая операция, которую не отменить одной кнопкой:
+  // она создаёт по рассылке на каждого бота, и останавливать их пришлось бы
+  // по одной. Поэтому спрашиваем до запуска, а не после.
+  if (!await askConfirm('Сообщение уйдёт подписчикам ВСЕХ ваших активных ботов. '
+      + 'Запустится по одной рассылке на каждого бота, останавливать их придётся '
+      + 'по отдельности. Запустить?')) return;
   const btn = document.getElementById('netbcBtn');
   btn.disabled=true; btn.textContent='⏳ Запуск...';
   try {
@@ -13078,9 +13286,6 @@ function openKeywordsScreen() {
   txt('kwTrackList','<div class="spin-wrap"><div class="spin"></div></div>');
   loadKeywords();
 }
-
-// Keep old openKeywords for analytics
-function openKeywords() { push('s-analytics'); loadAnalytics(); }
 
 let KW_LIMIT = 50;
 async function loadKeywords(more) {
@@ -13551,6 +13756,7 @@ function openMassPub() {
   { const _pc=document.getElementById('mpPickCount'); if(_pc) _pc.textContent='0'; }
   { const _mc=document.getElementById('mpChannels'); if(_mc) _mc.dataset.loaded=''; }
   if (typeof mpScopeToggle === 'function') mpScopeToggle();
+  buildMpPresets();
   push('s-masspub');
   loadMpTargets();
   loadMpOps();
@@ -13775,6 +13981,15 @@ async function sendMassPublish() {
     if (_d.getTime() <= Date.now()) { errEl.textContent='Время публикации должно быть в будущем'; errEl.style.display='block'; return; }
     scheduled_for = _d.toISOString();
   }
+  // Повтор: минуты в бэк, а в подтверждение — подпись самого варианта
+  // («каждый день»): пересчёт из минут уже давал однажды «каждые 1 дн.».
+  const _repMin = parseInt(document.getElementById('mpRepeat')?.value || '0') || 0;
+  const _repLbl = (() => {
+    const e = document.getElementById('mpRepeat');
+    return (_repMin > 0 && e && e.selectedIndex >= 0)
+      ? (e.options[e.selectedIndex].textContent || '').trim().toLowerCase() : '';
+  })();
+  const _repNote = _repMin > 0 ? '\n\nПовтор: ' + _repLbl + '. Останавливается в «Очереди операций».' : '';
   // Совет редактора: повтор недавнего поста и правила канала. Это подсказка,
   // а не запрет — она дописывается в подтверждение, решает человек.
   const _edBox = document.getElementById('mpEditorial');
@@ -13805,7 +14020,7 @@ async function sendMassPublish() {
     const when = scheduled_for
       ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU')+'. До этого операцию можно отменить в «Очереди операций».'
       : '\n\nПосле старта публикацию нельзя отменить.';
-    if (!(await askConfirm(edNote+'Опубликовать в '+pickedIds.length+' '+plural(pickedIds.length,'выбранный канал','выбранных канала','выбранных каналов')+'?'+when))) return;
+    if (!(await askConfirm(edNote+'Опубликовать в '+num(pickedIds.length)+' '+plural(pickedIds.length,'выбранный канал','выбранных канала','выбранных каналов')+'?'+when+_repNote))) return;
     channel_ids = pickedIds;
   } else if (canary > 0) {
     let targets;
@@ -13830,18 +14045,18 @@ async function sendMassPublish() {
       return;
     }
     if (!(await askConfirm(edNote+'Тест-публикация в '+ids.length+' '+plural(ids.length,'канал','канала','каналов')+':\n\n'
-        + _mpChList(sample, 6) + '\n\nОстальные '+(MP_TOTAL-ids.length)+' не затронуты. Отменить публикацию после старта нельзя.'))) return;
+        + _mpChList(sample, 6) + '\n\nОстальные '+(MP_TOTAL-ids.length)+' не затронуты. Отменить публикацию после старта нельзя.'+_repNote))) return;
     channel_ids = ids;
   } else {
     const whereTo = (MP_TOTAL != null && MP_TOTAL > 0)
-      ? 'во все ваши каналы — их '+MP_TOTAL
+      ? 'во все ваши каналы — их '+num(MP_TOTAL)+' '+plural(MP_TOTAL,'канал','канала','каналов')
       : 'во ВСЕ ваши каналы (узнать их число не удалось)';
     const when = scheduled_for
       ? '\n\nЗапуск: '+new Date(scheduled_for).toLocaleString('ru-RU')+'. До этого момента операцию можно отменить в «Очереди операций».'
       : '\n\nПосле старта публикацию нельзя отменить. Совет: сначала протестируйте на нескольких.';
     // Отложенная публикация раньше уходила вообще без подтверждения: достаточно
     // было заполнить дату — и пост уезжал во все каналы с одного нажатия.
-    if (!(await askConfirm(edNote+'Опубликовать '+whereTo+'?'+when))) return;
+    if (!(await askConfirm(edNote+'Опубликовать '+whereTo+'?'+when+_repNote))) return;
   }
   const btn = document.getElementById('mpBtn');
   btn.disabled=true; btn.textContent='⏳ Добавление в очередь...';
@@ -13850,14 +14065,17 @@ async function sendMassPublish() {
     if (channel_ids) payload.channel_ids = channel_ids;
     { const _p=document.getElementById('mpPillar'); if (_p && _p.value) payload.pillar = _p.value; }
     if (scheduled_for) payload.scheduled_for = scheduled_for;
+    if (_repMin > 0) payload.repeat_interval_min = _repMin;
     const d = await api('/api/miniapp/mass_publish', {method:'POST', body: JSON.stringify(payload)});
     document.getElementById('mpText').value='';
     document.getElementById('mpLen').textContent='0';
     { const _s=document.getElementById('mpSchedule'); if(_s) _s.value=''; }
+    { const _r=document.getElementById('mpRepeat'); if(_r) _r.value='0'; }
     { const _e=document.getElementById('mpEditorial'); if(_e) _e.innerHTML=''; }
     tg.HapticFeedback?.notificationOccurred('success');
     const _when = scheduled_for ? (' на '+new Date(scheduled_for).toLocaleString('ru-RU')) : '';
-    toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+d.total+' '+plural(d.total,'канал','канала','каналов')+' · операция #'+d.op_id);
+    const _repToast = _repMin > 0 ? ' · 🔁 ' + _repLbl : '';
+    toast((scheduled_for?'📅 Запланировано'+_when+' · ':(canary>0?'🐤 Тест-публикация · ':'✅ Публикация запущена · '))+d.total+' '+plural(d.total,'канал','канала','каналов')+' · операция #'+d.op_id+_repToast);
     { const _c=document.getElementById('mpCanary'); if(_c) _c.value='0'; }
     renderMpCanaryNote();
     loadMpOps();
@@ -16235,83 +16453,8 @@ async function submitAiComment() {
   finally { btn.disabled=false; btn.textContent='💬 Запустить ИИ-комментинг'; }
 }
 
-// ── Quick Post ───────────────────────────────────────────
-let QUICK_POST_SELECTED = new Set();
 // ── Spintax — вынесен в mini_app/screens/spintax.js (см. подключение
 // <script src="screens/spintax.js"> перед закрывающим </body>) ───────────
-
-async function openQuickPost() {
-  push('s-quickpost');
-  QUICK_POST_SELECTED = new Set();
-  buildQuickPostPresets();
-  document.getElementById('quickPostText').value='';
-  txt('quickPostSelected','Выбрано: 0 каналов');
-  txt('quickPostChannels','<div class="spin-wrap"><div class="spin"></div></div>');
-  document.getElementById('quickPostBtn').disabled=true;
-  document.getElementById('quickPostBtn').textContent='📤 Опубликовать (выберите каналы)';
-  try {
-    const d = await api('/api/miniapp/channels');
-    const chs = d.channels||[];
-    if (!chs.length) { txt('quickPostChannels', empty('📢','Нет каналов','Создайте канал в фабрике — и публикуйте прямо отсюда',{label:'📡 Фабрика каналов',fn:'openChannelFactory()'})); return; }
-    txt('quickPostChannels', chs.map(c=>`
-      <div class="row tap" onclick="toggleQpChannel(${c.id})">
-        <div class="row-ico" id="qpc-${c.id}" style="background:var(--bg-blue-16)">📢</div>
-        <div class="row-body">
-          <div class="row-name">${esc(c.title||c.username||c.id)}</div>
-          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''} ${(c.member_count||c.members_count||0).toLocaleString('ru-RU')} подп.</div>
-        </div>
-      </div>
-    `).join(''));
-  } catch(e) {
-    txt('quickPostChannels', empty('⚠️','Ошибка',errRu(e)));
-  }
-}
-function toggleQpChannel(id) {
-  const ico = document.getElementById('qpc-'+id);
-  if (QUICK_POST_SELECTED.has(id)) {
-    QUICK_POST_SELECTED.delete(id);
-    if (ico) ico.style.background='rgba(96,165,250,.16)';
-  } else {
-    QUICK_POST_SELECTED.add(id);
-    if (ico) { ico.textContent='✅'; ico.style.background='rgba(52,211,153,.16)'; }
-  }
-  const cnt = QUICK_POST_SELECTED.size;
-  txt('quickPostSelected',`Выбрано: ${cnt} каналов`);
-  const btn = document.getElementById('quickPostBtn');
-  btn.disabled = cnt===0;
-  btn.textContent = cnt>0 ? `📤 Опубликовать в ${cnt} каналов` : '📤 Опубликовать (выберите каналы)';
-}
-async function submitQuickPost() {
-  const text = document.getElementById('quickPostText').value.trim();
-  const errEl = document.getElementById('quickPostErr');
-  if (!text) { errEl.textContent='Введите текст публикации'; return; }
-  if (QUICK_POST_SELECTED.size===0) { errEl.textContent='Выберите каналы'; return; }
-    const schedMin = parseInt(document.getElementById('qpSchedule')?.value||'0')||0;
-  const repMin = parseInt(document.getElementById('qpRepeat')?.value||'0')||0;
-  // Пост уходит подписчикам и виден сразу; масштаб называем ДО нажатия, как
-  // и в «посте во все каналы аккаунта» рядом.
-  const _qpN = QUICK_POST_SELECTED.size;
-  // Срок и повтор берём подписью из самого списка («Через 6 часов», «Каждый
-  // день»), а не пересчитываем из минут: пересчёт давал «каждые 1 дн.».
-  const _qpSel = id => { const e = document.getElementById(id);
-    return e && e.selectedIndex >= 0 ? (e.options[e.selectedIndex].textContent || '').trim() : ''; };
-  const _qpWhen = schedMin>0 ? `\nКогда: ${_qpSel('qpSchedule').toLowerCase()}.` : '';
-  const _qpRep = repMin>0 ? `\nПовтор: ${_qpSel('qpRepeat').toLowerCase()}.` : '';
-  if (!await askConfirm(
-      `Опубликовать в ${num(_qpN)} ${plural(_qpN,'канал','канала','каналов')}?`
-      + _qpWhen + _qpRep)) return;
-  const btn = document.getElementById('quickPostBtn');
-  btn.disabled=true; btn.textContent='Публикую…';
-  try {
-    const payload={text,channel_ids:[...QUICK_POST_SELECTED]}; if(schedMin>0) payload.schedule_minutes=schedMin;
-    if(repMin>0) payload.repeat_interval_min=repMin;
-    const r = await api('/api/miniapp/quick_post',{method:'POST',body:JSON.stringify(payload)});
-    toast(schedMin>0 ? '⏰ Публикация запланирована' : `✍️ Публикация запущена (#${r.op_id})`);
-    errEl.textContent='';
-    back();
-  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; }
-}
 
 // ── SEO ──────────────────────────────────────────────────
 async function openSeo() {
@@ -16504,6 +16647,30 @@ function toggleGenderFilter(g, el) {
   document.querySelectorAll('.contact-gender').forEach(x=>x.classList.toggle('on', x.dataset.g===CONTACT_GENDER));
   loadContacts();
 }
+// Числа на чипах стадий. Фильтр по стадии был, а числа — нет: чтобы понять,
+// где лежат сделки, владелец нажимал по очереди все шесть чипов. Считает их
+// сервер (одна функция crm_engine.pipeline), а подписи берутся оттуда же —
+// в разметке они статические, и расхождение поймал бы только владелец.
+async function refreshStageCounts() {
+  let d;
+  try { d = await api('/api/miniapp/uch/crm/pipeline'); }
+  catch(e) { return; }   // молчим: это украшение фильтра, а не сам фильтр
+  const by = {};
+  (d.stages||[]).forEach(s => { by[s.stage] = s; });
+  document.querySelectorAll('.contact-stage').forEach(el => {
+    const s = by[el.dataset.s];
+    if (!s) return;
+    // Ноль — не «нет данных», а честный ноль: стадию видно и пустой.
+    el.textContent = s.label + ' ' + num(Number(s.count||0));
+    const cur = Object.entries(s.by_currency||{});
+    // Суммы складываются ПО ВАЛЮТАМ: «итого» из рублей с долларами было бы
+    // красивым и неверным. Одна валюта — показываем, несколько — только счёт.
+    el.title = cur.length === 1
+      ? s.label + ': ' + num(Math.round(cur[0][1])) + ' ' + cur[0][0]
+      : (cur.length ? s.label + ': суммы в разных валютах' : s.label);
+  });
+}
+
 function toggleStageFilter(s, el) {
   CONTACT_STAGE = (CONTACT_STAGE === s) ? null : s;
   document.querySelectorAll('.contact-stage').forEach(x=>x.classList.toggle('on', x.dataset.s===CONTACT_STAGE));
@@ -16988,15 +17155,14 @@ function lastSeenLabel(t, at) {
   }
   return '';
 }
-const CONTACT_PAGE = 200;
-let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
-async function loadContacts(append=false) {
-  cgRenderBanner();           // фильтр по группе виден всегда, пока он включён
-  const q = (document.getElementById('contactSearch')?.value||'').trim();
-  if (!append) CONTACT_OFFSET = 0;
-  // Единый путь: поиск КОМБИНИРУЕТСЯ с фильтрами (пол/стадия/…) и совпадает с
-  // резолвером сегмента — «вижу одно, действую по тому же». Одна пагинация.
+// Фильтры списка одной строкой запроса — и для списка, и для выгрузки.
+// Экспорт умел только «все контакты»: владелец, собравший срез (стадия, тег,
+// группа, аккаунт, пол), выгружал вместо него весь справочник. Если бы экспорт
+// собирал параметры своим кодом, «вижу одно — выгружаю другое» вернулось бы на
+// первой правке фильтра.
+function contactFilterParams() {
   const params = new URLSearchParams();
+  const q = (document.getElementById('contactSearch')?.value||'').trim();
   if (q) params.set('search', q);
   if (CONTACT_FILTER === 'favorite') params.set('favorite', '1');
   if (CONTACT_FILTER === 'premium') params.set('premium', '1');
@@ -17008,6 +17174,19 @@ async function loadContacts(append=false) {
   if (CONTACT_STAGE) params.set('crm_stage', CONTACT_STAGE);
   if (CONTACT_GROUP) params.set('group_id', CONTACT_GROUP.id);
   if (CONTACT_ACCOUNT) params.set('account_id', CONTACT_ACCOUNT.id);
+  return params;
+}
+
+const CONTACT_PAGE = 200;
+let CONTACT_SLICE_TOTAL = null;   // размер последнего загруженного среза
+let CONTACT_OFFSET = 0;      // сколько уже загружено (для «Показать ещё»)
+async function loadContacts(append=false) {
+  cgRenderBanner();           // фильтр по группе виден всегда, пока он включён
+  if (!append) refreshStageCounts();   // числа на чипах стадий, не блокируя список
+  if (!append) CONTACT_OFFSET = 0;
+  // Единый путь: поиск КОМБИНИРУЕТСЯ с фильтрами (пол/стадия/…) и совпадает с
+  // резолвером сегмента — «вижу одно, действую по тому же». Одна пагинация.
+  const params = contactFilterParams();
   params.set('limit', CONTACT_PAGE);
   params.set('offset', CONTACT_OFFSET);
   const url = '/api/miniapp/uch/contacts?' + params.toString();
@@ -17016,7 +17195,26 @@ async function loadContacts(append=false) {
     const d = await api(url);
     const contacts = d.results||d.contacts||[];
     const total = (d.total!=null) ? d.total : contacts.length;
-    if (!append && !contacts.length) { txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки')); return; }
+    CONTACT_SLICE_TOTAL = total;   // для выгрузки: «сколько выгружу» = «сколько вижу»
+    if (!append && !contacts.length) {
+      // Пустой список врал: на любом пустом ответе он предлагал
+      // «Синхронизируйте аккаунты» — в том числе владельцу с тысячами
+      // контактов, который просто набрал запрос с опечаткой или сузил фильтр.
+      // Теперь причина называется та, которая есть.
+      const q = (document.getElementById('contactSearch')?.value||'').trim();
+      const other = contactFilterParams(); other.delete('search');
+      if (q) {
+        txt('contactsList', empty('🔍','Ничего не найдено',
+          'Поиск понимает @ник, #тег, company: и phone:'));
+        contactSuggest(q);
+      } else if ([...other.keys()].length) {
+        txt('contactsList', empty('🔍','В этом срезе нет контактов',
+          'Снимите фильтр или выберите другой'));
+      } else {
+        txt('contactsList', empty('📇','Нет контактов','Синхронизируйте аккаунты для загрузки'));
+      }
+      return;
+    }
     const rowsHtml = contacts.map(c=>{
       const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'#'+c.telegram_user_id;
       const sub = [c.username?'@'+c.username:'', c.phones&&c.phones.length?c.phones[0]:'', c.company||''].filter(Boolean).join(' · ');
@@ -17054,6 +17252,39 @@ async function loadContacts(append=false) {
 }
 
 async function searchContacts() { loadContacts(); }
+
+// Подсказки по опечатке. Движок (uch/spotlight) считает fuzzy-близость по
+// имени, нику и компании и ранжирует попадания — больше такого в продукте нет
+// нигде, и до этого экрана он не был подключён НИ К ЧЕМУ: набрав «Птеров»,
+// владелец видел пустой список и вывод «контактов нет».
+//
+// Подсказка открывает ОДНУ карточку, а не задаёт срез: расхождения «вижу одно
+// — применяю массовое действие к другому» здесь не возникает, поэтому второго
+// фильтра у списка не появляется.
+async function contactSuggest(q) {
+  if (!q || q.length < 2) return;
+  try {
+    const d = await api('/api/miniapp/uch/spotlight?q=' + encodeURIComponent(q));
+    const rows = d.results || [];
+    if (!rows.length) return;
+    const html = rows.map(r => {
+      const sub = [r.username ? '@' + r.username : '', r.company || '',
+                   (r.tags || []).map(x => '#' + x).join(' ')]
+                  .filter(Boolean).join(' · ');
+      return `<div class="li tap" onclick="openContactDetail('${esc(r.id)}')">
+        <div class="ava" style="background:rgba(96,165,250,.16);color:var(--text)">👤</div>
+        <div class="li-body">
+          <div class="li-name">${esc(r.name)}</div>
+          ${sub ? `<div class="li-sub">${esc(sub)}</div>` : ''}
+        </div>
+        <div class="li-right"><span class="chev">›</span></div>
+      </div>`;
+    }).join('');
+    const el = document.getElementById('contactsList');
+    if (el) el.insertAdjacentHTML('beforeend',
+      `<div style="margin-top:10px"><div class="muted" style="padding:4px 2px">Похожие контакты</div>${html}</div>`);
+  } catch(e) { /* подсказка не обязана мешать списку */ }
+}
 
 // Пояснения к неочевидным фильтрам — чтобы «взаимных всего 2» не читалось как баг.
 const CONTACT_FILTER_HINTS = {
@@ -17190,6 +17421,7 @@ async function openContactDetail(id) {
     const groups = d.groups||[];
     const enr = d.enriched||{};
     window._cdContact = c; window._cdSources = sources;  // для «Написать»/«Пригласить»
+    window._cdGroups = groups;  // для «Группы»: что отмечать галочкой
     const name = [c.first_name,c.last_name].filter(Boolean).join(' ')||c.username||'';
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
@@ -17243,12 +17475,57 @@ async function openContactDetail(id) {
       <button class="btn btn-s" onclick="openContactRelationships('${id}')" style="flex:0 0 auto">🕸 Связи</button>
       <button class="btn btn-s" onclick="openContactIdentity('${id}')" style="flex:0 0 auto">🔑 Личность</button>
       <button class="btn btn-s" onclick="openContactCRM('${id}')" style="flex:0 0 auto">💼 CRM</button>
+      <button class="btn btn-s" onclick="cdEditGroups()" style="flex:0 0 auto">📂 Группы</button>
+      <button class="btn btn-s" onclick="cdExportVcard()" style="flex:0 0 auto">📇 Визитка</button>
     </div>`;
     txt('cdBody', html);
     if (c.telegram_user_id || c.username || (c.phones && c.phones.length)) {
       renderContactInviteLink(id);  // screens/contact_invite_link.js — своя секция
     }
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+}
+
+// Группы ОДНОГО контакта — из его карточки, а не только через выбор в списке.
+// Состав группы менялся лишь массовым действием: чтобы переложить одного
+// человека, владелец уходил из карточки в список, включал выбор, искал там же
+// открытый контакт и отмечал его. Отдельные ручки на один контакт в API были,
+// но их не звал никто, и владельца в их запросах не было вообще — они удалены.
+// Здесь зовётся тот же /uch/bulk/group списком из одного контакта: одна
+// реализация, хозяйская проверка в самом запросе.
+async function cdEditGroups() {
+  const id = CURRENT_CONTACT_ID;
+  if (!id) return;
+  let groups = [];
+  try {
+    const d = await api('/api/miniapp/uch/groups');
+    groups = d.groups || [];
+    CONTACT_GROUPS = groups;
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); return; }
+  if (!groups.length) {
+    toast('⚠️ Групп ещё нет — создайте первую');
+    openContactGroups();
+    return;
+  }
+  const mine = new Set((window._cdGroups||[]).map(g => String(g.id)));
+  const pick = await askChoice('Группы контакта', groups.map(g => ({
+    value: String(g.id),
+    label: (mine.has(String(g.id)) ? '✅ ' : '◻️ ') + (g.name||'Без названия'),
+    sub: mine.has(String(g.id)) ? 'нажмите, чтобы убрать из группы' : 'нажмите, чтобы добавить',
+  })));
+  if (!pick) return;
+  const remove = mine.has(String(pick));
+  try {
+    const r = await api('/api/miniapp/uch/bulk/group', {method:'POST',
+      body:JSON.stringify({contact_ids:[id], group_id:Number(pick),
+                           action: remove ? 'remove' : 'add'})});
+    // Сервер отвечает числом ИЗМЕНЁННЫХ строк: ноль — значит контакт уже был
+    // (или уже не был) в группе. Молчать нельзя, иначе кажется, что кнопка не
+    // сработала.
+    const n = Number(remove ? (r.removed||0) : (r.added||0));
+    toast(n ? (remove ? '📂 Убран из группы' : '📁 Добавлен в группу')
+            : (remove ? 'Контакт и так не был в этой группе' : 'Контакт уже в этой группе'));
+    openContactDetail(id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 // ── Действия по контакту: написать в ЛС / пригласить в чат ──────────────────
@@ -17770,13 +18047,36 @@ async function openContactVersions(id) {
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
 }
 
+// Откат перезаписывает карточку и отменяется только ещё одним откатом.
+// Вопрос «Откатить к версии 3?» — это подпись не глядя: владелец не знал, что
+// потеряет. Сначала спрашиваем у сервера, ЧТО изменится, и называем поля.
 async function rollbackVersion(id, vnum) {
-  if (!await askConfirm('Откатить к версии '+vnum+'?')) return;
+  let prev;
+  try {
+    prev = await api('/api/miniapp/uch/contacts/'+id+'/rollback/'+vnum);
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось посмотреть, что изменится')); return; }
+  const ch = (prev && prev.changes) || [];
+  if (!ch.length) { toast('ℹ️ Версия v'+vnum+' совпадает с текущей карточкой — менять нечего'); return; }
+  const lines = ch.map(c => '• ' + c.label + ': ' + verVal(c.from) + ' → ' + verVal(c.to));
+  if (!await askConfirm(
+      'Откат к версии ' + vnum + ' изменит ' + num(ch.length) + ' '
+      + plural(ch.length, 'поле', 'поля', 'полей') + ':\n\n' + lines.join('\n')
+      + '\n\nТекущее состояние сохранится отдельной версией, так что откат можно отменить.')) return;
   try {
     await api('/api/miniapp/uch/contacts/'+id+'/rollback/'+vnum, {method:'POST'});
     toast('✅ Контакт откачен к v'+vnum);
     openContactDetail(id);
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+// Значение поля одной строкой для вопроса об откате. Пустое поле называется
+// словом: «—» в списке «было → стало» читается как потерянная строка.
+function verVal(v) {
+  if (v === null || v === undefined || v === '' ) return 'пусто';
+  if (Array.isArray(v)) return v.length ? v.join(', ') : 'пусто';
+  if (typeof v === 'object') { try { v = JSON.stringify(v); } catch(_) { v = String(v); } }
+  v = String(v);
+  return v.length > 60 ? v.slice(0, 60) + '…' : v;
 }
 
 // ── Типы связи между контактами: подписи и пояснения ────────────────────────
@@ -17878,15 +18178,46 @@ async function openContactCRM(id) {
     if (crm.next_reminder_at) {
       html += `<div style="padding:0 16px 8px"><div style="padding:8px 12px;background:rgba(251,191,36,.1);border-radius:8px;font-size:13px">⏰ ${new Date(crm.next_reminder_at).toLocaleString('ru-RU')}${crm.next_reminder_text?' · '+esc(crm.next_reminder_text):''}</div></div>`;
     }
+    // Журнал касаний: кнопка стоит ВСЕГДА, а не только когда журнал непуст.
+    // Записывать в него было нечем — ручка POST .../crm/activity была, но её
+    // не звал ни один экран, поэтому у всех контактов журнал был пуст всегда,
+    // и секция «Активность» не показывалась ни разу.
+    html += `<div class="sec" style="margin:0 16px">📝 Журнал касаний</div>
+      <div style="padding:4px 16px 8px"><button class="btn btn-s" style="width:100%" onclick="addCrmTouch('${id}')">➕ Отметить касание</button></div>`;
     if (activity.length) {
-      html += `<div class="sec" style="margin:0 16px">📝 Активность</div><div class="lst" style="margin:0 16px">`;
+      html += `<div class="lst" style="margin:0 16px">`;
       activity.forEach(a=>{
-        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(a.activity_type)}</div><div class="li-sub">${esc(a.description||'')} · ${a.created_at?new Date(a.created_at).toLocaleString('ru-RU'):''}</div></div></div>`;
+        // Подпись считает сервер (ACTIVITY_LABELS): раньше здесь стояло
+        // `activity_type`, то есть владелец читал «call» и «meeting».
+        html += `<div class="li"><div class="li-body"><div class="li-name">${esc(a.activity_label||a.activity_type)}</div><div class="li-sub">${esc(a.description||'')} · ${a.created_at?new Date(a.created_at).toLocaleString('ru-RU'):''}</div></div></div>`;
       });
       html += '</div>';
+    } else {
+      html += `<div style="padding:0 16px 8px;font-size:13px;color:var(--hint)">Пока ничего не отмечено. Звонок, встреча, сообщение — чтобы через месяц помнить, о чём договорились.</div>`;
     }
     txt('cdBody', html);
   } catch(e) { txt('cdBody', errHtml(errRu(e))); }
+}
+
+async function addCrmTouch(id) {
+  const kinds = [
+    {value:'call',    label:'📞 Звонок'},
+    {value:'message', label:'✉️ Сообщение'},
+    {value:'meeting', label:'🤝 Встреча'},
+    {value:'note',    label:'📝 Заметка'},
+    {value:'deal',    label:'💼 Сделка'},
+    {value:'task',    label:'✅ Задача'},
+  ];
+  const kind = await askChoice('Что было?', kinds);
+  if (!kind) return;
+  const desc = await askPrompt('О чём коротко?', {placeholder:'например, договорились созвониться в пятницу'});
+  if (desc === null) return;   // отмена, а не пустая запись
+  try {
+    const r = await api('/api/miniapp/uch/contacts/'+id+'/crm/activity', {method:'POST',
+      body:JSON.stringify({type:kind, description:(desc||'').trim()})});
+    toast('📝 Отмечено: '+(r.label||''));
+    openContactCRM(id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 async function setCrmStage(id, stage) {
@@ -17940,6 +18271,59 @@ async function syncContacts() {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
+// Пары с последней проверки: пакетное объединение берёт их отсюда, а не
+// перечитывает экран. Ручка /api/miniapp/uch/bulk/merge была написана и
+// недостижима — объединять приходилось по одной паре, сколько бы их ни нашлось.
+let DUP_PAIRS = [];
+// Порог, ниже которого пакетное объединение не трогает ничего: решение
+// необратимо (вторая запись удаляется), поэтому пакетом идут только пары, в
+// которых движок уверен. Остальные — по одной, глазами.
+const DUP_SURE = 0.9;
+
+async function mergeAllDuplicates() {
+  const sure = DUP_PAIRS.filter(p => Number(p.confidence) >= DUP_SURE);
+  if (!sure.length) {
+    toast('Надёжных дублей нет — объедините оставшиеся по одной паре');
+    return;
+  }
+  const n = sure.length;
+  if (!await askConfirm('Объединить ' + num(n) + ' ' + plural(n,'надёжную пару','надёжные пары','надёжных пар')
+      + ' (уверенность ' + Math.round(DUP_SURE*100) + '% и выше)?\n\nВ каждой паре вторая запись будет '
+      + 'удалена, её данные перенесутся в первую: пустые поля заполнятся, телефоны и почты объединятся, '
+      + 'заполненные поля первой записи не изменятся.\n\nСостояние каждой первой записи сохранится '
+      + 'версией — слияние видно и откатываемо в «Версиях» контакта.\n\nПары с меньшей уверенностью '
+      + 'останутся — их видно в списке и можно объединить по одной.')) return;
+  try {
+    const d = await api('/api/miniapp/uch/bulk/merge', {method:'POST',
+      body:JSON.stringify({pairs: sure.map(p => ({primary_id: p.contact_a.id, secondary_id: p.contact_b.id}))})});
+    // Движок пропускает пару, если контакт уже слит или не принадлежит
+    // владельцу. Промолчать о пропущенных значит соврать, что слилось всё.
+    const skipped = Number(d.skipped || 0);
+    toast(skipped
+      ? `✅ Объединено пар: ${num(d.merged||0)} · пропущено: ${num(skipped)}`
+      : `✅ Объединено пар: ${num(d.merged||0)}`);
+    detectDuplicates();
+  } catch(e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
+}
+
+// Доверие контакта показано в его карточке («Доверие: N%»), но писал его
+// только update_trust_scores — а зваться он мог лишь через ручку
+// /api/miniapp/uch/trust/update, которую не звал никто. То есть показатель был
+// пуст у всех контактов всегда, и строка в карточке не появлялась ни разу.
+async function recomputeContactTrust() {
+  toast('🛡 Считаю доверие…');
+  try {
+    const d = await api('/api/miniapp/uch/trust/update', {method:'POST', body:'{}'});
+    const n = Number(d.updated || 0);
+    toast(n
+      ? `✅ Доверие пересчитано · ${num(n)} ${plural(n,'контакт','контакта','контактов')}`
+      : 'Контактов пока нет — считать нечего');
+    // Карточка открытого контакта показывает старое значение, пока список не
+    // перечитан: пересчёт без обновления выглядел бы как «ничего не произошло».
+    if (typeof loadContacts === 'function') loadContacts();
+  } catch(e) { toast('⚠️ ' + errRu(e,'Не удалось пересчитать доверие')); }
+}
+
 async function detectDuplicates() {
   // Экран открывается ЗДЕСЬ, а не в вызывающем: функция служит и входом с плитки
   // «🔍 Дубликаты», и кнопкой «🔄 Проверить» внутри самого экрана. Без push плитка
@@ -17951,11 +18335,28 @@ async function detectDuplicates() {
   try {
     const d = await api('/api/miniapp/uch/duplicates');
     const dupes = d.duplicates||[];
-    if (!dupes.length) { txt('dupBody', empty('✅','Дубликатов нет','Все контакты уникальны')); return; }
+    DUP_PAIRS = dupes;
+    if (!dupes.length) {
+      txt('dupBody', d.skipped_groups
+        ? empty('⚠️','Сравнение неполное','Группы контактов с одинаковым номером или ником слишком велики — в них дубли не искались')
+        : empty('✅','Дубликатов нет','Все контакты уникальны'));
+      return;
+    }
     let html = `<div style="padding:12px 16px;font-size:13px;color:var(--hint)">Найдено ${dupes.length} ${plural(dupes.length,'возможный дубликат','возможных дубликата','возможных дубликатов')}</div>`;
+    // Несравнённые группы называем вслух: срезанный список дублей читается как
+    // «больше дублей нет», и владелец закрывает экран с этим выводом.
+    if (d.skipped_groups) {
+      html += `<div class="field-note" style="padding:0 16px 8px">Не сравнивались ${num(d.skipped_groups)} ${plural(d.skipped_groups,'группа','группы','групп')} контактов с одинаковым номером или ником — слишком много записей с одним значением. Почистите такие значения, и пары из них появятся здесь.</div>`;
+    }
+    // Пакетное объединение показываем только когда оно что-то сделает.
+    const sure = dupes.filter(x => Number(x.confidence) >= DUP_SURE).length;
+    if (sure > 1) {
+      html += `<div style="padding:0 16px 10px"><button class="btn btn-p" style="width:100%" onclick="mergeAllDuplicates()">🔀 Объединить ${num(sure)} ${plural(sure,'надёжную пару','надёжные пары','надёжных пар')} (≥${Math.round(DUP_SURE*100)}%)</button>
+        <div class="field-note" style="padding:6px 2px 0">Остальные останутся в списке — их видно по одной</div></div>`;
+    }
     dupes.forEach(dp=>{
       html += `<div class="li" style="margin:0 16px 8px">
-        <div class="li-body"><div class="li-name">${esc(dp.contact_a.name)} ↔ ${esc(dp.contact_b.name)}</div><div class="li-sub">${Math.round(dp.confidence*100)}% · ${dp.reasons.join(', ')}</div></div>
+        <div class="li-body"><div class="li-name">${esc(dp.contact_a.name)} ↔ ${esc(dp.contact_b.name)}</div><div class="li-sub">${Math.round(dp.confidence*100)}% · ${esc((dp.reason_labels||dp.reasons||[]).join(', '))}</div></div>
         <div class="li-right"><button class="btn btn-s" style="padding:4px 10px;font-size:12px" onclick="mergeContacts('${dp.contact_a.id}','${dp.contact_b.id}')">Объединить</button></div></div>`;
     });
     txt('dupBody', html);
@@ -17965,10 +18366,33 @@ async function detectDuplicates() {
 async function mergeContacts(primary, secondary) {
   // Подтверждение обязано говорить, ЧТО произойдёт: «Объединить контакты?»
   // не отвечало на главный вопрос — какой из двух останется.
-  if (!await askConfirm('Объединить два контакта в один?\n\nВторая запись будет удалена, её данные перенесутся в первую.')) return;
+  //
+  // Обещание «данные перенесутся» тут стояло и РАНЬШЕ, а движок при этом
+  // просто удалял вторую запись, не перенося ни одного поля: телефон, почта
+  // и заметки второго контакта исчезали. Теперь перенос настоящий, и после
+  // слияния можно сказать, что именно переехало.
+  // Что именно переедет, спрашиваем у сервера теми же правилами, которыми
+  // слияние и работает: «данные перенесутся» без перечисления — это опять
+  // обещание, которое нечем проверить.
+  let prev = null;
   try {
-    await api('/api/miniapp/uch/merge', {method:'POST', body:JSON.stringify({primary_id:primary, secondary_id:secondary})});
-    toast('✅ Контакты объединены');
+    prev = await api('/api/miniapp/uch/merge?primary_id=' + encodeURIComponent(primary)
+      + '&secondary_id=' + encodeURIComponent(secondary));
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось посмотреть, что переедет')); return; }
+  const moving = (prev && prev.taken) || [];
+  const what = moving.length
+    ? 'Переедет ' + num(moving.length) + ' ' + plural(moving.length,'поле','поля','полей') + ':\n\n'
+      + moving.map(c => '• ' + c.label + ': ' + verVal(c.to)).join('\n')
+    : 'Переносить нечего: всё, что есть во второй записи, уже есть в первой.';
+  if (!await askConfirm('Объединить два контакта в один?\n\n' + what
+      + '\n\nВторая запись будет удалена. Заполненные поля первой не изменятся.'
+      + '\n\nСостояние первой записи сохранится версией — слияние можно откатить в «Версиях».')) return;
+  try {
+    const d = await api('/api/miniapp/uch/merge', {method:'POST', body:JSON.stringify({primary_id:primary, secondary_id:secondary})});
+    const got = (d && d.absorbed_fields) || [];
+    toast(got.length
+      ? '✅ Объединены · перенесено полей: ' + num(got.length)
+      : '✅ Объединены · переносить было нечего');
     detectDuplicates();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
@@ -18350,6 +18774,7 @@ async function bulkMoreSelected() {
     {value:'imp',     label:'❗ Важность',          sub:'обычный, важный, ключевой'},
     {value:'rating',  label:'⭐ Оценка',            sub:'от 1 до 5, или снять'},
     {value:'ungroup', label:'📁 Убрать из группы',  sub:'состав группы, сами контакты останутся'},
+    {value:'export',  label:'📤 Выгрузить',          sub:'файл только с отмеченными'},
   ];
   const pick = await askChoice(`Что сделать с ${n} ${plural(n,'контактом','контактами','контактами')}?`, opts);
   if (!pick) return;
@@ -18357,6 +18782,19 @@ async function bulkMoreSelected() {
   if (pick === 'imp')     return bulkImportanceSelected();
   if (pick === 'rating')  return bulkRatingSelected();
   if (pick === 'ungroup') return bulkUngroupSelected();
+  if (pick === 'export')  return bulkExportSelected();
+}
+
+// Выгрузить ТОЛЬКО отмеченных. Раньше экспорт умел «все контакты», и отобрать
+// нужных можно было лишь вручную в уже скачанном файле.
+async function bulkExportSelected() {
+  const fmt = await askChoice('В каком формате?', [
+    {value:'csv',  label:'📄 CSV',     sub:'таблица: Excel, Google Sheets'},
+    {value:'vcf',  label:'📇 VCF',     sub:'визитки: телефонная книга'},
+    {value:'json', label:'{ } JSON',   sub:'для переноса и скриптов'},
+  ]);
+  if (!fmt) return;
+  uchExportSelected(fmt);
 }
 
 // Итог массового действия: снять выбор и перечитать список. Ноль изменённых —
@@ -18651,20 +19089,63 @@ async function applySmartTags() {
 // Ссылки на выгрузку уходили новой вкладкой БЕЗ заголовка Authorization и
 // возвращали 401: три кнопки не работали. Токен в query — тот же способ, что
 // у выгрузки разобранной аудитории (exportAudience).
-function uchExport(fmt) {
+// Выгрузка: весь хаб, текущий срез, выбранные галочками или один контакт.
+// Умела она только первое: фильтр хаба на выгрузку не влиял никак, и владелец,
+// собравший срез, получал вместо него весь справочник. Срез считает сервер по
+// ТЕМ ЖЕ параметрам, что список (contactFilterParams), — «выгружаю то, что вижу».
+const UCH_EXPORT_CAP = 5000;
+function uchExport(fmt, opts) {
   const f = (fmt === 'vcf' || fmt === 'json') ? fmt : 'csv';
-  const url = '/api/miniapp/uch/export/' + f + '?token=' + encodeURIComponent(TK);
+  opts = opts || {};
+  const params = (opts.slice ? contactFilterParams() : new URLSearchParams());
+  if (opts.ids && opts.ids.length) {
+    if (opts.ids.length > UCH_EXPORT_CAP) {
+      toast('⚠️ За раз выгружается не больше ' + num(UCH_EXPORT_CAP) + ' контактов');
+      return;
+    }
+    params.set('ids', opts.ids.join(','));
+  }
+  // Отказ сервера открылся бы в браузере как JSON — поэтому про слишком
+  // большой срез говорим здесь, числом, которое владелец только что видел.
+  if (opts.slice && CONTACT_SLICE_TOTAL != null && CONTACT_SLICE_TOTAL > UCH_EXPORT_CAP) {
+    toast('⚠️ В срезе ' + num(CONTACT_SLICE_TOTAL) + ' контактов, за раз выгружается ' + num(UCH_EXPORT_CAP) + '. Сузьте фильтр.');
+    return;
+  }
+  params.set('token', TK);
+  const url = '/api/miniapp/uch/export/' + f + '?' + params.toString();
   if (tg?.openLink) tg.openLink(location.origin + url); else window.open(url, '_blank');
+}
+
+function uchExportSelected(fmt) {
+  const ids = [...CONTACT_SELECTED];
+  if (!ids.length) { toast('⚠️ Никто не выбран'); return; }
+  uchExport(fmt, {ids});
+}
+
+function cdExportVcard() {
+  if (!CURRENT_CONTACT_ID) return;
+  uchExport('vcf', {ids: [CURRENT_CONTACT_ID]});
 }
 
 async function openUchExport() {
   push('s-uchexport');
+  const n = CONTACT_SLICE_TOTAL;
   let html = `<div style="padding:16px">
-    <div class="sec">Экспорт всех контактов</div>
+    <div class="sec">Текущий срез${n!=null?' · '+num(n):''}</div>
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:4px 0 8px">
+      То, что сейчас в списке: поиск, фильтр, стадия, группа, аккаунт. Выгрузка
+      считается теми же условиями, что и список.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('csv',{slice:true})">📄 CSV</button>
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('vcf',{slice:true})">📇 VCF</button>
+      <button class="btn btn-p" style="flex:1" onclick="uchExport('json',{slice:true})">{ } JSON</button>
+    </div>
+    <div class="sec" style="margin-top:16px">Все контакты</div>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn btn-p" style="flex:1" onclick="uchExport('csv')">📄 CSV</button>
-      <button class="btn btn-p" style="flex:1" onclick="uchExport('vcf')">📇 VCF</button>
-      <button class="btn btn-p" style="flex:1" onclick="uchExport('json')">{ } JSON</button>
+      <button class="btn btn-s" style="flex:1" onclick="uchExport('csv')">📄 CSV</button>
+      <button class="btn btn-s" style="flex:1" onclick="uchExport('vcf')">📇 VCF</button>
+      <button class="btn btn-s" style="flex:1" onclick="uchExport('json')">{ } JSON</button>
     </div>
   </div>`;
   txt('expBody', html);
@@ -19067,6 +19548,9 @@ async function openUchGraphType(relType) {
     let html = `<div style="padding:12px 16px">
       <div class="hint" style="margin-bottom:10px">${esc(uchRelHint(relType)||uchRelRu(relType))}. Нажмите на имя — откроется карточка контакта.</div>`;
     pairs.forEach(r=>{ html += _uchPairRow(r); });
+    // Предыдущий экран назвал число связей этого типа. Список приезжает с
+    // потолком, и без этой строки экран противоречил бы тому числу молча.
+    html += anCap(pairs.length, d.total, 'пара', 'пары', 'пар');
     html += '</div>';
     txt('grtBody', html);
   } catch(e) { txt('grtBody', errHtml(errRu(e), `openUchGraphType('${relType}')`)); }
@@ -20172,6 +20656,187 @@ let _invPreviewT = null;
 
 
 
+// ── Единая кампания: один спек → операции по всем выбранным ресурсам ───────
+//
+// Движок (services/campaign_hub.py) был написан и покрыт тестами, а запустить
+// его было нельзя: /api/miniapp/campaign/launch не звал ни один экран. Здесь
+// собирается ровно тот спек, который понимает plan_campaign: content,
+// settings и targets по четырём видам ресурсов.
+let UC_CH_SEL = new Set();
+let UC_CH_TOTAL = 0;
+let UC_ACC_SEL = new Set();
+
+function openUniCampaign() {
+  push('s-unicampaign');
+  UC_CH_SEL = new Set(); UC_ACC_SEL = new Set(); UC_CH_TOTAL = 0;
+  document.getElementById('ucName').value = '';
+  document.getElementById('ucText').value = '';
+  document.getElementById('ucWhen').value = '';
+  document.getElementById('ucDelay').value = '3';
+  document.getElementById('ucSilent').checked = false;
+  for (const id of ['ucKChannels','ucKChats','ucKBots','ucKDm']) document.getElementById(id).checked = false;
+  document.getElementById('ucChScope').value = 'all';
+  document.getElementById('ucErr').style.display = 'none';
+  ucCount();
+  ucKindToggle();
+}
+
+function ucCount() {
+  txt('ucLen', String((document.getElementById('ucText').value || '').length));
+}
+
+function ucKindToggle() {
+  const on = id => document.getElementById(id).checked;
+  const show = (id, vis) => { const e = document.getElementById(id); if (e) e.style.display = vis ? 'block' : 'none'; };
+  show('ucChWrap', on('ucKChannels'));
+  show('ucChatsWrap', on('ucKChats'));
+  show('ucBotsWrap', on('ucKBots'));
+  show('ucDmWrap', on('ucKDm'));
+  const pick = document.getElementById('ucChScope').value === 'pick';
+  show('ucChPickWrap', on('ucKChannels') && pick);
+  if (on('ucKChannels')) _ucLoadChannels();
+  if (on('ucKChats')) {
+    accPickerSearchBox('ucAccounts', _ucLoadAccs);
+    _ucLoadAccs('');
+  }
+}
+
+async function _ucLoadChannels() {
+  const box = document.getElementById('ucChannels');
+  if (!box || box.dataset.loaded === '1') return;
+  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+  try {
+    const d = await api('/api/miniapp/channels');
+    const chs = d.channels || [];
+    UC_CH_TOTAL = chs.length;
+    if (!chs.length) {
+      box.innerHTML = empty('📢','Нет каналов','Создайте канал в «Фабрике каналов» или импортируйте');
+      return;
+    }
+    box.innerHTML = chs.map(c => `
+      <div class="row tap" onclick="ucToggleChannel(${c.id})">
+        <div class="row-ico" id="ucc-${c.id}" style="background:var(--bg-blue-16)">📢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.title||c.username||c.id)}</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''}${(c.member_count||c.members_count||0).toLocaleString('ru-RU')} подп.</div>
+        </div>
+      </div>`).join('');
+    box.dataset.loaded = '1';
+  } catch(e) {
+    box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить каналы'), 'openUniCampaign()');
+  }
+}
+
+function ucToggleChannel(id) {
+  if (UC_CH_SEL.has(id)) UC_CH_SEL.delete(id); else UC_CH_SEL.add(id);
+  const ico = document.getElementById('ucc-' + id);
+  if (ico) ico.textContent = UC_CH_SEL.has(id) ? '✅' : '📢';
+  txt('ucChCount', String(UC_CH_SEL.size));
+}
+
+// Аккаунты берём тем же помощником, что и остальные пикеры: он просит
+// серверный максимум, ищет на сервере и подписывает «показаны N из M» —
+// иначе выбор молча ограничился бы первой сотней.
+async function _ucLoadAccs(q) {
+  const box = document.getElementById('ucAccounts');
+  if (!box) return;
+  try {
+    const r = await accPickerLoad('active', q);
+    const live = r.accs;
+    box.innerHTML = live.length
+      ? live.map(a=>`<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px">
+          <input type="checkbox" class="uc-acc-cb" value="${a.id}" ${UC_ACC_SEL.has(a.id)?'checked':''} onchange="ucToggleAcc(${a.id}, this.checked)">
+          ${esc(a.phone||a.first_name||('#'+a.id))}</label>`).join('')
+      : `<div style="font-size:13px;color:var(--hint)">${q ? 'По запросу активных не найдено' : 'Нет активных аккаунтов'}</div>`;
+    accPickerSetNote('ucAccounts', accPickerNote(r));
+  } catch(e) {
+    box.innerHTML = '<div style="font-size:13px;color:var(--hint)">Не удалось загрузить аккаунты</div>';
+    accPickerSetNote('ucAccounts', '');
+  }
+}
+
+function ucToggleAcc(id, on) {
+  if (on) UC_ACC_SEL.add(id); else UC_ACC_SEL.delete(id);
+}
+
+function _ucSpec() {
+  const on = id => document.getElementById(id).checked;
+  const name = (document.getElementById('ucName').value || '').trim();
+  const text = (document.getElementById('ucText').value || '').trim();
+  const when = (document.getElementById('ucWhen').value || '').trim();
+  const targets = {};
+  if (on('ucKChannels')) {
+    const t = {enabled: true};
+    // Пустой список = «во все управляемые каналы» (поведение mass_publish).
+    if (document.getElementById('ucChScope').value === 'pick') t.channel_ids = [...UC_CH_SEL];
+    targets.channels = t;
+  }
+  if (on('ucKChats')) targets.chats = {enabled: true, acc_ids: [...UC_ACC_SEL]};
+  if (on('ucKBots')) targets.bots = {enabled: true, segment: document.getElementById('ucBotSeg').value};
+  if (on('ucKDm')) targets.dm = {enabled: true, target_type: document.getElementById('ucDmTarget').value};
+  const settings = {
+    silent: on('ucSilent'),
+    delay_seconds: parseInt(document.getElementById('ucDelay').value) || 0,
+  };
+  if (when) settings.scheduled_for = new Date(when).toISOString();
+  return {name: name || 'Кампания', content: {text}, settings, targets};
+}
+
+// Что именно уйдёт — словами и числами, ДО нажатия. Экран массовой публикации
+// уже учил: подтверждение без числа адресатов — это подпись не глядя.
+function _ucSummary(spec) {
+  const out = [];
+  const t = spec.targets;
+  if (t.channels) {
+    out.push(t.channels.channel_ids
+      ? `каналы: ${t.channels.channel_ids.length} выбрано`
+      : `каналы: ВСЕ мои${UC_CH_TOTAL?' ('+UC_CH_TOTAL+')':''}`);
+  }
+  if (t.chats) out.push(`чаты аккаунтов: ${t.chats.acc_ids.length} (по операции на аккаунт)`);
+  if (t.bots) out.push('подписчики ботов: по рассылке на каждого бота');
+  if (t.dm) out.push(t.dm.target_type === 'contacts' ? 'ЛС: все контакты' : 'ЛС: подписчики всех ботов');
+  return out;
+}
+
+async function launchUniCampaign() {
+  const err = document.getElementById('ucErr');
+  const btn = document.getElementById('ucBtn');
+  err.style.display = 'none';
+  const spec = _ucSpec();
+  const fail = m => { err.textContent = m; err.style.display = 'block'; tg.HapticFeedback?.notificationOccurred('error'); };
+  if (!spec.content.text) return fail('Введите текст сообщения');
+  const kinds = Object.keys(spec.targets);
+  if (!kinds.length) return fail('Отметьте хотя бы один ресурс: каналы, чаты, боты или ЛС');
+  if (spec.targets.chats && !spec.targets.chats.acc_ids.length) return fail('Для рассылки по чатам выберите хотя бы один аккаунт');
+  if (spec.targets.channels && spec.targets.channels.channel_ids && !spec.targets.channels.channel_ids.length) return fail('Отметьте каналы или выберите «Во все мои каналы»');
+
+  const lines = _ucSummary(spec);
+  const later = spec.settings.scheduled_for ? ' Запуск отложен на выбранное время.' : '';
+  if (!await askConfirm('Кампания уйдёт по ' + lines.length + ' направлениям:\n\n• '
+      + lines.join('\n• ') + '\n\nПо каждому ресурсу встанет своя операция — '
+      + 'останавливать их придётся по отдельности в «Операциях».' + later + ' Запустить?')) return;
+
+  btn.disabled = true; btn.textContent = '⏳ Запуск...';
+  try {
+    const d = await api('/api/miniapp/campaign/launch', {method:'POST', body:JSON.stringify(spec)});
+    const started = (d.children || []).length;
+    // Отказ отдельной ветки не валит кампанию — движок копит причины в errors.
+    // Промолчать о них значит соврать, что ушло всё.
+    if (d.errors && d.errors.length) {
+      toast(`⚠️ Запущено операций: ${started}. Не ушло: ${d.errors.join('; ')}`);
+    } else {
+      tg.HapticFeedback?.notificationOccurred('success');
+      toast(`✅ Кампания запущена · операций: ${started}`);
+    }
+    LOADED['broadcasts'] = false;
+    openOps();
+  } catch(e) {
+    fail('Ошибка: ' + errRu(e));
+  } finally {
+    btn.disabled = false; btn.textContent = '🚀 Запустить кампанию';
+  }
+}
+
 // ── Планировщик кампании (цель → план по ёмкости) ───────────────────────────
 let CAMPAIGN_PLAN = null;
 function openCampaignPlanner() { push('s-campaign'); }
@@ -20604,6 +21269,10 @@ async function openGhostDetail(id) {
           <div class="li-sub wrap">${esc(l.result_ru||l.result||'')}${l.target?' · '+esc(String(l.target)):''}${l.error_msg?' · '+esc(String(l.error_msg).slice(0,120)):''} · ${ago(l.executed_at)}</div>
         </div></div>`;
       }).join('') + '</div>';
+      // Журнал приезжает последними тридцатью. Без этой строки владелец,
+      // который открыл экран проверить, на чём призрак спотыкается, принимал
+      // тридцать записей за весь журнал.
+      h += anCap(logs.length, d.log_total, 'запись', 'записи', 'записей');
     }
     h += `<div style="padding:12px 0"><button class="btn btn-d" style="width:100%" onclick="deleteGhost(${id}, this)">🗑 Удалить профиль</button></div></div>`;
     txt('ghdBody', h);
@@ -25121,75 +25790,6 @@ async function checkChannelRanks() {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
-// ── Group Factory ───────────────────────────────────────
-// Группу создаёт АККАУНТ: без единого подключённого аккаунта здесь делать
-// нечего. Раньше экран этого не говорил — выпадашка показывала «Выберите
-// аккаунт…» и ни одного варианта, кнопка «Создать группу» оставалась активной
-// и всегда падала на «Выберите аккаунт». Тупик из трёх шагов вместо ответа на
-// первом. Теперь состояние экрана честное на каждом шаге: загрузка → список,
-// пусто или ошибка, и кнопка живёт только когда есть чем создавать.
-function _gfSetSubmit(enabled, label) {
-  const b = document.getElementById('gfSubmit');
-  if (!b) return;
-  b.disabled = !enabled;
-  b.style.opacity = enabled ? '' : '.5';
-  b.textContent = label || '👥 Создать группу';
-}
-async function openGroupFactory() {
-  push('s-groupfactory');
-  document.getElementById('gfTitle').value='';
-  _gfLoadAccounts();
-}
-// Повтор после сбоя вызывает ИМЕННО загрузку, а не открытие экрана: push() ещё
-// раз положил бы тот же экран в стек, и «назад» пришлось бы жать дважды.
-async function _gfLoadAccounts(q) {
-  document.getElementById('gfErr').textContent='';
-  accPickerSearchBox('gfAccount', _gfLoadAccounts);
-  const sel = document.getElementById('gfAccount');
-  // Пока идёт запрос, в выпадашке висели аккаунты с ПРОШЛОГО открытия экрана.
-  sel.innerHTML = '<option value="">Загрузка аккаунтов…</option>';
-  _gfSetSubmit(false, '⏳ Загрузка аккаунтов…');
-  try {
-    const r = await accPickerLoad('', q);
-    const accs = r.accs;
-    if (!accs.length) {
-      sel.innerHTML = `<option value="">${q ? 'По запросу ничего не найдено' : 'Нет подключённых аккаунтов'}</option>`;
-      accPickerSetNote('gfAccount', '');
-      if (q) { _gfSetSubmit(false, 'Уточните поиск'); return; }
-      document.getElementById('gfErr').innerHTML =
-        'Группу создаёт аккаунт, а их пока нет. '
-        + '<span style="color:var(--accent);cursor:pointer;text-decoration:underline" '
-        + 'onclick="goTab(\'accounts\')">Подключить аккаунт</span>';
-      _gfSetSubmit(false, 'Нужен хотя бы один аккаунт');
-      return;
-    }
-    sel.innerHTML='<option value="">Выберите аккаунт…</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
-    accPickerSetNote('gfAccount', accPickerNote(r));
-    _gfSetSubmit(true);
-  } catch(e) {
-    sel.innerHTML = '<option value="">Аккаунты не загрузились</option>';
-    // Причина отказа не должна оставаться только в консоли: без неё непонятно,
-    // повторить сейчас или чинить связь.
-    document.getElementById('gfErr').innerHTML = esc(errRu(e,'Ошибка загрузки'))
-      + ' <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="_gfLoadAccounts()">↺ Повторить</span>';
-    _gfSetSubmit(false, 'Аккаунты не загрузились');
-  }
-}
-async function submitGroupFactory() {
-  const title = document.getElementById('gfTitle').value.trim();
-  const account_id = document.getElementById('gfAccount').value;
-  const is_supergroup = document.getElementById('gfSupergroup').checked;
-  const errEl = document.getElementById('gfErr');
-  errEl.textContent='';
-  if (!title) { errEl.textContent='Укажите название'; return; }
-  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
-  try {
-    await api('/api/miniapp/group_factory/submit',{method:'POST',body:JSON.stringify({title,account_id:+account_id,is_supergroup})});
-    toast('✅ Группа будет создана в ближайшее время');
-    document.getElementById('gfTitle').value='';
-  } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-}
-
 // ── Physics Hub ────────────────────────────────────────
 async function openPhysics() {
   push('s-physics');
@@ -25747,11 +26347,22 @@ function _meshWhen(iso) {
 
 // Очередь репостов (mesh_queue) с самого начала хранит, что ушло, что ждёт и
 // что упало с текстом ошибки. Экран показывал из этого одно число.
-async function openMeshDetail(meshId) {
+// Чипы «ждут · ушли · с ошибкой» считали всю очередь, а список под ними был
+// последними тридцатью записями по времени: при сорока восьми ошибках среди
+// тысяч отправок в списке не было ни одной, и узнать, почему репост не дошёл,
+// было негде. Поэтому чип стал дверью в срез очереди, а список говорит, сколько
+// в срезе всего.
+async function openMeshDetail(meshId, status) {
   push('s-meshdetail');
+  loadMeshDetail(meshId, status);
+}
+
+async function loadMeshDetail(meshId, status) {
+  const st = ['pending','sent','error'].includes(status) ? status : '';
   txt('mdBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api(`/api/miniapp/content_mesh/${meshId}`);
+    const d = await api(`/api/miniapp/content_mesh/${meshId}`
+      + (st ? '?status=' + encodeURIComponent(st) : ''));
     const m = d.mesh||{};
     const q = d.queue||{};
     const targets = d.targets||[];
@@ -25763,9 +26374,9 @@ async function openMeshDetail(meshId) {
         <div class="li-sub wrap">Источник ${esc(m.source_channel||'не указан')} · задержка ${m.delay_minutes} ${plural(m.delay_minutes,'минута','минуты','минут')}${m.append_text?' · подпись «'+esc(String(m.append_text).slice(0,60))+'»':''}</div>
       </div></div>
       <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(q.pending||0)}</div><div class="kpi-chip-lbl">ждут</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(q.sent||0)}</div><div class="kpi-chip-lbl">ушли</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val" style="color:${(q.error||0)?'var(--red)':'inherit'}">${num(q.error||0)}</div><div class="kpi-chip-lbl">с ошибкой</div></div>
+        ${_meshChip(meshId, st, 'pending', q.pending||0, 'ждут', '')}
+        ${_meshChip(meshId, st, 'sent', q.sent||0, 'ушли', '')}
+        ${_meshChip(meshId, st, 'error', q.error||0, 'с ошибкой', (q.error||0)?'var(--red)':'')}
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button class="btn ${m.enabled?'btn-s':'btn-p'}" style="flex:1" onclick="toggleMeshFrom(${meshId})">${m.enabled?'⏸ Выключить':'▶️ Включить'}</button>
@@ -25788,21 +26399,36 @@ async function openMeshDetail(meshId) {
         </div></div>`).join('') + '</div>';
       h += `<div style="padding:8px 0"><button class="btn btn-s" style="width:100%" onclick="openMeshTargets(${meshId},'${esc(String(m.name||'').replace(/'/g,''))}')">+ Добавить канал-получатель</button></div>`;
     }
-    h += '<div class="sec" style="margin-top:8px">Последние репосты</div>';
+    h += `<div class="sec" style="margin-top:8px">${st?esc(MESH_Q_RU[st]||st)+' — записи очереди':'Последние репосты'}${
+      st?` · <span style="color:var(--accent);cursor:pointer" onclick="loadMeshDetail(${meshId})" role="button" tabindex="0">показать все</span>`:''}</div>`;
     if (!recent.length) {
-      h += empty('🕐','Репостов ещё не было',
-        m.enabled ? 'Сеть ждёт новый пост в источнике — как появится, он встанет в очередь.'
-                  : 'Сеть выключена, поэтому ничего не репостится.');
+      h += st
+        ? empty('🕐','В этом срезе записей нет',
+            'Нажмите «показать все» — и список снова покажет всю очередь.')
+        : empty('🕐','Репостов ещё не было',
+            m.enabled ? 'Сеть ждёт новый пост в источнике — как появится, он встанет в очередь.'
+                      : 'Сеть выключена, поэтому ничего не репостится.');
     } else {
       h += '<div class="lst">' + recent.map(r=>`
         <div class="li"><div class="li-body">
           <div class="li-name">${esc(MESH_Q_RU[r.status]||r.status)} → ${esc(r.target_channel||'канал удалён')}</div>
           <div class="li-sub wrap">Пост №${r.source_msg_id}${r.error_msg?' · '+esc(String(r.error_msg).slice(0,120)):''} · ${r.status==='pending'?_meshWhen(r.scheduled_at):ago(r.sent_at||r.scheduled_at)}</div>
         </div></div>`).join('') + '</div>';
+      h += anCap(recent.length, d.recent_total, 'запись', 'записи', 'записей');
     }
     h += `<div style="padding:12px 0"><button class="btn btn-d" style="width:100%" onclick="deleteMesh(${meshId}, this)">🗑 Удалить сеть</button></div></div>`;
     txt('mdBody', h);
-  } catch(e) { txt('mdBody', errHtml(errRu(e), `openMeshDetail(${Number(meshId)})`)); }
+  } catch(e) { txt('mdBody', errHtml(errRu(e), `loadMeshDetail(${Number(meshId)},'${st}')`)); }
+}
+
+// Чип очереди — дверь в срез по состоянию. Нажатый чип подсвечен и ведёт
+// обратно ко всей очереди, иначе из среза было бы не выйти.
+function _meshChip(meshId, cur, key, val, label, color) {
+  const on = cur === key;
+  return `<div class="kpi-chip" style="cursor:pointer${on?';outline:2px solid var(--accent)':''}" role="button" tabindex="0"
+    onclick="loadMeshDetail(${meshId}${on?'':`,'${key}'`})">
+    <div class="kpi-chip-val"${color?` style="color:${color}"`:''}>${num(val)}</div>
+    <div class="kpi-chip-lbl">${label}${on?' ·':''}</div></div>`;
 }
 
 async function toggleMeshFrom(meshId) {
@@ -26627,6 +27253,73 @@ const AF_SEG_RU = {all:'Все подписчики', new_7d:'Новые за 7 
   new_30d:'Новые за 30 дней', inactive_30d:'Неактивные 30 дней'};
 let _AF_CUR = 0;
 
+// ── Люди за числом воронки ──────────────────────────────────────────────────
+//
+// Оба экрана воронок показывали только числа: «сошли 48», «ждут этого шага:
+// 12», «отвал дальше: 31». Кто именно ушёл и на каком шаге — главный вопрос
+// к любой цепочке, — ответа не было: маршрута за этими людьми не существовало
+// ни у одной из двух систем воронок. Теперь каждое из этих чисел — дверь, и
+// срез задаётся теми же полями, из которых число посчитано, поэтому итог
+// среза с ним совпадает.
+let _FPPL = null;
+
+function openFunnelPeople(kind, fid, title, qs) {
+  push('s-funnelppl');
+  _FPPL = {kind: kind, fid: Number(fid), title: title || '', qs: qs || ''};
+  txt('fppl-title', title || '');
+  loadFunnelPeople(100);
+}
+
+async function loadFunnelPeople(limit) {
+  if (!_FPPL) return;
+  const cap = Math.max(1, Math.min(Number(limit)||100, 500));
+  txt('fpplBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  const base = _FPPL.kind === 'auto'
+    ? `/api/miniapp/auto_funnel/${_FPPL.fid}/people`
+    : `/api/miniapp/funnel/${_FPPL.fid}/people`;
+  try {
+    const d = await api(base + '?' + (_FPPL.qs ? _FPPL.qs + '&' : '') + 'limit=' + cap);
+    const rows = d.items||[];
+    const total = Number(d.total||rows.length);
+    if (!rows.length) {
+      txt('fpplBody', empty('👥','В этом срезе никого нет',
+        'Либо число устарело, либо люди уже сдвинулись на другой шаг. Вернитесь и откройте воронку заново.'));
+      return;
+    }
+    let note = anCap(rows.length, total, 'человек', 'человека', 'человек');
+    if (total > rows.length && cap < 500) {
+      note += `<button class="btn btn-s" style="width:100%;margin:0 0 8px" onclick="loadFunnelPeople(500)">⬇️ Догрузить до 500</button>`;
+    }
+    txt('fpplBody', note + '<div class="lst">' + rows.map(r=>{
+      const who = r.name ? esc(r.name)+(r.username?' · @'+esc(r.username):'')
+                : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(String(r.user_id)));
+      const parts = [];
+      if (r.status) parts.push(esc(_FPPL_STATUS[r.status]||r.status));
+      parts.push('шаг ' + num(r.step||0));
+      if (r.fail_count) parts.push('сбоев: ' + num(r.fail_count));
+      if (r.next_send_at) parts.push('следующее ' + esc(ago(r.next_send_at)));
+      else if (r.completed) parts.push('дошёл до конца');
+      else if (r.dropped) parts.push('сошёл');
+      return `<div class="li tap" onclick="copyToClipboard('${Number(r.user_id)}','📋 Номер скопирован')" role="button" tabindex="0">
+        <div class="row-body"><div class="row-name">${who}</div>
+          <div class="li-sub wrap">${parts.join(' · ')}</div></div>
+        <span class="chev">›</span></div>`;
+    }).join('') + '</div>'
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="fpplCopyIds()">📋 Скопировать номера (${num(rows.length)}${
+          total > rows.length ? ' из ' + num(total) : ''})</button>`);
+    _FPPL_ROWS = rows;
+  } catch(e) { txt('fpplBody', errHtml(errRu(e), `loadFunnelPeople(${cap})`)); }
+}
+
+const _FPPL_STATUS = {active:'идёт', completed:'дошёл до конца',
+                      stopped:'остановлен', error:'сбой'};
+let _FPPL_ROWS = [];
+function fpplCopyIds() {
+  if (!_FPPL_ROWS.length) return;
+  copyToClipboard(_FPPL_ROWS.map(r=>String(r.user_id)).join('\n'),
+    '📋 Скопировано номеров: ' + _FPPL_ROWS.length);
+}
+
 async function openFunnelSteps(fid, fname) {
   push('s-afsteps');
   _AF_CUR = fid;
@@ -26650,10 +27343,11 @@ async function openFunnelSteps(fid, fname) {
     if (!runs.total) {
       html += `<div class="hint" style="padding:0 16px 8px">Пока никто: люди попадают в воронку сами, когда подходят под сегмент «${esc(AF_SEG_RU[f.target_segment]||f.target_segment||'')}».</div>`;
     } else {
+      const _fp = (q, t) => `openFunnelPeople('auto',${fid},'${esc(String(t))}','${q}')`;
       html += `<div style="display:flex;gap:8px;padding:0 16px 8px;flex-wrap:wrap">
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(st.active||0)}</div><div class="kpi-chip-lbl">идут</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val">${num(st.completed||0)}</div><div class="kpi-chip-lbl">дошли до конца</div></div>
-        <div class="kpi-chip"><div class="kpi-chip-val">${num((st.stopped||0)+(st.error||0))}</div><div class="kpi-chip-lbl">сошли</div></div>
+        <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=active','Идут по воронке')}"><div class="kpi-chip-val">${num(st.active||0)}</div><div class="kpi-chip-lbl">идут ›</div></div>
+        <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=completed','Дошли до конца')}"><div class="kpi-chip-val">${num(st.completed||0)}</div><div class="kpi-chip-lbl">дошли до конца ›</div></div>
+        <div class="kpi-chip" style="cursor:pointer" role="button" tabindex="0" onclick="${_fp('status=lost','Сошли с воронки')}"><div class="kpi-chip-val">${num((st.stopped||0)+(st.error||0))}</div><div class="kpi-chip-lbl">сошли ›</div></div>
       </div>`;
     }
     html += `<div class="sec">Шаги воронки (${steps.length})</div>`;
@@ -26672,7 +27366,7 @@ async function openFunnelSteps(fid, fname) {
               <div class="li-name">Шаг ${s2.step_num} · через ${s2.delay_hours} ${plural(s2.delay_hours,'час','часа','часов')}</div>
               <div class="li-sub wrap">${esc((s2.message_text||'').slice(0,110))}${(s2.message_text||'').length>110?'…':''}</div>
               ${s2.button_text?`<div class="li-sub wrap" style="color:var(--accent)">🔘 ${esc(s2.button_text)}</div>`:''}
-              ${here?`<div class="li-sub wrap">⏳ ждут этого шага: ${num(here)}</div>`:''}
+              ${here?`<div class="li-sub wrap" style="color:var(--accent);cursor:pointer" role="button" tabindex="0" onclick="event.stopPropagation();openFunnelPeople('auto',${fid},'Ждут шага ${s2.step_num}','status=active&step=${s2.step_num}')">⏳ ждут этого шага: ${num(here)} ›</div>`:''}
             </div><span class="chev">›</span>
           </div>`;
       });
@@ -28417,21 +29111,44 @@ function renderAudSegments(segments) {
 let _AUDSEG_ROWS = [];
 // Кто в сегменте: имя, сколько писал и когда был последний раз. Номера можно
 // забрать целиком — «1 240 спящих» нужны не для любования, а для рассылки.
+// Экран сегмента нужен, чтобы забрать людей сегмента: посмотреть, кто это, и
+// скопировать номера для рассылки. Сервер отдаёт первую сотню, а сегмент
+// «Спящие» — это тысяча двести человек. Ни список, ни кнопка «Скопировать
+// номера (100)» об этом не говорили: владелец уносил в буфере восемь процентов
+// сегмента и считал, что унёс сегмент. Отсюда и запрошенный потолок, и строка
+// об обрезке, и возможность догрузить до пятисот.
+let _AUDSEG = null;
 async function openAudSegment(i) {
   const seg = _AUD_SEGMENTS[i];
   if (!seg || !seg.key) return;
   push('s-audseg');
   txt('audseg-title', seg.name||'');
+  _AUDSEG = {key: seg.key, name: seg.name||''};
+  loadAudSegment(100);
+}
+
+async function loadAudSegment(limit) {
+  if (!_AUDSEG) return;
+  const cap = Math.max(1, Math.min(Number(limit)||100, 500));
   txt('audsegBody','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/audience_analytics/segment?key='+encodeURIComponent(seg.key));
+    const d = await api('/api/miniapp/audience_analytics/segment?key='
+      + encodeURIComponent(_AUDSEG.key) + '&limit=' + cap);
     _AUDSEG_ROWS = d.items||[];
+    _AUDSEG_TOTAL = Number(d.total||_AUDSEG_ROWS.length);
     if (!_AUDSEG_ROWS.length) {
       txt('audsegBody', empty('👥','В сегменте пусто',
         'Записанной активности по этим подписчикам нет'));
       return;
     }
-    txt('audsegBody',
+    let note = anCap(_AUDSEG_ROWS.length, _AUDSEG_TOTAL,
+                     'человек', 'человека', 'человек');
+    if (_AUDSEG_TOTAL > _AUDSEG_ROWS.length) {
+      note += cap < 500
+        ? `<button class="btn btn-s" style="width:100%;margin:0 0 8px" onclick="loadAudSegment(500)">⬇️ Догрузить до 500</button>`
+        : `<div class="lst-more-note">Больше 500 человек за раз экран не отдаёт. Сузьте сегмент по боту или берите номера рассылкой по сегменту.</div>`;
+    }
+    txt('audsegBody', note +
       `<div class="lst">` + _AUDSEG_ROWS.map(r=>{
         const who = r.name ? esc(r.name)+(r.username?' · @'+esc(r.username):'')
                   : (r.username ? '@'+esc(r.username) : 'Пользователь '+esc(String(r.user_id)));
@@ -28441,13 +29158,17 @@ async function openAudSegment(i) {
               r.last_seen?' · был(а) '+esc(ago(r.last_seen)):' · активности не было'}</div></div>
           <span class="chev">›</span></div>`;
       }).join('') + `</div>`
-      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="audSegCopyIds()">📋 Скопировать номера (${num(_AUDSEG_ROWS.length)})</button>`);
-  } catch(e) { txt('audsegBody', errHtml(errRu(e),'openAudSegment('+i+')')); }
+      + `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="audSegCopyIds()">📋 Скопировать номера (${num(_AUDSEG_ROWS.length)}${
+          _AUDSEG_TOTAL > _AUDSEG_ROWS.length ? ' из ' + num(_AUDSEG_TOTAL) : ''})</button>`);
+  } catch(e) { txt('audsegBody', errHtml(errRu(e),'loadAudSegment('+cap+')')); }
 }
+let _AUDSEG_TOTAL = 0;
 function audSegCopyIds() {
   if (!_AUDSEG_ROWS.length) return;
+  const partial = _AUDSEG_TOTAL > _AUDSEG_ROWS.length
+    ? ' из ' + _AUDSEG_TOTAL + ' — остальные не загружены' : '';
   copyToClipboard(_AUDSEG_ROWS.map(r=>String(r.user_id)).join('\n'),
-    '📋 Скопировано номеров: ' + _AUDSEG_ROWS.length);
+    '📋 Скопировано номеров: ' + _AUDSEG_ROWS.length + partial);
 }
 function renderAudInsights(insights) {
   if (!insights.length) {

@@ -142,7 +142,17 @@ class _FakePool:
         self.rows = rows
 
     async def fetch(self, query, *args):
+        # Чтение потомков-повторов (`journal_op_ids`) идёт тем же `fetch`;
+        # у операции здесь их нет, а предмет файла — разбор строк журнала.
+        if "operation_log" not in query:
+            return []
         return self.rows
+
+    async def fetchrow(self, query, *args):
+        # Состав семьи повторов двери читают fail-closed: не прочитали —
+        # прогон откладывается, иначе журнал выглядел бы пустым. Здесь семья
+        # здоровая и состоит из одной операции.
+        return {"src": None}
 
 
 def _run(coro):

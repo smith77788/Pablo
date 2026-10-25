@@ -27,7 +27,7 @@ import re
 
 import pytest
 
-from tests.miniapp_source import miniapp_source, source_of
+from tests.miniapp_source import js_functions, miniapp_source, source_of
 
 # Пикеры: имя загрузчика → (якорь в разметке, нужен ли серверный срез «активные»)
 PICKERS = {
@@ -35,9 +35,9 @@ PICKERS = {
     "_warmupLoadAccs": ("warmupAccSel", True),
     "_gpLoadAccs": ("gpAccountsList", False),
     "_massOpsLoadAccs": ("mjAccounts", True),
-    "_gfLoadAccounts": ("gfAccount", False),
     "_meshLoadAccs": ("mc-account", False),
     "_invLoadAccs": ("massInviteAccsWrap", True),
+    "_ucLoadAccs": ("ucAccounts", True),
 }
 
 
@@ -60,6 +60,24 @@ def _body(fn: str) -> str:
             if depth == 0:
                 return src[i:j + 1]
     raise AssertionError(f"не закрылось тело {fn}")
+
+
+def test_the_table_lists_every_picker_there_is():
+    """Таблица PICKERS — это и есть измеритель; устареет она — молча.
+
+    Якорь разметки и признак «активные считает сервер» из кода не вывести,
+    поэтому таблица осталась ручной. Но её полнота выводится: пикер — это
+    функция, которая зовёт accPickerLoad(). Без этой сверки новый пикер
+    появляется без строки в таблице и не проверяется ничем, а удалённый
+    оставляет строку, по которой тесты падают на пустом месте (22.10.2026:
+    так и случилось с _gfLoadAccounts, когда уехал экран-дубль фабрики групп).
+    """
+    live = {n for n, body in js_functions().items()
+            if "accPickerLoad(" in body and n != "accPickerLoad"}
+    assert live, "ни одного пикера не нашлось — измеритель сломан"
+    assert live == set(PICKERS), (
+        f"таблица разошлась с кодом: без строки {sorted(live - set(PICKERS))}, "
+        f"лишние строки {sorted(set(PICKERS) - live)}")
 
 
 def test_no_picker_calls_accounts_without_limit():

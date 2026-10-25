@@ -1139,7 +1139,7 @@ async def cb_alerts(
         rows = await pool.fetch(
             "SELECT severity, event_type, details, created_at, account_id, bot_id "
             "FROM restriction_events WHERE owner_id=$1 "
-            "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            "ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
             user_id,
             limit,
             offset,
@@ -2074,7 +2074,7 @@ async def cb_op_reports(
         ops = await pool.fetch(
             "SELECT id, op_type, status, total_items, done_items, created_at, finished_at "
             "FROM operation_queue WHERE owner_id=$1 "
-            "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            "ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
             user_id,
             limit,
             offset,

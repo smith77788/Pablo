@@ -371,7 +371,7 @@ async def _show_template_step(
     try:
         templates = await pool.fetch(
             "SELECT id, name FROM asset_templates WHERE owner_id=$1 AND asset_type=$2 "
-            "ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            "ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4",
             user_id,
             asset_type,
             _TPL_PAGE_SIZE + 1,
@@ -1505,7 +1505,8 @@ async def _show_accounts_step(
     try:
         accounts = await pool.fetch(
             "SELECT id, phone, trust_score, is_active FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST LIMIT $2 OFFSET $3",
+            "WHERE owner_id=$1 AND is_active=TRUE "
+            "ORDER BY trust_score DESC NULLS LAST, id DESC LIMIT $2 OFFSET $3",
             user_id,
             _ACC_PAGE_SIZE + 1,
             offset,

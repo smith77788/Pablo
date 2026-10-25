@@ -27,7 +27,10 @@ operation_bus as _obus` лежал внутри `if op == "check":`, а испо
 from __future__ import annotations
 
 import ast
+import functools
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,16 +44,22 @@ COND_NODES = (
 )
 
 
-def _py_files() -> list[Path]:
+@functools.lru_cache(maxsize=1)
+def _py_files() -> tuple[Path, ...]:
     files: list[Path] = []
     for sub in WATCHED:
         d = ROOT / sub
         if d.is_dir():
             files.extend(p for p in d.rglob("*.py") if "__pycache__" not in p.parts)
     files.extend(p for p in ROOT.glob("*.py"))
-    return sorted(files)
+    return tuple(sorted(files))
 
 
+# Разбор всех файлов — самая долгая часть, и оба правила ниже разбирают одно и
+# то же. Кэш по пути убирает ровно второй проход: 20 + 18 секунд прогона
+# становятся 20. Дерево читается, но не меняется, поэтому общее на два правила
+# безопасно (ссылки `parent` уже расставлены при первом разборе).
+@functools.lru_cache(maxsize=None)
 def _parse(path: Path) -> ast.Module | None:
     try:
         tree = ast.parse(path.read_text("utf-8"))
@@ -199,3 +208,16 @@ def test_no_use_of_shadowed_module_name_without_binding():
         "Чтение имени, которое локальный import затенил, но мог не связать "
         "(UnboundLocalError в рантайме):\n  " + "\n  ".join(offenders[:40])
     )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _free_the_parsed_trees():
+    """Деревья живут только пока идут правила этого файла.
+
+    Разбор всех 1700 файлов держит около 670 МиБ. Экономить двадцать секунд
+    прогона такой памятью до самого конца набора нельзя: дальше идут тесты,
+    поднимающие подпроцессы, и съеденная память стоит дороже сэкономленного
+    времени. Поэтому кэш снимается, как только оба правила отработали.
+    """
+    yield
+    _parse.cache_clear()

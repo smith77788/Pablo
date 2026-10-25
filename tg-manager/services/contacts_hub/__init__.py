@@ -1,7 +1,7 @@
 from .repository import (
     get_contacts, get_contact, upsert_contact, update_contact, delete_contact,
     ensure_contact_by_telegram_id,
-    get_contact_groups, add_contact_to_group, remove_contact_from_group,
+    get_contact_groups,
     get_contact_stats, log_contact_history, log_sync,
 )
 from .merge_engine import find_duplicates, auto_merge, manual_merge
@@ -18,7 +18,7 @@ from .trust_engine import (
 )
 from .crm_engine import (
     get_crm_data, upsert_crm, log_crm_activity, get_crm_activity,
-    get_upcoming_reminders, get_crm_stats, get_crm_overdue,
+    get_upcoming_reminders, get_crm_overdue,
 )
 from .smart_tags_engine import (
     apply_smart_tags, get_smart_tags, get_smart_tag_rules,
@@ -28,7 +28,7 @@ from .bulk_ops_engine import (
     bulk_tag, bulk_untag, bulk_set_favorite, bulk_delete,
     bulk_add_to_group, bulk_remove_from_group,
     create_group, update_group, delete_group,
-    bulk_merge, bulk_export, bulk_add_tags, bulk_remove_tags,
+    bulk_merge, bulk_add_tags, bulk_remove_tags,
     bulk_set_importance, bulk_set_rating,
 )
 from .export_engine import export_csv, export_vcf, export_json

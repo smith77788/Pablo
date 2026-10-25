@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date as _date, datetime, timezone
 from typing import Optional
 
 import asyncpg
@@ -90,7 +90,21 @@ def _segment_where(owner_id, f: dict):
         # совпадением считается и точный тег. Условие собирается ЗДЕСЬ, то есть
         # остаётся общим для списка и для рабочего среза: «что вижу» и «на что
         # применяю действие» по-прежнему считаются одним запросом.
-        words = [w for w in re.split(r'\s+', str(f['search']).strip().lower()) if w]
+        #
+        # ОПЕРАТОРЫ. `@ник`, `#тег`, `company:`, `phone:` понимал только поиск
+        # БОТА (search_engine.search_contacts); список мини-аппа — нет, и
+        # подсказки о них не было ни в одном поле. Владелец, набравший `#vip` в
+        # единственном поле поиска хаба, не находил никого: тот же тег, та же
+        # база, разный ответ — ровно та жалоба, что и про теги выше, только на
+        # уровень глубже. Разбор и условия берутся из search_engine, чтобы у
+        # двух поисков было одно поведение, а не две копии правил.
+        from services.contacts_hub.search_engine import (
+            build_operator_conditions, parse_operators)
+        parsed, rest = parse_operators(str(f['search']))
+        op_conds, op_params, idx = build_operator_conditions(parsed, idx)
+        conds.extend(op_conds)
+        params.extend(op_params)
+        words = [w for w in re.split(r'\s+', rest.strip().lower()) if w]
         for w in words:
             conds.append(
                 f'(first_name ILIKE ${idx} OR last_name ILIKE ${idx} OR '
@@ -165,7 +179,14 @@ async def get_contacts(pool, owner_id, search=None, tag=None, group_id=None,
         'synced': 'last_synced_at DESC',
         'changed': 'last_changed_at DESC',
     }
-    order = sort_map.get(sort_by, 'first_name')
+    # Добивочный уникальный ключ обязателен: список листается по offset
+    # («Показать ещё»), а все сортировки выше НЕУНИКАЛЬНЫ — тёзки, пустые
+    # имена, одинаковые даты. Порядок внутри равных значений Postgres не
+    # обещает, и строка, изменившаяся между запросами страниц (а их пишет и
+    # синхронизация, и сам владелец), переезжает. Без добивки проход по
+    # списку показывал одного человека дважды, а другого — ни разу: проверено
+    # живьём в tests/test_paging_does_not_skip_or_repeat_people.py.
+    order = sort_map.get(sort_by, 'first_name') + ', id'
     params.extend([limit, offset])
     rows = await pool.fetch(f'SELECT * FROM unified_contacts WHERE {where} ORDER BY {order} LIMIT ${idx} OFFSET ${idx+1}', *params)
     total = await pool.fetchval(f'SELECT COUNT(*) FROM unified_contacts WHERE {where}', *params[:-2])
@@ -366,14 +387,61 @@ async def ensure_contact_by_telegram_id(
         return None
 
 
+# Поля карточки контакта, которые владелец правит и которые откат к версии
+# обязан вернуть. Список лежал в ТРЁХ местах — здесь, в rollback_to_version и
+# в сборке снимка версии, — значит поле, добавленное в одно из них, молча
+# терялось в остальных: правка проходила, а откат возвращал не всё. Список
+# один, и живёт он тут, в самом нижнем слое.
+EDITABLE_FIELDS = (
+    'first_name', 'last_name', 'username', 'display_name', 'phones', 'emails',
+    'company', 'position', 'websites', 'addresses', 'birthday', 'notes', 'tags',
+    'color_label', 'is_favorite', 'is_premium', 'importance_level', 'user_rating',
+    'custom_fields',
+)
+
+# Поля, которые уходят в jsonb-колонки и требуют json.dumps.
+_JSONB_FIELDS = ('phones', 'emails', 'websites', 'addresses', 'custom_fields')
+
+
+class BadDate(ValueError):
+    """Дата из ввода не разобралась: ошибка владельца, а не сбой сервера."""
+
+
+def coerce_date(value):
+    """None/`date` → как есть; ISO-строка → `date`; пустая строка → None.
+
+    `birthday` — это колонка DATE, и asyncpg биндит её БЕЗ каста: строка
+    роняет запрос (DataError), то есть вся правка контакта. А с экрана
+    приходит ровно строка: `<input type="date">.value` — «1990-05-01».
+    Поэтому день рождения в карточке не сохранялся никогда: владелец
+    заполнял поле, жал «Сохранить» и получал ошибку на всей правке.
+    Тот же дефект уже находили у `next_reminder_at` (см. uch_crm_reminder).
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, _date):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return _date.fromisoformat(s[:10])
+    except (TypeError, ValueError):
+        raise BadDate("Некорректная дата рождения")
+
+
 async def update_contact(pool, contact_id, owner_id, updates: dict) -> bool:
     set_clauses = []
     params = []
     idx = 1
-    for field in ('first_name','last_name','username','display_name','phones','emails','company','position','websites','addresses','birthday','notes','tags','color_label','is_favorite','is_premium','importance_level','user_rating','custom_fields'):
+    for field in EDITABLE_FIELDS:
         if field in updates:
             val = updates[field]
-            if field in ('phones','emails','websites','addresses','custom_fields'):
+            if field == 'birthday':
+                val = coerce_date(val)
+            if field in _JSONB_FIELDS:
                 set_clauses.append(f'{field} = ${idx}::jsonb')
                 params.append(json.dumps(val))
             elif field == 'tags':
@@ -399,17 +467,12 @@ async def get_contact_groups(pool, owner_id) -> list:
     return [dict(r) for r in rows]
 
 
-async def add_contact_to_group(pool, contact_id, group_id) -> bool:
-    try:
-        await pool.execute('INSERT INTO contact_group_members (group_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', group_id, contact_id)
-        return True
-    except Exception:
-        return False
-
-
-async def remove_contact_from_group(pool, contact_id, group_id) -> bool:
-    result = await pool.execute('DELETE FROM contact_group_members WHERE group_id=$1 AND contact_id=$2', group_id, contact_id)
-    return result != 'DELETE 0'
+# Состав группы у ОДНОГО контакта отдельной функции больше не имеет: это была
+# вторая реализация той же операции, и владельца в её запросах не было вообще
+# (ручки .../contacts/{id}/groups/{gid} пускали к чужой группе по перебору
+# целого id). Единственный путь — bulk_ops_engine.bulk_add_to_group /
+# bulk_remove_from_group: владельца проверяет сам запрос, и карточка контакта
+# зовёт их же списком из одного контакта.
 
 
 async def get_contact_stats(pool, owner_id) -> dict:

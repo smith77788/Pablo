@@ -754,6 +754,65 @@ def _json_resp(data: Any, status: int = 200) -> web.Response:
 # Подробности уходят в лог, наружу — одна русская фраза.
 _INTERNAL_ERROR = "Внутренняя ошибка сервера. Повторите позже."
 
+# Нечитаемое тело запроса — вина клиента, и отвечать на неё надо 400.
+#
+# Тело читают около 250 изменяющих ручек, и ни одна не разбирает ошибку
+# разбора: `await request.json()` на мусоре или на ПУСТОМ теле бросает
+# JSONDecodeError, и дальше это ловит либо общий `except` ручки, либо слой
+# ниже — в обоих случаях владелец получает «Что-то пошло не так, попробуйте
+# ещё раз». Совет неверный: повтор того же запроса даст то же самое. Плюс на
+# каждый такой заход в журнал уезжает полная трассировка, и настоящие
+# пятисотки тонут среди чужих опечаток. И 500 для клиента значит «повтори
+# позже», а 400 — «не повторяй».
+#
+# Чинить это в 250 ручках нельзя: класс останется открытым для 251-й.
+# Поэтому решение стоит слоем — там же, где уже стоит страховка от
+# необработанных исключений.
+#
+# Отличить вину клиента от своей обязательно, и на глаз это не делается:
+# JSONDecodeError прилетает и изнутри — из jsonb-поля базы, из ответа чужого
+# API. Ответить на это «ты прислал мусор» значило бы соврать. Признак точный:
+# исключение ВЫЛЕТЕЛО ИЗ разбора тела, то есть его трассировка проходит через
+# `Request.json`/`Request.post` самого aiohttp. Тело при этом не перечитывается:
+# перечитывание в обработчике исключения — лишний ввод-вывод на пути ошибки.
+_BAD_BODY = ("Запрос не разобран: приложение отправило неполные данные. "
+             "Закройте и откройте мини-апп, затем повторите.")
+
+_BODY_READERS = ("json", "post")
+
+
+def bad_body_response(request, exc: BaseException):
+    """Ответ 400, если тело прислано сломанным; иначе None.
+
+    Ручек, читающих тело, около 250, и у многих свой общий `except`, который
+    перехватывает ошибку раньше страховочного слоя. Поэтому решение зовут и
+    оттуда — но текст сообщения и журнальный след лежат ЗДЕСЬ, в одном месте:
+    иначе 28 копий разойдутся, и часть из них начнёт писать в журнал тело
+    запроса, в котором бывают токены.
+
+    В журнал уходит метод и путь, без трассировки: сломан запрос, а не сервер,
+    и трассировка тут лишь прячет настоящие пятисотки.
+    """
+    if not body_came_broken_from_the_client(exc):
+        return None
+    log.warning("API: нечитаемое тело запроса %s %s",
+                request.method, request.rel_url.path)
+    return _err(_BAD_BODY, 400)
+
+
+def body_came_broken_from_the_client(exc: BaseException) -> bool:
+    """Исключение вылетело из разбора ТЕЛА запроса, а не из наших данных."""
+    if not isinstance(exc, (ValueError, UnicodeDecodeError)):
+        return False
+    tb = exc.__traceback__
+    while tb is not None:
+        code = tb.tb_frame.f_code
+        if (code.co_name in _BODY_READERS
+                and "web_request" in code.co_filename):
+            return True
+        tb = tb.tb_next
+    return False
+
 
 def _err(msg: str, status: int = 400) -> web.Response:
     # Единственная дверь наружу для текста ошибки, а текст этот чаще всего —
@@ -1182,6 +1241,33 @@ async def _user_can_use_bot(pool, uid: int, bot_id: int) -> bool:
 
 # Группа и канал различаются полем type, владение — is_creator/is_admin.
 _CHANNEL_IS_GROUP_SQL = "type IN ('supergroup','group','chat')"
+
+# Один и тот же канал лежит в managed_channels ОТДЕЛЬНОЙ строкой у каждого
+# владельца, а условие видимости выше тянет и чужие строки — через экосистемы и
+# рабочие пространства. Поэтому список каналов показывал общий канал ДВАЖДЫ, и
+# у одной из копий были чужие название и права: экран писал владельцу «админ»
+# там, где он не админ. Проверено на живой базе: один канал, две строки.
+#
+# `SELECT DISTINCT` это не лечило и лечить не мог: он различает строки по ВСЕМУ
+# списку столбцов, а у копий отличаются и title, и is_admin, и added_at. Рядом
+# стоявший счётчик давно считал `COUNT(DISTINCT channel_id)`, то есть шапка
+# говорила «40», а список отдавал 41 строку — число и его же список расходились.
+# И сортировка `member_count DESC, channel_id` на таких копиях вырождается:
+# ключ равен у обеих, то есть страницы могли повторить канал и потерять другой.
+#
+# Здесь выбирается РОВНО ОДНА строка на канал, и своя — предпочтительнее чужой
+# (`owner_id = $1` первым в сортировке DISTINCT ON), чтобы права и название
+# были те, которые касаются смотрящего. После этого channel_id в выдаче
+# уникален, список совпадает со своим счётчиком, а сортировка полна.
+_CHANNELS_ONE_ROW_SQL = f"""
+    SELECT DISTINCT ON (channel_id)
+           channel_id, username, title,
+           COALESCE(members_count, 0) AS member_count,
+           type, added_at, is_admin, is_creator, owner_id
+      FROM managed_channels
+     WHERE ({_CHANNELS_VISIBLE_SQL})
+     ORDER BY channel_id, (owner_id = $1) DESC, id
+"""
 
 
 def _channel_filter_sql(kind: str | None, role: str | None,
@@ -2061,7 +2147,7 @@ async def _apply_next_action(pool: asyncpg.Pool, uid: int, action_id: str) -> di
         op_id = await _obus.submit(
             pool, uid, "check_accounts_health",
             {"account_ids": ids, "check_spambot": True},
-            total_items=len(ids), label=f"Проверка {len(ids)} аккаунтов")
+            total_items=len(ids), label=f"Проверка · аккаунтов: {len(ids)}")
         return {"ok": True, "op_id": op_id,
                 "message": f"Проверка здоровья запущена для {len(ids)} аккаунтов"}
 
@@ -2193,7 +2279,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return await handler(request)
         except (web.HTTPException, asyncio.CancelledError):
             raise
-        except Exception:
+        except Exception as exc:
+            bad = bad_body_response(request, exc)
+            if bad is not None:
+                return bad
             log.exception("API: необработанное исключение в %s %s",
                           request.method, request.rel_url.path)
             try:
@@ -3344,73 +3433,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             log.exception("reporter_submit uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
-    # ── Quick Post ─────────────────────────────────────────────────────────────
-
-    async def quick_post_submit(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Не удалось разобрать запрос", 400)
-        text = validate_string(body.get("text"), max_len=4096)
-        channel_ids = body.get("channel_ids") or []
-        if not text:
-            return _err("Заполните текст поста", 400)
-        if check_sql_suspicious(text):
-            return _err("Недопустимые символы в тексте поста")
-        if not channel_ids:
-            return _err("Выберите хотя бы один канал", 400)
-        # Validate channel IDs are integers
-        try:
-            channel_ids = [int(x) for x in channel_ids if str(x).lstrip("-").isdigit()]
-        except (TypeError, ValueError):
-            return _err("Неверные идентификаторы каналов", 400)
-        try:
-            schedule_minutes = max(0, min(validate_integer(body.get("schedule_minutes") or 0, min_val=0) or 0, 60 * 24 * 30))
-        except (TypeError, ValueError):
-            schedule_minutes = 0
-        # Autopost v2: рекуррентная публикация (0 = разовая).
-        try:
-            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
-        except (TypeError, ValueError):
-            _rmin = 0
-        try:
-            label = f"Быстрый пост · каналов: {len(channel_ids)}"
-            _pd = {"text": text, "channel_ids": channel_ids}
-            if _rmin > 0:
-                _pd["repeat_interval_min"] = _rmin
-                _rc = body.get("repeat_count")
-                if _rc is not None:
-                    try:
-                        _pd["repeat_count"] = max(1, min(int(_rc), 1000))
-                    except (TypeError, ValueError):
-                        pass
-            if schedule_minutes > 0:
-                from datetime import datetime as _dtm, timedelta as _tdl, timezone as _tzn
-                op_id = await _obus.submit(
-                    pool, uid, "quick_post", _pd,
-                    total_items=len(channel_ids), label="⏰ " + label,
-                    scheduled_for=_dtm.now(_tzn.utc) + _tdl(minutes=schedule_minutes))
-            else:
-                op_id = await _obus.submit(
-                    pool, uid, "quick_post", _pd,
-                    total_items=len(channel_ids), label=label)
-            return _json_resp({"ok": True, "op_id": op_id, "label": label, "scheduled_minutes": schedule_minutes})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("quick_post_submit uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    # ── SEO Overview ───────────────────────────────────────────────────────────
-
-
-
-
+    # Экран «Быстрый пост» слит с единой публикацией (см.
+    # tests/test_publish_module_unified.py о том, почему он один), а эта ручка
+    # была его единственной дверью и больше ничьей: ops типа quick_post заводила
+    # только она. Сам тип операции ЖИВ — op_worker и operation_bus исполняют и
+    # показывают уже стоящие в очереди и историю; удалена только ручка.
 
 
     # ── Bot Factory Overview ───────────────────────────────────────────────────
@@ -3739,7 +3766,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, op_type,
                 {"account_ids": acc_ids},
                 total_items=len(acc_ids),
-                label=f"Импорт {what} с {len(acc_ids)} аккаунтов",
+                label=f"Импорт {what} · аккаунтов: {len(acc_ids)}",
             )
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
@@ -3969,7 +3996,32 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         } for b in blocked[:limit]]
         return _json_resp({"step": step, "items": items, "total": len(blocked)})
 
+    async def fleet_sweep(request: web.Request) -> web.Response:
+        """Единое обслуживание флота «сделать всё разом»: параллельно по ботам,
+        аккаунтам и каналам — проверить живость и (по желанию) удалить мёртвое.
 
+        body: {delete: bool, preview: bool}. delete=false — только проверка;
+        delete=true,preview=true — посчитать, что удалится (без удаления);
+        delete=true,preview=false — удалить мёртвое. Удаляется только то, что
+        ТОЧНО мёртвое (бот с отозванным токеном, аккаунт с терминальным
+        статусом); «не ответившие» не трогаются.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        want_delete = bool(body.get("delete"))
+        preview = bool(body.get("preview"))
+        try:
+            from services import fleet_maintenance
+            return _json_resp(await fleet_maintenance.sweep_fleet(
+                pool, uid, delete=want_delete, preview=preview))
+        except Exception:
+            log.exception("fleet_sweep uid=%s", uid)
+            return _err(_INTERNAL_ERROR, 500)
 
 
 
@@ -4107,7 +4159,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                  "text": text, "delay": delay,
                  "per_account_cap": per_account_cap},
                 total_items=len(usernames),
-                label=f"Рассылка ЛС: {len(usernames)} получателей × {len(acc_ids)} акк.",
+                label=f"Рассылка ЛС · получателей: {len(usernames)} × акк.: {len(acc_ids)}",
             )
             return _json_resp({"ok": True, "op_id": op_id,
                                "recipients": len(usernames), "accounts": len(acc_ids),
@@ -4332,7 +4384,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 pool, uid, "group_announce",
                 {"acc_id": int(acc_id), "text": text},
                 total_items=int(cnt),
-                label=f"Объявление в {cnt} групп аккаунта #{acc_id}",
+                label=f"Объявление · групп: {cnt} · аккаунт #{acc_id}",
             )
             return _json_resp({"ok": True, "op_id": op_id, "groups": int(cnt)})
         except PermissionError as exc:
@@ -4710,7 +4762,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             if not node:
                 return _err("Не найдено", 404)
             threads = await pool.fetch(
-                """SELECT id, entity_type, entity_id, topic_name, status, created_at
+                """SELECT id, tg_thread_id, entity_type, entity_id, topic_name,
+                          status, created_at
                    FROM bm_node_threads WHERE node_id=$1 ORDER BY status, created_at DESC""",
                 node_id,
             )
@@ -6300,6 +6353,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         params = {"text": text, "delay": delay, "owner_id": uid}
         if channel_ids:
             params["channel_ids"] = channel_ids
+        # Рекуррентная публикация (0 = разовая). Умел её только «Быстрый пост»,
+        # слитый в этот экран; при слиянии повтор потерялся, хотя воркер его
+        # поддерживает — после успешного прогона сам ставит следующий запуск.
+        try:
+            _rmin = max(0, min(int(body.get("repeat_interval_min") or 0), 60 * 24 * 30))
+        except (TypeError, ValueError):
+            _rmin = 0
+        if _rmin > 0:
+            params["repeat_interval_min"] = _rmin
+            _rc = body.get("repeat_count")
+            if _rc is not None:
+                try:
+                    params["repeat_count"] = max(1, min(int(_rc), 1000))
+                except (TypeError, ValueError):
+                    pass
         # Рубрика поста (контент-микс редактора): только из рубрик владельца,
         # иначе история заполнится опечатками и микс перестанет что-то значить.
         _pillar = str(body.get("pillar") or "").strip()
@@ -6670,6 +6738,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 log.warning("settings→notification_settings sync failed uid=%d: %s", uid, _ne)
             return _json_resp({"ok": True})
         except Exception as e:
+            _bad = bad_body_response(request, e)
+            if _bad is not None:
+                return _bad
             log.warning("user_settings_save uid=%d: %s", uid, e)
             return _err("Не удалось сохранить", 500)
 
@@ -7041,47 +7112,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"items": [dict(r) for r in rows], "total": total})
         except Exception:
             log.exception("channel_factory_recent uid=%d", uid)
-            return _err(_INTERNAL_ERROR, 500)
-
-    # ── Group Factory ─────────────────────────────────────────────────────────
-
-    async def group_factory_submit(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            body = await request.json()
-        except Exception:
-            return _err("Неверное тело запроса", 400)
-        title = (body.get("title") or "").strip()
-        account_id = body.get("account_id")
-        is_supergroup = body.get("is_supergroup", True)
-        if not title:
-            return _err("Нужен заголовок")
-        if not account_id:
-            return _err("Нужен идентификатор аккаунта")
-        try:
-            acc = await pool.fetchrow(
-                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
-                int(account_id), uid,
-            )
-            if not acc:
-                return _err("Аккаунт не найден или неактивен", 404)
-            from bot.utils.subscription import get_channel_limit, get_effective_channel_count
-            _lim = await get_channel_limit(pool, uid)
-            if await get_effective_channel_count(pool, uid) >= _lim:
-                return _err(f"Достигнут лимит каналов/групп ({_lim}) для вашего тарифа. Оформите подписку для снятия ограничений.", 403)
-            op_id = await _obus.submit(
-                pool, uid, "create_group",
-                {"title": title, "account_id": account_id, "is_supergroup": is_supergroup},
-                total_items=1, label=f"Создать группу: {title}")
-            return _json_resp({"ok": True, "op_id": op_id})
-        except PermissionError as exc:
-            # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
-            # честный 403 с причиной вместо сырого 500 с внутренним текстом.
-            return _err(str(exc) or "Требуется подписка", 403)
-        except Exception:
-            log.exception("group_factory_submit uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
     # ── Physics Hub ──────────────────────────────────────────────────────────
@@ -7843,6 +7873,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/onboarding", onboarding_status)
     app.router.add_get("/api/miniapp/fleet/diagnose", fleet_diagnose)
     app.router.add_get("/api/miniapp/fleet/diagnose/blocked", fleet_diagnose_blocked)
+    app.router.add_post("/api/miniapp/fleet/sweep", fleet_sweep)
     app.router.add_post("/api/miniapp/dm/preview", dm_preview)
     app.router.add_post("/api/miniapp/dm/adhoc_send", dm_adhoc_send)
     app.router.add_post("/api/miniapp/mass_report", mass_report_submit)
@@ -8048,7 +8079,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/compliance_scan", compliance_scan_submit)
     app.router.add_post("/api/miniapp/reporter", reporter_submit)
     # Quick Post
-    app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
     # SEO
     app.router.add_get("/api/miniapp/ai/status", ai_status)
     app.router.add_post("/api/miniapp/ai/test", ai_test)
@@ -8111,8 +8141,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Channel Factory
     app.router.add_post("/api/miniapp/channel_factory/submit", channel_factory_submit)
     app.router.add_get("/api/miniapp/channel_factory/recent", channel_factory_recent)
-    # Group Factory
-    app.router.add_post("/api/miniapp/group_factory/submit", group_factory_submit)
     # Physics Hub
     app.router.add_get("/api/miniapp/physics", physics_overview)
     app.router.add_get("/api/miniapp/physics/{account_id}/telemetry", physics_account_telemetry)
@@ -8502,6 +8530,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неизвестный сегмент", 400)
         limit = _list_limit(request, 100, 500)
         rows = await _aa.segment_members(pool, uid, key, limit)
+        # Экран существует, чтобы забрать номера сегмента для рассылки. Без
+        # полного числа и список, и кнопка «Скопировать номера» молчали о
+        # потолке: в буфер уезжала первая сотня из тысячи с лишним.
+        total = await _aa.segment_member_count(pool, uid, key)
         ids = [int(r["user_id"]) for r in rows if r.get("user_id") is not None]
         names: dict[int, dict] = {}
         if ids:
@@ -8528,7 +8560,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "last_seen": r["last_seen"].isoformat() if r.get("last_seen") else None,
             })
         return _json_resp({"key": key, "name": _aa.SEGMENT_NAMES.get(key, key),
-                           "items": items, "shown": len(items)})
+                           "items": items, "shown": len(items),
+                           "total": total, "limit": limit})
 
 
 
@@ -8639,7 +8672,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # внутри import_sessions.
             result = await import_sessions(pool, uid, raw, proxy, proxy_id=proxy_id)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             # Раньше сырой текст исключения уходил клиенту и никуда не писался:
             # пользователю — непонятная внутренняя строка, разработчику — ничего.
             log.exception("import_sessions uid=%s", uid)

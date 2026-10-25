@@ -140,6 +140,7 @@ from bot.handlers import nodes_hub as nodes_handler
 from bot.handlers import spintax as spintax_handler
 from bot.handlers import about as about_handler
 from bot.handlers import fleet_pulse as fleet_pulse_handler
+from services import bg_tasks
 from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
@@ -735,6 +736,13 @@ async def main() -> None:
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_domains INT DEFAULT 0",
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_apwg_sent INT DEFAULT 0",
         "ALTER TABLE strike_history ADD COLUMN IF NOT EXISTS infra_registrar_sent INT DEFAULT 0",
+        # Отметка отправленного шага воронки — её пишут ДО отправки, чтобы
+        # рестарт между отправкой и продвижением не послал тот же шаг живому
+        # человеку второй раз. Без колонки claim падал бы при лаге миграции.
+        "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS last_sent_step INT",
+        # Счётчик подряд идущих срывов шага: без него один блип БД писал
+        # воронке человека status='error' навсегда.
+        "ALTER TABLE auto_funnel_runs ADD COLUMN IF NOT EXISTS fail_count INT DEFAULT 0",
         # Device-fingerprint tg_accounts — без них check_accounts_health и другие
         # запросы с device-полями падали при лаге миграции (поздние колонки).
         "ALTER TABLE tg_accounts ADD COLUMN IF NOT EXISTS device_model TEXT",
@@ -1365,8 +1373,32 @@ async def main() -> None:
                         drop_pending_updates=True,
                         polling_timeout=30,
                         allowed_updates=_allowed_updates,
+                        # ПОЧЕМУ СИГНАЛЫ НЕ ОТДАЁМ aiogram. По умолчанию
+                        # start_polling сам ставит обработчики SIGTERM/SIGINT
+                        # (loop.add_signal_handler) и ЗАМЕЩАЕТ наш. Его
+                        # обработчик делает одно: останавливает поллинг. Для
+                        # процесса это выглядело как штатный выход из
+                        # start_polling — и цикл ниже тут же запускал поллинг
+                        # заново. То есть SIGTERM на деплое НЕ завершал процесс
+                        # вовсе: KeyboardInterrupt не поднимался, блок finally
+                        # не выполнялся, op_worker.shutdown не звался, и
+                        # платформа добивала контейнер SIGKILL'ом. Последствия
+                        # ровно те, от которых shutdown и написан: операции
+                        # оставались в 'running' и на старте теряли бюджет
+                        # живучести, аккаунты — in_operation до истечения
+                        # аренды (флот стоит ~15 минут после каждого выпуска),
+                        # аренда исполнителя — за мёртвым процессом, то есть
+                        # очередь не разбирал никто. Проверено настоящим
+                        # процессом: tests/test_a_deploy_does_not_leave_the_
+                        # queue_locked_postgres.py.
+                        handle_signals=False,
                     )
-                    _poll_fail = 0          # штатный выход — начинаем счёт заново
+                    # Сюда можно попасть ТОЛЬКО если поллинг остановили
+                    # осознанно (dp.stop_polling): ошибки приходят
+                    # исключением. Значит процесс сворачивается — выходим в
+                    # finally, а не поднимаем поллинг заново.
+                    log.info("Поллинг остановлен штатно — завершаем процесс")
+                    break
                 except asyncio.CancelledError:
                     raise                    # остановка процесса — не сбой
                 except Exception as _pe:
@@ -1390,6 +1422,15 @@ async def main() -> None:
             await op_worker.shutdown(pool)
         except Exception:
             log.warning("Корректная остановка воркера операций не удалась", exc_info=True)
+        # Затем — фоновые записи, запущенные через spawn (телеметрия физики,
+        # журнал соответствия, конверсии). Удержание ссылки спасает их от
+        # сборщика мусора, но не от конца процесса: без ожидания они умирали
+        # на полпути («Task was destroyed but it is pending!»), а закрытый
+        # поверх них пул ронял их запросы. Ждём коротко и до pool.close().
+        try:
+            await bg_tasks.drain(5.0)
+        except Exception:
+            log.warning("Сворачивание фоновых записей не удалось", exc_info=True)
         await pool.close()
         await http.close()
         await bot.session.close()

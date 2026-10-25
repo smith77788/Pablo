@@ -26,7 +26,7 @@ def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты каналов и групп на приложении мини-аппа."""
     from services import operation_bus as _obus
     from services.mini_app_api import (
-        _CHANNEL_IS_GROUP_SQL, _CHANNELS_VISIBLE_SQL, _INTERNAL_ERROR,
+        _CHANNEL_IS_GROUP_SQL, _CHANNELS_ONE_ROW_SQL, _INTERNAL_ERROR,
         _cached_user, _channel_filter_sql, _err, _get_uid, _json_resp,
         _safe_count, _safe_fetch, _safe_fetchrow, channel_edit_worker_op, log,
     )
@@ -66,8 +66,8 @@ def setup_routes(app: web.Application, pool) -> None:
 
         cond, extra = _channel_filter_sql(kind, role, search, next_param=4)
         rows = await _safe_fetch(pool,
-            f"""SELECT DISTINCT channel_id AS id, channel_id, username, title,
-                      COALESCE(members_count, 0) AS member_count,
+            f"""WITH visible AS ({_CHANNELS_ONE_ROW_SQL})
+               SELECT channel_id AS id, channel_id, username, title, member_count,
                       type, added_at, is_admin, is_creator,
                       CASE
                           WHEN is_creator THEN 'owner'
@@ -75,9 +75,9 @@ def setup_routes(app: web.Application, pool) -> None:
                           WHEN is_admin IS FALSE THEN 'member'
                           ELSE 'unknown'
                       END AS role
-               FROM managed_channels
-               WHERE ({_CHANNELS_VISIBLE_SQL}){cond}
-               ORDER BY member_count DESC NULLS LAST
+               FROM visible
+               WHERE TRUE{cond}
+               ORDER BY member_count DESC NULLS LAST, channel_id
                LIMIT $2 OFFSET $3""", uid, limit, offset, *extra)
         # Считаем ТО ЖЕ, что показывает список: он отдаёт DISTINCT channel_id, а
         # счётчик брал DISTINCT id (первичный ключ строки). Один и тот же канал
@@ -92,19 +92,21 @@ def setup_routes(app: web.Application, pool) -> None:
         # ещё», и он обязан совпадать с тем, что реально отдаётся страницами.
         cond_total, extra_total = _channel_filter_sql(kind, role, search, next_param=2)
         total = await _safe_count(pool,
-            f"""SELECT COUNT(DISTINCT channel_id) FROM managed_channels
-                WHERE ({_CHANNELS_VISIBLE_SQL}){cond_total}""", uid, *extra_total)
+            f"""WITH visible AS ({_CHANNELS_ONE_ROW_SQL})
+                SELECT COUNT(*) FROM visible WHERE TRUE{cond_total}""",
+            uid, *extra_total)
         # Счётчики чипов — по ВСЕМ видимым каналам (и с учётом поиска, если он
         # есть), одним запросом вместо подсчёта загруженного на клиенте.
         cond_counts, extra_counts = _channel_filter_sql(None, None, search, next_param=2)
         crow = await _safe_fetchrow(pool,
-            f"""SELECT COUNT(DISTINCT channel_id) AS all_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE {_CHANNEL_IS_GROUP_SQL}) AS group_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE NOT {_CHANNEL_IS_GROUP_SQL}) AS channel_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE is_creator IS TRUE) AS mine_n,
-                       COUNT(DISTINCT channel_id) FILTER (WHERE is_admin IS FALSE) AS foreign_n
-                  FROM managed_channels
-                 WHERE ({_CHANNELS_VISIBLE_SQL}){cond_counts}""", uid, *extra_counts)
+            f"""WITH visible AS ({_CHANNELS_ONE_ROW_SQL})
+                SELECT COUNT(*) AS all_n,
+                       COUNT(*) FILTER (WHERE {_CHANNEL_IS_GROUP_SQL}) AS group_n,
+                       COUNT(*) FILTER (WHERE NOT {_CHANNEL_IS_GROUP_SQL}) AS channel_n,
+                       COUNT(*) FILTER (WHERE is_creator IS TRUE) AS mine_n,
+                       COUNT(*) FILTER (WHERE is_admin IS FALSE) AS foreign_n
+                  FROM visible
+                 WHERE TRUE{cond_counts}""", uid, *extra_counts)
         counts = {"all": 0, "channel": 0, "group": 0, "mine": 0, "foreign": 0}
         if crow:
             counts = {"all": int(crow["all_n"] or 0),
@@ -572,6 +574,43 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("channel_restore uid=%d ch=%d", uid, ch_id)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def channels_bulk_delete(request: web.Request) -> web.Response:
+        """Удалить из системы несколько каналов разом (паритет с channel_remove).
+
+        Каждый канал идёт через remove_managed_channel: голый DELETE строк
+        вернул бы каналы следующим импортом с аккаунтов. Сам канал в Telegram
+        не трогаем. Идемпотентно: повтор по уже удалённым = 0, а не ошибка.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Некорректный запрос", 400)
+        raw = body.get("channel_ids")
+        if not isinstance(raw, list) or not raw:
+            return _err("Не выбран ни один канал", 400)
+        try:
+            ch_ids = [int(x) for x in raw]
+        except (TypeError, ValueError):
+            return _err("Неверный идентификатор канала", 400)
+        try:
+            from database.db import record_manual_action, remove_managed_channel
+
+            deleted = 0
+            for ch_id in dict.fromkeys(ch_ids):
+                if await remove_managed_channel(pool, uid, ch_id):
+                    deleted += 1
+
+            await record_manual_action(
+                pool, uid, "channels_bulk_delete",
+                target=",".join(str(c) for c in ch_ids[:50]))
+            return _json_resp({"ok": True, "deleted": deleted, "requested": len(ch_ids)})
+        except Exception:
+            log.exception("channels_bulk_delete uid=%d n=%d", uid, len(ch_ids))
+            return _err(_INTERNAL_ERROR, 500)
+
     async def channels_bulk_create(request: web.Request) -> web.Response:
         """Массовое создание каналов аккаунтом (паритет с ботом).
 
@@ -808,7 +847,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 pool, uid, "bulk_post_chans",
                 {"acc_id": int(acc_id), "channel_ids": channel_ids, "text": text},
                 total_items=len(channel_ids),
-                label=f"Пост в {len(channel_ids)} каналов аккаунта #{acc_id}",
+                label=f"Пост · каналов: {len(channel_ids)} · аккаунт #{acc_id}",
             )
             return _json_resp({"ok": True, "op_id": op_id, "channels": len(channel_ids)})
         except PermissionError as exc:
@@ -875,6 +914,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)
     app.router.add_post("/api/miniapp/channels/mass", channels_mass)
+    app.router.add_post("/api/miniapp/channels/bulk_delete", channels_bulk_delete)
     app.router.add_delete("/api/miniapp/channel/{ch_id}", channel_remove)
     app.router.add_get("/api/miniapp/channels/removed", channels_removed)
     app.router.add_post("/api/miniapp/channel/{ch_id}/restore", channel_restore)

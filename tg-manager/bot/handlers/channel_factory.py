@@ -1750,7 +1750,7 @@ async def _show_seo_chan_picker(
     try:
         channels = await pool.fetch(
             "SELECT id, title, username FROM managed_channels "
-            "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title LIMIT $3 OFFSET $4",
+            "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title, id LIMIT $3 OFFSET $4",
             user_id,
             acc_id,
             _SEO_PAGE + 1,

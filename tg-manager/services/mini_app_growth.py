@@ -265,7 +265,7 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             op_id = await _obus.submit(
                 pool, uid, "bulk_seo_apply", {"channel_ids": chan_ids, "fields": ["about"]},
-                total_items=len(chan_ids), label=f"SEO-описания: {len(chan_ids)} каналов")
+                total_items=len(chan_ids), label=f"SEO-описания · каналов: {len(chan_ids)}")
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         return _json_resp({"ok": True, "op_id": op_id, "count": len(chan_ids)})

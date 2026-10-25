@@ -109,7 +109,7 @@ def test_switched_off_bot_is_not_called_broken():
 
 
 def test_bot_taken_out_by_dead_token_says_why():
-    """Серия 401 снимает бота из работы автоматически (v253): бот удалён в
+    """Серия 401 снимает бота из работы автоматически (v257): бот удалён в
     @BotFather или токен перевыпущен. «⏸ Убран из работы» здесь — неправда о
     причине, и владельцу нужно сделать шаг."""
     d = BH.describe({"is_active": False, "fail_streak": 9, "last_error": BH.UNAUTHORIZED})

@@ -205,17 +205,49 @@ def js_function(name: str) -> str:
 
     Зеркало `api_function` для JS: тест, которому нужно тело, получает ровно
     тело — ни соседей, ни пустоты.
+
+    Берём из общего индекса (js_functions): один проход по 1,6 МБ вместо
+    регекспа на каждый вызов. test_js_function_door сверяет две двери имя за
+    именем, поэтому подмена индексом ничего не меняет по смыслу.
     """
+    body = js_functions().get(name)
+    if body is None:
+        raise AssertionError(
+            f"функция {name} не найдена ни в одном файле мини-аппа")
+    return body
+
+
+# ── Все функции фронта за один проход ───────────────────────────────────────
+#
+# js_function ищет имя регекспом по каждому файлу заново: 47 мс на вызов при
+# 1432 функциях мини-аппа. Проверке, которая смотрит НА ВСЕ функции (например
+# «на эту функцию кто-нибудь ссылается?»), это даёт больше минуты на один
+# проход, и в CI такой тест превращается в налог. Один проход строит тот же
+# индекс за десятые доли секунды; test_js_function_door сверяет две двери имя
+# за именем, чтобы они не разъехались.
+
+
+@functools.lru_cache(maxsize=1)
+def js_functions() -> dict[str, str]:
+    """Имя → тело, по всем файлам мини-аппа. Побеждает первое вхождение."""
     import re
 
-    pat = re.compile(r"(?:async\s+)?function\s+" + re.escape(name) + r"\s*\(")
+    pat = re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(")
+    out: dict[str, str] = {}
     for text in (miniapp_html(), *(p.read_text(encoding="utf-8") for p in screen_files())):
-        m = pat.search(text)
-        if not m:
-            continue
-        brace = text.index("{", m.end() - 1)
-        return text[m.start():_skip_braces(text, brace)]
-    raise AssertionError(f"функция {name} не найдена ни в одном файле мини-аппа")
+        for m in pat.finditer(text):
+            if m.group(1) in out:
+                continue
+            brace = text.index("{", m.end() - 1)
+            try:
+                out[m.group(1)] = text[m.start():_skip_braces(text, brace)]
+            except AssertionError:
+                # Слово `function` внутри строки или шаблона: парной скобки у
+                # него нет. Пропускаем, чтобы одна такая находка не ломала
+                # индекс целиком; настоящая функция тогда просто не найдётся,
+                # и вызывающий тест упадёт громко.
+                continue
+    return out
 
 
 # ── Тело функции в ЛЮБОМ файле репозитория ──────────────────────────────────
@@ -228,17 +260,26 @@ def js_function(name: str) -> str:
 # выполняли соседи, попавшие в окно.
 
 
-def py_function(rel_path: str, name: str) -> str:
-    """Тело функции по ТОЧНЫМ границам (ast) в указанном файле репозитория."""
+@functools.lru_cache(maxsize=64)
+def _py_bodies(rel_path: str) -> dict[str, str]:
+    """Имя -> тело для одного файла репозитория, разобранного один раз."""
     import ast
 
-    path = ROOT / rel_path
-    text = path.read_text(encoding="utf-8")
+    text = (ROOT / rel_path).read_text(encoding="utf-8")
+    out: dict[str, str] = {}
     for node in ast.walk(ast.parse(text)):
         if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and node.name == name):
-            return ast.get_source_segment(text, node) or ""
-    raise AssertionError(f"функция {name} не найдена в {rel_path}")
+                and node.name not in out):
+            out[node.name] = ast.get_source_segment(text, node) or ""
+    return out
+
+
+def py_function(rel_path: str, name: str) -> str:
+    """Тело функции по ТОЧНЫМ границам (ast) в указанном файле репозитория."""
+    body = _py_bodies(rel_path).get(name)
+    if body is None:
+        raise AssertionError(f"функция {name} не найдена в {rel_path}")
+    return body
 
 
 # ── Серверная сторона: API-слой тоже перестал быть одним файлом ──────────────
@@ -274,6 +315,29 @@ def api_routes() -> frozenset[str]:
         r'app\.router\.add_(?:get|post|put|delete|patch)\("([^"]+)"', api_source()))
 
 
+# Разбор API-слоя стоит дорого: один mini_app_api.py — 415 КБ, и ast.parse на
+# нём занимает четверть секунды. Тесты зовут api_function сто с лишним раз,
+# каждый вызов разбирал ВСЕ модули слоя заново, пока не найдёт имя, — минуты
+# на полный прогон, и в CI это уже упиралось в предел по времени (прогоны
+# 23.10.2026 обрывались ровно на 20м18с). Разбираем каждый модуль один раз за
+# прогон и складываем в индекс «имя -> тело».
+
+
+@functools.lru_cache(maxsize=1)
+def _api_bodies() -> dict[str, str]:
+    """Имя -> тело, по всем модулям API-слоя. Побеждает первое вхождение."""
+    import ast
+
+    out: dict[str, str] = {}
+    for path in api_files():
+        text = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(text)):
+            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name not in out):
+                out[node.name] = ast.get_source_segment(text, node) or ""
+    return out
+
+
 def api_function(name: str) -> str:
     """Тело функции API-слоя по ТОЧНЫМ границам (ast), в любом его модуле.
 
@@ -281,12 +345,8 @@ def api_function(name: str) -> str:
     каждой правке выше, а привязка к файлу — на каждом выносе ручки в
     отдельный модуль. Границы знает только парсер, файл ищем сами.
     """
-    import ast
-
-    for path in api_files():
-        text = path.read_text(encoding="utf-8")
-        for node in ast.walk(ast.parse(text)):
-            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and node.name == name):
-                return ast.get_source_segment(text, node) or ""
-    raise AssertionError(f"функция {name} не найдена ни в одном модуле API-слоя")
+    body = _api_bodies().get(name)
+    if body is None:
+        raise AssertionError(
+            f"функция {name} не найдена ни в одном модуле API-слоя")
+    return body

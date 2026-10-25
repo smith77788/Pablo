@@ -441,7 +441,7 @@ def validate_settings(payload: Any) -> tuple[dict, list[str]]:
             out["lang"] = lg
         else:
             errors.append("Язык канала: авто, русский, украинский или английский")
-    for key in ("enabled", "intro_pending", "auto_tune"):
+    for key in ("enabled", "intro_pending", "auto_tune", "cross_promote"):
         if key in payload:
             out[key] = bool(payload.get(key))
     if "business" in payload:
@@ -460,6 +460,7 @@ def next_slot(
     window_end: int,
     tz_offset: int,
     rng: Optional[random.Random] = None,
+    peak_hours: Optional[list[int]] = None,
 ) -> datetime:
     """Следующее время публикации (UTC) после now.
 
@@ -467,12 +468,17 @@ def next_slot(
     часовом поясе примерно равными интервалами, с разбросом ±20% — ровная сетка
     «каждые 6 часов минута в минуту» выдаёт автопостинг. Вне окна — начало
     следующего окна (с небольшим сдвигом).
+
+    peak_hours (необязательно) — локальные часы с лучшим охватом (services.peak_hours):
+    кандидат мягко притягивается к ближайшему из них в пределах половины интервала,
+    не выходя за окно. None/[] → прежнее поведение без изменений.
     """
     rng = rng or random.Random()
     tz = timedelta(hours=int(tz_offset))
     local = now.astimezone(timezone.utc) + tz
     span_h = max(1, int(window_end) - int(window_start))
-    interval = timedelta(hours=span_h / max(1, int(posts_per_day)))
+    interval_h = span_h / max(1, int(posts_per_day))
+    interval = timedelta(hours=interval_h)
     day0 = local.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _window(day: datetime) -> tuple[datetime, datetime]:
@@ -486,6 +492,9 @@ def next_slot(
     if cand >= end:
         nxt, _ = _window(day0 + timedelta(days=1))
         cand = nxt + interval * rng.uniform(0.0, 0.3)
+    if peak_hours:
+        cand = _snap_to_peak(cand, peak_hours, window_start=window_start,
+                             window_end=window_end, interval_h=interval_h, rng=rng)
     return cand - tz
 
 
@@ -571,6 +580,194 @@ def tune_weights(weights: dict[str, float], stats: dict[str, dict],
 
 def post_score(views: int, reactions: int, forwards: int) -> float:
     return float(views or 0) + 3.0 * float(reactions or 0) + 5.0 * float(forwards or 0)
+
+
+# ── Пиковые часы аудитории (когда внутри окна пост набирает больше охвата) ────
+# Администратор уже публикует в пределах окна владельца. КОГДА именно внутри окна
+# — учится по реальному охвату своих прошлых постов: час с лучшим средним
+# результатом притягивает слот. Это НЕ выход за окно и НЕ рост частоты — только
+# сдвиг момента внутри уже разрешённого окна, поэтому для флота безопасно.
+_PEAK_MIN_TOTAL = 12   # меньше постов с охватом — данных мало, окну доверяем как есть
+_PEAK_SHRINK = 5.0     # притяжение часа к общему среднему: мало постов → меньше доверия
+
+
+def _shrunk_mean(n: int, mean: float, prior: float, k: float = _PEAK_SHRINK) -> float:
+    """Среднее часа, подтянутое к общему среднему: мало постов → меньше доверия выбросу."""
+    return (n * mean + k * prior) / (n + k) if (n + k) else prior
+
+
+def peak_hours(posts: list[tuple[datetime, float]], tz_offset: int,
+               window_start: int, window_end: int, *,
+               min_total: int = _PEAK_MIN_TOTAL) -> list[int]:
+    """Локальные часы ВНУТРИ окна, где охват выше среднего — лучший первым.
+
+    posts — пары (момент публикации в UTC, оценка охвата post_score). Мало данных
+    → [] и расписание работает как раньше. Часы вне [window_start, window_end)
+    отбрасываются: администратор не выходит за разрешённое владельцем окно.
+    """
+    scored = [(at, float(s)) for at, s in posts if at is not None and s is not None]
+    tz = timedelta(hours=int(tz_offset))
+    ws, we = int(window_start), int(window_end)
+    # Базу сравнения считаем ТОЛЬКО по часам внутри окна: публикуем мы всегда в
+    # окне, и выброс в ненужный час (ночью) не должен занижать все дневные часы.
+    buckets: dict[int, list[float]] = {}
+    in_window: list[float] = []
+    for at, s in scored:
+        lh = (at.astimezone(timezone.utc) + tz).hour
+        if not (ws <= lh < we):
+            continue
+        buckets.setdefault(lh, []).append(s)
+        in_window.append(s)
+    if len(in_window) < max(1, int(min_total)):
+        return []
+    prior = sum(in_window) / len(in_window)
+    ranked: list[tuple[int, float]] = []
+    for h, v in buckets.items():
+        m = _shrunk_mean(len(v), sum(v) / len(v), prior)
+        if m >= prior:  # только часы не хуже среднего по окну — их и притягиваем
+            ranked.append((h, m))
+    ranked.sort(key=lambda hm: -hm[1])
+    return [h for h, _ in ranked]
+
+
+def _snap_to_peak(cand_local: datetime, peaks: list[int], *,
+                  window_start: int, window_end: int, interval_h: float,
+                  rng: random.Random) -> datetime:
+    """Подвинуть кандидата к ближайшему пиковому часу, но не дальше половины
+    интервала между постами и не выходя за окно.
+
+    Ограниченный сдвиг держит два инварианта: слоты не схлопываются в один час и
+    остаются строго по возрастанию (сдвиг < минимального зазора до соседа), а
+    проверка окна гарантирует, что мы не вынесем пост за разрешённые часы.
+    """
+    if not peaks:
+        return cand_local
+    reach = max(0.5, float(interval_h) / 2.0)
+    cand_h = cand_local.hour + cand_local.minute / 60.0
+    best: Optional[tuple[float, int]] = None
+    for h in peaks:
+        dist = abs((h + 0.5) - cand_h)  # к середине часа
+        if dist <= reach and (best is None or dist < best[0]):
+            best = (dist, h)
+    if best is None:
+        return cand_local
+    h = best[1]
+    if not (int(window_start) <= h < int(window_end)):
+        return cand_local
+    return cand_local.replace(hour=h, minute=int(rng.uniform(0, 60)),
+                              second=0, microsecond=0)
+
+
+# ── Авточастота: сколько постов в день по откликам аудитории ─────────────────
+# Больше постов ≠ больше охвата: после насыщения каждый следующий пост в тот же
+# день собирает меньше и утомляет подписчиков. Советуем частоту по ТРЕНДУ охвата
+# на пост (свежая половина против ранней), ±1 за раз и не выше потолка. Это
+# ТОЛЬКО совет владельцу в отчёте — сами частоту не меняем (его решение).
+_FREQ_MIN_SAMPLE = 14   # постов за окно — меньше сигнал шумный, молчим
+_FREQ_UP = 1.15         # охват на пост вырос ≥15% → есть запас публиковать чаще
+_FREQ_DOWN = 0.80       # охват на пост упал ≥20% → аудитория устаёт, лучше реже
+_FREQ_CEIL = 6          # выше сами не предлагаем — защита от скатывания в спам
+
+
+def recommend_frequency(current_ppd: int, early_avg: float, recent_avg: float,
+                        sample: int, *, pmin: int = 1, pmax: int = _FREQ_CEIL
+                        ) -> Optional[dict]:
+    """Совет по числу постов в день (±1) по тренду охвата на пост. None — держать как есть."""
+    cur = int(current_ppd or 1)
+    if sample < _FREQ_MIN_SAMPLE or early_avg <= 0 or recent_avg <= 0:
+        return None
+    ratio = recent_avg / early_avg
+    if ratio >= _FREQ_UP and cur < int(pmax):
+        return {"suggested": cur + 1, "current": cur,
+                "reason": "охват на пост растёт — аудитория готова читать чаще"}
+    if ratio <= _FREQ_DOWN and cur > int(pmin):
+        return {"suggested": cur - 1, "current": cur,
+                "reason": "охват на пост снижается — реже, но сильнее держит аудиторию"}
+    return None
+
+
+async def frequency_suggestion(pool, owner_id: int, channel_id: int) -> Optional[dict]:
+    """Совет по частоте из истории охвата (va_channel_posts). Fail-soft → None."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT avg(sc) FILTER (WHERE published_at <  now() - interval '14 days') AS early, "
+            "       avg(sc) FILTER (WHERE published_at >= now() - interval '14 days') AS recent, "
+            "       count(*) AS n FROM ("
+            "  SELECT published_at, "
+            "    (coalesce(views,0)+3*coalesce(reactions,0)+5*coalesce(forwards,0))::float AS sc "
+            "  FROM va_channel_posts WHERE owner_id=$1 AND channel_key=$2 AND views IS NOT NULL "
+            "  AND published_at > now() - interval '28 days') t",
+            int(owner_id), str(channel_id))
+        ppd = await pool.fetchrow(
+            "SELECT posts_per_day FROM va_channel_admin WHERE owner_id=$1 AND channel_id=$2",
+            int(owner_id), int(channel_id))
+    except Exception:
+        log.debug("channel_admin.frequency_suggestion failed", exc_info=True)
+        return None
+    if not row or not ppd:
+        return None
+    return recommend_frequency(ppd["posts_per_day"], float(row["early"] or 0),
+                               float(row["recent"] or 0), int(row["n"] or 0))
+
+
+# ── Взаимопиар каналов ОДНОГО владельца ──────────────────────────────────────
+# Самый дешёвый легальный рост сети: канал изредка советует подписчикам
+# родственный канал того же владельца. Не касается третьих лиц, не спам — выходит
+# обычным постом через редакторский гейт. Частоту держим низкой (не назойливо),
+# родственников перебираем по кругу, берём только каналы с публичным @username
+# (иначе ссылку не дать).
+CROSS_EVERY = 12  # примерно один взаимопиар на столько постов
+
+
+def should_cross_promote(post_index: int, *, every: int = CROSS_EVERY) -> bool:
+    """Пора ли на этом по счёту посту вставить взаимопиар (не на первом)."""
+    every = max(2, int(every))
+    return post_index > 0 and post_index % every == 0
+
+
+def pick_cross_sibling(siblings: list[dict], rotation: int) -> Optional[dict]:
+    """Какой родственный канал советовать (по кругу). Только с публичным @username."""
+    linkable = [s for s in siblings if str(s.get("username") or "").strip()]
+    if not linkable:
+        return None
+    return linkable[int(rotation) % len(linkable)]
+
+
+def cross_promo_topic(sibling: dict) -> str:
+    """Директива-тема для поста-рекомендации родственного канала (честно, без выдумок)."""
+    u = str(sibling.get("username") or "").strip().lstrip("@")
+    title = str(sibling.get("title") or "").strip()
+    topic = str(sibling.get("topic") or "").strip()
+    name = title or ("@" + u)
+    about = f" (тематика: {topic})" if topic else ""
+    return (f"Порекомендуй наш родственный канал {name}{about} — честно и по делу: "
+            f"кому и чем он полезен этой аудитории, без преувеличений. "
+            f"В конце дай ссылку: t.me/{u}. Не выдумывай фактов о нём — опирайся только "
+            f"на его тему.")
+
+
+async def cross_siblings(pool, owner_id: int, channel_id: int) -> list[dict]:
+    """Другие каналы владельца под администратором, годные для взаимопиара (с @username)."""
+    try:
+        rows = await pool.fetch(
+            "SELECT a.channel_id, a.topic, "
+            " (SELECT max(username) FROM managed_channels mc "
+            "  WHERE mc.owner_id=a.owner_id AND mc.channel_id=a.channel_id) AS username, "
+            " (SELECT max(title) FROM managed_channels mc "
+            "  WHERE mc.owner_id=a.owner_id AND mc.channel_id=a.channel_id) AS title "
+            "FROM va_channel_admin a "
+            "WHERE a.owner_id=$1 AND a.enabled AND a.setup_done IS NOT NULL "
+            "AND a.channel_id <> $2 ORDER BY a.channel_id",
+            int(owner_id), int(channel_id))
+    except Exception:
+        log.debug("channel_admin.cross_siblings failed", exc_info=True)
+        return []
+    out = []
+    for r in rows or []:
+        if str(r["username"] or "").strip():
+            out.append({"channel_id": int(r["channel_id"]), "username": r["username"],
+                        "title": r["title"] or "", "topic": r["topic"] or ""})
+    return out
 
 
 def _fence(items: list[str], cap: int = 600) -> str:
@@ -1119,6 +1316,91 @@ def parse_plan_topics(raw: str, n: int) -> list[str]:
     return out
 
 
+# ── Нативные опросы: слой генерации (вопрос + варианты) ───────────────────────
+# Опрос — один из сильнейших ЛЕГАЛЬНЫХ двигателей вовлечения и охвата в Telegram.
+# Здесь ТОЛЬКО генерация и валидация под лимиты Telegram (чистые функции, без сети
+# и БД). Публикация опроса в живой канал — отдельный следующий срез (действие
+# записи через account_manager + mass_publish с канарейкой).
+_POLL_Q_MAX = 300    # жёсткий лимит Telegram на вопрос
+_POLL_OPT_MAX = 100  # жёсткий лимит Telegram на вариант
+_POLL_MIN_OPTS = 2
+_POLL_MAX_OPTS = 10
+
+_SYSTEM_POLL = (
+    "Ты — администратор Telegram-канала. Составь ВОВЛЕКАЮЩИЙ опрос для аудитории "
+    "канала: один вопрос и короткие варианты ответа. Опрос провоцирует мнение и "
+    "голосование, а не проверяет знания. Ответь СТРОГО одним JSON без пояснений: "
+    "{\"question\": \"...\", \"options\": [\"...\", \"...\"]}. Правила: вопрос — до "
+    "280 символов; 2–4 варианта, каждый до 90 символов, короткие и РАЗНЫЕ; язык — "
+    "как у канала; без Markdown и фигурных скобок в тексте; не выдумывай фактов, "
+    "цифр и имён; не добавляй вариант-заглушку «другое/свой вариант», если без него "
+    "смысл не теряется."
+)
+
+
+def build_poll_prompt(profile: dict, *, topic_hint: str = "") -> tuple[str, str]:
+    """Промпт на опрос → (system, user). Опирается на тему и аудиторию канала."""
+    lines: list[str] = []
+    ld = lang_directive(profile.get("lang") or "")
+    if ld:
+        lines += [ld, ""]
+    lines += [
+        "ПРОФИЛЬ КАНАЛА",
+        f"Тематика: {profile.get('topic') or '—'}",
+        f"Аудитория: {profile.get('audience') or '—'}",
+        f"Голос и тон: {profile.get('tone') or 'живой, по делу, без канцелярита'}",
+    ]
+    if topic_hint:
+        lines.append(f"Тема опроса: {topic_hint}")
+    lines.append("Составь один опрос по теме канала, который хочется пройти и обсудить.")
+    return _SYSTEM_POLL, "\n".join(lines)
+
+
+def parse_poll(raw: str) -> Optional[dict]:
+    """Ответ ИИ → {question, options:[str]} (сырьё для валидации) или None."""
+    d = _extract_json(raw)
+    if not isinstance(d, dict):
+        return None
+    q = d.get("question") or d.get("q") or d.get("вопрос") or ""
+    opts = d.get("options") or d.get("answers") or d.get("variants") or d.get("варианты") or []
+    if not isinstance(q, str) or not isinstance(opts, list):
+        return None
+    return {"question": q, "options": [o for o in opts if isinstance(o, str)]}
+
+
+def validate_poll(question: Any, options: Any) -> tuple[Optional[dict], list[str]]:
+    """Опрос под лимиты Telegram: обрезка длины, схлопывание пробелов, дедуп (без
+    регистра), 2..10 непустых разных вариантов. Возвращает (чистый|None, ошибки)."""
+    errors: list[str] = []
+    q = " ".join(str(question or "").split())[:_POLL_Q_MAX]
+    seen: set[str] = set()
+    clean: list[str] = []
+    for o in options or []:
+        t = " ".join(str(o or "").split())[:_POLL_OPT_MAX]
+        key = t.lower()
+        if t and key not in seen:
+            seen.add(key)
+            clean.append(t)
+        if len(clean) >= _POLL_MAX_OPTS:
+            break
+    if not q:
+        errors.append("пустой вопрос")
+    if len(clean) < _POLL_MIN_OPTS:
+        errors.append("нужно минимум два разных варианта")
+    if errors:
+        return None, errors
+    return {"question": q, "options": clean}, []
+
+
+def clean_poll(raw: str) -> Optional[dict]:
+    """Сырой ответ ИИ → готовый опрос под лимиты Telegram или None."""
+    p = parse_poll(raw)
+    if not p:
+        return None
+    clean, _ = validate_poll(p["question"], p["options"])
+    return clean
+
+
 def settings_public(row: Optional[dict]) -> dict:
     """Строка va_channel_admin → JSON настроек для Mini App (умолчания без строки)."""
     r = row or {}
@@ -1146,6 +1428,7 @@ def settings_public(row: Optional[dict]) -> dict:
         "lang": r.get("lang") or "",
         "intro_pending": bool(r.get("intro_pending", True)),
         "auto_tune": bool(r.get("auto_tune", True)),
+        "cross_promote": bool(r.get("cross_promote", True)),
         "members_count": r.get("members_count"),
         "next_post_at": _iso(r.get("next_post_at")),
         "last_post_at": _iso(r.get("last_post_at")),
@@ -1161,7 +1444,7 @@ _ADMIN_COLS = (
     "lead_contact, brief, business, posts_per_day, lang, "
     "window_start, window_end, tz_offset, publish_mode, intro_pending, next_post_at, "
     "last_post_at, last_error, fail_streak, setup_done, last_op_id, alerted_at, "
-    "auto_tune, members_count, last_stats_at, last_report_at"
+    "auto_tune, cross_promote, members_count, last_stats_at, last_report_at"
 )
 
 
@@ -1300,8 +1583,9 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
     await pool.execute(
         "INSERT INTO va_channel_admin (owner_id, channel_id, enabled, topic, audience, tone, "
         " notes, posts_per_day, window_start, window_end, tz_offset, publish_mode, "
-        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, business, lang, updated_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19, now()) "
+        " intro_pending, auto_tune, next_post_at, project_info, lead_contact, business, lang, "
+        " cross_promote, updated_at) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20, now()) "
         "ON CONFLICT (owner_id, channel_id) DO UPDATE SET enabled=EXCLUDED.enabled, "
         " topic=EXCLUDED.topic, audience=EXCLUDED.audience, tone=EXCLUDED.tone, "
         " notes=EXCLUDED.notes, posts_per_day=EXCLUDED.posts_per_day, "
@@ -1310,13 +1594,14 @@ async def save_settings(pool, owner_id: int, channel_id: int, clean: dict) -> di
         " tz_offset=EXCLUDED.tz_offset, publish_mode=EXCLUDED.publish_mode, "
         " intro_pending=EXCLUDED.intro_pending, auto_tune=EXCLUDED.auto_tune, "
         " next_post_at=EXCLUDED.next_post_at, business=EXCLUDED.business, "
-        " lang=EXCLUDED.lang, updated_at=now()",
+        " lang=EXCLUDED.lang, cross_promote=EXCLUDED.cross_promote, updated_at=now()",
         int(owner_id), int(channel_id), bool(merged["enabled"]), merged["topic"],
         merged["audience"], merged["tone"], merged["notes"], int(merged["posts_per_day"]),
         int(merged["window_start"]), int(merged["window_end"]), int(merged["tz_offset"]),
         merged["publish_mode"], bool(merged["intro_pending"]), bool(merged["auto_tune"]),
         next_at, merged["project_info"], merged["lead_contact"],
         json.dumps(merged["business"], ensure_ascii=False), merged.get("lang") or "",
+        bool(merged.get("cross_promote", True)),
     )
     if schedule_changed and prev:
         # Расписание сменилось — старый план не совпадает с новыми слотами.
@@ -1550,6 +1835,21 @@ def _brand_rules_dict(r: cb.BrandRules) -> dict:
     }
 
 
+async def learn_peak_hours(pool, owner_id: int, channel_id: int, *,
+                           tz_offset: int, window_start: int, window_end: int,
+                           days: int = 30) -> list[int]:
+    """Пиковые локальные часы канала по реальному охвату его постов (или [])."""
+    rows = await pool.fetch(
+        "SELECT published_at, views, reactions, forwards FROM va_channel_posts "
+        "WHERE owner_id=$1 AND channel_key=$2 AND views IS NOT NULL "
+        "AND published_at > now() - make_interval(days => $3) "
+        "ORDER BY published_at DESC LIMIT 400",
+        int(owner_id), str(channel_id), int(days))
+    posts = [(r["published_at"], post_score(r["views"], r["reactions"], r["forwards"]))
+             for r in rows or [] if r["published_at"]]
+    return peak_hours(posts, tz_offset, window_start, window_end)
+
+
 async def ensure_plan(pool, owner_id: int, channel_id: int, *,
                       complete: Optional[Complete] = None, force: bool = False,
                       now: Optional[datetime] = None) -> int:
@@ -1575,6 +1875,9 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     if not force and last_at and last_at > now + timedelta(hours=_PLAN_MIN_AHEAD_H):
         return 0
     start = max(last_at or now, now)
+    peaks = await learn_peak_hours(
+        pool, owner_id, channel_id, tz_offset=admin["tz_offset"],
+        window_start=admin["window_start"], window_end=admin["window_end"])
     slots: list[datetime] = []
     cursor = start
     if not last_at:
@@ -1586,7 +1889,7 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     while len(slots) < slot_limit:
         cursor = next_slot(cursor, posts_per_day=admin["posts_per_day"],
                            window_start=admin["window_start"], window_end=admin["window_end"],
-                           tz_offset=admin["tz_offset"])
+                           tz_offset=admin["tz_offset"], peak_hours=peaks)
         if cursor > horizon:
             break
         slots.append(cursor)
@@ -1612,10 +1915,19 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
     # в канале. Отдельный запрос «придумай темы на трое суток» тратил лимит
     # бесплатных моделей впустую — темы устаревали раньше, чем доходили до
     # публикации. Новостному каналу темы наперёд не нужны вовсе.
-    for slot, pillar in zip(slots, pillars):
+    siblings = (await cross_siblings(pool, owner_id, channel_id)
+                if admin.get("cross_promote", True) else [])
+    base_idx = len(planned or [])  # сколько постов уже в плане — продолжаем счёт
+    cross_used = 0
+    for i, (slot, pillar) in enumerate(zip(slots, pillars)):
         topic = ""
         if pillar == INTRO_PILLAR:
             topic = "Знакомство с каналом: о чём он и для кого"
+        elif siblings and should_cross_promote(base_idx + i):
+            sib = pick_cross_sibling(siblings, cross_used)
+            if sib:
+                topic = cross_promo_topic(sib)
+                cross_used += 1
         await pool.execute(
             "INSERT INTO va_admin_plan(owner_id, channel_id, slot_at, pillar, topic) "
             "VALUES($1,$2,$3,$4,$5)", int(owner_id), int(channel_id), slot, pillar, topic)
@@ -1626,8 +1938,13 @@ async def ensure_plan(pool, owner_id: int, channel_id: int, *,
         await pool.execute(
             "UPDATE va_channel_admin SET next_post_at=$3 WHERE owner_id=$1 AND channel_id=$2",
             int(owner_id), int(channel_id), first["s"])
+    peak_note = ""
+    if peaks:
+        hrs = ", ".join(f"{h:02d}:00" for h in sorted(peaks[:3]))
+        peak_note = f" · время под охват аудитории ({hrs})"
+    cross_note = f" · взаимопиар сети: {cross_used}" if cross_used else ""
     await log_event(pool, owner_id, channel_id, "plan",
-                    f"Контент-план дополнен: {len(pillars)} постов вперёд")
+                    f"Контент-план дополнен: {len(pillars)} постов вперёд{peak_note}{cross_note}")
     return len(pillars)
 
 
@@ -2012,10 +2329,22 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
         raise ChannelAdminError("После чистки текст поста оказался пустым")
 
     acc_ids = await va_control.eligible_accounts(pool, owner_id, channel_id)
+    # Пост ведёт в основной канал владельца — ставим в него свою ссылку-
+    # приглашение, чтобы считать вступления с этого поста (services/va_links).
+    # Любой сбой здесь не мешает публикации: уходит исходный текст.
+    link_id = None
+    if acc_ids:
+        try:
+            from services import va_links
+            text, link_id = await va_links.prepare(pool, owner_id, channel_id, text, pillar)
+        except Exception:
+            log.warning("publish: ссылка поста для учёта переходов не создана", exc_info=True)
+
     if not acc_ids:
         raise ChannelAdminError("Нет доступного аккаунта для публикации: проверьте активность, ограничения и карантин")
     ch = await channel_row(pool, owner_id, channel_id) or {}
     if not ch:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError("Канал не найден среди ваших каналов")
     try:
         photo = (await va_media.get_photo(pool, owner_id, channel_id, media_id) if media_id
@@ -2023,6 +2352,7 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
         if photo and not va_media.caption_fits(text):
             raise va_media.MediaError("Текст с изображением слишком длинный: нужен более короткий черновик")
     except va_media.MediaError as exc:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError(str(exc)) from exc
     media_params = ({"media_file_id": photo["file_id"], "media_type": "photo", "require_media": True}
                     if photo else {})
@@ -2062,12 +2392,33 @@ async def publish(pool, owner_id: int, channel_id: int, text: str, pillar: str, 
             label=f"🧠 Администратор: {(ch.get('title') or channel_id)}"[:120],
         )
     except operation_bus.PlanRequiredError as e:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError(
             f"Публикация в каналы доступна на тарифе «{e.required_plan}» и выше — "
             "продлите подписку, и администратор продолжит сам") from e
+    except BaseException:
+        await _drop_link(pool, link_id)
+        raise
     if not op_id:
+        await _drop_link(pool, link_id)
         raise ChannelAdminError("Не удалось поставить публикацию в очередь")
+    if link_id:
+        try:
+            from services import va_links
+            await va_links.attach_op(pool, link_id, int(op_id))
+        except Exception:
+            log.warning("publish: ссылка поста не связана с публикацией", exc_info=True)
     return int(op_id)
+
+
+async def _drop_link(pool, link_id: Optional[int]) -> None:
+    if not link_id:
+        return
+    try:
+        from services import va_links
+        await va_links.drop(pool, link_id)
+    except Exception:
+        log.debug("publish: запись ссылки не удалена", exc_info=True)
 
 
 async def save_draft(pool, owner_id: int, channel_id: int, d: Draft) -> int:
@@ -2579,6 +2930,17 @@ async def channel_report(pool, owner_id: int, channel_id: int) -> dict:
         "AND day > CURRENT_DATE - 8 ORDER BY day", int(owner_id), int(channel_id))
     stats = await pillar_stats(pool, owner_id, channel_id)
     best = max(stats.items(), key=lambda kv: kv[1]["score"])[0] if stats else None
+    try:
+        from services import va_links
+        links = await va_links.summary(pool, owner_id, channel_id)
+    except Exception:
+        log.debug("channel_report: переходы не посчитаны", exc_info=True)
+        links = {"links": 0, "joins": 0, "requests": 0, "by_pillar": {}}
+    # Задача витрины — вступления в основной канал. Есть они — лучшая рубрика
+    # та, что приводит людей, а не та, что больше читают.
+    by_pillar = links.get("by_pillar") or {}
+    if any(v > 0 for v in by_pillar.values()):
+        best = max(by_pillar.items(), key=lambda kv: kv[1])[0]
     members = [int(r["members_count"]) for r in growth or []]
     return {
         "posts_7d": int((agg or {}).get("posts_7d") or 0) if agg else 0,
@@ -2587,7 +2949,12 @@ async def channel_report(pool, owner_id: int, channel_id: int) -> dict:
         "members": members[-1] if members else None,
         "members_delta_7d": (members[-1] - members[0]) if len(members) >= 2 else None,
         "best_pillar": best,
-        "pillars": [{"name": p, "posts": s["posts"], "avg_views": s["views"]}
+        "links_7d": int(links.get("links") or 0),
+        "joins_7d": int(links.get("joins") or 0),
+        "requests_7d": int(links.get("requests") or 0),
+        "freq_suggestion": await frequency_suggestion(pool, owner_id, channel_id),
+        "pillars": [{"name": p, "posts": s["posts"], "avg_views": s["views"],
+                     "joins": int(by_pillar.get(p, 0))}
                     for p, s in sorted(stats.items(), key=lambda kv: -kv[1]["score"])],
     }
 
@@ -2754,6 +3121,19 @@ async def network_overview(pool, owner_id: int) -> dict:
     return out
 
 
+def plural_posts(n: int) -> str:
+    """Русское склонение слова «пост» по числу: 1 пост, 2 поста, 5 постов."""
+    n = abs(int(n))
+    if 11 <= n % 100 <= 14:
+        return "постов"
+    tail = n % 10
+    if tail == 1:
+        return "пост"
+    if 2 <= tail <= 4:
+        return "поста"
+    return "постов"
+
+
 def format_daily_report(items: list[tuple[str, dict]]) -> str:
     """Отчёт владельцу за сутки по всем его каналам под администратором."""
     lines = ["🧠 <b>Отчёт виртуального администратора</b>"]
@@ -2779,8 +3159,17 @@ def format_daily_report(items: list[tuple[str, dict]]) -> str:
             if r.get("members_delta_7d") is not None:
                 d = r["members_delta_7d"]
                 s += f" ({'+' if d >= 0 else ''}{d} за неделю)"
+        if r.get("links_7d"):
+            s += f"\n• привёл в основной канал: {r.get('joins_7d') or 0}"
+            if r.get("requests_7d"):
+                s += f" (ещё заявок на вступление: {r['requests_7d']})"
         if r.get("best_pillar"):
             s += f"\n• лучше всего заходит: {html.escape(r['best_pillar'])}"
+        fs = r.get("freq_suggestion")
+        if fs:
+            s += (f"\n• совет по частоте: {fs['suggested']} "
+                  f"{plural_posts(fs['suggested'])} в день — {html.escape(fs['reason'])} "
+                  f"(сейчас {fs['current']})")
         if is_ai_wait(r.get("last_error")):
             s += "\n• ⏳ ждёт сброса лимита ИИ — продолжит сам"
         elif r.get("last_error"):

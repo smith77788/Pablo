@@ -216,11 +216,11 @@ def test_segment_source_sends_hub_contact_by_phone_not_bare_id(monkeypatch):
     by_phone: list = []
     by_ref: list = []
 
-    async def _batch(sess, acc, group, refs, pace_mult=1.0, bulk=None):
+    async def _batch(sess, acc, group, refs, pace_mult=1.0, bulk=None, **_kw):
         by_ref.extend(refs)
         return _ok(len(refs))
 
-    async def _phones(sess, acc, group, refs, skip_keys=None):
+    async def _phones(sess, acc, group, refs, skip_keys=None, **_kw):
         by_phone.extend(refs)
         return {**_ok(len(refs)), "invited_phones": list(refs), "invited_aliases": [],
                 "already_phones": []}

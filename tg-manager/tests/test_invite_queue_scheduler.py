@@ -76,7 +76,7 @@ class _Stand:
         self.bulk_seen: list = []
 
     async def invite_batch(self, session_str, acc, group, refs, pace_mult=1.0,
-                           bulk=None):
+                           bulk=None, **_kw):
         # pace_mult: исполнитель прокидывает множитель темпа ВНУТРЬ батча —
         # до этого движок спал фиксированные 2–4с на цель, и режим «быстро»
         # не влиял на основную задержку прогона.
@@ -85,7 +85,8 @@ class _Stand:
         self.calls.append((int(acc["id"]), list(refs)))
         return self.responder(int(acc["id"]), list(refs))
 
-    async def invite_by_phones(self, session_str, acc, group, refs, skip_keys=None):
+    async def invite_by_phones(self, session_str, acc, group, refs, skip_keys=None,
+                               **_kw):
         return await self.invite_batch(session_str, acc, group, refs)
 
     @property

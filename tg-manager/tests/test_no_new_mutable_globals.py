@@ -35,8 +35,16 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVICES = os.path.join(ROOT, "services")
 
+# `set` в этом списке появился не сразу, и дыра нашлась случайно: у кэша поиска
+# (search_engine._cache) единственным ВИДИМЫМ детектору изменением был
+# `_cache.clear()` внутри clear_search_cache. Эту функцию удалили как мёртвую, и
+# запись в реестре стала «устаревшей» — хотя кэш остался и по-прежнему пишется
+# через `_cache.set(...)`. То есть детектор не видел записи в собственный кэш
+# проекта, а вместе с ней — ещё семь глобалов в broadcaster, proxy_selector и
+# logger. Правило: детектор, у которого запись в реестре «пропала» без правки
+# самого глобала, сначала проверяется сам.
 _MUTATORS = {"append", "extend", "add", "update", "pop", "clear", "remove",
-             "discard", "setdefault", "insert", "popitem", "sort"}
+             "discard", "setdefault", "insert", "popitem", "sort", "set"}
 
 
 def _module_globals(tree: ast.Module) -> set[str]:
@@ -104,6 +112,15 @@ def detect() -> set[str]:
 
 # Делить нечего: объекты привязаны к процессу/циклу событий по своей природе.
 PROCESS_LOCAL: dict[str, str] = {
+    "services/logger.py:_correlation_id": (
+        "contextvars.ContextVar: значение принадлежит ЗАДАЧЕ, а не процессу, и "
+        "в общей БД ему места нет — это сквозной идентификатор записи в логе"),
+    "services/logger.py:_op_id": (
+        "contextvars.ContextVar с id операции для записей в логе: живёт ровно "
+        "столько, сколько задача, которая эту операцию ведёт"),
+    "services/logger.py:_user_id": (
+        "contextvars.ContextVar с id владельца для записей в логе: задаётся на "
+        "входе в задачу и умирает вместе с ней"),
     "services/mini_app_api.py:_sse_streams": (
         "счётчик ЖИВЫХ SSE-соединений по владельцу: соединение физически "
         "существует в этом процессе и умирает вместе с ним, поэтому считать "
@@ -165,6 +182,19 @@ PROCESS_LOCAL: dict[str, str] = {
 # Производное состояние: расхождение стоит лишней работы или устаревшего
 # показания на экране, но не корректности и не доступа.
 CACHE: dict[str, str] = {
+    "services/broadcaster.py:_broadcast_result_cache": (
+        "результат рассылки на 5 минут (TTLCache): истина — в таблице рассылок, "
+        "кэш только избавляет повторный просмотр от пересчёта"),
+    "services/broadcaster.py:_user_map_cache": (
+        "соответствие пользователь->данные на 2 минуты (TTLCache): "
+        "перечитывается из БД по истечении, расхождение реплик означает лишь "
+        "лишний запрос, а не другой ответ"),
+    "services/proxy_selector.py:_proxy_health_cache": (
+        "здоровье прокси на 3 минуты (TTLCache): истина — в таблице прокси, "
+        "кэш гасит шквал проверок при подборе"),
+    "services/proxy_selector.py:_proxy_pool_stats_cache": (
+        "сводка по пулу прокси на 2 минуты (TTLCache): считается из БД, "
+        "по истечении пересчитывается"),
     "services/account_health.py:_health_cache": "здоровье аккаунта, пересчитывается",
     "services/account_manager.py:_ACC_TRANSPORT": (
         "релей/прокси аккаунта; истина в tg_accounts, авторитетно перечитывается "

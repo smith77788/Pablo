@@ -281,6 +281,11 @@ async def run_once(pool, bot, *, now: datetime | None = None) -> dict:
                     await ca.autotune(pool, a["owner_id"], a["channel_id"])
         except Exception:
             log.exception("channel_admin_runner: статистика канала %s", a["channel_id"])
+        try:
+            from services import va_links
+            await va_links.refresh(pool, a["owner_id"], a["channel_id"])
+        except Exception:
+            log.exception("channel_admin_runner: переходы с канала %s", a["channel_id"])
 
     try:
         from services import va_references

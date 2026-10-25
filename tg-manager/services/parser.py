@@ -846,7 +846,7 @@ async def get_parsed_audience(
     where = " AND ".join(conditions)
     rows = await pool.fetch(
         f"SELECT * FROM parsed_audiences WHERE {where} "
-        f"ORDER BY parsed_at DESC OFFSET ${p} LIMIT ${p + 1}",
+        f"ORDER BY parsed_at DESC, id OFFSET ${p} LIMIT ${p + 1}",
         *params,
         offset,
         limit,

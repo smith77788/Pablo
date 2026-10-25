@@ -21,14 +21,25 @@ import time
 
 from aiohttp import web
 
+# id контакта — UUID. Проверяем форму ДО запроса: asyncpg биндит uuid без
+# каста, и одна некорректная строка в списке роняет весь запрос, то есть всю
+# выгрузку, а не одну строку.
+_UUID_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+                      r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+
 
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты хранилища контактов на приложении мини-аппа."""
     from services.contacts_hub import segments as _segments
+    # На уровне setup_routes, а не внутри обработчика: `except BadDate` в
+    # обработчике вычисляется и тогда, когда до ленивого импорта дело не
+    # дошло, и неразрешённое имя превратило бы любую раннюю ошибку в NameError.
+    from services.contacts_hub.repository import BadDate
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _BAD_BODY, _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
         _safe_fetch, _safe_fetchrow, alive_accounts, log,
         read_upload, read_upload_text, UploadTooLarge,
+        bad_body_response,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
@@ -59,31 +70,67 @@ def setup_routes(app: web.Application, pool) -> None:
     async def _alive_accounts(uid: int, wanted: list[int] | None = None) -> list[int]:
         return await alive_accounts(pool, uid, wanted)
 
-    async def uch_contacts(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        search = request.query.get('search', '')
-        tag = request.query.get('tag')
-        favorite = request.query.get('favorite') == '1'
-        premium = request.query.get('premium') == '1'
-        multi = request.query.get('multi') == '1'
-        mutual = request.query.get('mutual') == '1'
-        # Плитки «📱 Телефон» и «С ником» показывали числа, которые ни во что не
-        # открывались: срез существовал только в счётчике.
-        with_phone = request.query.get('with_phone') == '1'
-        with_username = request.query.get('with_username') == '1'
+    def _contact_filters(request: web.Request) -> dict:
+        """Фильтры списка контактов — ОДИН разбор на список и на экспорт.
+
+        Экспорт умел только «все контакты», хотя у хаба богатый фильтр: стадия,
+        тег, группа, аккаунт, пол, личные. Владелец, собравший нужный срез, не
+        мог выгрузить именно его. Если бы экспорт разбирал параметры своим
+        кодом, «вижу одно — выгружаю другое» появилось бы на первой же правке
+        фильтра, поэтому разбор здесь общий.
+        """
         gender = request.query.get('gender') or None       # 'm' | 'f' | 'unknown'
         if gender not in ('m', 'f', 'unknown'):
             gender = None
-        crm_stage = (request.query.get('crm_stage') or '').strip()[:40] or None
-        excluded_only = request.query.get('excluded_only') == '1'  # только личные (управление)
-        # Фильтр по группе контактов: репозиторий его умел, а список не читал,
-        # поэтому группы было некуда открыть.
-        group_id = validate_integer(request.query.get('group_id'), min_val=1)
-        # Фильтр «контакты этого аккаунта»: фронт его отправлял, репозиторий
-        # умел, а список не читал — экран обещал контакты одного аккаунта и
-        # показывал весь справочник (тот же класс, что срез «Прокси мёртв»).
-        account_id = validate_integer(request.query.get('account_id'), min_val=1)
+        return dict(
+            search=request.query.get('search', ''),
+            tag=request.query.get('tag'),
+            favorite_only=request.query.get('favorite') == '1',
+            premium_only=request.query.get('premium') == '1',
+            multi_only=request.query.get('multi') == '1',
+            mutual_only=request.query.get('mutual') == '1',
+            # Плитки «📱 Телефон» и «С ником» показывали числа, которые ни во
+            # что не открывались: срез существовал только в счётчике.
+            with_phone_only=request.query.get('with_phone') == '1',
+            with_username_only=request.query.get('with_username') == '1',
+            gender=gender,
+            crm_stage=(request.query.get('crm_stage') or '').strip()[:40] or None,
+            excluded_only=request.query.get('excluded_only') == '1',
+            # Фильтр по группе контактов: репозиторий его умел, а список не
+            # читал, поэтому группы было некуда открыть.
+            group_id=validate_integer(request.query.get('group_id'), min_val=1),
+            # Фильтр «контакты этого аккаунта»: фронт его отправлял, репозиторий
+            # умел, а список не читал — экран обещал контакты одного аккаунта и
+            # показывал весь справочник (тот же класс, что срез «Прокси мёртв»).
+            account_id=validate_integer(request.query.get('account_id'), min_val=1),
+        )
+
+    async def _own_contact(cid: str, uid: int) -> bool:
+        """Принадлежит ли контакт владельцу.
+
+        НАХОДКА. Лента карточки и граф идентичности читали ПОДТАБЛИЦЫ контакта
+        (contact_sources, contact_crm, last_active_at) по одному contact_id, без
+        owner_id вообще: по чужому uuid отдавались аккаунты-источники, стадия
+        CRM и «был сегодня». Часть запросов в тех же обработчиках владельца
+        проверяла, часть — нет, поэтому ответ выглядел правдоподобно
+        (полупустая лента), а не как отказ.
+
+        Проверка одна и ДО чтения: у подтаблиц contact_sources своего owner_id
+        нет вообще, поэтому скоуп может держать только сам контакт.
+        """
+        if not _UUID_RE.match(str(cid or '')):
+            return False
+        return bool(await pool.fetchval(
+            'SELECT 1 FROM unified_contacts WHERE id=$1 AND owner_id=$2', cid, uid))
+
+    def _filters_are_set(filters: dict) -> bool:
+        """Есть ли хоть один фильтр: «весь хаб» и «срез» — разные выгрузки."""
+        return any(v not in (None, '', False) for v in filters.values())
+
+    async def uch_contacts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        filters = _contact_filters(request)
         # Пагинация: без неё список молча обрезался дефолтным limit=100 — при 2.9к+
         # контактов пользователь видел «лишь десятки» и не мог долистать до
         # остальных. limit зажат, offset — для «Показать ещё».
@@ -97,14 +144,8 @@ def setup_routes(app: web.Application, pool) -> None:
             offset = 0
         try:
             from services.contacts_hub.repository import get_contacts
-            result = await get_contacts(pool, uid, search=search, favorite_only=favorite,
-                                        tag=tag, premium_only=premium, multi_only=multi,
-                                        mutual_only=mutual, gender=gender, crm_stage=crm_stage,
-                                        excluded_only=excluded_only, group_id=group_id,
-                                        account_id=account_id,
-                                        with_phone_only=with_phone,
-                                        with_username_only=with_username,
-                                        limit=limit, offset=offset)
+            result = await get_contacts(pool, uid, limit=limit, offset=offset,
+                                        **filters)
             result['offset'] = offset
             result['limit'] = limit
             return _json_resp(result)
@@ -752,12 +793,45 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             contact_id = request.match_info['contact_id']
             data = await request.json()
-            from services.contacts_hub.repository import update_contact, log_contact_history
+            from services.contacts_hub.repository import (
+                get_contact, update_contact, log_contact_history)
+            from services.contacts_hub.versioning_engine import (
+                changed_against, create_version, snapshot_of, summary_of)
+            # Снимок ДО правки. Экран «Версии» обещает «версии создаются при
+            # изменениях», а создавал их НИКТО: create_version не звался ни
+            # отсюда, ни откуда-либо ещё в продукте, так что список версий был
+            # пуст всегда, а откату было некуда откатываться.
+            before = await get_contact(pool, contact_id, uid)
             success = await update_contact(pool, contact_id, uid, data)
             if not success: return _err("Не найдено", 404)
             await log_contact_history(pool, contact_id, uid, 'edit', source='user')
+            if before and before.get('contact'):
+                snapshot = snapshot_of(before['contact'])
+                # Только то, что правка реально меняет: экран отправляет
+                # карточку целиком, и версия, подписанная «всем, что пришло»,
+                # утверждала бы, что изменились телефоны, которых владелец не
+                # касался. Ничего не изменилось — версии и не нужно.
+                changed = changed_against(snapshot, data)
+                try:
+                    if changed:
+                        await create_version(
+                            pool, contact_id, uid, snapshot,
+                            changed_fields=changed, changed_by='user',
+                            change_summary=summary_of(changed))
+                except Exception:
+                    # Правка уже применена и подтверждена истории: ронять ответ
+                    # из-за непишущейся версии значит показать владельцу ошибку
+                    # там, где всё получилось.
+                    log.exception("uch_contact_update: версия не создана")
             return _json_resp({'ok': True})
-        except Exception:
+        except BadDate as bad:
+            # Непонятная дата — это ошибка ввода, а не сбой сервера: 500 с
+            # «внутренней ошибкой» заставлял владельца жать «Сохранить» снова.
+            return _err(str(bad), 400)
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_contact_update")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -774,17 +848,46 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_contact_delete")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_search(request: web.Request) -> web.Response:
+    # ОТБОР СПИСКА — один, в фильтре списка. Здесь лежала ручка
+    # GET /uch/search: те же семь колонок и теги, что у фильтра списка, но
+    # своим условием и без пагинации, и её не звал ни один экран. Операторы
+    # (@ник, #тег, company:, phone:), которые раньше знал только поиск бота,
+    # теперь разбираются в repository._segment_where, поэтому работают в
+    # списке, в срезе для массовых действий и в выгрузке — одним кодом.
+    # Второй экран поиска НЕ заводить: он вернул бы расхождение «вижу одно —
+    # применяю к другому», закрытое в выгрузке.
+
+    async def uch_spotlight(request: web.Request) -> web.Response:
+        """Подсказки по мере набора: ПРЫЖОК к контакту, а не отбор списка.
+
+        Это не дубль фильтра: search_contacts_spotlight прощает опечатку
+        (fuzzy-близость по имени/нику/компании) и ранжирует попадания — больше
+        такого в продукте нет нигде. Ручка висела без двери, то есть
+        устойчивость к опечаткам была написана и недоступна.
+
+        Расхождения «вижу одно — применяю к другому» здесь не возникает:
+        подсказка открывает ОДНУ карточку, а не задаёт срез, к которому
+        применяются массовые действия.
+        """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
-        query = request.query.get('q', '')
-        if not query: return _err("Нужен поисковый запрос", 400)
+        q = request.query.get('q', '').strip()
+        if not q: return _json_resp({'results': []})
         try:
-            from services.contacts_hub.search_engine import search_contacts
-            results = await search_contacts(pool, uid, query)
-            return _json_resp({'results': results, 'total': len(results)})
+            from services.contacts_hub.search_engine import search_contacts_spotlight
+            results = await search_contacts_spotlight(pool, uid, q, limit=8)
+            out = [{'id': str(r.get('id')),
+                    'name': (' '.join(x for x in (r.get('first_name'),
+                                                  r.get('last_name')) if x)
+                             or r.get('display_name') or r.get('username')
+                             or 'Без имени'),
+                    'username': r.get('username'),
+                    'company': r.get('company'),
+                    'tags': list(r.get('tags') or [])[:3]}
+                   for r in results]
+            return _json_resp({'results': out, 'total': len(out)})
         except Exception:
-            log.exception("uch_search")
+            log.exception("uch_spotlight")
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_stats(request: web.Request) -> web.Response:
@@ -926,7 +1029,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import create_group
             gid = await create_group(pool, uid, data.get('name', ''), data.get('color'))
             return _json_resp({'ok': True, 'id': gid})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_group_create")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -935,11 +1041,17 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             gid = int(request.match_info['group_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор группы", 400)
+        try:
             data = await request.json()
             from services.contacts_hub.bulk_ops_engine import update_group
             ok = await update_group(pool, gid, uid, data.get('name'), data.get('color'))
             return _json_resp({'ok': ok})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_group_update")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -948,6 +1060,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             gid = int(request.match_info['group_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор группы", 400)
+        try:
             from services.contacts_hub.bulk_ops_engine import delete_group
             ok = await delete_group(pool, gid, uid)
             return _json_resp({'ok': ok})
@@ -970,48 +1085,12 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_toggle_favorite")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_add_to_group(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            gid = int(request.match_info['group_id'])
-            from services.contacts_hub.repository import add_contact_to_group
-            ok = await add_contact_to_group(pool, cid, gid)
-            return _json_resp({'ok': ok})
-        except Exception:
-            log.exception("uch_add_to_group")
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def uch_remove_from_group(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            gid = int(request.match_info['group_id'])
-            from services.contacts_hub.repository import remove_contact_from_group
-            ok = await remove_contact_from_group(pool, cid, gid)
-            return _json_resp({'ok': ok})
-        except Exception:
-            log.exception("uch_remove_from_group")
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def uch_contact_history(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            rows = await pool.fetch(
-                'SELECT * FROM contact_history WHERE contact_id=$1 AND owner_id=$2 '
-                'ORDER BY created_at DESC LIMIT $3',
-                cid, uid, _list_limit(request, 100, 2000))
-            total = await _safe_count(pool,
-                'SELECT COUNT(*) FROM contact_history WHERE contact_id=$1 AND owner_id=$2',
-                cid, uid)
-            return _json_resp({'history': [dict(r) for r in rows], 'total': total})
-        except Exception:
-            log.exception("uch_contact_history")
-            return _err(_INTERNAL_ERROR, 500)
+    # СПИСОК ПРАВОК КОНТАКТА отдельной ручкой больше не отдаётся: ручка
+    # GET /uch/contacts/{id}/history была строгим подмножеством ленты
+    # /timeline (та читает тот же contact_history и склеивает его с
+    # источниками, событиями организма и стадией CRM), и её не звал ни один
+    # экран. Две ленты истории расходились бы по скоупу: /timeline проверяет
+    # владельца через _own_contact, а здесь владелец был только в WHERE.
 
     async def uch_contact_invite_history(request: web.Request) -> web.Response:
         """Кому/куда/когда пытались пригласить этот контакт (по всем группам).
@@ -1043,7 +1122,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contact_invite_link import opt_out_contact
             stored = await opt_out_contact(pool, uid, cid, reason=reason)
             return _json_resp({'ok': bool(stored), 'targets': stored})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_contact_opt_out")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1071,12 +1153,36 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("uch_contact_versions")
             return _err(_INTERNAL_ERROR, 500)
 
+    async def uch_rollback_preview(request: web.Request) -> web.Response:
+        """Что именно затрёт откат — ДО того, как владелец его подтвердит.
+
+        Экран спрашивал «Откатить к версии 3?» и больше ничего: необратимая
+        перезапись карточки предлагалась к подписи вслепую.
+        """
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            cid = request.match_info['contact_id']
+            vnum = int(request.match_info['version_num'])
+            from services.contacts_hub.versioning_engine import rollback_preview
+            prev = await rollback_preview(pool, cid, uid, vnum)
+            if prev is None: return _err("Версия не найдена", 404)
+            return _json_resp(prev)
+        except ValueError:
+            return _err("Неверный номер версии", 400)
+        except Exception:
+            log.exception("uch_rollback_preview")
+            return _err(_INTERNAL_ERROR, 500)
+
     async def uch_rollback(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = request.match_info['contact_id']
             vnum = int(request.match_info['version_num'])
+        except (KeyError, ValueError):
+            return _err("Неверный номер версии", 400)
+        try:
             from services.contacts_hub.versioning_engine import rollback_to_version
             ok = await rollback_to_version(pool, cid, uid, vnum)
             if not ok: return _err("Версия не найдена", 404)
@@ -1093,6 +1199,8 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = request.match_info['contact_id']
+            if not await _own_contact(cid, uid):
+                return _err("Контакт не найден", 404)
             history = await pool.fetch(
                 'SELECT field_name, old_value, new_value, created_at FROM contact_history WHERE contact_id=$1 AND owner_id=$2 ORDER BY created_at DESC LIMIT 60',
                 cid, uid)
@@ -1151,12 +1259,25 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = request.match_info['contact_id']
+            if not await _own_contact(cid, uid):
+                return _err("Контакт не найден", 404)
             from services.contacts_hub.identity_engine import build_identity_graph, get_last_active
             graph = await build_identity_graph(pool, uid, cid)
-            last_active = await get_last_active(pool, cid)
+            last_active = await get_last_active(pool, cid, uid)
             return _json_resp({**graph, 'last_active': last_active})
         except Exception:
             log.exception("uch_identity")
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def uch_crm_pipeline(request: web.Request) -> web.Response:
+        """Воронка хаба: сколько контактов в каждой стадии и на какую сумму."""
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            from services.contacts_hub.crm_engine import pipeline
+            return _json_resp(await pipeline(pool, uid))
+        except Exception:
+            log.exception("uch_crm_pipeline")
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_crm_get(request: web.Request) -> web.Response:
@@ -1184,6 +1305,8 @@ def setup_routes(app: web.Application, pool) -> None:
         except ContactNotFound as nf:
             return _err(str(nf), 404)
         except ValueError as ve:
+            # BadStage — подвид ValueError: «Неизвестная стадия сделки» уходит
+            # владельцу как есть, по-русски.
             return _err(str(ve), 400)
         except Exception:
             log.exception("uch_crm_upsert uid=%s", uid)
@@ -1196,27 +1319,28 @@ def setup_routes(app: web.Application, pool) -> None:
             cid = request.match_info['contact_id']
             data = await request.json()
             from services.contacts_hub.crm_engine import (
-                ContactNotFound, log_crm_activity,
+                ACTIVITY_LABELS, ContactNotFound, activity_label,
+                log_crm_activity,
             )
-            await log_crm_activity(pool, uid, cid, data.get('type', 'note'),
-                                   data.get('description'), data.get('metadata'))
-            return _json_resp({'ok': True})
+            kind = str(data.get('type') or 'note')
+            # Тип приходит с экрана и ложится в базу. Свободная строка
+            # превратила бы журнал в свалку, по которой нельзя ни считать, ни
+            # группировать, поэтому список закрытый — и отказ по-русски.
+            if kind not in ACTIVITY_LABELS:
+                return _err("Неизвестный тип касания", 400)
+            desc = data.get('description')
+            if desc is not None:
+                desc = validate_string(desc, max_len=500)
+            await log_crm_activity(pool, uid, cid, kind, desc,
+                                   data.get('metadata'))
+            return _json_resp({'ok': True, 'label': activity_label(kind)})
         except ContactNotFound as nf:
             return _err(str(nf), 404)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_crm_activity")
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def uch_crm_activity_list(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            cid = request.match_info['contact_id']
-            from services.contacts_hub.crm_engine import get_crm_activity
-            activity = await get_crm_activity(pool, uid, cid)
-            return _json_resp({'activity': activity})
-        except Exception:
-            log.exception("uch_crm_activity_list")
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_crm_reminder(request: web.Request) -> web.Response:
@@ -1248,7 +1372,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return _json_resp({'ok': True})
         except ContactNotFound as nf:
             return _err(str(nf), 404)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_crm_reminder uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1257,10 +1384,38 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             from services.contacts_hub.trust_engine import detect_smart_duplicates
-            dupes = await detect_smart_duplicates(pool, uid)
-            return _json_resp({'duplicates': dupes, 'count': len(dupes)})
+            res = await detect_smart_duplicates(pool, uid)
+            dupes = res['duplicates']
+            # Сколько групп не сравнивалось — часть ответа, а не деталь
+            # реализации: молча срезанный список читается как «дублей больше
+            # нет», и владелец закрывает экран с этим выводом.
+            return _json_resp({'duplicates': dupes, 'count': len(dupes),
+                               'skipped_groups': res['skipped_groups']})
         except Exception:
             log.exception("uch_duplicates")
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def uch_merge_preview(request: web.Request) -> web.Response:
+        """Что переедет при слиянии — ДО подтверждения.
+
+        Тот же путь, что и само слияние: GET — что будет, POST — сделать.
+        Считает теми же правилами, что и слияние, поэтому разойтись с ним
+        не может.
+        """
+        uid = _get_uid(request)
+        if not uid: return _err("Unauthorized", 401)
+        try:
+            primary_id = (request.query.get('primary_id') or '').strip()
+            secondary_id = (request.query.get('secondary_id') or '').strip()
+            if not primary_id or not secondary_id:
+                return _err("Нужны основной и дополнительный идентификаторы", 400)
+            from services.contacts_hub.merge_engine import merge_preview
+            res = await merge_preview(pool, primary_id, secondary_id, uid)
+            if 'error' in res:
+                return _err("Контакт не найден", 404)
+            return _json_resp(res)
+        except Exception:
+            log.exception("uch_merge_preview")
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_merge(request: web.Request) -> web.Response:
@@ -1275,7 +1430,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.merge_engine import manual_merge
             result = await manual_merge(pool, primary_id, secondary_id, uid)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_merge")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1295,12 +1453,18 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             cid = int(request.match_info['conflict_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор конфликта", 400)
+        try:
             data = await request.json()
             from services.contacts_hub.trust_engine import resolve_conflict
             ok = await resolve_conflict(pool, cid, uid, data.get('resolution', 'accepted'),
                                         data.get('value'), uid)
             return _json_resp({'ok': ok})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_resolve_conflict")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1346,7 +1510,10 @@ def setup_routes(app: web.Application, pool) -> None:
             rid = await create_smart_tag_rule(pool, uid, data.get('name', ''),
                                               data.get('tag', ''), data.get('conditions', {}))
             return _json_resp({'ok': True, 'id': rid})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_smart_tag_rule_create")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1355,6 +1522,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             rid = int(request.match_info['rule_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор правила", 400)
+        try:
             from services.contacts_hub.smart_tags_engine import delete_smart_tag_rule
             ok = await delete_smart_tag_rule(pool, rid, uid)
             return _json_resp({'ok': ok})
@@ -1367,6 +1537,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             rid = int(request.match_info['rule_id'])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор правила", 400)
+        try:
             from services.contacts_hub.smart_tags_engine import toggle_smart_tag_rule
             active = await toggle_smart_tag_rule(pool, rid, uid)
             return _json_resp({'ok': True, 'is_active': active})
@@ -1382,7 +1555,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_tag
             result = await bulk_tag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_tag")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1394,7 +1570,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_untag
             result = await bulk_untag(pool, uid, data.get('contact_ids', []), data.get('tag', ''))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_untag")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1406,7 +1585,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_favorite
             result = await bulk_set_favorite(pool, uid, data.get('contact_ids', []), data.get('is_favorite', True))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_favorite")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1418,7 +1600,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_delete
             result = await bulk_delete(pool, uid, data.get('contact_ids', []))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_delete")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1432,7 +1617,10 @@ def setup_routes(app: web.Application, pool) -> None:
             result = await set_excluded(pool, uid, data.get('contact_ids', []),
                                         bool(data.get('excluded', True)))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_exclude")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1462,7 +1650,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 pool, uid, country=(d.get('country') or None),
                 tag=(d.get('tag') or None), account_id=acc_id)
             return _json_resp({'count': n})
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_filter_preview")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1481,7 +1672,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 country=(d.get('country') or None), tag=(d.get('tag') or None),
                 account_id=acc_id)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_filter_exclude")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1502,7 +1696,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 tag=(d.get('tag') or None),
                 account_id=(int(d['account_id']) if d.get('account_id') else None))
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_filter_delete")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1521,7 +1718,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 from services.contacts_hub.bulk_ops_engine import bulk_remove_from_group
                 result = await bulk_remove_from_group(pool, uid, data.get('contact_ids', []), gid)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_group")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1535,27 +1735,17 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_merge
             result = await bulk_merge(pool, uid, pairs)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_merge")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_bulk_export(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            data = await request.json()
-            contact_ids = data.get('contact_ids', [])
-            fmt = data.get('format', 'json')
-            from services.contacts_hub.bulk_ops_engine import bulk_export
-            result = await bulk_export(pool, uid, contact_ids, fmt)
-            content_types = {'csv': 'text/csv', 'vcf': 'text/vcard', 'json': 'application/json'}
-            return web.Response(
-                body=result['data'], content_type=content_types.get(fmt, 'application/json'),
-                headers={'Content-Disposition': f'attachment; filename="contacts.{fmt}"'})
-        except Exception:
-            log.exception("uch_bulk_export")
-            return _err(_INTERNAL_ERROR, 500)
-
+    # Ручка POST /uch/bulk/export удалена: выгрузка выбранных идёт тем же
+    # GET /uch/export/{fmt}?ids=…, что и весь хаб и текущий срез. Она была
+    # второй реализацией той же выгрузки, и её не звал ни один экран —
+    # «выгрузить отмеченных» в интерфейсе просто не было.
     async def uch_bulk_importance(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
@@ -1566,7 +1756,10 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_importance
             result = await bulk_set_importance(pool, uid, contact_ids, level)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_importance")
             return _err(_INTERNAL_ERROR, 500)
 
@@ -1580,44 +1773,86 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.bulk_ops_engine import bulk_set_rating
             result = await bulk_set_rating(pool, uid, contact_ids, rating)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_bulk_rating")
             return _err(_INTERNAL_ERROR, 500)
 
-    async def uch_export_csv(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.contacts_hub.export_engine import export_csv
-            csv_data = await export_csv(pool, uid)
-            return web.Response(body=csv_data, content_type='text/csv',
-                                headers={'Content-Disposition': 'attachment; filename="contacts.csv"'})
-        except Exception:
-            log.exception("uch_export_csv")
-            return _err(_INTERNAL_ERROR, 500)
+    _EXPORT_FORMATS = {
+        'csv': ('text/csv', 'contacts.csv'),
+        'vcf': ('text/vcard', 'contacts.vcf'),
+        'json': ('application/json', 'contacts.json'),
+    }
+    # Сколько контактов выгружаем срезом за один раз. Выгрузка молча обрезанного
+    # среза — это файл, в котором чего-то нет, и владелец об этом не узнает;
+    # поэтому на превышении приходит отказ с числом, а не усечённый файл.
+    _EXPORT_SLICE_CAP = 5000
 
-    async def uch_export_vcf(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        try:
-            from services.contacts_hub.export_engine import export_vcf
-            vcf_data = await export_vcf(pool, uid)
-            return web.Response(body=vcf_data, content_type='text/vcard',
-                                headers={'Content-Disposition': 'attachment; filename="contacts.vcf"'})
-        except Exception:
-            log.exception("uch_export_vcf")
-            return _err(_INTERNAL_ERROR, 500)
+    async def _export_target_ids(request: web.Request, uid: int):
+        """Кого выгружаем: (ids | None, ошибка | None).
 
-    async def uch_export_json(request: web.Request) -> web.Response:
+        None означает «весь хаб» — прежнее и единственное поведение экспорта.
+        Список id приходит либо прямо (`ids=` — выбранные галочками, и так же
+        выгружается один контакт из карточки), либо считается по ТЕМ ЖЕ
+        фильтрам, что у списка (`_contact_filters`), то есть «выгрузить то, что
+        вижу».
+        """
+        raw = (request.query.get('ids') or '').strip()
+        if raw:
+            ids = [x for x in (s.strip() for s in raw.split(',')) if x]
+            if len(ids) > _EXPORT_SLICE_CAP:
+                return None, f"За раз выгружается не больше {_EXPORT_SLICE_CAP} контактов"
+            for x in ids:
+                # id контакта — UUID; что угодно другое уронило бы запрос
+                # целиком (asyncpg биндит uuid без каста).
+                if not _UUID_RE.match(x):
+                    return None, "Неверный идентификатор контакта"
+            return ids, None
+        filters = _contact_filters(request)
+        if not _filters_are_set(filters):
+            return None, None
+        from services.contacts_hub.repository import get_contacts
+        res = await get_contacts(pool, uid, limit=_EXPORT_SLICE_CAP, offset=0,
+                                 **filters)
+        rows = res.get('contacts') or []
+        total = int(res.get('total') or len(rows))
+        if total > _EXPORT_SLICE_CAP:
+            return None, (
+                f"В срезе {total} контактов, за раз выгружается "
+                f"{_EXPORT_SLICE_CAP}. Сузьте фильтр или выгрузите весь хаб.")
+        return [str(r['id']) for r in rows], None
+
+    async def uch_export(request: web.Request) -> web.Response:
+        """Экспорт контактов: весь хаб, текущий срез или выбранные.
+
+        Раньше здесь лежали три почти одинаковых обработчика, и каждый умел
+        ровно одно — «все контакты». Фильтр хаба (стадия, тег, группа,
+        аккаунт, пол, личные) на экспорт не влиял никак, то есть владелец,
+        собравший срез, выгружал вместо него весь справочник.
+        """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
+        fmt = (request.match_info.get('fmt') or 'csv').lower()
+        if fmt not in _EXPORT_FORMATS:
+            return _err("Неизвестный формат выгрузки", 400)
+        content_type, filename = _EXPORT_FORMATS[fmt]
         try:
-            from services.contacts_hub.export_engine import export_json
-            json_data = await export_json(pool, uid)
-            return web.Response(body=json_data, content_type='application/json',
-                                headers={'Content-Disposition': 'attachment; filename="contacts.json"'})
+            ids, err = await _export_target_ids(request, uid)
+            if err:
+                return _err(err, 400)
+            if ids is not None and not ids:
+                return _err("В этом срезе нет контактов", 400)
+            from services.contacts_hub import export_engine as _ex
+            fn = {'csv': _ex.export_csv, 'vcf': _ex.export_vcf,
+                  'json': _ex.export_json}[fmt]
+            data = await fn(pool, uid, ids)
+            return web.Response(
+                body=data, content_type=content_type,
+                headers={'Content-Disposition': f'attachment; filename="{filename}"'})
         except Exception:
-            log.exception("uch_export_json")
+            log.exception("uch_export fmt=%s", fmt)
             return _err(_INTERNAL_ERROR, 500)
 
     async def uch_reminders(request: web.Request) -> web.Response:
@@ -1653,12 +1888,18 @@ def setup_routes(app: web.Application, pool) -> None:
         limit = _list_limit(request, default=50, maximum=200)
         try:
             from services.contacts_hub.relationship_engine import (
-                RELATIONSHIP_TYPES, get_pairs_by_type)
+                RELATIONSHIP_TYPES, count_pairs_by_type, get_pairs_by_type)
             pairs = await get_pairs_by_type(pool, uid, rel_type, limit)
+            # Предыдущий экран показал число связей этого типа. Если список
+            # обрезан потолком, экран обязан сказать это сам, иначе число и
+            # список противоречат друг другу молча.
+            total = await count_pairs_by_type(pool, uid, rel_type)
             return _json_resp({
                 'type': rel_type,
                 'type_label': RELATIONSHIP_TYPES.get(rel_type, rel_type),
                 'pairs': pairs,
+                'total': total,
+                'limit': limit,
             })
         except Exception:
             log.exception("uch_graph_pairs")
@@ -1696,21 +1937,11 @@ def setup_routes(app: web.Application, pool) -> None:
             from services.contacts_hub.ai_assistant import process_ai_query
             result = await process_ai_query(pool, uid, query)
             return _json_resp(result)
-        except Exception:
+        except Exception as exc:
+            _bad = bad_body_response(request, exc)
+            if _bad is not None:
+                return _bad
             log.exception("uch_ai_query")
-            return _err(_INTERNAL_ERROR, 500)
-
-    async def uch_spotlight(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid: return _err("Unauthorized", 401)
-        q = request.query.get('q', '').strip()
-        if not q: return _json_resp({'results': []})
-        try:
-            from services.contacts_hub.search_engine import search_contacts_spotlight
-            results = await search_contacts_spotlight(pool, uid, q)
-            return _json_resp({'results': results, 'total': len(results)})
-        except Exception:
-            log.exception("uch_spotlight")
             return _err(_INTERNAL_ERROR, 500)
 
     app.router.add_get("/api/miniapp/uch/contacts", uch_contacts)
@@ -1734,7 +1965,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/intent/hits", uch_intent_hits)
     app.router.add_post("/api/miniapp/uch/intent/seed", uch_intent_seed)
     app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}", uch_contact_delete)
-    app.router.add_get("/api/miniapp/uch/search", uch_search)
+    app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)
     app.router.add_get("/api/miniapp/uch/stats", uch_stats)
     app.router.add_post("/api/miniapp/uch/sync", uch_sync)
     app.router.add_get("/api/miniapp/uch/sync_center", uch_sync_center)
@@ -1743,23 +1974,25 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_put("/api/miniapp/uch/groups/{group_id}", uch_group_update)
     app.router.add_delete("/api/miniapp/uch/groups/{group_id}", uch_group_delete)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/favorite", uch_toggle_favorite)
-    app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_add_to_group)
-    app.router.add_delete("/api/miniapp/uch/contacts/{contact_id}/groups/{group_id}", uch_remove_from_group)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/history", uch_contact_history)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/invite_history", uch_contact_invite_history)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/opt_out", uch_contact_opt_out)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/allow_invite", uch_contact_allow_invite)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/versions", uch_contact_versions)
+    # Тот же путь: GET — что изменится, POST — изменить.
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback_preview)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}", uch_rollback)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/timeline", uch_timeline)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/relationships", uch_relationships)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/identity", uch_identity)
+    app.router.add_get("/api/miniapp/uch/crm/pipeline", uch_crm_pipeline)
+    app.router.add_get("/api/miniapp/uch/export/{fmt}", uch_export)
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_get)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm", uch_crm_upsert)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity)
-    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/crm/activity", uch_crm_activity_list)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/crm/reminder", uch_crm_reminder)
     app.router.add_get("/api/miniapp/uch/duplicates", uch_duplicates)
+    # Тот же путь: GET — что переедет, POST — слить.
+    app.router.add_get("/api/miniapp/uch/merge", uch_merge_preview)
     app.router.add_post("/api/miniapp/uch/merge", uch_merge)
     app.router.add_get("/api/miniapp/uch/conflicts", uch_conflicts)
     app.router.add_post("/api/miniapp/uch/conflicts/{conflict_id}/resolve", uch_resolve_conflict)
@@ -1779,16 +2012,11 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/uch/filter/delete", uch_filter_delete)
     app.router.add_post("/api/miniapp/uch/bulk/group", uch_bulk_group)
     app.router.add_post("/api/miniapp/uch/bulk/merge", uch_bulk_merge)
-    app.router.add_post("/api/miniapp/uch/bulk/export", uch_bulk_export)
     app.router.add_post("/api/miniapp/uch/bulk/importance", uch_bulk_importance)
     app.router.add_post("/api/miniapp/uch/bulk/rating", uch_bulk_rating)
-    app.router.add_get("/api/miniapp/uch/export/csv", uch_export_csv)
-    app.router.add_get("/api/miniapp/uch/export/vcf", uch_export_vcf)
-    app.router.add_get("/api/miniapp/uch/export/json", uch_export_json)
     app.router.add_get("/api/miniapp/uch/reminders", uch_reminders)
     app.router.add_get("/api/miniapp/uch/graph/stats", uch_graph_stats)
     app.router.add_get("/api/miniapp/uch/graph/pairs", uch_graph_pairs)
     app.router.add_post("/api/miniapp/uch/graph/compute", uch_graph_compute)
     app.router.add_post("/api/miniapp/uch/trust/update", uch_trust_update)
     app.router.add_post("/api/miniapp/uch/ai", uch_ai_query)
-    app.router.add_get("/api/miniapp/uch/spotlight", uch_spotlight)

@@ -334,7 +334,7 @@ async def cb_infra_audit(
                FROM operation_audit oa
                LEFT JOIN tg_accounts a ON a.id=oa.account_id
                WHERE oa.owner_id=$1
-               ORDER BY oa.occurred_at DESC
+               ORDER BY oa.occurred_at DESC, oa.id DESC
                OFFSET $2 LIMIT $3""",
             uid,
             page * _PAGE,

@@ -157,10 +157,27 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
 
 
 async def _render_search(target, pool, owner_id: int, query: str) -> None:
-    from services.contacts_hub.search_engine import search_contacts
+    """Результаты поиска по контактам — с ПРАВДИВЫМ числом найденного.
 
+    Раньше бралась `search_contacts(..., limit=12)` и в заголовок печаталось
+    `Найдено: len(results)`. То есть при 57 совпадениях владелец читал
+    «Найдено: 12»: не «показаны первые 12», а неверное число как факт, и
+    решение «такого контакта почти нет» принималось по нему. Это тот же класс,
+    что молча обрезанные списки в мини-аппе, только здесь обрезание ещё и
+    называло себя итогом.
+
+    `search_contacts_advanced` отдаёт `total` и `has_more` — ровно то, чего не
+    хватало, — и до этого места у неё не было ни одного вызова: счётчик
+    существовал и не использовался, а использовался тот, что считать не умеет.
+    """
+    from services.contacts_hub.search_engine import search_contacts_advanced
+
+    total = 0
     try:
-        results = await search_contacts(pool, owner_id, query, limit=_SEARCH_LIMIT)
+        found = await search_contacts_advanced(
+            pool, owner_id, query, limit=_SEARCH_LIMIT)
+        results = found.get("items") or []
+        total = int(found.get("total") or len(results))
     except Exception as exc:
         log.warning("contacts_hub search uid=%s: %s", owner_id, exc)
         results = []
@@ -177,7 +194,12 @@ async def _render_search(target, pool, owner_id: int, query: str) -> None:
             await target.answer(text, reply_markup=kb.as_markup())
         return
 
-    lines = [f"🔍 <b>Найдено: {len(results)}</b> (запрос «{html.escape(query)}»)\n"]
+    # «Показаны первые N» пишется только когда показаны действительно не все:
+    # иначе честная оговорка превращается в шум на каждом ответе.
+    head = f"🔍 <b>Найдено: {total}</b> (запрос «{html.escape(query)}»)"
+    if total > len(results):
+        head += f"\nПоказаны первые {len(results)} — уточните запрос"
+    lines = [head + "\n"]
     kb = InlineKeyboardBuilder()
     for r in results:
         name = " ".join(filter(None, [r.get("first_name"), r.get("last_name")])) or "—"

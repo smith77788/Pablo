@@ -32,6 +32,11 @@ _EXPECTED = (
 )
 
 
+# Модули, которые пишут счётчики надёжности своим `_reliability_metric`.
+_EMITTERS = ("services/op_worker.py", "services/dm_engine.py",
+             "services/broadcaster.py")
+
+
 def _read(rel: str) -> str:
     with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
         return f.read()
@@ -51,8 +56,11 @@ def _emitted_counters() -> set[str]:
     и смысл её знал бы только тот, кто полез в исходник. Поэтому проверяем не
     список, а код.
     """
-    ow = _read("services/op_worker.py")
-    return set(re.findall(r'_reliability_metric\(\s*"([a-z0-9_]+)"', ow))
+    # Файлов больше одного: защитные записи есть и вне исполнителя (движок ЛС
+    # метит цель ДО отправки своим `_reliability_metric`), а привязка разбора к
+    # одному файлу делала проверку описаний ложно-зелёной для всех остальных.
+    src = "".join(_read(rel) for rel in _EMITTERS)
+    return set(re.findall(r'_reliability_metric\(\s*"([a-z0-9_]+)"', src))
 
 
 def test_every_counter_is_documented_in_the_registry():

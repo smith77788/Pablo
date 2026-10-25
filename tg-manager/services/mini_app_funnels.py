@@ -33,8 +33,8 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты воронок и авто-воронок."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _safe_count, _safe_fetch,
-        _safe_fetchrow, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
+        _safe_fetch, _safe_fetchrow, log,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
@@ -569,9 +569,179 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("auto_funnel_delete uid=%d fid=%d", uid, fid)
             return _err(_INTERNAL_ERROR, 500)
 
+
+    # ── Кто именно стоит за числом воронки ──────────────────────────────────
+    #
+    # Оба экрана воронок показывали ТОЛЬКО числа: «сошли 48», «ждут этого
+    # шага: 12», «отвал дальше: 31». Главный вопрос к любой цепочке — кто
+    # именно ушёл и на каком шаге, — оставался без ответа: маршрута, который
+    # отдал бы этих людей, в продукте не было ни у одной из двух систем
+    # воронок. Число без двери — тупик: владелец видит, что цепочка теряет
+    # людей, и не может ни посмотреть их, ни написать им.
+    #
+    # Срез задаётся теми же полями, из которых считалось число на экране,
+    # поэтому итог среза совпадает с ним по построению, а не по совпадению.
+
+    async def _funnel_people_names(bot_id: int, uid: int, ids: list[int]) -> dict:
+        """Имена подписчиков. Скоуп по ботам владельца, иначе подтянулось бы
+        имя из чужого бота с тем же user_id."""
+        if not ids:
+            return {}
+        rows = await _safe_fetch(pool,
+            """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.first_name, bu.username
+                 FROM bot_users bu
+                 JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+                WHERE mb.added_by=$1 AND bu.bot_id=$2
+                  AND bu.user_id = ANY($3::bigint[])
+             ORDER BY bu.user_id, bu.last_seen DESC NULLS LAST""",
+            uid, bot_id, ids)
+        return {int(r["user_id"]): dict(r) for r in (rows or [])}
+
+    async def funnel_people(request: web.Request) -> web.Response:
+        """Подписчики классической воронки: срез по шагу и по состоянию.
+
+        `current_step` — сколько шагов человеку уже доставлено. Поэтому
+        «отвал дальше» на шаге i — это ровно те, у кого current_step = i:
+        дошли до i и дальше не пошли. Срез по шагу считает то же самое число,
+        что нарисовано на экране.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            funnel_id = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор воронки", 400)
+        funnel = await _safe_fetchrow(pool,
+            """SELECT f.id, f.name, f.bot_id
+                 FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
+                WHERE f.id=$1 AND mb.added_by=$2""", funnel_id, uid)
+        if not funnel:
+            return _err("Воронка не найдена", 404)
+        state = (request.query.get("state") or "").strip().lower()
+        if state not in ("dropped", "completed", "active"):
+            state = ""
+        step = validate_integer(request.query.get("step"), min_val=0, max_val=1000)
+        limit = _list_limit(request, 100, 500)
+        where = ["funnel_id=$1"]
+        params: list = [funnel_id]
+        if step is not None:
+            params.append(step)
+            where.append(f"current_step=${len(params)}")
+        if state == "dropped":
+            where.append("dropped")
+        elif state == "completed":
+            where.append("completed")
+        elif state == "active":
+            where.append("NOT completed AND NOT dropped")
+        cond = " AND ".join(where)
+        try:
+            rows = await _safe_fetch(pool,
+                f"""SELECT user_id, current_step, completed, dropped,
+                           next_send_at, created_at, completed_at
+                      FROM funnel_subscriptions WHERE {cond}
+                  ORDER BY created_at DESC LIMIT ${len(params) + 1}""",
+                *params, limit)
+            total = await _safe_count(pool,
+                f"SELECT COUNT(*) FROM funnel_subscriptions WHERE {cond}", *params)
+        except Exception:
+            log.exception("funnel_people uid=%d fid=%d", uid, funnel_id)
+            return _err(_INTERNAL_ERROR, 500)
+        names = await _funnel_people_names(
+            int(funnel["bot_id"]), uid,
+            [int(r["user_id"]) for r in (rows or [])])
+        items = []
+        for r in (rows or []):
+            n = names.get(int(r["user_id"]), {})
+            items.append({
+                "user_id": int(r["user_id"]),
+                "name": n.get("first_name"),
+                "username": n.get("username"),
+                "step": int(r["current_step"] or 0),
+                "completed": bool(r["completed"]),
+                "dropped": bool(r["dropped"]),
+                "next_send_at": (r["next_send_at"].isoformat()
+                                 if r["next_send_at"] else None),
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            })
+        return _json_resp({
+            "funnel": {"id": int(funnel["id"]), "name": funnel["name"]},
+            "items": items, "total": int(total or 0),
+            "state": state, "step": step, "limit": limit,
+        })
+
+    async def auto_funnel_people(request: web.Request) -> web.Response:
+        """Прохождения авто-воронки: срез по состоянию и по ожидаемому шагу.
+
+        `status=lost` — сошли: цепочка встала (stopped) или упала с ошибкой
+        (error). Экран показывает их одним числом, значит и срез должен быть
+        один, иначе число и список разойдутся.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            fid = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор воронки", 400)
+        if not await _own_funnel(uid, fid):
+            return _err("Воронка не найдена", 404)
+        status = (request.query.get("status") or "").strip().lower()
+        if status not in ("active", "completed", "stopped", "error", "lost"):
+            status = ""
+        step = validate_integer(request.query.get("step"), min_val=1, max_val=1000)
+        limit = _list_limit(request, 100, 500)
+        where = ["funnel_id=$1"]
+        params: list = [fid]
+        if status == "lost":
+            where.append("status IN ('stopped','error')")
+        elif status:
+            params.append(status)
+            where.append(f"status=${len(params)}")
+        if step is not None:
+            params.append(step)
+            where.append(f"next_step_num=${len(params)}")
+        cond = " AND ".join(where)
+        try:
+            rows = await _safe_fetch(pool,
+                f"""SELECT user_id, bot_id, status, next_step_num, next_send_at,
+                           last_sent_step, fail_count, started_at
+                      FROM auto_funnel_runs WHERE {cond}
+                  ORDER BY started_at DESC LIMIT ${len(params) + 1}""",
+                *params, limit)
+            total = await _safe_count(pool,
+                f"SELECT COUNT(*) FROM auto_funnel_runs WHERE {cond}", *params)
+        except Exception:
+            log.exception("auto_funnel_people uid=%d fid=%d", uid, fid)
+            return _err(_INTERNAL_ERROR, 500)
+        bot_id = int((rows or [{}])[0]["bot_id"]) if rows else 0
+        names = await _funnel_people_names(
+            bot_id, uid, [int(r["user_id"]) for r in (rows or [])])
+        items = []
+        for r in (rows or []):
+            n = names.get(int(r["user_id"]), {})
+            items.append({
+                "user_id": int(r["user_id"]),
+                "name": n.get("first_name"),
+                "username": n.get("username"),
+                "status": r["status"],
+                "step": int(r["next_step_num"] or 0),
+                "last_sent_step": (int(r["last_sent_step"])
+                                   if r["last_sent_step"] is not None else None),
+                "fail_count": int(r["fail_count"] or 0),
+                "next_send_at": (r["next_send_at"].isoformat()
+                                 if r["next_send_at"] else None),
+                "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+            })
+        return _json_resp({
+            "items": items, "total": int(total or 0),
+            "status": status, "step": step, "limit": limit,
+        })
+
     app.router.add_put("/api/miniapp/funnel/{funnel_id}/toggle", toggle_funnel)
     app.router.add_get("/api/miniapp/funnels", funnels_all)
     app.router.add_get("/api/miniapp/funnel/{funnel_id}/steps", funnel_steps)
+    app.router.add_get("/api/miniapp/funnel/{funnel_id}/people", funnel_people)
     app.router.add_post("/api/miniapp/funnel/{funnel_id}/step", add_funnel_step)
     app.router.add_delete("/api/miniapp/funnel/step/{step_id}", delete_funnel_step)
     app.router.add_patch("/api/miniapp/funnel/step/{step_id}", update_funnel_step)
@@ -579,6 +749,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/auto_funnel", auto_funnel_create)
     app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/toggle", auto_funnel_toggle)
     app.router.add_get("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_detail)
+    app.router.add_get("/api/miniapp/auto_funnel/{funnel_id}/people", auto_funnel_people)
     app.router.add_delete("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_delete)
     app.router.add_post("/api/miniapp/auto_funnel/{funnel_id}/step", auto_funnel_step_add)
     app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/step/{step_id}", auto_funnel_step_update)
