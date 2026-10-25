@@ -1502,8 +1502,9 @@ def setup_routes(app: web.Application, pool) -> None:
             op_id = await _obus.submit(
                 pool, uid, "bulk_bot_profile", params,
                 total_items=int(cnt), label=f"Профиль ботов: {cnt} шт.")
-        except _obus.PlanRequiredError as e:
-            return _err(f"Доступно на тарифе «{e.required_plan}» и выше", 403)
+        except PermissionError as exc:
+            return _err(f"Массовое изменение профиля доступно на тарифе "
+                        f"«{getattr(exc, 'required_plan', '')}» и выше — продлите подписку", 403)
         except Exception:
             log.exception("bots_bulk_profile uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
@@ -1618,8 +1619,9 @@ def setup_routes(app: web.Application, pool) -> None:
             op_id = await _obus.submit(
                 pool, uid, "bulk_bot_profile_rollback", {"source_op_id": src_op_id},
                 total_items=int(cnt), label=f"Откат профиля ботов: {cnt} шт.")
-        except _obus.PlanRequiredError as e:
-            return _err(f"Доступно на тарифе «{e.required_plan}» и выше", 403)
+        except PermissionError as exc:
+            return _err(f"Откат доступен на тарифе "
+                        f"«{getattr(exc, 'required_plan', '')}» и выше — продлите подписку", 403)
         except Exception:
             log.exception("bots_bulk_profile_rollback uid=%d src=%d", uid, src_op_id)
             return _err(_INTERNAL_ERROR, 500)

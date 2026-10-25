@@ -6275,15 +6275,17 @@ async def _exec_bulk_bot_profile(
 
             if not reasons:
                 ok_count += 1
-                await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, ok_count + fail_count, target)
+                # Через дверь журнала (не raw execute): потеря отметки «ok»
+                # заставила бы повтор изменить этого бота второй раз.
+                await _journal_done(pool, op_id, ok_count + fail_count, target)
             else:
                 fail_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300])
+                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300],
+                    log_ctx=f" bot_profile op={op_id}")
             await _safe_execute(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             # Небольшая пауза бережёт от флуд-лимита Bot API; виток цикла сам
@@ -6401,15 +6403,18 @@ async def _exec_bulk_bot_profile_rollback(
                 ok_count += 1
                 await pool.execute(
                     "UPDATE bulk_edit_snapshots SET reverted_at=now() WHERE id=$1", s["id"])
-                await pool.execute(
-                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                    op_id, ok_count + fail_count, target)
+                # Через дверь журнала: потеря «ok» заставила бы повтор откатить
+                # этого бота второй раз (хотя reverted_at уже защищает — журнал
+                # держим единообразно, как требует храповик).
+                await _journal_done(pool, op_id, ok_count + fail_count, target)
             else:
                 fail_count += 1
-                await pool.execute(
+                await _journal_write(
+                    pool,
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300])
+                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300],
+                    log_ctx=f" profile_rollback op={op_id}")
             await _safe_execute(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             await asyncio.sleep(1)
