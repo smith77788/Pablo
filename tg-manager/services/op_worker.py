@@ -13787,6 +13787,9 @@ async def _exec_check_accounts_health(
     deactivated = 0
     reactivated = 0
     errors = 0
+    # Сколько вердиктов НЕ записано в базу (ошибка связи, нет сессии, сессия без
+    # подтверждения): плитки экрана «Аккаунты» их не увидят — см. итог ниже.
+    unchanged = 0
     # Разбивка спам-блока на временный/вечный (из spambot-ответа), чтобы
     # результат проверки показывал их раздельно — как отдельные счётчики/папки
     # «Временный/Вечный спамблок» в панели. Общий status остаётся 'spamblock'.
@@ -13794,13 +13797,15 @@ async def _exec_check_accounts_health(
     spamblock_perm = 0
 
     # Читаемые подписи статусов — используются и для per-account лога (секция
-    # «📋 Лог» в деталях операции), и для итоговой сводки ниже.
+    # «📋 Лог» в деталях операции), и для итоговой сводки ниже. Порядок ключей —
+    # порядок в итоге: от здоровых к проблемным, ошибки проверки в конце.
     _STATUS_LABELS = {
         "active": "✅ активен",
         "spamblock": "🚫 спам-блок",
-        "banned": "❌ заблокирован",
         "cooldown": "⏳ FloodWait",
-        "session_expired": "🔑 сессия истекла",
+        "banned": "❌ заблокирован",
+        "session_expired": "🔑 сессия отозвана",
+        "deactivated": "❌ аккаунт удалён",
         "no_session": "⚪ нет сессии",
         "unknown": "❓ ошибка проверки",
     }
@@ -13854,8 +13859,16 @@ async def _exec_check_accounts_health(
                             acc["id"], e)
 
         if result.get("auth_error"):
+            # Вместе с выключением пишем и сам вердикт. Раньше ставился только
+            # is_active=FALSE, а acc_status оставался прежним: аккаунт выпадал из
+            # «Активных», но не попадал ни в «Мёртвые», ни в «Заблокированы» —
+            # плитки экрана «Аккаунты» переставали сходиться с «Все», а итог
+            # проверки называл одно, список показывал другое.
             try:
-                await pool.execute("UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"])
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE, acc_status=$2, "
+                    "status_reason=$3, status_checked_at=now() WHERE id=$1",
+                    acc["id"], status, result.get("reason", ""))
                 deactivated += 1
             except Exception as e:
                 log.warning("check_accounts_health: deactivate acc %s failed: %s", acc["id"], e)
@@ -13886,6 +13899,8 @@ async def _exec_check_accounts_health(
                 await _db.update_acc_status(pool, acc["id"], status, result.get("reason", ""))
             except Exception as e:
                 log.warning("check_accounts_health: update_acc_status for acc %s failed: %s", acc["id"], e)
+        else:
+            unchanged += 1
 
         # Per-account запись в лог операции — чтобы секция «📋 Лог» в деталях
         # (mini-app) показывала вердикт по каждому аккаунту, а не пустоту.
@@ -13904,17 +13919,30 @@ async def _exec_check_accounts_health(
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
-    parts = [f"{_STATUS_LABELS.get(s, s)}: {c}" for s, c in sorted(status_counts.items())]
-    # Уточняем строку спам-блока разбивкой врем./вечный, если она была.
-    if spamblock_temp or spamblock_perm:
-        parts = [
-            p + f" (врем.: {spamblock_temp}, вечн.: {spamblock_perm})"
-            if p.startswith(_STATUS_LABELS["spamblock"]) else p
-            for p in parts
-        ]
+    # Вся раскладка — ОДНОЙ строкой и в порядке важности, а не по алфавиту
+    # кодов. Плашка исхода показывает первые строки итога; при раскладке
+    # «строка на статус» по алфавиту спам-блок и ошибки проверки уходили за
+    # обрез: владелец видел «активен 46, сессия истекла 1» из 52 и не мог
+    # понять, куда делись ещё пять (жалоба «несоответствие в данных»).
+    _ORDER = list(_STATUS_LABELS)
+    parts = []
+    for s in sorted(status_counts, key=lambda k: (_ORDER.index(k) if k in _ORDER else len(_ORDER), k)):
+        p = f"{_STATUS_LABELS.get(s, s)}: {status_counts[s]}"
+        # Уточняем спам-блок разбивкой врем./вечный, если она была.
+        if s == "spamblock" and (spamblock_temp or spamblock_perm):
+            p += f" (врем.: {spamblock_temp}, вечн.: {spamblock_perm})"
+        parts.append(p)
+    # Итог проверки — это живой ответ Telegram, а плитки «Аккаунты» — то, что
+    # записано в базу. Ошибка связи и отсутствие сессии статус в базе НЕ меняют
+    # (иначе сбой прокси объявил бы аккаунт мёртвым), поэтому там такой аккаунт
+    # остаётся в прежней плитке, обычно в «Активных». Говорим об этом прямо,
+    # чтобы 46 здесь и 49 там не читались как ошибка счёта.
+    unchanged_note = (f"\nℹ️ Без подтверждения: {unchanged} — в списке аккаунтов их "
+                      f"статус не менялся" if unchanged else "")
     deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""
     react_note = f"\n🔄 Восстановлено: {reactivated}" if reactivated else ""
-    summary = f"🔍 Проверено {n} аккаунтов\n" + "\n".join(parts) + deact_note + react_note
+    summary = (f"🔍 Проверено {n} аккаунтов\n" + " · ".join(parts)
+               + unchanged_note + deact_note + react_note)
 
     # Persist health snapshots immediately so health_dashboard trends show current data
     # without waiting for the hourly run_health_check_loop cycle.
@@ -13931,6 +13959,7 @@ async def _exec_check_accounts_health(
         "deactivated": deactivated,
         "reactivated": reactivated,
         "status_counts": status_counts,
+        "unchanged": unchanged,
         "spamblock_temp": spamblock_temp,
         "spamblock_perm": spamblock_perm,
         "summary": summary,
