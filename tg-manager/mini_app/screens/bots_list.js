@@ -443,6 +443,16 @@ async function submitBotProfileEdit() {
   finally { btn.disabled=false; btn.textContent='Применить к выбранным'; }
 }
 
+// Откат массового изменения профиля — «вернуть как было». Вызывается кнопкой
+// «↩️ Откатить профиль» в быстрых действиях по итогу операции (op_id применения).
+async function rollbackBulkProfile(opId) {
+  if(!await askConfirm('Вернуть прежние имя/описание/приветствие у изменённых ботов?')) return;
+  try {
+    const r=await api('/api/miniapp/bots/bulk_profile_rollback',{method:'POST',body:JSON.stringify({op_id:opId})});
+    toast(`↩️ Откат запущен: ${r.count||''} ${plural(r.count||0,'бот','бота','ботов')}`);
+  } catch(e){ toast('⚠️ '+errRu(e,'Не удалось откатить')); }
+}
+
 async function submitQuickBot() {
   const token=document.getElementById('quickBotToken').value.trim();
   const errEl=document.getElementById('quickBotErr'); errEl.textContent='';

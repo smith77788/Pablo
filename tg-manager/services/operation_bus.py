@@ -227,6 +227,12 @@ OP_REGISTRY: dict[str, dict] = {
         # состоянию), а повтор в пределах одного прогона уже пропускает
         # сделанное по operation_log (completed_targets в исполнителе).
     },
+    "bulk_bot_profile_rollback": {
+        "description": "Откат массового изменения профиля ботов",
+        "min_plan": "pro",
+        "max_retries": 2,
+        "icon": "↩️",
+    },
     "bulk_create_channels": {
         "description": "Массовое создание каналов",
         "min_plan": "pro",

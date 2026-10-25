@@ -4700,6 +4700,7 @@ def _build_dispatch() -> dict:
         "mass_publish": _exec_mass_publish,
         "bulk_bot_edit": _exec_bulk_bot_edit,
         "bulk_bot_profile": _exec_bulk_bot_profile,
+        "bulk_bot_profile_rollback": _exec_bulk_bot_profile_rollback,
         "bulk_join": _exec_bulk_join,
         "bulk_leave": _exec_bulk_leave,
         "find_contact": _exec_find_contact,
@@ -6221,6 +6222,30 @@ async def _exec_bulk_bot_profile(
                     pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
                 continue
 
+            # Снимок «как было» для отката — ДО изменения. Читаем текущие значения
+            # ТОЛЬКО изменяемых полей; если снять не удалось, меняем всё равно
+            # (этот бот просто не попадёт в откат), но это логируем.
+            _before: dict = {}
+            try:
+                if name:
+                    _before["name"] = await bot_api.get_my_name(sess, b["token"])
+                if description:
+                    _before["description"] = await bot_api.get_my_description(sess, b["token"])
+                if short_description:
+                    _before["short_description"] = await bot_api.get_my_short_description(
+                        sess, b["token"])
+                if greeting:
+                    _before["greeting"] = await pool.fetchval(
+                        "SELECT response_text FROM auto_replies WHERE bot_id=$1 "
+                        "AND trigger_type='start' ORDER BY id LIMIT 1", b["bot_id"]) or ""
+                await pool.execute(
+                    "INSERT INTO bulk_edit_snapshots(owner_id, op_id, entity_type, target_id, before) "
+                    "VALUES($1,$2,'bot',$3,$4::jsonb)",
+                    owner_id, op_id, b["bot_id"], json.dumps(_before, ensure_ascii=False))
+            except Exception as _se:  # noqa: BLE001 — снимок best-effort, апдейт важнее
+                log.warning("bulk_bot_profile: снимок для отката не снят bot=%s: %s",
+                            b.get("bot_id"), _se)
+
             reasons: list[str] = []
             for method, pkey, val in api_fields:
                 try:
@@ -6273,6 +6298,124 @@ async def _exec_bulk_bot_profile(
         "status": "done", "ok": ok_count, "failed": fail_count,
         "summary": f"Профиль ботов обновлён ({_changed}): {ok_count}, ошибок: {fail_count}",
     }
+
+
+async def _exec_bulk_bot_profile_rollback(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Откатить массовое изменение профиля ботов: вернуть прежние имя/описание/
+    короткое описание/приветствие из снимка bulk_edit_snapshots, снятого
+    операцией применения source_op_id.
+
+    Идемпотентно: откатываются только ещё не откаченные снимки (reverted_at IS
+    NULL); успешный откат проставляет reverted_at. Повтор в пределах прогона
+    пропускает уже сделанное по operation_log (completed_targets)."""
+    from services import bot_api, bot_health
+    from database.db import fetch_bots as _fetch_bots_op
+
+    try:
+        source_op_id = int(params.get("source_op_id") or 0)
+    except (TypeError, ValueError):
+        source_op_id = 0
+    if not source_op_id:
+        return {"status": "failed", "summary": "⚠️ Откат: не указана операция применения"}
+
+    snaps = await _safe_fetch(
+        pool,
+        "SELECT id, target_id, before FROM bulk_edit_snapshots "
+        "WHERE owner_id=$1 AND op_id=$2 AND entity_type='bot' AND reverted_at IS NULL "
+        "ORDER BY id", owner_id, source_op_id)
+    if not snaps:
+        return {"status": "failed",
+                "summary": "⚠️ Нечего откатывать: снимок не найден или уже откачен"}
+
+    target_ids = [int(s["target_id"]) for s in snaps]
+    rows = await _fetch_bots_op(
+        pool,
+        "SELECT bot_id, token FROM managed_bots WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+        owner_id, target_ids)
+    tok_by_bot = {int(r["bot_id"]): r["token"] for r in rows}
+
+    await _safe_execute(
+        pool, "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(snaps), op_id)
+    already = await completed_targets(pool, op_id)
+
+    _METHOD = {"name": "setMyName", "description": "setMyDescription",
+               "short_description": "setMyShortDescription"}
+    ok_count = 0
+    fail_count = 0
+    async with aiohttp.ClientSession() as sess:
+        for s in snaps:
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
+                        "summary": f"Отменено. Возвращено: {ok_count}, ошибок: {fail_count}"}
+            target = str(s["id"])
+            if target in already:
+                await _safe_execute(
+                    pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
+
+            before = s["before"]
+            if isinstance(before, str):
+                try:
+                    before = json.loads(before)
+                except (ValueError, TypeError):
+                    before = {}
+            before = before if isinstance(before, dict) else {}
+            bid = int(s["target_id"])
+            token = tok_by_bot.get(bid)
+
+            reasons: list[str] = []
+            if token is None:
+                reasons.append("бот не найден")
+            else:
+                for field, method in _METHOD.items():
+                    if field not in before:
+                        continue
+                    try:
+                        data = await bot_api._call(
+                            sess, token, method, **{field: before.get(field) or ""})
+                    except Exception as e:  # noqa: BLE001
+                        reasons.append(bot_health._LABEL[bot_health.OTHER])
+                        log.warning("rollback profile: bot=%s %s error=%s", bid, method, e)
+                        continue
+                    if not data.get("ok"):
+                        _kind = bot_health.classify_error(
+                            data.get("description", ""), data.get("error_code"))
+                        reasons.append(bot_health._LABEL.get(_kind, bot_health._LABEL[bot_health.OTHER]))
+                if "greeting" in before:
+                    try:
+                        async with pool.acquire() as conn:
+                            async with conn.transaction():
+                                await conn.execute(
+                                    "DELETE FROM auto_replies WHERE bot_id=$1 AND trigger_type='start'", bid)
+                                if (before.get("greeting") or "").strip():
+                                    await conn.execute(
+                                        "INSERT INTO auto_replies(bot_id, trigger_type, response_text, is_active) "
+                                        "VALUES($1,'start',$2,TRUE)", bid, before["greeting"])
+                    except Exception as e:  # noqa: BLE001
+                        reasons.append("приветствие не возвращено")
+                        log.warning("rollback profile: bot=%s greeting error=%s", bid, e)
+
+            if not reasons:
+                ok_count += 1
+                await pool.execute(
+                    "UPDATE bulk_edit_snapshots SET reverted_at=now() WHERE id=$1", s["id"])
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, ok_count + fail_count, target)
+            else:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, ok_count + fail_count, target, "; ".join(reasons)[:300])
+            await _safe_execute(
+                pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            await asyncio.sleep(1)
+
+    return {"status": "done", "ok": ok_count, "failed": fail_count,
+            "summary": f"Откат профиля: возвращено {ok_count}, ошибок: {fail_count}"}
 
 
 async def _exec_dm_campaign(

@@ -102,6 +102,14 @@ def suggest(op_type: str, status: str, result: dict | None,
     if st == "failed" and op_id:
         _add("retry", "↻ Повторить", "retryOp", "операция провалилась", arg=op_id)
 
+    # 3b. Массовое изменение профиля ботов прошло — предложить ОТКАТ (снимок
+    #     «как было» снят самой операцией). Владелец выбрал безопасность: любое
+    #     применение обратимо одной кнопкой, пока снимок не откачен.
+    if (op_type == "bulk_bot_profile" and op_id
+            and st in ("done", "partial") and _int(res.get("ok")) > 0):
+        _add("rollback_profile", "↩️ Откатить профиль", "rollbackBulkProfile",
+             "вернуть прежние имя/описание/приветствие у изменённых ботов", arg=op_id)
+
     # 4. Мёртвые сессии — чинить аккаунты, а не повторять.
     if res.get("all_failed_connect"):
         _add("fix_accounts", "📱 Открыть аккаунты", "goTab",

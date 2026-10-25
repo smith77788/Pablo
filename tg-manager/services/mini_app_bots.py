@@ -1511,10 +1511,48 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось поставить операцию", 500)
         return _json_resp({"ok": True, "op_id": op_id, "count": int(cnt)})
 
+    async def bots_bulk_profile_rollback(request: web.Request) -> web.Response:
+        """Откатить массовое изменение профиля ботов (вернуть как было).
+
+        Берёт op_id операции применения, проверяет, что снимок принадлежит
+        владельцу и ещё не откачен, и ставит операцию отката."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Некорректный запрос", 400)
+        try:
+            src_op_id = int(body.get("op_id") or 0)
+        except (TypeError, ValueError):
+            return _err("Неверная операция", 400)
+        if not src_op_id:
+            return _err("Не указана операция для отката", 400)
+        cnt = await _safe_count(
+            pool, "SELECT COUNT(*) FROM bulk_edit_snapshots "
+            "WHERE owner_id=$1 AND op_id=$2 AND entity_type='bot' AND reverted_at IS NULL",
+            uid, src_op_id)
+        if not cnt:
+            return _err("Нечего откатывать: снимок не найден или уже откачен", 400)
+        try:
+            op_id = await _obus.submit(
+                pool, uid, "bulk_bot_profile_rollback", {"source_op_id": src_op_id},
+                total_items=int(cnt), label=f"Откат профиля ботов: {cnt} шт.")
+        except _obus.PlanRequiredError as e:
+            return _err(f"Доступно на тарифе «{e.required_plan}» и выше", 403)
+        except Exception:
+            log.exception("bots_bulk_profile_rollback uid=%d src=%d", uid, src_op_id)
+            return _err(_INTERNAL_ERROR, 500)
+        if not op_id:
+            return _err("Не удалось поставить откат", 500)
+        return _json_resp({"ok": True, "op_id": op_id, "count": int(cnt)})
+
     app.router.add_get("/api/miniapp/bots", bots)
     app.router.add_post("/api/miniapp/bots/check_all", bots_check_all)
     app.router.add_post("/api/miniapp/bots/bulk_delete", bots_bulk_delete)
     app.router.add_post("/api/miniapp/bots/bulk_profile", bots_bulk_profile)
+    app.router.add_post("/api/miniapp/bots/bulk_profile_rollback", bots_bulk_profile_rollback)
     app.router.add_post("/api/miniapp/bots/cleanup_dead", bots_cleanup_dead)
     app.router.add_post("/api/miniapp/bot/add", bot_add)
     app.router.add_delete("/api/miniapp/bot/{bot_id}", bot_remove)

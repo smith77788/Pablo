@@ -59,12 +59,22 @@ class _Conn:
 
 
 class _Pool:
-    def __init__(self):
+    def __init__(self, fetchval=None, snap_rows=None):
         self.calls = []
+        self._fetchval = fetchval
+        self._snap_rows = snap_rows or []
 
     async def execute(self, q, *a):
         self.calls.append((q, a))
         return "INSERT 1"
+
+    async def fetchval(self, q, *a):
+        return self._fetchval
+
+    async def fetch(self, q, *a):
+        if "bulk_edit_snapshots" in q:
+            return list(self._snap_rows)
+        return []
 
     @asynccontextmanager
     async def acquire(self):
@@ -186,6 +196,74 @@ async def test_already_done_bots_are_skipped_on_resume(monkeypatch):
     res = await op_worker._exec_bulk_bot_profile(
         pool, None, 7, 99, {"bot_ids": [111, 222], "name": "Имя"})
     assert res["status"] == "done"
-    # по Telegram ударили только по второму боту (первый пропущен)
+    # по Telegram ходили только по второму боту (первый пропущен целиком —
+    # ни снимка, ни изменения); у второго есть и чтение снимка, и setMy*.
     tokens = [t for t, _, _ in api_calls]
-    assert tokens == ["T2"], f"повтор ударил по уже сделанному боту: {tokens}"
+    assert "T1" not in tokens, f"повтор ударил по уже сделанному боту: {tokens}"
+    assert "T2" in tokens
+
+
+# ── Безопасность: снимок «как было» + откат ───────────────────────────────────
+
+def test_rollback_op_registered():
+    assert (op_worker.handler_for("bulk_bot_profile_rollback")
+            is op_worker._exec_bulk_bot_profile_rollback)
+    assert "bulk_bot_profile_rollback" in operation_bus.OP_REGISTRY
+
+
+def test_rollback_route_registered():
+    src = open(os.path.join(ROOT, "services", "mini_app_bots.py"), encoding="utf-8").read()
+    assert '"/api/miniapp/bots/bulk_profile_rollback"' in src
+    assert "bots_bulk_profile_rollback" in src
+
+
+def test_rollback_js_fn_exists():
+    src = open(os.path.join(ROOT, "mini_app", "screens", "bots_list.js"), encoding="utf-8").read()
+    assert "function rollbackBulkProfile(" in src
+
+
+@pytest.mark.asyncio
+async def test_apply_captures_before_snapshot(monkeypatch):
+    bots = [{"id": 1, "bot_id": 111, "token": "T1"}]
+    _patch_common(monkeypatch, bots, {"ok": True})
+    pool = _Pool()
+    await op_worker._exec_bulk_bot_profile(
+        pool, None, 7, 99, {"bot_ids": [111], "name": "Новое"})
+    sql = " ".join(q for q, _ in pool.calls)
+    assert "INSERT INTO bulk_edit_snapshots" in sql, "снимок для отката не сохранён"
+
+
+def test_rollback_quick_action_offered():
+    from services import op_quick_actions
+    acts = op_quick_actions.suggest("bulk_bot_profile", "done", {"ok": 3}, op_id=42)
+    assert any(a["fn"] == "rollbackBulkProfile" and a.get("arg") == 42 for a in acts)
+    # у пустого исхода отката не предлагаем
+    assert not any(a["fn"] == "rollbackBulkProfile" for a in
+                   op_quick_actions.suggest("bulk_bot_profile", "done", {"ok": 0}, op_id=42))
+
+
+@pytest.mark.asyncio
+async def test_rollback_restores_from_snapshot(monkeypatch):
+    bots = [{"bot_id": 111, "token": "T1"}]
+    api_calls = _patch_common(monkeypatch, bots, {"ok": True})
+    snap = [{"id": 9, "target_id": 111,
+             "before": '{"name": "Старое имя", "greeting": "Старое приветствие"}'}]
+    pool = _Pool(snap_rows=snap)
+    res = await op_worker._exec_bulk_bot_profile_rollback(
+        pool, None, 50, 99, {"source_op_id": 42})
+    assert res["status"] == "done" and res["ok"] == 1
+    # имя возвращено через setMyName со СТАРЫМ значением
+    assert any(m == "setMyName" and p.get("name") == "Старое имя"
+               for _, m, p in api_calls)
+    sql = " ".join(q for q, _ in pool.calls)
+    assert "UPDATE bulk_edit_snapshots SET reverted_at" in sql, "снимок не помечен откаченным"
+    assert "INSERT INTO auto_replies" in sql, "приветствие не восстановлено"
+
+
+@pytest.mark.asyncio
+async def test_rollback_without_snapshot_fails(monkeypatch):
+    _patch_common(monkeypatch, [], {"ok": True})
+    pool = _Pool(snap_rows=[])
+    res = await op_worker._exec_bulk_bot_profile_rollback(
+        pool, None, 50, 99, {"source_op_id": 42})
+    assert res["status"] == "failed"
